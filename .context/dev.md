@@ -26,5 +26,5 @@ pnpm dev
   - `GROUPS_DIR=./groups` (optional; defaults to `./groups`)
 
 ## Notes
-- The bot currently hardcodes model `opus` and tool set in `src/discord.ts` (intentionally explicit early on).
+- Runtime invocation defaults are configurable via env (`RUNTIME_MODEL`, `RUNTIME_TOOLS`, `RUNTIME_TIMEOUT_MS`).
 - If `pnpm dev` fails with “Missing DISCORD_TOKEN”, your `.env` isn’t loaded or the var is unset.

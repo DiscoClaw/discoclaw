@@ -18,6 +18,9 @@ describe('Discord handler (fail closed)', () => {
       workspaceCwd: '/tmp',
       groupsDir: '/tmp',
       useGroupDirCwd: false,
+      runtimeModel: 'opus',
+      runtimeTools: [],
+      runtimeTimeoutMs: 1000,
     }, queue);
 
     const msg = {
@@ -45,6 +48,9 @@ describe('Discord handler (fail closed)', () => {
       workspaceCwd: '/tmp',
       groupsDir: '/tmp',
       useGroupDirCwd: false,
+      runtimeModel: 'opus',
+      runtimeTools: [],
+      runtimeTimeoutMs: 1000,
     }, queue);
 
     const msg = {
@@ -62,4 +68,3 @@ describe('Discord handler (fail closed)', () => {
     expect(queue.run).not.toHaveBeenCalled();
   });
 });
-

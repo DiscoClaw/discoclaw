@@ -31,6 +31,14 @@ if (restrictChannelIds && allowChannelIds.size === 0) {
   log.warn('DISCORD_CHANNEL_IDS was set but no valid IDs were parsed: bot will respond to no guild channels (fail closed)');
 }
 
+const runtimeModel = (process.env.RUNTIME_MODEL ?? 'opus').trim() || 'opus';
+const runtimeTools = String(process.env.RUNTIME_TOOLS ?? 'Bash,Read,Edit,WebSearch,WebFetch')
+  .split(/[,\s]+/g)
+  .map((t) => t.trim())
+  .filter(Boolean);
+const runtimeTimeoutMsRaw = (process.env.RUNTIME_TIMEOUT_MS ?? '').trim();
+const runtimeTimeoutMs = runtimeTimeoutMsRaw ? Math.max(1, Number(runtimeTimeoutMsRaw)) : 10 * 60_000;
+
 const dataDir = process.env.DISCOCLAW_DATA_DIR;
 const defaultWorkspaceCwd = dataDir
   ? path.join(dataDir, 'workspace')
@@ -62,6 +70,9 @@ await startDiscordBot({
   workspaceCwd,
   groupsDir,
   useGroupDirCwd,
+  runtimeModel,
+  runtimeTools,
+  runtimeTimeoutMs,
 });
 
 log.info('Discord bot started');

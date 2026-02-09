@@ -17,6 +17,9 @@ export type BotParams = {
   workspaceCwd: string;
   groupsDir: string;
   useGroupDirCwd: boolean;
+  runtimeModel: string;
+  runtimeTools: string[];
+  runtimeTimeoutMs: number;
 };
 
 type QueueLike = Pick<KeyedQueue, 'run'>;
@@ -179,12 +182,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       let finalText = '';
       for await (const evt of params.runtime.invoke({
         prompt: msg.content,
-        model: 'opus',
+        model: params.runtimeModel,
         cwd,
         addDirs: params.useGroupDirCwd ? [params.workspaceCwd] : undefined,
         sessionId,
-        tools: ['Bash', 'Read', 'Edit', 'WebSearch', 'WebFetch'],
-        timeoutMs: 10 * 60_000,
+        tools: params.runtimeTools,
+        timeoutMs: params.runtimeTimeoutMs,
       })) {
         if (evt.type === 'text_final') {
           finalText = evt.text;

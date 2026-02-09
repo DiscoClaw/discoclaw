@@ -23,7 +23,7 @@ Guidelines:
 ## Phase 1: Safety + Routing Hardening
 - [x] Verify fail-closed behavior end-to-end (empty allowlist responds to nobody).
 - [x] Decide whether to support `DISCORD_CHANNEL_IDS` allowlist (supported).
-- [ ] Add a short “safe operations” checklist for running in production channels.
+- [x] Add a short “safe operations” checklist for running in production channels.
 
 ## Phase 2: Data + Migration From Weston
 - [ ] Inventory what should be copied from `legacy/weston` into `discoclaw-data/content` (selective, not wholesale).
@@ -31,7 +31,7 @@ Guidelines:
 - [ ] Add a small script (optional) to copy/sync selected “weston” artifacts into the new data root.
 
 ## Phase 3: Runtime Reliability
-- [ ] Make runtime invocation config explicit (model, tool list, timeouts) via env or a small config file.
+- [x] Make runtime invocation config explicit (model, tool list, timeouts) via env or a small config file.
 - [ ] Decide on `CLAUDE_OUTPUT_FORMAT=text` vs `stream-json` and tighten parsing if switching.
 - [ ] Add structured logging around invoke lifecycle and failures.
 
