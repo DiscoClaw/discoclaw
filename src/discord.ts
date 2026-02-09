@@ -279,6 +279,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           };
 
+          // If the runtime produces no stdout/stderr (auth/network hangs), avoid leaving the
+          // placeholder `...` indefinitely by periodically updating the message.
+          const keepalive = setInterval(() => {
+            // eslint-disable-next-line @typescript-eslint/no-floating-promises
+            maybeEdit(true);
+          }, 5000);
+
           params.log?.info(
             {
               sessionKey,
@@ -320,6 +327,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
           params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');
+          clearInterval(keepalive);
 
           const outText = finalText || deltaText || '(no output)';
           const chunks = splitDiscord(outText);
