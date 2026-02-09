@@ -19,6 +19,8 @@ export type BotParams = {
   useGroupDirCwd: boolean;
 };
 
+type QueueLike = Pick<KeyedQueue, 'run'>;
+
 function discordSessionKey(msg: {
   channelId: string;
   authorId: string;
@@ -140,21 +142,9 @@ function splitDiscord(text: string, limit = 2000): string[] {
   return chunks.filter((c) => c.trim().length > 0);
 }
 
-export async function startDiscordBot(params: BotParams) {
-  const client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent,
-      GatewayIntentBits.DirectMessages,
-    ],
-    partials: [Partials.Channel],
-  });
-
-  const queue = new KeyedQueue();
-
-  client.on('messageCreate', async (msg) => {
-    if (!msg.author || msg.author.bot) return;
+export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike) {
+  return async (msg: any) => {
+    if (!msg?.author || msg.author.bot) return;
 
     if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
@@ -168,6 +158,7 @@ export async function startDiscordBot(params: BotParams) {
         (parentId && params.allowChannelIds.has(parentId));
       if (!allowed) return;
     }
+
     const isThread = typeof (msg.channel as any)?.isThread === 'function' ? (msg.channel as any).isThread() : false;
     const threadId = isThread ? String((msg.channel as any).id ?? '') : null;
     const sessionKey = discordSessionKey({
@@ -211,7 +202,22 @@ export async function startDiscordBot(params: BotParams) {
         await msg.channel.send(extra);
       }
     });
+  };
+}
+
+export async function startDiscordBot(params: BotParams) {
+  const client = new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+      GatewayIntentBits.DirectMessages,
+    ],
+    partials: [Partials.Channel],
   });
+
+  const queue = new KeyedQueue();
+  client.on('messageCreate', createMessageCreateHandler(params, queue));
 
   await client.login(params.token);
   return client;
