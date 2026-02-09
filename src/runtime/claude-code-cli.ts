@@ -96,6 +96,8 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       cwd: params.cwd,
       timeout: params.timeoutMs,
       reject: false,
+      // Ensure the CLI can't hang waiting for input (auth prompts, trust dialogs, etc).
+      stdin: 'ignore',
       env: {
         ...process.env,
         // Prefer plain output: Discord doesn't render ANSI well.
