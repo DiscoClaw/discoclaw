@@ -35,6 +35,22 @@ function groupDirNameFromSessionKey(sessionKey: string): string {
 async function ensureGroupDir(groupsDir: string, sessionKey: string): Promise<string> {
   const dir = path.join(groupsDir, groupDirNameFromSessionKey(sessionKey));
   await fs.mkdir(dir, { recursive: true });
+  const claudeMd = path.join(dir, 'CLAUDE.md');
+  try {
+    await fs.stat(claudeMd);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') throw err;
+    // Minimal per-group instructions, mirroring the nanoclaw style.
+    const body =
+      `# Discoclaw Group\n\n` +
+      `Session key: \`${sessionKey}\`\n\n` +
+      `This directory scopes conversation instructions for this Discord context.\n\n` +
+      `Notes:\n` +
+      `- The main workspace is mounted separately (see Discoclaw service env).\n` +
+      `- Keep instructions short and specific; prefer referencing files in the workspace.\n`;
+    await fs.writeFile(claudeMd, body, 'utf8');
+  }
   return dir;
 }
 
