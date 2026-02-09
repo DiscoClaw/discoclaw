@@ -32,8 +32,8 @@ Guidelines:
 
 ## Phase 3: Runtime Reliability
 - [x] Make runtime invocation config explicit (model, tool list, timeouts) via env or a small config file.
-- [ ] Decide on `CLAUDE_OUTPUT_FORMAT=text` vs `stream-json` and tighten parsing if switching.
-- [ ] Add structured logging around invoke lifecycle and failures.
+- [x] Decide on `CLAUDE_OUTPUT_FORMAT=text` vs `stream-json` and tighten parsing if switching.
+- [x] Add structured logging around invoke lifecycle and failures.
 
 ## Phase 4: Tests + CI Basics
 - [ ] Add minimal tests for allowlist parsing + session key mapping.
@@ -48,3 +48,4 @@ Guidelines:
 - 2026-02-09: Implemented new workspace defaults + docs; created Dropbox data root; created local `.env`.
 - 2026-02-09: Added optional `DISCORD_CHANNEL_IDS` allowlist and docs; started tests for allowlist parsing.
 - 2026-02-09: Added handler-level tests proving fail-closed routing + expanded ops safety checklist.
+- 2026-02-09: Switched to `stream-json` parsing path and added invoke lifecycle logging.

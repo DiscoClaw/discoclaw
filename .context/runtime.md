@@ -11,12 +11,11 @@ See: `src/runtime/types.ts`
 - Invocation shape (simplified):
   - `claude -p --model <id|alias> [--session-id <uuid>] [--tools ...] [--add-dir ...] <prompt>`
 - Output modes:
-  - `CLAUDE_OUTPUT_FORMAT=text` (stable)
-  - `CLAUDE_OUTPUT_FORMAT=stream-json` (best-effort parsing right now; tighten once we confirm event schema)
+  - `CLAUDE_OUTPUT_FORMAT=stream-json` (preferred; Discoclaw parses JSONL and streams text)
+  - `CLAUDE_OUTPUT_FORMAT=text` (fallback if your local CLI doesn't support stream-json)
 
 ## Tool Surface
 - Today Discoclaw passes a basic tool list and relies on `--dangerously-skip-permissions` in production.
 - If/when we add OpenAI/Gemini adapters:
   - Start with **analysis-only** routes (no tools).
   - Add a tool layer only if we explicitly decide we need full parity.
-

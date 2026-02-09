@@ -6,12 +6,19 @@ import type { SessionManager } from './sessions.js';
 import { isAllowlisted } from './discord/allowlist.js';
 import { KeyedQueue } from './group-queue.js';
 
+type LoggerLike = {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+};
+
 export type BotParams = {
   token: string;
   allowUserIds: Set<string>;
   // If set, restricts non-DM messages to these channel IDs (or thread parent IDs).
   // If unset, all channels are allowed (user allowlist still applies).
   allowChannelIds?: Set<string>;
+  log?: LoggerLike;
   runtime: RuntimeAdapter;
   sessionManager: SessionManager;
   workspaceCwd: string;
@@ -180,6 +187,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         : params.workspaceCwd;
 
       let finalText = '';
+      const t0 = Date.now();
+      params.log?.info(
+        {
+          sessionKey,
+          sessionId,
+          cwd,
+          model: params.runtimeModel,
+          toolsCount: params.runtimeTools.length,
+          timeoutMs: params.runtimeTimeoutMs,
+        },
+        'invoke:start',
+      );
       for await (const evt of params.runtime.invoke({
         prompt: msg.content,
         model: params.runtimeModel,
@@ -198,6 +217,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           finalText += evt.text;
         }
       }
+      params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');
 
       const chunks = splitDiscord(finalText || '(no output)');
       await reply.edit(chunks[0] ?? '(no output)');

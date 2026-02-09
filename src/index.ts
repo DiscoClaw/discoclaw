@@ -65,6 +65,7 @@ await startDiscordBot({
   token,
   allowUserIds,
   allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
+  log,
   runtime,
   sessionManager,
   workspaceCwd,

@@ -25,6 +25,14 @@ function* textAsChunks(text: string): Generator<EngineEvent> {
   yield { type: 'done' };
 }
 
+function tryParseJsonLine(line: string): unknown | null {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
 export type ClaudeCliRuntimeOpts = {
   claudeBin: string;
   dangerouslySkipPermissions: boolean;
@@ -103,13 +111,17 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
 
     // stream-json: parse line-delimited JSON events.
     let buffered = '';
-    subprocess.stdout.on('data', (chunk) => {
-      buffered += String(chunk);
+    let merged = '';
+
+    // Capture stderr in case we need to surface it on failure.
+    let stderrBuf = '';
+    subprocess.stderr?.on('data', (chunk) => {
+      stderrBuf += String(chunk);
     });
 
-    // Consume progressively while the process runs.
-    while (subprocess.exitCode == null) {
-      await new Promise((r) => setTimeout(r, 75));
+    for await (const chunk of subprocess.stdout) {
+      buffered += String(chunk);
+
       const lines = buffered.split(/\r?\n/);
       buffered = lines.pop() ?? '';
 
@@ -117,22 +129,19 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
         const trimmed = line.trim();
         if (!trimmed) continue;
 
-        try {
-          const evt = JSON.parse(trimmed);
-          const text = extractTextFromUnknownEvent(evt);
-          if (text) {
-            yield { type: 'text_delta', text };
-          }
-        } catch {
-          // If CLI prints non-JSON noise, treat it as text.
-          yield { type: 'text_delta', text: trimmed };
+        const evt = tryParseJsonLine(trimmed);
+        const text = extractTextFromUnknownEvent(evt ?? trimmed);
+        if (text) {
+          merged += text;
+          yield { type: 'text_delta', text };
         }
       }
     }
 
-    const { stdout, stderr, exitCode } = await subprocess;
+    const { exitCode } = await subprocess;
     if (exitCode !== 0) {
-      yield { type: 'error', message: (stderr || stdout || `claude exit ${exitCode}`).trim() };
+      const msg = (stderrBuf || `claude exit ${exitCode}`).trim();
+      yield { type: 'error', message: msg };
       yield { type: 'done' };
       return;
     }
@@ -140,20 +149,15 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     // Flush any trailing buffered line.
     const tail = buffered.trim();
     if (tail) {
-      try {
-        const evt = JSON.parse(tail);
-        const text = extractTextFromUnknownEvent(evt);
-        if (text) yield { type: 'text_delta', text };
-      } catch {
-        yield { type: 'text_delta', text: tail };
+      const evt = tryParseJsonLine(tail);
+      const text = extractTextFromUnknownEvent(evt ?? tail);
+      if (text) {
+        merged += text;
+        yield { type: 'text_delta', text };
       }
     }
 
-    // Provide a final merged text as well, based on what the CLI returned.
-    // (This makes Discord output stable even if the event model changes.)
-    if (stdout.trim()) {
-      yield { type: 'text_final', text: stdout.trimEnd() };
-    }
+    if (merged.trim()) yield { type: 'text_final', text: merged.trimEnd() };
     yield { type: 'done' };
   }
 
