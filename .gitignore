@@ -9,3 +9,7 @@ var
 !.env.example
 data/*.json
 *.log
+
+# Per-session working dirs (keep the README)
+groups/*
+!groups/README.md
