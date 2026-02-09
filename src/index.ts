@@ -80,6 +80,7 @@ const outputFormat = (process.env.CLAUDE_OUTPUT_FORMAT ?? 'text') === 'stream-js
   : 'text';
 const echoStdio = (process.env.CLAUDE_ECHO_STDIO ?? '0') === '1';
 const claudeDebugFile = (process.env.CLAUDE_DEBUG_FILE ?? '').trim() || null;
+const strictMcpConfig = (process.env.CLAUDE_STRICT_MCP_CONFIG ?? '1') === '1';
 
 // Debug: surface common "works in terminal but not in systemd" issues without logging secrets.
 if ((process.env.DISCOCLAW_DEBUG_RUNTIME ?? '0') === '1') {
@@ -119,6 +120,8 @@ const runtime = createClaudeCliRuntime({
   outputFormat,
   echoStdio,
   debugFile: claudeDebugFile,
+  strictMcpConfig,
+  log,
 });
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));

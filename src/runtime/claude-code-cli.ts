@@ -42,6 +42,10 @@ export type ClaudeCliRuntimeOpts = {
   echoStdio?: boolean;
   // If set, pass `--debug-file` to Claude CLI. Keep local; may contain sensitive info.
   debugFile?: string | null;
+  // If true, pass `--strict-mcp-config` to skip slow MCP plugin init in headless contexts.
+  strictMcpConfig?: boolean;
+  // Optional logger for pre-invocation debug output.
+  log?: { debug(...args: unknown[]): void };
 };
 
 export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapter {
@@ -62,6 +66,10 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       args.push('--dangerously-skip-permissions');
     }
 
+    if (opts.strictMcpConfig) {
+      args.push('--strict-mcp-config');
+    }
+
     if (opts.debugFile && opts.debugFile.trim()) {
       args.push('--debug-file', opts.debugFile.trim());
     }
@@ -71,8 +79,9 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     }
 
     if (params.addDirs && params.addDirs.length > 0) {
-      // `--add-dir` accepts multiple values.
-      args.push('--add-dir', ...params.addDirs);
+      for (const dir of params.addDirs) {
+        args.push('--add-dir', dir);
+      }
     }
 
     if (opts.outputFormat) {
@@ -86,12 +95,23 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     // Tool flags are runtime-specific; keep optional and configurable.
     // Note: treat an explicit empty list as "disable all tools" (claude expects --tools "").
     if (params.tools) {
-      // `--tools` accepts a comma-separated list for built-in tools.
-      // We keep this simple; if we need finer control, add --allowedTools/--disallowedTools.
-      args.push('--tools', params.tools.length > 0 ? params.tools.join(',') : '');
+      if (params.tools.length > 0) {
+        args.push('--tools', params.tools.join(','));
+      } else {
+        // Use `=` syntax so the empty value stays in one argv element,
+        // preventing commander's variadic parser from consuming the prompt.
+        args.push('--tools=');
+      }
     }
 
-    args.push(params.prompt);
+    if (opts.log) {
+      // Log args without the prompt to avoid leaking user content at debug level.
+      opts.log.debug({ args }, 'claude-cli: constructed args');
+    }
+
+    // POSIX `--` terminates option parsing, preventing variadic flags
+    // (--tools, --add-dir) from consuming the positional prompt.
+    args.push('--', params.prompt);
 
     const subprocess = execa(opts.claudeBin, args, {
       cwd: params.cwd,

@@ -64,7 +64,19 @@ describe('Claude CLI runtime adapter (smoke)', () => {
     expect(callArgs).toContain('sess');
     expect(callArgs).toContain('--tools');
     expect(callArgs).toContain('Read,Bash');
-    expect(callArgs).toContain('--add-dir');
+
+    // --add-dir should be repeated per directory
+    const addDirIndices = callArgs
+      .map((v: string, i: number) => v === '--add-dir' ? i : -1)
+      .filter((i: number) => i >= 0);
+    expect(addDirIndices).toHaveLength(2);
+    expect(callArgs[addDirIndices[0] + 1]).toBe('/w');
+    expect(callArgs[addDirIndices[1] + 1]).toBe('/c');
+
+    // Prompt must follow `--` separator
+    const sepIdx = callArgs.indexOf('--');
+    expect(sepIdx).toBeGreaterThanOrEqual(0);
+    expect(callArgs[sepIdx + 1]).toBe('p');
   });
 
   it('stream-json mode yields merged text_final', async () => {
@@ -100,9 +112,14 @@ describe('Claude CLI runtime adapter (smoke)', () => {
     expect(callArgs).toContain('stream-json');
     expect(callArgs).toContain('--dangerously-skip-permissions');
     expect(callArgs).toContain('--include-partial-messages');
+
+    // Prompt must follow `--` separator
+    const sepIdx = callArgs.indexOf('--');
+    expect(sepIdx).toBeGreaterThanOrEqual(0);
+    expect(callArgs[sepIdx + 1]).toBe('p');
   });
 
-  it('explicit empty tools disables all tools', async () => {
+  it('explicit empty tools uses --tools= syntax', async () => {
     const execaMock = execa as any;
     execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
 
@@ -124,8 +141,52 @@ describe('Claude CLI runtime adapter (smoke)', () => {
 
     expect(events.find((e) => e.type === 'text_final')?.text).toBe('ok');
     const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
-    const toolsFlagIdx = callArgs.findIndex((x: any) => x === '--tools');
-    expect(toolsFlagIdx).toBeGreaterThanOrEqual(0);
-    expect(callArgs[toolsFlagIdx + 1]).toBe('');
+
+    // Should use `--tools=` (single element) not `--tools` + `''` (two elements)
+    expect(callArgs).toContain('--tools=');
+    expect(callArgs.filter((x: string) => x === '--tools')).toHaveLength(0);
+
+    // Prompt must follow `--` separator
+    const sepIdx = callArgs.indexOf('--');
+    expect(sepIdx).toBeGreaterThanOrEqual(0);
+    expect(callArgs[sepIdx + 1]).toBe('p');
+  });
+
+  it('--strict-mcp-config is passed when enabled', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+      strictMcpConfig: true,
+    });
+
+    for await (const _evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      // drain
+    }
+
+    const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(callArgs).toContain('--strict-mcp-config');
+  });
+
+  it('--strict-mcp-config is omitted when disabled', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+      strictMcpConfig: false,
+    });
+
+    for await (const _evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      // drain
+    }
+
+    const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(callArgs).not.toContain('--strict-mcp-config');
   });
 });
