@@ -38,3 +38,4 @@ This lets you keep the repo fast/local, while storing durable "workspace content
 
 - Default runtime is Claude Code via the `claude` CLI.
 - Session mapping is stored locally in `data/sessions.json`.
+- Access control is fail-closed by user allowlist (`DISCORD_ALLOW_USER_IDS`). Optionally restrict guild channels via `DISCORD_CHANNEL_IDS`.

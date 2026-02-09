@@ -9,6 +9,9 @@ import { KeyedQueue } from './group-queue.js';
 export type BotParams = {
   token: string;
   allowUserIds: Set<string>;
+  // If set, restricts non-DM messages to these channel IDs (or thread parent IDs).
+  // If unset, all channels are allowed (user allowlist still applies).
+  allowChannelIds?: Set<string>;
   runtime: RuntimeAdapter;
   sessionManager: SessionManager;
   workspaceCwd: string;
@@ -156,6 +159,15 @@ export async function startDiscordBot(params: BotParams) {
     if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
     const isDm = msg.guildId == null;
+    if (!isDm && params.allowChannelIds) {
+      const ch: any = msg.channel as any;
+      const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
+      const parentId = isThread ? String(ch.parentId ?? '') : '';
+      const allowed =
+        params.allowChannelIds.has(msg.channelId) ||
+        (parentId && params.allowChannelIds.has(parentId));
+      if (!allowed) return;
+    }
     const isThread = typeof (msg.channel as any)?.isThread === 'function' ? (msg.channel as any).isThread() : false;
     const threadId = isThread ? String((msg.channel as any).id ?? '') : null;
     const sessionKey = discordSessionKey({

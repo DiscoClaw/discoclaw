@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createClaudeCliRuntime } from './runtime/claude-code-cli.js';
 import { SessionManager } from './sessions.js';
-import { parseAllowUserIds } from './discord/allowlist.js';
+import { parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 import { startDiscordBot } from './discord.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
@@ -22,6 +22,13 @@ if (!token) {
 const allowUserIds = parseAllowUserIds(process.env.DISCORD_ALLOW_USER_IDS);
 if (allowUserIds.size === 0) {
   log.warn('DISCORD_ALLOW_USER_IDS is empty: bot will respond to nobody (fail closed)');
+}
+
+const allowChannelIdsRaw = process.env.DISCORD_CHANNEL_IDS;
+const restrictChannelIds = (allowChannelIdsRaw ?? '').trim().length > 0;
+const allowChannelIds = parseAllowChannelIds(allowChannelIdsRaw);
+if (restrictChannelIds && allowChannelIds.size === 0) {
+  log.warn('DISCORD_CHANNEL_IDS was set but no valid IDs were parsed: bot will respond to no guild channels (fail closed)');
 }
 
 const dataDir = process.env.DISCOCLAW_DATA_DIR;
@@ -49,6 +56,7 @@ const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'se
 await startDiscordBot({
   token,
   allowUserIds,
+  allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
   runtime,
   sessionManager,
   workspaceCwd,

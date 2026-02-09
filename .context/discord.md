@@ -3,6 +3,7 @@
 ## Access Control
 - `DISCORD_ALLOW_USER_IDS` is the primary gate.
 - Fail closed: if the allowlist is empty, Discoclaw responds to nobody.
+- Optional: `DISCORD_CHANNEL_IDS` restricts the bot to specific guild channels (DMs are still allowed).
 
 ## Session Keys
 - DM: `discord:dm:<authorId>`
