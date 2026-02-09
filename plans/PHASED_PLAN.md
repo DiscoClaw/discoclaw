@@ -37,13 +37,13 @@ Guidelines:
 - [x] Add structured logging around invoke lifecycle and failures.
 
 ## Phase 4: Tests + CI Basics
-- [ ] Add minimal tests for allowlist parsing + session key mapping.
+- [x] Add minimal tests for allowlist parsing + session key mapping.
 - [ ] Add a smoke test for runtime adapter (mock execa).
 - [ ] Add a simple CI workflow (build + test) if desired.
 
 ## Phase 5: Ops
 - [x] Update `systemd/discoclaw.service` template to include `DISCOCLAW_DATA_DIR` guidance.
-- [ ] Add an ops “rollout” checklist (private channel first, allowlist, logs, restart).
+- [x] Add an ops “rollout” checklist (private channel first, allowlist, logs, restart).
 
 ## Progress Log
 - 2026-02-09: Implemented new workspace defaults + docs; created Dropbox data root; created local `.env`.

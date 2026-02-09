@@ -7,6 +7,7 @@ import { isAllowlisted } from './discord/allowlist.js';
 import { KeyedQueue } from './group-queue.js';
 import type { DiscordChannelContext } from './discord/channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
+import { discordSessionKey } from './discord/session-key.js';
 
 type LoggerLike = {
   info(obj: unknown, msg?: string): void;
@@ -35,17 +36,6 @@ export type BotParams = {
 };
 
 type QueueLike = Pick<KeyedQueue, 'run'>;
-
-function discordSessionKey(msg: {
-  channelId: string;
-  authorId: string;
-  isDm: boolean;
-  threadId?: string | null;
-}): string {
-  if (msg.isDm) return `discord:dm:${msg.authorId}`;
-  if (msg.threadId) return `discord:thread:${msg.threadId}`;
-  return `discord:channel:${msg.channelId}`;
-}
 
 function groupDirNameFromSessionKey(sessionKey: string): string {
   // Keep it filesystem-safe and easy to inspect.
