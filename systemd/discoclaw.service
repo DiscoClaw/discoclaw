@@ -1,0 +1,18 @@
+[Unit]
+Description=Discoclaw
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/davidmarsh/code/discoclaw
+EnvironmentFile=/home/davidmarsh/code/discoclaw/.env
+ExecStart=/usr/bin/node /home/davidmarsh/code/discoclaw/dist/index.js
+Restart=on-failure
+RestartSec=15
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Install]
+WantedBy=default.target
+

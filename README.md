@@ -1,6 +1,8 @@
-# Claude Discord Shell
+# Discoclaw
 
-CLI-first Discord bridge that routes Discord messages into provider runtimes.
+Small, CLI-first Discord bridge that routes Discord messages into provider runtimes.
+
+Modeled after the structure/philosophy of nanoclaw: keep the codebase small, make behavior explicit, and treat "customization" as code changes (not a sprawling plugin system).
 
 ## Local dev
 

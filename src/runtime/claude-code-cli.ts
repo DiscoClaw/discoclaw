@@ -53,6 +53,11 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       args.push('--session-id', params.sessionId);
     }
 
+    if (params.addDirs && params.addDirs.length > 0) {
+      // `--add-dir` accepts multiple values.
+      args.push('--add-dir', ...params.addDirs);
+    }
+
     if (opts.outputFormat) {
       args.push('--output-format', opts.outputFormat);
     }

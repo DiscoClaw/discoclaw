@@ -1,8 +1,10 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { Client, GatewayIntentBits, Partials } from 'discord.js';
-import type { RuntimeAdapter } from '../engine/types.js';
-import type { SessionManager } from '../sessionManager.js';
-import { isAllowlisted } from './allowlist.js';
-import { KeyedQueue } from './keyed-queue.js';
+import type { RuntimeAdapter } from './runtime/types.js';
+import type { SessionManager } from './sessions.js';
+import { isAllowlisted } from './discord/allowlist.js';
+import { KeyedQueue } from './group-queue.js';
 
 export type BotParams = {
   token: string;
@@ -10,11 +12,30 @@ export type BotParams = {
   runtime: RuntimeAdapter;
   sessionManager: SessionManager;
   workspaceCwd: string;
+  groupsDir: string;
+  useGroupDirCwd: boolean;
 };
 
-function discordSessionKey(msg: { channelId: string; authorId: string; isDm: boolean }): string {
+function discordSessionKey(msg: {
+  channelId: string;
+  authorId: string;
+  isDm: boolean;
+  threadId?: string | null;
+}): string {
   if (msg.isDm) return `discord:dm:${msg.authorId}`;
+  if (msg.threadId) return `discord:thread:${msg.threadId}`;
   return `discord:channel:${msg.channelId}`;
+}
+
+function groupDirNameFromSessionKey(sessionKey: string): string {
+  // Keep it filesystem-safe and easy to inspect.
+  return sessionKey.replace(/[^a-zA-Z0-9:_-]+/g, '-');
+}
+
+async function ensureGroupDir(groupsDir: string, sessionKey: string): Promise<string> {
+  const dir = path.join(groupsDir, groupDirNameFromSessionKey(sessionKey));
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
 }
 
 function splitDiscord(text: string, limit = 2000): string[] {
@@ -119,21 +140,29 @@ export async function startDiscordBot(params: BotParams) {
     if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
     const isDm = msg.guildId == null;
+    const isThread = typeof (msg.channel as any)?.isThread === 'function' ? (msg.channel as any).isThread() : false;
+    const threadId = isThread ? String((msg.channel as any).id ?? '') : null;
     const sessionKey = discordSessionKey({
       channelId: msg.channelId,
       authorId: msg.author.id,
       isDm,
+      threadId: threadId || null,
     });
 
     await queue.run(sessionKey, async () => {
       const sessionId = await params.sessionManager.getOrCreate(sessionKey);
       const reply = await msg.reply('...');
 
+      const cwd = params.useGroupDirCwd
+        ? await ensureGroupDir(params.groupsDir, sessionKey)
+        : params.workspaceCwd;
+
       let finalText = '';
       for await (const evt of params.runtime.invoke({
         prompt: msg.content,
         model: 'opus',
-        cwd: params.workspaceCwd,
+        cwd,
+        addDirs: params.useGroupDirCwd ? [params.workspaceCwd] : undefined,
         sessionId,
         tools: ['Bash', 'Read', 'Edit', 'WebSearch', 'WebFetch'],
         timeoutMs: 10 * 60_000,

@@ -24,6 +24,7 @@ export type RuntimeInvokeParams = {
   cwd: string;
   sessionId?: string | null;
   tools?: string[];
+  addDirs?: string[];
   timeoutMs?: number;
 };
 

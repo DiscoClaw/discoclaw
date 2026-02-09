@@ -3,10 +3,10 @@ import pino from 'pino';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createClaudeCliRuntime } from './engine/claudeCli.js';
-import { SessionManager } from './sessionManager.js';
+import { createClaudeCliRuntime } from './runtime/claude-code-cli.js';
+import { SessionManager } from './sessions.js';
 import { parseAllowUserIds } from './discord/allowlist.js';
-import { startDiscordBot } from './discord/bot.js';
+import { startDiscordBot } from './discord.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -25,6 +25,8 @@ if (allowUserIds.size === 0) {
 }
 
 const workspaceCwd = process.env.WORKSPACE_CWD ?? '/home/davidmarsh/weston';
+const groupsDir = process.env.GROUPS_DIR ?? path.join(__dirname, '..', 'groups');
+const useGroupDirCwd = (process.env.USE_GROUP_DIR_CWD ?? '0') === '1';
 
 const claudeBin = process.env.CLAUDE_BIN ?? 'claude';
 const dangerouslySkipPermissions = (process.env.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS ?? '0') === '1';
@@ -46,6 +48,8 @@ await startDiscordBot({
   runtime,
   sessionManager,
   workspaceCwd,
+  groupsDir,
+  useGroupDirCwd,
 });
 
 log.info('Discord bot started');
