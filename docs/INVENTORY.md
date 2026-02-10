@@ -144,18 +144,18 @@ All actions are gated by category env flags (off by default except channels).
 ### Must-have for MVP
 
 - [ ] **README rewrite** — current README is developer-internal; needs a clear "what is this / quickstart / how to run" for anyone cloning the repo.
-- [ ] **`.env.example`** — document all env vars with sane defaults and comments. Currently the 50+ vars are only discoverable by reading source.
+- [x] **`.env.example`** — tiered layout: 2 required vars up top, core settings next, optional features commented out by section.
 - [ ] **First-run experience** — verify that `git clone → pnpm install → copy .env.example → pnpm dev` works end-to-end for a fresh user. Document any one-time setup (Dropbox symlinks, bd CLI, etc.) or make them optional.
 - [ ] **Graceful degradation when optional deps missing** — beads requires `bd` CLI, cron requires a forum channel. Ensure clean errors / skip when these aren't configured.
 
 ### Nice-to-have before MVP
 
-- [ ] **Additional runtime adapters** — OpenAI-compatible and/or Gemini so the project isn't locked to Claude CLI.
-- [ ] **Runtime adapter selection via env** — e.g. `RUNTIME_ADAPTER=claude-cli|openai|gemini`.
 - [ ] **Observability beyond status channel** — basic metrics (messages handled, errors, latency) to stdout or a simple dashboard.
 - [ ] **Content dir without Dropbox** — make Dropbox symlinks fully optional; default to a local `data/content/` tree.
 
 ### Post-MVP
 
+- [ ] **Additional runtime adapters** — OpenAI-compatible and/or Gemini so the project isn't locked to Claude CLI.
+- [ ] **Runtime adapter selection via env** — e.g. `RUNTIME_ADAPTER=claude-cli|openai|gemini`.
 - [ ] Discord-native dashboard (status embeds, config commands, health checks in a dedicated channel)
 - [ ] Shareable PRD packs — markdown files describing a bot persona/config that can be generated, traded, and dropped into a workspace to bootstrap a new instance
