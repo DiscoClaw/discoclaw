@@ -207,6 +207,102 @@ describe('channelDelete', () => {
 });
 
 // ---------------------------------------------------------------------------
+// channelCreate types
+// ---------------------------------------------------------------------------
+
+describe('channelCreate', () => {
+  it('creates a text channel by default', async () => {
+    const guild = makeMockGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelCreate', name: 'general' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(guild.channels.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: ChannelType.GuildText }),
+    );
+  });
+
+  it('creates a voice channel', async () => {
+    const guild = makeMockGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelCreate', name: 'voice-chat', channelType: 'voice' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(guild.channels.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: ChannelType.GuildVoice }),
+    );
+  });
+
+  it('creates an announcement channel', async () => {
+    const guild = makeMockGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelCreate', name: 'news', channelType: 'announcement' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(guild.channels.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: ChannelType.GuildAnnouncement }),
+    );
+  });
+
+  it('creates a stage channel', async () => {
+    const guild = makeMockGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelCreate', name: 'stage-talk', channelType: 'stage' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(guild.channels.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: ChannelType.GuildStageVoice }),
+    );
+  });
+
+  it('creates under a parent category', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat1', name: 'Dev', type: ChannelType.GuildCategory },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelCreate', name: 'dev-chat', parent: 'Dev' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('under Dev');
+    expect(guild.channels.create).toHaveBeenCalledWith(
+      expect.objectContaining({ parent: 'cat1' }),
+    );
+  });
+
+  it('fails when parent category not found', async () => {
+    const guild = makeMockGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelCreate', name: 'test', parent: 'NonExistent' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Category "NonExistent" not found' });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // channelInfo
 // ---------------------------------------------------------------------------
 

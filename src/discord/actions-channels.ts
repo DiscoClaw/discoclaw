@@ -7,7 +7,7 @@ import type { DiscordActionResult, ActionContext } from './actions.js';
 // ---------------------------------------------------------------------------
 
 export type ChannelActionRequest =
-  | { type: 'channelCreate'; name: string; parent?: string; topic?: string }
+  | { type: 'channelCreate'; name: string; parent?: string; topic?: string; channelType?: 'text' | 'voice' | 'announcement' | 'stage' }
   | { type: 'channelEdit'; channelId: string; name?: string; topic?: string }
   | { type: 'channelDelete'; channelId: string }
   | { type: 'channelList' }
@@ -22,6 +22,15 @@ const CHANNEL_TYPE_MAP: Record<ChannelActionRequest['type'], true> = {
   threadListArchived: true,
 };
 export const CHANNEL_ACTION_TYPES = new Set<string>(Object.keys(CHANNEL_TYPE_MAP));
+
+type GuildChannelType = ChannelType.GuildText | ChannelType.GuildVoice | ChannelType.GuildAnnouncement | ChannelType.GuildStageVoice;
+
+const CHANNEL_TYPE_ENUM: Record<string, GuildChannelType> = {
+  text: ChannelType.GuildText,
+  voice: ChannelType.GuildVoice,
+  announcement: ChannelType.GuildAnnouncement,
+  stage: ChannelType.GuildStageVoice,
+};
 
 // ---------------------------------------------------------------------------
 // Executor
@@ -49,9 +58,16 @@ export async function executeChannelAction(
         }
       }
 
+      const resolvedType = action.channelType
+        ? CHANNEL_TYPE_ENUM[action.channelType]
+        : ChannelType.GuildText;
+      if (resolvedType === undefined) {
+        return { ok: false, error: `Invalid channelType: "${action.channelType}"` };
+      }
+
       const created = await guild.channels.create({
         name: action.name,
-        type: ChannelType.GuildText,
+        type: resolvedType,
         parent,
         topic: action.topic,
       });
@@ -167,13 +183,14 @@ export async function executeChannelAction(
 export function channelActionsPromptSection(): string {
   return `### Channel Management
 
-**channelCreate** — Create a text channel:
+**channelCreate** — Create a channel:
 \`\`\`
-<discord-action>{"type":"channelCreate","name":"channel-name","parent":"Category Name","topic":"Optional topic"}</discord-action>
+<discord-action>{"type":"channelCreate","name":"channel-name","parent":"Category Name","topic":"Optional topic","channelType":"text"}</discord-action>
 \`\`\`
 - \`name\` (required): Channel name (lowercase, hyphens, no spaces).
 - \`parent\` (optional): Category name to create the channel under.
 - \`topic\` (optional): Channel topic description.
+- \`channelType\` (optional): \`text\` (default), \`voice\`, \`announcement\`, or \`stage\`.
 
 **channelEdit** — Edit a channel's name or topic:
 \`\`\`
