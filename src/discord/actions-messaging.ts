@@ -8,6 +8,7 @@ import { resolveChannel, fmtTime } from './action-utils.js';
 export type MessagingActionRequest =
   | { type: 'sendMessage'; channel: string; content: string; replyTo?: string }
   | { type: 'react'; channelId: string; messageId: string; emoji: string }
+  | { type: 'unreact'; channelId: string; messageId: string; emoji: string }
   | { type: 'readMessages'; channel: string; limit?: number; before?: string }
   | { type: 'fetchMessage'; channelId: string; messageId: string }
   | { type: 'editMessage'; channelId: string; messageId: string; content: string }
@@ -18,7 +19,7 @@ export type MessagingActionRequest =
   | { type: 'listPins'; channel: string };
 
 const MESSAGING_TYPE_MAP: Record<MessagingActionRequest['type'], true> = {
-  sendMessage: true, react: true, readMessages: true, fetchMessage: true,
+  sendMessage: true, react: true, unreact: true, readMessages: true, fetchMessage: true,
   editMessage: true, deleteMessage: true, threadCreate: true,
   pinMessage: true, unpinMessage: true, listPins: true,
 };
@@ -65,6 +66,16 @@ export async function executeMessagingAction(
       const message = await (channel as any).messages.fetch(action.messageId);
       await message.react(action.emoji);
       return { ok: true, summary: `Reacted with ${action.emoji}` };
+    }
+
+    case 'unreact': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await (channel as any).messages.fetch(action.messageId);
+      const reaction = message.reactions.resolve(action.emoji);
+      if (!reaction) return { ok: false, error: `Reaction "${action.emoji}" not found on message` };
+      await reaction.users.remove(ctx.client.user!.id);
+      return { ok: true, summary: `Removed reaction ${action.emoji}` };
     }
 
     case 'readMessages': {
@@ -202,6 +213,11 @@ export function messagingActionsPromptSection(): string {
 **react** — Add a reaction to a message:
 \`\`\`
 <discord-action>{"type":"react","channelId":"123","messageId":"456","emoji":"👍"}</discord-action>
+\`\`\`
+
+**unreact** — Remove the bot's reaction from a message:
+\`\`\`
+<discord-action>{"type":"unreact","channelId":"123","messageId":"456","emoji":"👍"}</discord-action>
 \`\`\`
 
 **readMessages** — Read recent messages from a channel:

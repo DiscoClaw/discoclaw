@@ -161,6 +161,48 @@ describe('react', () => {
   });
 });
 
+describe('unreact', () => {
+  it('removes bot reaction from a message', async () => {
+    const removeFn = vi.fn(async () => {});
+    const msg = makeMockMessage('msg1');
+    (msg as any).reactions = {
+      resolve: vi.fn((emoji: string) => ({
+        users: { remove: removeFn },
+      })),
+    };
+    const ch = makeMockChannel({ id: 'ch1' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+    ctx.client = { user: { id: 'bot-user-id' } } as any;
+
+    const result = await executeMessagingAction(
+      { type: 'unreact', channelId: 'ch1', messageId: 'msg1', emoji: '👍' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Removed reaction 👍' });
+    expect((msg as any).reactions.resolve).toHaveBeenCalledWith('👍');
+    expect(removeFn).toHaveBeenCalledWith('bot-user-id');
+  });
+
+  it('fails when reaction not found on message', async () => {
+    const msg = makeMockMessage('msg1');
+    (msg as any).reactions = {
+      resolve: vi.fn(() => null),
+    };
+    const ch = makeMockChannel({ id: 'ch1' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'unreact', channelId: 'ch1', messageId: 'msg1', emoji: '🔥' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Reaction "🔥" not found on message' });
+  });
+});
+
 describe('readMessages', () => {
   it('reads and formats messages', async () => {
     const msg1 = makeMockMessage('m1', { content: 'First', author: 'alice' });
