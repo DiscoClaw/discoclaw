@@ -3,6 +3,12 @@ import { CHANNEL_ACTION_TYPES, executeChannelAction, channelActionsPromptSection
 import type { ChannelActionRequest } from './actions-channels.js';
 import { MESSAGING_ACTION_TYPES, executeMessagingAction, messagingActionsPromptSection } from './actions-messaging.js';
 import type { MessagingActionRequest } from './actions-messaging.js';
+import { GUILD_ACTION_TYPES, executeGuildAction, guildActionsPromptSection } from './actions-guild.js';
+import type { GuildActionRequest } from './actions-guild.js';
+import { MODERATION_ACTION_TYPES, executeModerationAction, moderationActionsPromptSection } from './actions-moderation.js';
+import type { ModerationActionRequest } from './actions-moderation.js';
+import { POLL_ACTION_TYPES, executePollAction, pollActionsPromptSection } from './actions-poll.js';
+import type { PollActionRequest } from './actions-poll.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,7 +31,10 @@ export type ActionCategoryFlags = {
 
 export type DiscordActionRequest =
   | ChannelActionRequest
-  | MessagingActionRequest;
+  | MessagingActionRequest
+  | GuildActionRequest
+  | ModerationActionRequest
+  | PollActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -45,6 +54,9 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   const types = new Set<string>();
   if (flags.channels) for (const t of CHANNEL_ACTION_TYPES) types.add(t);
   if (flags.messaging) for (const t of MESSAGING_ACTION_TYPES) types.add(t);
+  if (flags.guild) for (const t of GUILD_ACTION_TYPES) types.add(t);
+  if (flags.moderation) for (const t of MODERATION_ACTION_TYPES) types.add(t);
+  if (flags.polls) for (const t of POLL_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -94,6 +106,12 @@ export async function executeDiscordActions(
         result = await executeChannelAction(action as ChannelActionRequest, ctx);
       } else if (MESSAGING_ACTION_TYPES.has(action.type)) {
         result = await executeMessagingAction(action as MessagingActionRequest, ctx);
+      } else if (GUILD_ACTION_TYPES.has(action.type)) {
+        result = await executeGuildAction(action as GuildActionRequest, ctx);
+      } else if (MODERATION_ACTION_TYPES.has(action.type)) {
+        result = await executeModerationAction(action as ModerationActionRequest, ctx);
+      } else if (POLL_ACTION_TYPES.has(action.type)) {
+        result = await executePollAction(action as PollActionRequest, ctx);
       } else {
         result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
       }
@@ -129,6 +147,18 @@ You can perform Discord server actions by including structured action blocks in 
 
   if (flags.channels) {
     sections.push(channelActionsPromptSection());
+  }
+
+  if (flags.guild) {
+    sections.push(guildActionsPromptSection());
+  }
+
+  if (flags.moderation) {
+    sections.push(moderationActionsPromptSection());
+  }
+
+  if (flags.polls) {
+    sections.push(pollActionsPromptSection());
   }
 
   sections.push(`### Rules
