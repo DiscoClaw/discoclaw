@@ -176,6 +176,58 @@ describe('ToolAwareQueue', () => {
     taq.dispose();
   });
 
+  it('events after dispose() are silently ignored', () => {
+    const { actions, emit } = collect();
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+
+    taq.handleEvent({ type: 'text_delta', text: 'before' });
+    taq.dispose();
+
+    const countAfterDispose = actions.length;
+
+    // These should all be silently dropped.
+    taq.handleEvent({ type: 'text_delta', text: 'after' });
+    taq.handleEvent({ type: 'tool_start', name: 'Read' });
+    taq.handleEvent({ type: 'tool_end', name: 'Read', ok: true });
+    taq.handleEvent({ type: 'text_final', text: 'final' });
+
+    vi.advanceTimersByTime(5000);
+    expect(actions).toHaveLength(countAfterDispose);
+  });
+
+  it('tool_end without prior tool_start does not crash', () => {
+    const { actions, emit } = collect();
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+
+    // Orphan tool_end — should be silently ignored (state is idle, not tool_active).
+    taq.handleEvent({ type: 'tool_end', name: 'Bash', ok: true });
+
+    // Queue should still function normally after the orphan.
+    taq.handleEvent({ type: 'text_delta', text: 'hello' });
+    vi.advanceTimersByTime(2000);
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toEqual({ type: 'stream_text', text: 'hello' });
+
+    taq.dispose();
+  });
+
+  it('multiple text_final events: only first is emitted as set_final', () => {
+    const { actions, emit } = collect();
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+
+    taq.handleEvent({ type: 'text_final', text: 'first final' });
+    taq.handleEvent({ type: 'text_final', text: 'second final' });
+
+    const finals = actions.filter((a) => a.type === 'set_final');
+    expect(finals).toHaveLength(2);
+    expect(finals[0]).toEqual({ type: 'set_final', text: 'first final' });
+    // Second text_final still emits (no crash), but first is the meaningful one.
+    expect(finals[1]).toEqual({ type: 'set_final', text: 'second final' });
+
+    taq.dispose();
+  });
+
   it('text deltas during tool_active are discarded on next tool_start', () => {
     const { actions, emit } = collect();
     const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });

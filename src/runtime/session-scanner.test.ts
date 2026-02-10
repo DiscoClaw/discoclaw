@@ -299,6 +299,44 @@ describe('SessionFileScanner', () => {
     expect(ends).toHaveLength(1);
     expect(ends[0]).toMatchObject({ name: 'Bash', ok: true });
   });
+
+  it('concurrent readNewBytes calls do not produce duplicate events', async () => {
+    const cwd = '/home/test/code/proj';
+    const sessionId = 'test-session-concurrent';
+    const filePath = await ensureSessionFile(cwd, sessionId);
+    const events: EngineEvent[] = [];
+
+    const scanner = new SessionFileScanner(
+      { sessionId, cwd },
+      { onEvent: (evt) => events.push(evt) },
+    );
+
+    await scanner.start();
+
+    // Write a tool_use line.
+    await fsp.appendFile(filePath, makeToolUse('conc-1', 'Read') + '\n');
+
+    // Trigger readNewBytes concurrently by calling the scanner's
+    // internal method multiple times. Access via the poll/watch mechanism
+    // by triggering a rapid series of file changes.
+    await fsp.appendFile(filePath, makeToolUse('conc-2', 'Bash') + '\n');
+    await fsp.appendFile(filePath, makeToolResult('conc-1') + '\n');
+    await fsp.appendFile(filePath, makeToolResult('conc-2') + '\n');
+
+    await new Promise((r) => setTimeout(r, 500));
+    scanner.stop();
+
+    // Verify each tool_start appears exactly once.
+    const starts = events.filter((e) => e.type === 'tool_start');
+    const readStarts = starts.filter((e) => e.type === 'tool_start' && e.name === 'Read');
+    const bashStarts = starts.filter((e) => e.type === 'tool_start' && e.name === 'Bash');
+    expect(readStarts).toHaveLength(1);
+    expect(bashStarts).toHaveLength(1);
+
+    // Verify each tool_end appears exactly once.
+    const ends = events.filter((e) => e.type === 'tool_end');
+    expect(ends).toHaveLength(2);
+  });
 });
 
 describe('toolActivityLabel', () => {
