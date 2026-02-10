@@ -15,6 +15,8 @@ import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { loadDurableMemory, selectItemsForInjection, formatDurableSection } from './discord/durable-memory.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
+import type { StatusPoster } from './discord/status-channel.js';
+import { createStatusPoster } from './discord/status-channel.js';
 
 export type BotParams = {
   token: string;
@@ -56,6 +58,7 @@ export type BotParams = {
   durableInjectMaxChars: number;
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
+  statusChannel?: string;
 };
 
 type QueueLike = Pick<KeyedQueue, 'run'>;
@@ -196,16 +199,19 @@ function truncateCodeBlocks(text: string, maxLines = 20): string {
   });
 }
 
-function renderDiscordTail(text: string, limit = 1900): string {
-  // Render a "tail" view for streaming updates without exceeding Discord limits.
+function renderDiscordTail(text: string, maxLines = 8): string {
+  // Render a fixed-height "tail" view for streaming updates.
   const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
-  const tail = normalized.length > limit ? normalized.slice(normalized.length - limit) : normalized;
+  const lines = normalized.split('\n').filter((l) => l.length > 0);
+  const tail = lines.slice(-maxLines);
   // Avoid breaking the fence if the content contains ``` sequences.
-  const safe = tail.replace(/```/g, '``\\`');
+  const safe = tail.join('\n').replace(/```/g, '``\\`');
   return `\`\`\`text\n${safe}\n\`\`\``;
 }
 
-export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike) {
+export type StatusRef = { current: StatusPoster | null };
+
+export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
   const actionFlags: ActionCategoryFlags = {
     channels: params.discordActionsChannels,
     messaging: params.discordActionsMessaging,
@@ -441,6 +447,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             } else if (evt.type === 'error') {
               finalText = `Error: ${evt.message}`;
               await maybeEdit(true);
+              // eslint-disable-next-line @typescript-eslint/no-floating-promises
+              statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
             } else if (evt.type === 'text_delta') {
               // Some runtimes never emit a final payload; keep deltas as a fallback.
               deltaText += evt.text;
@@ -468,6 +476,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const results = await executeDiscordActions(actions, actCtx, params.log);
               const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
               processedText = cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
+              if (statusRef?.current) {
+                for (let i = 0; i < results.length; i++) {
+                  const r = results[i];
+                  if (!r.ok) {
+                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                    statusRef.current.actionFailed(actions[i].type, r.error);
+                  }
+                }
+              }
             } else {
               processedText = cleanText;
             }
@@ -496,6 +513,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
         } catch (err) {
           params.log?.error({ err, sessionKey }, 'discord:handler failed');
+          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+          statusRef?.current?.handlerError({ sessionKey }, err);
           try {
             if (reply) await reply.edit(`Error: ${String(err)}`);
           } catch {
@@ -533,7 +552,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
   };
 }
 
-export async function startDiscordBot(params: BotParams) {
+function resolveStatusChannel(client: Client, nameOrId: string, log?: LoggerLike): StatusPoster | null {
+  // Try by ID first, then by name across all guilds.
+  const byId = client.channels.cache.get(nameOrId);
+  if (byId?.isTextBased() && !byId.isDMBased()) return createStatusPoster(byId, log);
+
+  for (const guild of client.guilds.cache.values()) {
+    const ch = guild.channels.cache.find(
+      (c) => c.isTextBased() && c.name === nameOrId,
+    );
+    if (ch && ch.isTextBased()) return createStatusPoster(ch, log);
+  }
+  return null;
+}
+
+export async function startDiscordBot(params: BotParams): Promise<{ client: Client; status: StatusPoster | null }> {
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -544,8 +577,12 @@ export async function startDiscordBot(params: BotParams) {
     partials: [Partials.Channel],
   });
 
+  // Mutable ref: handler captures this at registration time, but dereferences
+  // .current at call time so we can set it after the ready event.
+  const statusRef: StatusRef = { current: null };
+
   const queue = new KeyedQueue();
-  client.on('messageCreate', createMessageCreateHandler(params, queue));
+  client.on('messageCreate', createMessageCreateHandler(params, queue, statusRef));
 
   if (params.autoJoinThreads) {
     client.on('threadCreate', async (thread: any) => {
@@ -565,5 +602,25 @@ export async function startDiscordBot(params: BotParams) {
   }
 
   await client.login(params.token);
-  return client;
+
+  // Wait for cache to be ready before resolving the status channel.
+  await new Promise<void>((resolve) => {
+    if (client.isReady()) {
+      resolve();
+    } else {
+      client.once('ready', () => resolve());
+    }
+  });
+
+  if (params.statusChannel) {
+    statusRef.current = resolveStatusChannel(client, params.statusChannel, params.log);
+    if (statusRef.current) {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      statusRef.current.online();
+    } else {
+      params.log?.warn({ statusChannel: params.statusChannel }, 'status-channel: channel not found, status posting disabled');
+    }
+  }
+
+  return { client, status: statusRef.current };
 }

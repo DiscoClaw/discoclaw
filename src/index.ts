@@ -9,6 +9,7 @@ import { SessionManager } from './sessions.js';
 import { parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 import { loadDiscordChannelContext } from './discord/channel-context.js';
 import { startDiscordBot } from './discord.js';
+import type { StatusPoster } from './discord/status-channel.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
@@ -55,7 +56,10 @@ try {
   process.exit(1);
 }
 
+let botStatus: StatusPoster | null = null;
 const shutdown = async () => {
+  // Best-effort: may not complete before SIGKILL on short shutdown windows.
+  await botStatus?.offline();
   await releasePidLock(pidLockPath);
   process.exit(0);
 };
@@ -99,6 +103,7 @@ const durableDataDir = (process.env.DISCOCLAW_DURABLE_DATA_DIR ?? '').trim()
 const durableInjectMaxChars = Math.max(1, Number(process.env.DISCOCLAW_DURABLE_INJECT_MAX_CHARS ?? '2000'));
 const durableMaxItems = Math.max(1, Number(process.env.DISCOCLAW_DURABLE_MAX_ITEMS ?? '200'));
 const memoryCommandsEnabled = (process.env.DISCOCLAW_MEMORY_COMMANDS_ENABLED ?? '1') === '1';
+const statusChannel = (process.env.DISCOCLAW_STATUS_CHANNEL ?? '').trim() || undefined;
 if (requireChannelContext && !discordChannelContext) {
   log.error({ contentDir }, 'DISCORD_REQUIRE_CHANNEL_CONTEXT=1 but channel context failed to initialize');
   process.exit(1);
@@ -165,7 +170,7 @@ const runtime = createClaudeCliRuntime({
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
-await startDiscordBot({
+const { status } = await startDiscordBot({
   token,
   allowUserIds,
   allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
@@ -200,6 +205,8 @@ await startDiscordBot({
   durableInjectMaxChars,
   durableMaxItems,
   memoryCommandsEnabled,
+  statusChannel,
 });
+botStatus = status;
 
 log.info('Discord bot started');
