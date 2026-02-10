@@ -153,19 +153,31 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
           const sub = proc.getSubprocess();
           if (sub) activeSubprocesses.add(sub);
 
-          let hungUp = false;
+          let fallback = false;
+          const buffered: EngineEvent[] = [];
           for await (const evt of proc.sendTurn(params.prompt)) {
-            if (evt.type === 'error' && evt.message.includes('hang detected')) {
+            if (evt.type === 'error' && evt.message.startsWith('long-running:')) {
+              // Process crashed/failed — fall back to one-shot silently.
               pool.remove(params.sessionKey);
-              hungUp = true;
+              fallback = true;
               break;
             }
-            yield evt;
+            if (evt.type === 'error' && evt.message.includes('hang detected')) {
+              pool.remove(params.sessionKey);
+              fallback = true;
+              break;
+            }
+            buffered.push(evt);
           }
 
           if (sub) activeSubprocesses.delete(sub);
-          if (!hungUp) return; // success via long-running process
-          // Fall through to one-shot on hang...
+          if (!fallback) {
+            // Success: yield all buffered events.
+            for (const evt of buffered) yield evt;
+            return;
+          }
+          (opts.log as any)?.info?.('multi-turn: process failed, falling back to one-shot');
+          // Fall through to one-shot...
         }
       } catch (err) {
         (opts.log as any)?.info?.({ err }, 'multi-turn: error, falling back to one-shot');

@@ -70,8 +70,8 @@ describe('LongRunningProcess', () => {
     expect(callArgs).toContain('Read,Bash');
     expect(callArgs).toContain('--add-dir');
     expect(callArgs).toContain('/workspace');
-    // No -p flag (not one-shot mode)
-    expect(callArgs).not.toContain('-p');
+    // -p is required for --input-format stream-json
+    expect(callArgs).toContain('-p');
   });
 
   it('first turn yields text_delta and text_final from stream', async () => {
@@ -102,11 +102,12 @@ describe('LongRunningProcess', () => {
     expect(events.find((e) => e.type === 'done')).toBeTruthy();
     expect(proc.state).toBe('idle');
 
-    // Verify stdin was written with correct NDJSON
+    // Verify stdin was written with correct NDJSON (API-shaped message)
     const written = mock.stdin.write.mock.calls[0]?.[0];
     const parsed = JSON.parse(written.trim());
     expect(parsed.type).toBe('user');
-    expect(parsed.content).toBe('Hello');
+    expect(parsed.message.role).toBe('user');
+    expect(parsed.message.content).toBe('Hello');
   });
 
   it('second turn reuses the same process', async () => {

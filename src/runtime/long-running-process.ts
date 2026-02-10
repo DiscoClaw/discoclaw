@@ -70,6 +70,7 @@ export class LongRunningProcess {
    */
   spawn(): boolean {
     const args: string[] = [
+      '-p',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--include-partial-messages',
@@ -161,8 +162,8 @@ export class LongRunningProcess {
     // Start hang detection.
     this.startHangTimer();
 
-    // Write the user message to stdin.
-    const msg = JSON.stringify({ type: 'user', content: prompt }) + '\n';
+    // Write the user message to stdin (Claude CLI stream-json expects API-shaped messages).
+    const msg = JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n';
     try {
       this.subprocess!.stdin!.write(msg);
     } catch (err) {
