@@ -43,6 +43,7 @@ describe('Discord handler (fail closed)', () => {
       durableInjectMaxChars: 2000,
       durableMaxItems: 200,
       memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
     }, queue);
 
     const msg = {
@@ -95,6 +96,7 @@ describe('Discord handler (fail closed)', () => {
       durableInjectMaxChars: 2000,
       durableMaxItems: 200,
       memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
     }, queue);
 
     const msg = {

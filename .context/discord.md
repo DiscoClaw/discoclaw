@@ -75,6 +75,8 @@ Each action category has its own flag (only active when the master switch is `1`
 | `DISCOCLAW_DISCORD_ACTIONS_POLLS` | `0` | poll |
 | `DISCOCLAW_DISCORD_ACTIONS_BEADS` | `0` | beadCreate, beadUpdate, beadClose, beadShow, beadList, beadSync |
 
+Auto-follow-up: When query actions (channelList, channelInfo, threadListArchived, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, beadList, beadShow) succeed, Discoclaw automatically re-invokes Claude with the results. This allows Claude to reason about query results without requiring the user to send a follow-up message. Controlled by `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` (default `3`, `0` disables). Mutation-only responses do not trigger follow-ups. Trivially short follow-up responses (<50 chars with no actions) are suppressed.
+
 Requirements:
 - The bot needs appropriate permissions in the server (Manage Channels, Manage Roles, Moderate Members, etc.) depending on the actions used. These are server-level role permissions, not Developer Portal settings.
 - Only works in guild channels (not DMs).

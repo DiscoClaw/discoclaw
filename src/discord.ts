@@ -9,7 +9,8 @@ import type { DiscordChannelContext } from './discord/channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { discordSessionKey } from './discord/session-key.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection } from './discord/actions.js';
-import type { ActionCategoryFlags } from './discord/actions.js';
+import type { ActionCategoryFlags, DiscordActionResult } from './discord/actions.js';
+import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { LoggerLike } from './discord/action-types.js';
 import { fetchMessageHistory } from './discord/message-history.js';
@@ -65,6 +66,7 @@ export type BotParams = {
   memoryCommandsEnabled: boolean;
   statusChannel?: string;
   toolAwareStreaming?: boolean;
+  actionFollowupDepth: number;
 };
 
 type QueueLike = Pick<KeyedQueue, 'run'>;
@@ -426,37 +428,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (params.useGroupDirCwd) addDirs.push(params.workspaceCwd);
           if (params.discordChannelContext) addDirs.push(params.discordChannelContext.contentDir);
 
-          let finalText = '';
-          let deltaText = '';
-          let activityLabel = '';
-          const t0 = Date.now();
-          let lastEditAt = 0;
-          const minEditIntervalMs = 1250;
-
-          const maybeEdit = async (force = false) => {
-            if (!reply) return;
-            const now = Date.now();
-            if (!force && now - lastEditAt < minEditIntervalMs) return;
-            lastEditAt = now;
-            const out = deltaText
-              ? renderDiscordTail(deltaText)
-              : activityLabel
-                ? renderActivityTail(activityLabel)
-                : renderDiscordTail(finalText || '(working...)');
-            try {
-              await reply.edit(out);
-            } catch {
-              // Ignore Discord edit errors during streaming.
-            }
-          };
-
-          // If the runtime produces no stdout/stderr (auth/network hangs), avoid leaving the
-          // placeholder `...` indefinitely by periodically updating the message.
-          const keepalive = setInterval(() => {
-            // eslint-disable-next-line @typescript-eslint/no-floating-promises
-            maybeEdit(true);
-          }, 5000);
-
           const permissions = await loadWorkspacePermissions(params.workspaceCwd, params.log);
           const effectiveTools = resolveTools(permissions, params.runtimeTools);
           if (permissions?.note) {
@@ -479,109 +450,197 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             'invoke:start',
           );
 
-          // Tool-aware streaming: route events through a state machine that buffers
-          // text during tool execution and streams the final answer cleanly.
-          const taq = params.toolAwareStreaming
-            ? new ToolAwareQueue((action) => {
-                if (action.type === 'stream_text') {
-                  deltaText += action.text;
-                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                  maybeEdit(false);
-                } else if (action.type === 'set_final') {
-                  finalText = action.text;
-                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                  maybeEdit(true);
-                } else if (action.type === 'show_activity') {
-                  activityLabel = action.label;
-                  deltaText = '';
-                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                  maybeEdit(true);
-                }
-              }, { flushDelayMs: 2000, postToolDelayMs: 500 })
-            : null;
+          let currentPrompt = prompt;
+          let followUpDepth = 0;
+          let processedText = '';
 
-          for await (const evt of params.runtime.invoke({
-            prompt,
-            model: params.runtimeModel,
-            cwd,
-            addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
-            sessionId,
-            sessionKey,
-            tools: effectiveTools,
-            timeoutMs: params.runtimeTimeoutMs,
-          })) {
-            if (taq) {
-              // Tool-aware mode: route relevant events through the queue.
-              if (evt.type === 'text_delta' || evt.type === 'text_final' ||
-                  evt.type === 'tool_start' || evt.type === 'tool_end') {
-                taq.handleEvent(evt);
-              } else if (evt.type === 'error') {
-                taq.handleEvent(evt);
-                finalText = `Error: ${evt.message}`;
-                await maybeEdit(true);
-                // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
-              } else if (evt.type === 'log_line') {
-                // Bypass queue for log lines.
-                const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
-                deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
-                await maybeEdit(false);
+          // -- auto-follow-up loop --
+          // When query actions (channelList, readMessages, etc.) succeed, re-invoke
+          // Claude with the results so it can continue reasoning without user intervention.
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            let finalText = '';
+            let deltaText = '';
+            let activityLabel = '';
+            const t0 = Date.now();
+            let lastEditAt = 0;
+            const minEditIntervalMs = 1250;
+
+            // On follow-up iterations, send a new placeholder message.
+            if (followUpDepth > 0) {
+              reply = await msg.channel.send(renderActivityTail('(following up...)'));
+              params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
+            }
+
+            const maybeEdit = async (force = false) => {
+              if (!reply) return;
+              const now = Date.now();
+              if (!force && now - lastEditAt < minEditIntervalMs) return;
+              lastEditAt = now;
+              const out = deltaText
+                ? renderDiscordTail(deltaText)
+                : activityLabel
+                  ? renderActivityTail(activityLabel)
+                  : renderDiscordTail(finalText || '(working...)');
+              try {
+                await reply.edit(out);
+              } catch {
+                // Ignore Discord edit errors during streaming.
               }
-            } else {
-              // Flat mode: existing behavior unchanged.
-              if (evt.type === 'text_final') {
-                finalText = evt.text;
-                await maybeEdit(true);
-              } else if (evt.type === 'error') {
-                finalText = `Error: ${evt.message}`;
-                await maybeEdit(true);
-                // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
-              } else if (evt.type === 'text_delta') {
-                deltaText += evt.text;
-                await maybeEdit(false);
-              } else if (evt.type === 'log_line') {
-                const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
-                deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
-                await maybeEdit(false);
+            };
+
+            // If the runtime produces no stdout/stderr (auth/network hangs), avoid leaving the
+            // placeholder `...` indefinitely by periodically updating the message.
+            const keepalive = setInterval(() => {
+              // eslint-disable-next-line @typescript-eslint/no-floating-promises
+              maybeEdit(true);
+            }, 5000);
+
+            // Tool-aware streaming: route events through a state machine that buffers
+            // text during tool execution and streams the final answer cleanly.
+            const taq = params.toolAwareStreaming
+              ? new ToolAwareQueue((action) => {
+                  if (action.type === 'stream_text') {
+                    deltaText += action.text;
+                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                    maybeEdit(false);
+                  } else if (action.type === 'set_final') {
+                    finalText = action.text;
+                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                    maybeEdit(true);
+                  } else if (action.type === 'show_activity') {
+                    activityLabel = action.label;
+                    deltaText = '';
+                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                    maybeEdit(true);
+                  }
+                }, { flushDelayMs: 2000, postToolDelayMs: 500 })
+              : null;
+
+            for await (const evt of params.runtime.invoke({
+              prompt: currentPrompt,
+              model: params.runtimeModel,
+              cwd,
+              addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
+              sessionId,
+              sessionKey,
+              tools: effectiveTools,
+              timeoutMs: params.runtimeTimeoutMs,
+            })) {
+              if (taq) {
+                // Tool-aware mode: route relevant events through the queue.
+                if (evt.type === 'text_delta' || evt.type === 'text_final' ||
+                    evt.type === 'tool_start' || evt.type === 'tool_end') {
+                  taq.handleEvent(evt);
+                } else if (evt.type === 'error') {
+                  taq.handleEvent(evt);
+                  finalText = `Error: ${evt.message}`;
+                  await maybeEdit(true);
+                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                  statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                } else if (evt.type === 'log_line') {
+                  // Bypass queue for log lines.
+                  const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
+                  deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
+                  await maybeEdit(false);
+                }
+              } else {
+                // Flat mode: existing behavior unchanged.
+                if (evt.type === 'text_final') {
+                  finalText = evt.text;
+                  await maybeEdit(true);
+                } else if (evt.type === 'error') {
+                  finalText = `Error: ${evt.message}`;
+                  await maybeEdit(true);
+                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                  statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                } else if (evt.type === 'text_delta') {
+                  deltaText += evt.text;
+                  await maybeEdit(false);
+                } else if (evt.type === 'log_line') {
+                  const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
+                  deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
+                  await maybeEdit(false);
+                }
               }
             }
-          }
-          taq?.dispose();
-          params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');
-          clearInterval(keepalive);
+            taq?.dispose();
+            if (followUpDepth > 0) {
+              params.log?.info({ sessionKey, followUpDepth, ms: Date.now() - t0 }, 'followup:end');
+            } else {
+              params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');
+            }
+            clearInterval(keepalive);
 
-          let processedText = finalText || deltaText || '(no output)';
-          if (params.discordActionsEnabled && msg.guild) {
-            const { cleanText, actions } = parseDiscordActions(processedText, actionFlags);
-            if (actions.length > 0) {
-              const actCtx = {
-                guild: msg.guild,
-                client: msg.client,
-                channelId: msg.channelId,
-                messageId: msg.id,
-              };
-              const results = await executeDiscordActions(actions, actCtx, params.log, params.beadCtx);
-              const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
-              processedText = cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
-              if (statusRef?.current) {
-                for (let i = 0; i < results.length; i++) {
-                  const r = results[i];
-                  if (!r.ok) {
-                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                    statusRef.current.actionFailed(actions[i].type, r.error);
+            processedText = finalText || deltaText || '(no output)';
+            let actions: { type: string }[] = [];
+            let actionResults: DiscordActionResult[] = [];
+            if (params.discordActionsEnabled && msg.guild) {
+              const parsed = parseDiscordActions(processedText, actionFlags);
+              if (parsed.actions.length > 0) {
+                actions = parsed.actions;
+                const actCtx = {
+                  guild: msg.guild,
+                  client: msg.client,
+                  channelId: msg.channelId,
+                  messageId: msg.id,
+                };
+                actionResults = await executeDiscordActions(parsed.actions, actCtx, params.log, params.beadCtx);
+                const resultLines = actionResults.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
+                processedText = parsed.cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
+                if (statusRef?.current) {
+                  for (let i = 0; i < actionResults.length; i++) {
+                    const r = actionResults[i];
+                    if (!r.ok) {
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      statusRef.current.actionFailed(actions[i].type, r.error);
+                    }
                   }
                 }
+              } else {
+                processedText = parsed.cleanText;
               }
-            } else {
-              processedText = cleanText;
             }
-          }
-          const outText = truncateCodeBlocks(processedText);
-          const chunks = splitDiscord(outText);
-          await reply.edit(chunks[0] ?? '(no output)');
-          for (const extra of chunks.slice(1)) {
-            await msg.channel.send(extra);
+
+            // Suppression: if a follow-up response is trivially short and has no further
+            // actions, suppress it to avoid posting empty messages like "Got it."
+            if (followUpDepth > 0 && actions.length === 0) {
+              const stripped = processedText.replace(/\s+/g, ' ').trim();
+              if (stripped.length < 50) {
+                try { await reply.delete(); } catch { /* ignore */ }
+                params.log?.info({ sessionKey, followUpDepth, chars: stripped.length }, 'followup:suppressed');
+                break;
+              }
+            }
+
+            // Post to Discord.
+            const outText = truncateCodeBlocks(processedText);
+            const chunks = splitDiscord(outText);
+            await reply.edit(chunks[0] ?? '(no output)');
+            for (const extra of chunks.slice(1)) {
+              await msg.channel.send(extra);
+            }
+
+            // -- auto-follow-up check --
+            if (followUpDepth >= params.actionFollowupDepth) break;
+            if (actions.length === 0) break;
+            const actionTypes = actions.map((a) => a.type);
+            if (!hasQueryAction(actionTypes)) break;
+            // At least one query action must have succeeded.
+            const anyQuerySucceeded = actions.some(
+              (a, i) => QUERY_ACTION_TYPES.has(a.type) && actionResults[i]?.ok,
+            );
+            if (!anyQuerySucceeded) break;
+
+            // Build follow-up prompt with action results.
+            const followUpLines = actionResults.map((r) =>
+              r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`,
+            );
+            currentPrompt =
+              `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
+              followUpLines.join('\n') +
+              `\n\nContinue your analysis based on these results. If you need additional information, you may emit further query actions.`;
+            followUpDepth++;
           }
 
           if (params.summaryEnabled) {

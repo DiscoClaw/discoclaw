@@ -177,9 +177,8 @@ You can perform Discord server actions by including structured action blocks in 
 - Only the action types listed above are supported.
 - Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
 - Action blocks are removed from the displayed message; results are appended automatically.
-- All action blocks in your response execute AFTER the response is complete. You cannot see action results within the same turn.
+- Results from information-gathering actions (channelList, channelInfo, threadListArchived, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, beadList, beadShow) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
 - Include all needed actions in a single response when possible (e.g., a channelList and multiple channelDelete blocks together).
-- If you need information from an action result before deciding the next step, tell the user to send a follow-up message after seeing the results.
 
 ### Permissions
 These actions require the bot to have appropriate permissions in this Discord server (e.g. Manage Channels, Manage Roles, Moderate Members). These are server-level role permissions, not Discord Developer Portal settings.

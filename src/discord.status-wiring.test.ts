@@ -56,6 +56,7 @@ function baseParams(runtimeOverride: any) {
     durableInjectMaxChars: 2000,
     durableMaxItems: 200,
     memoryCommandsEnabled: false,
+    actionFollowupDepth: 0,
   };
 }
 

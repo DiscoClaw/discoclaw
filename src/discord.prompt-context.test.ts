@@ -82,6 +82,7 @@ describe('prompt includes correct context file paths', () => {
       durableInjectMaxChars: 2000,
       durableMaxItems: 200,
       memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
     }, queue);
 
     await handler(makeMsg({ channelId: 'chan' }));
@@ -148,6 +149,7 @@ describe('prompt includes correct context file paths', () => {
       durableInjectMaxChars: 2000,
       durableMaxItems: 200,
       memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
     }, queue);
 
     await handler(makeMsg({
@@ -214,6 +216,7 @@ describe('prompt includes correct context file paths', () => {
       durableInjectMaxChars: 2000,
       durableMaxItems: 200,
       memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
     }, queue);
 
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
@@ -272,6 +275,7 @@ describe('durable memory injection into prompt', () => {
       durableInjectMaxChars: 2000,
       durableMaxItems: 200,
       memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
     }, queue);
 
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
@@ -344,6 +348,7 @@ describe('workspace PA files in prompt', () => {
       durableInjectMaxChars: 2000,
       durableMaxItems: 200,
       memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
     }, queue);
 
     await handler(makeMsg({ channelId: 'chan' }));
@@ -410,6 +415,7 @@ describe('workspace PA files in prompt', () => {
       durableInjectMaxChars: 2000,
       durableMaxItems: 200,
       memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
     }, queue);
 
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
@@ -467,6 +473,7 @@ describe('memory command interception', () => {
       durableInjectMaxChars: 2000,
       durableMaxItems: 200,
       memoryCommandsEnabled: true,
+      actionFollowupDepth: 0,
     }, queue);
 
     const msg = makeMsg({ guildId: null, channelId: 'dmchan', content: '!memory show' });

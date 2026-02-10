@@ -115,6 +115,7 @@ const durableDataDir = (process.env.DISCOCLAW_DURABLE_DATA_DIR ?? '').trim()
 const durableInjectMaxChars = Math.max(1, Number(process.env.DISCOCLAW_DURABLE_INJECT_MAX_CHARS ?? '2000'));
 const durableMaxItems = Math.max(1, Number(process.env.DISCOCLAW_DURABLE_MAX_ITEMS ?? '200'));
 const memoryCommandsEnabled = (process.env.DISCOCLAW_MEMORY_COMMANDS_ENABLED ?? '1') === '1';
+const actionFollowupDepth = Math.max(0, Number(process.env.DISCOCLAW_ACTION_FOLLOWUP_DEPTH ?? '3'));
 const statusChannel = (process.env.DISCOCLAW_STATUS_CHANNEL ?? '').trim() || undefined;
 const cronEnabled = (process.env.DISCOCLAW_CRON_ENABLED ?? '0') === '1';
 const cronForum = (process.env.DISCOCLAW_CRON_FORUM ?? '').trim() || undefined;
@@ -279,6 +280,7 @@ const { client, status } = await startDiscordBot({
   memoryCommandsEnabled,
   statusChannel,
   toolAwareStreaming,
+  actionFollowupDepth,
 });
 botStatus = status;
 
