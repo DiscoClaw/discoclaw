@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 
-import { createClaudeCliRuntime } from './runtime/claude-code-cli.js';
+import { createClaudeCliRuntime, killActiveSubprocesses } from './runtime/claude-code-cli.js';
 import { SessionManager } from './sessions.js';
 import { parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 import { loadDiscordChannelContext } from './discord/channel-context.js';
@@ -66,6 +66,8 @@ try {
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
 const shutdown = async () => {
+  // Kill Claude subprocesses first so they release session locks before the new instance starts.
+  killActiveSubprocesses();
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
   cronScheduler?.stopAll();
   await botStatus?.offline();

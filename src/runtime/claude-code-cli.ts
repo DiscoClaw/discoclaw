@@ -1,7 +1,18 @@
 import process from 'node:process';
-import { execa } from 'execa';
+import { execa, type ResultPromise } from 'execa';
 import type { EngineEvent, RuntimeAdapter, RuntimeInvokeParams } from './types.js';
 import { SessionFileScanner } from './session-scanner.js';
+
+// Track active Claude subprocesses so we can kill them on shutdown.
+const activeSubprocesses = new Set<ResultPromise>();
+
+/** SIGKILL all tracked Claude subprocesses (e.g. on SIGTERM). */
+export function killActiveSubprocesses(): void {
+  for (const p of activeSubprocesses) {
+    p.kill('SIGKILL');
+  }
+  activeSubprocesses.clear();
+}
 
 function extractTextFromUnknownEvent(evt: unknown): string | null {
   if (!evt || typeof evt !== 'object') return null;
@@ -151,6 +162,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       cwd: params.cwd,
       timeout: params.timeoutMs,
       reject: false,
+      forceKillAfterDelay: 5000,
       // Ensure the CLI can't hang waiting for input (auth prompts, trust dialogs, etc).
       stdin: 'ignore',
       env: {
@@ -163,6 +175,10 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       stdout: 'pipe',
       stderr: 'pipe',
     });
+
+    activeSubprocesses.add(subprocess);
+    subprocess.then(() => activeSubprocesses.delete(subprocess))
+      .catch(() => activeSubprocesses.delete(subprocess));
 
     if (!subprocess.stdout) {
       yield { type: 'error', message: 'claude: missing stdout stream' };
@@ -381,6 +397,8 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       }
     } finally {
       scanner?.stop();
+      if (!finished) subprocess.kill('SIGKILL');
+      activeSubprocesses.delete(subprocess);
     }
   }
 
