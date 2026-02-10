@@ -19,6 +19,8 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
       createdAt: ch.createdAt ?? null,
       edit: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
+      setParent: vi.fn(async () => {}),
+      setPosition: vi.fn(async () => {}),
     });
   }
 
@@ -342,6 +344,153 @@ describe('channelInfo', () => {
 // ---------------------------------------------------------------------------
 // categoryCreate
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// channelMove
+// ---------------------------------------------------------------------------
+
+describe('channelMove', () => {
+  it('moves channel to a category by name', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat1', name: 'Projects', type: ChannelType.GuildCategory },
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelMove', channelId: 'ch1', parent: 'Projects' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Moved #general: moved to Projects' });
+    const ch = guild.channels.cache.get('ch1');
+    expect(ch.setParent).toHaveBeenCalledWith('cat1');
+  });
+
+  it('moves channel to a category by ID', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat1', name: 'Projects', type: ChannelType.GuildCategory },
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelMove', channelId: 'ch1', parent: 'cat1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const ch = guild.channels.cache.get('ch1');
+    expect(ch.setParent).toHaveBeenCalledWith('cat1');
+  });
+
+  it('removes channel from category with empty string', async () => {
+    const guild = makeMockGuild([
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText, parentName: 'Old' },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelMove', channelId: 'ch1', parent: '' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Moved #general: removed from category' });
+    const ch = guild.channels.cache.get('ch1');
+    expect(ch.setParent).toHaveBeenCalledWith(null);
+  });
+
+  it('sets channel position', async () => {
+    const guild = makeMockGuild([
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelMove', channelId: 'ch1', position: 3 },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Moved #general: position → 3' });
+    const ch = guild.channels.cache.get('ch1');
+    expect(ch.setPosition).toHaveBeenCalledWith(3);
+  });
+
+  it('moves and repositions in one call', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat1', name: 'Dev', type: ChannelType.GuildCategory },
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelMove', channelId: 'ch1', parent: 'Dev', position: 0 },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Moved #general: moved to Dev, position → 0' });
+    const ch = guild.channels.cache.get('ch1');
+    expect(ch.setParent).toHaveBeenCalledWith('cat1');
+    expect(ch.setPosition).toHaveBeenCalledWith(0);
+  });
+
+  it('fails when neither parent nor position given', async () => {
+    const guild = makeMockGuild([
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelMove', channelId: 'ch1' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'channelMove requires at least one of parent or position' });
+  });
+
+  it('fails when channel not found', async () => {
+    const guild = makeMockGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelMove', channelId: 'nope', parent: 'Dev' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Channel "nope" not found' });
+  });
+
+  it('fails when category not found', async () => {
+    const guild = makeMockGuild([
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelMove', channelId: 'ch1', parent: 'NonExistent' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Category "NonExistent" not found' });
+  });
+
+  it('resolves category name case-insensitively', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat1', name: 'Projects', type: ChannelType.GuildCategory },
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelMove', channelId: 'ch1', parent: 'projects' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const ch = guild.channels.cache.get('ch1');
+    expect(ch.setParent).toHaveBeenCalledWith('cat1');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // threadListArchived

@@ -13,13 +13,14 @@ export type ChannelActionRequest =
   | { type: 'channelList' }
   | { type: 'channelInfo'; channelId: string }
   | { type: 'categoryCreate'; name: string; position?: number }
+  | { type: 'channelMove'; channelId: string; parent?: string; position?: number }
   | { type: 'threadListArchived'; channelId: string; limit?: number };
 
 // Record ensures every union member is listed; TS errors if a new type is added to the union but not here.
 const CHANNEL_TYPE_MAP: Record<ChannelActionRequest['type'], true> = {
   channelCreate: true, channelEdit: true, channelDelete: true,
   channelList: true, channelInfo: true, categoryCreate: true,
-  threadListArchived: true,
+  channelMove: true, threadListArchived: true,
 };
 export const CHANNEL_ACTION_TYPES = new Set<string>(Object.keys(CHANNEL_TYPE_MAP));
 
@@ -151,6 +152,43 @@ export async function executeChannelAction(
       return { ok: true, summary: `Created category "${created.name}"` };
     }
 
+    case 'channelMove': {
+      if (action.parent == null && action.position == null) {
+        return { ok: false, error: 'channelMove requires at least one of parent or position' };
+      }
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+
+      const parts: string[] = [];
+
+      if (action.parent != null) {
+        if (action.parent === '') {
+          await (channel as GuildChannel).setParent(null);
+          parts.push('removed from category');
+        } else {
+          // Resolve by ID first, then by name (case-insensitive).
+          let cat = guild.channels.cache.get(action.parent);
+          if (!cat || cat.type !== ChannelType.GuildCategory) {
+            cat = guild.channels.cache.find(
+              (ch: any) =>
+                ch.type === ChannelType.GuildCategory &&
+                ch.name.toLowerCase() === action.parent!.toLowerCase(),
+            );
+          }
+          if (!cat) return { ok: false, error: `Category "${action.parent}" not found` };
+          await (channel as GuildChannel).setParent(cat.id);
+          parts.push(`moved to ${cat.name}`);
+        }
+      }
+
+      if (action.position != null) {
+        await (channel as GuildChannel).setPosition(action.position);
+        parts.push(`position → ${action.position}`);
+      }
+
+      return { ok: true, summary: `Moved #${channel.name}: ${parts.join(', ')}` };
+    }
+
     case 'threadListArchived': {
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
@@ -219,6 +257,15 @@ export function channelActionsPromptSection(): string {
 \`\`\`
 <discord-action>{"type":"categoryCreate","name":"Category Name"}</discord-action>
 \`\`\`
+
+**channelMove** — Move a channel to a category or position:
+\`\`\`
+<discord-action>{"type":"channelMove","channelId":"123","parent":"Category Name","position":0}</discord-action>
+\`\`\`
+- \`channelId\` (required): Channel ID.
+- \`parent\` (optional): Category name or ID. Empty string removes from category.
+- \`position\` (optional): New position (0-based).
+At least one of parent or position is required.
 
 **threadListArchived** — List archived threads in a forum or text channel:
 \`\`\`
