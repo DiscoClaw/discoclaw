@@ -1,3 +1,4 @@
+import { ChannelType } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, fmtTime } from './action-utils.js';
 
@@ -13,6 +14,8 @@ export type MessagingActionRequest =
   | { type: 'fetchMessage'; channelId: string; messageId: string }
   | { type: 'editMessage'; channelId: string; messageId: string; content: string }
   | { type: 'deleteMessage'; channelId: string; messageId: string }
+  | { type: 'bulkDelete'; channelId: string; count: number }
+  | { type: 'crosspost'; channelId: string; messageId: string }
   | { type: 'threadCreate'; channelId: string; name: string; messageId?: string; autoArchiveMinutes?: number }
   | { type: 'pinMessage'; channelId: string; messageId: string }
   | { type: 'unpinMessage'; channelId: string; messageId: string }
@@ -20,7 +23,7 @@ export type MessagingActionRequest =
 
 const MESSAGING_TYPE_MAP: Record<MessagingActionRequest['type'], true> = {
   sendMessage: true, react: true, unreact: true, readMessages: true, fetchMessage: true,
-  editMessage: true, deleteMessage: true, threadCreate: true,
+  editMessage: true, deleteMessage: true, bulkDelete: true, crosspost: true, threadCreate: true,
   pinMessage: true, unpinMessage: true, listPins: true,
 };
 export const MESSAGING_ACTION_TYPES = new Set<string>(Object.keys(MESSAGING_TYPE_MAP));
@@ -136,6 +139,30 @@ export async function executeMessagingAction(
       return { ok: true, summary: `Deleted message in #${(channel as any).name}` };
     }
 
+    case 'bulkDelete': {
+      const count = action.count;
+      if (!Number.isInteger(count) || count < 2 || count > 100) {
+        return { ok: false, error: 'bulkDelete count must be an integer between 2 and 100' };
+      }
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel || !('bulkDelete' in channel)) {
+        return { ok: false, error: `Channel "${action.channelId}" not found or does not support bulk delete` };
+      }
+      const deleted = await (channel as any).bulkDelete(count, true);
+      return { ok: true, summary: `Bulk deleted ${deleted.size} messages in #${(channel as any).name}` };
+    }
+
+    case 'crosspost': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if ((channel as any).type !== ChannelType.GuildAnnouncement) {
+        return { ok: false, error: `Channel #${(channel as any).name} is not an announcement channel` };
+      }
+      const message = await (channel as any).messages.fetch(action.messageId);
+      await message.crosspost();
+      return { ok: true, summary: `Published message to followers of #${(channel as any).name}` };
+    }
+
     case 'threadCreate': {
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
@@ -242,6 +269,19 @@ export function messagingActionsPromptSection(): string {
 \`\`\`
 <discord-action>{"type":"deleteMessage","channelId":"123","messageId":"456"}</discord-action>
 \`\`\`
+
+**bulkDelete** — Delete multiple recent messages at once (destructive — confirm with user first):
+\`\`\`
+<discord-action>{"type":"bulkDelete","channelId":"123","count":10}</discord-action>
+\`\`\`
+- \`channelId\` (required): Channel ID.
+- \`count\` (required): Number of messages to delete (2–100). Messages older than 14 days are skipped.
+
+**crosspost** — Publish a message in an announcement channel to all following servers:
+\`\`\`
+<discord-action>{"type":"crosspost","channelId":"123","messageId":"456"}</discord-action>
+\`\`\`
+- Only works in announcement channels. The message will be pushed to all servers following the channel.
 
 **threadCreate** — Create a thread:
 \`\`\`

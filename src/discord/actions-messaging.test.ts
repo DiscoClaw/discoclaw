@@ -297,6 +297,99 @@ describe('deleteMessage', () => {
   });
 });
 
+describe('bulkDelete', () => {
+  it('bulk deletes messages', async () => {
+    const deleted = new Map([['m1', {}], ['m2', {}], ['m3', {}]]);
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    (ch as any).bulkDelete = vi.fn(async () => deleted);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'bulkDelete', channelId: 'ch1', count: 10 },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Bulk deleted 3 messages in #general' });
+    expect((ch as any).bulkDelete).toHaveBeenCalledWith(10, true);
+  });
+
+  it('rejects count below 2', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'bulkDelete', channelId: 'ch1', count: 1 },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'bulkDelete count must be an integer between 2 and 100' });
+  });
+
+  it('rejects count above 100', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'bulkDelete', channelId: 'ch1', count: 101 },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'bulkDelete count must be an integer between 2 and 100' });
+  });
+
+  it('rejects non-integer count', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'bulkDelete', channelId: 'ch1', count: 5.5 },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'bulkDelete count must be an integer between 2 and 100' });
+  });
+
+  it('fails when channel not found', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'bulkDelete', channelId: 'nope', count: 5 },
+      ctx,
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('not found');
+  });
+});
+
+describe('crosspost', () => {
+  it('crossposts a message in an announcement channel', async () => {
+    const msg = makeMockMessage('msg1');
+    (msg as any).crosspost = vi.fn(async () => {});
+    const ch = makeMockChannel({ id: 'ch1', name: 'announcements', type: ChannelType.GuildAnnouncement });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'crosspost', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Published message to followers of #announcements' });
+    expect((msg as any).crosspost).toHaveBeenCalled();
+  });
+
+  it('fails when channel is not an announcement channel', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general', type: ChannelType.GuildText });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'crosspost', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Channel #general is not an announcement channel' });
+  });
+
+  it('fails when channel not found', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'crosspost', channelId: 'nope', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'Channel "nope" not found' });
+  });
+});
+
 describe('threadCreate', () => {
   it('creates a thread from a message', async () => {
     const msg = makeMockMessage('msg1');
