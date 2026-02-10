@@ -17,6 +17,7 @@ import { initCronForum } from './cron/forum-sync.js';
 import type { ActionCategoryFlags } from './discord/actions.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import { loadTagMap } from './beads/discord-sync.js';
+import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -128,6 +129,9 @@ const defaultWorkspaceCwd = dataDir
 const workspaceCwd = (process.env.WORKSPACE_CWD ?? '').trim() || defaultWorkspaceCwd;
 const groupsDir = (process.env.GROUPS_DIR ?? '').trim() || path.join(__dirname, '..', 'groups');
 const useGroupDirCwd = (process.env.USE_GROUP_DIR_CWD ?? '0') === '1';
+
+// --- Scaffold workspace PA files (first run) ---
+await ensureWorkspaceBootstrapFiles(workspaceCwd, log);
 
 // --- Beads subsystem ---
 const beadsEnabled = (process.env.DISCOCLAW_BEADS_ENABLED ?? '0') === '1';

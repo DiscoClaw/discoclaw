@@ -282,6 +282,146 @@ describe('durable memory injection into prompt', () => {
   });
 });
 
+describe('workspace PA files in prompt', () => {
+  it('injects SOUL, IDENTITY, USER before base context when files exist', async () => {
+    const queue = makeQueue();
+    let seenPrompt = '';
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        seenPrompt = p.prompt;
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    // Create a temp workspace with PA files.
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pa-prompt-'));
+    await fs.writeFile(path.join(workspace, 'SOUL.md'), '# Soul', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), '# Identity', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'USER.md'), '# User', 'utf-8');
+
+    const discordChannelContext = {
+      contentDir: '/content',
+      indexPath: '/content/discord/DISCORD.md',
+      baseDir: '/content/discord/base',
+      baseFiles: ['/content/discord/base/core.md'],
+      baseCoreLinkFromChannel: '../base/core.md',
+      baseSafetyLinkFromChannel: '../base/safety.md',
+      channelsDir: '/content/discord/channels',
+      byChannelId: new Map([['chan', { channelId: 'chan', channelName: 'general', contextPath: '/content/discord/channels/general.md' }]]),
+      dmContextPath: '/content/discord/channels/dm.md',
+    };
+
+    const handler = createMessageCreateHandler({
+      allowUserIds: new Set(['123']),
+      runtime,
+      sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
+      workspaceCwd: workspace,
+      groupsDir: '/tmp',
+      useGroupDirCwd: false,
+      runtimeModel: 'opus',
+      runtimeTools: [],
+      runtimeTimeoutMs: 1000,
+      requireChannelContext: false,
+      autoIndexChannelContext: false,
+      autoJoinThreads: false,
+      useRuntimeSessions: true,
+      discordChannelContext: discordChannelContext as any,
+      discordActionsEnabled: false,
+      discordActionsChannels: true,
+      discordActionsMessaging: false,
+      discordActionsGuild: false,
+      discordActionsModeration: false,
+      discordActionsPolls: false,
+      discordActionsBeads: false,
+      messageHistoryBudget: 0,
+      summaryEnabled: false,
+      summaryModel: 'haiku',
+      summaryMaxChars: 2000,
+      summaryEveryNTurns: 5,
+      summaryDataDir: '/tmp/summaries',
+      durableMemoryEnabled: false,
+      durableDataDir: '/tmp/durable',
+      durableInjectMaxChars: 2000,
+      durableMaxItems: 200,
+      memoryCommandsEnabled: false,
+    }, queue);
+
+    await handler(makeMsg({ channelId: 'chan' }));
+
+    expect(runtime.invoke).toHaveBeenCalled();
+    // PA files should appear before base context.
+    const soulIdx = seenPrompt.indexOf('SOUL.md');
+    const identIdx = seenPrompt.indexOf('IDENTITY.md');
+    const userIdx = seenPrompt.indexOf('USER.md');
+    const baseIdx = seenPrompt.indexOf('core.md');
+    expect(soulIdx).toBeGreaterThan(-1);
+    expect(identIdx).toBeGreaterThan(-1);
+    expect(userIdx).toBeGreaterThan(-1);
+    expect(soulIdx).toBeLessThan(baseIdx);
+    expect(identIdx).toBeLessThan(baseIdx);
+    expect(userIdx).toBeLessThan(baseIdx);
+  });
+
+  it('includes BOOTSTRAP.md when present, before SOUL', async () => {
+    const queue = makeQueue();
+    let seenPrompt = '';
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        seenPrompt = p.prompt;
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pa-prompt-'));
+    await fs.writeFile(path.join(workspace, 'BOOTSTRAP.md'), '# Bootstrap', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'SOUL.md'), '# Soul', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), '# Identity', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'USER.md'), '# User', 'utf-8');
+
+    const handler = createMessageCreateHandler({
+      allowUserIds: new Set(['123']),
+      runtime,
+      sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
+      workspaceCwd: workspace,
+      groupsDir: '/tmp',
+      useGroupDirCwd: false,
+      runtimeModel: 'opus',
+      runtimeTools: [],
+      runtimeTimeoutMs: 1000,
+      requireChannelContext: false,
+      autoIndexChannelContext: false,
+      autoJoinThreads: false,
+      useRuntimeSessions: true,
+      discordActionsEnabled: false,
+      discordActionsChannels: true,
+      discordActionsMessaging: false,
+      discordActionsGuild: false,
+      discordActionsModeration: false,
+      discordActionsPolls: false,
+      discordActionsBeads: false,
+      messageHistoryBudget: 0,
+      summaryEnabled: false,
+      summaryModel: 'haiku',
+      summaryMaxChars: 2000,
+      summaryEveryNTurns: 5,
+      summaryDataDir: '/tmp/summaries',
+      durableMemoryEnabled: false,
+      durableDataDir: '/tmp/durable',
+      durableInjectMaxChars: 2000,
+      durableMaxItems: 200,
+      memoryCommandsEnabled: false,
+    }, queue);
+
+    await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
+
+    expect(runtime.invoke).toHaveBeenCalled();
+    const bootstrapIdx = seenPrompt.indexOf('BOOTSTRAP.md');
+    const soulIdx = seenPrompt.indexOf('SOUL.md');
+    expect(bootstrapIdx).toBeGreaterThan(-1);
+    expect(bootstrapIdx).toBeLessThan(soulIdx);
+  });
+});
+
 describe('memory command interception', () => {
   it('!memory show returns early without invoking runtime', async () => {
     const queue = makeQueue();

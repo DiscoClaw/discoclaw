@@ -331,7 +331,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           // Keep prompt small: link to the channel context file and instruct the runtime to read it.
-          const contextFiles: string[] = [];
+          // Workspace PA files — identity, personality, user profile (listed first so Claude reads them first).
+          const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md'];
+          const bootstrapPath = path.join(params.workspaceCwd, 'BOOTSTRAP.md');
+          const paFiles: string[] = [];
+          try { await fs.access(bootstrapPath); paFiles.push(bootstrapPath); } catch { /* no bootstrap */ }
+          for (const f of paFileNames) {
+            const p = path.join(params.workspaceCwd, f);
+            try { await fs.access(p); paFiles.push(p); } catch { /* skip missing */ }
+          }
+
+          const contextFiles: string[] = [...paFiles];
           if (params.discordChannelContext) {
             contextFiles.push(...params.discordChannelContext.baseFiles);
           }
