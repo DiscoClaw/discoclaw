@@ -92,6 +92,7 @@ Copy `.env.example` -> `.env`. See that file for inline comments.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISCOCLAW_BEADS_ENABLED` | `0` | Master switch — loads beads module |
+| `BD_BIN` | `bd` | Path to the `bd` CLI binary |
 | `DISCOCLAW_BEADS_CWD` | `WORKSPACE_CWD` | Working directory for bd CLI |
 | `DISCOCLAW_BEADS_FORUM` | *(empty)* | Forum channel name or ID for bead threads |
 | `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/bead-hooks/tag-map.json` | Path to tag-map.json |

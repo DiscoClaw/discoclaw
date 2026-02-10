@@ -146,7 +146,7 @@ All actions are gated by category env flags (off by default except channels).
 - [ ] **README rewrite** — current README is developer-internal; needs a clear "what is this / quickstart / how to run" for anyone cloning the repo.
 - [x] **`.env.example`** — tiered layout: 2 required vars up top, core settings next, optional features commented out by section.
 - [ ] **First-run experience** — verify that `git clone → pnpm install → copy .env.example → pnpm dev` works end-to-end for a fresh user. Document any one-time setup (Dropbox symlinks, bd CLI, etc.) or make them optional.
-- [ ] **Graceful degradation when optional deps missing** — beads requires `bd` CLI, cron requires a forum channel. Ensure clean errors / skip when these aren't configured.
+- [x] **Graceful degradation when optional deps missing** — beads requires `bd` CLI, cron requires a forum channel. Ensure clean errors / skip when these aren't configured.
 
 ### Nice-to-have before MVP
 
