@@ -68,7 +68,7 @@ Each action category has its own flag (only active when the master switch is `1`
 
 | Flag | Default | Actions |
 |------|---------|---------|
-| `DISCOCLAW_DISCORD_ACTIONS_CHANNELS` | `1` | channelCreate, channelEdit, channelDelete, channelList, channelInfo, categoryCreate |
+| `DISCOCLAW_DISCORD_ACTIONS_CHANNELS` | `1` | channelCreate, channelEdit, channelDelete, channelList, channelInfo, categoryCreate, threadListArchived |
 | `DISCOCLAW_DISCORD_ACTIONS_MESSAGING` | `0` | sendMessage, react, readMessages, fetchMessage, editMessage, deleteMessage, threadCreate, pinMessage, unpinMessage, listPins |
 | `DISCOCLAW_DISCORD_ACTIONS_GUILD` | `0` | memberInfo, roleInfo, roleAdd, roleRemove, searchMessages, eventList, eventCreate |
 | `DISCOCLAW_DISCORD_ACTIONS_MODERATION` | `0` | timeout, kick, ban |

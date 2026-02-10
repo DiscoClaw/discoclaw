@@ -247,6 +247,125 @@ describe('channelInfo', () => {
 // categoryCreate
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// threadListArchived
+// ---------------------------------------------------------------------------
+
+describe('threadListArchived', () => {
+  function makeMockForumGuild(threads: Array<{ id: string; name: string }>) {
+    const threadMap = new Map<string, any>();
+    for (const t of threads) {
+      threadMap.set(t.id, { id: t.id, name: t.name });
+    }
+
+    const forumChannel = {
+      id: 'forum1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      parent: null,
+      threads: {
+        fetchArchived: vi.fn(async () => ({ threads: threadMap })),
+      },
+    };
+
+    const cache = new Map<string, any>();
+    cache.set('forum1', forumChannel);
+
+    return {
+      guild: {
+        channels: {
+          cache: {
+            get: (id: string) => cache.get(id),
+            find: (fn: (ch: any) => boolean) => {
+              for (const ch of cache.values()) {
+                if (fn(ch)) return ch;
+              }
+              return undefined;
+            },
+            values: () => cache.values(),
+            get size() { return cache.size; },
+          },
+          create: vi.fn(async (opts: any) => ({ name: opts.name, id: 'new-id' })),
+        },
+      } as any,
+      forumChannel,
+    };
+  }
+
+  it('lists archived threads in a forum channel', async () => {
+    const { guild } = makeMockForumGuild([
+      { id: 't1', name: 'Thread Alpha' },
+      { id: 't2', name: 'Thread Beta' },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'threadListArchived', channelId: 'forum1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Archived threads in #beads (2)');
+    expect(summary).toContain('• Thread Alpha (id:t1)');
+    expect(summary).toContain('• Thread Beta (id:t2)');
+  });
+
+  it('returns message when no archived threads', async () => {
+    const { guild } = makeMockForumGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'threadListArchived', channelId: 'forum1' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'No archived threads in #beads' });
+  });
+
+  it('passes limit to fetchArchived', async () => {
+    const { guild, forumChannel } = makeMockForumGuild([]);
+    const ctx = makeCtx(guild);
+
+    await executeChannelAction(
+      { type: 'threadListArchived', channelId: 'forum1', limit: 10 },
+      ctx,
+    );
+
+    expect(forumChannel.threads.fetchArchived).toHaveBeenCalledWith({ limit: 10, fetchAll: true });
+  });
+
+  it('fails when channel not found', async () => {
+    const { guild } = makeMockForumGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'threadListArchived', channelId: 'nope' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Channel "nope" not found' });
+  });
+
+  it('fails for non-forum/text channel', async () => {
+    const guild = makeMockGuild([
+      { id: 'voice1', name: 'voice-chat', type: ChannelType.GuildVoice },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'threadListArchived', channelId: 'voice1' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Channel #voice-chat is not a forum or text channel' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// categoryCreate
+// ---------------------------------------------------------------------------
+
 describe('categoryCreate', () => {
   it('creates a category', async () => {
     const guild = makeMockGuild([]);

@@ -1,5 +1,5 @@
 import { ChannelType } from 'discord.js';
-import type { GuildChannel } from 'discord.js';
+import type { ForumChannel, GuildChannel } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 
 // ---------------------------------------------------------------------------
@@ -12,12 +12,14 @@ export type ChannelActionRequest =
   | { type: 'channelDelete'; channelId: string }
   | { type: 'channelList' }
   | { type: 'channelInfo'; channelId: string }
-  | { type: 'categoryCreate'; name: string; position?: number };
+  | { type: 'categoryCreate'; name: string; position?: number }
+  | { type: 'threadListArchived'; channelId: string; limit?: number };
 
 // Record ensures every union member is listed; TS errors if a new type is added to the union but not here.
 const CHANNEL_TYPE_MAP: Record<ChannelActionRequest['type'], true> = {
   channelCreate: true, channelEdit: true, channelDelete: true,
   channelList: true, channelInfo: true, categoryCreate: true,
+  threadListArchived: true,
 };
 export const CHANNEL_ACTION_TYPES = new Set<string>(Object.keys(CHANNEL_TYPE_MAP));
 
@@ -132,6 +134,29 @@ export async function executeChannelAction(
       } as any);
       return { ok: true, summary: `Created category "${created.name}"` };
     }
+
+    case 'threadListArchived': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+
+      if (channel.type !== ChannelType.GuildForum && channel.type !== ChannelType.GuildText) {
+        return { ok: false, error: `Channel #${channel.name} is not a forum or text channel` };
+      }
+
+      const limit = action.limit ?? 50;
+      const fetched = await (channel as ForumChannel).threads.fetchArchived({ limit, fetchAll: true });
+      const threads = [...fetched.threads.values()];
+
+      if (threads.length === 0) {
+        return { ok: true, summary: `No archived threads in #${channel.name}` };
+      }
+
+      const lines = threads.map((t) => `• ${t.name} (id:${t.id})`);
+      return {
+        ok: true,
+        summary: `Archived threads in #${channel.name} (${threads.length}):\n${lines.join('\n')}`,
+      };
+    }
   }
 }
 
@@ -176,5 +201,12 @@ export function channelActionsPromptSection(): string {
 **categoryCreate** — Create a channel category:
 \`\`\`
 <discord-action>{"type":"categoryCreate","name":"Category Name"}</discord-action>
-\`\`\``;
+\`\`\`
+
+**threadListArchived** — List archived threads in a forum or text channel:
+\`\`\`
+<discord-action>{"type":"threadListArchived","channelId":"123","limit":25}</discord-action>
+\`\`\`
+- \`channelId\` (required): The forum or text channel ID.
+- \`limit\` (optional): Max threads to return (default 50).`;
 }
