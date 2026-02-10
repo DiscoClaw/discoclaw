@@ -205,7 +205,7 @@ export function truncateCodeBlocks(text: string, maxLines = 20): string {
   });
 }
 
-function renderDiscordTail(text: string, maxLines = 8): string {
+export function renderDiscordTail(text: string, maxLines = 8): string {
   // Render a fixed-height "tail" view for streaming updates.
   // Content is bottom-aligned; empty lines above use a zero-width space
   // so Discord doesn't collapse them.
@@ -218,11 +218,11 @@ function renderDiscordTail(text: string, maxLines = 8): string {
   return `\`\`\`text\n${safe}\n\`\`\``;
 }
 
-function renderActivityTail(label: string, maxLines = 8): string {
+export function renderActivityTail(label: string, maxLines = 8): string {
   // Render a fixed-height block with an activity label on the bottom line.
   const lines: string[] = [];
   for (let i = 0; i < maxLines - 1; i++) lines.push('\u200b');
-  lines.push(label);
+  lines.push(label.split('\n')[0] || label);
   const safe = lines.join('\n').replace(/```/g, '``\\`');
   return `\`\`\`text\n${safe}\n\`\`\``;
 }
