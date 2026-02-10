@@ -207,11 +207,23 @@ export function truncateCodeBlocks(text: string, maxLines = 20): string {
 
 function renderDiscordTail(text: string, maxLines = 8): string {
   // Render a fixed-height "tail" view for streaming updates.
+  // Content is bottom-aligned; empty lines above use a zero-width space
+  // so Discord doesn't collapse them.
   const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
   const lines = normalized.split('\n').filter((l) => l.length > 0);
   const tail = lines.slice(-maxLines);
+  while (tail.length < maxLines) tail.unshift('\u200b');
   // Avoid breaking the fence if the content contains ``` sequences.
   const safe = tail.join('\n').replace(/```/g, '``\\`');
+  return `\`\`\`text\n${safe}\n\`\`\``;
+}
+
+function renderActivityTail(label: string, maxLines = 8): string {
+  // Render a fixed-height block with an activity label on the bottom line.
+  const lines: string[] = [];
+  for (let i = 0; i < maxLines - 1; i++) lines.push('\u200b');
+  lines.push(label);
+  const safe = lines.join('\n').replace(/```/g, '``\\`');
   return `\`\`\`text\n${safe}\n\`\`\``;
 }
 
@@ -298,7 +310,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          reply = await msg.reply('...');
+          reply = await msg.reply(renderActivityTail('(working...)'));
 
           const cwd = params.useGroupDirCwd
             ? await ensureGroupDir(params.groupsDir, sessionKey)
@@ -424,7 +436,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             const out = deltaText
               ? renderDiscordTail(deltaText)
               : activityLabel
-                ? renderDiscordTail(activityLabel)
+                ? renderActivityTail(activityLabel)
                 : renderDiscordTail(finalText || '(working...)');
             try {
               await reply.edit(out);
