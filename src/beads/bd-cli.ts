@@ -89,8 +89,10 @@ export async function bdShow(id: string, cwd: string): Promise<BeadData | null> 
     const stdout = await runBd(['show', '--json', id], cwd);
     const items = parseBdJson<BeadData>(stdout);
     return items[0] ?? null;
-  } catch {
-    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/not found/i.test(msg)) return null;
+    throw err;
   }
 }
 

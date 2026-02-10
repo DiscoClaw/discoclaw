@@ -1,4 +1,4 @@
-import type { Client } from 'discord.js';
+import type { Client, Guild } from 'discord.js';
 import type { TagMap, BeadData } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import { bdList, bdUpdate } from './bd-cli.js';
@@ -8,22 +8,37 @@ import {
   closeBeadThread,
   updateBeadThreadName,
   getThreadIdFromBead,
-  buildThreadName,
+  ensureUnarchived,
+  findExistingThreadForBead,
 } from './discord-sync.js';
 
 export type BeadSyncOptions = {
   client: Client;
+  guild: Guild;
   forumId: string;
   tagMap: TagMap;
   beadsCwd: string;
   log?: LoggerLike;
+  throttleMs?: number;
+  archivedDedupeLimit?: number;
 };
 
 export type BeadSyncResult = {
   threadsCreated: number;
   emojisUpdated: number;
   threadsArchived: number;
+  statusesUpdated: number;
 };
+
+function hasLabel(bead: BeadData, label: string): boolean {
+  return (bead.labels ?? []).includes(label);
+}
+
+async function sleep(ms: number | undefined): Promise<void> {
+  const n = ms ?? 0;
+  if (n <= 0) return;
+  await new Promise((r) => setTimeout(r, n));
+}
 
 /**
  * 4-phase safety-net sync between beads DB and Discord forum threads.
@@ -34,25 +49,46 @@ export type BeadSyncResult = {
  * Phase 4: Archive threads for closed beads.
  */
 export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult> {
-  const { client, forumId, tagMap, beadsCwd, log } = opts;
+  const { client, guild, forumId, tagMap, beadsCwd, log } = opts;
+  const throttleMs = opts.throttleMs ?? 250;
 
-  const forum = resolveBeadsForum(client, forumId);
+  const forum = await resolveBeadsForum(guild, forumId);
   if (!forum) {
     log?.warn({ forumId }, 'bead-sync: forum not found');
-    return { threadsCreated: 0, emojisUpdated: 0, threadsArchived: 0 };
+    return { threadsCreated: 0, emojisUpdated: 0, threadsArchived: 0, statusesUpdated: 0 };
   }
 
   let threadsCreated = 0;
   let emojisUpdated = 0;
   let threadsArchived = 0;
+  let statusesUpdated = 0;
 
   // Load all beads (including closed for Phase 4).
   const allBeads = await bdList({ status: 'all' }, beadsCwd);
 
   // Phase 1: Create threads for beads missing external_ref.
-  const missingRef = allBeads.filter((b) => !getThreadIdFromBead(b) && b.status !== 'closed' && b.status !== 'done' && b.status !== 'tombstone');
+  const missingRef = allBeads.filter((b) =>
+    !getThreadIdFromBead(b) &&
+    b.status !== 'closed' &&
+    b.status !== 'done' &&
+    b.status !== 'tombstone' &&
+    !hasLabel(b, 'no-thread'),
+  );
   for (const bead of missingRef) {
     try {
+      // Dedupe: if the thread already exists, backfill external_ref instead of creating a duplicate.
+      const existing = await findExistingThreadForBead(forum, bead.id, { archivedLimit: opts.archivedDedupeLimit });
+      if (existing) {
+        try {
+          await bdUpdate(bead.id, { externalRef: `discord:${existing}` }, beadsCwd);
+          log?.info({ beadId: bead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfilled');
+        } catch (err) {
+          log?.warn({ err, beadId: bead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfill failed');
+        }
+        await sleep(throttleMs);
+        continue;
+      }
+
       const threadId = await createBeadThread(forum, bead, tagMap);
       // Link back via external_ref.
       try {
@@ -65,37 +101,48 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     } catch (err) {
       log?.warn({ err, beadId: bead.id }, 'bead-sync:phase1 failed');
     }
+    await sleep(throttleMs);
   }
 
-  // Phase 2: Fix label mismatches — skip for now (labels are informational).
+  // Phase 2: Fix status/label mismatches (matches legacy shell behavior).
+  const needsBlocked = allBeads.filter((b) =>
+    b.status === 'open' && (b.labels ?? []).some((l) => /^(waiting|blocked)-/.test(l)),
+  );
+  for (const bead of needsBlocked) {
+    try {
+      await bdUpdate(bead.id, { status: 'blocked' as any }, beadsCwd);
+      statusesUpdated++;
+      log?.info({ beadId: bead.id }, 'bead-sync:phase2 status updated to blocked');
+    } catch (err) {
+      log?.warn({ err, beadId: bead.id }, 'bead-sync:phase2 failed');
+    }
+    await sleep(throttleMs);
+  }
 
   // Phase 3: Sync emoji/names for existing threads.
   const withRef = allBeads.filter((b) => getThreadIdFromBead(b) && b.status !== 'closed' && b.status !== 'done' && b.status !== 'tombstone');
   for (const bead of withRef) {
     const threadId = getThreadIdFromBead(bead)!;
-    const thread = client.channels.cache.get(threadId);
-    if (!thread || !thread.isThread()) continue;
-
-    const expectedName = buildThreadName(bead.id, bead.title, bead.status);
-    if (thread.name !== expectedName) {
-      try {
-        await updateBeadThreadName(client, threadId, bead);
+    // If archived, unarchive and keep unarchived for active beads.
+    try {
+      await ensureUnarchived(client, threadId);
+    } catch {}
+    try {
+      const changed = await updateBeadThreadName(client, threadId, bead);
+      if (changed) {
         emojisUpdated++;
         log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase3 name updated');
-      } catch (err) {
-        log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase3 failed');
       }
+    } catch (err) {
+      log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase3 failed');
     }
+    await sleep(throttleMs);
   }
 
   // Phase 4: Archive threads for closed beads.
   const closedBeads = allBeads.filter((b) => (b.status === 'closed' || b.status === 'done') && getThreadIdFromBead(b));
   for (const bead of closedBeads) {
     const threadId = getThreadIdFromBead(bead)!;
-    const thread = client.channels.cache.get(threadId);
-    if (!thread || !thread.isThread()) continue;
-    if (thread.archived) continue;
-
     try {
       await closeBeadThread(client, threadId, bead);
       threadsArchived++;
@@ -103,8 +150,9 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     } catch (err) {
       log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase4 failed');
     }
+    await sleep(throttleMs);
   }
 
-  log?.info({ threadsCreated, emojisUpdated, threadsArchived }, 'bead-sync: complete');
-  return { threadsCreated, emojisUpdated, threadsArchived };
+  log?.info({ threadsCreated, emojisUpdated, threadsArchived, statusesUpdated }, 'bead-sync: complete');
+  return { threadsCreated, emojisUpdated, threadsArchived, statusesUpdated };
 }

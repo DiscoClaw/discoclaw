@@ -2,21 +2,36 @@
 // Bead data types — mirrors the bd CLI JSONL schema.
 // ---------------------------------------------------------------------------
 
-export type BeadStatus = 'open' | 'in_progress' | 'blocked' | 'closed' | 'done' | 'tombstone';
+export const BEAD_STATUSES = [
+  'open',
+  'in_progress',
+  'blocked',
+  'closed',
+  'done',
+  'tombstone',
+] as const;
+
+export type BeadStatus = (typeof BEAD_STATUSES)[number];
+
+export function isBeadStatus(s: string): s is BeadStatus {
+  return (BEAD_STATUSES as readonly string[]).includes(s);
+}
 
 export type BeadData = {
   id: string;
   title: string;
-  description: string;
   status: BeadStatus;
-  priority: number;
-  issue_type: string;
-  owner: string;
-  external_ref: string;
-  labels: string[];
-  comments: Array<{ author: string; body: string; created_at: string }>;
-  created_at: string;
-  updated_at: string;
+
+  // Many bd fields are often absent depending on command / config; model as optional.
+  description?: string;
+  priority?: number;
+  issue_type?: string;
+  owner?: string;
+  external_ref?: string;
+  labels?: string[];
+  comments?: Array<{ author: string; body: string; created_at: string }>;
+  created_at?: string;
+  updated_at?: string;
   closed_at?: string;
   close_reason?: string;
 };

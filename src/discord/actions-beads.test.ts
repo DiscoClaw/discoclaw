@@ -68,6 +68,15 @@ vi.mock('../beads/auto-tag.js', () => ({
   autoTagBead: vi.fn(async () => ['feature']),
 }));
 
+vi.mock('../beads/bead-sync.js', () => ({
+  runBeadSync: vi.fn(async () => ({
+    threadsCreated: 1,
+    emojisUpdated: 2,
+    threadsArchived: 3,
+    statusesUpdated: 4,
+  })),
+}));
+
 vi.mock('execa', () => ({
   execa: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
 }));
@@ -143,6 +152,19 @@ describe('executeBeadAction', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('beadCreate honors no-thread by skipping thread creation', async () => {
+    const { createBeadThread } = await import('../beads/discord-sync.js');
+    (createBeadThread as any).mockClear?.();
+
+    const result = await executeBeadAction(
+      { type: 'beadCreate', title: 'No thread please', tags: 'no-thread,feature' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(true);
+    expect(createBeadThread).not.toHaveBeenCalled();
+  });
+
   it('beadUpdate returns updated summary', async () => {
     const result = await executeBeadAction(
       { type: 'beadUpdate', beadId: 'ws-001', status: 'in_progress', priority: 1 },
@@ -161,6 +183,16 @@ describe('executeBeadAction', () => {
       makeBeadCtx(),
     );
     expect(result.ok).toBe(false);
+  });
+
+  it('beadUpdate rejects invalid status', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadUpdate', beadId: 'ws-001', status: 'nonsense' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('Invalid');
   });
 
   it('beadClose returns closed summary', async () => {
@@ -204,6 +236,16 @@ describe('executeBeadAction', () => {
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain('ws-001');
     expect((result as any).summary).toContain('ws-002');
+  });
+
+  it('beadSync returns extended sync summary', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadSync' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('status-fixes');
   });
 });
 

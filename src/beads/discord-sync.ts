@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { ChannelType } from 'discord.js';
-import type { Client, ForumChannel } from 'discord.js';
+import type { Client, ForumChannel, Guild, ThreadChannel } from 'discord.js';
 import type { BeadData, TagMap } from './types.js';
 import { STATUS_EMOJI } from './types.js';
 
@@ -25,22 +25,33 @@ export function buildThreadName(beadId: string, title: string, status: string): 
   return `${prefix}${trimmedTitle}`;
 }
 
+function beadIdToken(beadId: string): string {
+  return `[${shortBeadId(beadId)}]`;
+}
+
 // ---------------------------------------------------------------------------
 // Forum channel resolution
 // ---------------------------------------------------------------------------
 
-/** Resolve a forum channel by name or ID, same pattern as cron forum-sync.ts. */
-export function resolveBeadsForum(client: Client, nameOrId: string): ForumChannel | null {
-  const byId = client.channels.cache.get(nameOrId);
+/** Resolve a forum channel by name or ID in a specific guild (multi-guild safe). */
+export async function resolveBeadsForum(guild: Guild, nameOrId: string): Promise<ForumChannel | null> {
+  // Fast path: cached by ID.
+  const byId = guild.channels.cache.get(nameOrId);
   if (byId && byId.type === ChannelType.GuildForum) return byId as ForumChannel;
 
-  for (const guild of client.guilds.cache.values()) {
-    const ch = guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildForum && c.name === nameOrId,
-    );
-    if (ch) return ch as ForumChannel;
+  // If it's an ID, try fetching directly (covers cache misses).
+  try {
+    const fetched = await guild.channels.fetch(nameOrId);
+    if (fetched && fetched.type === ChannelType.GuildForum) return fetched as ForumChannel;
+  } catch {
+    // Not an ID or fetch failed; fall through to name lookup.
   }
-  return null;
+
+  const want = nameOrId.toLowerCase();
+  const ch = guild.channels.cache.find(
+    (c) => c.type === ChannelType.GuildForum && c.name.toLowerCase() === want,
+  );
+  return (ch as ForumChannel) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +71,18 @@ export function getThreadIdFromBead(bead: BeadData): string | null {
   // Numeric ID.
   if (/^\d+$/.test(ref)) return ref;
   return null;
+}
+
+async function fetchThreadChannel(client: Client, threadId: string): Promise<ThreadChannel | null> {
+  const cached = client.channels.cache.get(threadId);
+  if (cached && cached.isThread()) return cached as ThreadChannel;
+  try {
+    const fetched = await client.channels.fetch(threadId);
+    if (fetched && fetched.isThread()) return fetched as ThreadChannel;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +120,7 @@ export async function createBeadThread(
     const tagId = tagMap[cleaned] ?? tagMap[label];
     if (tagId) appliedTagIds.push(tagId);
   }
+  const uniqueTagIds = [...new Set(appliedTagIds)];
 
   const descLines: string[] = [];
   if (bead.description) descLines.push(bead.description);
@@ -111,11 +135,32 @@ export async function createBeadThread(
 
   const thread = await forum.threads.create({
     name,
-    message: { content: message },
-    appliedTags: appliedTagIds.slice(0, 5), // Discord limit: 5 tags
+    message: {
+      content: message,
+      // Prevent accidental @everyone/@here from bead descriptions.
+      allowedMentions: { parse: [], users: mentionUserId ? [mentionUserId] : [] },
+    },
+    appliedTags: uniqueTagIds.slice(0, 5), // Discord limit: 5 tags
   });
 
   return thread.id;
+}
+
+export async function findExistingThreadForBead(
+  forum: ForumChannel,
+  beadId: string,
+  opts?: { archivedLimit?: number },
+): Promise<string | null> {
+  const token = beadIdToken(beadId);
+  const archivedLimit = Math.max(1, Math.min(1000, opts?.archivedLimit ?? 200));
+
+  const active = await forum.threads.fetchActive();
+  const archived = await forum.threads.fetchArchived({ limit: archivedLimit, fetchAll: true });
+  const all = [...active.threads.values(), ...archived.threads.values()];
+
+  const matches = all.filter((t) => typeof t?.name === 'string' && t.name.includes(token));
+  if (matches.length === 1) return matches[0].id;
+  return null;
 }
 
 /** Post a close summary, rename with checkmark, and archive the thread. */
@@ -124,15 +169,25 @@ export async function closeBeadThread(
   threadId: string,
   bead: BeadData,
 ): Promise<void> {
-  const thread = client.channels.cache.get(threadId);
-  if (!thread || !thread.isThread()) return;
+  const thread = await fetchThreadChannel(client, threadId);
+  if (!thread) return;
+
+  // Ensure the thread is modifiable even if it was archived previously.
+  try {
+    if (thread.archived) await thread.setArchived(false);
+  } catch {
+    // Ignore unarchive failures.
+  }
 
   const closedName = buildThreadName(bead.id, bead.title, 'closed');
 
   const reason = bead.close_reason || 'Closed';
 
   try {
-    await thread.send(`**Bead Closed**\n${reason}`);
+    await thread.send({
+      content: `**Bead Closed**\n${reason}`,
+      allowedMentions: { parse: [], users: [] },
+    });
   } catch {
     // Ignore send failures (thread may already be archived).
   }
@@ -155,21 +210,22 @@ export async function updateBeadThreadName(
   client: Client,
   threadId: string,
   bead: BeadData,
-): Promise<void> {
-  const thread = client.channels.cache.get(threadId);
-  if (!thread || !thread.isThread()) return;
+): Promise<boolean> {
+  const thread = await fetchThreadChannel(client, threadId);
+  if (!thread) return false;
 
   const newName = buildThreadName(bead.id, bead.title, bead.status);
   const current = thread.name;
-  if (current === newName) return;
+  if (current === newName) return false;
 
   await thread.setName(newName);
+  return true;
 }
 
 /** Unarchive a thread if it's currently archived. */
 export async function ensureUnarchived(client: Client, threadId: string): Promise<void> {
-  const thread = client.channels.cache.get(threadId);
-  if (!thread || !thread.isThread()) return;
+  const thread = await fetchThreadChannel(client, threadId);
+  if (!thread) return;
   if (thread.archived) {
     await thread.setArchived(false);
   }
