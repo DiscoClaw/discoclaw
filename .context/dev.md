@@ -99,6 +99,74 @@ Copy `.env.example` -> `.env`. See that file for inline comments.
 | `DISCOCLAW_BEADS_AUTO_TAG` | `1` | Enable Haiku auto-tagging |
 | `DISCOCLAW_BEADS_AUTO_TAG_MODEL` | `haiku` | Model for auto-tagging |
 
+## Debugging
+
+### Where logs go
+
+| Mode | Log destination |
+|------|----------------|
+| `pnpm dev` | stdout/stderr in your terminal |
+| systemd service | journalctl (`journalctl --user -u discoclaw.service`) |
+
+Discoclaw uses Pino for structured JSON logging. All app logs go to stdout.
+
+### Quick commands
+
+```bash
+# Local dev — logs stream to terminal automatically
+pnpm dev
+
+# Production — tail live logs
+journalctl --user -u discoclaw.service -f
+
+# Production — last 50 lines
+journalctl --user -u discoclaw.service -n 50
+
+# Production — logs since last boot
+journalctl --user -u discoclaw.service -b
+
+# Production — logs from the last 10 minutes
+journalctl --user -u discoclaw.service --since "10 min ago"
+```
+
+### Increasing verbosity
+
+Set `LOG_LEVEL` in `.env` to get more detail. Levels: `fatal`, `error`, `warn`, `info`, `debug`, `trace`.
+
+```bash
+LOG_LEVEL=debug pnpm dev
+```
+
+### Claude CLI debug output
+
+To capture raw Claude CLI stdin/stdout for diagnosing runtime issues:
+
+```bash
+# Write CLI debug logs to a file
+CLAUDE_DEBUG_FILE=/tmp/claude-debug.log pnpm dev
+
+# Echo raw CLI output into Discord (noisy, useful for live debugging)
+CLAUDE_ECHO_STDIO=1 pnpm dev
+```
+
+### Startup / env issues
+
+If the bot starts but behaves unexpectedly (wrong model, missing tools, wrong CWD):
+
+```bash
+# Dump resolved runtime config at startup
+DISCOCLAW_DEBUG_RUNTIME=1 pnpm dev
+```
+
+This is especially useful for systemd, where env loading can differ from your shell.
+
+### What to look for
+
+- **Bot not responding:** Check allowlist (`DISCORD_ALLOW_USER_IDS`), channel restrictions (`DISCORD_CHANNEL_IDS`), and channel context requirement (`DISCORD_REQUIRE_CHANNEL_CONTEXT`).
+- **Claude CLI errors:** Look for `runtime` or `spawn` in logs. Use `CLAUDE_DEBUG_FILE` to capture full CLI output.
+- **Timeout issues:** Look for `timeout` in logs. Adjust `RUNTIME_TIMEOUT_MS` if needed.
+- **PID lock conflicts:** Look for `pidlock` in logs. See ops.md for stale lock handling.
+
 ## Notes
 - Runtime invocation defaults are configurable via env (`RUNTIME_MODEL`, `RUNTIME_TOOLS`, `RUNTIME_TIMEOUT_MS`).
-- If `pnpm dev` fails with “Missing DISCORD_TOKEN”, your `.env` isn’t loaded or the var is unset.
+- If `pnpm dev` fails with "Missing DISCORD_TOKEN", your `.env` isn't loaded or the var is unset.
