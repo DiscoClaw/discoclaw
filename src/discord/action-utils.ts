@@ -30,14 +30,13 @@ export function resolveChannel(
 }
 
 function isTextBased(ch: any): boolean {
+  // We only want channels that are meaningfully sendable via `.send()`.
   return (
     ch.type === ChannelType.GuildText ||
     ch.type === ChannelType.GuildAnnouncement ||
     ch.type === ChannelType.PublicThread ||
     ch.type === ChannelType.PrivateThread ||
-    ch.type === ChannelType.AnnouncementThread ||
-    ch.type === ChannelType.GuildForum ||
-    ch.type === ChannelType.GuildVoice
+    ch.type === ChannelType.AnnouncementThread
   );
 }
 

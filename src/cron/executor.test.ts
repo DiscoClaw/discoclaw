@@ -177,6 +177,41 @@ describe('executeCronJob', () => {
     expect(job.running).toBe(false);
   });
 
+  it('does not post if target channel is not allowlisted', async () => {
+    const status = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+    };
+    const ctx = makeCtx({ status, allowChannelIds: new Set(['some-other-channel']) });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(status.runtimeError).toHaveBeenCalledOnce();
+  });
+
+  it('posts when target channel is allowlisted', async () => {
+    const status = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+    };
+    const ctx = makeCtx({ status, allowChannelIds: new Set(['ch-1']) });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+  });
+
   it('does not post if output is empty', async () => {
     const ctx = makeCtx({ runtime: makeMockRuntime('') });
     const job = makeJob();

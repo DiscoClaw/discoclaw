@@ -15,14 +15,22 @@ export class CronScheduler {
   }
 
   register(id: string, threadId: string, guildId: string, name: string, def: ParsedCronDef): CronJob {
-    // Stop any existing job with the same ID.
-    this.unregister(id);
+    const existing = this.jobs.get(id);
 
+    // Create the cron instance first so invalid schedules don't clobber an existing job.
     const job: CronJob = { id, threadId, guildId, name, def, cron: null, running: false };
-    job.cron = new Cron(def.schedule, { timezone: def.timezone }, () => {
+    const cron = new Cron(def.schedule, { timezone: def.timezone }, () => {
       // Fire-and-forget: errors handled inside the handler.
       void this.handler(job);
     });
+    job.cron = cron;
+
+    if (existing) {
+      existing.cron?.stop();
+      existing.cron = null;
+      this.jobs.delete(id);
+    }
+
     this.jobs.set(id, job);
     this.log?.info({ jobId: id, schedule: def.schedule, timezone: def.timezone }, 'cron:registered');
     return job;
@@ -42,15 +50,16 @@ export class CronScheduler {
     const job = this.jobs.get(id);
     if (!job) return false;
     job.cron?.stop();
+    job.cron = null;
     this.log?.info({ jobId: id }, 'cron:disabled');
     return true;
   }
 
   enable(id: string): boolean {
     const job = this.jobs.get(id);
-    if (!job || !job.cron) return false;
-    // Recreate the cron instance to restart scheduling.
-    job.cron.stop();
+    if (!job) return false;
+    // Recreate the cron instance to (re)start scheduling.
+    job.cron?.stop();
     job.cron = new Cron(job.def.schedule, { timezone: job.def.timezone }, () => {
       void this.handler(job);
     });

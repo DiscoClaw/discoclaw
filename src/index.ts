@@ -291,6 +291,7 @@ if (cronEnabled && cronForum) {
     timeoutMs: runtimeTimeoutMs,
     status: botStatus,
     log,
+    allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
     discordActionsEnabled,
     actionFlags,
     beadCtx,
@@ -306,6 +307,7 @@ if (cronEnabled && cronForum) {
       runtime,
       cronModel,
       cwd: workspaceCwd,
+      allowUserIds,
       log,
     });
   } catch (err) {

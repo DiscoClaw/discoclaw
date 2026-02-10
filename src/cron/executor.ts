@@ -19,6 +19,8 @@ export type CronExecutorContext = {
   timeoutMs: number;
   status: StatusPoster | null;
   log?: LoggerLike;
+  // If set, restrict cron output to these channel IDs (or thread parent IDs).
+  allowChannelIds?: Set<string>;
   discordActionsEnabled: boolean;
   actionFlags: ActionCategoryFlags;
   beadCtx?: BeadContext;
@@ -49,6 +51,23 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         `Cron "${job.name}": target channel "${job.def.channel}" not found`,
       );
       return;
+    }
+
+    if (ctx.allowChannelIds) {
+      const ch: any = targetChannel as any;
+      const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
+      const parentId = isThread ? String(ch.parentId ?? '') : '';
+      const allowed =
+        ctx.allowChannelIds.has(String(ch.id ?? '')) ||
+        (parentId && ctx.allowChannelIds.has(parentId));
+      if (!allowed) {
+        ctx.log?.error({ jobId: job.id, channel: job.def.channel }, 'cron:exec target channel not allowlisted');
+        await ctx.status?.runtimeError(
+          { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
+          `Cron "${job.name}": target channel "${job.def.channel}" is not allowlisted`,
+        );
+        return;
+      }
     }
 
     const prompt =

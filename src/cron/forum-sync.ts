@@ -9,6 +9,8 @@ import type { ParsedCronDef } from './types.js';
 export type ForumSyncOptions = {
   client: Client;
   forumChannelNameOrId: string;
+  // Authorization: only these users may create/update cron jobs via the cron forum.
+  allowUserIds: Set<string>;
   scheduler: CronScheduler;
   runtime: RuntimeAdapter;
   cronModel: string;
@@ -29,6 +31,10 @@ function resolveForumChannel(client: Client, nameOrId: string): ForumChannel | n
     if (ch) return ch as ForumChannel;
   }
   return null;
+}
+
+function isSnowflakeId(v: string): boolean {
+  return /^\d+$/.test(String(v ?? '').trim());
 }
 
 async function fetchStarterMessage(thread: AnyThreadChannel): Promise<Message | null> {
@@ -58,7 +64,7 @@ async function loadThreadAsCron(
   guildId: string,
   scheduler: CronScheduler,
   runtime: RuntimeAdapter,
-  opts: { cronModel: string; cwd: string; log?: LoggerLike; isNew: boolean },
+  opts: { cronModel: string; cwd: string; log?: LoggerLike; isNew: boolean; allowUserIds: Set<string> },
 ): Promise<boolean> {
   const starter = await fetchStarterMessage(thread);
   if (!starter?.content) {
@@ -66,9 +72,22 @@ async function loadThreadAsCron(
     return false;
   }
 
+  const starterAuthorId = (starter as any)?.author?.id ? String((starter as any).author.id) : '';
+  if (!starterAuthorId || !opts.allowUserIds.has(starterAuthorId)) {
+    opts.log?.warn({ threadId: thread.id, name: thread.name, starterAuthorId }, 'cron:forum starter author not allowlisted');
+    scheduler.disable(thread.id);
+    try {
+      await thread.send('Cron not registered: the starter message author is not allowlisted for cron.');
+    } catch {
+      // Ignore send failures.
+    }
+    return false;
+  }
+
   const def = await parseCronDefinition(starter.content, runtime, { model: opts.cronModel, cwd: opts.cwd });
   if (!def) {
     opts.log?.warn({ threadId: thread.id, name: thread.name }, 'cron:forum parse failed');
+    scheduler.disable(thread.id);
     try {
       await thread.send('Could not parse this cron definition. Please edit the starter message with a clearer schedule, timezone, target channel, and instruction.');
     } catch {
@@ -82,6 +101,7 @@ async function loadThreadAsCron(
     job = scheduler.register(thread.id, thread.id, guildId, thread.name, def);
   } catch (err) {
     opts.log?.error({ err, threadId: thread.id, schedule: def.schedule }, 'cron:forum invalid schedule');
+    scheduler.disable(thread.id);
     try {
       await thread.send(`Invalid cron schedule: \`${def.schedule}\`. Please edit the starter message with a valid schedule.`);
     } catch {
@@ -109,7 +129,11 @@ async function loadThreadAsCron(
 }
 
 export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: string }> {
-  const { client, forumChannelNameOrId, scheduler, runtime, cronModel, cwd, log } = opts;
+  const { client, forumChannelNameOrId, allowUserIds, scheduler, runtime, cronModel, cwd, log } = opts;
+
+  if (!isSnowflakeId(forumChannelNameOrId)) {
+    log?.warn({ forumChannelNameOrId }, 'cron:forum name-based resolution is ambiguous; prefer a channel ID');
+  }
 
   const forum = resolveForumChannel(client, forumChannelNameOrId);
   if (!forum) {
@@ -125,13 +149,29 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
   let loaded = 0;
   for (const thread of activeThreads.values()) {
     if (thread.archived) continue;
-    const ok = await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false });
+    const ok = await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false, allowUserIds });
     if (ok) loaded++;
   }
   log?.info({ loaded, total: activeThreads.size }, 'cron:forum initial load complete');
 
   // --- Live event listeners ---
   const forumId = forum.id;
+  const reparseTimers = new Map<string, NodeJS.Timeout>();
+  const scheduleReparse = (thread: AnyThreadChannel, isNew: boolean) => {
+    const key = String(thread.id ?? '');
+    const existing = reparseTimers.get(key);
+    if (existing) clearTimeout(existing);
+    reparseTimers.set(key, setTimeout(() => {
+      reparseTimers.delete(key);
+      void (async () => {
+        try {
+          await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew, allowUserIds });
+        } catch (err) {
+          log?.error?.({ err, threadId: key }, 'cron:forum reparse failed');
+        }
+      })();
+    }, 1000));
+  };
 
   client.on('threadCreate', async (thread: AnyThreadChannel) => {
     try {
@@ -139,7 +179,7 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadCreate');
       // Small delay: Discord may not have the starter message ready immediately after thread creation.
       await new Promise((r) => setTimeout(r, 2000));
-      await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: true });
+      await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: true, allowUserIds });
     } catch (err) {
       log?.error({ err, threadId: thread.id }, 'cron:forum threadCreate handler failed');
     }
@@ -166,7 +206,7 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
           scheduler.disable(newThread.id);
         } else {
           log?.info({ threadId: newThread.id }, 'cron:forum thread unarchived, re-loading');
-          await loadThreadAsCron(newThread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false });
+          await loadThreadAsCron(newThread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false, allowUserIds });
         }
         return;
       }
@@ -174,7 +214,7 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       // Name changed — update the job name (re-parse for good measure).
       if (oldThread.name !== newThread.name) {
         log?.info({ threadId: newThread.id, oldName: oldThread.name, newName: newThread.name }, 'cron:forum thread name changed');
-        await loadThreadAsCron(newThread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false });
+        await loadThreadAsCron(newThread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false, allowUserIds });
       }
     } catch (err) {
       log?.error({ err, threadId: newThread.id }, 'cron:forum threadUpdate handler failed');
@@ -187,8 +227,6 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       if (!newMsg?.channel || !newMsg?.id) return;
       const thread = newMsg.channel;
       if (thread.parentId !== forumId) return;
-      const job = scheduler.getJob(thread.id);
-      if (!job) return;
 
       // Verify it's the starter message (first message in thread).
       try {
@@ -199,7 +237,7 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       }
 
       log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum starter message updated, re-parsing');
-      await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false });
+      scheduleReparse(thread, false);
     } catch (err) {
       log?.error({ err }, 'cron:forum messageUpdate handler failed');
     }

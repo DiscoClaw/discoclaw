@@ -59,7 +59,9 @@ describe('CronScheduler', () => {
     const disabled = scheduler.disable('t1');
     expect(disabled).toBe(true);
     // Job still listed.
-    expect(scheduler.listJobs()).toHaveLength(1);
+    const jobs = scheduler.listJobs();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].nextRun).toBeNull();
   });
 
   it('enable re-starts a disabled job', () => {
