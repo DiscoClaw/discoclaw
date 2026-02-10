@@ -81,6 +81,11 @@ const autoIndexChannelContext = (process.env.DISCORD_AUTO_INDEX_CHANNEL_CONTEXT 
 const autoJoinThreads = (process.env.DISCORD_AUTO_JOIN_THREADS ?? '0') === '1';
 const useRuntimeSessions = (process.env.DISCOCLAW_RUNTIME_SESSIONS ?? '1') === '1';
 const discordActionsEnabled = (process.env.DISCOCLAW_DISCORD_ACTIONS ?? '0') === '1';
+const discordActionsChannels = (process.env.DISCOCLAW_DISCORD_ACTIONS_CHANNELS ?? '1') === '1';
+const discordActionsMessaging = (process.env.DISCOCLAW_DISCORD_ACTIONS_MESSAGING ?? '0') === '1';
+const discordActionsGuild = (process.env.DISCOCLAW_DISCORD_ACTIONS_GUILD ?? '0') === '1';
+const discordActionsModeration = (process.env.DISCOCLAW_DISCORD_ACTIONS_MODERATION ?? '0') === '1';
+const discordActionsPolls = (process.env.DISCOCLAW_DISCORD_ACTIONS_POLLS ?? '0') === '1';
 const messageHistoryBudget = Math.max(0, Number(process.env.DISCOCLAW_MESSAGE_HISTORY_BUDGET ?? '3000'));
 const summaryEnabled = (process.env.DISCOCLAW_SUMMARY_ENABLED ?? '1') === '1';
 const summaryModel = (process.env.DISCOCLAW_SUMMARY_MODEL ?? 'haiku').trim() || 'haiku';
@@ -179,6 +184,11 @@ await startDiscordBot({
   runtimeTools,
   runtimeTimeoutMs,
   discordActionsEnabled,
+  discordActionsChannels,
+  discordActionsMessaging,
+  discordActionsGuild,
+  discordActionsModeration,
+  discordActionsPolls,
   messageHistoryBudget,
   summaryEnabled,
   summaryModel,

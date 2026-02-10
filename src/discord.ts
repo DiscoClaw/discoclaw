@@ -9,6 +9,7 @@ import type { DiscordChannelContext } from './discord/channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { discordSessionKey } from './discord/session-key.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection } from './discord/actions.js';
+import type { ActionCategoryFlags } from './discord/actions.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { loadDurableMemory, selectItemsForInjection, formatDurableSection } from './discord/durable-memory.js';
@@ -44,6 +45,11 @@ export type BotParams = {
   runtimeTools: string[];
   runtimeTimeoutMs: number;
   discordActionsEnabled: boolean;
+  discordActionsChannels: boolean;
+  discordActionsMessaging: boolean;
+  discordActionsGuild: boolean;
+  discordActionsModeration: boolean;
+  discordActionsPolls: boolean;
   messageHistoryBudget: number;
   summaryEnabled: boolean;
   summaryModel: string;
@@ -369,8 +375,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             `\n---\nUser message:\n` +
             String(msg.content ?? '');
 
+          const actionFlags: ActionCategoryFlags = {
+            channels: params.discordActionsChannels,
+            messaging: params.discordActionsMessaging,
+            guild: params.discordActionsGuild,
+            moderation: params.discordActionsModeration,
+            polls: params.discordActionsPolls,
+          };
+
           if (params.discordActionsEnabled && !isDm) {
-            prompt += '\n\n---\n' + discordActionsPromptSection();
+            prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags);
           }
 
           const addDirs: string[] = [];
@@ -448,9 +462,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           let processedText = finalText || deltaText || '(no output)';
           if (params.discordActionsEnabled && msg.guild) {
-            const { cleanText, actions } = parseDiscordActions(processedText);
+            const { cleanText, actions } = parseDiscordActions(processedText, actionFlags);
             if (actions.length > 0) {
-              const results = await executeDiscordActions(actions, msg.guild, params.log);
+              const actCtx = {
+                guild: msg.guild,
+                client: msg.client,
+                channelId: msg.channelId,
+                messageId: msg.id,
+              };
+              const results = await executeDiscordActions(actions, actCtx, params.log);
               const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
               processedText = cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
             } else {

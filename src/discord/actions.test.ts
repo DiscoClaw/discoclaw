@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
 import { parseDiscordActions, executeDiscordActions } from './actions.js';
+import type { ActionCategoryFlags } from './actions.js';
+
+const ALL_FLAGS: ActionCategoryFlags = {
+  channels: true,
+  messaging: false,
+  guild: false,
+  moderation: false,
+  polls: false,
+};
 
 // ---------------------------------------------------------------------------
 // parseDiscordActions
@@ -9,7 +18,7 @@ import { parseDiscordActions, executeDiscordActions } from './actions.js';
 describe('parseDiscordActions', () => {
   it('extracts a single action and strips it from text', () => {
     const input = 'Here is the list:\n<discord-action>{"type":"channelList"}</discord-action>\nDone.';
-    const { cleanText, actions } = parseDiscordActions(input);
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
     expect(actions).toEqual([{ type: 'channelList' }]);
     expect(cleanText).toBe('Here is the list:\n\nDone.');
   });
@@ -18,7 +27,7 @@ describe('parseDiscordActions', () => {
     const input =
       '<discord-action>{"type":"channelCreate","name":"status","parent":"Dev"}</discord-action>' +
       '<discord-action>{"type":"channelList"}</discord-action>';
-    const { actions } = parseDiscordActions(input);
+    const { actions } = parseDiscordActions(input, ALL_FLAGS);
     expect(actions).toHaveLength(2);
     expect(actions[0]).toEqual({ type: 'channelCreate', name: 'status', parent: 'Dev' });
     expect(actions[1]).toEqual({ type: 'channelList' });
@@ -26,20 +35,26 @@ describe('parseDiscordActions', () => {
 
   it('skips malformed JSON gracefully', () => {
     const input = '<discord-action>{bad json}</discord-action>Some text';
-    const { cleanText, actions } = parseDiscordActions(input);
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
     expect(actions).toHaveLength(0);
     expect(cleanText).toBe('Some text');
   });
 
   it('skips unknown action types', () => {
-    const input = '<discord-action>{"type":"channelDelete","id":"123"}</discord-action>';
-    const { actions } = parseDiscordActions(input);
+    const input = '<discord-action>{"type":"somethingWeird","id":"123"}</discord-action>';
+    const { actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(0);
+  });
+
+  it('skips disabled category action types', () => {
+    const input = '<discord-action>{"type":"channelCreate","name":"test"}</discord-action>';
+    const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, channels: false });
     expect(actions).toHaveLength(0);
   });
 
   it('returns original text when no actions present', () => {
     const input = 'Just a normal message.';
-    const { cleanText, actions } = parseDiscordActions(input);
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
     expect(actions).toHaveLength(0);
     expect(cleanText).toBe(input);
   });
@@ -80,6 +95,15 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
   } as any;
 }
 
+function makeCtx(guild: any) {
+  return {
+    guild,
+    client: {} as any,
+    channelId: 'test-channel',
+    messageId: 'test-message',
+  };
+}
+
 describe('executeDiscordActions', () => {
   it('channelCreate succeeds with parent category', async () => {
     const guild = makeMockGuild([
@@ -88,7 +112,7 @@ describe('executeDiscordActions', () => {
 
     const results = await executeDiscordActions(
       [{ type: 'channelCreate', name: 'status', parent: 'Dev', topic: 'Status updates' }],
-      guild,
+      makeCtx(guild),
     );
 
     expect(results).toHaveLength(1);
@@ -106,7 +130,7 @@ describe('executeDiscordActions', () => {
 
     const results = await executeDiscordActions(
       [{ type: 'channelCreate', name: 'status', parent: 'NonExistent' }],
-      guild,
+      makeCtx(guild),
     );
 
     expect(results).toHaveLength(1);
@@ -118,7 +142,7 @@ describe('executeDiscordActions', () => {
 
     const results = await executeDiscordActions(
       [{ type: 'channelCreate', name: 'general' }],
-      guild,
+      makeCtx(guild),
     );
 
     expect(results).toHaveLength(1);
@@ -138,7 +162,7 @@ describe('executeDiscordActions', () => {
       { id: 'ch2', name: 'random', type: ChannelType.GuildText },
     ]);
 
-    const results = await executeDiscordActions([{ type: 'channelList' }], guild);
+    const results = await executeDiscordActions([{ type: 'channelList' }], makeCtx(guild));
 
     expect(results).toHaveLength(1);
     expect(results[0].ok).toBe(true);
@@ -155,7 +179,7 @@ describe('executeDiscordActions', () => {
 
     const results = await executeDiscordActions(
       [{ type: 'channelCreate', name: 'test' }],
-      guild,
+      makeCtx(guild),
     );
 
     expect(results).toHaveLength(1);
@@ -175,7 +199,7 @@ describe('executeDiscordActions', () => {
         { type: 'channelCreate', name: 'test' },
         { type: 'channelList' },
       ],
-      guild,
+      makeCtx(guild),
     );
 
     expect(results).toHaveLength(2);

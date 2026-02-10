@@ -1,13 +1,28 @@
-import { ChannelType } from 'discord.js';
-import type { Guild } from 'discord.js';
+import type { Client, Guild } from 'discord.js';
+import { CHANNEL_ACTION_TYPES, executeChannelAction, channelActionsPromptSection } from './actions-channels.js';
+import type { ChannelActionRequest } from './actions-channels.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+export type ActionContext = {
+  guild: Guild;
+  client: Client;
+  channelId: string;
+  messageId: string;
+};
+
+export type ActionCategoryFlags = {
+  channels: boolean;
+  messaging: boolean;
+  guild: boolean;
+  moderation: boolean;
+  polls: boolean;
+};
+
 export type DiscordActionRequest =
-  | { type: 'channelCreate'; name: string; parent?: string; topic?: string }
-  | { type: 'channelList' };
+  | ChannelActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -20,19 +35,31 @@ type LoggerLike = {
 };
 
 // ---------------------------------------------------------------------------
+// Valid types (union of all sub-module type sets)
+// ---------------------------------------------------------------------------
+
+function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
+  const types = new Set<string>();
+  if (flags.channels) for (const t of CHANNEL_ACTION_TYPES) types.add(t);
+  return types;
+}
+
+// ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
 
 const ACTION_RE = /<discord-action>([\s\S]*?)<\/discord-action>/g;
 
-const VALID_TYPES = new Set(['channelCreate', 'channelList']);
-
-export function parseDiscordActions(text: string): { cleanText: string; actions: DiscordActionRequest[] } {
+export function parseDiscordActions(
+  text: string,
+  flags: ActionCategoryFlags,
+): { cleanText: string; actions: DiscordActionRequest[] } {
+  const validTypes = buildValidTypes(flags);
   const actions: DiscordActionRequest[] = [];
   const cleanText = text.replace(ACTION_RE, (_match, json: string) => {
     try {
       const parsed = JSON.parse(json.trim());
-      if (parsed && typeof parsed.type === 'string' && VALID_TYPES.has(parsed.type)) {
+      if (parsed && typeof parsed.type === 'string' && validTypes.has(parsed.type)) {
         actions.push(parsed as DiscordActionRequest);
       }
     } catch {
@@ -45,78 +72,29 @@ export function parseDiscordActions(text: string): { cleanText: string; actions:
 }
 
 // ---------------------------------------------------------------------------
-// Executor
+// Executor (dispatcher)
 // ---------------------------------------------------------------------------
 
 export async function executeDiscordActions(
   actions: DiscordActionRequest[],
-  guild: Guild,
+  ctx: ActionContext,
   log?: LoggerLike,
 ): Promise<DiscordActionResult[]> {
   const results: DiscordActionResult[] = [];
 
   for (const action of actions) {
     try {
-      switch (action.type) {
-        case 'channelCreate': {
-          let parent: string | undefined;
-          if (action.parent) {
-            const cat = guild.channels.cache.find(
-              (ch) =>
-                ch.type === ChannelType.GuildCategory &&
-                ch.name.toLowerCase() === action.parent!.toLowerCase(),
-            );
-            if (cat) {
-              parent = cat.id;
-            } else {
-              results.push({ ok: false, error: `Category "${action.parent}" not found` });
-              continue;
-            }
-          }
+      let result: DiscordActionResult;
 
-          const created = await guild.channels.create({
-            name: action.name,
-            type: ChannelType.GuildText,
-            parent,
-            topic: action.topic,
-          });
-          results.push({ ok: true, summary: `Created #${created.name}${parent ? ` under ${action.parent}` : ''}` });
-          log?.info({ channel: created.name, parent: action.parent }, 'discord:action channelCreate');
-          break;
-        }
+      if (CHANNEL_ACTION_TYPES.has(action.type)) {
+        result = await executeChannelAction(action as ChannelActionRequest, ctx);
+      } else {
+        result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
+      }
 
-        case 'channelList': {
-          const grouped = new Map<string, string[]>();
-          const uncategorized: string[] = [];
-
-          for (const ch of guild.channels.cache.values()) {
-            if (ch.type === ChannelType.GuildCategory) continue;
-            const parentName = ch.parent?.name;
-            if (parentName) {
-              const list = grouped.get(parentName) ?? [];
-              list.push(`#${ch.name}`);
-              grouped.set(parentName, list);
-            } else {
-              uncategorized.push(`#${ch.name}`);
-            }
-          }
-
-          const lines: string[] = [];
-          if (uncategorized.length > 0) {
-            lines.push(`(no category): ${uncategorized.join(', ')}`);
-          }
-          for (const [cat, chs] of grouped) {
-            lines.push(`${cat}: ${chs.join(', ')}`);
-          }
-          results.push({ ok: true, summary: lines.length > 0 ? lines.join('\n') : '(no channels)' });
-          log?.info({ channelCount: guild.channels.cache.size }, 'discord:action channelList');
-          break;
-        }
-
-        default: {
-          const unknownType = (action as any).type ?? 'unknown';
-          results.push({ ok: false, error: `Unknown action type: ${unknownType}` });
-        }
+      results.push(result);
+      if (result.ok) {
+        log?.info({ action: action.type, summary: result.summary }, `discord:action ${action.type}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -132,37 +110,30 @@ export async function executeDiscordActions(
 // Prompt section
 // ---------------------------------------------------------------------------
 
-export function discordActionsPromptSection(): string {
-  return `## Discord Actions
+export function discordActionsPromptSection(flags: ActionCategoryFlags): string {
+  const sections: string[] = [];
 
-You can perform Discord server actions by including structured action blocks in your response.
+  sections.push(`## Discord Actions
 
-### Available actions
+You can perform Discord server actions by including structured action blocks in your response.`);
 
-**channelCreate** — Create a text channel:
-\`\`\`
-<discord-action>{"type":"channelCreate","name":"channel-name","parent":"Category Name","topic":"Optional topic"}</discord-action>
-\`\`\`
-- \`name\` (required): Channel name (lowercase, hyphens, no spaces).
-- \`parent\` (optional): Category name to create the channel under.
-- \`topic\` (optional): Channel topic description.
+  if (flags.channels) {
+    sections.push(channelActionsPromptSection());
+  }
 
-**channelList** — List all channels in the server:
-\`\`\`
-<discord-action>{"type":"channelList"}</discord-action>
-\`\`\`
-
-### Rules
-- Only \`channelCreate\` and \`channelList\` are supported. You cannot delete channels, manage roles, or perform moderation actions.
-- Confirm with the user before creating channels.
+  sections.push(`### Rules
+- Only the action types listed above are supported.
+- Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
 - Action blocks are removed from the displayed message; results are appended automatically.
 
 ### Permissions
-These actions require the bot to have **Manage Channels** permission in this Discord server. This is a server-level role permission, not a Discord Developer Portal setting.
+These actions require the bot to have appropriate permissions in this Discord server (e.g. Manage Channels, Manage Roles, Moderate Members). These are server-level role permissions, not Discord Developer Portal settings.
 
 If an action fails with a "Missing Permissions" or "Missing Access" error, tell the user:
 1. Open **Server Settings → Roles**.
 2. Find the Discoclaw bot's role (usually named after the bot).
-3. Enable **Manage Channels** under the role's permissions.
-4. The bot may need to be re-invited with the "moderator" permission profile if the role wasn't granted at invite time. The server owner or an admin can also grant it directly via Server Settings → Roles.`;
+3. Enable the required permission under the role's permissions.
+4. The bot may need to be re-invited with the "moderator" permission profile if the role wasn't granted at invite time.`);
+
+  return sections.join('\n\n');
 }
