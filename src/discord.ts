@@ -205,24 +205,29 @@ export function truncateCodeBlocks(text: string, maxLines = 20): string {
   });
 }
 
-export function renderDiscordTail(text: string, maxLines = 8): string {
+export function renderDiscordTail(text: string, maxLines = 8, maxWidth = 56): string {
   // Render a fixed-height "tail" view for streaming updates.
   // Content is bottom-aligned; empty lines above use a zero-width space
   // so Discord doesn't collapse them.
+  // Lines are truncated to maxWidth to prevent wrapping in Discord code blocks,
+  // which would break the fixed-height visual contract.
   const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
   const lines = normalized.split('\n').filter((l) => l.length > 0);
-  const tail = lines.slice(-maxLines);
+  const tail = lines.slice(-maxLines).map((l) =>
+    l.length > maxWidth ? l.slice(0, maxWidth - 1) + '\u2026' : l,
+  );
   while (tail.length < maxLines) tail.unshift('\u200b');
   // Avoid breaking the fence if the content contains ``` sequences.
   const safe = tail.join('\n').replace(/```/g, '``\\`');
   return `\`\`\`text\n${safe}\n\`\`\``;
 }
 
-export function renderActivityTail(label: string, maxLines = 8): string {
+export function renderActivityTail(label: string, maxLines = 8, maxWidth = 56): string {
   // Render a fixed-height block with an activity label on the bottom line.
   const lines: string[] = [];
   for (let i = 0; i < maxLines - 1; i++) lines.push('\u200b');
-  lines.push(label.split('\n')[0] || label);
+  const singleLine = label.split('\n')[0] || label;
+  lines.push(singleLine.length > maxWidth ? singleLine.slice(0, maxWidth - 1) + '\u2026' : singleLine);
   const safe = lines.join('\n').replace(/```/g, '``\\`');
   return `\`\`\`text\n${safe}\n\`\`\``;
 }

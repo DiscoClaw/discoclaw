@@ -114,6 +114,28 @@ describe('renderDiscordTail', () => {
     expect(lines).toHaveLength(8);
     expect(lines.every((l) => l === ZWS)).toBe(true);
   });
+
+  it('long lines are truncated to maxWidth with ellipsis', () => {
+    const long = 'x'.repeat(100);
+    const out = renderDiscordTail(long, 8, 56);
+    const lines = contentLines(out);
+    expect(lines[7].length).toBe(56);
+    expect(lines[7].endsWith('\u2026')).toBe(true);
+  });
+
+  it('lines at or under maxWidth are not truncated', () => {
+    const exact = 'y'.repeat(56);
+    const out = renderDiscordTail(exact, 8, 56);
+    const lines = contentLines(out);
+    expect(lines[7]).toBe(exact);
+  });
+
+  it('ZWS padding lines are not affected by maxWidth', () => {
+    const out = renderDiscordTail('short', 8, 10);
+    const lines = contentLines(out);
+    // All padding lines should still be ZWS.
+    expect(lines.slice(0, 7).every((l) => l === ZWS)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -178,6 +200,21 @@ describe('renderActivityTail', () => {
     const out = renderActivityTail('hi');
     expect(out.startsWith('```text\n')).toBe(true);
     expect(out.endsWith('\n```')).toBe(true);
+  });
+
+  it('long label is truncated to maxWidth with ellipsis', () => {
+    const long = 'z'.repeat(100);
+    const out = renderActivityTail(long, 8, 56);
+    const lines = contentLines(out);
+    expect(lines[7].length).toBe(56);
+    expect(lines[7].endsWith('\u2026')).toBe(true);
+  });
+
+  it('label at or under maxWidth is not truncated', () => {
+    const exact = 'w'.repeat(56);
+    const out = renderActivityTail(exact, 8, 56);
+    const lines = contentLines(out);
+    expect(lines[7]).toBe(exact);
   });
 });
 
