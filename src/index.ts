@@ -156,7 +156,7 @@ const claudeDebugFile = (process.env.CLAUDE_DEBUG_FILE ?? '').trim() || null;
 const strictMcpConfig = (process.env.CLAUDE_STRICT_MCP_CONFIG ?? '1') === '1';
 const sessionScanning = (process.env.DISCOCLAW_SESSION_SCANNING ?? '0') === '1';
 const toolAwareStreaming = (process.env.DISCOCLAW_TOOL_AWARE_STREAMING ?? '0') === '1';
-const multiTurn = (process.env.DISCOCLAW_MULTI_TURN ?? '0') === '1';
+const multiTurn = (process.env.DISCOCLAW_MULTI_TURN ?? '1') === '1';
 const multiTurnHangTimeoutMs = Math.max(1, Number(process.env.DISCOCLAW_MULTI_TURN_HANG_TIMEOUT_MS ?? '60000'));
 const multiTurnIdleTimeoutMs = Math.max(1, Number(process.env.DISCOCLAW_MULTI_TURN_IDLE_TIMEOUT_MS ?? '300000'));
 const multiTurnMaxProcesses = Math.max(1, Number(process.env.DISCOCLAW_MULTI_TURN_MAX_PROCESSES ?? '5'));

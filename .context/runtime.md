@@ -71,7 +71,7 @@ Opt-in feature that keeps a long-running Claude Code subprocess alive per Discor
 
 | Env Var | Default | Purpose |
 |---------|---------|---------|
-| `DISCOCLAW_MULTI_TURN` | `0` | Enable long-running process pool |
+| `DISCOCLAW_MULTI_TURN` | `1` | Enable long-running process pool |
 | `DISCOCLAW_MULTI_TURN_HANG_TIMEOUT_MS` | `60000` | Kill process if no stdout output for this long |
 | `DISCOCLAW_MULTI_TURN_IDLE_TIMEOUT_MS` | `300000` | Kill idle process after 5 min of no messages |
 | `DISCOCLAW_MULTI_TURN_MAX_PROCESSES` | `5` | Max concurrent long-running processes |
