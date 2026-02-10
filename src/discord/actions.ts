@@ -1,6 +1,8 @@
 import type { Client, Guild } from 'discord.js';
 import { CHANNEL_ACTION_TYPES, executeChannelAction, channelActionsPromptSection } from './actions-channels.js';
 import type { ChannelActionRequest } from './actions-channels.js';
+import { MESSAGING_ACTION_TYPES, executeMessagingAction, messagingActionsPromptSection } from './actions-messaging.js';
+import type { MessagingActionRequest } from './actions-messaging.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,7 +24,8 @@ export type ActionCategoryFlags = {
 };
 
 export type DiscordActionRequest =
-  | ChannelActionRequest;
+  | ChannelActionRequest
+  | MessagingActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -41,6 +44,7 @@ type LoggerLike = {
 function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   const types = new Set<string>();
   if (flags.channels) for (const t of CHANNEL_ACTION_TYPES) types.add(t);
+  if (flags.messaging) for (const t of MESSAGING_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -88,6 +92,8 @@ export async function executeDiscordActions(
 
       if (CHANNEL_ACTION_TYPES.has(action.type)) {
         result = await executeChannelAction(action as ChannelActionRequest, ctx);
+      } else if (MESSAGING_ACTION_TYPES.has(action.type)) {
+        result = await executeMessagingAction(action as MessagingActionRequest, ctx);
       } else {
         result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
       }
@@ -116,6 +122,10 @@ export function discordActionsPromptSection(flags: ActionCategoryFlags): string 
   sections.push(`## Discord Actions
 
 You can perform Discord server actions by including structured action blocks in your response.`);
+
+  if (flags.messaging) {
+    sections.push(messagingActionsPromptSection());
+  }
 
   if (flags.channels) {
     sections.push(channelActionsPromptSection());

@@ -1,0 +1,230 @@
+import type { DiscordActionResult, ActionContext } from './actions.js';
+import { resolveChannel, fmtTime } from './action-utils.js';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type MessagingActionRequest =
+  | { type: 'sendMessage'; channel: string; content: string; replyTo?: string }
+  | { type: 'react'; channelId: string; messageId: string; emoji: string }
+  | { type: 'readMessages'; channel: string; limit?: number; before?: string }
+  | { type: 'fetchMessage'; channelId: string; messageId: string }
+  | { type: 'editMessage'; channelId: string; messageId: string; content: string }
+  | { type: 'deleteMessage'; channelId: string; messageId: string }
+  | { type: 'threadCreate'; channelId: string; name: string; messageId?: string; autoArchiveMinutes?: number }
+  | { type: 'pinMessage'; channelId: string; messageId: string }
+  | { type: 'unpinMessage'; channelId: string; messageId: string }
+  | { type: 'listPins'; channel: string };
+
+export const MESSAGING_ACTION_TYPES = new Set([
+  'sendMessage', 'react', 'readMessages', 'fetchMessage',
+  'editMessage', 'deleteMessage', 'threadCreate',
+  'pinMessage', 'unpinMessage', 'listPins',
+]);
+
+// ---------------------------------------------------------------------------
+// Executor
+// ---------------------------------------------------------------------------
+
+export async function executeMessagingAction(
+  action: MessagingActionRequest,
+  ctx: ActionContext,
+): Promise<DiscordActionResult> {
+  const { guild } = ctx;
+
+  switch (action.type) {
+    case 'sendMessage': {
+      const channel = resolveChannel(guild, action.channel);
+      if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
+
+      const opts: any = { content: action.content };
+      if (action.replyTo) {
+        opts.reply = { messageReference: action.replyTo };
+      }
+      await channel.send(opts);
+      return { ok: true, summary: `Sent message to #${channel.name}` };
+    }
+
+    case 'react': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await (channel as any).messages.fetch(action.messageId);
+      await message.react(action.emoji);
+      return { ok: true, summary: `Reacted with ${action.emoji}` };
+    }
+
+    case 'readMessages': {
+      const channel = resolveChannel(guild, action.channel);
+      if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
+
+      const limit = Math.min(Math.max(1, action.limit ?? 10), 20);
+      const opts: any = { limit };
+      if (action.before) opts.before = action.before;
+
+      const messages = await channel.messages.fetch(opts) as any;
+      const sorted = [...messages.values()].sort(
+        (a: any, b: any) => a.createdTimestamp - b.createdTimestamp,
+      );
+
+      if (sorted.length === 0) {
+        return { ok: true, summary: `No messages found in #${channel.name}` };
+      }
+
+      const lines = sorted.map((m: any) => {
+        const author = m.author?.username ?? 'Unknown';
+        const time = fmtTime(m.createdAt);
+        const text = (m.content || '(no text)').slice(0, 200);
+        return `[${author}] ${text} (${time}, id:${m.id})`;
+      });
+      return { ok: true, summary: `Messages in #${channel.name}:\n${lines.join('\n')}` };
+    }
+
+    case 'fetchMessage': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await (channel as any).messages.fetch(action.messageId);
+      const author = message.author?.username ?? 'Unknown';
+      const time = fmtTime(message.createdAt);
+      const text = (message.content || '(no text)').slice(0, 500);
+      return { ok: true, summary: `[${author}]: ${text} (${time}, #${(channel as any).name}, id:${message.id})` };
+    }
+
+    case 'editMessage': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await (channel as any).messages.fetch(action.messageId);
+      await message.edit(action.content);
+      return { ok: true, summary: `Edited message in #${(channel as any).name}` };
+    }
+
+    case 'deleteMessage': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await (channel as any).messages.fetch(action.messageId);
+      await message.delete();
+      return { ok: true, summary: `Deleted message in #${(channel as any).name}` };
+    }
+
+    case 'threadCreate': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+
+      if (action.messageId && 'messages' in channel) {
+        const message = await (channel as any).messages.fetch(action.messageId);
+        const thread = await message.startThread({
+          name: action.name,
+          autoArchiveDuration: action.autoArchiveMinutes ?? 1440,
+        });
+        return { ok: true, summary: `Created thread "${thread.name}" from message in #${(channel as any).name}` };
+      }
+
+      if ('threads' in channel) {
+        const thread = await (channel as any).threads.create({
+          name: action.name,
+          autoArchiveDuration: action.autoArchiveMinutes ?? 1440,
+        });
+        return { ok: true, summary: `Created thread "${thread.name}" in #${(channel as any).name}` };
+      }
+
+      return { ok: false, error: `Channel "${action.channelId}" does not support threads` };
+    }
+
+    case 'pinMessage': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await (channel as any).messages.fetch(action.messageId);
+      await message.pin();
+      return { ok: true, summary: `Pinned message in #${(channel as any).name}` };
+    }
+
+    case 'unpinMessage': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await (channel as any).messages.fetch(action.messageId);
+      await message.unpin();
+      return { ok: true, summary: `Unpinned message in #${(channel as any).name}` };
+    }
+
+    case 'listPins': {
+      const channel = resolveChannel(guild, action.channel);
+      if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
+      const pinned = await channel.messages.fetchPinned();
+
+      if (pinned.size === 0) {
+        return { ok: true, summary: `No pinned messages in #${channel.name}` };
+      }
+
+      const lines = [...pinned.values()].map((m) => {
+        const author = m.author?.username ?? 'Unknown';
+        const text = (m.content || '(no text)').slice(0, 200);
+        return `[${author}] ${text} (id:${m.id})`;
+      });
+      return { ok: true, summary: `Pinned messages in #${channel.name}:\n${lines.join('\n')}` };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Prompt section
+// ---------------------------------------------------------------------------
+
+export function messagingActionsPromptSection(): string {
+  return `### Messaging
+
+**sendMessage** — Send a message to a channel:
+\`\`\`
+<discord-action>{"type":"sendMessage","channel":"#general","content":"Hello world!","replyTo":"message-id"}</discord-action>
+\`\`\`
+- \`channel\` (required): Channel name (with or without #) or channel ID.
+- \`content\` (required): Message text.
+- \`replyTo\` (optional): Message ID to reply to.
+
+**react** — Add a reaction to a message:
+\`\`\`
+<discord-action>{"type":"react","channelId":"123","messageId":"456","emoji":"👍"}</discord-action>
+\`\`\`
+
+**readMessages** — Read recent messages from a channel:
+\`\`\`
+<discord-action>{"type":"readMessages","channel":"#general","limit":10,"before":"message-id"}</discord-action>
+\`\`\`
+- \`channel\` (required): Channel name or ID.
+- \`limit\` (optional): 1–20, default 10.
+- \`before\` (optional): Message ID to fetch messages before.
+
+**fetchMessage** — Fetch a single message by ID:
+\`\`\`
+<discord-action>{"type":"fetchMessage","channelId":"123","messageId":"456"}</discord-action>
+\`\`\`
+
+**editMessage** — Edit a bot message:
+\`\`\`
+<discord-action>{"type":"editMessage","channelId":"123","messageId":"456","content":"Updated text"}</discord-action>
+\`\`\`
+
+**deleteMessage** — Delete a message (destructive — confirm with user first):
+\`\`\`
+<discord-action>{"type":"deleteMessage","channelId":"123","messageId":"456"}</discord-action>
+\`\`\`
+
+**threadCreate** — Create a thread:
+\`\`\`
+<discord-action>{"type":"threadCreate","channelId":"123","name":"Discussion","messageId":"456"}</discord-action>
+\`\`\`
+- \`channelId\` (required): Parent channel ID.
+- \`name\` (required): Thread name.
+- \`messageId\` (optional): Start thread from this message. If omitted, creates a standalone thread.
+- \`autoArchiveMinutes\` (optional): Auto-archive after N minutes (60, 1440, 4320, 10080). Default: 1440.
+
+**pinMessage** / **unpinMessage** — Pin or unpin a message:
+\`\`\`
+<discord-action>{"type":"pinMessage","channelId":"123","messageId":"456"}</discord-action>
+<discord-action>{"type":"unpinMessage","channelId":"123","messageId":"456"}</discord-action>
+\`\`\`
+
+**listPins** — List pinned messages in a channel:
+\`\`\`
+<discord-action>{"type":"listPins","channel":"#general"}</discord-action>
+\`\`\``;
+}
