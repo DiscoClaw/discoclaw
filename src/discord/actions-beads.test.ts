@@ -313,4 +313,13 @@ describe('beadActionsPromptSection', () => {
     expect(section).toContain('P1');
     expect(section).toContain('beadUpdate');
   });
+
+  it('keeps guidelines block under 600 chars', () => {
+    const section = beadActionsPromptSection();
+    const marker = '#### Bead Quality Guidelines';
+    const idx = section.indexOf(marker);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const guidelinesBlock = section.slice(idx);
+    expect(guidelinesBlock.length).toBeLessThanOrEqual(600);
+  });
 });

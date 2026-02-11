@@ -327,9 +327,9 @@ export function beadActionsPromptSection(): string {
 \`\`\`
 
 #### Bead Quality Guidelines
-- **Title**: imperative mood, specific, <60 chars. Good: "Add retry logic to webhook handler". Bad: "fix stuff".
-- **Description** should answer what/why/scope. Use markdown for structure. Include acceptance criteria for larger tasks.
-- **Priority**: P0=outage, P1=blocking, P2=normal (default), P3=nice-to-have, P4=someday.
+- **Title**: imperative mood, specific, <60 chars. Good: "Add retry logic to webhook handler", "Plan March Denver trip". Bad: "fix stuff".
+- **Description** should answer what/why/scope. Use markdown for structure. Include what "done" looks like for larger tasks.
+- **Priority**: P0=urgent, P1=important, P2=normal (default), P3=nice-to-have, P4=someday.
 - If the user explicitly asks to create a bead, always create it — don't second-guess.
 - Apply the same description quality standards when using beadUpdate to backfill details.`;
 }
