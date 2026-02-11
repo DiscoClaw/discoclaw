@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { setBotNickname } from '../discord.js';
 
-function mockGuild(overrides?: Record<string, any>) {
+function mockGuild() {
   const me = {
     nickname: null as string | null,
     user: { username: 'Discoclaw' },
     setNickname: vi.fn().mockResolvedValue(undefined),
-    ...overrides?.me,
   };
   return {
     id: 'guild-1',
@@ -14,7 +13,6 @@ function mockGuild(overrides?: Record<string, any>) {
       me,
       fetchMe: vi.fn().mockResolvedValue(me),
     },
-    ...overrides,
   };
 }
 

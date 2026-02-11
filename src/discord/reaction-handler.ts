@@ -95,7 +95,7 @@ export function createReactionAddHandler(
           }
 
           const cwd = params.useGroupDirCwd
-            ? await ensureGroupDir(params.groupsDir, sessionKey)
+            ? await ensureGroupDir(params.groupsDir, sessionKey, params.botDisplayName)
             : params.workspaceCwd;
 
           // Auto-index channel context.

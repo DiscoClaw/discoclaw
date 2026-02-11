@@ -147,7 +147,7 @@ async function ensureChild(
 }
 
 export async function ensureSystemScaffold(
-  params: { guild: Guild; ensureBeads: boolean },
+  params: { guild: Guild; ensureBeads: boolean; botDisplayName?: string },
   log?: LoggerLike,
 ): Promise<SystemScaffold | null> {
   const { guild, ensureBeads } = params;
@@ -161,7 +161,7 @@ export async function ensureSystemScaffold(
   const status = await ensureChild(
     guild,
     system.id,
-    { name: 'status', type: ChannelType.GuildText, topic: 'Discoclaw status (online/offline/errors).' },
+    { name: 'status', type: ChannelType.GuildText, topic: `${params.botDisplayName ?? 'Discoclaw'} status (online/offline/errors).` },
     log,
   );
   if (status.created) created.push('status');

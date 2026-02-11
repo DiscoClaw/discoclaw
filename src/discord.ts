@@ -102,7 +102,8 @@ export function groupDirNameFromSessionKey(sessionKey: string): string {
   return sessionKey.replace(/[^a-zA-Z0-9:_-]+/g, '-');
 }
 
-export async function ensureGroupDir(groupsDir: string, sessionKey: string): Promise<string> {
+export async function ensureGroupDir(groupsDir: string, sessionKey: string, botDisplayName?: string): Promise<string> {
+  const name = botDisplayName ?? 'Discoclaw';
   const dir = path.join(groupsDir, groupDirNameFromSessionKey(sessionKey));
   await fs.mkdir(dir, { recursive: true });
   const claudeMd = path.join(dir, 'CLAUDE.md');
@@ -113,11 +114,11 @@ export async function ensureGroupDir(groupsDir: string, sessionKey: string): Pro
     if (code !== 'ENOENT') throw err;
     // Minimal per-group instructions, mirroring the nanoclaw style.
     const body =
-      `# Discoclaw Group\n\n` +
+      `# ${name} Group\n\n` +
       `Session key: \`${sessionKey}\`\n\n` +
       `This directory scopes conversation instructions for this Discord context.\n\n` +
       `Notes:\n` +
-      `- The main workspace is mounted separately (see Discoclaw service env).\n` +
+      `- The main workspace is mounted separately (see ${name} service env).\n` +
       `- Keep instructions short and specific; prefer referencing files in the workspace.\n`;
     await fs.writeFile(claudeMd, body, 'utf8');
   }
@@ -291,7 +292,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           reply = await msg.reply({ content: renderActivityTail('(working...)'), allowedMentions: NO_MENTIONS });
 
           const cwd = params.useGroupDirCwd
-            ? await ensureGroupDir(params.groupsDir, sessionKey)
+            ? await ensureGroupDir(params.groupsDir, sessionKey, params.botDisplayName)
             : params.workspaceCwd;
 
           // Ensure every channel has its own context file (bootstrapped on first message).
@@ -682,28 +683,36 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
   };
 }
 
-function resolveStatusChannel(client: Client, nameOrId: string, botDisplayName?: string, log?: LoggerLike): StatusPoster | null {
+function resolveStatusChannel(client: Client, nameOrId: string, statusOpts: { botDisplayName?: string; log?: LoggerLike }): StatusPoster | null {
   // Try by ID first, then by name across all guilds.
   const byId = client.channels.cache.get(nameOrId);
-  if (byId?.isTextBased() && !byId.isDMBased()) return createStatusPoster(byId, botDisplayName, log);
+  if (byId?.isTextBased() && !byId.isDMBased()) return createStatusPoster(byId, statusOpts);
 
   for (const guild of client.guilds.cache.values()) {
     const ch = guild.channels.cache.find(
       (c) => c.isTextBased() && c.name === nameOrId,
     );
-    if (ch && ch.isTextBased()) return createStatusPoster(ch, botDisplayName, log);
+    if (ch && ch.isTextBased()) return createStatusPoster(ch, statusOpts);
   }
   return null;
 }
 
-async function resolveStatusChannelById(client: Client, channelId: string, botDisplayName?: string, log?: LoggerLike): Promise<StatusPoster | null> {
+async function resolveStatusChannelById(client: Client, channelId: string, statusOpts: { botDisplayName?: string; log?: LoggerLike }): Promise<StatusPoster | null> {
   const cached = client.channels.cache.get(channelId);
   const ch = cached ?? await client.channels.fetch(channelId).catch(() => null);
-  if (ch?.isTextBased() && !ch.isDMBased()) return createStatusPoster(ch as any, botDisplayName, log);
+  if (ch?.isTextBased() && !ch.isDMBased()) return createStatusPoster(ch as any, statusOpts);
   return null;
 }
 
-export async function setBotNickname(guild: any, nickname: string, log?: LoggerLike): Promise<void> {
+type GuildForNickname = {
+  id: string;
+  members: {
+    me: { nickname: string | null; user?: { username: string }; setNickname(nick: string, reason?: string): Promise<unknown> } | null;
+    fetchMe(): Promise<{ nickname: string | null; user?: { username: string }; setNickname(nick: string, reason?: string): Promise<unknown> }>;
+  };
+};
+
+export async function setBotNickname(guild: GuildForNickname, nickname: string, log?: LoggerLike): Promise<void> {
   try {
     let me = guild.members?.me;
     if (!me) {
@@ -794,7 +803,7 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
     const guild = selectBootstrapGuild(client, params.guildId, params.log);
     if (guild) {
       system = await ensureSystemScaffold(
-        { guild, ensureBeads: Boolean(params.bootstrapEnsureBeadsForum) },
+        { guild, ensureBeads: Boolean(params.bootstrapEnsureBeadsForum), botDisplayName: params.botDisplayName },
         params.log,
       );
     }
@@ -809,7 +818,7 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
   }
 
   if (params.statusChannel) {
-    statusRef.current = resolveStatusChannel(client, params.statusChannel, params.botDisplayName, params.log);
+    statusRef.current = resolveStatusChannel(client, params.statusChannel, { botDisplayName: params.botDisplayName, log: params.log });
     if (statusRef.current) {
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       statusRef.current.online();
@@ -817,7 +826,7 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
       params.log?.warn({ statusChannel: params.statusChannel }, 'status-channel: channel not found, status posting disabled');
     }
   } else if (system?.statusChannelId) {
-    statusRef.current = await resolveStatusChannelById(client, system.statusChannelId, params.botDisplayName, params.log);
+    statusRef.current = await resolveStatusChannelById(client, system.statusChannelId, { botDisplayName: params.botDisplayName, log: params.log });
     if (statusRef.current) {
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       statusRef.current.online();

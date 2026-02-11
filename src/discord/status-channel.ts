@@ -18,8 +18,14 @@ const Colors = {
   orange: 0xfee75c,
 } as const;
 
-export function createStatusPoster(channel: Sendable, botDisplayName?: string, log?: LoggerLike): StatusPoster {
-  const name = botDisplayName ?? 'Discoclaw';
+export type StatusPosterOpts = {
+  botDisplayName?: string;
+  log?: LoggerLike;
+};
+
+export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): StatusPoster {
+  const name = opts?.botDisplayName ?? 'Discoclaw';
+  const log = opts?.log;
   const send = async (embed: EmbedBuilder) => {
     try {
       await channel.send({ embeds: [embed] });
