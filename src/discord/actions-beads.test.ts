@@ -310,7 +310,22 @@ describe('executeBeadAction', () => {
     );
 
     expect(runBeadSync).toHaveBeenCalledWith(
-      expect.objectContaining({ statusPoster: mockPoster }),
+      expect.objectContaining({ statusPoster: mockPoster, mentionUserId: undefined }),
+    );
+  });
+
+  it('beadSync passes sidebarMentionUserId as mentionUserId to runBeadSync', async () => {
+    const { runBeadSync } = await import('../beads/bead-sync.js');
+    (runBeadSync as any).mockClear();
+
+    await executeBeadAction(
+      { type: 'beadSync' },
+      makeCtx(),
+      makeBeadCtx({ sidebarMentionUserId: '999' }),
+    );
+
+    expect(runBeadSync).toHaveBeenCalledWith(
+      expect.objectContaining({ mentionUserId: '999' }),
     );
   });
 });

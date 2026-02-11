@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage } from './discord-sync.js';
+import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage, closeBeadThread } from './discord-sync.js';
 import type { BeadData } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -232,5 +232,106 @@ describe('updateBeadStarterMessage', () => {
     const result = await updateBeadStarterMessage(makeClient(thread), '123', bead, '999');
     expect(result).toBe(false);
     expect(thread._editFn).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// closeBeadThread
+// ---------------------------------------------------------------------------
+
+describe('closeBeadThread', () => {
+  const bead: BeadData = {
+    id: 'ws-001',
+    title: 'Test',
+    description: 'A test bead',
+    status: 'closed',
+    priority: 2,
+    issue_type: 'task',
+    owner: '',
+    external_ref: '',
+    labels: [],
+    comments: [],
+    created_at: '',
+    updated_at: '',
+    close_reason: 'Done',
+  };
+
+  function makeClient(thread: any): any {
+    return {
+      channels: { cache: { get: () => thread } },
+      user: { id: 'bot-123' },
+    };
+  }
+
+  function makeCloseThread(opts?: { starterContent?: string; starterAuthorId?: string; archived?: boolean }): any {
+    const editFn = vi.fn();
+    const sendFn = vi.fn();
+    const setNameFn = vi.fn();
+    const setArchivedFn = vi.fn();
+    const fetchStarterFn = vi.fn(async () => ({
+      author: { id: opts?.starterAuthorId ?? 'bot-123' },
+      content: opts?.starterContent ?? 'old content',
+      edit: editFn,
+    }));
+
+    return {
+      isThread: () => true,
+      archived: opts?.archived ?? false,
+      fetchStarterMessage: fetchStarterFn,
+      send: sendFn,
+      setName: setNameFn,
+      setArchived: setArchivedFn,
+      _editFn: editFn,
+      _sendFn: sendFn,
+      _setNameFn: setNameFn,
+      _setArchivedFn: setArchivedFn,
+      _fetchStarterFn: fetchStarterFn,
+    };
+  }
+
+  it('strips mention from starter message before archiving', async () => {
+    const contentWithMention = buildBeadStarterContent(bead, '999');
+    const thread = makeCloseThread({ starterContent: contentWithMention });
+    const client = makeClient(thread);
+
+    await closeBeadThread(client, 'thread-1', bead);
+
+    const cleanContent = buildBeadStarterContent(bead);
+    expect(thread._editFn).toHaveBeenCalledWith({
+      content: cleanContent.slice(0, 2000),
+      allowedMentions: { parse: [], users: [] },
+    });
+  });
+
+  it('skips starter edit when content has no mention', async () => {
+    const cleanContent = buildBeadStarterContent(bead);
+    const thread = makeCloseThread({ starterContent: cleanContent });
+    const client = makeClient(thread);
+
+    await closeBeadThread(client, 'thread-1', bead);
+
+    expect(thread._editFn).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with close even if fetchStarterMessage throws', async () => {
+    const thread = makeCloseThread();
+    thread.fetchStarterMessage = vi.fn(async () => { throw new Error('not found'); });
+    const client = makeClient(thread);
+
+    await closeBeadThread(client, 'thread-1', bead);
+
+    expect(thread._sendFn).toHaveBeenCalled();
+    expect(thread._setNameFn).toHaveBeenCalled();
+    expect(thread._setArchivedFn).toHaveBeenCalledWith(true);
+  });
+
+  it('does nothing when thread is not found', async () => {
+    const client = {
+      channels: { cache: { get: () => undefined } },
+      user: { id: 'bot-123' },
+    } as any;
+
+    await closeBeadThread(client, 'missing', bead);
+    // No error thrown — function completes silently.
   });
 });

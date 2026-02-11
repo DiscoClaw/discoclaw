@@ -142,10 +142,7 @@ export async function createBeadThread(
   }
   const uniqueTagIds = [...new Set(appliedTagIds)];
 
-  const baseContent = buildBeadStarterContent(bead);
-  const message = mentionUserId
-    ? `${baseContent}\n\n<@${mentionUserId}>`.slice(0, 2000)
-    : baseContent.slice(0, 2000);
+  const message = buildBeadStarterContent(bead, mentionUserId).slice(0, 2000);
 
   const thread = await forum.threads.create({
     name,
