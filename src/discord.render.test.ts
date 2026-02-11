@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   renderDiscordTail,
   renderActivityTail,
+  formatBoldLabel,
   splitDiscord,
   truncateCodeBlocks,
   thinkingLabel,
@@ -277,6 +278,43 @@ describe('thinkingLabel', () => {
 });
 
 // ---------------------------------------------------------------------------
+// formatBoldLabel
+// ---------------------------------------------------------------------------
+describe('formatBoldLabel', () => {
+  it('wraps label in bold', () => {
+    expect(formatBoldLabel('hello')).toBe('**hello**');
+  });
+
+  it('escapes markdown special chars', () => {
+    expect(formatBoldLabel('*bold* _ital_')).toBe('**\\*bold\\* \\_ital\\_**');
+  });
+
+  it('truncates long labels with ellipsis', () => {
+    const long = 'z'.repeat(100);
+    const out = formatBoldLabel(long, 56);
+    // ** + 56 chars + ** = total; inner content is 55 chars + ellipsis
+    expect(out).toBe(`**${'z'.repeat(55)}\u2026**`);
+  });
+
+  it('labels at maxWidth are not truncated', () => {
+    const exact = 'a'.repeat(56);
+    expect(formatBoldLabel(exact, 56)).toBe(`**${exact}**`);
+  });
+
+  it('uses first non-empty line from multi-line input', () => {
+    expect(formatBoldLabel('first\nsecond\nthird')).toBe('**first**');
+  });
+
+  it('newline-only input → empty bold', () => {
+    expect(formatBoldLabel('\n\n')).toBe('****');
+  });
+
+  it('escapes backticks', () => {
+    expect(formatBoldLabel('reading ```file```')).toBe('**reading \\`\\`\\`file\\`\\`\\`**');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // selectStreamingOutput
 // ---------------------------------------------------------------------------
 describe('selectStreamingOutput', () => {
@@ -347,6 +385,68 @@ describe('selectStreamingOutput', () => {
     expect(out0).toContain('**Thinking.**');
     expect(out1).toContain('**Thinking..**');
     expect(out3).toContain('**Thinking**');
+  });
+
+  // -- showPreview: false (delay streaming code block) --
+
+  it('showPreview=false + deltaText → label only (no code block)', () => {
+    const out = selectStreamingOutput({
+      deltaText: 'streaming text',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 1,
+      showPreview: false,
+    });
+    expect(out).toBe('**Thinking..**');
+    expect(out).not.toContain('```');
+    expect(out).not.toContain('streaming text');
+  });
+
+  it('showPreview=false + activityLabel → label only (no code block)', () => {
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: 'Reading file...',
+      finalText: '',
+      statusTick: 0,
+      showPreview: false,
+    });
+    expect(out).toBe('**Reading file...**');
+    expect(out).not.toContain('```');
+  });
+
+  it('showPreview=false + finalText → still renders code block (bypasses gate)', () => {
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: '',
+      finalText: 'final answer',
+      statusTick: 0,
+      showPreview: false,
+    });
+    expect(out).toContain('```text');
+    expect(out).toContain('final answer');
+  });
+
+  it('showPreview=false + no content → thinking label only (no code block)', () => {
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 2,
+      showPreview: false,
+    });
+    expect(out).toBe('**Thinking...**');
+    expect(out).not.toContain('```');
+  });
+
+  it('showPreview=true (default) is unchanged', () => {
+    const out = selectStreamingOutput({
+      deltaText: 'data',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 0,
+    });
+    expect(out).toContain('```text');
+    expect(out).toContain('data');
   });
 });
 

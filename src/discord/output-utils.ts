@@ -119,18 +119,20 @@ export function renderDiscordTail(text: string, maxLines = 8, maxWidth = 56): st
   return `\`\`\`text\n${safe}\n\`\`\``;
 }
 
-export function renderActivityTail(label: string, maxLines = 8, maxWidth = 56): string {
-  const lines: string[] = [];
-  for (let i = 0; i < maxLines; i++) lines.push('\u200b');
-  const safe = lines.join('\n').replace(/```/g, '``\\`');
-  // Use first non-empty line; fixes existing newline-only edge case
+export function formatBoldLabel(label: string, maxWidth = 56): string {
   const singleLine = label.split('\n').find((l) => l.length > 0) ?? '';
   const truncated = singleLine.length > maxWidth
     ? singleLine.slice(0, maxWidth - 1) + '\u2026'
     : singleLine;
-  // Escape markdown chars that would break bold context or create formatting artifacts
-  const safeLabel = truncated.replace(/([*_~|`\\[\]])/g, '\\$1');
-  return `**${safeLabel}**\n\`\`\`text\n${safe}\n\`\`\``;
+  const safe = truncated.replace(/([*_~|`\\[\]])/g, '\\$1');
+  return `**${safe}**`;
+}
+
+export function renderActivityTail(label: string, maxLines = 8, maxWidth = 56): string {
+  const lines: string[] = [];
+  for (let i = 0; i < maxLines; i++) lines.push('\u200b');
+  const safe = lines.join('\n').replace(/```/g, '``\\`');
+  return `${formatBoldLabel(label, maxWidth)}\n\`\`\`text\n${safe}\n\`\`\``;
 }
 
 export function thinkingLabel(tick: number): string {
@@ -143,7 +145,14 @@ export function selectStreamingOutput(opts: {
   activityLabel: string;
   finalText: string;
   statusTick: number;
+  showPreview?: boolean;
 }): string {
+  const preview = opts.showPreview ?? true;
+  // finalText always bypasses the gate — completion/error output renders immediately.
+  if (!preview && !opts.finalText) {
+    if (opts.activityLabel) return formatBoldLabel(opts.activityLabel);
+    return formatBoldLabel(thinkingLabel(opts.statusTick));
+  }
   if (opts.deltaText) {
     const label = thinkingLabel(opts.statusTick);
     return `**${label}**\n${renderDiscordTail(opts.deltaText)}`;

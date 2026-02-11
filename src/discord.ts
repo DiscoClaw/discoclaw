@@ -26,7 +26,7 @@ import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-boo
 import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { createReactionAddHandler } from './discord/reaction-handler.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
 import { buildContextFiles, buildDurableMemorySection, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { editThenSendChunks } from './discord/output-common.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
@@ -132,7 +132,7 @@ export async function ensureGroupDir(groupsDir: string, sessionKey: string, botD
   return dir;
 }
 
-export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, thinkingLabel, selectStreamingOutput };
+export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput };
 
 export type StatusRef = { current: StatusPoster | null };
 
@@ -297,7 +297,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          reply = await msg.reply({ content: renderActivityTail(thinkingLabel(0)), allowedMentions: NO_MENTIONS });
+          reply = await msg.reply({ content: formatBoldLabel(thinkingLabel(0)), allowedMentions: NO_MENTIONS });
 
           const cwd = params.useGroupDirCwd
             ? await ensureGroupDir(params.groupsDir, sessionKey, params.botDisplayName)
@@ -441,7 +441,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
             // On follow-up iterations, send a new placeholder message.
             if (followUpDepth > 0) {
-              reply = await msg.channel.send({ content: renderActivityTail('(following up...)'), allowedMentions: NO_MENTIONS });
+              reply = await msg.channel.send({ content: formatBoldLabel('(following up...)'), allowedMentions: NO_MENTIONS });
               params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
             }
 
@@ -450,7 +450,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const now = Date.now();
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               lastEditAt = now;
-              const out = selectStreamingOutput({ deltaText, activityLabel, finalText, statusTick: statusTick++ });
+              const out = selectStreamingOutput({ deltaText, activityLabel, finalText, statusTick: statusTick++, showPreview: Date.now() - t0 >= 6000 });
               try {
                 await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
               } catch {
