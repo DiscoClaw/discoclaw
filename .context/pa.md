@@ -12,6 +12,7 @@ Generic PA rules. Personal customizations go in `workspace/AGENTS.md`.
 | `AGENTS.md` | Your personal rules and conventions | Every prompt |
 | `TOOLS.md` | Available tools and integrations | Every prompt |
 | `HEARTBEAT.md` | Periodic self-check template | By cron |
+| `MEMORY.md` | Curated long-term memory | DM prompts |
 | `BOOTSTRAP.md` | First-run onboarding (deleted after) | Once |
 
 Templates live in `templates/workspace/` and are scaffolded on first run (copy-if-missing).
@@ -43,11 +44,14 @@ Participate, don't dominate.
 
 ## Memory
 
-Discoclaw manages memory automatically:
-- **Durable memory** — user-specific facts stored via `!memory` commands, injected into every prompt
-- **Rolling summaries** — conversation history summarized and carried forward between sessions
+Memory is layered. Use the right layer for the right thing.
 
-When someone says "remember this," tell them to use `!memory add <note>` or do it yourself.
+- **Durable memory** — structured facts stored via `!memory` commands, injected into every prompt. Good for quick facts, preferences, names, dates.
+- **Rolling summaries** — conversation history compressed and carried forward between sessions. Automatic.
+- **`MEMORY.md`** — your curated long-term notes (loaded in DMs only). Decisions, lessons, project context, nuanced preferences. Keep it pruned.
+- **`memory/YYYY-MM-DD.md`** — daily scratch logs (loaded in DMs, today + yesterday only). Raw session notes, follow-ups, in-progress thinking.
+
+When someone says "remember this": if it's a quick fact, use `!memory add <note>`. If it's nuanced or needs context, write it to `MEMORY.md` or today's daily log.
 
 ## External vs Internal Actions
 

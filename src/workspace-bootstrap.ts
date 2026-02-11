@@ -14,6 +14,7 @@ const TEMPLATE_FILES = [
   'AGENTS.md',
   'TOOLS.md',
   'HEARTBEAT.md',
+  'MEMORY.md',
 ];
 
 /**
@@ -41,6 +42,9 @@ export async function ensureWorkspaceBootstrapFiles(
       created.push(file);
     }
   }
+
+  // Ensure the daily log directory exists for file-based memory.
+  await fs.mkdir(path.join(workspaceCwd, 'memory'), { recursive: true });
 
   if (created.length > 0) {
     log?.info({ created, workspaceCwd }, 'workspace:bootstrap scaffolded PA files');

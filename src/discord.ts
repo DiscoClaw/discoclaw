@@ -27,7 +27,7 @@ import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { createReactionAddHandler } from './discord/reaction-handler.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
-import { buildContextFiles, buildDurableMemorySection, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
+import { buildContextFiles, buildDurableMemorySection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { editThenSendChunks } from './discord/output-common.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
@@ -336,7 +336,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           const paFiles = await loadWorkspacePaFiles(params.workspaceCwd);
-          const contextFiles = buildContextFiles(paFiles, params.discordChannelContext, channelCtx.contextPath);
+          const memoryFiles: string[] = [];
+          if (isDm) {
+            const memFile = await loadWorkspaceMemoryFile(params.workspaceCwd);
+            if (memFile) memoryFiles.push(memFile);
+            memoryFiles.push(...await loadDailyLogFiles(params.workspaceCwd));
+          }
+          const contextFiles = buildContextFiles(
+            [...paFiles, ...memoryFiles],
+            params.discordChannelContext,
+            channelCtx.contextPath,
+          );
 
           let historySection = '';
           if (params.messageHistoryBudget > 0) {
@@ -451,7 +461,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const now = Date.now();
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               lastEditAt = now;
-              const out = selectStreamingOutput({ deltaText, activityLabel, finalText, statusTick: statusTick++, showPreview: Date.now() - t0 >= 6000 });
+              const out = selectStreamingOutput({ deltaText, activityLabel, finalText, statusTick: statusTick++, showPreview: Date.now() - t0 >= 7000 });
               try {
                 await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
               } catch {

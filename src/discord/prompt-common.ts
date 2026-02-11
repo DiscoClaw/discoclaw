@@ -17,6 +17,26 @@ export async function loadWorkspacePaFiles(workspaceCwd: string): Promise<string
   return paFiles;
 }
 
+/** Returns workspace/MEMORY.md path if it exists, null otherwise. */
+export async function loadWorkspaceMemoryFile(workspaceCwd: string): Promise<string | null> {
+  const p = path.join(workspaceCwd, 'MEMORY.md');
+  try { await fs.access(p); return p; } catch { return null; }
+}
+
+/** Returns paths for today + yesterday daily logs that exist. */
+export async function loadDailyLogFiles(workspaceCwd: string): Promise<string[]> {
+  const files: string[] = [];
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  for (const d of [today, yesterday]) {
+    const name = d.toISOString().slice(0, 10) + '.md';
+    const p = path.join(workspaceCwd, 'memory', name);
+    try { await fs.access(p); files.push(p); } catch { /* ignore */ }
+  }
+  return files;
+}
+
 export function buildContextFiles(
   paFiles: string[],
   discordChannelContext: DiscordChannelContext | undefined,

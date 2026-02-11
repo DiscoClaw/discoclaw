@@ -13,6 +13,7 @@ const EXPECTED_FILES = [
   'AGENTS.md',
   'TOOLS.md',
   'HEARTBEAT.md',
+  'MEMORY.md',
 ];
 
 describe('ensureWorkspaceBootstrapFiles', () => {
@@ -66,6 +67,16 @@ describe('ensureWorkspaceBootstrapFiles', () => {
 
     expect(created.length).toBe(EXPECTED_FILES.length);
     const stat = await fs.stat(workspace);
+    expect(stat.isDirectory()).toBe(true);
+  });
+
+  it('creates memory/ directory for daily logs', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
+    dirs.push(workspace);
+
+    await ensureWorkspaceBootstrapFiles(workspace);
+
+    const stat = await fs.stat(path.join(workspace, 'memory'));
     expect(stat.isDirectory()).toBe(true);
   });
 
