@@ -175,6 +175,37 @@ This is especially useful for systemd, where env loading can differ from your sh
 - **Timeout issues:** Look for `timeout` in logs. Adjust `RUNTIME_TIMEOUT_MS` if needed.
 - **PID lock conflicts:** Look for `pidlock` in logs. See ops.md for stale lock handling.
 
+## Bead Close Sync (Claude Code Hook)
+
+When `bd close` is run from a Claude Code session, a PostToolUse hook automatically syncs the Discord forum thread (archives it with a close message).
+
+**How it works:** `.claude/hooks/bead-close-sync.sh` detects successful `bd close` commands, verifies the bead is actually closed, then calls `scripts/beads/bead-hooks/on-close.sh` which delegates to the TS implementation.
+
+**Setup** (`.claude/settings.local.json` is gitignored — add this on each machine):
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/bead-close-sync.sh",
+            "timeout": 30000
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Required env vars in `.env`:** `DISCORD_TOKEN`, `DISCORD_GUILD_ID`, `DISCOCLAW_BEADS_FORUM`.
+
+The hook is idempotent — if the thread is already closed (e.g. bot already synced it), it's a no-op.
+
 ## Notes
 - Runtime invocation defaults are configurable via env (`RUNTIME_MODEL`, `RUNTIME_TOOLS`, `RUNTIME_TIMEOUT_MS`).
 - If `pnpm dev` fails with "Missing DISCORD_TOKEN", your `.env` isn't loaded or the var is unset.

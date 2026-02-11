@@ -6,6 +6,13 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DISCOCLAW_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
+# Auto-source .env when called outside the bot process (e.g. Claude Code sessions).
+if [[ -z "${DISCORD_TOKEN:-}" || -z "${DISCORD_GUILD_ID:-}" || -z "${DISCOCLAW_BEADS_FORUM:-}" ]]; then
+  if [[ -f "$DISCOCLAW_DIR/.env" ]]; then
+    set -a; source "$DISCOCLAW_DIR/.env"; set +a
+  fi
+fi
+
 [[ $# -lt 1 ]] && { echo "Usage: on-close.sh <bead-id>" >&2; exit 1; }
 
 CLI_DIST="$DISCOCLAW_DIR/dist/beads/bead-hooks-cli.js"

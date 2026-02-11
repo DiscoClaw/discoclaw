@@ -1,6 +1,6 @@
 import { Client, GatewayIntentBits } from 'discord.js';
 import { bdAddLabel, bdShow, bdUpdate } from './bd-cli.js';
-import { findExistingThreadForBead, createBeadThread, ensureUnarchived, getThreadIdFromBead, resolveBeadsForum, updateBeadThreadName, closeBeadThread } from './discord-sync.js';
+import { findExistingThreadForBead, createBeadThread, ensureUnarchived, getThreadIdFromBead, resolveBeadsForum, updateBeadThreadName, closeBeadThread, isBeadThreadAlreadyClosed } from './discord-sync.js';
 import type { BeadData } from './types.js';
 import { loadTagMap } from './discord-sync.js';
 
@@ -137,6 +137,8 @@ async function run(): Promise<void> {
     }
 
     if (sub === 'on-close') {
+      const alreadyClosed = await isBeadThreadAlreadyClosed(client, threadId, bead);
+      if (alreadyClosed) return;
       await closeBeadThread(client, threadId, bead);
       return;
     }
