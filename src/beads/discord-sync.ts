@@ -162,7 +162,7 @@ export async function findExistingThreadForBead(
   opts?: { archivedLimit?: number },
 ): Promise<string | null> {
   const token = beadIdToken(beadId);
-  const archivedLimit = Math.max(1, Math.min(1000, opts?.archivedLimit ?? 200));
+  const archivedLimit = Math.max(1, Math.min(100, opts?.archivedLimit ?? 100));
 
   const active = await forum.threads.fetchActive();
   const archived = await forum.threads.fetchArchived({ limit: archivedLimit, fetchAll: true });
