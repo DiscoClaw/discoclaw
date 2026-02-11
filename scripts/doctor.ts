@@ -69,6 +69,15 @@ if (claudePath) {
   fail(`Claude CLI not found (looked for "${claudeBin}")`, 'Install from https://docs.anthropic.com/en/docs/claude-code');
 }
 
+// 3b. bd CLI (informational — beads is default-on)
+const bdBin = process.env.BD_BIN || 'bd';
+const bdPath = which(bdBin);
+if (bdPath) {
+  ok(`bd CLI: ${bdPath}`);
+} else {
+  console.log(`  ℹ bd CLI not found (beads task tracking will be inactive until bd is installed)`);
+}
+
 // 4. .env exists
 const envPath = path.join(root, '.env');
 if (fs.existsSync(envPath)) {
