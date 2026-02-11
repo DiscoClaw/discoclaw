@@ -88,3 +88,43 @@ Behavior:
 Known limitations:
 - GitHub issue #3187 reports that multi-turn stdin can hang after the first message. Mitigated by automatic hang detection + fallback.
 - Prompt construction is unchanged (full context sent every turn). Optimizing to skip redundant context is a follow-up.
+
+## Image Pipeline
+
+Any `image` content block in Claude Code's stream-json output is automatically captured and delivered as a Discord file attachment. Claude models don't natively generate images — images only appear when an MCP tool returns image content blocks.
+
+### How it works
+
+1. **Extraction** — `extractImageFromUnknownEvent()` in `claude-code-cli.ts` recognizes direct `{ type: 'image', source: { type: 'base64', media_type, data } }` blocks and `content_block_start` wrappers. `extractResultContentBlocks()` handles result events containing mixed text + image arrays.
+2. **Dedup** — `imageDedupeKey()` builds a key from media type + base64 length + 64-char prefix. Each consumer tracks a `Set<string>` of seen keys so duplicates (common with multi-turn mirrors) are dropped.
+3. **Delivery** — `buildAttachments()` in `output-common.ts` converts each `ImageData` to a Discord `AttachmentBuilder` (named `image-1.png`, etc.). The three consumer paths — message (`discord.ts`), reaction (`reaction-handler.ts`), and cron (`executor.ts`) — all collect images into an `ImageData[]` during streaming and pass them to the shared send helpers.
+
+### Key files
+
+| File | Role |
+|------|------|
+| `src/runtime/types.ts` | `ImageData` type, `image_data` EngineEvent variant |
+| `src/runtime/claude-code-cli.ts` | Extraction, dedup key, per-invocation image counting |
+| `src/runtime/long-running-process.ts` | Multi-turn mirror: dedup + emit for long-running sessions |
+| `src/discord/output-common.ts` | `buildAttachments()`, attachment slicing across message chunks |
+| `src/discord.ts` | Message path consumer |
+| `src/discord/reaction-handler.ts` | Reaction path consumer |
+| `src/cron/executor.ts` | Cron path consumer |
+
+### Limits
+
+| Limit | Value | Source |
+|-------|-------|--------|
+| Max base64 size per image | 25 MB | `MAX_IMAGE_BASE64_LEN` |
+| Max images per invocation | 10 | `MAX_IMAGES_PER_INVOCATION` |
+| Max attachments per Discord message | 10 | Discord API limit |
+
+### Enabling image generation
+
+Since Claude can't generate images directly, you need an MCP server that wraps an external image API (DALL-E, Replicate, Stability, etc.).
+
+1. **Set up an MCP server** that exposes a tool (e.g. `generate_image`) returning an `image` content block with `{ type: 'base64', media_type, data }`. Any MCP server that returns image content blocks will work — the pipeline is format-driven, not tool-name-driven.
+2. **Register it** in the workspace `.mcp.json` so Claude Code loads it on invocation.
+3. **Add workspace instructions** (in `workspace/SOUL.md` or system prompt) telling the bot it can generate images and when to use the tool.
+
+The rest is automatic: the runtime adapter extracts the image blocks, deduplicates them, and the Discord layer attaches them to the reply.
