@@ -79,6 +79,9 @@ All actions are gated by category env flags (off by default except channels).
 | Discord forum thread sync | `src/beads/discord-sync.ts` | **done** |
 | Auto-tag (AI classification) | `src/beads/auto-tag.ts` | **done** |
 | Full bead ↔ thread sync | `src/beads/bead-sync.ts` | **done** |
+| Sync coordinator (concurrency guard + cache) | `src/beads/bead-sync-coordinator.ts` | **done** |
+| File watcher (auto-sync on external changes) | `src/beads/bead-sync-watcher.ts` | **done** |
+| Bead thread cache | `src/beads/bead-thread-cache.ts` | **done** |
 | Hook scripts (on-create, on-update, etc.) | `scripts/beads/` | **done** |
 
 ## 8. Cron Subsystem (`src/cron/`)
@@ -122,7 +125,7 @@ All actions are gated by category env flags (off by default except channels).
 | Core (pidlock, bootstrap, permissions) | 3 tests | **done** |
 | Discord subsystem | 14 tests | **done** |
 | Runtime adapter | 1 test | **done** |
-| Beads subsystem | 4 tests | **done** |
+| Beads subsystem | 6 tests | **done** |
 | Cron subsystem | 3 tests | **done** |
 | Integration (fail-closed, prompt-context, status, channel-context) | 4 tests | **done** |
 

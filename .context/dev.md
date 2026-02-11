@@ -175,9 +175,19 @@ This is especially useful for systemd, where env loading can differ from your sh
 - **Timeout issues:** Look for `timeout` in logs. Adjust `RUNTIME_TIMEOUT_MS` if needed.
 - **PID lock conflicts:** Look for `pidlock` in logs. See ops.md for stale lock handling.
 
+## Bead Auto-Sync
+
+When the bot is running, external bead changes are detected automatically:
+
+- **Startup sync:** On boot, a fire-and-forget full sync runs to catch any drift that occurred while the bot was down.
+- **File watcher:** Watches `.beads/last-touched` for changes. When `bd` CLI modifies beads from a terminal or another Claude Code session, the watcher triggers a sync after a 2s debounce. Uses `fs.watch` with a stat-polling fallback.
+- **Coordinator:** All sync paths (watcher, startup, manual `beadSync` action) share a `BeadSyncCoordinator` that prevents concurrent syncs and invalidates the bead thread cache. Auto-triggered syncs are silent; only manual `beadSync` posts to the status channel.
+
+No extra env vars are needed — auto-sync activates whenever `DISCOCLAW_BEADS_ENABLED=1` and a guild is available.
+
 ## Bead Close Sync (Claude Code Hook)
 
-When `bd close` is run from a Claude Code session, a PostToolUse hook automatically syncs the Discord forum thread (archives it with a close message).
+When `bd close` is run from a Claude Code session, a PostToolUse hook syncs the Discord forum thread immediately (archives it with a close message). This is faster than waiting for the file watcher's 2s debounce, but both paths are idempotent.
 
 **How it works:** `.claude/hooks/bead-close-sync.sh` detects successful `bd close` commands, verifies the bead is actually closed, then calls `scripts/beads/bead-hooks/on-close.sh` which delegates to the TS implementation.
 

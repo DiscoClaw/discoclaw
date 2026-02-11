@@ -126,6 +126,8 @@ Two paths produce the same Discord state:
 
 Both use the `bd` binary for data storage and produce identical Discord thread state: emoji-prefixed thread names, auto-tagged forum tags, and archive-on-close behavior.
 
+**Auto-sync:** On startup and whenever `.beads/last-touched` changes on disk, a file watcher triggers a full sync automatically. This catches external mutations (e.g., `bd close` in a terminal or another Claude Code session) without requiring a restart or manual `beadSync` action. Auto-triggered syncs are silent (no status channel post); only explicit `beadSync` actions post to the status channel. All sync paths share a `BeadSyncCoordinator` that prevents concurrent syncs and invalidates the bead thread cache.
+
 Bead actions (requires `DISCOCLAW_DISCORD_ACTIONS=1` and `DISCOCLAW_DISCORD_ACTIONS_BEADS=1`):
 - `beadCreate` — create a bead + forum thread (auto-tagged if enabled)
 - `beadUpdate` — update bead fields + sync thread name/emoji
