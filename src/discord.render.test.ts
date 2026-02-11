@@ -280,17 +280,28 @@ describe('thinkingLabel', () => {
 // selectStreamingOutput
 // ---------------------------------------------------------------------------
 describe('selectStreamingOutput', () => {
-  it('deltaText wins over all others', () => {
+  it('deltaText wins over all others and shows thinking label above', () => {
     const out = selectStreamingOutput({
       deltaText: 'streaming text',
       activityLabel: 'Reading file...',
       finalText: 'final answer',
       statusTick: 0,
     });
-    // Should be a code block (renderDiscordTail)
+    // Should be bold thinking label + code block (renderDiscordTail)
+    expect(out).toContain('**Thinking.**');
     expect(out).toContain('```text');
     expect(out).toContain('streaming text');
-    expect(out).not.toContain('**');
+  });
+
+  it('deltaText thinking label animates with statusTick', () => {
+    const out2 = selectStreamingOutput({
+      deltaText: 'hello',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 2,
+    });
+    expect(out2).toContain('**Thinking...**');
+    expect(out2).toContain('hello');
   });
 
   it('activityLabel wins over finalText and default', () => {

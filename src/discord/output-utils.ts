@@ -144,7 +144,10 @@ export function selectStreamingOutput(opts: {
   finalText: string;
   statusTick: number;
 }): string {
-  if (opts.deltaText) return renderDiscordTail(opts.deltaText);
+  if (opts.deltaText) {
+    const label = thinkingLabel(opts.statusTick);
+    return `**${label}**\n${renderDiscordTail(opts.deltaText)}`;
+  }
   if (opts.activityLabel) return renderActivityTail(opts.activityLabel);
   if (opts.finalText) return renderDiscordTail(opts.finalText);
   return renderActivityTail(thinkingLabel(opts.statusTick));
