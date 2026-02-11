@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 // Types
 // ---------------------------------------------------------------------------
 
-export const CADENCE_TAGS = ['once', 'frequent', 'hourly', 'daily', 'weekly', 'monthly'] as const;
+export const CADENCE_TAGS = ['yearly', 'frequent', 'hourly', 'daily', 'weekly', 'monthly'] as const;
 export type CadenceTag = (typeof CADENCE_TAGS)[number];
 
 export type CronRunRecord = {

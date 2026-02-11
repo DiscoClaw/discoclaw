@@ -40,10 +40,21 @@ describe('detectCadence', () => {
     expect(detectCadence('')).toBe('daily');
   });
 
-  it('detects once for specific month', () => {
-    expect(detectCadence('0 6 11 2 *')).toBe('once');
-    expect(detectCadence('0 0 1 1 *')).toBe('once');
-    expect(detectCadence('0 12 25 12 *')).toBe('once');
+  it('detects yearly for single specific month', () => {
+    expect(detectCadence('0 6 11 2 *')).toBe('yearly');
+    expect(detectCadence('0 0 1 1 *')).toBe('yearly');
+    expect(detectCadence('0 12 25 12 *')).toBe('yearly');
+  });
+
+  it('falls through for multi-month patterns', () => {
+    // "1,7" = Jan + Jul → 2 months → not yearly, classify by other fields.
+    expect(detectCadence('0 7 * 1,7 *')).toBe('daily');
+    // "3-6" = Mar–Jun → 4 months → not yearly.
+    expect(detectCadence('0 7 * 3-6 *')).toBe('daily');
+    // Multi-month with specific dom → monthly.
+    expect(detectCadence('0 7 1 1,7 *')).toBe('monthly');
+    // Multi-month with wildcard minute → frequent.
+    expect(detectCadence('* * * 1,2,3 *')).toBe('frequent');
   });
 
   it('handles complex schedules', () => {

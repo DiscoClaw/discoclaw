@@ -57,6 +57,9 @@ export type CronContext = {
   // Used by cronTrigger to build a full executor context.
   // If not provided, manual triggers run with reduced capabilities (no tools, no actions).
   executorCtx?: CronExecutorContext;
+  // Thread IDs currently being created by cronCreate. The threadCreate listener
+  // checks this to avoid double-handling before scheduler.register() completes.
+  pendingThreadIds: Set<string>;
 };
 
 // ---------------------------------------------------------------------------
@@ -131,6 +134,9 @@ export async function executeCronAction(
       const threadName = buildCronThreadName(action.name, cadence);
       const starterContent = buildStarterContent(action.schedule, timezone, action.channel, action.prompt);
 
+      // Validate the schedule before creating the thread to avoid orphaned threads.
+      const def = { schedule: action.schedule, timezone, channel: action.channel, prompt: action.prompt };
+
       let thread;
       try {
         thread = await forum.threads.create({
@@ -146,12 +152,16 @@ export async function executeCronAction(
         return { ok: false, error: `Failed to create forum thread: ${msg}` };
       }
 
-      // Register with scheduler.
-      const def = { schedule: action.schedule, timezone, channel: action.channel, prompt: action.prompt };
+      // Mark thread as pending so the threadCreate listener skips it.
+      cronCtx.pendingThreadIds.add(thread.id);
+
+      // Register with scheduler, then clear the pending marker.
       try {
         cronCtx.scheduler.register(thread.id, thread.id, ctx.guild.id, action.name, def, cronId);
       } catch (err) {
         return { ok: false, error: `Invalid cron schedule: ${action.schedule}` };
+      } finally {
+        cronCtx.pendingThreadIds.delete(thread.id);
       }
 
       // Save stats. On create, set the classified model but don't set modelOverride —

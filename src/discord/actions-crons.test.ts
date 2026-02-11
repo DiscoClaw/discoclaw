@@ -119,6 +119,7 @@ function makeCronCtx(overrides?: Partial<CronContext>): CronContext {
     cwd: '/tmp',
     allowUserIds: new Set(['user-1']),
     log: mockLog(),
+    pendingThreadIds: new Set<string>(),
     ...overrides,
   };
 }

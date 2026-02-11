@@ -22,6 +22,9 @@ export type ForumSyncOptions = {
   log?: LoggerLike;
   // Optional: persistent stats store for cronId recovery and status messages.
   statsStore?: CronRunStats;
+  // Thread IDs currently being created by cronCreate action. Checked by the
+  // threadCreate listener to avoid double-handling before register() completes.
+  pendingThreadIds?: Set<string>;
 };
 
 function resolveForumChannel(client: Client, nameOrId: string): ForumChannel | null {
@@ -106,7 +109,12 @@ async function loadThreadAsCron(
 
   const starterAuthorId = (starter as any)?.author?.id ? String((starter as any).author.id) : '';
   const botUserId = thread.client?.user?.id ?? '';
-  const isBotAuthored = botUserId && starterAuthorId === botUserId;
+  // SECURITY: Bot-authored threads are accepted because cronCreate (the only
+  // code path that creates bot-authored threads in the cron forum) already
+  // requires the requesting user to be in the Discord allowlist. If another
+  // code path ever creates bot-authored cron forum threads, it must enforce
+  // its own authorization check.
+  const isBotAuthored = botUserId !== '' && starterAuthorId === botUserId;
   if (!starterAuthorId || (!opts.allowUserIds.has(starterAuthorId) && !isBotAuthored)) {
     opts.log?.warn({ threadId: thread.id, name: thread.name, starterAuthorId }, 'cron:forum starter author not allowlisted');
     scheduler.disable(thread.id);
@@ -203,7 +211,7 @@ async function loadThreadAsCron(
 }
 
 export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: string }> {
-  const { client, forumChannelNameOrId, allowUserIds, scheduler, runtime, cronModel, cwd, log, statsStore } = opts;
+  const { client, forumChannelNameOrId, allowUserIds, scheduler, runtime, cronModel, cwd, log, statsStore, pendingThreadIds } = opts;
 
   if (!isSnowflakeId(forumChannelNameOrId)) {
     log?.warn({ forumChannelNameOrId }, 'cron:forum name-based resolution is ambiguous; prefer a channel ID');
@@ -251,11 +259,12 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
     try {
       if (thread.parentId !== forumId) return;
 
-      // Skip threads already registered by cronCreate action to avoid
-      // double-handling (the bot-authored starter message would fail the
-      // allowlist check since the bot's own ID isn't in allowUserIds).
-      if (scheduler.getJob(thread.id)) {
-        log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadCreate skipped (already registered)');
+      // Skip threads created by cronCreate action to avoid double-handling.
+      // Check both the scheduler (already registered) and the pending set
+      // (registered soon — covers the window between threads.create and
+      // scheduler.register in the cronCreate flow).
+      if (scheduler.getJob(thread.id) || pendingThreadIds?.has(thread.id)) {
+        log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadCreate skipped (already registered or pending)');
         return;
       }
 

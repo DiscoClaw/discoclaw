@@ -387,6 +387,8 @@ if (cronEnabled && effectiveCronForum) {
     botProfile: false, // Intentionally excluded from cron flows to avoid rate-limit and abuse issues.
   };
 
+  const cronPendingThreadIds = new Set<string>();
+
   const cronCtx: CronContext = {
     scheduler: null as any, // Will be set after scheduler creation.
     client,
@@ -399,6 +401,7 @@ if (cronEnabled && effectiveCronForum) {
     cwd: workspaceCwd,
     allowUserIds,
     log,
+    pendingThreadIds: cronPendingThreadIds,
   };
 
   const cronExecCtx = {
@@ -437,6 +440,7 @@ if (cronEnabled && effectiveCronForum) {
       allowUserIds,
       log,
       statsStore: cronStats,
+      pendingThreadIds: cronPendingThreadIds,
     });
   } catch (err) {
     log.error({ err }, 'cron:forum init failed');
