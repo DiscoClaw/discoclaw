@@ -13,6 +13,7 @@ Core instructions live in `CLAUDE.md` at the repo root.
 | **Development / build / test** | `dev.md` |
 | **Runtime adapters (Claude CLI, OpenAI/Gemini later)** | `runtime.md` |
 | **Ops / systemd service** | `ops.md` |
+| **Architecture / system overview** | `architecture.md` |
 
 ## Context Hygiene (Strict)
 - Read the minimum necessary modules for the task.
@@ -24,4 +25,5 @@ Core instructions live in `CLAUDE.md` at the repo root.
 - **discord.md** — Allowlist gating, session keys, threading rules, output constraints
 - **runtime.md** — Runtime adapter interface, Claude CLI flags, capability routing
 - **ops.md** — systemd service notes, logs, restart workflow
+- **architecture.md** — System overview, data flow, directory layout, key concepts
 - **bot-setup.md** — One-time bot creation and invite guide

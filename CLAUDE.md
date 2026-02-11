@@ -24,6 +24,7 @@ Never auto-load all `.context/` modules. Read only what the task requires.
 | Dev workflow / env / build | `.context/dev.md` |
 | Ops / systemd / deploy | `.context/ops.md` |
 | Bot setup (invite + env) | `.context/bot-setup.md` |
+| Architecture / system overview | `.context/architecture.md` |
 
 See `.context/README.md` for details.
 
