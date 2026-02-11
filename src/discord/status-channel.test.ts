@@ -77,7 +77,7 @@ describe('createStatusPoster', () => {
   it('does not throw when channel.send fails', async () => {
     const ch = { send: vi.fn().mockRejectedValue(new Error('network')) } as any;
     const log = mockLog();
-    const poster = createStatusPoster(ch, log);
+    const poster = createStatusPoster(ch, undefined, log);
     await expect(poster.online()).resolves.toBeUndefined();
     expect(log.warn).toHaveBeenCalledOnce();
   });

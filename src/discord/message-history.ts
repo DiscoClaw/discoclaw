@@ -3,6 +3,7 @@ import type { TextBasedChannel } from 'discord.js';
 export type MessageHistoryOpts = {
   budgetChars: number;
   fetchLimit?: number;
+  botDisplayName?: string;
 };
 
 /**
@@ -39,7 +40,7 @@ export async function fetchMessageHistory(
 
   for (let i = sorted.length - 1; i >= 0 && remaining > 0; i--) {
     const m = sorted[i]!;
-    const author = m.author.bot ? 'Discoclaw' : (m.author.displayName || m.author.username);
+    const author = m.author.bot ? (opts.botDisplayName ?? 'Discoclaw') : (m.author.displayName || m.author.username);
     const content = String(m.content ?? '');
     const full = `[${author}]: ${content}`;
 

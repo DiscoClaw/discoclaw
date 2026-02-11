@@ -41,12 +41,13 @@ export function renderHealthReport(opts: {
   queueDepth: number;
   config: HealthConfigSnapshot;
   mode: HealthCommandMode;
+  botDisplayName?: string;
 }): string {
   const snap = opts.metrics.snapshot();
   const counters = snap.counters;
   const lines: string[] = [];
 
-  lines.push('Discoclaw Health');
+  lines.push(`${opts.botDisplayName ?? 'Discoclaw'} Health`);
   lines.push(`Uptime: ${formatUptime(Date.now() - snap.startedAt)}`);
   lines.push(`Queue depth: ${opts.queueDepth}`);
   lines.push(`Messages: ${counters['discord.message.received'] ?? 0} | Reactions: ${counters['discord.reaction.received'] ?? 0}`);
@@ -89,9 +90,10 @@ export function renderHealthToolsReport(opts: {
   permissionTier: string;
   effectiveTools: string[];
   configuredRuntimeTools: readonly string[];
+  botDisplayName?: string;
 }): string {
   const lines: string[] = [];
-  lines.push('Discoclaw Tools');
+  lines.push(`${opts.botDisplayName ?? 'Discoclaw'} Tools`);
   lines.push(`Permission tier: ${opts.permissionTier}`);
   lines.push(`Effective tools: ${opts.effectiveTools.length > 0 ? opts.effectiveTools.join(', ') : '(none)'}`);
   lines.push(`Configured runtime tools: ${opts.configuredRuntimeTools.length > 0 ? opts.configuredRuntimeTools.join(', ') : '(none)'}`);

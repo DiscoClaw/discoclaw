@@ -62,6 +62,7 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
 function baseParams(runtimeOverride: any, overrides: Partial<any> = {}) {
   return {
     allowUserIds: new Set(['123']),
+    botDisplayName: 'TestBot',
     runtime: runtimeOverride,
     sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
     workspaceCwd: '/tmp',

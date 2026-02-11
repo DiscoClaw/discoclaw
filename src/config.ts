@@ -90,6 +90,8 @@ export type DiscoclawConfig = {
 
   healthCommandsEnabled: boolean;
   healthVerboseAllowlist: Set<string>;
+
+  botDisplayName?: string;
 };
 
 function parseBoolean(
@@ -335,6 +337,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
       healthCommandsEnabled: parseBoolean(env, 'DISCOCLAW_HEALTH_COMMANDS_ENABLED', true),
       healthVerboseAllowlist,
+
+      botDisplayName: parseTrimmedString(env, 'DISCOCLAW_BOT_NAME'),
     },
     warnings,
     infos,

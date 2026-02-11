@@ -85,6 +85,7 @@ describe('prompt includes correct context file paths', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     await handler(makeMsg({ channelId: 'chan' }));
@@ -154,6 +155,7 @@ describe('prompt includes correct context file paths', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     await handler(makeMsg({
@@ -223,6 +225,7 @@ describe('prompt includes correct context file paths', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
@@ -278,6 +281,7 @@ describe('discord action flags are not frozen at handler creation', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     };
 
     const handler = createMessageCreateHandler(params, queue);
@@ -345,6 +349,7 @@ describe('durable memory injection into prompt', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
@@ -420,6 +425,7 @@ describe('workspace PA files in prompt', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     await handler(makeMsg({ channelId: 'chan' }));
@@ -489,6 +495,7 @@ describe('workspace PA files in prompt', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
@@ -549,6 +556,7 @@ describe('workspace PA files in prompt', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
@@ -606,6 +614,7 @@ describe('memory command interception', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     const msg = makeMsg({ guildId: null, channelId: 'dmchan', content: '!memory show' });

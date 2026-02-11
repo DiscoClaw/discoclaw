@@ -18,7 +18,8 @@ const Colors = {
   orange: 0xfee75c,
 } as const;
 
-export function createStatusPoster(channel: Sendable, log?: LoggerLike): StatusPoster {
+export function createStatusPoster(channel: Sendable, botDisplayName?: string, log?: LoggerLike): StatusPoster {
+  const name = botDisplayName ?? 'Discoclaw';
   const send = async (embed: EmbedBuilder) => {
     try {
       await channel.send({ embeds: [embed] });
@@ -33,7 +34,7 @@ export function createStatusPoster(channel: Sendable, log?: LoggerLike): StatusP
         new EmbedBuilder()
           .setColor(Colors.green)
           .setTitle('Bot Online')
-          .setDescription('Discoclaw is connected and ready.')
+          .setDescription(`${name} is connected and ready.`)
           .setTimestamp(),
       );
     },
@@ -43,7 +44,7 @@ export function createStatusPoster(channel: Sendable, log?: LoggerLike): StatusP
         new EmbedBuilder()
           .setColor(Colors.gray)
           .setTitle('Bot Offline')
-          .setDescription('Discoclaw is shutting down.')
+          .setDescription(`${name} is shutting down.`)
           .setTimestamp(),
       );
     },

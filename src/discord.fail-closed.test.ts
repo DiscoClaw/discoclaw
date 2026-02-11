@@ -46,6 +46,7 @@ describe('Discord handler (fail closed)', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     const msg = {
@@ -101,6 +102,7 @@ describe('Discord handler (fail closed)', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     const msg = {
@@ -156,6 +158,7 @@ describe('Discord handler (fail closed)', () => {
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      botDisplayName: 'TestBot',
     }, queue);
 
     const msg = {

@@ -195,7 +195,7 @@ export function createReactionAddHandler(
           };
 
           if (params.discordActionsEnabled) {
-            prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags);
+            prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags, params.botDisplayName);
           }
 
           const addDirs: string[] = [];

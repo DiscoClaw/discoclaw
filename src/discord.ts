@@ -39,6 +39,7 @@ export type BotParams = {
   // If set and the bot is in multiple guilds, selects the guild used for system bootstrap.
   // If unset and the bot is in exactly one guild, that guild is used.
   guildId?: string;
+  botDisplayName: string;
   // If set, restricts non-DM messages to these channel IDs (or thread parent IDs).
   // If unset, all channels are allowed (user allowlist still applies).
   allowChannelIds?: Set<string>;
@@ -195,6 +196,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             permissionTier: liveTools.permissionTier,
             effectiveTools: liveTools.effectiveTools,
             configuredRuntimeTools: params.runtimeTools,
+            botDisplayName: params.botDisplayName,
           });
           await msg.reply({ content: toolsReport, allowedMentions: NO_MENTIONS });
           return;
@@ -226,6 +228,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           queueDepth: queue.size?.() ?? 0,
           config: healthConfig,
           mode,
+          botDisplayName: params.botDisplayName,
         });
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
         return;
@@ -332,7 +335,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               historySection = await fetchMessageHistory(
                 msg.channel,
                 msg.id,
-                { budgetChars: params.messageHistoryBudget },
+                { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
               );
             } catch (err) {
               params.log?.warn({ err }, 'discord:history fetch failed');
@@ -373,7 +376,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             String(msg.content ?? '');
 
           if (params.discordActionsEnabled && !isDm) {
-            prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags);
+            prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags, params.botDisplayName);
           }
 
           const addDirs: string[] = [];
@@ -626,7 +629,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 exchange:
                   (historySection ? historySection + '\n' : '') +
                   `[${msg.author.displayName || msg.author.username}]: ${msg.content}\n` +
-                  `[Discoclaw]: ${(processedText || '').slice(0, 500)}`,
+                  `[${params.botDisplayName}]: ${(processedText || '').slice(0, 500)}`,
               };
             }
           }
@@ -679,25 +682,52 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
   };
 }
 
-function resolveStatusChannel(client: Client, nameOrId: string, log?: LoggerLike): StatusPoster | null {
+function resolveStatusChannel(client: Client, nameOrId: string, botDisplayName?: string, log?: LoggerLike): StatusPoster | null {
   // Try by ID first, then by name across all guilds.
   const byId = client.channels.cache.get(nameOrId);
-  if (byId?.isTextBased() && !byId.isDMBased()) return createStatusPoster(byId, log);
+  if (byId?.isTextBased() && !byId.isDMBased()) return createStatusPoster(byId, botDisplayName, log);
 
   for (const guild of client.guilds.cache.values()) {
     const ch = guild.channels.cache.find(
       (c) => c.isTextBased() && c.name === nameOrId,
     );
-    if (ch && ch.isTextBased()) return createStatusPoster(ch, log);
+    if (ch && ch.isTextBased()) return createStatusPoster(ch, botDisplayName, log);
   }
   return null;
 }
 
-async function resolveStatusChannelById(client: Client, channelId: string, log?: LoggerLike): Promise<StatusPoster | null> {
+async function resolveStatusChannelById(client: Client, channelId: string, botDisplayName?: string, log?: LoggerLike): Promise<StatusPoster | null> {
   const cached = client.channels.cache.get(channelId);
   const ch = cached ?? await client.channels.fetch(channelId).catch(() => null);
-  if (ch?.isTextBased() && !ch.isDMBased()) return createStatusPoster(ch as any, log);
+  if (ch?.isTextBased() && !ch.isDMBased()) return createStatusPoster(ch as any, botDisplayName, log);
   return null;
+}
+
+export async function setBotNickname(guild: any, nickname: string, log?: LoggerLike): Promise<void> {
+  try {
+    let me = guild.members?.me;
+    if (!me) {
+      try {
+        me = await guild.members.fetchMe();
+      } catch {
+        log?.warn({ guildId: guild.id }, 'discord:nickname could not fetch bot member');
+        return;
+      }
+    }
+    // Skip if nickname already matches.
+    if (me.nickname === nickname) return;
+    // Skip if no nickname is set and the username already matches.
+    if (me.nickname == null && me.user?.username === nickname) return;
+
+    await me.setNickname(nickname, 'Automatic nickname from bot identity');
+    log?.info({ guildId: guild.id, nickname }, 'discord:nickname set');
+  } catch (err: any) {
+    if (err?.code === 50013) {
+      log?.warn({ guildId: guild.id }, 'discord:nickname Missing Permissions — cannot set nickname');
+    } else {
+      log?.warn({ err, guildId: guild.id }, 'discord:nickname failed to set');
+    }
+  }
 }
 
 export async function startDiscordBot(params: BotParams): Promise<{ client: Client; status: StatusPoster | null; system: SystemScaffold | null }> {
@@ -743,6 +773,10 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
     });
   }
 
+  client.on('guildCreate', async (guild: any) => {
+    await setBotNickname(guild, params.botDisplayName, params.log);
+  });
+
   await client.login(params.token);
 
   // Wait for cache to be ready before resolving the status channel.
@@ -769,8 +803,13 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
     system = null;
   }
 
+  // Set bot nickname in all guilds.
+  for (const guild of client.guilds.cache.values()) {
+    await setBotNickname(guild, params.botDisplayName, params.log);
+  }
+
   if (params.statusChannel) {
-    statusRef.current = resolveStatusChannel(client, params.statusChannel, params.log);
+    statusRef.current = resolveStatusChannel(client, params.statusChannel, params.botDisplayName, params.log);
     if (statusRef.current) {
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       statusRef.current.online();
@@ -778,7 +817,7 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
       params.log?.warn({ statusChannel: params.statusChannel }, 'status-channel: channel not found, status posting disabled');
     }
   } else if (system?.statusChannelId) {
-    statusRef.current = await resolveStatusChannelById(client, system.statusChannelId, params.log);
+    statusRef.current = await resolveStatusChannelById(client, system.statusChannelId, params.botDisplayName, params.log);
     if (statusRef.current) {
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       statusRef.current.online();

@@ -154,7 +154,8 @@ export async function executeDiscordActions(
 // Prompt section
 // ---------------------------------------------------------------------------
 
-export function discordActionsPromptSection(flags: ActionCategoryFlags): string {
+export function discordActionsPromptSection(flags: ActionCategoryFlags, botDisplayName?: string): string {
+  const displayName = botDisplayName ?? 'Discoclaw';
   const sections: string[] = [];
 
   sections.push(`## Discord Actions
@@ -201,7 +202,7 @@ These actions require the bot to have appropriate permissions in this Discord se
 
 If an action fails with a "Missing Permissions" or "Missing Access" error, tell the user:
 1. Open **Server Settings → Roles**.
-2. Find the Discoclaw bot's role (usually named after the bot).
+2. Find the ${displayName} bot's role (usually named after the bot).
 3. Enable the required permission under the role's permissions.
 4. The bot may need to be re-invited with the "moderator" permission profile if the role wasn't granted at invite time.`);
 

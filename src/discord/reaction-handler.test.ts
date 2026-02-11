@@ -94,6 +94,7 @@ function makeParams(overrides?: Partial<Omit<BotParams, 'token'>>): Omit<BotPara
   return {
     allowUserIds: new Set(['user-1']),
     allowChannelIds: undefined,
+    botDisplayName: 'TestBot',
     log: mockLog(),
     discordChannelContext: undefined,
     requireChannelContext: false,

@@ -24,6 +24,7 @@ function makeMsg(content: string, authorId = '123') {
 function baseParams(metrics: MetricsRegistry, overrides: Partial<any> = {}) {
   return {
     allowUserIds: new Set(['123']),
+    botDisplayName: 'TestBot',
     runtime: { invoke: vi.fn(async function* () { yield { type: 'text_final', text: 'ok' } as any; }) } as any,
     sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
     workspaceCwd: '/tmp',
@@ -95,7 +96,7 @@ describe('health command integration', () => {
     expect((params.runtime.invoke as any)).not.toHaveBeenCalled();
     const payload = (msg.reply as any).mock.calls[0]?.[0];
     expect(payload).toBeTruthy();
-    expect(payload.content).toContain('Discoclaw Health');
+    expect(payload.content).toContain('TestBot Health');
   });
 
   it('falls back to basic for !health verbose when user is not in verbose allowlist', async () => {
@@ -129,7 +130,7 @@ describe('health command integration', () => {
     expect((params.runtime.invoke as any)).not.toHaveBeenCalled();
     const payload = (msg.reply as any).mock.calls[0]?.[0];
     expect(payload).toBeTruthy();
-    expect(payload.content).toContain('Discoclaw Tools');
+    expect(payload.content).toContain('TestBot Tools');
     expect(payload.content).toContain('Permission tier: env');
     expect(payload.content).toContain('Effective tools: Read, Edit, WebSearch');
   });

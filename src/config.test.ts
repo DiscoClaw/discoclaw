@@ -61,4 +61,19 @@ describe('parseConfig', () => {
     expect(warnings.some((w) => w.includes('category flags are ignored'))).toBe(false);
     expect(infos.some((i) => i.includes('category flags are ignored'))).toBe(true);
   });
+
+  it('parses DISCOCLAW_BOT_NAME when set', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_NAME: 'Weston' }));
+    expect(config.botDisplayName).toBe('Weston');
+  });
+
+  it('returns undefined for botDisplayName when DISCOCLAW_BOT_NAME is unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.botDisplayName).toBeUndefined();
+  });
+
+  it('returns undefined for botDisplayName when DISCOCLAW_BOT_NAME is whitespace-only', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_NAME: '   ' }));
+    expect(config.botDisplayName).toBeUndefined();
+  });
 });

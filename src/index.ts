@@ -24,6 +24,7 @@ import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
 import { ensureForumTags } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
+import { parseIdentityName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
@@ -154,6 +155,17 @@ const useGroupDirCwd = cfg.useGroupDirCwd;
 // --- Scaffold workspace PA files (first run) ---
 await ensureWorkspaceBootstrapFiles(workspaceCwd, log);
 
+// --- Resolve bot display name ---
+let botDisplayName = cfg.botDisplayName ?? await parseIdentityName(workspaceCwd) ?? 'Discoclaw';
+if (botDisplayName.length > 32) {
+  log.warn({ original: botDisplayName, truncated: botDisplayName.slice(0, 32) }, 'botDisplayName exceeds Discord 32-char nickname limit; truncating');
+  botDisplayName = botDisplayName.slice(0, 32);
+}
+if (!botDisplayName.trim()) {
+  botDisplayName = 'Discoclaw';
+}
+log.info({ botDisplayName }, 'resolved bot display name');
+
 // --- Beads subsystem ---
 const beadsEnabled = cfg.beadsEnabled;
 const beadsCwd = cfg.beadsCwdOverride || workspaceCwd;
@@ -243,6 +255,7 @@ const botParams = {
   token,
   allowUserIds,
   guildId,
+  botDisplayName,
   allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
   log,
   discordChannelContext,
