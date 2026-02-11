@@ -48,7 +48,7 @@ async function sleep(ms: number | undefined): Promise<void> {
  *
  * Phase 1: Create threads for beads missing external_ref.
  * Phase 2: Fix label mismatches (e.g., blocked label on open beads).
- * Phase 3: Sync emoji/names for existing threads.
+ * Phase 3: Sync emoji/names/starter content for existing threads.
  * Phase 4: Archive threads for closed beads.
  */
 export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult> {

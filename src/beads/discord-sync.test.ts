@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead } from './discord-sync.js';
+import { describe, expect, it, vi } from 'vitest';
+import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage } from './discord-sync.js';
 import type { BeadData } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -130,5 +130,84 @@ describe('getThreadIdFromBead', () => {
 
   it('handles whitespace', () => {
     expect(getThreadIdFromBead(makeBead('  discord:123  '))).toBe('123');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateBeadStarterMessage
+// ---------------------------------------------------------------------------
+
+describe('updateBeadStarterMessage', () => {
+  const bead: BeadData = {
+    id: 'ws-001',
+    title: 'Test',
+    description: 'A test bead',
+    status: 'open',
+    priority: 2,
+    issue_type: 'task',
+    owner: '',
+    external_ref: '',
+    labels: [],
+    comments: [],
+    created_at: '',
+    updated_at: '',
+    close_reason: '',
+  };
+
+  function makeClient(thread: any): any {
+    return {
+      channels: { cache: { get: () => thread } },
+      user: { id: 'bot-123' },
+    };
+  }
+
+  function makeThread(starterOverrides?: Record<string, any>): any {
+    const editFn = vi.fn();
+    return {
+      isThread: () => true,
+      fetchStarterMessage: vi.fn(async () => ({
+        author: { id: 'bot-123' },
+        content: 'old content',
+        edit: editFn,
+        ...starterOverrides,
+      })),
+      _editFn: editFn,
+    };
+  }
+
+  it('returns false when thread is not found', async () => {
+    const client = { channels: { cache: { get: () => undefined } }, user: { id: 'bot-123' } } as any;
+    expect(await updateBeadStarterMessage(client, 'missing', bead)).toBe(false);
+  });
+
+  it('returns false when fetchStarterMessage throws', async () => {
+    const thread = {
+      isThread: () => true,
+      fetchStarterMessage: vi.fn(async () => { throw new Error('not found'); }),
+    };
+    expect(await updateBeadStarterMessage(makeClient(thread), '123', bead)).toBe(false);
+  });
+
+  it('returns false when starter is not bot-authored', async () => {
+    const thread = makeThread({ author: { id: 'user-456' } });
+    expect(await updateBeadStarterMessage(makeClient(thread), '123', bead)).toBe(false);
+    expect(thread._editFn).not.toHaveBeenCalled();
+  });
+
+  it('returns false when content is already identical (idempotent)', async () => {
+    const currentContent = buildBeadStarterContent(bead);
+    const thread = makeThread({ content: currentContent });
+    expect(await updateBeadStarterMessage(makeClient(thread), '123', bead)).toBe(false);
+    expect(thread._editFn).not.toHaveBeenCalled();
+  });
+
+  it('edits starter and returns true when content differs', async () => {
+    const thread = makeThread({ content: 'stale content' });
+    const result = await updateBeadStarterMessage(makeClient(thread), '123', bead);
+    expect(result).toBe(true);
+    expect(thread._editFn).toHaveBeenCalledWith({
+      content: buildBeadStarterContent(bead),
+      allowedMentions: { parse: [] },
+    });
   });
 });
