@@ -179,7 +179,7 @@ export async function loadDiscordChannelContext(opts: {
   // Ensure base/ directory exists.
   await fs.mkdir(baseDir, { recursive: true });
 
-  // Seed minimal core.md / safety.md if the directory is empty (first run).
+  // Seed base context files if missing (first run).
   await writeFileIfMissing(
     path.join(baseDir, 'core.md'),
     [
@@ -218,7 +218,7 @@ export async function loadDiscordChannelContext(opts: {
       '- Per-channel context files live in content/discord/channels/',
       '- Your workspace and identity files (SOUL.md, IDENTITY.md, etc.) are in workspace/',
       '',
-      'For architecture details, read: .context/architecture.md',
+      'For architecture details, see the project\'s .context/architecture.md',
       'For your behavioral rules, read: the other base context files loaded alongside this one.',
       '',
     ].join('\n'),
