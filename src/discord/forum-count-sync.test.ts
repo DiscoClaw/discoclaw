@@ -63,6 +63,10 @@ describe('stripCountSuffix', () => {
   it('strips stacked slugified corruption "beads-6-・-・-6"', () => {
     expect(stripCountSuffix('beads-6-・-・-6')).toBe('beads');
   });
+
+  it('strips compact format "crons・1"', () => {
+    expect(stripCountSuffix('crons・1')).toBe('crons');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -94,7 +98,7 @@ describe('ForumCountSync', () => {
 
     expect(countFn).toHaveBeenCalledTimes(1);
     expect(channel.setName).toHaveBeenCalledTimes(1);
-    expect(channel.setName).toHaveBeenCalledWith('beads ・ 5');
+    expect(channel.setName).toHaveBeenCalledWith('beads・5');
 
     sync.stop();
   });
@@ -111,12 +115,12 @@ describe('ForumCountSync', () => {
     sync.requestUpdate();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(channel.setName).toHaveBeenCalledTimes(1);
-    expect(channel.setName).toHaveBeenCalledWith('beads ・ 3');
+    expect(channel.setName).toHaveBeenCalledWith('beads・3');
 
     // Second update shortly after.
     count = 4;
     // Update the channel mock name to reflect last setName.
-    channel.name = 'beads ・ 3';
+    channel.name = 'beads・3';
     sync.requestUpdate();
     await vi.advanceTimersByTimeAsync(10_000); // debounce fires, but rate limit defers
 
@@ -126,13 +130,13 @@ describe('ForumCountSync', () => {
     // Advance to remaining time (~5min - 20s = ~280s).
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(channel.setName).toHaveBeenCalledTimes(2);
-    expect(channel.setName).toHaveBeenLastCalledWith('beads ・ 4');
+    expect(channel.setName).toHaveBeenLastCalledWith('beads・4');
 
     sync.stop();
   });
 
   it('no-op does not consume rate budget', async () => {
-    const channel = mockChannel('beads ・ 5');
+    const channel = mockChannel('beads・5');
     const client = makeClient(channel);
     const countFn = vi.fn(() => 5);
 
@@ -150,7 +154,7 @@ describe('ForumCountSync', () => {
     sync.requestUpdate();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(channel.setName).toHaveBeenCalledTimes(1);
-    expect(channel.setName).toHaveBeenCalledWith('beads ・ 6');
+    expect(channel.setName).toHaveBeenCalledWith('beads・6');
 
     sync.stop();
   });
@@ -171,7 +175,7 @@ describe('ForumCountSync', () => {
 
     // Request another update (will be deferred).
     count = 2;
-    channel.name = 'beads ・ 1';
+    channel.name = 'beads・1';
     sync.requestUpdate();
     await vi.advanceTimersByTimeAsync(10_000); // debounce fires
 
@@ -230,7 +234,7 @@ describe('ForumCountSync', () => {
     channel.setName = vi.fn(async () => {});
     await vi.advanceTimersByTimeAsync(30_000); // retry_after fires
 
-    expect(channel.setName).toHaveBeenCalledWith('beads ・ 5');
+    expect(channel.setName).toHaveBeenCalledWith('beads・5');
 
     sync.stop();
   });
@@ -246,7 +250,7 @@ describe('ForumCountSync', () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(channel.setName).toHaveBeenCalledTimes(1);
-    expect(channel.setName).toHaveBeenCalledWith('beads ・ 5');
+    expect(channel.setName).toHaveBeenCalledWith('beads・5');
 
     sync.stop();
   });

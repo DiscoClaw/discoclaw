@@ -5,7 +5,7 @@ import type { LoggerLike } from './action-types.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Strip a trailing ` ・ N` or legacy ` (N)` count suffix from a forum channel name. */
+/** Strip a trailing `・N` (or legacy ` ・ N`, `(N)`, `-・-N`) count suffix from a forum name. */
 export function stripCountSuffix(name: string): string {
   let result = name;
   // Loop to handle stacked corruption (e.g. "beads-6-・-・-6" from multiple
@@ -13,8 +13,7 @@ export function stripCountSuffix(name: string): string {
   let prev: string;
   do {
     prev = result;
-    // Strip structured suffix (katakana dot or parens).
-    // Also handle Discord-slugified form where spaces become hyphens: `-・-N`.
+    // Strip structured suffix: `・N`, ` ・ N`, `-・-N`, or `(N)`.
     result = result.replace(/[\s-]*(?:・[\s-]*\d+|\(\d+\))$/, '');
     // Clean up any trailing separator debris (lone `・` without a count digit).
     result = result.replace(/[\s-]*・[\s-]*$/, '');
@@ -100,7 +99,7 @@ export class ForumCountSync {
 
     const currentName = channel.name;
     const baseName = stripCountSuffix(currentName);
-    const newName = `${baseName} ・ ${count}`;
+    const newName = `${baseName}・${count}`;
 
     if (newName === currentName) {
       this.log?.info({ forumId: this.forumId, name: currentName }, 'forum-count-sync: name unchanged, skipping');
