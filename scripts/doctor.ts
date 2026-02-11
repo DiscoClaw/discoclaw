@@ -6,6 +6,7 @@
  * Usage:  pnpm doctor
  */
 
+import 'dotenv/config';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -93,7 +94,27 @@ if (fs.existsSync(prePushHook)) {
   console.log('  ℹ pre-push hook not installed (run: pnpm install)');
 }
 
-// 5. .env exists
+// 5. workspace/PERMISSIONS.json (informational)
+const wsDir = process.env.WORKSPACE_CWD
+  || (process.env.DISCOCLAW_DATA_DIR ? path.join(process.env.DISCOCLAW_DATA_DIR, 'workspace') : path.join(root, 'workspace'));
+const permPath = path.join(wsDir, 'PERMISSIONS.json');
+if (fs.existsSync(permPath)) {
+  try {
+    const permRaw = JSON.parse(fs.readFileSync(permPath, 'utf8'));
+    const tier = typeof permRaw?.tier === 'string' ? permRaw.tier : undefined;
+    if (tier && ['readonly', 'standard', 'full', 'custom'].includes(tier)) {
+      ok(`PERMISSIONS.json: tier=${tier}`);
+    } else {
+      fail('PERMISSIONS.json exists but is malformed', `Invalid tier: ${JSON.stringify(permRaw?.tier)}`);
+    }
+  } catch {
+    fail('PERMISSIONS.json exists but is not valid JSON');
+  }
+} else {
+  console.log('  ℹ PERMISSIONS.json not found (will use env/default tools until onboarding runs)');
+}
+
+// 6. .env exists
 const envPath = path.join(root, '.env');
 if (fs.existsSync(envPath)) {
   ok('.env file exists');
@@ -101,7 +122,7 @@ if (fs.existsSync(envPath)) {
   fail('.env file missing', 'Run: cp .env.example .env');
 }
 
-// 6. Required env vars
+// 7. Required env vars
 const requiredVars = ['DISCORD_TOKEN', 'DISCORD_ALLOW_USER_IDS'];
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf8');
