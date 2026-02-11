@@ -106,6 +106,7 @@ function baseParams(overrides: Partial<BotParams> = {}): BotParams {
     summaryMaxChars: 2000,
     summaryEveryNTurns: 5,
     summaryDataDir: '/tmp/summaries',
+    summaryToDurableEnabled: false,
     durableMemoryEnabled: false,
     durableDataDir: '/tmp/durable',
     durableInjectMaxChars: 2000,

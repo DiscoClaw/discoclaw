@@ -124,6 +124,7 @@ const durableDataDir = cfg.durableDataDirOverride
 const durableInjectMaxChars = cfg.durableInjectMaxChars;
 const durableMaxItems = cfg.durableMaxItems;
 const memoryCommandsEnabled = cfg.memoryCommandsEnabled;
+const summaryToDurableEnabled = cfg.summaryToDurableEnabled;
 const actionFollowupDepth = cfg.actionFollowupDepth;
 const reactionHandlerEnabled = cfg.reactionHandlerEnabled;
 const reactionRemoveHandlerEnabled = cfg.reactionRemoveHandlerEnabled;
@@ -296,6 +297,7 @@ const botParams = {
   durableInjectMaxChars,
   durableMaxItems,
   memoryCommandsEnabled,
+  summaryToDurableEnabled,
   statusChannel,
   bootstrapEnsureBeadsForum: beadsEnabled && bdAvailable,
   toolAwareStreaming,

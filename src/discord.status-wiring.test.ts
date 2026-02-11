@@ -53,6 +53,7 @@ function baseParams(runtimeOverride: any) {
     summaryMaxChars: 2000,
     summaryEveryNTurns: 5,
     summaryDataDir: '/tmp/summaries',
+    summaryToDurableEnabled: false,
     durableMemoryEnabled: false,
     durableDataDir: '/tmp/durable',
     durableInjectMaxChars: 2000,

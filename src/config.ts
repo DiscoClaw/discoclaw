@@ -46,6 +46,7 @@ export type DiscoclawConfig = {
   durableInjectMaxChars: number;
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
+  summaryToDurableEnabled: boolean;
   actionFollowupDepth: number;
 
   reactionHandlerEnabled: boolean;
@@ -325,6 +326,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       durableInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_DURABLE_INJECT_MAX_CHARS', 2000),
       durableMaxItems: parsePositiveInt(env, 'DISCOCLAW_DURABLE_MAX_ITEMS', 200),
       memoryCommandsEnabled: parseBoolean(env, 'DISCOCLAW_MEMORY_COMMANDS_ENABLED', true),
+      summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', false),
       actionFollowupDepth: parseNonNegativeInt(env, 'DISCOCLAW_ACTION_FOLLOWUP_DEPTH', 3),
 
       reactionHandlerEnabled: parseBoolean(env, 'DISCOCLAW_REACTION_HANDLER', true),

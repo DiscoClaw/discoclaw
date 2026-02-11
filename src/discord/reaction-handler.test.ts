@@ -130,6 +130,7 @@ function makeParams(overrides?: Partial<Omit<BotParams, 'token'>>): Omit<BotPara
     summaryMaxChars: 2000,
     summaryEveryNTurns: 5,
     summaryDataDir: '/tmp/summary',
+    summaryToDurableEnabled: false,
     durableMemoryEnabled: false,
     durableDataDir: '/tmp/durable',
     durableInjectMaxChars: 2000,

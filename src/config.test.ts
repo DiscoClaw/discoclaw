@@ -156,6 +156,17 @@ describe('parseConfig', () => {
     expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE'))).toBe(true);
   });
 
+  // --- Summary-to-durable ---
+  it('defaults summaryToDurableEnabled to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.summaryToDurableEnabled).toBe(false);
+  });
+
+  it('parses DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED: '1' }));
+    expect(config.summaryToDurableEnabled).toBe(true);
+  });
+
   // --- Reaction remove handler ---
   it('defaults reactionRemoveHandlerEnabled to false', () => {
     const { config } = parseConfig(env());

@@ -19,6 +19,7 @@ import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
+import { applyUserTurnToDurable } from './discord/user-turn-to-durable.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster } from './discord/status-channel.js';
 import { ToolAwareQueue } from './discord/tool-aware-queue.js';
@@ -85,6 +86,7 @@ export type BotParams = {
   durableInjectMaxChars: number;
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
+  summaryToDurableEnabled: boolean;
   statusChannel?: string;
   bootstrapEnsureBeadsForum?: boolean;
   toolAwareStreaming?: boolean;
@@ -727,6 +729,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             saveSummary(params.summaryDataDir, sessionKey, {
               summary: newSummary,
               updatedAt: Date.now(),
+            }).then(() => {
+              if (params.summaryToDurableEnabled) {
+                return applyUserTurnToDurable({
+                  runtime: params.runtime,
+                  userMessageText: String(msg.content ?? ''),
+                  userId: msg.author.id,
+                  durableDataDir: params.durableDataDir,
+                  durableMaxItems: params.durableMaxItems,
+                  model: params.summaryModel,
+                  cwd: params.workspaceCwd,
+                });
+              }
             }),
           )
           .catch((err) => {
