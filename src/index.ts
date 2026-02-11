@@ -17,9 +17,7 @@ import { initCronForum } from './cron/forum-sync.js';
 import type { ActionCategoryFlags } from './discord/actions.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
-import { loadTagMap } from './beads/discord-sync.js';
-import { checkBdAvailable } from './beads/bd-cli.js';
-import { initBeadsForumGuard } from './beads/forum-guard.js';
+import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
@@ -254,13 +252,20 @@ const limitedRuntime = withConcurrencyLimit(runtime, { maxConcurrentInvocations,
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
 // Pre-flight: detect whether the bd CLI is installed (used to decide whether to bootstrap the beads forum).
-let bdAvailable = false;
-let bdVersion: string | undefined;
-if (beadsEnabled) {
-  const bd = await checkBdAvailable();
-  bdAvailable = bd.available;
-  bdVersion = bd.version;
-}
+const beadsInit = await initializeBeadsContext({
+  enabled: beadsEnabled,
+  beadsCwd,
+  beadsForum,
+  beadsTagMapPath,
+  beadsMentionUser,
+  beadsSidebar,
+  beadsAutoTag,
+  beadsAutoTagModel,
+  runtime,
+  log,
+});
+const bdAvailable = beadsInit.bdAvailable;
+const bdVersion = beadsInit.bdVersion;
 
 const botParams = {
   token,
@@ -349,78 +354,57 @@ const { client, status, system } = await startDiscordBot(botParams);
 botStatus = status;
 
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
-let beadCtx: BeadContext | undefined;
-if (beadsEnabled) {
-  if (!bdAvailable) {
-    log.warn(
-      'DISCOCLAW_BEADS_ENABLED=1 but the bd CLI was not found. ' +
-      'Beads is a task-tracking system that syncs with Discord forum threads. ' +
-      'It requires the `bd` binary (set BD_BIN to a custom path if needed). ' +
-      'Beads subsystem disabled.',
-    );
-  } else {
-    const effectiveForum = beadsForum || system?.beadsForumId || '';
-    if (!effectiveForum) {
-      log.warn('DISCOCLAW_BEADS_ENABLED=1 but no beads forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_BEADS_FORUM); beads subsystem disabled');
-    } else {
-      const tagMap = await loadTagMap(beadsTagMapPath);
-      if (beadsSidebar && !beadsMentionUser) {
-        log.warn('beads:sidebar enabled but DISCOCLAW_BEADS_MENTION_USER not set; sidebar mentions will be inactive');
-      }
-      beadCtx = {
-        beadsCwd,
-        forumId: effectiveForum,
-        tagMap,
-        runtime,
-        autoTag: beadsAutoTag,
-        autoTagModel: beadsAutoTagModel,
-        mentionUserId: beadsMentionUser,
-        sidebarMentionUserId,
-        statusPoster: botStatus ?? undefined,
-        log,
-      };
-      botParams.beadCtx = beadCtx;
-      botParams.discordActionsBeads = discordActionsBeads && beadsEnabled;
-      initBeadsForumGuard({ client, forumId: effectiveForum, log });
+// If initializeBeadsContext didn't resolve a forum (because system bootstrap hadn't run yet),
+// retry now with the system-provided forum ID.
+let beadCtx = beadsInit.beadCtx;
+if (!beadCtx && beadsEnabled && bdAvailable && system?.beadsForumId) {
+  const retry = await initializeBeadsContext({
+    enabled: true,
+    beadsCwd,
+    beadsForum,
+    beadsTagMapPath,
+    beadsMentionUser,
+    beadsSidebar,
+    beadsAutoTag,
+    beadsAutoTagModel,
+    runtime,
+    statusPoster: botStatus ?? undefined,
+    log,
+    systemBeadsForumId: system.beadsForumId,
+  });
+  beadCtx = retry.beadCtx;
+}
 
-      // Wire coordinator + watcher + startup sync
-      const resolvedGuildId = guildId || system?.guildId || '';
-      const guild = resolvedGuildId ? client.guilds.cache.get(resolvedGuildId) : undefined;
-      if (guild) {
-        const { BeadSyncCoordinator } = await import('./beads/bead-sync-coordinator.js');
-        const { startBeadSyncWatcher } = await import('./beads/bead-sync-watcher.js');
-
-        const syncCoordinator = new BeadSyncCoordinator({
-          client, guild,
-          forumId: effectiveForum,
-          tagMap,
-          beadsCwd,
-          log,
-          mentionUserId: sidebarMentionUserId,
-        });
-        beadCtx.syncCoordinator = syncCoordinator;
-
-        // Startup sync: fire-and-forget to avoid blocking cron init
-        syncCoordinator.sync().catch((err) => {
-          log.warn({ err }, 'beads:startup-sync failed');
-        });
-
-        beadSyncWatcher = startBeadSyncWatcher({
-          coordinator: syncCoordinator,
-          beadsCwd,
-          log,
-        });
-        log.info({ beadsCwd }, 'beads:file-watcher started');
-      } else {
-        log.warn({ resolvedGuildId }, 'beads:sync-watcher skipped; guild not in cache');
-      }
-
-      log.info(
-        { beadsCwd, beadsForum: effectiveForum, tagCount: Object.keys(tagMap).length, autoTag: beadsAutoTag, bdVersion },
-        'beads:initialized',
-      );
-    }
+if (beadCtx) {
+  // Attach status poster now that the bot is connected (may not have been available during pre-flight).
+  if (!beadCtx.statusPoster && botStatus) {
+    beadCtx.statusPoster = botStatus;
   }
+  botParams.beadCtx = beadCtx;
+  botParams.discordActionsBeads = discordActionsBeads && beadsEnabled;
+
+  // Wire coordinator + watcher + startup sync
+  const resolvedGuildId = guildId || system?.guildId || '';
+  const guild = resolvedGuildId ? client.guilds.cache.get(resolvedGuildId) : undefined;
+  if (guild) {
+    const wired = await wireBeadsSync({
+      beadCtx,
+      client,
+      guild,
+      guildId: resolvedGuildId,
+      beadsCwd,
+      sidebarMentionUserId,
+      log,
+    });
+    beadSyncWatcher = wired.syncWatcher;
+  } else {
+    log.warn({ resolvedGuildId }, 'beads:sync-watcher skipped; guild not in cache');
+  }
+
+  log.info(
+    { beadsCwd, beadsForum: beadCtx.forumId, tagCount: Object.keys(beadCtx.tagMap).length, autoTag: beadsAutoTag, bdVersion },
+    'beads:initialized',
+  );
 }
 
 // --- Cron subsystem ---
