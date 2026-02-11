@@ -192,6 +192,7 @@ export function createReactionAddHandler(
             polls: params.discordActionsPolls,
             beads: params.discordActionsBeads,
             crons: params.discordActionsCrons ?? false,
+            botProfile: params.discordActionsBotProfile ?? false,
           };
 
           if (params.discordActionsEnabled) {

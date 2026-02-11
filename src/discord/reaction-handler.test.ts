@@ -117,6 +117,7 @@ function makeParams(overrides?: Partial<Omit<BotParams, 'token'>>): Omit<BotPara
     discordActionsPolls: false,
     discordActionsBeads: false,
     discordActionsCrons: false,
+    discordActionsBotProfile: false,
     messageHistoryBudget: 0,
     summaryEnabled: false,
     summaryModel: 'haiku',

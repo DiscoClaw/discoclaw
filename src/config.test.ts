@@ -76,4 +76,78 @@ describe('parseConfig', () => {
     const { config } = parseConfig(env({ DISCOCLAW_BOT_NAME: '   ' }));
     expect(config.botDisplayName).toBeUndefined();
   });
+
+  // --- Bot profile: status ---
+  it('parses valid bot status values', () => {
+    for (const status of ['online', 'idle', 'dnd', 'invisible'] as const) {
+      const { config } = parseConfig(env({ DISCOCLAW_BOT_STATUS: status }));
+      expect(config.botStatus).toBe(status);
+    }
+  });
+
+  it('parses bot status case-insensitively', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_STATUS: 'DND' }));
+    expect(config.botStatus).toBe('dnd');
+  });
+
+  it('throws on invalid bot status', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_BOT_STATUS: 'away' })))
+      .toThrow(/DISCOCLAW_BOT_STATUS must be one of online\|idle\|dnd\|invisible/);
+  });
+
+  it('returns undefined for botStatus when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.botStatus).toBeUndefined();
+  });
+
+  // --- Bot profile: activity type ---
+  it('defaults botActivityType to Playing', () => {
+    const { config } = parseConfig(env());
+    expect(config.botActivityType).toBe('Playing');
+  });
+
+  it('parses activity type case-insensitively', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_ACTIVITY_TYPE: 'listening' }));
+    expect(config.botActivityType).toBe('Listening');
+  });
+
+  it('throws on invalid activity type', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_BOT_ACTIVITY_TYPE: 'Streaming' })))
+      .toThrow(/DISCOCLAW_BOT_ACTIVITY_TYPE must be one of Playing\|Listening\|Watching\|Competing\|Custom/);
+  });
+
+  // --- Bot profile: avatar ---
+  it('accepts absolute file path for botAvatar', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_AVATAR: '/home/user/avatar.png' }));
+    expect(config.botAvatar).toBe('/home/user/avatar.png');
+  });
+
+  it('accepts URL for botAvatar', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_AVATAR: 'https://example.com/avatar.png' }));
+    expect(config.botAvatar).toBe('https://example.com/avatar.png');
+  });
+
+  it('rejects relative path for botAvatar', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_BOT_AVATAR: 'images/avatar.png' })))
+      .toThrow('DISCOCLAW_BOT_AVATAR must be an absolute file path or URL');
+  });
+
+  it('returns undefined for botAvatar when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.botAvatar).toBeUndefined();
+  });
+
+  // --- Bot profile: action flag ---
+  it('defaults discordActionsBotProfile to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsBotProfile).toBe(false);
+  });
+
+  it('reports ignored bot profile action flag when master actions off', () => {
+    const { infos } = parseConfig(env({
+      DISCOCLAW_DISCORD_ACTIONS: '0',
+      DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE: '1',
+    }));
+    expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE'))).toBe(true);
+  });
 });

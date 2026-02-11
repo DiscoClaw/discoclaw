@@ -450,7 +450,7 @@ export async function executeCronAction(
           status: null,
           log: cronCtx.log,
           discordActionsEnabled: false,
-          actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false },
+          actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false },
           statsStore: cronCtx.statsStore,
         };
         void executeCronJob(job, execCtx);

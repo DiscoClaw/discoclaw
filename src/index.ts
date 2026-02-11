@@ -107,6 +107,7 @@ const discordActionsMessaging = cfg.discordActionsMessaging;
 const discordActionsGuild = cfg.discordActionsGuild;
 const discordActionsModeration = cfg.discordActionsModeration;
 const discordActionsPolls = cfg.discordActionsPolls;
+const discordActionsBotProfile = cfg.discordActionsBotProfile;
 const messageHistoryBudget = cfg.messageHistoryBudget;
 const summaryEnabled = cfg.summaryEnabled;
 const summaryModel = cfg.summaryModel;
@@ -274,6 +275,7 @@ const botParams = {
   discordActionsGuild,
   discordActionsModeration,
   discordActionsPolls,
+  discordActionsBotProfile,
   // Enable beads/crons actions only after contexts are configured.
   discordActionsBeads: false,
   discordActionsCrons: false,
@@ -298,6 +300,10 @@ const botParams = {
   reactionMaxAgeMs,
   healthCommandsEnabled,
   healthVerboseAllowlist,
+  botStatus: cfg.botStatus,
+  botActivity: cfg.botActivity,
+  botActivityType: cfg.botActivityType,
+  botAvatar: cfg.botAvatar,
   healthConfigSnapshot: {
     runtimeModel,
     runtimeTimeoutMs,
@@ -378,6 +384,7 @@ if (cronEnabled && effectiveCronForum) {
     polls: discordActionsPolls,
     beads: discordActionsBeads && beadsEnabled && Boolean(beadCtx),
     crons: discordActionsCrons && cronEnabled,
+    botProfile: false, // Intentionally excluded from cron flows to avoid rate-limit and abuse issues.
   };
 
   const cronCtx: CronContext = {

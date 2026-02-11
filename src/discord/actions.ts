@@ -13,6 +13,8 @@ import { BEAD_ACTION_TYPES, executeBeadAction, beadActionsPromptSection } from '
 import type { BeadActionRequest, BeadContext } from './actions-beads.js';
 import { CRON_ACTION_TYPES, executeCronAction, cronActionsPromptSection } from './actions-crons.js';
 import type { CronActionRequest, CronContext } from './actions-crons.js';
+import { BOT_PROFILE_ACTION_TYPES, executeBotProfileAction, botProfileActionsPromptSection } from './actions-bot-profile.js';
+import type { BotProfileActionRequest } from './actions-bot-profile.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +35,7 @@ export type ActionCategoryFlags = {
   polls: boolean;
   beads: boolean;
   crons: boolean;
+  botProfile: boolean;
 };
 
 export type DiscordActionRequest =
@@ -42,7 +45,8 @@ export type DiscordActionRequest =
   | ModerationActionRequest
   | PollActionRequest
   | BeadActionRequest
-  | CronActionRequest;
+  | CronActionRequest
+  | BotProfileActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -63,6 +67,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.polls) for (const t of POLL_ACTION_TYPES) types.add(t);
   if (flags.beads) for (const t of BEAD_ACTION_TYPES) types.add(t);
   if (flags.crons) for (const t of CRON_ACTION_TYPES) types.add(t);
+  if (flags.botProfile) for (const t of BOT_PROFILE_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -132,6 +137,8 @@ export async function executeDiscordActions(
         } else {
           result = await executeCronAction(action as CronActionRequest, ctx, cronCtx);
         }
+      } else if (BOT_PROFILE_ACTION_TYPES.has(action.type)) {
+        result = await executeBotProfileAction(action as BotProfileActionRequest, ctx);
       } else {
         result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
       }
@@ -188,6 +195,10 @@ You can perform Discord server actions by including structured action blocks in 
 
   if (flags.crons) {
     sections.push(cronActionsPromptSection());
+  }
+
+  if (flags.botProfile) {
+    sections.push(botProfileActionsPromptSection());
   }
 
   sections.push(`### Rules

@@ -33,6 +33,7 @@ export type DiscoclawConfig = {
   discordActionsPolls: boolean;
   discordActionsBeads: boolean;
   discordActionsCrons: boolean;
+  discordActionsBotProfile: boolean;
 
   messageHistoryBudget: number;
   summaryEnabled: boolean;
@@ -92,6 +93,10 @@ export type DiscoclawConfig = {
   healthVerboseAllowlist: Set<string>;
 
   botDisplayName?: string;
+  botStatus?: 'online' | 'idle' | 'dnd' | 'invisible';
+  botActivity?: string;
+  botActivityType?: 'Playing' | 'Listening' | 'Watching' | 'Competing' | 'Custom';
+  botAvatar?: string;
 };
 
 function parseBoolean(
@@ -169,6 +174,22 @@ function parseTrimmedString(
   return trimmed || undefined;
 }
 
+function parseEnum<T extends string>(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  validValues: T[],
+  defaultValue?: T,
+): T | undefined {
+  const raw = env[name];
+  if (raw == null || raw.trim() === '') return defaultValue;
+  const normalized = raw.trim().toLowerCase();
+  const match = validValues.find((v) => v.toLowerCase() === normalized);
+  if (!match) {
+    throw new Error(`${name} must be one of ${validValues.join('|')}, got "${raw}"`);
+  }
+  return match;
+}
+
 function parseRuntimeTools(env: NodeJS.ProcessEnv, warnings: string[]): string[] {
   const raw = parseTrimmedString(env, 'RUNTIME_TOOLS');
   if (!raw) return ['Bash', 'Read', 'Edit', 'WebSearch', 'WebFetch'];
@@ -236,6 +257,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsPolls = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_POLLS', false);
   const discordActionsBeads = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BEADS', false);
   const discordActionsCrons = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_CRONS', false);
+  const discordActionsBotProfile = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', false);
 
   if (!discordActionsEnabled) {
     const enabledCategories = [
@@ -246,6 +268,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       { name: 'DISCOCLAW_DISCORD_ACTIONS_POLLS', enabled: discordActionsPolls },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_BEADS', enabled: discordActionsBeads },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_CRONS', enabled: discordActionsCrons },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', enabled: discordActionsBotProfile },
     ]
       .filter((entry) => (env[entry.name] ?? '').trim().length > 0 && entry.enabled)
       .map((entry) => entry.name);
@@ -280,6 +303,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsPolls,
       discordActionsBeads,
       discordActionsCrons,
+      discordActionsBotProfile,
 
       messageHistoryBudget: parseNonNegativeInt(env, 'DISCOCLAW_MESSAGE_HISTORY_BUDGET', 3000),
       summaryEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_ENABLED', true),
@@ -339,6 +363,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       healthVerboseAllowlist,
 
       botDisplayName: parseTrimmedString(env, 'DISCOCLAW_BOT_NAME'),
+      botStatus: parseEnum(env, 'DISCOCLAW_BOT_STATUS', ['online', 'idle', 'dnd', 'invisible'] as const),
+      botActivity: parseTrimmedString(env, 'DISCOCLAW_BOT_ACTIVITY'),
+      botActivityType: parseEnum(env, 'DISCOCLAW_BOT_ACTIVITY_TYPE', ['Playing', 'Listening', 'Watching', 'Competing', 'Custom'] as const, 'Playing'),
+      botAvatar: (() => {
+        const val = parseTrimmedString(env, 'DISCOCLAW_BOT_AVATAR');
+        if (val && !val.startsWith('http://') && !val.startsWith('https://') && !val.startsWith('/')) {
+          throw new Error('DISCOCLAW_BOT_AVATAR must be an absolute file path or URL');
+        }
+        return val;
+      })(),
     },
     warnings,
     infos,

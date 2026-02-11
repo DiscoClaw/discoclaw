@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
+import { ActivityType, Client, GatewayIntentBits, Partials } from 'discord.js';
 import type { RuntimeAdapter } from './runtime/types.js';
 import type { SessionManager } from './sessions.js';
 import { isAllowlisted } from './discord/allowlist.js';
@@ -68,6 +68,7 @@ export type BotParams = {
   discordActionsPolls: boolean;
   discordActionsBeads: boolean;
   discordActionsCrons?: boolean;
+  discordActionsBotProfile?: boolean;
   beadCtx?: BeadContext;
   cronCtx?: CronContext;
   messageHistoryBudget: number;
@@ -91,6 +92,10 @@ export type BotParams = {
   healthVerboseAllowlist?: Set<string>;
   healthConfigSnapshot?: HealthConfigSnapshot;
   metrics?: MetricsRegistry;
+  botStatus?: 'online' | 'idle' | 'dnd' | 'invisible';
+  botActivity?: string;
+  botActivityType?: 'Playing' | 'Listening' | 'Watching' | 'Competing' | 'Custom';
+  botAvatar?: string;
 };
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -152,6 +157,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         polls: params.discordActionsPolls,
         beads: params.discordActionsBeads,
         crons: params.discordActionsCrons ?? false,
+        botProfile: params.discordActionsBotProfile ?? false,
       };
 
       const isDm = msg.guildId == null;
@@ -815,6 +821,52 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
   // Set bot nickname in all guilds.
   for (const guild of client.guilds.cache.values()) {
     await setBotNickname(guild, params.botDisplayName, params.log);
+  }
+
+  // Set bot presence (status + activity) on startup.
+  if (params.botStatus || params.botActivity) {
+    try {
+      const ACTIVITY_TYPE_MAP: Record<string, ActivityType> = {
+        Playing: ActivityType.Playing,
+        Listening: ActivityType.Listening,
+        Watching: ActivityType.Watching,
+        Competing: ActivityType.Competing,
+        Custom: ActivityType.Custom,
+      };
+
+      const presenceData: any = {};
+      if (params.botStatus) {
+        presenceData.status = params.botStatus;
+      }
+      if (params.botActivity) {
+        const typeName = params.botActivityType ?? 'Playing';
+        const typeNum = ACTIVITY_TYPE_MAP[typeName] ?? ActivityType.Playing;
+        if (typeName === 'Custom') {
+          presenceData.activities = [{ name: 'Custom Status', type: ActivityType.Custom, state: params.botActivity }];
+        } else {
+          presenceData.activities = [{ name: params.botActivity, type: typeNum }];
+        }
+      }
+      client.user!.setPresence(presenceData);
+      params.log?.info({ status: params.botStatus, activity: params.botActivity, activityType: params.botActivityType }, 'discord:presence set');
+    } catch (err) {
+      params.log?.warn({ err }, 'discord:presence failed to set');
+    }
+  }
+
+  // Set bot avatar on startup (rate-limited — applied once).
+  if (params.botAvatar) {
+    try {
+      if (params.botAvatar.startsWith('http://') || params.botAvatar.startsWith('https://')) {
+        await client.user!.setAvatar(params.botAvatar);
+      } else {
+        const buf = await fs.readFile(params.botAvatar);
+        await client.user!.setAvatar(buf);
+      }
+      params.log?.info({ avatar: params.botAvatar }, 'discord:avatar set');
+    } catch (err) {
+      params.log?.warn({ err, avatar: params.botAvatar }, 'discord:avatar failed to set');
+    }
   }
 
   if (params.statusChannel) {

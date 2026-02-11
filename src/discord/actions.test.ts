@@ -11,6 +11,7 @@ const ALL_FLAGS: ActionCategoryFlags = {
   polls: false,
   beads: false,
   crons: false,
+  botProfile: false,
 };
 
 // ---------------------------------------------------------------------------
