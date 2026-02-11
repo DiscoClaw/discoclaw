@@ -5,9 +5,9 @@ import type { LoggerLike } from './action-types.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Strip a trailing ` (N)` count suffix from a forum channel name. */
+/** Strip a trailing ` ・ N` or legacy ` (N)` count suffix from a forum channel name. */
 export function stripCountSuffix(name: string): string {
-  return name.replace(/\s*\(\d+\)$/, '');
+  return name.replace(/\s*(?:・\s*\d+|\(\d+\))$/, '');
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ export class ForumCountSync {
 
     const currentName = channel.name;
     const baseName = stripCountSuffix(currentName);
-    const newName = `${baseName} (${count})`;
+    const newName = `${baseName} ・ ${count}`;
 
     if (newName === currentName) {
       this.log?.info({ forumId: this.forumId, name: currentName }, 'forum-count-sync: name unchanged, skipping');
