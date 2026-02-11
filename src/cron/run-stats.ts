@@ -101,10 +101,20 @@ export class CronRunStats {
   private store: CronRunStatsStore;
   private filePath: string;
   private mutex = new WriteMutex();
+  // Secondary index: threadId → cronId for O(1) lookups.
+  private threadIndex = new Map<string, string>();
 
   constructor(store: CronRunStatsStore, filePath: string) {
     this.store = store;
     this.filePath = filePath;
+    this.rebuildThreadIndex();
+  }
+
+  private rebuildThreadIndex(): void {
+    this.threadIndex.clear();
+    for (const rec of Object.values(this.store.jobs)) {
+      this.threadIndex.set(rec.threadId, rec.cronId);
+    }
   }
 
   getStore(): CronRunStatsStore {
@@ -116,10 +126,8 @@ export class CronRunStats {
   }
 
   getRecordByThreadId(threadId: string): CronRunRecord | undefined {
-    for (const rec of Object.values(this.store.jobs)) {
-      if (rec.threadId === threadId) return rec;
-    }
-    return undefined;
+    const cronId = this.threadIndex.get(threadId);
+    return cronId ? this.store.jobs[cronId] : undefined;
   }
 
   async upsertRecord(cronId: string, threadId: string, updates?: Partial<CronRunRecord>): Promise<CronRunRecord> {
@@ -127,6 +135,10 @@ export class CronRunStats {
     await this.mutex.run(async () => {
       const existing = this.store.jobs[cronId];
       if (existing) {
+        // If threadId changed, remove old index entry.
+        if (existing.threadId !== threadId) {
+          this.threadIndex.delete(existing.threadId);
+        }
         if (updates) Object.assign(existing, updates);
         existing.threadId = threadId;
         record = existing;
@@ -134,6 +146,7 @@ export class CronRunStats {
         record = { ...emptyRecord(cronId, threadId), ...updates };
         this.store.jobs[cronId] = record;
       }
+      this.threadIndex.set(threadId, cronId);
       this.store.updatedAt = Date.now();
       await this.flush();
     });
@@ -160,7 +173,9 @@ export class CronRunStats {
   async removeRecord(cronId: string): Promise<boolean> {
     let removed = false;
     await this.mutex.run(async () => {
-      if (this.store.jobs[cronId]) {
+      const rec = this.store.jobs[cronId];
+      if (rec) {
+        this.threadIndex.delete(rec.threadId);
         delete this.store.jobs[cronId];
         this.store.updatedAt = Date.now();
         removed = true;
@@ -175,6 +190,7 @@ export class CronRunStats {
     await this.mutex.run(async () => {
       for (const [cronId, rec] of Object.entries(this.store.jobs)) {
         if (rec.threadId === threadId) {
+          this.threadIndex.delete(threadId);
           delete this.store.jobs[cronId];
           removed = true;
         }

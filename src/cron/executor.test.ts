@@ -101,7 +101,7 @@ describe('executeCronJob', () => {
     const guild = (ctx.client as any).guilds.cache.get('guild-1');
     const channel = guild.channels.cache.get('general');
     expect(channel.send).toHaveBeenCalledOnce();
-    expect(channel.send.mock.calls[0][0]).toContain('Hello from cron!');
+    expect(channel.send.mock.calls[0][0].content).toContain('Hello from cron!');
   });
 
   it('sets running flag and clears it after', async () => {

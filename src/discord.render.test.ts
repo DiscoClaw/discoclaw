@@ -241,9 +241,16 @@ describe('splitDiscord', () => {
     const chunks = splitDiscord(text, limit);
     expect(chunks.length).toBeGreaterThan(1);
     for (const chunk of chunks) {
-      // Each chunk should be at or under the limit (with small tolerance for fence closing).
-      expect(chunk.length).toBeLessThanOrEqual(limit + 10);
+      expect(chunk.length).toBeLessThanOrEqual(limit);
     }
+  });
+
+  it('never exceeds limit when re-opening fenced code blocks', () => {
+    const limit = 20;
+    const longish = 'x'.repeat(15); // <= limit, but too long once the ```js header is re-opened.
+    const text = `\`\`\`js\n${longish}\n\`\`\``;
+    const chunks = splitDiscord(text, limit);
+    for (const chunk of chunks) expect(chunk.length).toBeLessThanOrEqual(limit);
   });
 
   it('fenced code blocks are closed/reopened across chunk boundaries', () => {

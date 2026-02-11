@@ -1,19 +1,17 @@
-import type { Client, ForumChannel, ThreadChannel } from 'discord.js';
-import { ChannelType } from 'discord.js';
+import type { Client } from 'discord.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { CronRunStats, CadenceTag } from './run-stats.js';
+import type { CronRunStats } from './run-stats.js';
 import type { CronScheduler } from './scheduler.js';
 import { detectCadence } from './cadence.js';
 import { autoTagCron, classifyCronModel } from './auto-tag.js';
-import { buildCronThreadName, ensureStatusMessage } from './discord-sync.js';
+import { buildCronThreadName, ensureStatusMessage, resolveForumChannel } from './discord-sync.js';
+import type { TagMap } from './discord-sync.js';
 import { loadTagMap } from '../beads/discord-sync.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type TagMap = Record<string, string>;
 
 export type CronSyncOptions = {
   client: Client;
@@ -39,16 +37,6 @@ export type CronSyncResult = {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-async function resolveForumChannel(client: Client, forumId: string): Promise<ForumChannel | null> {
-  const ch = client.channels.cache.get(forumId);
-  if (ch && ch.type === ChannelType.GuildForum) return ch as ForumChannel;
-  try {
-    const fetched = await client.channels.fetch(forumId);
-    if (fetched && fetched.type === ChannelType.GuildForum) return fetched as ForumChannel;
-  } catch {}
-  return null;
-}
 
 async function sleep(ms: number | undefined): Promise<void> {
   const n = ms ?? 0;

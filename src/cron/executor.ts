@@ -10,6 +10,7 @@ import type { CronRunStats } from './run-stats.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import { parseDiscordActions, executeDiscordActions } from '../discord/actions.js';
 import { splitDiscord, truncateCodeBlocks } from '../discord.js';
+import { NO_MENTIONS } from '../discord/allowed-mentions.js';
 import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
 import { ensureStatusMessage } from './discord-sync.js';
 
@@ -31,6 +32,16 @@ export type CronExecutorContext = {
   statsStore?: CronRunStats;
 };
 
+async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string): Promise<void> {
+  if (ctx.statsStore && job.cronId) {
+    try {
+      await ctx.statsStore.recordRun(job.cronId, 'error', msg.slice(0, 200));
+    } catch {
+      // Best-effort.
+    }
+  }
+}
+
 export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Promise<void> {
   // Overlap guard: skip if previous run is still going.
   if (job.running) {
@@ -45,6 +56,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     if (!guild) {
       ctx.log?.error({ jobId: job.id, guildId: job.guildId }, 'cron:exec guild not found');
       await ctx.status?.runtimeError({ sessionKey: `cron:${job.id}` }, `Cron "${job.name}": guild ${job.guildId} not found`);
+      await recordError(ctx, job, `guild ${job.guildId} not found`);
       return;
     }
 
@@ -55,6 +67,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
         `Cron "${job.name}": target channel "${job.def.channel}" not found`,
       );
+      await recordError(ctx, job, `target channel "${job.def.channel}" not found`);
       return;
     }
 
@@ -71,6 +84,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
           `Cron "${job.name}": target channel "${job.def.channel}" is not allowlisted`,
         );
+        await recordError(ctx, job, `target channel "${job.def.channel}" not allowlisted`);
         return;
       }
     }
@@ -117,6 +131,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
           `Cron "${job.name}": ${evt.message}`,
         );
+        await recordError(ctx, job, evt.message);
         return;
       }
     }
@@ -160,7 +175,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     const chunks = splitDiscord(outText);
     for (const chunk of chunks) {
       if (chunk.trim()) {
-        await targetChannel.send(chunk);
+        await targetChannel.send({ content: chunk, allowedMentions: NO_MENTIONS });
       }
     }
 
@@ -182,14 +197,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       `Cron "${job.name}": ${msg}`,
     );
 
-    // Record error run.
-    if (ctx.statsStore && job.cronId) {
-      try {
-        await ctx.statsStore.recordRun(job.cronId, 'error', msg.slice(0, 200));
-      } catch {
-        // Best-effort.
-      }
-    }
+    await recordError(ctx, job, msg);
   } finally {
     job.running = false;
 

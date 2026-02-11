@@ -233,4 +233,77 @@ describe('executeCronAction', () => {
     expect(result.ok).toBe(true);
     expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith('cron-test0001', 'thread-1', expect.objectContaining({ modelOverride: 'opus' }));
   });
+
+  it('cronCreate does not set modelOverride', async () => {
+    const cronCtx = makeCronCtx();
+    await executeCronAction(
+      { type: 'cronCreate', name: 'New Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something', model: 'opus' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    // Should set model but NOT modelOverride.
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.not.objectContaining({ modelOverride: expect.anything() }),
+    );
+  });
+
+  it('cronTrigger returns ok for known job', async () => {
+    // Mock the dynamic import of executeCronJob.
+    vi.mock('../cron/executor.js', () => ({
+      executeCronJob: vi.fn(async () => {}),
+    }));
+
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronTrigger', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.summary).toContain('triggered');
+  });
+
+  it('cronTrigger returns error for unknown cronId', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronTrigger', cronId: 'cron-nope' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(false);
+  });
+
+  it('cronSync returns sync results', async () => {
+    // Mock the dynamic import of runCronSync.
+    vi.mock('../cron/cron-sync.js', () => ({
+      runCronSync: vi.fn(async () => ({ tagsApplied: 1, namesUpdated: 0, statusMessagesUpdated: 2, orphansDetected: 0 })),
+    }));
+
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronSync' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('1 tags');
+      expect(result.summary).toContain('2 status msgs');
+    }
+  });
+
+  it('cronCreate returns error when thread creation fails', async () => {
+    const forum = {
+      id: 'forum-1',
+      type: 15,
+      threads: {
+        create: vi.fn(async () => { throw new Error('Missing Permissions'); }),
+      },
+    };
+    const client = {
+      channels: {
+        cache: { get: vi.fn((id: string) => id === 'forum-1' ? forum : undefined) },
+        fetch: vi.fn(async (id: string) => id === 'forum-1' ? forum : null),
+      },
+      user: { id: 'bot-user' },
+    };
+    const cronCtx = makeCronCtx({ client: client as any });
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'Fail Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Test' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('Missing Permissions');
+  });
 });

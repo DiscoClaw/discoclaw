@@ -245,19 +245,23 @@ export async function ensureForumTags(
 
   // Identify tags that need to be created.
   const toCreate: string[] = [];
+  let backfilled = 0;
   for (const [name, id] of Object.entries(tagMap)) {
     if (id) continue; // Already has a Discord tag ID.
     if (existingNames.has(name.toLowerCase())) {
       // Tag exists on the forum but not in our map — backfill the ID.
       const existing = existingTags.find((t) => t.name.toLowerCase() === name.toLowerCase());
-      if (existing) tagMap[name] = existing.id;
+      if (existing && existing.id) {
+        tagMap[name] = existing.id;
+        backfilled++;
+      }
       continue;
     }
     toCreate.push(name);
   }
 
-  if (toCreate.length === 0 && !Object.values(tagMap).some((v) => !v)) {
-    // Nothing to create, nothing to backfill.
+  if (toCreate.length === 0 && backfilled === 0) {
+    // Nothing to create, nothing changed.
     return 0;
   }
 
@@ -296,4 +300,3 @@ export async function ensureForumTags(
   log?.info({ forumId, tagsCreated: creating.length }, 'system-bootstrap: forum tags ensured');
   return creating.length;
 }
-

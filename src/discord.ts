@@ -24,6 +24,7 @@ import { loadWorkspacePermissions, resolveTools } from './workspace-permissions.
 import { ToolAwareQueue } from './discord/tool-aware-queue.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
 import type { SystemScaffold } from './discord/system-bootstrap.js';
+import { NO_MENTIONS } from './discord/allowed-mentions.js';
 
 export type BotParams = {
   token: string;
@@ -121,9 +122,21 @@ export function splitDiscord(text: string, limit = 2000): string[] {
   let inFence = false;
   let fenceHeader = '```';
 
+  const effectiveCurLen = () => {
+    // If we're mid-fence and about to start a new chunk, we'll implicitly emit the fence header.
+    if (cur.length > 0) return cur.length;
+    return inFence ? fenceHeader.length : 0;
+  };
+
+  const remainingRoom = () => {
+    const base = effectiveCurLen();
+    const sep = base > 0 ? 1 : 0; // appendLine will insert a newline when base>0
+    return Math.max(0, limit - base - sep);
+  };
+
   const ensureFenceOpen = () => {
     if (cur) return;
-    if (inFence) cur = `${fenceHeader}\n`;
+    if (inFence) cur = `${fenceHeader}`;
   };
 
   const flush = () => {
@@ -145,24 +158,24 @@ export function splitDiscord(text: string, limit = 2000): string[] {
   };
 
   for (const line of rawLines) {
-    const nextLen = (cur.length ? cur.length + 1 : 0) + line.length;
-    if (nextLen > limit) {
+    // If the next line doesn't fit, flush first.
+    const curLen = effectiveCurLen();
+    const nextLen = (curLen ? curLen + 1 : 0) + line.length;
+    if (nextLen > limit && cur) {
       flush();
-      // Reopen fence if we flushed mid-fence.
-      ensureFenceOpen();
     }
 
-    // If the line itself is too long, hard split.
-    if (line.length > limit) {
+    // If the line is too long for the remaining room in the current chunk, hard-split it.
+    // This matters especially when re-opening a fence header: the header consumes room too.
+    if (line.length > remainingRoom()) {
       let rest = line;
       while (rest.length > 0) {
-        const room = Math.max(1, limit - (cur.length ? cur.length + 1 : 0));
+        const room = Math.max(1, remainingRoom());
         const take = rest.slice(0, room);
         appendLine(take);
         rest = rest.slice(room);
         if (rest.length > 0) {
           flush();
-          ensureFenceOpen();
         }
       }
     } else {
@@ -308,7 +321,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 channelId: msg.channelId,
                 messageId: msg.id,
               });
-              await msg.reply(response);
+              await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
               return;
             }
           }
@@ -332,7 +345,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          reply = await msg.reply(renderActivityTail('(working...)'));
+          reply = await msg.reply({ content: renderActivityTail('(working...)'), allowedMentions: NO_MENTIONS });
 
           const cwd = params.useGroupDirCwd
             ? await ensureGroupDir(params.groupsDir, sessionKey)
@@ -483,7 +496,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
             // On follow-up iterations, send a new placeholder message.
             if (followUpDepth > 0) {
-              reply = await msg.channel.send(renderActivityTail('(following up...)'));
+              reply = await msg.channel.send({ content: renderActivityTail('(following up...)'), allowedMentions: NO_MENTIONS });
               params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
             }
 
@@ -498,7 +511,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   ? renderActivityTail(activityLabel)
                   : renderDiscordTail(finalText || '(working...)');
               try {
-                await reply.edit(out);
+                await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
               } catch {
                 // Ignore Discord edit errors during streaming.
               }
@@ -631,9 +644,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             // Post to Discord.
             const outText = truncateCodeBlocks(processedText);
             const chunks = splitDiscord(outText);
-            await reply.edit(chunks[0] ?? '(no output)');
+            await reply.edit({ content: chunks[0] ?? '(no output)', allowedMentions: NO_MENTIONS });
             for (const extra of chunks.slice(1)) {
-              await msg.channel.send(extra);
+              await msg.channel.send({ content: extra, allowedMentions: NO_MENTIONS });
             }
 
             // -- auto-follow-up check --
@@ -678,7 +691,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
           statusRef?.current?.handlerError({ sessionKey }, err);
           try {
-            if (reply) await reply.edit(`Error: ${String(err)}`);
+            if (reply) await reply.edit({ content: `Error: ${String(err)}`, allowedMentions: NO_MENTIONS });
           } catch {
             // Ignore secondary errors writing to Discord.
           }

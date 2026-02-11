@@ -5,6 +5,18 @@ vi.mock('./parser.js', () => {
   return { parseCronDefinition: vi.fn() };
 });
 
+// Mock ensureStatusMessage and detectCadence to avoid side effects.
+vi.mock('./discord-sync.js', async (importOriginal) => {
+  const actual = await importOriginal() as any;
+  return {
+    ...actual,
+    ensureStatusMessage: vi.fn(async () => 'status-msg-1'),
+  };
+});
+vi.mock('./cadence.js', () => ({
+  detectCadence: vi.fn(() => 'daily'),
+}));
+
 function makeClient(forum: any) {
   return {
     channels: { cache: { get: vi.fn().mockReturnValue(forum) } },
@@ -20,6 +32,7 @@ function makeThread(overrides?: Partial<any>) {
     parentId: 'forum-1',
     fetchStarterMessage: vi.fn(),
     send: vi.fn().mockResolvedValue(undefined),
+    messages: { fetch: vi.fn().mockResolvedValue(new Map()) },
     ...overrides,
   };
 }
@@ -197,5 +210,98 @@ describe('initCronForum', () => {
     expect(scheduler.register).toHaveBeenCalledOnce();
     expect(scheduler.disable).toHaveBeenCalledOnce();
     expect(thread.send).toHaveBeenCalledOnce();
+  });
+
+	  it('passes cronId to scheduler.register when statsStore has record', async () => {
+	    const thread = makeThread();
+	    thread.fetchStarterMessage.mockResolvedValue({
+	      id: 'm1',
+	      content: 'every day at 7am post to #general say hello',
+	      author: { id: 'u-allowed' },
+	      react: vi.fn().mockResolvedValue(undefined),
+	    });
+	    // Ensure messages.fetch exists for cronId recovery scan.
+	    thread.messages.fetch = vi.fn().mockResolvedValue(new Map());
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      schedule: '0 7 * * *',
+      timezone: 'UTC',
+      channel: 'general',
+      prompt: 'Say hello.',
+    });
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue({ cronId: 'cron-recovered' }),
+      getRecord: vi.fn().mockReturnValue({ cronId: 'cron-recovered', threadId: 'thread-1', disabled: false }),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statsStore: statsStore as any,
+    });
+
+    // Should pass the recovered cronId to register.
+    expect(scheduler.register).toHaveBeenCalledWith(
+      'thread-1', 'thread-1', 'guild-1', 'Job 1',
+      expect.objectContaining({ schedule: '0 7 * * *' }),
+      'cron-recovered',
+    );
+  });
+
+	  it('restores disabled state from stats store', async () => {
+	    const thread = makeThread();
+	    thread.fetchStarterMessage.mockResolvedValue({
+	      id: 'm1',
+	      content: 'every day at 7am post to #general say hello',
+	      author: { id: 'u-allowed' },
+	      react: vi.fn().mockResolvedValue(undefined),
+	    });
+	    thread.messages.fetch = vi.fn().mockResolvedValue(new Map());
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      schedule: '0 7 * * *',
+      timezone: 'UTC',
+      channel: 'general',
+      prompt: 'Say hello.',
+    });
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue({ cronId: 'cron-disabled', disabled: true }),
+      getRecord: vi.fn().mockReturnValue({ cronId: 'cron-disabled', threadId: 'thread-1', disabled: true }),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statsStore: statsStore as any,
+    });
+
+    // Should disable the job because stats record says disabled: true.
+    expect(scheduler.disable).toHaveBeenCalledWith('thread-1');
   });
 });

@@ -1,16 +1,15 @@
-import { ChannelType } from 'discord.js';
-import type { Client, ForumChannel, Guild } from 'discord.js';
+import type { Client } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from './action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { CronRunStats, CadenceTag } from '../cron/run-stats.js';
+import type { CronRunStats } from '../cron/run-stats.js';
 import type { CronScheduler } from '../cron/scheduler.js';
+import type { CronExecutorContext } from '../cron/executor.js';
 import { generateCronId } from '../cron/run-stats.js';
 import { detectCadence } from '../cron/cadence.js';
 import { autoTagCron, classifyCronModel } from '../cron/auto-tag.js';
-import { buildCronThreadName, ensureStatusMessage, formatStatusMessage } from '../cron/discord-sync.js';
+import { buildCronThreadName, ensureStatusMessage, resolveForumChannel } from '../cron/discord-sync.js';
 import { loadTagMap } from '../beads/discord-sync.js';
-import { parseCronDefinition } from '../cron/parser.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,8 +39,6 @@ const CRON_TYPE_MAP: Record<CronActionRequest['type'], true> = {
 };
 export const CRON_ACTION_TYPES = new Set<string>(Object.keys(CRON_TYPE_MAP));
 
-export type TagMap = Record<string, string>;
-
 export type CronContext = {
   scheduler: CronScheduler;
   client: Client;
@@ -54,21 +51,14 @@ export type CronContext = {
   cwd: string;
   allowUserIds: Set<string>;
   log?: LoggerLike;
+  // Used by cronTrigger to build a full executor context.
+  // If not provided, manual triggers run with reduced capabilities (no tools, no actions).
+  executorCtx?: CronExecutorContext;
 };
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-async function resolveForumChannel(client: Client, forumId: string): Promise<ForumChannel | null> {
-  const ch = client.channels.cache.get(forumId);
-  if (ch && ch.type === ChannelType.GuildForum) return ch as ForumChannel;
-  try {
-    const fetched = await client.channels.fetch(forumId);
-    if (fetched && fetched.type === ChannelType.GuildForum) return fetched as ForumChannel;
-  } catch {}
-  return null;
-}
 
 function buildStarterContent(schedule: string, timezone: string, channel: string, prompt: string): string {
   return `**Schedule:** \`${schedule}\` (${timezone})\n**Channel:** #${channel}\n\n${prompt}`;
@@ -137,14 +127,20 @@ export async function executeCronAction(
       const threadName = buildCronThreadName(action.name, cadence);
       const starterContent = buildStarterContent(action.schedule, timezone, action.channel, action.prompt);
 
-      const thread = await forum.threads.create({
-        name: threadName,
-        message: {
-          content: starterContent.slice(0, 2000),
-          allowedMentions: { parse: [] },
-        },
-        appliedTags: uniqueTagIds,
-      });
+      let thread;
+      try {
+        thread = await forum.threads.create({
+          name: threadName,
+          message: {
+            content: starterContent.slice(0, 2000),
+            allowedMentions: { parse: [] },
+          },
+          appliedTags: uniqueTagIds,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `Failed to create forum thread: ${msg}` };
+      }
 
       // Register with scheduler.
       const def = { schedule: action.schedule, timezone, channel: action.channel, prompt: action.prompt };
@@ -154,12 +150,12 @@ export async function executeCronAction(
         return { ok: false, error: `Invalid cron schedule: ${action.schedule}` };
       }
 
-      // Save stats.
+      // Save stats. On create, set the classified model but don't set modelOverride —
+      // override is only for explicit user changes via cronUpdate.
       const record = await cronCtx.statsStore.upsertRecord(cronId, thread.id, {
         cadence,
         purposeTags,
         model,
-        modelOverride: action.model,
       });
 
       // Create status message.
@@ -206,7 +202,7 @@ export async function executeCronAction(
       const newChannel = action.channel ?? job.def.channel;
       const newPrompt = action.prompt ?? job.def.prompt;
 
-      const defChanged = action.schedule || action.timezone || action.channel || action.prompt;
+      const defChanged = action.schedule !== undefined || action.timezone !== undefined || action.channel !== undefined || action.prompt !== undefined;
 
       if (defChanged) {
         // Update cadence if schedule changed.
@@ -214,9 +210,9 @@ export async function executeCronAction(
           updates.cadence = detectCadence(action.schedule);
           changes.push(`schedule → ${action.schedule}`);
         }
-        if (action.timezone) changes.push(`timezone → ${action.timezone}`);
-        if (action.channel) changes.push(`channel → ${action.channel}`);
-        if (action.prompt) changes.push(`prompt updated`);
+        if (action.timezone !== undefined) changes.push(`timezone → ${action.timezone}`);
+        if (action.channel !== undefined) changes.push(`channel → ${action.channel}`);
+        if (action.prompt !== undefined) changes.push(`prompt updated`);
 
         // Try to edit the thread's starter message (works for bot-created threads).
         const thread = cronCtx.client.channels.cache.get(record.threadId);
@@ -256,7 +252,7 @@ export async function executeCronAction(
       } catch {}
 
       // Update thread tags if needed.
-      if (action.tags || action.schedule) {
+      if (action.tags !== undefined || action.schedule !== undefined) {
         try {
           const tagMap = await loadTagMap(cronCtx.tagMapPath);
           const updatedRecord = cronCtx.statsStore.getRecord(action.cronId);
@@ -419,9 +415,9 @@ export async function executeCronAction(
       // Fire the executor (deferred import to avoid circular).
       try {
         const { executeCronJob } = await import('../cron/executor.js');
-        // Build a minimal executor context. The real one is in index.ts,
-        // but we can construct from what CronContext provides.
-        void executeCronJob(job, {
+        // Use the real executor context if available (wired in from index.ts),
+        // falling back to a minimal context with reduced capabilities.
+        const execCtx: CronExecutorContext = cronCtx.executorCtx ?? {
           client: cronCtx.client,
           runtime: cronCtx.runtime,
           model: record.modelOverride ?? record.model ?? 'haiku',
@@ -433,7 +429,8 @@ export async function executeCronAction(
           discordActionsEnabled: false,
           actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false },
           statsStore: cronCtx.statsStore,
-        });
+        };
+        void executeCronJob(job, execCtx);
         return { ok: true, summary: `Cron ${action.cronId} triggered (running in background)` };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

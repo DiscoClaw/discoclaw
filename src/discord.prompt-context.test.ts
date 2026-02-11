@@ -595,6 +595,9 @@ describe('memory command interception', () => {
 
     expect(runtime.invoke).not.toHaveBeenCalled();
     expect(sessionManager.getOrCreate).not.toHaveBeenCalled();
-    expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining('Durable memory:'));
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('Durable memory:'),
+      allowedMentions: { parse: [] },
+    }));
   });
 });

@@ -1,6 +1,7 @@
 import { ChannelType } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, fmtTime } from './action-utils.js';
+import { NO_MENTIONS } from './allowed-mentions.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,7 +56,7 @@ export async function executeMessagingAction(
       const channel = resolveChannel(guild, action.channel);
       if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
 
-      const opts: any = { content: action.content };
+      const opts: any = { content: action.content, allowedMentions: NO_MENTIONS };
       if (action.replyTo) {
         opts.reply = { messageReference: action.replyTo };
       }
@@ -127,7 +128,7 @@ export async function executeMessagingAction(
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
       const message = await (channel as any).messages.fetch(action.messageId);
-      await message.edit(action.content);
+      await message.edit({ content: action.content, allowedMentions: NO_MENTIONS });
       return { ok: true, summary: `Edited message in #${(channel as any).name}` };
     }
 

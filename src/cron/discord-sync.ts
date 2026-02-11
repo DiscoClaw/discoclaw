@@ -1,7 +1,29 @@
 import fs from 'node:fs/promises';
-import type { Client, ThreadChannel } from 'discord.js';
+import path from 'node:path';
+import { ChannelType } from 'discord.js';
+import type { Client, ForumChannel, ThreadChannel } from 'discord.js';
 import type { CronRunRecord, CronRunStats, CadenceTag } from './run-stats.js';
 import type { LoggerLike } from '../discord/action-types.js';
+
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
+
+export type TagMap = Record<string, string>;
+
+// ---------------------------------------------------------------------------
+// Forum channel resolution
+// ---------------------------------------------------------------------------
+
+export async function resolveForumChannel(client: Client, forumId: string): Promise<ForumChannel | null> {
+  const ch = client.channels.cache.get(forumId);
+  if (ch && ch.type === ChannelType.GuildForum) return ch as ForumChannel;
+  try {
+    const fetched = await client.channels.fetch(forumId);
+    if (fetched && fetched.type === ChannelType.GuildForum) return fetched as ForumChannel;
+  } catch {}
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Cadence emojis
@@ -136,7 +158,7 @@ export async function seedTagMap(seedPath: string, targetPath: string): Promise<
     // Doesn't exist yet; seed it.
   }
   try {
-    const dir = await import('node:path').then((p) => p.dirname(targetPath));
+    const dir = path.dirname(targetPath);
     await fs.mkdir(dir, { recursive: true });
     await fs.copyFile(seedPath, targetPath);
     return true;

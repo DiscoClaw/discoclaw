@@ -2,8 +2,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { buildCronThreadName, formatStatusMessage, seedTagMap } from './discord-sync.js';
-import type { CronRunRecord } from './run-stats.js';
+import { buildCronThreadName, formatStatusMessage, seedTagMap, ensureStatusMessage, resolveForumChannel } from './discord-sync.js';
+import type { CronRunRecord, CronRunStats } from './run-stats.js';
 
 describe('buildCronThreadName', () => {
   it('prefixes with cadence emoji', () => {
@@ -133,5 +133,144 @@ describe('seedTagMap', () => {
 
     const content = await fs.readFile(targetPath, 'utf8');
     expect(content).toBe('{"existing": "123"}');
+  });
+});
+
+describe('ensureStatusMessage', () => {
+  function makeRecord(overrides?: Partial<CronRunRecord>): CronRunRecord {
+    return {
+      cronId: 'cron-test1',
+      threadId: 'thread-1',
+      runCount: 3,
+      lastRunAt: '2025-01-15T10:00:00Z',
+      lastRunStatus: 'success',
+      cadence: 'daily',
+      purposeTags: ['monitoring'],
+      disabled: false,
+      model: 'haiku',
+      ...overrides,
+    };
+  }
+
+  function makeStats(): CronRunStats {
+    return {
+      upsertRecord: vi.fn(async () => makeRecord()),
+      getRecord: vi.fn(() => makeRecord()),
+    } as unknown as CronRunStats;
+  }
+
+  it('creates a new status message when none exists', async () => {
+    const sentMsg = { id: 'new-msg-1', pin: vi.fn() };
+    const thread = {
+      isThread: () => true,
+      send: vi.fn(async () => sentMsg),
+      messages: { fetch: vi.fn() },
+    };
+    const client = {
+      channels: {
+        cache: { get: () => thread },
+        fetch: vi.fn(async () => thread),
+      },
+    };
+    const stats = makeStats();
+
+    const result = await ensureStatusMessage(client as any, 'thread-1', 'cron-test1', makeRecord(), stats);
+    expect(result).toBe('new-msg-1');
+    expect(thread.send).toHaveBeenCalled();
+    expect(sentMsg.pin).toHaveBeenCalled();
+    expect(stats.upsertRecord).toHaveBeenCalledWith('cron-test1', 'thread-1', { statusMessageId: 'new-msg-1' });
+  });
+
+  it('edits existing status message', async () => {
+    const existingMsg = { id: 'existing-msg', edit: vi.fn() };
+    const thread = {
+      isThread: () => true,
+      send: vi.fn(),
+      messages: { fetch: vi.fn(async () => existingMsg) },
+    };
+    const client = {
+      channels: {
+        cache: { get: () => thread },
+        fetch: vi.fn(async () => thread),
+      },
+    };
+
+    const record = makeRecord({ statusMessageId: 'existing-msg' });
+    const result = await ensureStatusMessage(client as any, 'thread-1', 'cron-test1', record, makeStats());
+    expect(result).toBe('existing-msg');
+    expect(existingMsg.edit).toHaveBeenCalled();
+    expect(thread.send).not.toHaveBeenCalled();
+  });
+
+  it('returns undefined when thread not found', async () => {
+    const client = {
+      channels: {
+        cache: { get: () => undefined },
+        fetch: vi.fn(async () => null),
+      },
+    };
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const result = await ensureStatusMessage(client as any, 'missing', 'cron-test1', makeRecord(), makeStats(), log);
+    expect(result).toBeUndefined();
+    expect(log.warn).toHaveBeenCalled();
+  });
+
+  it('creates new message when existing statusMessageId is stale', async () => {
+    const sentMsg = { id: 'new-msg-2', pin: vi.fn() };
+    const thread = {
+      isThread: () => true,
+      send: vi.fn(async () => sentMsg),
+      messages: { fetch: vi.fn(async () => { throw new Error('Unknown Message'); }) },
+    };
+    const client = {
+      channels: {
+        cache: { get: () => thread },
+        fetch: vi.fn(async () => thread),
+      },
+    };
+
+    const record = makeRecord({ statusMessageId: 'deleted-msg' });
+    const stats = makeStats();
+    const result = await ensureStatusMessage(client as any, 'thread-1', 'cron-test1', record, stats);
+    expect(result).toBe('new-msg-2');
+    expect(thread.send).toHaveBeenCalled();
+  });
+});
+
+describe('resolveForumChannel', () => {
+  it('returns forum from cache', async () => {
+    const forum = { id: 'forum-1', type: 15 };
+    const client = {
+      channels: {
+        cache: { get: (id: string) => id === 'forum-1' ? forum : undefined },
+        fetch: vi.fn(),
+      },
+    };
+    const result = await resolveForumChannel(client as any, 'forum-1');
+    expect(result).toBe(forum);
+  });
+
+  it('returns null for non-forum channel', async () => {
+    const textChannel = { id: 'text-1', type: 0 };
+    const client = {
+      channels: {
+        cache: { get: () => textChannel },
+        fetch: vi.fn(async () => textChannel),
+      },
+    };
+    const result = await resolveForumChannel(client as any, 'text-1');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when channel not found', async () => {
+    const client = {
+      channels: {
+        cache: { get: () => undefined },
+        fetch: vi.fn(async () => null),
+      },
+    };
+    const result = await resolveForumChannel(client as any, 'missing');
+    expect(result).toBeNull();
   });
 });

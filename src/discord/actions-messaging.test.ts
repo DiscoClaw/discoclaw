@@ -92,7 +92,7 @@ describe('sendMessage', () => {
     );
 
     expect(result).toEqual({ ok: true, summary: 'Sent message to #general' });
-    expect(ch.send).toHaveBeenCalledWith({ content: 'Hello!' });
+    expect(ch.send).toHaveBeenCalledWith({ content: 'Hello!', allowedMentions: { parse: [] } });
   });
 
   it('sends a reply when replyTo is set', async () => {
@@ -107,6 +107,7 @@ describe('sendMessage', () => {
     expect(result.ok).toBe(true);
     expect(ch.send).toHaveBeenCalledWith({
       content: 'Reply!',
+      allowedMentions: { parse: [] },
       reply: { messageReference: 'msg-123' },
     });
   });
@@ -266,7 +267,7 @@ describe('editMessage', () => {
     );
 
     expect(result).toEqual({ ok: true, summary: 'Edited message in #general' });
-    expect(msg.edit).toHaveBeenCalledWith('Updated');
+    expect(msg.edit).toHaveBeenCalledWith({ content: 'Updated', allowedMentions: { parse: [] } });
   });
 
   it('rejects content exceeding 2000 chars', async () => {

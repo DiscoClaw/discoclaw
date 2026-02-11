@@ -377,6 +377,7 @@ if (cronEnabled && effectiveCronForum) {
 
   cronScheduler = new CronScheduler((job) => executeCronJob(job, cronExecCtx), log);
   cronCtx.scheduler = cronScheduler;
+  cronCtx.executorCtx = cronExecCtx;
 
   botParams.cronCtx = cronCtx;
   botParams.discordActionsCrons = discordActionsCrons && cronEnabled;
