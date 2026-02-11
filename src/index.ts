@@ -18,6 +18,7 @@ import type { ActionCategoryFlags } from './discord/actions.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
 import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
+import { checkBdAvailable } from './beads/bd-cli.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
@@ -252,20 +253,20 @@ const limitedRuntime = withConcurrencyLimit(runtime, { maxConcurrentInvocations,
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
 // Pre-flight: detect whether the bd CLI is installed (used to decide whether to bootstrap the beads forum).
-const beadsInit = await initializeBeadsContext({
-  enabled: beadsEnabled,
-  beadsCwd,
-  beadsForum,
-  beadsTagMapPath,
-  beadsMentionUser,
-  beadsSidebar,
-  beadsAutoTag,
-  beadsAutoTagModel,
-  runtime,
-  log,
-});
-const bdAvailable = beadsInit.bdAvailable;
-const bdVersion = beadsInit.bdVersion;
+// Full context init is deferred to post-connect so system bootstrap can auto-create the forum first.
+let bdAvailable = false;
+let bdVersion: string | undefined;
+if (beadsEnabled) {
+  const bd = await checkBdAvailable();
+  bdAvailable = bd.available;
+  bdVersion = bd.version;
+  if (!bd.available) {
+    log.warn(
+      'beads: bd CLI not found — install bd or set BD_BIN to a custom path ' +
+      '(set DISCOCLAW_BEADS_ENABLED=0 to suppress this warning)',
+    );
+  }
+}
 
 const botParams = {
   token,
@@ -355,11 +356,9 @@ const { client, status, system } = await startDiscordBot(botParams);
 botStatus = status;
 
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
-// If initializeBeadsContext didn't resolve a forum (because system bootstrap hadn't run yet),
-// retry now with the system-provided forum ID.
-let beadCtx = beadsInit.beadCtx;
-if (!beadCtx && beadsEnabled && bdAvailable && system?.beadsForumId) {
-  const retry = await initializeBeadsContext({
+let beadCtx: BeadContext | undefined;
+if (beadsEnabled && bdAvailable) {
+  const beadsResult = await initializeBeadsContext({
     enabled: true,
     beadsCwd,
     beadsForum,
@@ -371,9 +370,9 @@ if (!beadCtx && beadsEnabled && bdAvailable && system?.beadsForumId) {
     runtime,
     statusPoster: botStatus ?? undefined,
     log,
-    systemBeadsForumId: system.beadsForumId,
+    systemBeadsForumId: system?.beadsForumId,
   });
-  beadCtx = retry.beadCtx;
+  beadCtx = beadsResult.beadCtx;
 }
 
 if (beadCtx) {

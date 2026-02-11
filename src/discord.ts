@@ -225,6 +225,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           || params.healthVerboseAllowlist.size === 0
           || params.healthVerboseAllowlist.has(msg.author.id);
         const mode = healthMode === 'verbose' && verboseAllowed ? 'verbose' : 'basic';
+        // Fallback: dead code — healthConfigSnapshot is always provided by index.ts.
+        // Kept for type safety; beadsEnabled/beadsActive may disagree with actual state.
         const healthConfig: HealthConfigSnapshot = params.healthConfigSnapshot ?? {
           runtimeModel: params.runtimeModel,
           runtimeTimeoutMs: params.runtimeTimeoutMs,

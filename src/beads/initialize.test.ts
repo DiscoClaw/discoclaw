@@ -17,8 +17,21 @@ vi.mock('./forum-guard.js', () => ({
   initBeadsForumGuard: vi.fn(),
 }));
 
+vi.mock('./bead-sync-coordinator.js', () => ({
+  BeadSyncCoordinator: vi.fn().mockImplementation(() => ({
+    sync: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+
+vi.mock('./bead-sync-watcher.js', () => ({
+  startBeadSyncWatcher: vi.fn().mockReturnValue({ stop: vi.fn() }),
+}));
+
 import { checkBdAvailable } from './bd-cli.js';
-import { initializeBeadsContext } from './initialize.js';
+import { initBeadsForumGuard } from './forum-guard.js';
+import { BeadSyncCoordinator } from './bead-sync-coordinator.js';
+import { startBeadSyncWatcher } from './bead-sync-watcher.js';
+import { initializeBeadsContext, wireBeadsSync } from './initialize.js';
 
 const mockCheckBd = vi.mocked(checkBdAvailable);
 
@@ -100,5 +113,100 @@ describe('initializeBeadsContext', () => {
     }));
     expect(result.beadCtx).toBeDefined();
     expect(result.beadCtx!.forumId).toBe('system-forum-456');
+  });
+
+  it('sets sidebarMentionUserId when sidebar enabled with mention user', async () => {
+    mockCheckBd.mockResolvedValue({ available: true });
+    const log = fakeLog();
+    const result = await initializeBeadsContext(baseOpts({
+      beadsSidebar: true,
+      beadsMentionUser: 'user-789',
+      log,
+    }));
+    expect(result.beadCtx).toBeDefined();
+    expect(result.beadCtx!.sidebarMentionUserId).toBe('user-789');
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('warns when sidebar enabled but mention user not set', async () => {
+    mockCheckBd.mockResolvedValue({ available: true });
+    const log = fakeLog();
+    const result = await initializeBeadsContext(baseOpts({
+      beadsSidebar: true,
+      beadsMentionUser: undefined,
+      log,
+    }));
+    expect(result.beadCtx).toBeDefined();
+    expect(result.beadCtx!.sidebarMentionUserId).toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('sidebar mentions will be inactive'),
+    );
+  });
+
+  it('does not set sidebarMentionUserId when sidebar disabled', async () => {
+    mockCheckBd.mockResolvedValue({ available: true });
+    const log = fakeLog();
+    const result = await initializeBeadsContext(baseOpts({
+      beadsSidebar: false,
+      beadsMentionUser: 'user-789',
+      log,
+    }));
+    expect(result.beadCtx).toBeDefined();
+    expect(result.beadCtx!.sidebarMentionUserId).toBeUndefined();
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('wireBeadsSync', () => {
+  it('wires forum guard, coordinator, and sync watcher', async () => {
+    const log = fakeLog();
+    const beadCtx = {
+      beadsCwd: '/tmp/beads',
+      forumId: 'forum-123',
+      tagMap: { bug: '111' },
+      log,
+    } as any;
+    const client = {} as any;
+    const guild = {} as any;
+
+    const result = await wireBeadsSync({
+      beadCtx,
+      client,
+      guild,
+      guildId: 'guild-1',
+      beadsCwd: '/tmp/beads',
+      sidebarMentionUserId: 'user-1',
+      log,
+    });
+
+    expect(initBeadsForumGuard).toHaveBeenCalledWith({
+      client,
+      forumId: 'forum-123',
+      log,
+    });
+    expect(BeadSyncCoordinator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client,
+        guild,
+        forumId: 'forum-123',
+        mentionUserId: 'user-1',
+      }),
+    );
+    // The coordinator's sync() should have been called (fire-and-forget startup sync).
+    const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
+    expect(coordinatorInstance.sync).toHaveBeenCalled();
+    expect(startBeadSyncWatcher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        beadsCwd: '/tmp/beads',
+        log,
+      }),
+    );
+    expect(beadCtx.syncCoordinator).toBeDefined();
+    expect(result.syncWatcher).toBeDefined();
+    expect(result.syncWatcher).toHaveProperty('stop');
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ beadsCwd: '/tmp/beads' }),
+      'beads:file-watcher started',
+    );
   });
 });
