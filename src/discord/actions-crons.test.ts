@@ -209,6 +209,22 @@ describe('executeCronAction', () => {
     expect(cronCtx.statsStore.removeRecord).toHaveBeenCalledWith('cron-test0001');
   });
 
+  it('cronDelete warns when archive fails', async () => {
+    const cronCtx = makeCronCtx();
+    // Override the cached thread to have a failing setArchived
+    (cronCtx.client.channels.cache.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => {
+      if (id === 'thread-1') return { id: 'thread-1', isThread: () => true, send: vi.fn(), setArchived: vi.fn().mockRejectedValue(new Error('Missing Permissions')) };
+      return undefined;
+    });
+    const result = await executeCronAction({ type: 'cronDelete', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('could not be archived');
+    }
+    expect(cronCtx.scheduler.unregister).toHaveBeenCalledWith('thread-1');
+    expect(cronCtx.log?.warn).toHaveBeenCalled();
+  });
+
   it('cronList shows running emoji when job is running', async () => {
     const cronCtx = makeCronCtx();
     const job = cronCtx.scheduler.getJob('thread-1');

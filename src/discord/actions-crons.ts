@@ -404,13 +404,18 @@ export async function executeCronAction(
       await cronCtx.statsStore.removeRecord(action.cronId);
 
       // Archive the thread.
-      try {
-        const thread = cronCtx.client.channels.cache.get(record.threadId);
-        if (thread && thread.isThread()) {
+      const thread = cronCtx.client.channels.cache.get(record.threadId);
+      if (thread && thread.isThread()) {
+        try {
           await (thread as any).send({ content: '\uD83D\uDDD1\uFE0F **Cron deleted**', allowedMentions: { parse: [] } });
+        } catch {}
+        try {
           await (thread as any).setArchived(true);
+        } catch (err) {
+          cronCtx.log?.warn({ err, cronId: action.cronId, threadId: record.threadId }, 'cron:action:delete archive failed');
+          return { ok: true, summary: `Cron ${action.cronId} deleted but thread could not be archived — archive it manually` };
         }
-      } catch {}
+      }
 
       return { ok: true, summary: `Cron ${action.cronId} deleted and thread archived` };
     }
