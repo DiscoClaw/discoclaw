@@ -3,7 +3,8 @@ import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from './action-types.js';
 import type { StatusPoster } from './status-channel.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { TagMap, BeadData, BeadStatus } from '../beads/types.js';
+import type { TagMap, BeadData, BeadStatus, BeadSyncResult } from '../beads/types.js';
+import type { BeadSyncCoordinator } from '../beads/bead-sync-coordinator.js';
 import { isBeadStatus } from '../beads/types.js';
 import { bdShow, bdList, bdCreate, bdUpdate, bdClose, bdAddLabel } from '../beads/bd-cli.js';
 import {
@@ -50,6 +51,7 @@ export type BeadContext = {
   mentionUserId?: string;
   statusPoster?: StatusPoster;
   log?: LoggerLike;
+  syncCoordinator?: BeadSyncCoordinator;
 };
 
 // ---------------------------------------------------------------------------
@@ -255,19 +257,29 @@ export async function executeBeadAction(
     }
 
     case 'beadSync': {
-      // Deferred to bead-sync.ts; import dynamically to avoid circular deps.
       try {
-        const { runBeadSync } = await import('../beads/bead-sync.js');
-        const result = await runBeadSync({
-          client: ctx.client,
-          guild: ctx.guild,
-          forumId: beadCtx.forumId,
-          tagMap: beadCtx.tagMap,
-          beadsCwd: beadCtx.beadsCwd,
-          log: beadCtx.log,
-          statusPoster: beadCtx.statusPoster,
-        });
-        beadThreadCache.invalidate();
+        let result: BeadSyncResult;
+        if (beadCtx.syncCoordinator) {
+          // Use coordinator: passes statusPoster for user-initiated syncs.
+          const coordResult = await beadCtx.syncCoordinator.sync(beadCtx.statusPoster);
+          if (!coordResult) {
+            return { ok: true, summary: 'Sync already running; changes will be picked up.' };
+          }
+          result = coordResult;
+        } else {
+          // Fallback: no coordinator (watcher not initialized).
+          const { runBeadSync } = await import('../beads/bead-sync.js');
+          result = await runBeadSync({
+            client: ctx.client,
+            guild: ctx.guild,
+            forumId: beadCtx.forumId,
+            tagMap: beadCtx.tagMap,
+            beadsCwd: beadCtx.beadsCwd,
+            log: beadCtx.log,
+            statusPoster: beadCtx.statusPoster,
+          });
+          beadThreadCache.invalidate();
+        }
         return {
           ok: true,
           summary: `Sync complete: ${result.threadsCreated} created, ${result.emojisUpdated} updated, ${result.starterMessagesUpdated} starters, ${result.threadsArchived} archived, ${result.statusesUpdated} status-fixes${result.warnings ? `, ${result.warnings} warnings` : ''}`,

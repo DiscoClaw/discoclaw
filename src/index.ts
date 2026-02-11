@@ -72,10 +72,12 @@ try {
 
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
+let beadSyncWatcher: { stop(): void } | null = null;
 const shutdown = async () => {
   // Kill Claude subprocesses first so they release session locks before the new instance starts.
   killActiveSubprocesses();
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
+  beadSyncWatcher?.stop();
   cronScheduler?.stopAll();
   await botStatus?.offline();
   await releasePidLock(pidLockPath);
@@ -358,6 +360,38 @@ if (beadsEnabled) {
       botParams.beadCtx = beadCtx;
       botParams.discordActionsBeads = discordActionsBeads && beadsEnabled;
       initBeadsForumGuard({ client, forumId: effectiveForum, log });
+
+      // Wire coordinator + watcher + startup sync
+      const resolvedGuildId = guildId || system?.guildId || '';
+      const guild = resolvedGuildId ? client.guilds.cache.get(resolvedGuildId) : undefined;
+      if (guild) {
+        const { BeadSyncCoordinator } = await import('./beads/bead-sync-coordinator.js');
+        const { startBeadSyncWatcher } = await import('./beads/bead-sync-watcher.js');
+
+        const syncCoordinator = new BeadSyncCoordinator({
+          client, guild,
+          forumId: effectiveForum,
+          tagMap,
+          beadsCwd,
+          log,
+        });
+        beadCtx.syncCoordinator = syncCoordinator;
+
+        // Startup sync: fire-and-forget to avoid blocking cron init
+        syncCoordinator.sync().catch((err) => {
+          log.warn({ err }, 'beads:startup-sync failed');
+        });
+
+        beadSyncWatcher = startBeadSyncWatcher({
+          coordinator: syncCoordinator,
+          beadsCwd,
+          log,
+        });
+        log.info({ beadsCwd }, 'beads:file-watcher started');
+      } else {
+        log.warn({ resolvedGuildId }, 'beads:sync-watcher skipped; guild not in cache');
+      }
+
       log.info(
         { beadsCwd, beadsForum: effectiveForum, tagCount: Object.keys(tagMap).length, autoTag: beadsAutoTag, bdVersion },
         'beads:initialized',
