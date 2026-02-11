@@ -236,7 +236,7 @@ describe('createReactionAddHandler', () => {
     expect(prompt).toContain('#');
   });
 
-  it('prompt includes attachment URLs when present', async () => {
+  it('image attachments are downloaded and passed to runtime.invoke', async () => {
     const invokeSpy = vi.fn();
     const runtime: RuntimeAdapter = {
       id: 'claude_code',
@@ -251,15 +251,37 @@ describe('createReactionAddHandler', () => {
     const queue = mockQueue();
     const handler = createReactionAddHandler(params, queue);
 
-    const reaction = mockReaction();
-    reaction.message.attachments = {
-      size: 1,
-      values: () => [{ url: 'https://cdn.example.com/image.png' }] as any,
-    };
-    await handler(reaction as any, mockUser() as any);
+    // Mock global fetch for the image download
+    const originalFetch = globalThis.fetch;
+    const imgData = Buffer.from('fake-png');
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(imgData.buffer.slice(imgData.byteOffset, imgData.byteOffset + imgData.byteLength)),
+    }) as any;
 
-    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
-    expect(prompt).toContain('https://cdn.example.com/image.png');
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 1,
+        values: () => [{
+          url: 'https://cdn.discordapp.com/attachments/123/456/photo.png',
+          name: 'photo.png',
+          contentType: 'image/png',
+          size: 100,
+        }] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      // Images should be passed in invoke params, not as URL text in prompt
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      expect(invokeParams.images).toBeDefined();
+      expect(invokeParams.images).toHaveLength(1);
+      expect(invokeParams.images[0].mediaType).toBe('image/png');
+      // Prompt should NOT contain the raw URL
+      expect(invokeParams.prompt).not.toContain('https://cdn.discordapp.com');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('prompt includes durable memory when enabled and store has items', async () => {

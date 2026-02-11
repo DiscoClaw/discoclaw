@@ -3,6 +3,9 @@ export type ImageData = {
   mediaType: string; // 'image/png', 'image/jpeg', 'image/webp'
 };
 
+/** Max images per invocation to prevent runaway accumulation. */
+export const MAX_IMAGES_PER_INVOCATION = 10;
+
 export type EngineEvent =
   | { type: 'text_delta'; text: string }
   | { type: 'text_final'; text: string }
@@ -35,6 +38,7 @@ export type RuntimeInvokeParams = {
   tools?: string[];
   addDirs?: string[];
   timeoutMs?: number;
+  images?: ImageData[];
 };
 
 export interface RuntimeAdapter {

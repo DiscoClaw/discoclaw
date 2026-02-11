@@ -1,13 +1,12 @@
 import process from 'node:process';
 import { execa, type ResultPromise } from 'execa';
-import type { EngineEvent, ImageData } from './types.js';
+import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData } from './types.js';
 import {
   extractTextFromUnknownEvent,
   extractResultText,
   extractImageFromUnknownEvent,
   extractResultContentBlocks,
   imageDedupeKey,
-  MAX_IMAGES_PER_INVOCATION,
   stripToolUseBlocks,
   tryParseJsonLine,
 } from './claude-code-cli.js';
@@ -147,7 +146,7 @@ export class LongRunningProcess {
    * Send a user turn to the long-running process and yield EngineEvents.
    * Caller must ensure state is `idle` before calling.
    */
-  async *sendTurn(prompt: string): AsyncGenerator<EngineEvent> {
+  async *sendTurn(prompt: string, images?: ImageData[]): AsyncGenerator<EngineEvent> {
     if (this._state !== 'idle') {
       yield { type: 'error', message: `long-running: cannot send turn in state ${this._state}` };
       yield { type: 'done' };
@@ -181,7 +180,17 @@ export class LongRunningProcess {
     this.startHangTimer();
 
     // Write the user message to stdin (Claude CLI stream-json expects API-shaped messages).
-    const msg = JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n';
+    // When images are present, build a content-block array; otherwise plain string.
+    const content = images && images.length > 0
+      ? [
+          { type: 'text', text: prompt },
+          ...images.map((img) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
+          })),
+        ]
+      : prompt;
+    const msg = JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
     try {
       this.subprocess!.stdin!.write(msg);
     } catch (err) {

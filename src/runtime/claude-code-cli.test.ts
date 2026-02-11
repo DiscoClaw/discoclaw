@@ -406,3 +406,134 @@ describe('imageDedupeKey', () => {
     expect(imageDedupeKey(a)).not.toBe(imageDedupeKey(b));
   });
 });
+
+describe('one-shot with images', () => {
+  function makeProcessStreamJsonWithStdin(args: { lines: string[]; exitCode: number }) {
+    const p: any = Promise.resolve({ exitCode: args.exitCode });
+    p.stdout = Readable.from(args.lines.map((l) => l + '\n'));
+    p.stderr = Readable.from([]);
+    p.stdin = { write: vi.fn(), end: vi.fn() };
+    return p;
+  }
+
+  it('uses stdin pipe + stream-json input when images are present', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJsonWithStdin({
+      lines: [
+        JSON.stringify({ type: 'message_delta', text: 'I see a cat' }),
+        JSON.stringify({ type: 'result', result: 'I see a cat' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({
+      prompt: 'What is in this image?',
+      model: 'opus',
+      cwd: '/tmp',
+      images: [{ base64: 'iVBORw0KGgo=', mediaType: 'image/png' }],
+    })) {
+      events.push(evt);
+    }
+
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('I see a cat');
+
+    // Verify args
+    const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(callArgs).toContain('--input-format');
+    expect(callArgs).toContain('stream-json');
+    // Prompt should NOT be in positional args
+    expect(callArgs).not.toContain('--');
+    expect(callArgs).not.toContain('What is in this image?');
+
+    // Verify stdin options
+    const callOpts = execaMock.mock.calls[0]?.[2] ?? {};
+    expect(callOpts.stdin).toBe('pipe');
+
+    // Verify stdin was written with content blocks
+    const proc = execaMock.mock.results[0].value;
+    expect(proc.stdin.write).toHaveBeenCalledOnce();
+    const written = proc.stdin.write.mock.calls[0][0];
+    const parsed = JSON.parse(written.trim());
+    expect(parsed.type).toBe('user');
+    expect(Array.isArray(parsed.message.content)).toBe(true);
+    expect(parsed.message.content[0]).toEqual({ type: 'text', text: 'What is in this image?' });
+    expect(parsed.message.content[1].type).toBe('image');
+    expect(parsed.message.content[1].source.media_type).toBe('image/png');
+    expect(proc.stdin.end).toHaveBeenCalledOnce();
+  });
+
+  it('without images: uses positional arg and stdin ignore (no regression)', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'hello', exitCode: 0 }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({
+      prompt: 'plain text prompt',
+      model: 'opus',
+      cwd: '/tmp',
+    })) {
+      events.push(evt);
+    }
+
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('hello');
+
+    const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    // Prompt must follow `--` separator
+    const sepIdx = callArgs.indexOf('--');
+    expect(sepIdx).toBeGreaterThanOrEqual(0);
+    expect(callArgs[sepIdx + 1]).toBe('plain text prompt');
+    // Should NOT have --input-format
+    expect(callArgs).not.toContain('--input-format');
+
+    const callOpts = execaMock.mock.calls[0]?.[2] ?? {};
+    expect(callOpts.stdin).toBe('ignore');
+  });
+
+  it('images with text outputFormat forces stream-json output', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJsonWithStdin({
+      lines: [
+        JSON.stringify({ type: 'result', result: 'Described image' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'text',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({
+      prompt: 'describe',
+      model: 'opus',
+      cwd: '/tmp',
+      images: [{ base64: 'abc', mediaType: 'image/jpeg' }],
+    })) {
+      events.push(evt);
+    }
+
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('Described image');
+
+    // Even though opts.outputFormat is 'text', args should include stream-json output
+    const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(callArgs).toContain('--input-format');
+    // Should have --output-format stream-json added for images
+    const outputFormatIdx = callArgs.lastIndexOf('--output-format');
+    expect(callArgs[outputFormatIdx + 1]).toBe('stream-json');
+  });
+});

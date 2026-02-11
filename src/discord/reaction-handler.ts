@@ -10,6 +10,7 @@ import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection
 import type { ActionCategoryFlags } from './actions.js';
 import { buildContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
 import { replyThenSendChunks } from './output-common.js';
+import { downloadMessageImages } from './image-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 
@@ -206,10 +207,22 @@ function createReactionHandler(
             `Original message by ${messageAuthor} (ID: ${messageAuthorId}):\n` +
             messageContent;
 
-          // Attachments.
+          // Download image attachments; non-image attachments are silently ignored.
+          let inputImages: ImageData[] | undefined;
           if (msg.attachments && msg.attachments.size > 0) {
-            const urls = [...msg.attachments.values()].map((a) => a.url).join(', ');
-            prompt += `\nAttachments: ${urls}`;
+            try {
+              const dlResult = await downloadMessageImages([...msg.attachments.values()]);
+              if (dlResult.images.length > 0) {
+                inputImages = dlResult.images;
+                params.log?.info({ imageCount: dlResult.images.length }, `${logPrefix}:images downloaded`);
+              }
+              if (dlResult.errors.length > 0) {
+                params.log?.warn({ errors: dlResult.errors }, `${logPrefix}:image download errors`);
+                prompt += `\n(Note: ${dlResult.errors.length} image(s) could not be loaded: ${dlResult.errors.join('; ')})`;
+              }
+            } catch (err) {
+              params.log?.warn({ err }, `${logPrefix}:image download failed`);
+            }
           }
 
           // Embeds.
@@ -297,6 +310,7 @@ function createReactionHandler(
             sessionKey,
             tools: effectiveTools,
             timeoutMs: params.runtimeTimeoutMs,
+            images: inputImages,
           })) {
             if (evt.type === 'text_final') {
               finalText = evt.text;

@@ -29,6 +29,7 @@ import { createReactionAddHandler, createReactionRemoveHandler } from './discord
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
 import { buildContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { editThenSendChunks } from './discord/output-common.js';
+import { downloadMessageImages } from './discord/image-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
 import type { HealthConfigSnapshot } from './discord/health-command.js';
@@ -442,6 +443,24 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             'invoke:start',
           );
 
+          // Download image attachments from the user message.
+          let inputImages: ImageData[] | undefined;
+          if (msg.attachments && msg.attachments.size > 0) {
+            try {
+              const dlResult = await downloadMessageImages([...msg.attachments.values()]);
+              if (dlResult.images.length > 0) {
+                inputImages = dlResult.images;
+                params.log?.info({ imageCount: dlResult.images.length }, 'discord:images downloaded');
+              }
+              if (dlResult.errors.length > 0) {
+                params.log?.warn({ errors: dlResult.errors }, 'discord:image download errors');
+                prompt += `\n(Note: ${dlResult.errors.length} image(s) could not be loaded: ${dlResult.errors.join('; ')})`;
+              }
+            } catch (err) {
+              params.log?.warn({ err }, 'discord:image download failed');
+            }
+          }
+
           let currentPrompt = prompt;
           let followUpDepth = 0;
           let processedText = '';
@@ -520,6 +539,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               sessionKey,
               tools: effectiveTools,
               timeoutMs: params.runtimeTimeoutMs,
+              images: followUpDepth === 0 ? inputImages : undefined,
             })) {
               if (taq) {
                 // Tool-aware mode: route relevant events through the queue.

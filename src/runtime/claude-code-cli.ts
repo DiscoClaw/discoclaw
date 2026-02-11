@@ -1,6 +1,6 @@
 import process from 'node:process';
 import { execa, type ResultPromise } from 'execa';
-import type { EngineEvent, ImageData, RuntimeAdapter, RuntimeInvokeParams } from './types.js';
+import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData, type RuntimeAdapter, type RuntimeInvokeParams } from './types.js';
 import { SessionFileScanner } from './session-scanner.js';
 import { ProcessPool } from './process-pool.js';
 
@@ -58,8 +58,8 @@ export function extractResultText(evt: unknown): string | null {
 /** Max base64 string length (~25 MB encoded, ~18.75 MB decoded). */
 const MAX_IMAGE_BASE64_LEN = 25 * 1024 * 1024;
 
-/** Max images per invocation to prevent runaway accumulation. */
-export const MAX_IMAGES_PER_INVOCATION = 10;
+// Re-export for backward compatibility (now defined in types.ts).
+export { MAX_IMAGES_PER_INVOCATION } from './types.js';
 
 /** Extract an image content block from a Claude CLI stream-json event. */
 export function extractImageFromUnknownEvent(evt: unknown): ImageData | null {
@@ -210,7 +210,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
           if (sub) activeSubprocesses.add(sub);
 
           let fallback = false;
-          for await (const evt of proc.sendTurn(params.prompt)) {
+          for await (const evt of proc.sendTurn(params.prompt, params.images)) {
             if (evt.type === 'error' && (evt.message.startsWith('long-running:') || evt.message.includes('hang detected'))) {
               // Process crashed/hung — suppress error, fall back to one-shot.
               pool.remove(params.sessionKey);
@@ -255,12 +255,23 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       }
     }
 
+    // When images are present, switch to stdin-based input with stream-json.
+    const hasImages = params.images && params.images.length > 0;
+
+    if (hasImages) {
+      args.push('--input-format', 'stream-json');
+    }
+
     if (opts.outputFormat) {
       args.push('--output-format', opts.outputFormat);
     }
 
+    // Ensure stream-json output includes partial messages for streaming.
     if (opts.outputFormat === 'stream-json') {
       args.push('--include-partial-messages');
+    } else if (hasImages) {
+      // Images require stream-json output format for content block parsing.
+      args.push('--output-format', 'stream-json', '--include-partial-messages');
     }
 
     // Tool flags are runtime-specific; keep optional and configurable.
@@ -277,20 +288,23 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
 
     if (opts.log) {
       // Log args without the prompt to avoid leaking user content at debug level.
-      opts.log.debug({ args }, 'claude-cli: constructed args');
+      opts.log.debug({ args, hasImages: Boolean(hasImages) }, 'claude-cli: constructed args');
     }
 
-    // POSIX `--` terminates option parsing, preventing variadic flags
-    // (--tools, --add-dir) from consuming the positional prompt.
-    args.push('--', params.prompt);
+    // When images are present, prompt is sent via stdin; otherwise as positional arg.
+    if (!hasImages) {
+      // POSIX `--` terminates option parsing, preventing variadic flags
+      // (--tools, --add-dir) from consuming the positional prompt.
+      args.push('--', params.prompt);
+    }
 
     const subprocess = execa(opts.claudeBin, args, {
       cwd: params.cwd,
       timeout: params.timeoutMs,
       reject: false,
       forceKillAfterDelay: 5000,
-      // Ensure the CLI can't hang waiting for input (auth prompts, trust dialogs, etc).
-      stdin: 'ignore',
+      // When images are present we pipe stdin; otherwise ignore to prevent auth hangs.
+      stdin: hasImages ? 'pipe' : 'ignore',
       env: {
         ...process.env,
         // Prefer plain output: Discord doesn't render ANSI well.
@@ -301,6 +315,20 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       stdout: 'pipe',
       stderr: 'pipe',
     });
+
+    // When images are present, write the prompt + images to stdin as NDJSON, then close.
+    if (hasImages && subprocess.stdin) {
+      const content = [
+        { type: 'text', text: params.prompt },
+        ...params.images!.map((img) => ({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
+        })),
+      ];
+      const stdinMsg = JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
+      subprocess.stdin.write(stdinMsg);
+      subprocess.stdin.end();
+    }
 
     activeSubprocesses.add(subprocess);
     subprocess.then(() => activeSubprocesses.delete(subprocess))
@@ -339,6 +367,8 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       scanner.start().catch((err) => opts.log?.debug({ err }, 'session-scanner: start failed'));
     }
 
+    // When images forced stream-json, override the effective output format for parsing.
+    const effectiveOutputFormat = hasImages ? 'stream-json' : opts.outputFormat;
     let mergedStdout = '';
     let merged = '';
     let resultText = '';  // fallback from "result" event if no deltas were extracted
@@ -356,7 +386,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     subprocess.stdout.on('data', (chunk) => {
       const s = String(chunk);
       mergedStdout += s;
-      if (opts.outputFormat === 'text') {
+      if (effectiveOutputFormat === 'text') {
         push({ type: 'text_delta', text: s });
         return;
       }
@@ -480,7 +510,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
         push({ type: 'log_line', stream: 'stderr', line: stderrTail });
       }
 
-      if (opts.outputFormat === 'stream-json') {
+      if (effectiveOutputFormat === 'stream-json') {
         // Flush trailing stdout.
         const tail = stdoutBuffered.trim();
         if (tail) {
@@ -513,7 +543,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
         return;
       }
 
-      if (opts.outputFormat === 'text') {
+      if (effectiveOutputFormat === 'text') {
         const final = (stdout || mergedStdout).trimEnd();
         if (final) push({ type: 'text_final', text: final });
       } else {

@@ -310,4 +310,57 @@ describe('LongRunningProcess', () => {
 
     expect(events.find((e) => e.type === 'text_final')?.text).toBe('The answer is 42.');
   });
+
+  it('sendTurn with images writes content-block array to stdin', async () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+
+    const proc = new LongRunningProcess(baseOpts);
+    proc.spawn();
+
+    queueMicrotask(() => {
+      mock.stdout.emit('data', JSON.stringify({ type: 'result', result: 'I see an image' }) + '\n');
+    });
+
+    const images = [{ base64: 'iVBORw0KGgo=', mediaType: 'image/png' }];
+    const events: any[] = [];
+    for await (const evt of proc.sendTurn('Describe this', images)) {
+      events.push(evt);
+    }
+
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('I see an image');
+
+    // Verify stdin was written with content-block array
+    const written = mock.stdin.write.mock.calls[0]?.[0];
+    const parsed = JSON.parse(written.trim());
+    expect(parsed.type).toBe('user');
+    expect(parsed.message.role).toBe('user');
+    expect(Array.isArray(parsed.message.content)).toBe(true);
+    expect(parsed.message.content[0]).toEqual({ type: 'text', text: 'Describe this' });
+    expect(parsed.message.content[1].type).toBe('image');
+    expect(parsed.message.content[1].source.type).toBe('base64');
+    expect(parsed.message.content[1].source.media_type).toBe('image/png');
+    expect(parsed.message.content[1].source.data).toBe('iVBORw0KGgo=');
+  });
+
+  it('sendTurn without images writes plain string content (no regression)', async () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+
+    const proc = new LongRunningProcess(baseOpts);
+    proc.spawn();
+
+    queueMicrotask(() => {
+      mock.stdout.emit('data', JSON.stringify({ type: 'result', result: 'ok' }) + '\n');
+    });
+
+    const events: any[] = [];
+    for await (const evt of proc.sendTurn('Hello')) {
+      events.push(evt);
+    }
+
+    const written = mock.stdin.write.mock.calls[0]?.[0];
+    const parsed = JSON.parse(written.trim());
+    expect(parsed.message.content).toBe('Hello');
+  });
 });
