@@ -40,6 +40,12 @@ describe('detectCadence', () => {
     expect(detectCadence('')).toBe('daily');
   });
 
+  it('detects once for specific month', () => {
+    expect(detectCadence('0 6 11 2 *')).toBe('once');
+    expect(detectCadence('0 0 1 1 *')).toBe('once');
+    expect(detectCadence('0 12 25 12 *')).toBe('once');
+  });
+
   it('handles complex schedules', () => {
     expect(detectCadence('0 7,19 * * *')).toBe('daily');
     expect(detectCadence('0 7 * * 1,3,5')).toBe('weekly');

@@ -8,6 +8,7 @@ import type { CadenceTag } from './run-stats.js';
  * parses via croner before classifying — if it throws, returns 'daily' as fallback.
  *
  * Logic:
+ * - month not * → once (fires at most once a year, e.g., a one-shot schedule)
  * - minute is * or *\/N → frequent (runs multiple times per hour)
  * - minute specific + hour * → hourly
  * - minute+hour specific, dom+dow * → daily
@@ -26,10 +27,13 @@ export function detectCadence(schedule: string): CadenceTag {
   const parts = schedule.trim().split(/\s+/);
   if (parts.length < 5) return 'daily';
 
-  const [minute, hour, dom, , dow] = parts;
+  const [minute, hour, dom, month, dow] = parts;
 
   const isWild = (f: string) => f === '*';
   const isStep = (f: string) => /^\*\/\d+$/.test(f);
+
+  // Specific month → fires at most once a year (one-shot or annual).
+  if (!isWild(month) && !isStep(month)) return 'once';
 
   // Minute is wildcard or step → runs multiple times per hour → frequent.
   if (isWild(minute) || isStep(minute)) return 'frequent';

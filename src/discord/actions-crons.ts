@@ -7,7 +7,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { CronRunStats } from '../cron/run-stats.js';
 import type { CronScheduler } from '../cron/scheduler.js';
 import type { CronExecutorContext } from '../cron/executor.js';
-import { generateCronId } from '../cron/run-stats.js';
+import { CADENCE_TAGS, generateCronId } from '../cron/run-stats.js';
 import { safeCronId } from '../cron/job-lock.js';
 import { detectCadence } from '../cron/cadence.js';
 import { autoTagCron, classifyCronModel } from '../cron/auto-tag.js';
@@ -95,7 +95,8 @@ export async function executeCronAction(
       const tagMap = await loadTagMap(cronCtx.tagMapPath);
 
       // Auto-tag if enabled.
-      const purposeTagNames = Object.keys(tagMap).filter((k) => !['frequent', 'hourly', 'daily', 'weekly', 'monthly'].includes(k));
+      const cadenceSet = new Set<string>(CADENCE_TAGS);
+      const purposeTagNames = Object.keys(tagMap).filter((k) => !cadenceSet.has(k));
       let purposeTags: string[] = [];
       let model: 'haiku' | 'opus' | null = null;
 

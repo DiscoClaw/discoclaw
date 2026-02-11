@@ -1,6 +1,7 @@
 import type { Client } from 'discord.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import { CADENCE_TAGS } from './run-stats.js';
 import type { CronRunStats } from './run-stats.js';
 import type { CronScheduler } from './scheduler.js';
 import { detectCadence } from './cadence.js';
@@ -45,7 +46,7 @@ async function sleep(ms: number | undefined): Promise<void> {
 }
 
 function purposeTagNames(tagMap: TagMap): string[] {
-  const cadenceSet = new Set(['frequent', 'hourly', 'daily', 'weekly', 'monthly']);
+  const cadenceSet = new Set<string>(CADENCE_TAGS);
   return Object.keys(tagMap).filter((k) => !cadenceSet.has(k));
 }
 
