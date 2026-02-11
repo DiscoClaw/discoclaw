@@ -49,6 +49,7 @@ export type BeadContext = {
   autoTag: boolean;
   autoTagModel: string;
   mentionUserId?: string;
+  sidebarMentionUserId?: string;
   statusPoster?: StatusPoster;
   log?: LoggerLike;
   syncCoordinator?: BeadSyncCoordinator;
@@ -170,7 +171,7 @@ export async function executeBeadAction(
               beadCtx.log?.warn({ err, beadId: action.beadId, threadId }, 'beads:thread name update failed');
             }
             try {
-              await updateBeadStarterMessage(ctx.client, threadId, bead);
+              await updateBeadStarterMessage(ctx.client, threadId, bead, beadCtx.sidebarMentionUserId);
             } catch (err) {
               beadCtx.log?.warn({ err, beadId: action.beadId, threadId }, 'beads:starter message update failed');
             }
@@ -277,6 +278,7 @@ export async function executeBeadAction(
             beadsCwd: beadCtx.beadsCwd,
             log: beadCtx.log,
             statusPoster: beadCtx.statusPoster,
+            mentionUserId: beadCtx.sidebarMentionUserId,
           });
           beadThreadCache.invalidate();
         }

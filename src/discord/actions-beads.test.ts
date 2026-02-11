@@ -201,6 +201,24 @@ describe('executeBeadAction', () => {
       expect.anything(),
       '111222333',
       expect.objectContaining({ id: 'ws-001' }),
+      undefined,
+    );
+  });
+
+  it('beadUpdate passes sidebarMentionUserId to updateBeadStarterMessage', async () => {
+    const { updateBeadStarterMessage } = await import('../beads/discord-sync.js');
+    (updateBeadStarterMessage as any).mockClear();
+
+    await executeBeadAction(
+      { type: 'beadUpdate', beadId: 'ws-001', description: 'Updated desc' },
+      makeCtx(),
+      makeBeadCtx({ sidebarMentionUserId: '999' }),
+    );
+    expect(updateBeadStarterMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      '111222333',
+      expect.objectContaining({ id: 'ws-001' }),
+      '999',
     );
   });
 

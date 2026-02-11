@@ -42,6 +42,11 @@ try {
   const guild = await client.guilds.fetch(guildId);
   const tagMap = tagMapPath ? await loadTagMap(tagMapPath) : {};
 
+  const mentionUserId = envOpt('DISCOCLAW_BEADS_MENTION_USER');
+  const sidebarRaw = envOpt('DISCOCLAW_BEADS_SIDEBAR');
+  const sidebarEnabled = sidebarRaw === '1' || sidebarRaw?.toLowerCase() === 'true';
+  const sidebarMentionUserId = sidebarEnabled ? mentionUserId : undefined;
+
   const result = await runBeadSync({
     client,
     guild,
@@ -50,6 +55,7 @@ try {
     beadsCwd,
     throttleMs,
     archivedDedupeLimit: archivedLimit,
+    mentionUserId: sidebarMentionUserId,
   });
 
   // Stable machine-readable output (matches legacy script's spirit).

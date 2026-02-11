@@ -103,8 +103,8 @@ export async function loadTagMap(filePath: string): Promise<TagMap> {
 // Starter message content builder
 // ---------------------------------------------------------------------------
 
-/** Build the starter message content for a bead thread (no mention line). */
-export function buildBeadStarterContent(bead: BeadData): string {
+/** Build the starter message content for a bead thread. When mentionUserId is provided, appends a mention for sidebar visibility. */
+export function buildBeadStarterContent(bead: BeadData, mentionUserId?: string): string {
   const lines: string[] = [];
   if (bead.description) lines.push(bead.description);
   lines.push('');
@@ -112,6 +112,10 @@ export function buildBeadStarterContent(bead: BeadData): string {
   lines.push(`**Priority:** P${bead.priority ?? 2}`);
   lines.push(`**Status:** ${bead.status}`);
   if (bead.owner) lines.push(`**Owner:** ${bead.owner}`);
+  if (mentionUserId) {
+    lines.push('');
+    lines.push(`<@${mentionUserId}>`);
+  }
   return lines.join('\n');
 }
 
@@ -191,6 +195,20 @@ export async function closeBeadThread(
 
   const closedName = buildThreadName(bead.id, bead.title, bead.status);
 
+  // Remove mention from starter message to clear sidebar visibility.
+  try {
+    const starter = await thread.fetchStarterMessage();
+    if (starter && starter.author.id === client.user?.id) {
+      const cleanContent = buildBeadStarterContent(bead);
+      if (starter.content !== cleanContent) {
+        await starter.edit({
+          content: cleanContent.slice(0, 2000),
+          allowedMentions: { parse: [], users: [] },
+        });
+      }
+    }
+  } catch { /* ignore — close should still proceed */ }
+
   const reason = bead.close_reason || 'Closed';
 
   try {
@@ -244,11 +262,12 @@ export async function updateBeadThreadName(
   return true;
 }
 
-/** Update a thread's starter message to reflect current bead state. */
+/** Update a thread's starter message to reflect current bead state. When mentionUserId is provided, the mention is included for sidebar visibility. */
 export async function updateBeadStarterMessage(
   client: Client,
   threadId: string,
   bead: BeadData,
+  mentionUserId?: string,
 ): Promise<boolean> {
   const thread = await fetchThreadChannel(client, threadId);
   if (!thread) return false;
@@ -264,10 +283,13 @@ export async function updateBeadStarterMessage(
   // Only edit messages authored by the bot.
   if (starter.author.id !== client.user?.id) return false;
 
-  const newContent = buildBeadStarterContent(bead);
+  const newContent = buildBeadStarterContent(bead, mentionUserId);
   if (starter.content === newContent) return false;
 
-  await starter.edit({ content: newContent.slice(0, 2000), allowedMentions: { parse: [] } });
+  await starter.edit({
+    content: newContent.slice(0, 2000),
+    allowedMentions: { parse: [], users: mentionUserId ? [mentionUserId] : [] },
+  });
   return true;
 }
 

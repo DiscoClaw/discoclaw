@@ -26,6 +26,7 @@ export type BeadSyncOptions = {
   throttleMs?: number;
   archivedDedupeLimit?: number;
   statusPoster?: StatusPoster;
+  mentionUserId?: string;
 };
 
 function hasLabel(bead: BeadData, label: string): boolean {
@@ -92,7 +93,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
         continue;
       }
 
-      const threadId = await createBeadThread(forum, bead, tagMap);
+      const threadId = await createBeadThread(forum, bead, tagMap, opts.mentionUserId);
       // Link back via external_ref.
       try {
         await bdUpdate(bead.id, { externalRef: `discord:${threadId}` }, beadsCwd);
@@ -144,7 +145,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
       warnings++;
     }
     try {
-      const starterChanged = await updateBeadStarterMessage(client, threadId, bead);
+      const starterChanged = await updateBeadStarterMessage(client, threadId, bead, opts.mentionUserId);
       if (starterChanged) {
         starterMessagesUpdated++;
         log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase3 starter updated');

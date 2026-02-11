@@ -104,6 +104,7 @@ Copy `.env.example` -> `.env`. See that file for inline comments.
 | `DISCOCLAW_BEADS_FORUM` | *(empty)* | Forum channel name or ID for bead threads |
 | `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/bead-hooks/tag-map.json` | Path to tag-map.json |
 | `DISCOCLAW_BEADS_MENTION_USER` | *(empty)* | User ID to @mention in new bead threads |
+| `DISCOCLAW_BEADS_SIDEBAR` | `0` | When `1` + `MENTION_USER` set, persists @mention in open bead starters for sidebar visibility |
 | `DISCOCLAW_BEADS_AUTO_TAG` | `1` | Enable Haiku auto-tagging |
 | `DISCOCLAW_BEADS_AUTO_TAG_MODEL` | `haiku` | Model for auto-tagging |
 

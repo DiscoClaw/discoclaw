@@ -47,6 +47,11 @@ export type DiscoclawConfig = {
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
   summaryToDurableEnabled: boolean;
+  shortTermMemoryEnabled: boolean;
+  shortTermMaxEntries: number;
+  shortTermMaxAgeHours: number;
+  shortTermInjectMaxChars: number;
+  shortTermDataDirOverride?: string;
   actionFollowupDepth: number;
 
   reactionHandlerEnabled: boolean;
@@ -73,6 +78,7 @@ export type DiscoclawConfig = {
   beadsForum?: string;
   beadsTagMapPathOverride?: string;
   beadsMentionUser?: string;
+  beadsSidebar: boolean;
   beadsAutoTag: boolean;
   beadsAutoTagModel: string;
 
@@ -327,6 +333,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       durableMaxItems: parsePositiveInt(env, 'DISCOCLAW_DURABLE_MAX_ITEMS', 200),
       memoryCommandsEnabled: parseBoolean(env, 'DISCOCLAW_MEMORY_COMMANDS_ENABLED', true),
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', false),
+      shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', false),
+      shortTermMaxEntries: parsePositiveInt(env, 'DISCOCLAW_SHORTTERM_MAX_ENTRIES', 20),
+      shortTermMaxAgeHours: parsePositiveNumber(env, 'DISCOCLAW_SHORTTERM_MAX_AGE_HOURS', 6),
+      shortTermInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_SHORTTERM_INJECT_MAX_CHARS', 1000),
+      shortTermDataDirOverride: parseTrimmedString(env, 'DISCOCLAW_SHORTTERM_DATA_DIR'),
       actionFollowupDepth: parseNonNegativeInt(env, 'DISCOCLAW_ACTION_FOLLOWUP_DEPTH', 3),
 
       reactionHandlerEnabled: parseBoolean(env, 'DISCOCLAW_REACTION_HANDLER', true),
@@ -353,6 +364,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       beadsForum: parseTrimmedString(env, 'DISCOCLAW_BEADS_FORUM'),
       beadsTagMapPathOverride: parseTrimmedString(env, 'DISCOCLAW_BEADS_TAG_MAP'),
       beadsMentionUser: parseTrimmedString(env, 'DISCOCLAW_BEADS_MENTION_USER'),
+      beadsSidebar: parseBoolean(env, 'DISCOCLAW_BEADS_SIDEBAR', false),
       beadsAutoTag: parseBoolean(env, 'DISCOCLAW_BEADS_AUTO_TAG', true),
       beadsAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_BEADS_AUTO_TAG_MODEL') ?? 'haiku',
 

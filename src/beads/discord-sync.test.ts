@@ -80,9 +80,14 @@ describe('buildBeadStarterContent', () => {
     expect(content).not.toContain('**Owner:**');
   });
 
-  it('does not include mention lines', () => {
+  it('does not include mention lines when mentionUserId omitted', () => {
     const content = buildBeadStarterContent(makeBead());
     expect(content).not.toContain('<@');
+  });
+
+  it('appends mention when mentionUserId provided', () => {
+    const content = buildBeadStarterContent(makeBead(), '999888777');
+    expect(content).toContain('<@999888777>');
   });
 
   it('defaults priority to P2 when undefined', () => {
@@ -207,7 +212,25 @@ describe('updateBeadStarterMessage', () => {
     expect(result).toBe(true);
     expect(thread._editFn).toHaveBeenCalledWith({
       content: buildBeadStarterContent(bead),
-      allowedMentions: { parse: [] },
+      allowedMentions: { parse: [], users: [] },
     });
+  });
+
+  it('passes mentionUserId to content builder and sets allowedMentions.users', async () => {
+    const thread = makeThread({ content: 'stale content' });
+    const result = await updateBeadStarterMessage(makeClient(thread), '123', bead, '999');
+    expect(result).toBe(true);
+    expect(thread._editFn).toHaveBeenCalledWith({
+      content: buildBeadStarterContent(bead, '999'),
+      allowedMentions: { parse: [], users: ['999'] },
+    });
+  });
+
+  it('skips edit when mention content already matches', async () => {
+    const contentWithMention = buildBeadStarterContent(bead, '999');
+    const thread = makeThread({ content: contentWithMention });
+    const result = await updateBeadStarterMessage(makeClient(thread), '123', bead, '999');
+    expect(result).toBe(false);
+    expect(thread._editFn).not.toHaveBeenCalled();
   });
 });

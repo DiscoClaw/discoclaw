@@ -140,8 +140,51 @@ describe('runBeadSync', () => {
       throttleMs: 0,
     } as any);
 
-    expect(updateBeadStarterMessage).toHaveBeenCalledWith(expect.anything(), '456', expect.objectContaining({ id: 'ws-010' }));
+    expect(updateBeadStarterMessage).toHaveBeenCalledWith(expect.anything(), '456', expect.objectContaining({ id: 'ws-010' }), undefined);
     expect(result.starterMessagesUpdated).toBe(1);
+  });
+
+  it('passes mentionUserId through to updateBeadStarterMessage in phase 3', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { updateBeadStarterMessage } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-012', title: 'L', status: 'in_progress', labels: [], external_ref: 'discord:456' },
+    ]);
+    (updateBeadStarterMessage as any).mockResolvedValueOnce(true);
+
+    await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+      mentionUserId: '999',
+    } as any);
+
+    expect(updateBeadStarterMessage).toHaveBeenCalledWith(expect.anything(), '456', expect.objectContaining({ id: 'ws-012' }), '999');
+  });
+
+  it('passes mentionUserId through to createBeadThread in phase 1', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { createBeadThread } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-013', title: 'M', status: 'open', labels: [], external_ref: '' },
+    ]);
+
+    await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+      mentionUserId: '999',
+    } as any);
+
+    expect(createBeadThread).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'ws-013' }), {}, '999');
   });
 
   it('starterMessagesUpdated stays 0 when updateBeadStarterMessage returns false', async () => {

@@ -167,6 +167,43 @@ describe('parseConfig', () => {
     expect(config.summaryToDurableEnabled).toBe(true);
   });
 
+  // --- Short-term memory ---
+  it('defaults shortTermMemoryEnabled to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.shortTermMemoryEnabled).toBe(false);
+  });
+
+  it('parses short-term memory config fields', () => {
+    const { config } = parseConfig(env({
+      DISCOCLAW_SHORTTERM_MEMORY_ENABLED: '1',
+      DISCOCLAW_SHORTTERM_MAX_ENTRIES: '10',
+      DISCOCLAW_SHORTTERM_MAX_AGE_HOURS: '12',
+      DISCOCLAW_SHORTTERM_INJECT_MAX_CHARS: '500',
+    }));
+    expect(config.shortTermMemoryEnabled).toBe(true);
+    expect(config.shortTermMaxEntries).toBe(10);
+    expect(config.shortTermMaxAgeHours).toBe(12);
+    expect(config.shortTermInjectMaxChars).toBe(500);
+  });
+
+  it('uses default values for short-term memory fields', () => {
+    const { config } = parseConfig(env());
+    expect(config.shortTermMaxEntries).toBe(20);
+    expect(config.shortTermMaxAgeHours).toBe(6);
+    expect(config.shortTermInjectMaxChars).toBe(1000);
+  });
+
+  // --- Beads sidebar ---
+  it('defaults beadsSidebar to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.beadsSidebar).toBe(false);
+  });
+
+  it('parses DISCOCLAW_BEADS_SIDEBAR=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BEADS_SIDEBAR: '1' }));
+    expect(config.beadsSidebar).toBe(true);
+  });
+
   // --- Reaction remove handler ---
   it('defaults reactionRemoveHandlerEnabled to false', () => {
     const { config } = parseConfig(env());

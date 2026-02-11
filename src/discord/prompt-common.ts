@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { DiscordChannelContext } from './channel-context.js';
 import { formatDurableSection, loadDurableMemory, selectItemsForInjection } from './durable-memory.js';
+import { buildShortTermMemorySection } from './shortterm-memory.js';
 import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
 import type { LoggerLike } from './action-types.js';
 import type { BeadData } from '../beads/types.js';
@@ -72,6 +73,8 @@ export async function buildDurableMemorySection(opts: {
     return '';
   }
 }
+
+export { buildShortTermMemorySection };
 
 export async function resolveEffectiveTools(opts: {
   workspaceCwd: string;

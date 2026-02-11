@@ -125,6 +125,12 @@ const durableInjectMaxChars = cfg.durableInjectMaxChars;
 const durableMaxItems = cfg.durableMaxItems;
 const memoryCommandsEnabled = cfg.memoryCommandsEnabled;
 const summaryToDurableEnabled = cfg.summaryToDurableEnabled;
+const shortTermMemoryEnabled = cfg.shortTermMemoryEnabled;
+const shortTermDataDir = cfg.shortTermDataDirOverride
+  || (dataDir ? path.join(dataDir, 'memory', 'shortterm') : path.join(__dirname, '..', 'data', 'memory', 'shortterm'));
+const shortTermMaxEntries = cfg.shortTermMaxEntries;
+const shortTermMaxAgeMs = cfg.shortTermMaxAgeHours * 60 * 60 * 1000;
+const shortTermInjectMaxChars = cfg.shortTermInjectMaxChars;
 const actionFollowupDepth = cfg.actionFollowupDepth;
 const reactionHandlerEnabled = cfg.reactionHandlerEnabled;
 const reactionRemoveHandlerEnabled = cfg.reactionRemoveHandlerEnabled;
@@ -176,6 +182,8 @@ const beadsForum = cfg.beadsForum || '';
 const beadsTagMapPath = cfg.beadsTagMapPathOverride
   || path.join(__dirname, '..', 'scripts', 'beads', 'bead-hooks', 'tag-map.json');
 const beadsMentionUser = cfg.beadsMentionUser;
+const beadsSidebar = cfg.beadsSidebar;
+const sidebarMentionUserId = beadsSidebar ? beadsMentionUser : undefined;
 const beadsAutoTag = cfg.beadsAutoTag;
 const beadsAutoTagModel = cfg.beadsAutoTagModel;
 const discordActionsBeads = cfg.discordActionsBeads;
@@ -298,6 +306,11 @@ const botParams = {
   durableMaxItems,
   memoryCommandsEnabled,
   summaryToDurableEnabled,
+  shortTermMemoryEnabled,
+  shortTermDataDir,
+  shortTermMaxEntries,
+  shortTermMaxAgeMs,
+  shortTermInjectMaxChars,
   statusChannel,
   bootstrapEnsureBeadsForum: beadsEnabled && bdAvailable,
   toolAwareStreaming,
@@ -351,6 +364,9 @@ if (beadsEnabled) {
       log.warn('DISCOCLAW_BEADS_ENABLED=1 but no beads forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_BEADS_FORUM); beads subsystem disabled');
     } else {
       const tagMap = await loadTagMap(beadsTagMapPath);
+      if (beadsSidebar && !beadsMentionUser) {
+        log.warn('beads:sidebar enabled but DISCOCLAW_BEADS_MENTION_USER not set; sidebar mentions will be inactive');
+      }
       beadCtx = {
         beadsCwd,
         forumId: effectiveForum,
@@ -359,6 +375,7 @@ if (beadsEnabled) {
         autoTag: beadsAutoTag,
         autoTagModel: beadsAutoTagModel,
         mentionUserId: beadsMentionUser,
+        sidebarMentionUserId,
         statusPoster: botStatus ?? undefined,
         log,
       };
@@ -379,6 +396,7 @@ if (beadsEnabled) {
           tagMap,
           beadsCwd,
           log,
+          mentionUserId: sidebarMentionUserId,
         });
         beadCtx.syncCoordinator = syncCoordinator;
 

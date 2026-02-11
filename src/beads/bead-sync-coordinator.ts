@@ -12,6 +12,7 @@ export type CoordinatorOptions = {
   tagMap: TagMap;
   beadsCwd: string;
   log?: LoggerLike;
+  mentionUserId?: string;
 };
 
 /**

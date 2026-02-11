@@ -28,7 +28,8 @@ import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { createReactionAddHandler, createReactionRemoveHandler } from './discord/reaction-handler.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
-import { buildContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
+import { buildContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
+import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/shortterm-memory.js';
 import { editThenSendChunks } from './discord/output-common.js';
 import { downloadMessageImages } from './discord/image-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
@@ -87,6 +88,11 @@ export type BotParams = {
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
   summaryToDurableEnabled: boolean;
+  shortTermMemoryEnabled: boolean;
+  shortTermDataDir: string;
+  shortTermMaxEntries: number;
+  shortTermMaxAgeMs: number;
+  shortTermInjectMaxChars: number;
   statusChannel?: string;
   bootstrapEnsureBeadsForum?: boolean;
   toolAwareStreaming?: boolean;
@@ -260,6 +266,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
       type SummaryWork = { existingSummary: string | null; exchange: string };
       let pendingSummaryWork: SummaryWork | null = null as SummaryWork | null;
+      type ShortTermAppend = { userContent: string; botResponse: string; channelName: string };
+      let pendingShortTermAppend: ShortTermAppend | null = null as ShortTermAppend | null;
 
       await queue.run(sessionKey, async () => {
         let reply: any = null;
@@ -376,12 +384,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          const [durableSection, beadSection] = await Promise.all([
+          const [durableSection, shortTermSection, beadSection] = await Promise.all([
             buildDurableMemorySection({
               enabled: params.durableMemoryEnabled,
               durableDataDir: params.durableDataDir,
               userId: msg.author.id,
               durableInjectMaxChars: params.durableInjectMaxChars,
+              log: params.log,
+            }),
+            buildShortTermMemorySection({
+              enabled: params.shortTermMemoryEnabled && !isDm,
+              shortTermDataDir: params.shortTermDataDir,
+              guildId: String(msg.guildId ?? ''),
+              userId: msg.author.id,
+              maxChars: params.shortTermInjectMaxChars,
+              maxAgeMs: params.shortTermMaxAgeMs,
               log: params.log,
             }),
             buildBeadThreadSection({
@@ -401,6 +418,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               : '') +
             (durableSection
               ? `\n\n---\nDurable memory (user-specific notes):\n${durableSection}\n`
+              : '') +
+            (shortTermSection
+              ? `\n\n---\nRecent activity (cross-channel):\n${shortTermSection}\n`
               : '') +
             (summarySection
               ? `\n\n---\nConversation memory:\n${summarySection}\n`
@@ -694,6 +714,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               };
             }
           }
+
+          // Stage short-term memory append for fire-and-forget after queue.
+          if (params.shortTermMemoryEnabled && !isDm && msg.guildId) {
+            const ch: any = msg.channel as any;
+            if (isChannelPublic(ch, msg.guild)) {
+              pendingShortTermAppend = {
+                userContent: String(msg.content ?? ''),
+                botResponse: (processedText || '').slice(0, 300),
+                channelName: String(ch?.name ?? ch?.parent?.name ?? msg.channelId),
+              };
+            }
+          }
         } catch (err) {
           metrics.increment('discord.handler.error');
           params.log?.error({ err, sessionKey }, 'discord:handler failed');
@@ -746,6 +778,29 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           .catch((err) => {
             params.log?.warn({ err, sessionKey }, 'discord:summary generation failed');
           });
+      }
+
+      // Fire-and-forget: record short-term memory entry (cross-channel awareness).
+      if (pendingShortTermAppend) {
+        const stWork = pendingShortTermAppend;
+        const guildUserId = `${msg.guildId}-${msg.author.id}`;
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        appendEntry(
+          params.shortTermDataDir,
+          guildUserId,
+          {
+            timestamp: Date.now(),
+            sessionKey,
+            channelName: stWork.channelName,
+            summary: buildExcerptSummary(stWork.userContent, stWork.botResponse),
+          },
+          {
+            maxEntries: params.shortTermMaxEntries,
+            maxAgeMs: params.shortTermMaxAgeMs,
+          },
+        ).catch((err) => {
+          params.log?.warn({ err, sessionKey }, 'discord:short-term memory append failed');
+        });
       }
     } catch (err) {
       const metrics = params.metrics ?? globalMetrics;
