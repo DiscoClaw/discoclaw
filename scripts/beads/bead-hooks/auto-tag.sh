@@ -31,15 +31,13 @@ Rules:
 - ops: operations, monitoring, audits, cron jobs, health checks
 - infra: infrastructure, Docker, services, networking, servers
 - token-cost: token usage, cost optimization, billing, API spend
-- doc-bot: Doc (the AI assistant) related work, personality, behavior
-- openclaw: core framework changes, gateway, config
 - personal: personal life tasks (non-technical)
 - blocked: do NOT use this — it's a status tag, not a content tag
 
 If the task is clearly personal/life stuff, use ONLY the personal tag.
 
 Return ONLY a comma-separated list of tag names, nothing else.
-Example: feature,openclaw
+Example: feature,ops
 
 Title: $title
 Description: ${description:-(none)}"
