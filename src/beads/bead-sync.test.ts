@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runBeadSync } from './bead-sync.js';
 
 vi.mock('./bd-cli.js', () => ({
@@ -10,6 +10,7 @@ vi.mock('./discord-sync.js', () => ({
   resolveBeadsForum: vi.fn(async () => ({})),
   createBeadThread: vi.fn(async () => 'thread-new'),
   closeBeadThread: vi.fn(async () => {}),
+  isBeadThreadAlreadyClosed: vi.fn(async () => false),
   updateBeadThreadName: vi.fn(async () => true),
   getThreadIdFromBead: vi.fn((bead: any) => {
     const ref = (bead.external_ref ?? '').trim();
@@ -31,6 +32,8 @@ function makeGuild(): any {
 }
 
 describe('runBeadSync', () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it('skips no-thread beads in phase 1', async () => {
     const { bdList } = await import('./bd-cli.js');
     const { createBeadThread } = await import('./discord-sync.js');
@@ -136,6 +139,50 @@ describe('runBeadSync', () => {
     } as any);
 
     expect(closeBeadThread).toHaveBeenCalled();
+    expect(result.threadsArchived).toBe(1);
+  });
+
+  it('skips already-archived closed bead threads in phase 4', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-006', title: 'F', status: 'closed', labels: [], external_ref: 'discord:888' },
+    ]);
+    (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(isBeadThreadAlreadyClosed).toHaveBeenCalledWith(expect.anything(), '888', expect.objectContaining({ id: 'ws-006' }));
+    expect(closeBeadThread).not.toHaveBeenCalled();
+    expect(result.threadsArchived).toBe(0);
+  });
+
+  it('archives threads for tombstone beads in phase 4', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { closeBeadThread } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-007', title: 'G', status: 'tombstone', labels: [], external_ref: 'discord:777' },
+    ]);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), '777', expect.objectContaining({ id: 'ws-007', status: 'tombstone' }));
     expect(result.threadsArchived).toBe(1);
   });
 });

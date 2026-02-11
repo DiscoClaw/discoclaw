@@ -6,6 +6,7 @@ import {
   resolveBeadsForum,
   createBeadThread,
   closeBeadThread,
+  isBeadThreadAlreadyClosed,
   updateBeadThreadName,
   getThreadIdFromBead,
   ensureUnarchived,
@@ -139,11 +140,23 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     await sleep(throttleMs);
   }
 
-  // Phase 4: Archive threads for closed beads.
-  const closedBeads = allBeads.filter((b) => (b.status === 'closed' || b.status === 'done') && getThreadIdFromBead(b));
+  // Phase 4: Archive threads for closed/done/tombstone beads.
+  const closedBeads = allBeads.filter((b) =>
+    (b.status === 'closed' || b.status === 'done' || b.status === 'tombstone') && getThreadIdFromBead(b),
+  );
   for (const bead of closedBeads) {
     const threadId = getThreadIdFromBead(bead)!;
     try {
+      let alreadyClosed = false;
+      try {
+        alreadyClosed = await isBeadThreadAlreadyClosed(client, threadId, bead);
+      } catch {
+        // Check failed (rate limit, network) — proceed with close attempt.
+      }
+      if (alreadyClosed) {
+        await sleep(throttleMs);
+        continue;
+      }
       await closeBeadThread(client, threadId, bead);
       threadsArchived++;
       log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase4 archived');
