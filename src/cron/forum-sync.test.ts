@@ -17,10 +17,11 @@ vi.mock('./cadence.js', () => ({
   detectCadence: vi.fn(() => 'daily'),
 }));
 
-function makeClient(forum: any) {
+function makeClient(forum: any, botUserId = 'bot-user-1') {
   return {
     channels: { cache: { get: vi.fn().mockReturnValue(forum) } },
     on: vi.fn(),
+    user: { id: botUserId },
   };
 }
 
@@ -33,6 +34,7 @@ function makeThread(overrides?: Partial<any>) {
     fetchStarterMessage: vi.fn(),
     send: vi.fn().mockResolvedValue(undefined),
     messages: { fetch: vi.fn().mockResolvedValue(new Map()) },
+    client: { user: { id: 'bot-user-1' } },
     ...overrides,
   };
 }
@@ -104,6 +106,42 @@ describe('initCronForum', () => {
     expect(scheduler.register).not.toHaveBeenCalled();
     expect(scheduler.disable).toHaveBeenCalledOnce();
     expect(thread.send).toHaveBeenCalledOnce();
+  });
+
+  it('registers when starter author is the bot itself (cronCreate flow)', async () => {
+    const thread = makeThread();
+    thread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: '**Schedule:** `0 7 * * *` (UTC)\n**Channel:** #general\n\nSay hello.',
+      author: { id: 'bot-user-1' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum, 'bot-user-1');
+    const scheduler = makeScheduler();
+
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      schedule: '0 7 * * *',
+      timezone: 'UTC',
+      channel: 'general',
+      prompt: 'Say hello.',
+    });
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    expect(scheduler.register).toHaveBeenCalledOnce();
+    expect(scheduler.disable).not.toHaveBeenCalled();
   });
 
   it('disables and reports when parsing fails', async () => {

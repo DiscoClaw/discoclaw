@@ -105,7 +105,9 @@ async function loadThreadAsCron(
   }
 
   const starterAuthorId = (starter as any)?.author?.id ? String((starter as any).author.id) : '';
-  if (!starterAuthorId || !opts.allowUserIds.has(starterAuthorId)) {
+  const botUserId = thread.client?.user?.id ?? '';
+  const isBotAuthored = botUserId && starterAuthorId === botUserId;
+  if (!starterAuthorId || (!opts.allowUserIds.has(starterAuthorId) && !isBotAuthored)) {
     opts.log?.warn({ threadId: thread.id, name: thread.name, starterAuthorId }, 'cron:forum starter author not allowlisted');
     scheduler.disable(thread.id);
     try {
@@ -248,6 +250,15 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
   client.on('threadCreate', async (thread: AnyThreadChannel) => {
     try {
       if (thread.parentId !== forumId) return;
+
+      // Skip threads already registered by cronCreate action to avoid
+      // double-handling (the bot-authored starter message would fail the
+      // allowlist check since the bot's own ID isn't in allowUserIds).
+      if (scheduler.getJob(thread.id)) {
+        log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadCreate skipped (already registered)');
+        return;
+      }
+
       log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadCreate');
       // Small delay: Discord may not have the starter message ready immediately after thread creation.
       await new Promise((r) => setTimeout(r, 2000));
