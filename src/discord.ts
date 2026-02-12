@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ActivityType, Client, GatewayIntentBits, Partials } from 'discord.js';
 import type { PresenceData } from 'discord.js';
 import type { RuntimeAdapter, ImageData } from './runtime/types.js';
+import { MAX_IMAGES_PER_INVOCATION } from './runtime/types.js';
 import type { SessionManager } from './sessions.js';
 import { isAllowlisted } from './discord/allowlist.js';
 import { KeyedQueue } from './group-queue.js';
@@ -35,7 +36,9 @@ import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/shortterm-memory.js';
 import { editThenSendChunks } from './discord/output-common.js';
-import { downloadMessageImages } from './discord/image-download.js';
+import { downloadMessageImages, resolveMediaType } from './discord/image-download.js';
+import { resolveReplyReference } from './discord/reply-reference.js';
+import { downloadTextAttachments } from './discord/file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
 import type { HealthConfigSnapshot } from './discord/health-command.js';
@@ -548,7 +551,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          const [durableSection, shortTermSection, beadSection] = await Promise.all([
+          const [durableSection, shortTermSection, beadSection, replyRef] = await Promise.all([
             buildDurableMemorySection({
               enabled: params.durableMemoryEnabled,
               durableDataDir: params.durableDataDir,
@@ -572,6 +575,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               beadCtx: params.beadCtx,
               log: params.log,
             }),
+            resolveReplyReference(msg, params.botDisplayName, params.log),
           ]);
 
           const inlinedContext = await inlineContextFiles(
@@ -597,6 +601,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               : '') +
             (historySection
               ? `---\nRecent conversation:\n${historySection}\n\n`
+              : '') +
+            (replyRef
+              ? `---\nReplied-to message:\n${replyRef.section}\n\n`
               : '') +
             `---\nUser message:\n` +
             String(msg.content ?? '');
@@ -635,13 +642,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             'invoke:start',
           );
 
-          // Download image attachments from the user message.
+          // Collect images from reply reference (downloaded first, takes priority).
           let inputImages: ImageData[] | undefined;
+          const replyRefImageCount = replyRef?.images.length ?? 0;
+          if (replyRefImageCount > 0) {
+            inputImages = [...replyRef!.images];
+            params.log?.info({ imageCount: replyRefImageCount }, 'discord:reply-ref images downloaded');
+          }
+
+          // Download image attachments from the user message (remaining budget).
           if (msg.attachments && msg.attachments.size > 0) {
             try {
-              const dlResult = await downloadMessageImages([...msg.attachments.values()]);
+              const dlResult = await downloadMessageImages(
+                [...msg.attachments.values()],
+                MAX_IMAGES_PER_INVOCATION - replyRefImageCount,
+              );
               if (dlResult.images.length > 0) {
-                inputImages = dlResult.images;
+                inputImages = [...(inputImages ?? []), ...dlResult.images];
                 params.log?.info({ imageCount: dlResult.images.length }, 'discord:images downloaded');
               }
               if (dlResult.errors.length > 0) {
@@ -651,6 +668,25 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
             } catch (err) {
               params.log?.warn({ err }, 'discord:image download failed');
+            }
+
+            // Download non-image text attachments.
+            try {
+              const nonImageAtts = [...msg.attachments.values()].filter(a => !resolveMediaType(a));
+              if (nonImageAtts.length > 0) {
+                const textResult = await downloadTextAttachments(nonImageAtts);
+                if (textResult.texts.length > 0) {
+                  const sections = textResult.texts.map(t => `[Attached file: ${t.name}]\n\`\`\`\n${t.content}\n\`\`\``);
+                  prompt += '\n\n' + sections.join('\n\n');
+                  params.log?.info({ fileCount: textResult.texts.length }, 'discord:text attachments downloaded');
+                }
+                if (textResult.errors.length > 0) {
+                  prompt += '\n(' + textResult.errors.join('; ') + ')';
+                  params.log?.info({ errors: textResult.errors }, 'discord:text attachment notes');
+                }
+              }
+            } catch (err) {
+              params.log?.warn({ err }, 'discord:text attachment download failed');
             }
           }
 
