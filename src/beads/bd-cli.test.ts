@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { parseBdJson, normalizeBeadData } from './bd-cli.js';
+import { describe, expect, it, vi } from 'vitest';
+import { parseBdJson, normalizeBeadData, bdShow } from './bd-cli.js';
 import type { BeadData } from './types.js';
+
+vi.mock('execa', () => ({
+  execa: vi.fn(),
+}));
 
 // ---------------------------------------------------------------------------
 // parseBdJson
@@ -95,4 +99,57 @@ describe('normalizeBeadData', () => {
       expect(result).toBe(bead); // same reference — no copy
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// bdShow — "not found" error handling
+// ---------------------------------------------------------------------------
+
+describe('bdShow', () => {
+  it('returns null for "not found" errors', async () => {
+    const { execa } = await import('execa');
+    (execa as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: not found',
+    });
+
+    const result = await bdShow('ws-999', '/tmp');
+    expect(result).toBeNull();
+  });
+
+  it('returns null for "no issue found matching" errors (bd resolve failure)', async () => {
+    const { execa } = await import('execa');
+    (execa as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: resolving ID ws-007: operation failed: failed to resolve ID: no issue found matching "ws-007"',
+    });
+
+    const result = await bdShow('ws-007', '/tmp');
+    expect(result).toBeNull();
+  });
+
+  it('returns bead data on success', async () => {
+    const { execa } = await import('execa');
+    (execa as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify([{ id: 'ws-001', title: 'Test', status: 'open' }]),
+      stderr: '',
+    });
+
+    const result = await bdShow('ws-001', '/tmp');
+    expect(result).toEqual({ id: 'ws-001', title: 'Test', status: 'open' });
+  });
+
+  it('throws on unexpected errors', async () => {
+    const { execa } = await import('execa');
+    (execa as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: database corruption detected',
+    });
+
+    await expect(bdShow('ws-001', '/tmp')).rejects.toThrow('database corruption');
+  });
 });

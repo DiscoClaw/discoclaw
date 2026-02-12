@@ -108,7 +108,10 @@ export async function bdShow(id: string, cwd: string): Promise<BeadData | null> 
     return items[0] ? normalizeBeadData(items[0]) : null;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (/not found/i.test(msg)) return null;
+    // Known "not found" variants from the bd CLI:
+    //   - "not found" (standard)
+    //   - "no issue found matching" (resolve-by-prefix failure)
+    if (/not found|no issue found/i.test(msg)) return null;
     throw err;
   }
 }
