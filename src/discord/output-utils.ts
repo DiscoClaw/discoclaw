@@ -108,7 +108,7 @@ export function truncateCodeBlocks(text: string, maxLines = 20): string {
   });
 }
 
-export function renderDiscordTail(text: string, maxLines = 8, maxWidth = 56): string {
+export function renderDiscordTail(text: string, maxLines = 8, maxWidth = 72): string {
   const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
   const lines = normalized.split('\n').filter((l) => l.length > 0);
   const tail = lines.slice(-maxLines).map((l) =>
@@ -119,7 +119,7 @@ export function renderDiscordTail(text: string, maxLines = 8, maxWidth = 56): st
   return `\`\`\`text\n${safe}\n\`\`\``;
 }
 
-export function formatBoldLabel(label: string, maxWidth = 56): string {
+export function formatBoldLabel(label: string, maxWidth = 72): string {
   const singleLine = label.split('\n').find((l) => l.length > 0) ?? '';
   const truncated = singleLine.length > maxWidth
     ? singleLine.slice(0, maxWidth - 1) + '\u2026'
@@ -128,7 +128,7 @@ export function formatBoldLabel(label: string, maxWidth = 56): string {
   return `**${safe}**`;
 }
 
-export function renderActivityTail(label: string, maxLines = 8, maxWidth = 56): string {
+export function renderActivityTail(label: string, maxLines = 8, maxWidth = 72): string {
   const lines: string[] = [];
   for (let i = 0; i < maxLines; i++) lines.push('\u200b');
   const safe = lines.join('\n').replace(/```/g, '``\\`');

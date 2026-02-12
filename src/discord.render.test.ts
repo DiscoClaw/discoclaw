@@ -132,15 +132,15 @@ describe('renderDiscordTail', () => {
 
   it('long lines are truncated to maxWidth with ellipsis', () => {
     const long = 'x'.repeat(100);
-    const out = renderDiscordTail(long, 8, 56);
+    const out = renderDiscordTail(long, 8, 72);
     const lines = contentLines(out);
-    expect(lines[7].length).toBe(56);
+    expect(lines[7].length).toBe(72);
     expect(lines[7].endsWith('\u2026')).toBe(true);
   });
 
   it('lines at or under maxWidth are not truncated', () => {
-    const exact = 'y'.repeat(56);
-    const out = renderDiscordTail(exact, 8, 56);
+    const exact = 'y'.repeat(72);
+    const out = renderDiscordTail(exact, 8, 72);
     const lines = contentLines(out);
     expect(lines[7]).toBe(exact);
   });
@@ -226,7 +226,7 @@ describe('renderActivityTail', () => {
 
   it('long label is truncated to maxWidth with ellipsis', () => {
     const long = 'z'.repeat(100);
-    const out = renderActivityTail(long, 8, 56);
+    const out = renderActivityTail(long, 8, 72);
     const bold = activityBoldLabel(out);
     // Bold wraps: **...truncated...**
     // The truncated label is 55 chars + ellipsis = 56 chars, then escaped
@@ -236,8 +236,8 @@ describe('renderActivityTail', () => {
   });
 
   it('label at or under maxWidth is not truncated', () => {
-    const exact = 'a'.repeat(56);
-    const out = renderActivityTail(exact, 8, 56);
+    const exact = 'a'.repeat(72);
+    const out = renderActivityTail(exact, 8, 72);
     const bold = activityBoldLabel(out);
     expect(bold).toBe(`**${exact}**`);
   });
@@ -291,14 +291,14 @@ describe('formatBoldLabel', () => {
 
   it('truncates long labels with ellipsis', () => {
     const long = 'z'.repeat(100);
-    const out = formatBoldLabel(long, 56);
-    // ** + 56 chars + ** = total; inner content is 55 chars + ellipsis
-    expect(out).toBe(`**${'z'.repeat(55)}\u2026**`);
+    const out = formatBoldLabel(long, 72);
+    // ** + 72 chars + ** = total; inner content is 71 chars + ellipsis
+    expect(out).toBe(`**${'z'.repeat(71)}\u2026**`);
   });
 
   it('labels at maxWidth are not truncated', () => {
-    const exact = 'a'.repeat(56);
-    expect(formatBoldLabel(exact, 56)).toBe(`**${exact}**`);
+    const exact = 'a'.repeat(72);
+    expect(formatBoldLabel(exact, 72)).toBe(`**${exact}**`);
   });
 
   it('uses first non-empty line from multi-line input', () => {

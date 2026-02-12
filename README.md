@@ -157,6 +157,10 @@ pnpm build      # compile TypeScript
 pnpm test       # run tests
 ```
 
+## Built with
+
+[Claude Code](https://claude.ai/claude-code), [OpenAI Codex](https://openai.com/index/openai-codex/), [discord.js](https://discord.js.org), [Croner](https://github.com/hexagon/croner), and [Beads](https://github.com/qwibitai/beads).
+
 ## License
 
 [MIT](LICENSE). See [DISCLAIMER.md](DISCLAIMER.md) for important usage terms.
