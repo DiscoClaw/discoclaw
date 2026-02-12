@@ -46,19 +46,24 @@ exists, that's your first run — read it, follow it, then delete it.
 - Prefer small, auditable changes (nanoclaw-style).
 - Commit regularly — don't batch an entire session into one commit.
 - Keep the git tree clean. After every task, follow the dev workflow below.
+- **Never push directly to `main`.** Branch protection is enforced — all changes go through PRs.
 
 ## Dev Workflow
 
 After completing a unit of work:
 
-1. **Build** — `pnpm build` (must be clean, no errors)
-2. **Test** — `pnpm test` (all tests must pass)
-3. **Commit** — stage only relevant files, write a clear commit message
-4. **Push** — `git push` to remote
-5. **Deploy** (if the change affects runtime behavior):
+1. **Branch** — create a descriptive branch off `main` (`git checkout -b <branch-name>`)
+2. **Build** — `pnpm build` (must be clean, no errors)
+3. **Test** — `pnpm test` (all tests must pass)
+4. **Commit** — stage only relevant files, write a clear commit message
+5. **Push** — `git push -u origin <branch-name>`
+6. **PR** — open a pull request via `gh pr create` with a clear title and description
+7. **Merge** — after approval, merge via `gh pr merge --squash` or send the PR link to the user
+8. **Clean up** — `git checkout main && git pull && git branch -d <branch-name>`
+9. **Deploy** (if the change affects runtime behavior):
    - `systemctl --user restart discoclaw.service`
    - `journalctl --user -u discoclaw.service -n 20` — verify startup
-6. **Verify** — `git status --short` must be clean
+10. **Verify** — `git status --short` must be clean
 
 Skip deploy for test-only, docs-only, or template-only changes.
 
