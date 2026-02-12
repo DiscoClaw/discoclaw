@@ -27,6 +27,9 @@ import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { probeWorkspacePermissions } from './workspace-permissions.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
+import { loadCronTagMapStrict } from './cron/tag-map.js';
+import { CronSyncCoordinator } from './cron/cron-sync-coordinator.js';
+import { startCronTagMapWatcher } from './cron/cron-tag-map-watcher.js';
 import { ensureForumTags, isSnowflake } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
 import { resolveDisplayName } from './identity.js';
@@ -83,6 +86,7 @@ setDataFilePath(path.join(pidLockDir, 'inflight.json'));
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
 let beadSyncWatcher: { stop(): void } | null = null;
+let cronTagMapWatcher: { stop(): void } | null = null;
 let beadForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
 const shutdown = async () => {
@@ -94,6 +98,7 @@ const shutdown = async () => {
   beadForumCountSync?.stop();
   cronForumCountSync?.stop();
   beadSyncWatcher?.stop();
+  cronTagMapWatcher?.stop();
   cronScheduler?.stopAll();
   await botStatus?.offline();
   await releasePidLock(pidLockPath);
@@ -536,6 +541,12 @@ if (cronEnabled && effectiveCronForum) {
   };
   const cronRunControl = new CronRunControl();
 
+  // Load cron tag map (strict, but fallback to empty on first run)
+  const cronTagMap = await loadCronTagMapStrict(cronTagMapPath).catch((err) => {
+    log.warn({ err, cronTagMapPath }, 'cron:tag-map strict load failed; starting with empty map');
+    return {} as Record<string, string>;
+  });
+
   const cronPendingThreadIds = new Set<string>();
 
   const cronCtx: CronContext = {
@@ -543,6 +554,7 @@ if (cronEnabled && effectiveCronForum) {
     client,
     forumId: effectiveCronForum,
     tagMapPath: cronTagMapPath,
+    tagMap: cronTagMap,
     statsStore: cronStats,
     runtime,
     autoTag: cronAutoTag,
@@ -608,6 +620,37 @@ if (cronEnabled && effectiveCronForum) {
     );
     cronCtx.forumCountSync = cronForumCountSync;
     cronForumCountSync.requestUpdate();
+  }
+
+  // Wire coordinator + watcher for cron tag-map hot-reload
+  if (cronForumResult.forumId) {
+    const cronSyncCoordinator = new CronSyncCoordinator({
+      client,
+      forumId: cronForumResult.forumId,
+      scheduler: cronScheduler!,
+      statsStore: cronStats,
+      runtime,
+      tagMap: cronTagMap,
+      tagMapPath: cronTagMapPath,
+      autoTag: cronAutoTag,
+      autoTagModel: cronAutoTagModel,
+      cwd: workspaceCwd,
+      log,
+      forumCountSync: cronForumCountSync,
+    });
+    cronCtx.syncCoordinator = cronSyncCoordinator;
+
+    // Startup sync (fire-and-forget; reconciles tags changed while bot was down)
+    cronSyncCoordinator.sync().catch((err) => {
+      log.warn({ err }, 'cron:startup-sync failed');
+    });
+
+    // File watcher for tag-map hot-reload
+    cronTagMapWatcher = startCronTagMapWatcher({
+      coordinator: cronSyncCoordinator,
+      tagMapPath: cronTagMapPath,
+      log,
+    });
   }
 
   // Bootstrap forum tags from the tag map (creates missing tags on the Discord forum).

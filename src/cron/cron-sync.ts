@@ -8,7 +8,6 @@ import { detectCadence } from './cadence.js';
 import { autoTagCron, classifyCronModel } from './auto-tag.js';
 import { buildCronThreadName, ensureStatusMessage, resolveForumChannel } from './discord-sync.js';
 import type { TagMap } from './discord-sync.js';
-import { loadTagMap } from '../beads/discord-sync.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,7 +19,7 @@ export type CronSyncOptions = {
   scheduler: CronScheduler;
   statsStore: CronRunStats;
   runtime: RuntimeAdapter;
-  tagMapPath: string;
+  tagMap: TagMap;
   autoTag: boolean;
   autoTagModel: string;
   cwd: string;
@@ -64,7 +63,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
     return { tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, orphansDetected: 0 };
   }
 
-  const tagMap = await loadTagMap(opts.tagMapPath);
+  const tagMap = opts.tagMap;
   const purposeTags = purposeTagNames(tagMap);
 
   let tagsApplied = 0;

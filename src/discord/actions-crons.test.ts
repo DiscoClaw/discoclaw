@@ -108,6 +108,7 @@ function makeCronCtx(overrides?: Partial<CronContext>): CronContext {
     client: client as any,
     forumId: 'forum-1',
     tagMapPath: '/tmp/tags.json',
+    tagMap: { monitoring: 'tag-1', daily: 'tag-2' },
     statsStore: makeStatsStore([makeRecord()]),
     runtime: makeMockRuntime('monitoring'),
     autoTag: false,
@@ -120,9 +121,9 @@ function makeCronCtx(overrides?: Partial<CronContext>): CronContext {
   };
 }
 
-// Mock loadTagMap
-vi.mock('../beads/discord-sync.js', () => ({
-  loadTagMap: vi.fn(async () => ({ monitoring: 'tag-1', daily: 'tag-2' })),
+// Mock reloadCronTagMapInPlace (best-effort reload in actions)
+vi.mock('../cron/tag-map.js', () => ({
+  reloadCronTagMapInPlace: vi.fn(async () => 2),
 }));
 
 // Mock ensureStatusMessage
@@ -414,5 +415,80 @@ describe('executeCronAction', () => {
     expect(result.ok).toBe(true);
     expect(runControl.requestCancel).toHaveBeenCalledWith('thread-1');
     if (result.ok) expect(result.summary).toContain('cancel requested');
+  });
+
+  it('cronSync uses coordinator when present and returns result summary', async () => {
+    const coordinator = {
+      sync: vi.fn(async () => ({ tagsApplied: 2, namesUpdated: 1, statusMessagesUpdated: 3, orphansDetected: 0 })),
+    };
+    const cronCtx = makeCronCtx({ syncCoordinator: coordinator as any });
+    const result = await executeCronAction({ type: 'cronSync' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('2 tags');
+      expect(result.summary).toContain('1 names');
+      expect(result.summary).toContain('3 status msgs');
+    }
+    expect(coordinator.sync).toHaveBeenCalled();
+  });
+
+  it('cronSync coalesced case returns "already running" message', async () => {
+    const coordinator = { sync: vi.fn(async () => null) };
+    const cronCtx = makeCronCtx({ syncCoordinator: coordinator as any });
+    const result = await executeCronAction({ type: 'cronSync' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.summary).toContain('coalesced');
+  });
+
+  it('cronSync fallback when coordinator absent', async () => {
+    vi.mock('../cron/cron-sync.js', () => ({
+      runCronSync: vi.fn(async () => ({ tagsApplied: 1, namesUpdated: 0, statusMessagesUpdated: 2, orphansDetected: 0 })),
+    }));
+
+    const cronCtx = makeCronCtx();
+    // Ensure no coordinator
+    delete (cronCtx as any).syncCoordinator;
+    const result = await executeCronAction({ type: 'cronSync' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('1 tags');
+    }
+  });
+
+  it('cronTagMapReload success with coordinator queues sync', async () => {
+    const { reloadCronTagMapInPlace } = await import('../cron/tag-map.js');
+    vi.mocked(reloadCronTagMapInPlace).mockResolvedValue(3);
+    const coordinator = { sync: vi.fn(async () => null) };
+    const cronCtx = makeCronCtx({ syncCoordinator: coordinator as any });
+    const result = await executeCronAction({ type: 'cronTagMapReload' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('sync queued');
+    }
+  });
+
+  it('cronTagMapReload success without coordinator', async () => {
+    const { reloadCronTagMapInPlace } = await import('../cron/tag-map.js');
+    vi.mocked(reloadCronTagMapInPlace).mockResolvedValue(2);
+    const cronCtx = makeCronCtx();
+    delete (cronCtx as any).syncCoordinator;
+    const result = await executeCronAction({ type: 'cronTagMapReload' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('no sync coordinator configured');
+    }
+  });
+
+  it('cronTagMapReload failure returns error', async () => {
+    const { reloadCronTagMapInPlace } = await import('../cron/tag-map.js');
+    vi.mocked(reloadCronTagMapInPlace).mockRejectedValue(new Error('bad json'));
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronTagMapReload' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('bad json');
+  });
+
+  it('CRON_ACTION_TYPES includes cronTagMapReload', () => {
+    expect(CRON_ACTION_TYPES.has('cronTagMapReload')).toBe(true);
   });
 });

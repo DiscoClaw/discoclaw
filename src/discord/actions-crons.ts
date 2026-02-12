@@ -10,7 +10,9 @@ import { detectCadence } from '../cron/cadence.js';
 import type { ForumCountSync } from './forum-count-sync.js';
 import { autoTagCron, classifyCronModel } from '../cron/auto-tag.js';
 import { buildCronThreadName, ensureStatusMessage, resolveForumChannel } from '../cron/discord-sync.js';
-import { loadTagMap } from '../beads/discord-sync.js';
+import type { TagMap } from '../cron/discord-sync.js';
+import type { CronSyncCoordinator } from '../cron/cron-sync-coordinator.js';
+import { reloadCronTagMapInPlace } from '../cron/tag-map.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,7 +27,8 @@ export type CronActionRequest =
   | { type: 'cronResume'; cronId: string }
   | { type: 'cronDelete'; cronId: string }
   | { type: 'cronTrigger'; cronId: string; force?: boolean }
-  | { type: 'cronSync' };
+  | { type: 'cronSync' }
+  | { type: 'cronTagMapReload' };
 
 const CRON_TYPE_MAP: Record<CronActionRequest['type'], true> = {
   cronCreate: true,
@@ -37,6 +40,7 @@ const CRON_TYPE_MAP: Record<CronActionRequest['type'], true> = {
   cronDelete: true,
   cronTrigger: true,
   cronSync: true,
+  cronTagMapReload: true,
 };
 export const CRON_ACTION_TYPES = new Set<string>(Object.keys(CRON_TYPE_MAP));
 
@@ -45,6 +49,7 @@ export type CronContext = {
   client: Client;
   forumId: string;
   tagMapPath: string;
+  tagMap: TagMap;
   statsStore: CronRunStats;
   runtime: RuntimeAdapter;
   autoTag: boolean;
@@ -59,6 +64,7 @@ export type CronContext = {
   // checks this to avoid double-handling before scheduler.register() completes.
   pendingThreadIds: Set<string>;
   forumCountSync?: ForumCountSync;
+  syncCoordinator?: CronSyncCoordinator;
 };
 
 // ---------------------------------------------------------------------------
@@ -102,7 +108,12 @@ export async function executeCronAction(
         return { ok: false, error: 'Cron forum channel not found' };
       }
 
-      const tagMap = await loadTagMap(cronCtx.tagMapPath);
+      // Reload shared cache from disk (best-effort; failure keeps cached)
+      await reloadCronTagMapInPlace(cronCtx.tagMapPath, cronCtx.tagMap).catch((err) => {
+        cronCtx.log?.warn({ err, tagMapPath: cronCtx.tagMapPath }, 'cron:action tag-map reload failed; using cached');
+      });
+      // Snapshot for deterministic use within this action
+      const tagMap = { ...cronCtx.tagMap };
 
       // Auto-tag if enabled.
       const cadenceSet = new Set<string>(CADENCE_TAGS);
@@ -276,7 +287,12 @@ export async function executeCronAction(
       // Update thread tags if needed.
       if (action.tags !== undefined || action.schedule !== undefined) {
         try {
-          const tagMap = await loadTagMap(cronCtx.tagMapPath);
+          // Reload shared cache from disk (best-effort; failure keeps cached)
+          await reloadCronTagMapInPlace(cronCtx.tagMapPath, cronCtx.tagMap).catch((err) => {
+            cronCtx.log?.warn({ err, tagMapPath: cronCtx.tagMapPath }, 'cron:action tag-map reload failed; using cached');
+          });
+          // Snapshot for deterministic use within this action
+          const tagMap = { ...cronCtx.tagMap };
           const updatedRecord = cronCtx.statsStore.getRecord(action.cronId);
           if (updatedRecord) {
             const allTags = [...updatedRecord.purposeTags];
@@ -491,27 +507,65 @@ export async function executeCronAction(
 
     case 'cronSync': {
       try {
-        const { runCronSync } = await import('../cron/cron-sync.js');
-        const result = await runCronSync({
-          client: cronCtx.client,
-          forumId: cronCtx.forumId,
-          scheduler: cronCtx.scheduler,
-          statsStore: cronCtx.statsStore,
-          runtime: cronCtx.runtime,
-          tagMapPath: cronCtx.tagMapPath,
-          autoTag: cronCtx.autoTag,
-          autoTagModel: cronCtx.autoTagModel,
-          cwd: cronCtx.cwd,
-          log: cronCtx.log,
-        });
-        cronCtx.forumCountSync?.requestUpdate();
-        return {
-          ok: true,
-          summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.orphansDetected} orphans`,
-        };
+        if (cronCtx.syncCoordinator) {
+          const result = await cronCtx.syncCoordinator.sync();
+          if (result === null) {
+            return { ok: true, summary: 'Cron sync already running; request coalesced' };
+          }
+          return {
+            ok: true,
+            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.orphansDetected} orphans`,
+          };
+        } else {
+          // Fallback (no coordinator): reload + snapshot + runCronSync + forumCountSync
+          await reloadCronTagMapInPlace(cronCtx.tagMapPath, cronCtx.tagMap).catch((err) => {
+            cronCtx.log?.warn({ err, tagMapPath: cronCtx.tagMapPath }, 'cron:sync tag-map reload failed; using cached');
+          });
+          const tagMapSnapshot = { ...cronCtx.tagMap };
+          const { runCronSync } = await import('../cron/cron-sync.js');
+          const result = await runCronSync({
+            client: cronCtx.client,
+            forumId: cronCtx.forumId,
+            scheduler: cronCtx.scheduler,
+            statsStore: cronCtx.statsStore,
+            runtime: cronCtx.runtime,
+            tagMap: tagMapSnapshot,
+            autoTag: cronCtx.autoTag,
+            autoTagModel: cronCtx.autoTagModel,
+            cwd: cronCtx.cwd,
+            log: cronCtx.log,
+          });
+          cronCtx.forumCountSync?.requestUpdate();
+          return {
+            ok: true,
+            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.orphansDetected} orphans`,
+          };
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, error: `Cron sync failed: ${msg}` };
+      }
+    }
+
+    case 'cronTagMapReload': {
+      const oldCount = Object.keys(cronCtx.tagMap).length;
+      try {
+        const newCount = await reloadCronTagMapInPlace(cronCtx.tagMapPath, cronCtx.tagMap);
+        const tagNames = Object.keys(cronCtx.tagMap).slice(0, 10);
+        const tagList = tagNames.join(', ') + (Object.keys(cronCtx.tagMap).length > 10 ? ', ...' : '');
+        let summary = `Tag map reloaded: ${oldCount} → ${newCount} tags [${tagList}]`;
+        if (cronCtx.syncCoordinator) {
+          cronCtx.syncCoordinator.sync().catch((err) => {
+            cronCtx.log?.warn({ err }, 'cron:tagMapReload post-reload sync failed');
+          });
+          summary += '; sync queued';
+        } else {
+          summary += '; no sync coordinator configured';
+        }
+        return { ok: true, summary };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `Tag map reload failed: ${msg}` };
       }
     }
   }
@@ -577,5 +631,10 @@ Note: \`force\` overrides are disabled in Discord actions.
 **cronSync** — Run full bidirectional sync:
 \`\`\`
 <discord-action>{"type":"cronSync"}</discord-action>
+\`\`\`
+
+**cronTagMapReload** — Reload tag map from disk and optionally trigger sync:
+\`\`\`
+<discord-action>{"type":"cronTagMapReload"}</discord-action>
 \`\`\``;
 }

@@ -86,15 +86,12 @@ function makeClient(forum: ReturnType<typeof makeForum>) {
   };
 }
 
-// Mock loadTagMap
-vi.mock('../beads/discord-sync.js', () => ({
-  loadTagMap: vi.fn(async () => ({
-    monitoring: 'tag-1',
-    cleanup: 'tag-2',
-    daily: 'tag-3',
-    weekly: 'tag-4',
-  })),
-}));
+const defaultTagMap = {
+  monitoring: 'tag-1',
+  cleanup: 'tag-2',
+  daily: 'tag-3',
+  weekly: 'tag-4',
+};
 
 // Mock ensureStatusMessage (from the cron discord-sync)
 vi.mock('./discord-sync.js', async (importOriginal) => {
@@ -114,7 +111,7 @@ describe('runCronSync', () => {
       scheduler: makeScheduler([]),
       statsStore: makeStatsStore([]),
       runtime: makeMockRuntime('monitoring'),
-      tagMapPath: '/tmp/tags.json',
+      tagMap: { ...defaultTagMap },
       autoTag: true,
       autoTagModel: 'haiku',
       cwd: '/tmp',
@@ -138,7 +135,7 @@ describe('runCronSync', () => {
       scheduler,
       statsStore: makeStatsStore([record]),
       runtime: makeMockRuntime('monitoring'),
-      tagMapPath: '/tmp/tags.json',
+      tagMap: { ...defaultTagMap },
       autoTag: true,
       autoTagModel: 'haiku',
       cwd: '/tmp',
@@ -161,7 +158,7 @@ describe('runCronSync', () => {
       scheduler,
       statsStore: makeStatsStore([record]),
       runtime: makeMockRuntime('monitoring'),
-      tagMapPath: '/tmp/tags.json',
+      tagMap: { ...defaultTagMap },
       autoTag: false,
       autoTagModel: 'haiku',
       cwd: '/tmp',
@@ -183,7 +180,7 @@ describe('runCronSync', () => {
       scheduler: makeScheduler([]),
       statsStore: makeStatsStore([]),
       runtime: makeMockRuntime(''),
-      tagMapPath: '/tmp/tags.json',
+      tagMap: { ...defaultTagMap },
       autoTag: false,
       autoTagModel: 'haiku',
       cwd: '/tmp',
