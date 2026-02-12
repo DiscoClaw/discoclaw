@@ -4,6 +4,7 @@ import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import { runBeadSync } from './bead-sync.js';
+import { reloadTagMapInPlace } from './discord-sync.js';
 import { beadThreadCache } from './bead-thread-cache.js';
 
 export type CoordinatorOptions = {
@@ -11,6 +12,7 @@ export type CoordinatorOptions = {
   guild: Guild;
   forumId: string;
   tagMap: TagMap;
+  tagMapPath?: string;
   beadsCwd: string;
   log?: LoggerLike;
   mentionUserId?: string;
@@ -43,7 +45,17 @@ export class BeadSyncCoordinator {
     }
     this.syncing = true;
     try {
-      const result = await runBeadSync({ ...this.opts, statusPoster });
+      // Reload tag map if path is configured
+      if (this.opts.tagMapPath) {
+        try {
+          await reloadTagMapInPlace(this.opts.tagMapPath, this.opts.tagMap);
+        } catch (err) {
+          this.opts.log?.warn({ err, tagMapPath: this.opts.tagMapPath }, 'beads:tag-map reload failed; using cached map');
+        }
+      }
+      // Snapshot tagMap for deterministic behavior within this sync run
+      const tagMapSnapshot = { ...this.opts.tagMap };
+      const result = await runBeadSync({ ...this.opts, tagMap: tagMapSnapshot, statusPoster });
       beadThreadCache.invalidate();
       this.opts.forumCountSync?.requestUpdate();
       return result;

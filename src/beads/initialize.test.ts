@@ -155,6 +155,15 @@ describe('initializeBeadsContext', () => {
     expect(result.beadCtx!.sidebarMentionUserId).toBeUndefined();
     expect(log.warn).not.toHaveBeenCalled();
   });
+
+  it('propagates tagMapPath to BeadContext', async () => {
+    mockCheckBd.mockResolvedValue({ available: true });
+    const result = await initializeBeadsContext(baseOpts({
+      beadsTagMapPath: '/my/custom/tag-map.json',
+    }));
+    expect(result.beadCtx).toBeDefined();
+    expect(result.beadCtx!.tagMapPath).toBe('/my/custom/tag-map.json');
+  });
 });
 
 describe('wireBeadsSync', () => {
@@ -207,6 +216,40 @@ describe('wireBeadsSync', () => {
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({ beadsCwd: '/tmp/beads' }),
       'beads:file-watcher started',
+    );
+  });
+
+  it('propagates tagMapPath to CoordinatorOptions and watcher', async () => {
+    const log = fakeLog();
+    const tagMap = { bug: '111' };
+    const beadCtx = {
+      beadsCwd: '/tmp/beads',
+      forumId: 'forum-123',
+      tagMap,
+      tagMapPath: '/config/tag-map.json',
+      log,
+    } as any;
+
+    await wireBeadsSync({
+      beadCtx,
+      client: {} as any,
+      guild: {} as any,
+      guildId: 'guild-1',
+      beadsCwd: '/tmp/beads',
+      log,
+    });
+
+    expect(BeadSyncCoordinator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tagMapPath: '/config/tag-map.json',
+        tagMap,
+      }),
+    );
+    expect(startBeadSyncWatcher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tagMapPath: '/config/tag-map.json',
+        tagMap,
+      }),
     );
   });
 });

@@ -1,6 +1,7 @@
+import fs from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage, closeBeadThread } from './discord-sync.js';
-import type { BeadData } from './types.js';
+import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage, closeBeadThread, reloadTagMapInPlace } from './discord-sync.js';
+import type { BeadData, TagMap } from './types.js';
 
 // ---------------------------------------------------------------------------
 // buildThreadName
@@ -333,5 +334,48 @@ describe('closeBeadThread', () => {
 
     await closeBeadThread(client, 'missing', bead);
     // No error thrown — function completes silently.
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reloadTagMapInPlace
+// ---------------------------------------------------------------------------
+
+describe('reloadTagMapInPlace', () => {
+  it('reads file, mutates object in-place, and returns count', async () => {
+    vi.spyOn(fs, 'readFile').mockResolvedValueOnce(JSON.stringify({ bug: '111', feature: '222' }));
+    const tagMap: TagMap = { old: '000' };
+    const count = await reloadTagMapInPlace('/tmp/tag-map.json', tagMap);
+    expect(count).toBe(2);
+    expect(tagMap).toEqual({ bug: '111', feature: '222' });
+    expect(tagMap).not.toHaveProperty('old');
+  });
+
+  it('throws on read failure, existing map untouched', async () => {
+    vi.spyOn(fs, 'readFile').mockRejectedValueOnce(new Error('ENOENT'));
+    const tagMap: TagMap = { existing: '999' };
+    await expect(reloadTagMapInPlace('/tmp/missing.json', tagMap)).rejects.toThrow('ENOENT');
+    expect(tagMap).toEqual({ existing: '999' });
+  });
+
+  it('throws on truncated JSON, existing map untouched', async () => {
+    vi.spyOn(fs, 'readFile').mockResolvedValueOnce('{ "bug": "111"');
+    const tagMap: TagMap = { existing: '999' };
+    await expect(reloadTagMapInPlace('/tmp/bad.json', tagMap)).rejects.toThrow();
+    expect(tagMap).toEqual({ existing: '999' });
+  });
+
+  it('rejects array with descriptive error, existing map untouched', async () => {
+    vi.spyOn(fs, 'readFile').mockResolvedValueOnce('["a", "b"]');
+    const tagMap: TagMap = { existing: '999' };
+    await expect(reloadTagMapInPlace('/tmp/array.json', tagMap)).rejects.toThrow('must be a JSON object, got array');
+    expect(tagMap).toEqual({ existing: '999' });
+  });
+
+  it('rejects non-string values with descriptive error, existing map untouched', async () => {
+    vi.spyOn(fs, 'readFile').mockResolvedValueOnce(JSON.stringify({ bug: 123 }));
+    const tagMap: TagMap = { existing: '999' };
+    await expect(reloadTagMapInPlace('/tmp/bad-val.json', tagMap)).rejects.toThrow('must be a string, got number');
+    expect(tagMap).toEqual({ existing: '999' });
   });
 });

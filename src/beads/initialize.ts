@@ -76,6 +76,7 @@ export async function initializeBeadsContext(
     beadsCwd: opts.beadsCwd,
     forumId: effectiveForum,
     tagMap,
+    tagMapPath: opts.beadsTagMapPath,
     runtime: opts.runtime,
     autoTag: opts.beadsAutoTag,
     autoTagModel: opts.beadsAutoTagModel,
@@ -118,6 +119,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     guild: opts.guild,
     forumId: opts.beadCtx.forumId,
     tagMap: opts.beadCtx.tagMap,
+    tagMapPath: opts.beadCtx.tagMapPath,
     beadsCwd: opts.beadsCwd,
     log: opts.log,
     mentionUserId: opts.sidebarMentionUserId,
@@ -134,6 +136,8 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     coordinator: syncCoordinator,
     beadsCwd: opts.beadsCwd,
     log: opts.log,
+    tagMapPath: opts.beadCtx.tagMapPath,
+    tagMap: opts.beadCtx.tagMap,
   });
   opts.log.info({ beadsCwd: opts.beadsCwd }, 'beads:file-watcher started');
 

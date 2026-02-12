@@ -16,6 +16,7 @@ import {
   updateBeadStarterMessage,
   ensureUnarchived,
   getThreadIdFromBead,
+  reloadTagMapInPlace,
 } from '../beads/discord-sync.js';
 import { autoTagBead } from '../beads/auto-tag.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
@@ -30,7 +31,8 @@ export type BeadActionRequest =
   | { type: 'beadClose'; beadId: string; reason?: string }
   | { type: 'beadShow'; beadId: string }
   | { type: 'beadList'; status?: string; label?: string; limit?: number }
-  | { type: 'beadSync' };
+  | { type: 'beadSync' }
+  | { type: 'tagMapReload' };
 
 const BEAD_TYPE_MAP: Record<BeadActionRequest['type'], true> = {
   beadCreate: true,
@@ -39,6 +41,7 @@ const BEAD_TYPE_MAP: Record<BeadActionRequest['type'], true> = {
   beadShow: true,
   beadList: true,
   beadSync: true,
+  tagMapReload: true,
 };
 export const BEAD_ACTION_TYPES = new Set<string>(Object.keys(BEAD_TYPE_MAP));
 
@@ -46,6 +49,7 @@ export type BeadContext = {
   beadsCwd: string;
   forumId: string;
   tagMap: TagMap;
+  tagMapPath?: string;
   runtime: RuntimeAdapter;
   autoTag: boolean;
   autoTagModel: string;
@@ -274,12 +278,20 @@ export async function executeBeadAction(
           result = coordResult;
         } else {
           // Fallback: no coordinator (watcher not initialized).
+          if (beadCtx.tagMapPath) {
+            try {
+              await reloadTagMapInPlace(beadCtx.tagMapPath, beadCtx.tagMap);
+            } catch (err) {
+              beadCtx.log?.warn({ err, tagMapPath: beadCtx.tagMapPath }, 'beads:tag-map reload failed; using cached map');
+            }
+          }
+          const tagMapSnapshot = { ...beadCtx.tagMap };
           const { runBeadSync } = await import('../beads/bead-sync.js');
           result = await runBeadSync({
             client: ctx.client,
             guild: ctx.guild,
             forumId: beadCtx.forumId,
-            tagMap: beadCtx.tagMap,
+            tagMap: tagMapSnapshot,
             beadsCwd: beadCtx.beadsCwd,
             log: beadCtx.log,
             statusPoster: beadCtx.statusPoster,
@@ -296,6 +308,25 @@ export async function executeBeadAction(
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, error: `Bead sync failed: ${msg}` };
       }
+    }
+
+    case 'tagMapReload': {
+      if (!beadCtx.tagMapPath) {
+        return { ok: false, error: 'Tag map path not configured' };
+      }
+      const oldCount = Object.keys(beadCtx.tagMap).length;
+      try {
+        await reloadTagMapInPlace(beadCtx.tagMapPath, beadCtx.tagMap);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `Tag map reload failed: ${msg}` };
+      }
+      const newCount = Object.keys(beadCtx.tagMap).length;
+      const tagList = Object.keys(beadCtx.tagMap);
+      const tagsDisplay = tagList.length <= 10
+        ? tagList.join(', ')
+        : `${tagList.slice(0, 10).join(', ')} (+${tagList.length - 10} more)`;
+      return { ok: true, summary: `Tag map reloaded (${oldCount} -> ${newCount}): ${tagsDisplay}` };
     }
   }
 }
@@ -344,6 +375,11 @@ export function beadActionsPromptSection(): string {
 **beadSync** — Run full sync between beads DB and Discord threads:
 \`\`\`
 <discord-action>{"type":"beadSync"}</discord-action>
+\`\`\`
+
+**tagMapReload** — Reload tag map from disk (hot-reload without restart):
+\`\`\`
+<discord-action>{"type":"tagMapReload"}</discord-action>
 \`\`\`
 
 #### Bead Quality Guidelines

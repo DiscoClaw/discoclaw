@@ -63,6 +63,7 @@ vi.mock('../beads/discord-sync.js', () => ({
     if (ref.startsWith('discord:')) return ref.slice('discord:'.length);
     return null;
   }),
+  reloadTagMapInPlace: vi.fn(async () => 2),
 }));
 
 vi.mock('../beads/auto-tag.js', () => ({
@@ -127,6 +128,7 @@ describe('BEAD_ACTION_TYPES', () => {
     expect(BEAD_ACTION_TYPES.has('beadShow')).toBe(true);
     expect(BEAD_ACTION_TYPES.has('beadList')).toBe(true);
     expect(BEAD_ACTION_TYPES.has('beadSync')).toBe(true);
+    expect(BEAD_ACTION_TYPES.has('tagMapReload')).toBe(true);
   });
 
   it('does not contain non-bead types', () => {
@@ -370,12 +372,116 @@ describe('executeBeadAction', () => {
   });
 });
 
+describe('tagMapReload action', () => {
+  it('success: returns old/new count with tag names', async () => {
+    const { reloadTagMapInPlace } = await import('../beads/discord-sync.js');
+    (reloadTagMapInPlace as any).mockClear();
+    (reloadTagMapInPlace as any).mockImplementationOnce(async (_path: string, tagMap: any) => {
+      // Simulate reload: clear and add new tags
+      for (const k of Object.keys(tagMap)) delete tagMap[k];
+      Object.assign(tagMap, { bug: '111', feature: '222', docs: '333' });
+      return 3;
+    });
+
+    const result = await executeBeadAction(
+      { type: 'tagMapReload' },
+      makeCtx(),
+      makeBeadCtx({ tagMapPath: '/tmp/tag-map.json' }),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('Tag map reloaded');
+    expect((result as any).summary).toContain('bug');
+    expect((result as any).summary).toContain('feature');
+    expect((result as any).summary).toContain('docs');
+  });
+
+  it('success with >10 tags: truncates tag list display', async () => {
+    const { reloadTagMapInPlace } = await import('../beads/discord-sync.js');
+    (reloadTagMapInPlace as any).mockClear();
+    (reloadTagMapInPlace as any).mockImplementationOnce(async (_path: string, tagMap: any) => {
+      for (const k of Object.keys(tagMap)) delete tagMap[k];
+      for (let i = 0; i < 15; i++) tagMap[`tag${i}`] = `id${i}`;
+      return 15;
+    });
+
+    const result = await executeBeadAction(
+      { type: 'tagMapReload' },
+      makeCtx(),
+      makeBeadCtx({ tagMapPath: '/tmp/tag-map.json' }),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('(+5 more)');
+  });
+
+  it('failure: returns error with message, map preserved', async () => {
+    const { reloadTagMapInPlace } = await import('../beads/discord-sync.js');
+    (reloadTagMapInPlace as any).mockClear();
+    (reloadTagMapInPlace as any).mockRejectedValueOnce(new Error('ENOENT: file not found'));
+
+    const tagMap = { existing: '999' };
+    const result = await executeBeadAction(
+      { type: 'tagMapReload' },
+      makeCtx(),
+      makeBeadCtx({ tagMapPath: '/tmp/tag-map.json', tagMap }),
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('Tag map reload failed');
+    expect((result as any).error).toContain('ENOENT');
+  });
+
+  it('without tagMapPath: returns error', async () => {
+    const result = await executeBeadAction(
+      { type: 'tagMapReload' },
+      makeCtx(),
+      makeBeadCtx(), // No tagMapPath
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('Tag map path not configured');
+  });
+});
+
+describe('beadSync fallback with tagMapPath', () => {
+  it('reloads tag map before runBeadSync in fallback path', async () => {
+    const { reloadTagMapInPlace } = await import('../beads/discord-sync.js');
+    const { runBeadSync } = await import('../beads/bead-sync.js');
+    (reloadTagMapInPlace as any).mockClear();
+    (runBeadSync as any).mockClear();
+
+    await executeBeadAction(
+      { type: 'beadSync' },
+      makeCtx(),
+      makeBeadCtx({ tagMapPath: '/tmp/tag-map.json' }),
+    );
+
+    expect(reloadTagMapInPlace).toHaveBeenCalledWith('/tmp/tag-map.json', expect.any(Object));
+    expect(runBeadSync).toHaveBeenCalled();
+  });
+
+  it('does not attempt reload without tagMapPath', async () => {
+    const { reloadTagMapInPlace } = await import('../beads/discord-sync.js');
+    (reloadTagMapInPlace as any).mockClear();
+
+    await executeBeadAction(
+      { type: 'beadSync' },
+      makeCtx(),
+      makeBeadCtx(), // No tagMapPath
+    );
+
+    expect(reloadTagMapInPlace).not.toHaveBeenCalled();
+  });
+});
+
 describe('beadActionsPromptSection', () => {
   it('returns non-empty prompt section', () => {
     const section = beadActionsPromptSection();
     expect(section).toContain('beadCreate');
     expect(section).toContain('beadClose');
     expect(section).toContain('beadList');
+  });
+
+  it('includes tagMapReload in prompt section', () => {
+    const section = beadActionsPromptSection();
+    expect(section).toContain('tagMapReload');
   });
 
   it('includes bead quality guidelines', () => {

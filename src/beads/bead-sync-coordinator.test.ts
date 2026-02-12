@@ -15,7 +15,12 @@ vi.mock('./bead-thread-cache.js', () => ({
   beadThreadCache: { invalidate: vi.fn() },
 }));
 
+vi.mock('./discord-sync.js', () => ({
+  reloadTagMapInPlace: vi.fn(async () => 2),
+}));
+
 import { BeadSyncCoordinator } from './bead-sync-coordinator.js';
+import { reloadTagMapInPlace } from './discord-sync.js';
 
 function makeOpts(): any {
   return {
@@ -181,5 +186,72 @@ describe('BeadSyncCoordinator', () => {
       expect.objectContaining({ err: expect.any(Error) }),
       'beads:coordinator follow-up sync failed',
     );
+  });
+
+  it('reloads tag map before runBeadSync when tagMapPath is set', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    (reloadTagMapInPlace as any).mockClear();
+
+    const opts = makeOpts();
+    opts.tagMapPath = '/tmp/tag-map.json';
+    opts.tagMap = { bug: '111' };
+
+    const coord = new BeadSyncCoordinator(opts);
+    await coord.sync();
+
+    expect(reloadTagMapInPlace).toHaveBeenCalledWith('/tmp/tag-map.json', opts.tagMap);
+    // reloadTagMapInPlace called before runBeadSync
+    const reloadOrder = (reloadTagMapInPlace as any).mock.invocationCallOrder[0];
+    const syncOrder = (runBeadSync as any).mock.invocationCallOrder[0];
+    expect(reloadOrder).toBeLessThan(syncOrder);
+  });
+
+  it('preserves existing map and continues sync when tag-map reload fails', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    (reloadTagMapInPlace as any).mockRejectedValueOnce(new Error('bad json'));
+
+    const opts = makeOpts();
+    opts.tagMapPath = '/tmp/tag-map.json';
+    opts.tagMap = { bug: '111' };
+
+    const coord = new BeadSyncCoordinator(opts);
+    const result = await coord.sync();
+
+    // Sync still runs despite reload failure
+    expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
+    expect(runBeadSync).toHaveBeenCalled();
+    expect(opts.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error), tagMapPath: '/tmp/tag-map.json' }),
+      'beads:tag-map reload failed; using cached map',
+    );
+  });
+
+  it('does not attempt reload when tagMapPath is not set', async () => {
+    (reloadTagMapInPlace as any).mockClear();
+
+    const opts = makeOpts();
+    // No tagMapPath set
+    const coord = new BeadSyncCoordinator(opts);
+    await coord.sync();
+
+    expect(reloadTagMapInPlace).not.toHaveBeenCalled();
+  });
+
+  it('passes a tagMap snapshot to runBeadSync', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    (reloadTagMapInPlace as any).mockClear();
+
+    const tagMap = { bug: '111' };
+    const opts = makeOpts();
+    opts.tagMapPath = '/tmp/tag-map.json';
+    opts.tagMap = tagMap;
+
+    const coord = new BeadSyncCoordinator(opts);
+    await coord.sync();
+
+    // runBeadSync should receive a snapshot (different object reference)
+    const passedOpts = (runBeadSync as any).mock.calls[0][0];
+    expect(passedOpts.tagMap).toEqual(tagMap);
+    expect(passedOpts.tagMap).not.toBe(tagMap);
   });
 });
