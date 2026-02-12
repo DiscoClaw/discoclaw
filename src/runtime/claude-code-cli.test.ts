@@ -116,6 +116,7 @@ describe('Claude CLI runtime adapter (smoke)', () => {
     expect(callArgs).toContain('--output-format');
     expect(callArgs).toContain('stream-json');
     expect(callArgs).toContain('--dangerously-skip-permissions');
+    expect(callArgs).toContain('--verbose');
     expect(callArgs).toContain('--include-partial-messages');
 
     // Prompt must follow `--` separator

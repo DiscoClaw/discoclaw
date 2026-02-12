@@ -88,6 +88,7 @@ export class LongRunningProcess {
       '-p',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
+      '--verbose',
       '--include-partial-messages',
       '--model', this.opts.model,
     ];

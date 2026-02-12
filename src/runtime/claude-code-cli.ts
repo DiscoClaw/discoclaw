@@ -292,7 +292,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     }
 
     if (effectiveOutputFormat === 'stream-json') {
-      args.push('--include-partial-messages');
+      args.push('--verbose', '--include-partial-messages');
     }
 
     // Tool flags are runtime-specific; keep optional and configurable.

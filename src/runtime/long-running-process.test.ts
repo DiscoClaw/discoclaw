@@ -62,6 +62,7 @@ describe('LongRunningProcess', () => {
     expect(callArgs).toContain('--input-format');
     expect(callArgs).toContain('stream-json');
     expect(callArgs).toContain('--output-format');
+    expect(callArgs).toContain('--verbose');
     expect(callArgs).toContain('--include-partial-messages');
     expect(callArgs).toContain('--model');
     expect(callArgs).toContain('opus');
