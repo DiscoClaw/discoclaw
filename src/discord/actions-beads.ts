@@ -86,6 +86,11 @@ export async function executeBeadAction(
         labels.push(...action.tags.split(',').map((t) => t.trim()).filter(Boolean));
       }
 
+      // Suppress watcher-triggered syncs during bead creation to prevent
+      // duplicate thread creation (race between beadCreate and file watcher).
+      const BEAD_CREATE_SYNC_SUPPRESS_MS = 10_000;
+      beadCtx.syncCoordinator?.suppressSync(BEAD_CREATE_SYNC_SUPPRESS_MS);
+
       const bead = await bdCreate(
         {
           title: action.title,

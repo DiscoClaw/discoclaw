@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./bead-sync.js', () => ({
   runBeadSync: vi.fn(async () => ({
@@ -254,5 +254,113 @@ describe('BeadSyncCoordinator', () => {
     const passedOpts = (runBeadSync as any).mock.calls[0][0];
     expect(passedOpts.tagMap).toEqual(tagMap);
     expect(passedOpts.tagMap).not.toBe(tagMap);
+  });
+});
+
+describe('BeadSyncCoordinator sync suppression', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('suppressed watcher sync returns null and does not call runBeadSync', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    const coord = new BeadSyncCoordinator(makeOpts());
+
+    coord.suppressSync(5000);
+    const result = await coord.sync(undefined, 'watcher');
+
+    expect(result).toBeNull();
+    expect(runBeadSync).not.toHaveBeenCalled();
+  });
+
+  it('user sync bypasses suppression', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    const coord = new BeadSyncCoordinator(makeOpts());
+
+    coord.suppressSync(5000);
+    const result = await coord.sync(undefined, 'user');
+
+    expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
+    expect(runBeadSync).toHaveBeenCalledOnce();
+  });
+
+  it('default source is user (bypasses suppression)', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    const coord = new BeadSyncCoordinator(makeOpts());
+
+    coord.suppressSync(5000);
+    const result = await coord.sync();
+
+    expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
+    expect(runBeadSync).toHaveBeenCalledOnce();
+  });
+
+  it('catch-up sync fires after suppression window expires', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    const coord = new BeadSyncCoordinator(makeOpts());
+
+    coord.suppressSync(100);
+    await coord.sync(undefined, 'watcher'); // suppressed, schedules catch-up
+
+    expect(runBeadSync).not.toHaveBeenCalled();
+
+    // Advance past the suppression window
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(runBeadSync).toHaveBeenCalledOnce();
+  });
+
+  it('multiple suppressed watcher syncs schedule only one catch-up', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    const coord = new BeadSyncCoordinator(makeOpts());
+
+    coord.suppressSync(100);
+    await coord.sync(undefined, 'watcher');
+    await coord.sync(undefined, 'watcher');
+    await coord.sync(undefined, 'watcher');
+
+    expect(runBeadSync).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(150);
+
+    // Only one catch-up sync should have fired
+    expect(runBeadSync).toHaveBeenCalledOnce();
+  });
+
+  it('watcher sync runs normally after suppression expires', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    const coord = new BeadSyncCoordinator(makeOpts());
+
+    coord.suppressSync(100);
+
+    // Advance past suppression window
+    await vi.advanceTimersByTimeAsync(150);
+
+    const result = await coord.sync(undefined, 'watcher');
+    expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
+    expect(runBeadSync).toHaveBeenCalledOnce();
+  });
+
+  it('catch-up sync failure is logged', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    (runBeadSync as any).mockRejectedValueOnce(new Error('catch-up boom'));
+
+    const opts = makeOpts();
+    const coord = new BeadSyncCoordinator(opts);
+
+    coord.suppressSync(100);
+    await coord.sync(undefined, 'watcher');
+
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(opts.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      'beads:coordinator catch-up sync failed',
+    );
   });
 });
