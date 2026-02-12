@@ -75,12 +75,23 @@ function getSection(content: string, heading: string): string {
   return (match?.[1] ?? '').trim();
 }
 
+async function findPlanFiles(dir: string): Promise<string[]> {
+  const results: string[] = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...(await findPlanFiles(full)));
+    } else if (entry.isFile() && entry.name.endsWith('.discoclaw-plan.md')) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
 async function loadPlanFiles(): Promise<string[]> {
   const plansDir = path.join(REPO_ROOT, 'plans');
-  const entries = await fs.readdir(plansDir, { withFileTypes: true });
-  const planFiles = entries
-    .filter((e) => e.isFile() && e.name.endsWith('.discoclaw-plan.md'))
-    .map((e) => path.join(plansDir, e.name));
+  const planFiles = await findPlanFiles(plansDir);
 
   return [
     path.join(REPO_ROOT, 'templates', 'plans', 'integration.discoclaw-plan.md'),

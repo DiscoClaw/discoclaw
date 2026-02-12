@@ -21,3 +21,7 @@ data/memory/
 # Per-session working dirs (keep the README)
 groups/*
 !groups/README.md
+
+# User's own plans (not shipped)
+plans/community/*
+!plans/community/.gitkeep
