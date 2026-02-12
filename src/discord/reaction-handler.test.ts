@@ -148,6 +148,7 @@ function makeParams(overrides?: Partial<Omit<BotParams, 'token'>>): Omit<BotPara
     reactionHandlerEnabled: true,
     reactionRemoveHandlerEnabled: false,
     reactionMaxAgeMs: 24 * 60 * 60 * 1000,
+    streamStallWarningMs: 0,
     ...overrides,
   };
 }

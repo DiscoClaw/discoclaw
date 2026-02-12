@@ -29,6 +29,10 @@ export function mapRuntimeErrorToUserMessage(raw: string): string {
     return 'Claude CLI authentication is missing or expired. Re-authenticate Claude CLI and retry.';
   }
 
+  if (lc.includes('stream stall')) {
+    return 'The runtime stream stalled (no output received). This may indicate a network issue or API hang. Try again or increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS.';
+  }
+
   if (lc.includes('configuration error: missing required channel context')) {
     return (
       'This channel is missing required context. Create/index the channel context file under content/discord/channels ' +

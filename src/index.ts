@@ -237,6 +237,8 @@ const multiTurn = cfg.multiTurn;
 const multiTurnHangTimeoutMs = cfg.multiTurnHangTimeoutMs;
 const multiTurnIdleTimeoutMs = cfg.multiTurnIdleTimeoutMs;
 const multiTurnMaxProcesses = cfg.multiTurnMaxProcesses;
+const streamStallTimeoutMs = cfg.streamStallTimeoutMs;
+const streamStallWarningMs = cfg.streamStallWarningMs;
 const maxConcurrentInvocations = cfg.maxConcurrentInvocations;
 
 // --- CLI version check: require >= 2.1.0 for new tools/flags ---
@@ -317,6 +319,7 @@ const runtime = createClaudeCliRuntime({
   multiTurnHangTimeoutMs,
   multiTurnIdleTimeoutMs,
   multiTurnMaxProcesses,
+  streamStallTimeoutMs,
 });
 const limitedRuntime = withConcurrencyLimit(runtime, { maxConcurrentInvocations, log });
 
@@ -392,6 +395,7 @@ const botParams = {
   existingCronsId: isSnowflake(cronForum ?? '') ? cronForum : undefined,
   existingBeadsId: isSnowflake(beadsForum) ? beadsForum : undefined,
   toolAwareStreaming,
+  streamStallWarningMs,
   actionFollowupDepth,
   reactionHandlerEnabled,
   reactionRemoveHandlerEnabled,

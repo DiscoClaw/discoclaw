@@ -57,6 +57,19 @@ Example: `{ "tier": "standard", "note": "Never modify files outside workspace." 
 The optional `note` field is injected into the prompt as a soft behavioral constraint.
 Custom tier example: `{ "tier": "custom", "tools": ["Read", "Edit", "Bash"] }`
 
+## Stream Stall Detection
+
+Two-layer protection against hung Claude Code processes:
+
+| Env Var | Default | Purpose |
+|---------|---------|---------|
+| `DISCOCLAW_STREAM_STALL_TIMEOUT_MS` | `120000` | Kill one-shot process if no stdout/stderr for this long. `0` disables. |
+| `DISCOCLAW_STREAM_STALL_WARNING_MS` | `60000` | Show user-visible warning in Discord after this many ms of no events. `0` disables. |
+
+**Runtime layer** (`src/runtime/claude-code-cli.ts`): resets a timer on every stdout/stderr `data` event. On timeout, emits a `stream stall: no output for ${ms}ms` error and kills the process. Applies to both `text` and `stream-json` output formats.
+
+**Discord layer** (`src/discord.ts`): tracks `lastEventAt` and `activeToolCount` in the streaming loop. When stall threshold is exceeded and no tools are active, appends a warning to `deltaText`. Enable `DISCOCLAW_SESSION_SCANNING=1` for tool-aware stall suppression (warnings suppressed during tool execution).
+
 ## Session Scanning & Tool-Aware Streaming
 
 Two opt-in features for better Discord UX during tool-heavy invocations:

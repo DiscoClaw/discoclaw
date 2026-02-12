@@ -121,6 +121,7 @@ function baseParams(overrides: Partial<BotParams> = {}): BotParams {
     reactionHandlerEnabled: false,
     reactionRemoveHandlerEnabled: false,
     reactionMaxAgeMs: 86400000,
+    streamStallWarningMs: 0,
     ...overrides,
   };
 }

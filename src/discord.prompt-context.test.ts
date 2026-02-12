@@ -115,6 +115,7 @@ describe('prompt inlines context file contents', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -205,6 +206,7 @@ describe('prompt inlines context file contents', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -293,6 +295,7 @@ describe('prompt inlines context file contents', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -357,6 +360,7 @@ describe('discord action flags are not frozen at handler creation', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     };
 
@@ -433,6 +437,7 @@ describe('durable memory injection into prompt', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -526,6 +531,7 @@ describe('workspace PA files in prompt', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -604,6 +610,7 @@ describe('workspace PA files in prompt', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -673,6 +680,7 @@ describe('workspace PA files in prompt', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -739,6 +747,7 @@ describe('memory command interception', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -812,6 +821,7 @@ function makeBeadParams(overrides?: Partial<any>) {
     actionFollowupDepth: 0,
     reactionHandlerEnabled: false,
     reactionMaxAgeMs: 86400000,
+    streamStallWarningMs: 0,
     botDisplayName: 'TestBot',
     beadCtx: {
       beadsCwd: '/tmp/beads',
@@ -959,6 +969,7 @@ describe('!memory remember threads Discord metadata into durable source', () => 
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 

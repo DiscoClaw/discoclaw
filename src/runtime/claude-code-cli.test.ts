@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Readable } from 'node:stream';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Readable, PassThrough } from 'node:stream';
 
 vi.mock('execa', () => ({
   execa: vi.fn(),
@@ -739,5 +739,208 @@ describe('pool forwarding (multi-turn opts wiring)', () => {
     expect(oneShotArgs[oneShotArgs.indexOf('--max-budget-usd') + 1]).toBe('10');
     expect(oneShotArgs).toContain('--append-system-prompt');
     expect(oneShotArgs[oneShotArgs.indexOf('--append-system-prompt') + 1]).toBe('You are a helpful PA.');
+  });
+});
+
+describe('one-shot stream stall timer', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Create a mock process with controllable stdout/stderr streams and deferred exit. */
+  function makeControllableProcess() {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    let resolveProcess: (val: any) => void;
+    const processPromise: any = new Promise((r) => { resolveProcess = r; });
+    processPromise.stdout = stdout;
+    processPromise.stderr = stderr;
+    processPromise.stdin = 'ignore';
+    processPromise.kill = vi.fn(() => {
+      stdout.end();
+      stderr.end();
+      resolveProcess!({ exitCode: null, failed: true, killed: true });
+    });
+    processPromise.then = processPromise.then.bind(processPromise);
+    processPromise.catch = processPromise.catch.bind(processPromise);
+    return { proc: processPromise, stdout, stderr, resolve: resolveProcess!, kill: processPromise.kill };
+  }
+
+  it('fires stall timer and kills process when no stdout arrives', async () => {
+    const { proc } = makeControllableProcess();
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => proc);
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+      streamStallTimeoutMs: 5000,
+    });
+
+    const events: any[] = [];
+    const iter = rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' });
+    const drainPromise = (async () => {
+      for await (const evt of iter) events.push(evt);
+    })();
+
+    // Advance past the stall timeout.
+    await vi.advanceTimersByTimeAsync(6000);
+    await drainPromise;
+
+    expect(events.some((e) => e.type === 'error' && e.message.includes('stream stall'))).toBe(true);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+    expect(proc.kill).toHaveBeenCalled();
+  });
+
+  it('resets stall timer when stdout data arrives', async () => {
+    const { proc, stdout, stderr, resolve } = makeControllableProcess();
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => proc);
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+      streamStallTimeoutMs: 5000,
+    });
+
+    const events: any[] = [];
+    const drainPromise = (async () => {
+      for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) events.push(evt);
+    })();
+
+    // Advance 3s, push data (resets timer), then advance 3s more.
+    await vi.advanceTimersByTimeAsync(3000);
+    stdout.write('hello');
+    // Let microtasks propagate the 'data' event handler (which calls resetStallTimer).
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(3000);
+
+    // Should not have stalled (3s + 3s = 6s but timer was reset at 3s, so only 3s of silence).
+    expect(events.some((e) => e.type === 'error' && e.message.includes('stream stall'))).toBe(false);
+
+    // Clean up: end the process normally.
+    stdout.end();
+    stderr.end();
+    resolve({ exitCode: 0, stdout: 'hello', stderr: '' });
+    await vi.advanceTimersByTimeAsync(100);
+    await drainPromise;
+  });
+
+  it('resets stall timer when stderr data arrives', async () => {
+    const { proc, stderr, resolve, stdout } = makeControllableProcess();
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => proc);
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+      streamStallTimeoutMs: 5000,
+    });
+
+    const events: any[] = [];
+    const drainPromise = (async () => {
+      for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) events.push(evt);
+    })();
+
+    // Advance 3s, push stderr (resets timer), then advance 3s more.
+    await vi.advanceTimersByTimeAsync(3000);
+    stderr.write('debug output');
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(events.some((e) => e.type === 'error' && e.message.includes('stream stall'))).toBe(false);
+
+    stdout.end();
+    stderr.end();
+    resolve({ exitCode: 0, stdout: '', stderr: 'debug output' });
+    await vi.advanceTimersByTimeAsync(100);
+    await drainPromise;
+  });
+
+  it('does not fire stall timer when set to 0 (disabled)', async () => {
+    const { proc, resolve, stdout, stderr } = makeControllableProcess();
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => proc);
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+      streamStallTimeoutMs: 0,
+    });
+
+    const events: any[] = [];
+    const drainPromise = (async () => {
+      for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) events.push(evt);
+    })();
+
+    // Advance past what would be a timeout.
+    await vi.advanceTimersByTimeAsync(200000);
+    expect(events.some((e) => e.type === 'error' && e.message.includes('stream stall'))).toBe(false);
+
+    stdout.write('ok');
+    stdout.end();
+    stderr.end();
+    resolve({ exitCode: 0, stdout: 'ok', stderr: '' });
+    await vi.advanceTimersByTimeAsync(100);
+    await drainPromise;
+  });
+
+  it('cleans up stall timer on normal process exit', async () => {
+    const { proc, stdout, stderr, resolve } = makeControllableProcess();
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => proc);
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+      streamStallTimeoutMs: 10000,
+    });
+
+    const events: any[] = [];
+    const drainPromise = (async () => {
+      for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) events.push(evt);
+    })();
+
+    // Normal exit before stall timeout.
+    stdout.write('done');
+    stdout.end();
+    stderr.end();
+    resolve({ exitCode: 0, stdout: 'done', stderr: '' });
+    await vi.advanceTimersByTimeAsync(100);
+    await drainPromise;
+
+    // Advance well past the stall timeout — should not fire (timer was cleaned up).
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(events.some((e) => e.type === 'error' && e.message.includes('stream stall'))).toBe(false);
+  });
+
+  it('works with stream-json output format', async () => {
+    const { proc } = makeControllableProcess();
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => proc);
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'stream-json',
+      streamStallTimeoutMs: 5000,
+    });
+
+    const events: any[] = [];
+    const drainPromise = (async () => {
+      for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) events.push(evt);
+    })();
+
+    await vi.advanceTimersByTimeAsync(6000);
+    await drainPromise;
+
+    expect(events.some((e) => e.type === 'error' && e.message.includes('stream stall'))).toBe(true);
   });
 });

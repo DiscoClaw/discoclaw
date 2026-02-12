@@ -165,6 +165,8 @@ export type ClaudeCliRuntimeOpts = {
   multiTurnHangTimeoutMs?: number;
   multiTurnIdleTimeoutMs?: number;
   multiTurnMaxProcesses?: number;
+  // One-shot: kill process if no stdout/stderr for this long (ms). 0 = disabled.
+  streamStallTimeoutMs?: number;
 };
 
 export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapter {
@@ -380,6 +382,25 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     };
     const wait = () => new Promise<void>((r) => { notify = r; });
 
+    // One-shot stream stall detection: kill process if no stdout/stderr for too long.
+    let finished = false;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearStallTimer = () => { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } };
+    const resetStallTimer = () => {
+      if (!opts.streamStallTimeoutMs) return;  // 0 or undefined = disabled
+      clearStallTimer();
+      stallTimer = setTimeout(() => {
+        const ms = opts.streamStallTimeoutMs!;
+        opts.log?.info?.(`one-shot: stream stall detected, killing process`);
+        push({ type: 'error', message: `stream stall: no output for ${ms}ms` });
+        push({ type: 'done' });
+        finished = true;
+        subprocess.kill('SIGTERM');
+        wake();
+      }, opts.streamStallTimeoutMs);
+    };
+    resetStallTimer();
+
     // Session file scanner: emit tool_start/tool_end from JSONL session log.
     let scanner: SessionFileScanner | null = null;
     if (opts.sessionScanning && params.sessionId) {
@@ -398,7 +419,6 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     let stdoutBuffered = '';
     let stderrBuffered = '';
     let stderrForError = '';
-    let finished = false;
     let stdoutEnded = false;
     let stderrEnded = subprocess.stderr == null;
     let procResult: any | null = null;
@@ -406,6 +426,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     let imageCount = 0;
 
     subprocess.stdout.on('data', (chunk) => {
+      resetStallTimer();
       const s = String(chunk);
       mergedStdout += s;
       if (effectiveOutputFormat === 'text') {
@@ -470,6 +491,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     });
 
     subprocess.stderr?.on('data', (chunk) => {
+      resetStallTimer();
       const s = String(chunk);
       stderrForError += s;
       if (!opts.echoStdio) return;
@@ -497,6 +519,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       if (!procResult) return;
       if (!stdoutEnded) return;
       if (!stderrEnded) return;
+      clearStallTimer();
 
       const exitCode = procResult.exitCode;
       const stdout = procResult.stdout ?? '';
@@ -588,6 +611,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       procResult = result;
       tryFinalize();
     }).catch((err: any) => {
+      clearStallTimer();
       // Timeouts/spawn errors reject the promise (even with `reject: false`).
       // Surface a stable message and include execa's short/original message when present.
       const timedOut = Boolean(err?.timedOut);
@@ -613,6 +637,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
         }
       }
     } finally {
+      clearStallTimer();
       scanner?.stop();
       if (!finished) subprocess.kill('SIGKILL');
       activeSubprocesses.delete(subprocess);

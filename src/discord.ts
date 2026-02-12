@@ -97,6 +97,7 @@ export type BotParams = {
   statusChannel?: string;
   bootstrapEnsureBeadsForum?: boolean;
   toolAwareStreaming?: boolean;
+  streamStallWarningMs: number;
   actionFollowupDepth: number;
   reactionHandlerEnabled: boolean;
   reactionRemoveHandlerEnabled: boolean;
@@ -552,9 +553,22 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
             };
 
+            // Stream stall warning state.
+            let lastEventAt = Date.now();
+            let activeToolCount = 0;
+            let stallWarned = false;
+
             // If the runtime produces no stdout/stderr (auth/network hangs), avoid leaving the
             // placeholder `...` indefinitely by periodically updating the message.
             const keepalive = setInterval(() => {
+              // Stall warning: append to deltaText when events stop arriving.
+              if (params.streamStallWarningMs > 0) {
+                const stallElapsed = Date.now() - lastEventAt;
+                if (stallElapsed > params.streamStallWarningMs && activeToolCount === 0 && !stallWarned) {
+                  stallWarned = true;
+                  deltaText += (deltaText ? '\n' : '') + `\n*Stream may be stalled (${Math.round(stallElapsed / 1000)}s no activity)...*`;
+                }
+              }
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
               maybeEdit(true);
             }, 5000);
@@ -593,6 +607,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // with action results; re-downloading would waste time and bandwidth.
               images: followUpDepth === 0 ? inputImages : undefined,
             })) {
+              // Track event flow for stall warning.
+              lastEventAt = Date.now();
+              stallWarned = false;
+              if (evt.type === 'tool_start') activeToolCount++;
+              else if (evt.type === 'tool_end') activeToolCount = Math.max(0, activeToolCount - 1);
+
               if (taq) {
                 // Tool-aware mode: route relevant events through the queue.
                 if (evt.type === 'text_delta' || evt.type === 'text_final' ||

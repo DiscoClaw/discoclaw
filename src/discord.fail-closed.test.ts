@@ -54,6 +54,7 @@ describe('Discord handler (fail closed)', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -118,6 +119,7 @@ describe('Discord handler (fail closed)', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 
@@ -182,6 +184,7 @@ describe('Discord handler (fail closed)', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
     }, queue);
 

@@ -19,6 +19,7 @@ function classifyError(message?: string): string {
   if (msg.includes('timed out')) return 'timeout';
   if (msg.includes('missing permissions') || msg.includes('missing access')) return 'discord_permissions';
   if (msg.includes('unauthorized') || msg.includes('auth')) return 'auth';
+  if (msg.includes('stream stall')) return 'stream_stall';
   return 'other';
 }
 

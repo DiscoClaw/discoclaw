@@ -68,6 +68,7 @@ function baseParams(runtimeOverride: any) {
     reactionHandlerEnabled: false,
     reactionRemoveHandlerEnabled: false,
     reactionMaxAgeMs: 86400000,
+    streamStallWarningMs: 0,
   };
 }
 

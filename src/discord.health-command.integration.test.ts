@@ -66,6 +66,7 @@ function baseParams(metrics: MetricsRegistry, overrides: Partial<any> = {}) {
     reactionHandlerEnabled: false,
     reactionRemoveHandlerEnabled: false,
     reactionMaxAgeMs: 86400000,
+    streamStallWarningMs: 0,
     healthCommandsEnabled: true,
     healthVerboseAllowlist: new Set<string>(),
     healthConfigSnapshot: {

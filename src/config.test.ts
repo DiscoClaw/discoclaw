@@ -330,4 +330,35 @@ describe('parseConfig', () => {
     const { config } = parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '0' }));
     expect(config.beadsEnabled).toBe(false);
   });
+
+  // --- Stream stall detection ---
+  it('defaults streamStallTimeoutMs to 120000', () => {
+    const { config } = parseConfig(env());
+    expect(config.streamStallTimeoutMs).toBe(120000);
+  });
+
+  it('defaults streamStallWarningMs to 60000', () => {
+    const { config } = parseConfig(env());
+    expect(config.streamStallWarningMs).toBe(60000);
+  });
+
+  it('parses custom streamStallTimeoutMs', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_STREAM_STALL_TIMEOUT_MS: '30000' }));
+    expect(config.streamStallTimeoutMs).toBe(30000);
+  });
+
+  it('parses custom streamStallWarningMs', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_STREAM_STALL_WARNING_MS: '15000' }));
+    expect(config.streamStallWarningMs).toBe(15000);
+  });
+
+  it('accepts 0 for streamStallTimeoutMs (disables feature)', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_STREAM_STALL_TIMEOUT_MS: '0' }));
+    expect(config.streamStallTimeoutMs).toBe(0);
+  });
+
+  it('accepts 0 for streamStallWarningMs (disables feature)', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_STREAM_STALL_WARNING_MS: '0' }));
+    expect(config.streamStallWarningMs).toBe(0);
+  });
 });

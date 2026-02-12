@@ -17,4 +17,12 @@ describe('MetricsRegistry', () => {
     expect(snap.latencies.message.maxMs).toBe(200);
     expect(snap.latencies.reaction.count).toBe(0);
   });
+
+  it('classifies stream stall errors as stream_stall', () => {
+    const m = new MetricsRegistry();
+    m.recordInvokeResult('message', 120000, false, 'stream stall: no output for 120000ms');
+
+    const snap = m.snapshot();
+    expect(snap.counters['invoke.message.error_class.stream_stall']).toBe(1);
+  });
 });

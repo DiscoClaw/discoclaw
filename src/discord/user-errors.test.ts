@@ -12,4 +12,10 @@ describe('mapRuntimeErrorToUserMessage', () => {
     expect(msg).toContain('Runtime error:');
     expect(msg).not.toContain('Claude CLI was not found');
   });
+
+  it('maps stream stall errors to stall-specific user message', () => {
+    const msg = mapRuntimeErrorToUserMessage('stream stall: no output for 120000ms');
+    expect(msg).toContain('stream stalled');
+    expect(msg).toContain('DISCOCLAW_STREAM_STALL_TIMEOUT_MS');
+  });
 });

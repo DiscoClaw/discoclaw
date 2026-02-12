@@ -105,6 +105,7 @@ function baseParams(runtimeOverride: any, overrides: Partial<any> = {}) {
     reactionHandlerEnabled: false,
     reactionRemoveHandlerEnabled: false,
     reactionMaxAgeMs: 24 * 60 * 60 * 1000,
+    streamStallWarningMs: 0,
     ...overrides,
   };
 }
