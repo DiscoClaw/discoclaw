@@ -292,6 +292,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     }
 
     if (effectiveOutputFormat === 'stream-json') {
+      args.push('--verbose');
       args.push('--include-partial-messages');
     }
 
