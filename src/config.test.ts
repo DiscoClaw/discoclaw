@@ -6,8 +6,8 @@ function env(overrides: Record<string, string | undefined> = {}): NodeJS.Process
     DISCORD_TOKEN: 'token',
     DISCORD_ALLOW_USER_IDS: '123',
     // Provide valid snowflakes for forums that are enabled by default.
-    DISCOCLAW_CRON_FORUM: '1470920350723342503',
-    DISCOCLAW_BEADS_FORUM: '1467563223590113333',
+    DISCOCLAW_CRON_FORUM: '1000000000000000001',
+    DISCOCLAW_BEADS_FORUM: '1000000000000000002',
     ...overrides,
   };
 }
@@ -300,8 +300,8 @@ describe('parseConfig', () => {
   });
 
   it('accepts valid snowflake for cronForum when cronEnabled=true', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_CRON_ENABLED: '1', DISCOCLAW_CRON_FORUM: '1467563223590113333' }));
-    expect(config.cronForum).toBe('1467563223590113333');
+    const { config } = parseConfig(env({ DISCOCLAW_CRON_ENABLED: '1', DISCOCLAW_CRON_FORUM: '1000000000000000002' }));
+    expect(config.cronForum).toBe('1000000000000000002');
     expect(config.cronEnabled).toBe(true);
   });
 
@@ -321,8 +321,8 @@ describe('parseConfig', () => {
   });
 
   it('accepts valid snowflake for beadsForum when beadsEnabled=true', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '1', DISCOCLAW_BEADS_FORUM: '1467563223590113333' }));
-    expect(config.beadsForum).toBe('1467563223590113333');
+    const { config } = parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '1', DISCOCLAW_BEADS_FORUM: '1000000000000000002' }));
+    expect(config.beadsForum).toBe('1000000000000000002');
     expect(config.beadsEnabled).toBe(true);
   });
 

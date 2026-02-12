@@ -23,5 +23,7 @@ groups/*
 !groups/README.md
 
 # User's own plans (not shipped)
+plans/*.md
+!plans/README.md
 plans/community/*
 !plans/community/.gitkeep

@@ -27,7 +27,7 @@ type LoggerLike = {
 
 function parseChannelIndexMarkdown(md: string, channelsDir: string): Map<string, ChannelContextEntry> {
   // Parse rows like:
-  // | #gallery | 1465092721646637087 | `discord/gallery.md` | ... |
+  // | #gallery | 1234567890123456789 | `discord/gallery.md` | ... |
   // We only need channel name + id + context file hint.
   const out = new Map<string, ChannelContextEntry>();
 

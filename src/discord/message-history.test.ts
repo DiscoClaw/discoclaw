@@ -28,17 +28,17 @@ function fakeChannel(messages: ReturnType<typeof fakeMsg>[]) {
 describe('fetchMessageHistory', () => {
   it('fetches and formats messages in chronological order', async () => {
     const ch = fakeChannel([
-      fakeMsg('3', 'sounds good', 'NimbleDave'),
+      fakeMsg('3', 'sounds good', 'TestUser'),
       fakeMsg('2', 'Before I create it, let me confirm...', 'Discoclaw', true),
-      fakeMsg('1', 'create a status channel', 'NimbleDave'),
+      fakeMsg('1', 'create a status channel', 'TestUser'),
     ]);
 
     const result = await fetchMessageHistory(ch, '4', { budgetChars: 5000 });
     const lines = result.split('\n');
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toBe('[NimbleDave]: create a status channel');
+    expect(lines[0]).toBe('[TestUser]: create a status channel');
     expect(lines[1]).toBe('[Discoclaw]: Before I create it, let me confirm...');
-    expect(lines[2]).toBe('[NimbleDave]: sounds good');
+    expect(lines[2]).toBe('[TestUser]: sounds good');
   });
 
   it('respects char budget — stops adding messages when full', async () => {

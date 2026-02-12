@@ -97,19 +97,19 @@ describe('ensureSystemScaffold', () => {
   it('finds renamed forum by existingId and does NOT create a duplicate', async () => {
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
-      { id: '1467563223590113333', name: 'beads-6', type: ChannelType.GuildForum, parentId: 'cat-sys' },
-      { id: '1470920350723342503', name: 'crons ・ 1', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: '1000000000000000002', name: 'beads-6', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: '1000000000000000001', name: 'crons ・ 1', type: ChannelType.GuildForum, parentId: 'cat-sys' },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
     const res = await ensureSystemScaffold({
       guild,
       ensureBeads: true,
-      existingCronsId: '1470920350723342503',
-      existingBeadsId: '1467563223590113333',
+      existingCronsId: '1000000000000000001',
+      existingBeadsId: '1000000000000000002',
     });
     expect(res).not.toBeNull();
-    expect(res?.cronsForumId).toBe('1470920350723342503');
-    expect(res?.beadsForumId).toBe('1467563223590113333');
+    expect(res?.cronsForumId).toBe('1000000000000000001');
+    expect(res?.beadsForumId).toBe('1000000000000000002');
     // No new channels should have been created (only category existed already).
     expect(guild.__create).not.toHaveBeenCalled();
   });
@@ -118,21 +118,21 @@ describe('ensureSystemScaffold', () => {
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
       // crons ID points to a text channel, not a forum.
-      { id: '1470920350723342503', name: 'crons', type: ChannelType.GuildText, parentId: 'cat-sys' },
+      { id: '1000000000000000001', name: 'crons', type: ChannelType.GuildText, parentId: 'cat-sys' },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const res = await ensureSystemScaffold({
       guild,
       ensureBeads: false,
-      existingCronsId: '1470920350723342503',
+      existingCronsId: '1000000000000000001',
     }, log as any);
     expect(res).not.toBeNull();
     // cronsForumId should be undefined because the type was wrong.
     expect(res?.cronsForumId).toBeUndefined();
     // Should have logged an error about wrong type.
     expect(log.error).toHaveBeenCalledWith(
-      expect.objectContaining({ existingId: '1470920350723342503' }),
+      expect.objectContaining({ existingId: '1000000000000000001' }),
       expect.stringContaining('wrong channel type'),
     );
     // Should NOT have created a new crons forum.
@@ -175,7 +175,7 @@ describe('ensureSystemScaffold', () => {
     // Simulate: the channel exists on Discord but isn't in the local cache.
     // Override fetch to return a channel object for the crons ID.
     const cronsChannel = {
-      id: '1470920350723342503',
+      id: '1000000000000000001',
       name: 'crons ・ 3',
       type: ChannelType.GuildForum,
       parentId: null,
@@ -183,19 +183,19 @@ describe('ensureSystemScaffold', () => {
       edit: vi.fn(async function (this: any, opts: any) { if ('parent' in opts) this.parentId = opts.parent; }),
     };
     guild.channels.fetch = vi.fn(async (id: string) => {
-      if (id === '1470920350723342503') return cronsChannel;
+      if (id === '1000000000000000001') return cronsChannel;
       return null;
     });
 
     const res = await ensureSystemScaffold({
       guild,
       ensureBeads: false,
-      existingCronsId: '1470920350723342503',
+      existingCronsId: '1000000000000000001',
     });
     expect(res).not.toBeNull();
-    expect(res?.cronsForumId).toBe('1470920350723342503');
+    expect(res?.cronsForumId).toBe('1000000000000000001');
     // fetch should have been called with the ID.
-    expect(guild.channels.fetch).toHaveBeenCalledWith('1470920350723342503');
+    expect(guild.channels.fetch).toHaveBeenCalledWith('1000000000000000001');
     // Should NOT have created a new crons forum.
     expect(guild.__create).not.toHaveBeenCalled();
   });
