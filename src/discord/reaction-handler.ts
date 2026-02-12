@@ -13,7 +13,7 @@ import { editThenSendChunks } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
-import { downloadMessageImages, resolveMediaType } from './image-download.js';
+import { downloadMessageImages, downloadMessageTextFiles } from './image-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 
@@ -240,12 +240,25 @@ function createReactionHandler(
               params.log?.warn({ err }, `${logPrefix}:image download failed`);
             }
 
-            // Surface non-image attachments as URLs in the prompt (PDFs, text files, etc.).
-            const nonImageUrls = [...msg.attachments.values()]
-              .filter((a) => !resolveMediaType(a))
-              .map((a) => a.url);
-            if (nonImageUrls.length > 0) {
-              prompt += `\nAttachments: ${nonImageUrls.join(', ')}`;
+            // Download text file attachments and inline their content.
+            try {
+              const textResult = await downloadMessageTextFiles([...msg.attachments.values()]);
+              if (textResult.files.length > 0) {
+                const sections = textResult.files.map(
+                  (f) => `--- File: ${f.name} ---\n${f.content}`,
+                );
+                prompt += '\n\n' + sections.join('\n\n');
+                params.log?.info({ textFileCount: textResult.files.length }, `${logPrefix}:text files downloaded`);
+              }
+              if (textResult.urls.length > 0) {
+                prompt += `\nOther attachments: ${textResult.urls.join(', ')}`;
+              }
+              if (textResult.errors.length > 0) {
+                params.log?.warn({ errors: textResult.errors }, `${logPrefix}:text file download errors`);
+                prompt += `\n(Note: ${textResult.errors.length} file(s) could not be loaded: ${textResult.errors.join('; ')})`;
+              }
+            } catch (err) {
+              params.log?.warn({ err }, `${logPrefix}:text file download failed`);
             }
           }
 

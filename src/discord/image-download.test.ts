@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { resolveMediaType, downloadAttachment, downloadMessageImages, type AttachmentLike } from './image-download.js';
+import { resolveMediaType, downloadAttachment, downloadMessageImages, isTextAttachment, downloadTextAttachment, downloadMessageTextFiles, type AttachmentLike } from './image-download.js';
 
 describe('resolveMediaType', () => {
   it('returns MIME from contentType for PNG', () => {
@@ -351,5 +351,258 @@ describe('downloadMessageImages', () => {
     expect(result.images).toHaveLength(1);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toContain('HTTP 500');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Text file attachment tests
+// ---------------------------------------------------------------------------
+
+describe('isTextAttachment', () => {
+  it('returns true for .txt files', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a.txt', name: 'notes.txt' })).toBe(true);
+  });
+
+  it('returns true for .py files', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a.py', name: 'script.py' })).toBe(true);
+  });
+
+  it('returns true for .json files', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a.json', name: 'data.json' })).toBe(true);
+  });
+
+  it('returns true for .md files', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a.md', name: 'README.md' })).toBe(true);
+  });
+
+  it('returns true for text/ MIME type', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a', name: 'a', contentType: 'text/plain' })).toBe(true);
+  });
+
+  it('returns true for application/json MIME type', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a', name: 'a', contentType: 'application/json' })).toBe(true);
+  });
+
+  it('returns false for .png images', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a.png', name: 'photo.png', contentType: 'image/png' })).toBe(false);
+  });
+
+  it('returns false for .zip files', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a.zip', name: 'archive.zip', contentType: 'application/zip' })).toBe(false);
+  });
+
+  it('returns false for unknown extension and no MIME', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a.xyz', name: 'unknown.xyz' })).toBe(false);
+  });
+
+  it('returns false for attachments with no name or contentType', () => {
+    expect(isTextAttachment({ url: 'https://cdn.discordapp.com/a' })).toBe(false);
+  });
+});
+
+describe('downloadTextAttachment', () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('downloads and returns text content', async () => {
+    const content = 'Hello, world!';
+    const data = Buffer.from(content);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadTextAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/notes.txt', name: 'notes.txt', size: data.length },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.file.name).toBe('notes.txt');
+      expect(result.file.content).toBe('Hello, world!');
+    }
+  });
+
+  it('rejects non-Discord-CDN URLs (SSRF protection)', async () => {
+    const result = await downloadTextAttachment(
+      { url: 'https://evil.com/malicious.txt', name: 'malicious.txt' },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('blocked');
+    }
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects files exceeding size limit from metadata', async () => {
+    const result = await downloadTextAttachment(
+      { url: 'https://cdn.discordapp.com/notes.txt', name: 'notes.txt', size: 200 * 1024 },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('too large');
+      expect(result.error).toContain('max 100 KB');
+    }
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects files exceeding size limit after download', async () => {
+    const bigBuf = Buffer.alloc(150 * 1024);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(bigBuf.buffer.slice(bigBuf.byteOffset, bigBuf.byteOffset + bigBuf.byteLength)),
+    });
+
+    const result = await downloadTextAttachment(
+      { url: 'https://cdn.discordapp.com/notes.txt', name: 'notes.txt', size: 50 },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('too large');
+  });
+
+  it('handles timeout', async () => {
+    const timeoutErr = new DOMException('signal timed out', 'TimeoutError');
+    (globalThis.fetch as any).mockRejectedValue(timeoutErr);
+
+    const result = await downloadTextAttachment(
+      { url: 'https://cdn.discordapp.com/notes.txt', name: 'notes.txt' },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('timed out');
+  });
+
+  it('handles HTTP error responses', async () => {
+    (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 403 });
+
+    const result = await downloadTextAttachment(
+      { url: 'https://cdn.discordapp.com/notes.txt', name: 'notes.txt' },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('HTTP 403');
+  });
+});
+
+describe('downloadMessageTextFiles', () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function makeAttachment(name: string, contentType: string | null, size: number): AttachmentLike {
+    return { url: `https://cdn.discordapp.com/attachments/123/456/${name}`, name, contentType, size };
+  }
+
+  function mockTextFetch(content: string) {
+    const data = Buffer.from(content);
+    return {
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    };
+  }
+
+  it('downloads multiple text files', async () => {
+    (globalThis.fetch as any)
+      .mockResolvedValueOnce(mockTextFetch('file one'))
+      .mockResolvedValueOnce(mockTextFetch('file two'));
+
+    const result = await downloadMessageTextFiles([
+      makeAttachment('a.txt', 'text/plain', 100),
+      makeAttachment('b.py', null, 200),
+    ]);
+
+    expect(result.files).toHaveLength(2);
+    expect(result.files[0].name).toBe('a.txt');
+    expect(result.files[0].content).toBe('file one');
+    expect(result.files[1].name).toBe('b.py');
+    expect(result.urls).toHaveLength(0);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('filters out images and collects binary URLs', async () => {
+    (globalThis.fetch as any).mockResolvedValueOnce(mockTextFetch('text content'));
+
+    const result = await downloadMessageTextFiles([
+      makeAttachment('photo.png', 'image/png', 100),    // image — skipped
+      makeAttachment('notes.txt', 'text/plain', 50),     // text — inlined
+      makeAttachment('archive.zip', 'application/zip', 500), // binary — URL collected
+    ]);
+
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0].name).toBe('notes.txt');
+    expect(result.urls).toHaveLength(1);
+    expect(result.urls[0]).toContain('archive.zip');
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('respects max text files cap', async () => {
+    (globalThis.fetch as any).mockImplementation(() =>
+      Promise.resolve(mockTextFetch('content')),
+    );
+
+    const atts = Array.from({ length: 7 }, (_, i) =>
+      makeAttachment(`file${i}.txt`, 'text/plain', 50),
+    );
+    const result = await downloadMessageTextFiles(atts);
+
+    // Only first 5 files downloaded; remaining 2 reported as errors with URLs.
+    expect(result.files).toHaveLength(5);
+    expect(result.errors).toHaveLength(2);
+    expect(result.urls).toHaveLength(2);
+  });
+
+  it('respects total byte budget', async () => {
+    (globalThis.fetch as any).mockImplementation(() =>
+      Promise.resolve(mockTextFetch('x')),
+    );
+
+    // First file (95 KB) fits both per-file and total budget.
+    // Second file (410 KB) would push total to 505 KB > 500 KB cap.
+    const result = await downloadMessageTextFiles([
+      makeAttachment('a.txt', 'text/plain', 95 * 1024),
+      makeAttachment('b.txt', 'text/plain', 410 * 1024),
+    ]);
+
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0].name).toBe('a.txt');
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('total text size limit');
+    expect(result.urls).toHaveLength(1);
+  });
+
+  it('returns empty for empty input', async () => {
+    const result = await downloadMessageTextFiles([]);
+    expect(result.files).toHaveLength(0);
+    expect(result.urls).toHaveLength(0);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('falls back to URL when download fails', async () => {
+    (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 500 });
+
+    const result = await downloadMessageTextFiles([
+      makeAttachment('broken.txt', 'text/plain', 50),
+    ]);
+
+    expect(result.files).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('HTTP 500');
+    expect(result.urls).toHaveLength(1);
   });
 });

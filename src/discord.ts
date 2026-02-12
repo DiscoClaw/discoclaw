@@ -32,7 +32,7 @@ import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/shortterm-memory.js';
 import { editThenSendChunks } from './discord/output-common.js';
-import { downloadMessageImages } from './discord/image-download.js';
+import { downloadMessageImages, downloadMessageTextFiles } from './discord/image-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
 import type { HealthConfigSnapshot } from './discord/health-command.js';
@@ -505,6 +505,27 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
             } catch (err) {
               params.log?.warn({ err }, 'discord:image download failed');
+            }
+
+            // Download text file attachments and inline their content.
+            try {
+              const textResult = await downloadMessageTextFiles([...msg.attachments.values()]);
+              if (textResult.files.length > 0) {
+                const sections = textResult.files.map(
+                  (f) => `--- File: ${f.name} ---\n${f.content}`,
+                );
+                prompt += '\n\n' + sections.join('\n\n');
+                params.log?.info({ textFileCount: textResult.files.length }, 'discord:text files downloaded');
+              }
+              if (textResult.urls.length > 0) {
+                prompt += `\nOther attachments: ${textResult.urls.join(', ')}`;
+              }
+              if (textResult.errors.length > 0) {
+                params.log?.warn({ errors: textResult.errors }, 'discord:text file download errors');
+                prompt += `\n(Note: ${textResult.errors.length} file(s) could not be loaded: ${textResult.errors.join('; ')})`;
+              }
+            } catch (err) {
+              params.log?.warn({ err }, 'discord:text file download failed');
             }
           }
 

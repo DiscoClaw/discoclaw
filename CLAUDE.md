@@ -61,8 +61,9 @@ After completing a unit of work:
 7. **Merge** — after approval, merge via `gh pr merge --squash` or send the PR link to the user
 8. **Clean up** — `git checkout main && git pull && git branch -d <branch-name>`
 9. **Deploy** (if the change affects runtime behavior):
-   - `systemctl --user restart discoclaw.service`
-   - `journalctl --user -u discoclaw.service -n 20` — verify startup
+   - Kill existing processes: `ps aux | grep 'tsx src/index.ts' | grep -v grep | awk '{print $2}' | xargs kill`
+   - Start the bot: `nohup pnpm dev > /tmp/discoclaw.log 2>&1 &`
+   - Verify startup: `sleep 3 && tail -20 /tmp/discoclaw.log`
 10. **Verify** — `git status --short` must be clean
 
 Skip deploy for test-only, docs-only, or template-only changes.
