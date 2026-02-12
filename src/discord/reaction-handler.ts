@@ -14,6 +14,7 @@ import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
+import { downloadTextAttachments } from './file-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 
@@ -222,7 +223,7 @@ function createReactionHandler(
             `Original message by ${messageAuthor} (ID: ${messageAuthorId}):\n` +
             messageContent;
 
-          // Download image attachments and surface non-image attachment URLs as text.
+          // Download image attachments and non-image text attachments.
           let inputImages: ImageData[] | undefined;
           if (msg.attachments && msg.attachments.size > 0) {
             try {
@@ -240,12 +241,23 @@ function createReactionHandler(
               params.log?.warn({ err }, `${logPrefix}:image download failed`);
             }
 
-            // Surface non-image attachments as URLs in the prompt (PDFs, text files, etc.).
-            const nonImageUrls = [...msg.attachments.values()]
-              .filter((a) => !resolveMediaType(a))
-              .map((a) => a.url);
-            if (nonImageUrls.length > 0) {
-              prompt += `\nAttachments: ${nonImageUrls.join(', ')}`;
+            // Download non-image text attachments.
+            try {
+              const nonImageAtts = [...msg.attachments.values()].filter(a => !resolveMediaType(a));
+              if (nonImageAtts.length > 0) {
+                const textResult = await downloadTextAttachments(nonImageAtts);
+                if (textResult.texts.length > 0) {
+                  const sections = textResult.texts.map(t => `[Attached file: ${t.name}]\n\`\`\`\n${t.content}\n\`\`\``);
+                  prompt += '\n\n' + sections.join('\n\n');
+                  params.log?.info({ fileCount: textResult.texts.length }, `${logPrefix}:text attachments downloaded`);
+                }
+                if (textResult.errors.length > 0) {
+                  prompt += '\n(' + textResult.errors.join('; ') + ')';
+                  params.log?.info({ errors: textResult.errors }, `${logPrefix}:text attachment notes`);
+                }
+              }
+            } catch (err) {
+              params.log?.warn({ err }, `${logPrefix}:text attachment download failed`);
             }
           }
 

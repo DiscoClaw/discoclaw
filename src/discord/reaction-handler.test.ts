@@ -568,6 +568,203 @@ describe('createReactionAddHandler', () => {
     );
   });
 
+  it('text file attachments are downloaded and inlined in the prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const originalFetch = globalThis.fetch;
+    const fileContent = 'const x = 42;';
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new TextEncoder().encode(fileContent).buffer),
+    }) as any;
+
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 1,
+        values: () => [{
+          url: 'https://cdn.discordapp.com/attachments/123/456/example.ts',
+          name: 'example.ts',
+          contentType: null,
+          size: 100,
+        }] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      expect(invokeParams.prompt).toContain('[Attached file: example.ts]');
+      expect(invokeParams.prompt).toContain('const x = 42;');
+      expect(invokeParams.prompt).not.toContain('https://cdn.discordapp.com');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('unsupported non-image attachment types produce notes in the prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('should not be called')) as any;
+
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 1,
+        values: () => [{
+          url: 'https://cdn.discordapp.com/attachments/123/456/archive.zip',
+          name: 'archive.zip',
+          contentType: 'application/zip',
+          size: 5000,
+        }] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      expect(invokeParams.prompt).toContain('[Unsupported attachment: archive.zip (application/zip)]');
+      expect(invokeParams.prompt).not.toContain('https://cdn.discordapp.com');
+      // fetch should NOT have been called (unsupported type is classified before download)
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('mixed image and text attachments: images passed as ImageData, text inlined in prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const originalFetch = globalThis.fetch;
+    const fileContent = 'hello = true';
+    const imgData = Buffer.from('fake-png');
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('.toml')) {
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(new TextEncoder().encode(fileContent).buffer),
+        });
+      }
+      // Image path: downloadAttachment does buffer.toString('base64') with no content validation
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(imgData.buffer.slice(imgData.byteOffset, imgData.byteOffset + imgData.byteLength)),
+      });
+    }) as any;
+
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 2,
+        values: () => [
+          {
+            url: 'https://cdn.discordapp.com/attachments/123/456/photo.png',
+            name: 'photo.png',
+            contentType: 'image/png',
+            size: 100,
+          },
+          {
+            url: 'https://cdn.discordapp.com/attachments/123/456/config.toml',
+            name: 'config.toml',
+            contentType: null,
+            size: 50,
+          },
+        ] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      // Image should be in images array
+      expect(invokeParams.images).toBeDefined();
+      expect(invokeParams.images).toHaveLength(1);
+      expect(invokeParams.images[0].mediaType).toBe('image/png');
+      // Text file should be inlined in prompt
+      expect(invokeParams.prompt).toContain('[Attached file: config.toml]');
+      expect(invokeParams.prompt).toContain('hello = true');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('text attachment download failure is caught and handler continues', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    // Mock fetch to throw — downloadTextAttachments catches per-file errors internally
+    // and surfaces them as textResult.errors entries rather than throwing
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network collapsed')) as any;
+
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 1,
+        values: () => [{
+          url: 'https://cdn.discordapp.com/attachments/123/456/example.ts',
+          name: 'example.ts',
+          contentType: null,
+          size: 100,
+        }] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      // Handler should still invoke the runtime (graceful degradation)
+      expect(invokeSpy).toHaveBeenCalledOnce();
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      // File contents should not be present (download failed)
+      expect(invokeParams.prompt).not.toContain('[Attached file:');
+      // The error is caught per-file inside downloadTextAttachments, so it surfaces
+      // as a textResult.errors entry logged via info, not the outer catch's warn
+      expect(invokeParams.prompt).toContain('example.ts: download failed');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('still triggers handlerError for non-50083 Discord errors', async () => {
     const statusPoster = {
       online: vi.fn(),
