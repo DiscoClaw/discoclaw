@@ -23,7 +23,6 @@
     "discord:join-threads": "node scripts/discord-join-threads.mjs",
     "claude:install-skills": "tsx scripts/install-claude-skills.ts",
     "sync:discord-context": "tsx scripts/sync-discord-context.ts",
-    "migrate:weston-content": "tsx scripts/migrate-weston-content.ts",
     "doctor": "tsx scripts/doctor.ts",
     "doctor:online": "tsx scripts/doctor.ts --check-connection",
     "setup": "tsx scripts/setup.ts",
