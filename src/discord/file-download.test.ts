@@ -58,6 +58,105 @@ describe('resolveTextType', () => {
   it('returns null for unknown extension and no contentType', () => {
     expect(resolveTextType(makeAtt('data.xyz', null))).toBeNull();
   });
+
+  // --- New extension tests ---
+  it('falls back to extension for .go', () => {
+    expect(resolveTextType(makeAtt('main.go', null))).toBe('text/x-script');
+  });
+
+  it('falls back to extension for .rs', () => {
+    expect(resolveTextType(makeAtt('lib.rs', null))).toBe('text/x-script');
+  });
+
+  it('falls back to extension for .css', () => {
+    expect(resolveTextType(makeAtt('styles.css', null))).toBe('text/css');
+  });
+
+  it('falls back to extension for .jsx', () => {
+    expect(resolveTextType(makeAtt('App.jsx', null))).toBe('application/javascript');
+  });
+
+  it('falls back to extension for .tsx', () => {
+    expect(resolveTextType(makeAtt('App.tsx', null))).toBe('application/typescript');
+  });
+
+  it('falls back to extension for .mjs', () => {
+    expect(resolveTextType(makeAtt('index.mjs', null))).toBe('application/javascript');
+  });
+
+  it('falls back to extension for .mts', () => {
+    expect(resolveTextType(makeAtt('index.mts', null))).toBe('application/typescript');
+  });
+
+  it('falls back to extension for .toml', () => {
+    expect(resolveTextType(makeAtt('config.toml', null))).toBe('application/toml');
+  });
+
+  it('falls back to extension for .env', () => {
+    expect(resolveTextType(makeAtt('app.env', null))).toBe('text/plain');
+  });
+
+  it('falls back to extension for .sql', () => {
+    expect(resolveTextType(makeAtt('schema.sql', null))).toBe('application/sql');
+  });
+
+  it('falls back to extension for .tf', () => {
+    expect(resolveTextType(makeAtt('main.tf', null))).toBe('text/plain');
+  });
+
+  it('falls back to extension for .proto', () => {
+    expect(resolveTextType(makeAtt('service.proto', null))).toBe('text/plain');
+  });
+
+  it('falls back to extension for .jsonc', () => {
+    expect(resolveTextType(makeAtt('tsconfig.jsonc', null))).toBe('application/json');
+  });
+
+  it('falls back to extension for .dockerfile', () => {
+    expect(resolveTextType(makeAtt('app.dockerfile', null))).toBe('text/plain');
+  });
+
+  it('falls back to extension for .log', () => {
+    expect(resolveTextType(makeAtt('error.log', null))).toBe('text/plain');
+  });
+
+  it('falls back to extension for .svg', () => {
+    expect(resolveTextType(makeAtt('icon.svg', null))).toBe('text/xml');
+  });
+
+  it('falls back to extension for .astro', () => {
+    expect(resolveTextType(makeAtt('Page.astro', null))).toBe('text/html');
+  });
+
+  it('falls back to extension for .bat', () => {
+    expect(resolveTextType(makeAtt('build.bat', null))).toBe('text/x-script');
+  });
+
+  it('falls back to extension for .gd (GDScript)', () => {
+    expect(resolveTextType(makeAtt('player.gd', null))).toBe('text/x-script');
+  });
+
+  // --- Bare dotfile tests (dotIdx === 0 path) ---
+  it('resolves bare .env dotfile', () => {
+    expect(resolveTextType(makeAtt('.env', null))).toBe('text/plain');
+  });
+
+  it('resolves bare .gitignore dotfile', () => {
+    expect(resolveTextType(makeAtt('.gitignore', null))).toBe('text/plain');
+  });
+
+  it('resolves bare .prettierrc dotfile', () => {
+    expect(resolveTextType(makeAtt('.prettierrc', null))).toBe('text/plain');
+  });
+
+  // --- Negative cases ---
+  it('returns null for .exe (binary)', () => {
+    expect(resolveTextType(makeAtt('app.exe', null))).toBeNull();
+  });
+
+  it('returns null for .dll (binary)', () => {
+    expect(resolveTextType(makeAtt('lib.dll', null))).toBeNull();
+  });
 });
 
 describe('isTextType', () => {
@@ -70,6 +169,22 @@ describe('isTextType', () => {
   it('returns true for application text types', () => {
     expect(isTextType('application/json')).toBe(true);
     expect(isTextType('application/javascript')).toBe(true);
+  });
+
+  it('returns true for application/toml', () => {
+    expect(isTextType('application/toml')).toBe(true);
+  });
+
+  it('returns true for application/sql', () => {
+    expect(isTextType('application/sql')).toBe(true);
+  });
+
+  it('returns true for application/graphql', () => {
+    expect(isTextType('application/graphql')).toBe(true);
+  });
+
+  it('returns true for text/css', () => {
+    expect(isTextType('text/css')).toBe(true);
   });
 
   it('returns false for non-text types', () => {

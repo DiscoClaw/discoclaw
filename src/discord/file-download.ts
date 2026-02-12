@@ -18,10 +18,17 @@ const TEXT_APPLICATION_TYPES = new Set([
   'application/xml',
   'application/javascript',
   'application/typescript',
+  'application/toml',
+  'application/sql',
+  'application/graphql',
+  'application/x-httpd-php',
+  'application/x-sh',
+  'application/x-yaml',
 ]);
 
 /** Extension-to-MIME fallback map for text types. */
 const EXT_TO_TEXT_MIME: Record<string, string> = {
+  // --- Existing ---
   txt: 'text/plain',
   json: 'application/json',
   csv: 'text/csv',
@@ -37,6 +44,144 @@ const EXT_TO_TEXT_MIME: Record<string, string> = {
   sh: 'text/x-script',
   bash: 'text/x-script',
   zsh: 'text/x-script',
+
+  // --- Web / frontend ---
+  jsx: 'application/javascript',
+  tsx: 'application/typescript',
+  mjs: 'application/javascript',
+  cjs: 'application/javascript',
+  mts: 'application/typescript',
+  cts: 'application/typescript',
+  css: 'text/css',
+  scss: 'text/css',
+  sass: 'text/css',
+  less: 'text/css',
+  vue: 'text/html',
+  svelte: 'text/html',
+  astro: 'text/html',
+  htm: 'text/html',
+
+  // --- Template engines ---
+  njk: 'text/html',
+  ejs: 'text/html',
+  hbs: 'text/html',
+  pug: 'text/html',
+
+  // --- Systems / compiled (source is text) ---
+  c: 'text/x-script',
+  h: 'text/x-script',
+  cpp: 'text/x-script',
+  cxx: 'text/x-script',
+  cc: 'text/x-script',
+  hpp: 'text/x-script',
+  hxx: 'text/x-script',
+  cs: 'text/x-script',
+  java: 'text/x-script',
+  kt: 'text/x-script',
+  kts: 'text/x-script',
+  scala: 'text/x-script',
+  go: 'text/x-script',
+  rs: 'text/x-script',
+  swift: 'text/x-script',
+  m: 'text/x-script',
+  mm: 'text/x-script',
+  zig: 'text/x-script',
+  nim: 'text/x-script',
+  v: 'text/x-script',
+  d: 'text/x-script',
+
+  // --- Scripting / dynamic ---
+  php: 'text/x-script',
+  pl: 'text/x-script',
+  pm: 'text/x-script',
+  r: 'text/x-script',
+  lua: 'text/x-script',
+  tcl: 'text/x-script',
+  ex: 'text/x-script',
+  exs: 'text/x-script',
+  erl: 'text/x-script',
+  hrl: 'text/x-script',
+  clj: 'text/x-script',
+  cljs: 'text/x-script',
+  cljc: 'text/x-script',
+  hs: 'text/x-script',
+  ml: 'text/x-script',
+  mli: 'text/x-script',
+  fs: 'text/x-script',
+  fsx: 'text/x-script',
+  jl: 'text/x-script',
+  dart: 'text/x-script',
+  groovy: 'text/x-script',
+  gradle: 'text/x-script',
+  ps1: 'text/x-script',
+  psm1: 'text/x-script',
+  fish: 'text/x-script',
+  nix: 'text/x-script',
+  gd: 'text/x-script',
+
+  // --- Config / data ---
+  toml: 'application/toml',
+  ini: 'text/plain',
+  cfg: 'text/plain',
+  conf: 'text/plain',
+  env: 'text/plain',
+  properties: 'text/plain',
+  json5: 'application/json',
+  jsonc: 'application/json',
+  editorconfig: 'text/plain',
+  gitignore: 'text/plain',
+  gitattributes: 'text/plain',
+  dockerignore: 'text/plain',
+  npmrc: 'text/plain',
+  nvmrc: 'text/plain',
+  prettierrc: 'text/plain',
+  eslintrc: 'text/plain',
+  babelrc: 'text/plain',
+
+  // --- Infrastructure / IaC ---
+  tf: 'text/plain',
+  tfvars: 'text/plain',
+  hcl: 'text/plain',
+
+  // --- Data / query / IDL ---
+  sql: 'application/sql',
+  graphql: 'application/graphql',
+  gql: 'application/graphql',
+  proto: 'text/plain',
+  prisma: 'text/plain',
+
+  // --- Markup / docs ---
+  rst: 'text/plain',
+  tex: 'text/plain',
+  latex: 'text/plain',
+  adoc: 'text/plain',
+  org: 'text/plain',
+  wiki: 'text/plain',
+  rdoc: 'text/plain',
+
+  // --- Build / CI ---
+  // Note: bare Dockerfile/Makefile/Gemfile (no extension) won't match via
+  // extension extraction — lastIndexOf('.') returns -1 for extensionless filenames.
+  // These entries only cover the foo.dockerfile / foo.makefile variant.
+  dockerfile: 'text/plain',
+  makefile: 'text/plain',
+  cmake: 'text/plain',
+  rake: 'text/x-script',
+  gemfile: 'text/x-script',
+
+  // --- Shell / terminal ---
+  ksh: 'text/x-script',
+  csh: 'text/x-script',
+  tcsh: 'text/x-script',
+  bat: 'text/x-script',
+  cmd: 'text/x-script',
+  awk: 'text/x-script',
+
+  // --- Misc text ---
+  log: 'text/plain',
+  diff: 'text/plain',
+  patch: 'text/plain',
+  svg: 'text/xml',
 };
 
 export type TextDownloadResult = {
