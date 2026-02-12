@@ -146,6 +146,9 @@ export type ClaudeCliRuntimeOpts = {
   outputFormat: 'text' | 'stream-json';
   // Echo raw CLI output for debugging / "terminal-like" Discord output.
   echoStdio?: boolean;
+  // If true, pass `--verbose` to Claude CLI for increased output detail.
+  // Automatically disabled when outputFormat='text' to prevent metadata leaking into responses.
+  verbose?: boolean;
   // If set, pass `--debug-file` to Claude CLI. Keep local; may contain sensitive info.
   debugFile?: string | null;
   // If true, pass `--strict-mcp-config` to skip slow MCP plugin init in headless contexts.
@@ -207,6 +210,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
           fallbackModel: opts.fallbackModel,
           maxBudgetUsd: opts.maxBudgetUsd,
           appendSystemPrompt: opts.appendSystemPrompt,
+          verbose: opts.verbose,
           tools: params.tools,
           addDirs: params.addDirs,
           hangTimeoutMs: opts.multiTurnHangTimeoutMs,
@@ -266,6 +270,10 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
 
     if (opts.debugFile && opts.debugFile.trim()) {
       args.push('--debug-file', opts.debugFile.trim());
+    }
+
+    if (opts.verbose) {
+      args.push('--verbose');
     }
 
     if (params.sessionId) {

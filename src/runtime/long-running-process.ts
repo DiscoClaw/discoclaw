@@ -26,6 +26,7 @@ export type LongRunningProcessOpts = {
   addDirs?: string[];
   hangTimeoutMs?: number;
   idleTimeoutMs?: number;
+  verbose?: boolean;
   log?: { info(...args: unknown[]): void; debug(...args: unknown[]): void };
 };
 
@@ -106,6 +107,9 @@ export class LongRunningProcess {
     }
     if (this.opts.appendSystemPrompt) {
       args.push('--append-system-prompt', this.opts.appendSystemPrompt);
+    }
+    if (this.opts.verbose) {
+      args.push('--verbose');
     }
     if (this.opts.tools) {
       if (this.opts.tools.length > 0) {

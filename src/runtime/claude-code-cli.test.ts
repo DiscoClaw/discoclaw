@@ -340,6 +340,64 @@ describe('Claude CLI runtime adapter (smoke)', () => {
     expect(callArgs).not.toContain('--append-system-prompt');
   });
 
+  it('--verbose is passed when enabled', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+
+    // Note: verbose: true with outputFormat: 'text' is prevented by the config layer,
+    // but we test the runtime layer in isolation here.
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'stream-json',
+      verbose: true,
+    });
+
+    for await (const _evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      // drain
+    }
+
+    const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(callArgs).toContain('--verbose');
+  });
+
+  it('--verbose is omitted when disabled', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+      verbose: false,
+    });
+
+    for await (const _evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      // drain
+    }
+
+    const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(callArgs).not.toContain('--verbose');
+  });
+
+  it('--verbose is omitted when unset', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+    });
+
+    for await (const _evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      // drain
+    }
+
+    const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(callArgs).not.toContain('--verbose');
+  });
+
   it('stream-json emits image_data from streaming content blocks', async () => {
     const execaMock = execa as any;
     execaMock.mockImplementation(() => makeProcessStreamJson({
@@ -739,6 +797,72 @@ describe('pool forwarding (multi-turn opts wiring)', () => {
     expect(oneShotArgs[oneShotArgs.indexOf('--max-budget-usd') + 1]).toBe('10');
     expect(oneShotArgs).toContain('--append-system-prompt');
     expect(oneShotArgs[oneShotArgs.indexOf('--append-system-prompt') + 1]).toBe('You are a helpful PA.');
+  });
+
+  it('forwards --verbose to LongRunningProcess', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'text',
+      verbose: true,
+      multiTurn: true,
+      multiTurnMaxProcesses: 2,
+      multiTurnHangTimeoutMs: 1000,
+      multiTurnIdleTimeoutMs: 5000,
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({
+      prompt: 'test prompt',
+      model: 'opus',
+      cwd: '/tmp',
+      sessionKey: 'test-session',
+    })) {
+      events.push(evt);
+    }
+
+    // First call is the LRP spawn (has --input-format stream-json as LRP signature).
+    const lrpArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(lrpArgs).toContain('--verbose');
+
+    // Second call (one-shot fallback) should also have --verbose.
+    if (execaMock.mock.calls.length >= 2) {
+      const oneShotArgs = execaMock.mock.calls[1]?.[1] ?? [];
+      expect(oneShotArgs).toContain('--verbose');
+    }
+  });
+
+  it('--verbose is omitted from LongRunningProcess when disabled', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'text',
+      verbose: false,
+      multiTurn: true,
+      multiTurnMaxProcesses: 2,
+      multiTurnHangTimeoutMs: 1000,
+      multiTurnIdleTimeoutMs: 5000,
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({
+      prompt: 'test prompt',
+      model: 'opus',
+      cwd: '/tmp',
+      sessionKey: 'test-session',
+    })) {
+      events.push(evt);
+    }
+
+    // First call is the LRP spawn.
+    const lrpArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(lrpArgs).not.toContain('--verbose');
   });
 });
 

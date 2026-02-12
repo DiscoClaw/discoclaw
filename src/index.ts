@@ -247,6 +247,7 @@ const claudeBin = cfg.claudeBin;
 const dangerouslySkipPermissions = cfg.dangerouslySkipPermissions;
 const outputFormat = cfg.outputFormat;
 const echoStdio = cfg.echoStdio;
+const verbose = cfg.verbose;
 const claudeDebugFile = cfg.claudeDebugFile ?? null;
 const strictMcpConfig = cfg.strictMcpConfig;
 const sessionScanning = cfg.sessionScanning;
@@ -305,6 +306,7 @@ if (cfg.debugRuntime) {
         bin: claudeBin,
         outputFormat,
         echoStdio,
+        verbose,
         dangerouslySkipPermissions,
       },
       runtime: {
@@ -326,6 +328,7 @@ const runtime = createClaudeCliRuntime({
   dangerouslySkipPermissions,
   outputFormat,
   echoStdio,
+  verbose,
   debugFile: claudeDebugFile,
   strictMcpConfig,
   fallbackModel: runtimeFallbackModel,

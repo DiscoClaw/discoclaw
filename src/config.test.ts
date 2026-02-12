@@ -331,6 +331,42 @@ describe('parseConfig', () => {
     expect(config.beadsEnabled).toBe(false);
   });
 
+  // --- Verbose CLI flag ---
+  it('CLAUDE_VERBOSE defaults to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.verbose).toBe(false);
+  });
+
+  it('CLAUDE_VERBOSE=1 sets verbose to true with stream-json', () => {
+    const { config } = parseConfig(env({ CLAUDE_VERBOSE: '1', CLAUDE_OUTPUT_FORMAT: 'stream-json' }));
+    expect(config.verbose).toBe(true);
+  });
+
+  it('CLAUDE_VERBOSE=1 is auto-disabled when outputFormat=text', () => {
+    const { config, warnings } = parseConfig(env({ CLAUDE_VERBOSE: '1', CLAUDE_OUTPUT_FORMAT: 'text' }));
+    expect(config.verbose).toBe(false);
+    expect(warnings).toContainEqual(
+      expect.stringContaining('CLAUDE_VERBOSE=1 ignored'),
+    );
+  });
+
+  it('CLAUDE_VERBOSE=1 is allowed when outputFormat=stream-json', () => {
+    const { config, warnings } = parseConfig(env({ CLAUDE_VERBOSE: '1', CLAUDE_OUTPUT_FORMAT: 'stream-json' }));
+    expect(config.verbose).toBe(true);
+    expect(warnings).not.toContainEqual(
+      expect.stringContaining('CLAUDE_VERBOSE=1 ignored'),
+    );
+  });
+
+  it('CLAUDE_VERBOSE=1 is auto-disabled when outputFormat defaults to text', () => {
+    const { config, warnings } = parseConfig(env({ CLAUDE_VERBOSE: '1' }));
+    // outputFormat defaults to 'text', so verbose should be auto-disabled
+    expect(config.verbose).toBe(false);
+    expect(warnings).toContainEqual(
+      expect.stringContaining('CLAUDE_VERBOSE=1 ignored'),
+    );
+  });
+
   // --- Stream stall detection ---
   it('defaults streamStallTimeoutMs to 120000', () => {
     const { config } = parseConfig(env());

@@ -97,6 +97,7 @@ export type DiscoclawConfig = {
   dangerouslySkipPermissions: boolean;
   outputFormat: 'text' | 'stream-json';
   echoStdio: boolean;
+  verbose: boolean;
   claudeDebugFile?: string;
   strictMcpConfig: boolean;
   sessionScanning: boolean;
@@ -271,6 +272,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   if (outputFormatRaw && outputFormatRaw !== 'text' && outputFormatRaw !== 'stream-json') {
     throw new Error(`CLAUDE_OUTPUT_FORMAT must be "text" or "stream-json", got "${outputFormatRaw}"`);
   }
+  const outputFormat: 'text' | 'stream-json' = outputFormatRaw === 'stream-json' ? 'stream-json' : 'text';
+
+  const rawVerbose = parseBoolean(env, 'CLAUDE_VERBOSE', false);
+  const effectiveVerbose = rawVerbose && outputFormat !== 'text';
+  if (rawVerbose && !effectiveVerbose) {
+    warnings.push(
+      'CLAUDE_VERBOSE=1 ignored: incompatible with CLAUDE_OUTPUT_FORMAT=text (verbose metadata would corrupt response text). ' +
+      'Set CLAUDE_OUTPUT_FORMAT=stream-json to use verbose mode.',
+    );
+  }
 
   const healthVerboseAllowlistRaw = env.DISCOCLAW_HEALTH_VERBOSE_ALLOWLIST;
   const healthVerboseAllowlist = parseAllowUserIds(healthVerboseAllowlistRaw);
@@ -420,8 +431,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
       claudeBin: parseTrimmedString(env, 'CLAUDE_BIN') ?? 'claude',
       dangerouslySkipPermissions: parseBoolean(env, 'CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS', false),
-      outputFormat: outputFormatRaw === 'stream-json' ? 'stream-json' : 'text',
+      outputFormat,
       echoStdio: parseBoolean(env, 'CLAUDE_ECHO_STDIO', false),
+      verbose: effectiveVerbose,
       claudeDebugFile: parseTrimmedString(env, 'CLAUDE_DEBUG_FILE'),
       strictMcpConfig: parseBoolean(env, 'CLAUDE_STRICT_MCP_CONFIG', true),
       sessionScanning: parseBoolean(env, 'DISCOCLAW_SESSION_SCANNING', false),
