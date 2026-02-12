@@ -87,15 +87,36 @@ describe('resolveReplyReference', () => {
     expect(result!.section).toContain('[dave123 (ID: 111)]: yo');
   });
 
-  it('notes non-image attachments inline', async () => {
+  it('notes unsupported attachments inline', async () => {
     const atts = new Map([
       ['1', { url: 'https://cdn.discordapp.com/a.pdf', name: 'report.pdf', contentType: 'application/pdf', size: 100 }],
     ]);
     const msg = makeMsg({ refId: '999', refContent: 'see attached', refAttachments: atts });
     const result = await resolveReplyReference(msg, 'Weston');
 
-    expect(result!.section).toContain('[attachment: report.pdf]');
+    expect(result!.section).toContain('Unsupported attachment: report.pdf');
     expect(result!.images).toHaveLength(0);
+    expect(result!.files).toHaveLength(0);
+  });
+
+  it('downloads text file attachments from referenced message', async () => {
+    const fileContent = 'console.log("hello world");';
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new TextEncoder().encode(fileContent).buffer),
+    });
+
+    const atts = new Map([
+      ['1', { url: 'https://cdn.discordapp.com/attachments/1/2/script.js', name: 'script.js', contentType: 'application/javascript', size: 27 }],
+    ]);
+    const msg = makeMsg({ refId: '999', refContent: 'check this code', refAttachments: atts });
+    const result = await resolveReplyReference(msg, 'Weston');
+
+    expect(result!.files).toHaveLength(1);
+    expect(result!.files[0].name).toBe('script.js');
+    expect(result!.files[0].content).toBe(fileContent);
+    expect(result!.section).toContain('[Attached file: script.js]');
+    expect(result!.section).toContain(fileContent);
   });
 
   it('downloads image attachments from referenced message', async () => {
