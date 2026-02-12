@@ -318,7 +318,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
       runtimeModel: parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'opus',
       runtimeTools: parseRuntimeTools(env, warnings),
-      runtimeTimeoutMs: parsePositiveNumber(env, 'RUNTIME_TIMEOUT_MS', 10 * 60_000),
+      runtimeTimeoutMs: parsePositiveNumber(env, 'RUNTIME_TIMEOUT_MS', 30 * 60_000),
       runtimeFallbackModel: parseTrimmedString(env, 'RUNTIME_FALLBACK_MODEL'),
       runtimeMaxBudgetUsd: (() => {
         const raw = parseTrimmedString(env, 'RUNTIME_MAX_BUDGET_USD');
