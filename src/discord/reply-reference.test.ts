@@ -4,15 +4,17 @@ import type { MessageWithReference, ReferencedMessage } from './reply-reference.
 
 function makeMsg(opts: {
   refId?: string;
-  refAuthor?: { bot?: boolean; displayName?: string; username: string };
+  refAuthor?: { id?: string; bot?: boolean; displayName?: string; username: string };
   refContent?: string;
   refAttachments?: Map<string, any>;
+  refEmbeds?: Array<{ title?: string | null; url?: string | null }>;
   fetchFails?: boolean;
 }): MessageWithReference {
   const refMsg: ReferencedMessage = {
-    author: opts.refAuthor ?? { username: 'TestUser', displayName: 'Test User' },
+    author: opts.refAuthor ?? { id: '456', username: 'TestUser', displayName: 'Test User' },
     content: opts.refContent ?? 'hello world',
     attachments: opts.refAttachments ?? new Map(),
+    embeds: opts.refEmbeds ?? [],
   };
 
   return {
@@ -48,41 +50,41 @@ describe('resolveReplyReference', () => {
     const result = await resolveReplyReference(msg, 'Weston');
 
     expect(result).not.toBeNull();
-    expect(result!.section).toBe('[Test User]: check this out');
+    expect(result!.section).toContain('[Test User (ID: 456)]: check this out');
     expect(result!.images).toHaveLength(0);
   });
 
   it('uses botDisplayName for bot authors', async () => {
     const msg = makeMsg({
       refId: '999',
-      refAuthor: { bot: true, username: 'discoclaw', displayName: 'Discoclaw' },
+      refAuthor: { id: '789', bot: true, username: 'discoclaw', displayName: 'Discoclaw' },
       refContent: 'I said something',
     });
     const result = await resolveReplyReference(msg, 'Weston');
 
-    expect(result!.section).toBe('[Weston]: I said something');
+    expect(result!.section).toContain('[Weston (ID: 789)]: I said something');
   });
 
   it('falls back to Discoclaw when botDisplayName is undefined', async () => {
     const msg = makeMsg({
       refId: '999',
-      refAuthor: { bot: true, username: 'discoclaw' },
+      refAuthor: { id: '789', bot: true, username: 'discoclaw' },
       refContent: 'bot message',
     });
     const result = await resolveReplyReference(msg, undefined);
 
-    expect(result!.section).toBe('[Discoclaw]: bot message');
+    expect(result!.section).toContain('[Discoclaw (ID: 789)]: bot message');
   });
 
   it('uses username when displayName is empty', async () => {
     const msg = makeMsg({
       refId: '999',
-      refAuthor: { username: 'dave123', displayName: '' },
+      refAuthor: { id: '111', username: 'dave123', displayName: '' },
       refContent: 'yo',
     });
     const result = await resolveReplyReference(msg, 'Weston');
 
-    expect(result!.section).toBe('[dave123]: yo');
+    expect(result!.section).toContain('[dave123 (ID: 111)]: yo');
   });
 
   it('notes non-image attachments inline', async () => {
@@ -157,6 +159,60 @@ describe('resolveReplyReference', () => {
     const msg = makeMsg({ refId: '999', refContent: '' });
     const result = await resolveReplyReference(msg, 'Weston');
 
-    expect(result!.section).toBe('[Test User]: ');
+    expect(result!.section).toContain('[Test User (ID: 456)]: ');
+  });
+
+  it('truncates long content with ellipsis', async () => {
+    const longContent = 'x'.repeat(2000);
+    const msg = makeMsg({ refId: '999', refContent: longContent });
+    const result = await resolveReplyReference(msg, 'Weston');
+
+    expect(result!.section).toContain('x'.repeat(1500) + '…');
+    expect(result!.section).not.toContain('x'.repeat(1501));
+  });
+
+  it('includes embed info in section', async () => {
+    const msg = makeMsg({
+      refId: '999',
+      refContent: 'check this link',
+      refEmbeds: [
+        { title: 'Article Title', url: 'https://example.com' },
+        { title: 'Another', url: null },
+      ],
+    });
+    const result = await resolveReplyReference(msg, 'Weston');
+
+    expect(result!.section).toContain('Embeds: Article Title https://example.com, Another');
+  });
+
+  it('skips embeds with no title or url', async () => {
+    const msg = makeMsg({
+      refId: '999',
+      refContent: 'empty embed',
+      refEmbeds: [
+        { title: null, url: null },
+        { title: 'Valid', url: 'https://example.com' },
+      ],
+    });
+    const result = await resolveReplyReference(msg, 'Weston');
+
+    expect(result!.section).toContain('Embeds: Valid https://example.com');
+    expect(result!.section).not.toContain('null');
+  });
+
+  it('notes image count in section when images are present', async () => {
+    const imgData = Buffer.from('fake-png');
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(imgData.buffer.slice(imgData.byteOffset, imgData.byteOffset + imgData.byteLength)),
+    });
+
+    const atts = new Map([
+      ['1', { url: 'https://cdn.discordapp.com/attachments/1/2/photo.png', name: 'photo.png', contentType: 'image/png', size: 100 }],
+    ]);
+    const msg = makeMsg({ refId: '999', refContent: 'see image', refAttachments: atts });
+    const result = await resolveReplyReference(msg, 'Weston');
+
+    expect(result!.section).toContain('1 image(s) from replied-to message included below');
   });
 });

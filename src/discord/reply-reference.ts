@@ -21,10 +21,14 @@ export type MessageWithReference = {
 
 /** Shape of the fetched referenced message. */
 export type ReferencedMessage = {
-  author: { bot?: boolean; displayName?: string; username: string };
+  author: { id?: string; bot?: boolean; displayName?: string; username: string };
   content?: string | null;
   attachments?: Map<string, AttachmentLike> | { values(): Iterable<AttachmentLike>; size: number };
+  embeds?: Array<{ title?: string | null; url?: string | null }>;
 };
+
+/** Max chars of referenced message content to include in the prompt. */
+const CONTENT_BUDGET = 1500;
 
 /**
  * Resolve a Discord reply reference into a prompt section and any image attachments.
@@ -45,12 +49,16 @@ export async function resolveReplyReference(
   try {
     const refMsg = await msg.channel.messages.fetch(refId);
 
-    // Author name
+    // Author info
     const author = refMsg.author.bot
       ? (botDisplayName ?? 'Discoclaw')
       : (refMsg.author.displayName || refMsg.author.username);
+    const authorId = String(refMsg.author.id ?? 'unknown');
 
-    const content = String(refMsg.content ?? '');
+    let content = String(refMsg.content ?? '');
+    if (content.length > CONTENT_BUDGET) {
+      content = content.slice(0, CONTENT_BUDGET) + '…';
+    }
 
     // Note non-image attachments inline
     const attachmentNotes: string[] = [];
@@ -88,10 +96,27 @@ export async function resolveReplyReference(
       }
     }
 
+    // Embeds (title + URL)
+    const embedInfos: string[] = [];
+    if (refMsg.embeds && refMsg.embeds.length > 0) {
+      for (const e of refMsg.embeds) {
+        const parts: string[] = [];
+        if (e.title) parts.push(e.title);
+        if (e.url) parts.push(e.url);
+        if (parts.length > 0) embedInfos.push(parts.join(' '));
+      }
+    }
+
     // Build section
-    let section = `[${author}]: ${content}`;
+    let section = `[${author} (ID: ${authorId})]: ${content}`;
     if (attachmentNotes.length > 0) {
       section += '\n' + attachmentNotes.join('\n');
+    }
+    if (images.length > 0) {
+      section += `\n(${images.length} image(s) from replied-to message included below)`;
+    }
+    if (embedInfos.length > 0) {
+      section += `\nEmbeds: ${embedInfos.join(', ')}`;
     }
 
     return { section, images };

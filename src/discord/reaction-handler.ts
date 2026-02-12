@@ -14,6 +14,7 @@ import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
+import { resolveReplyReference } from './reply-reference.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 
@@ -222,13 +223,34 @@ function createReactionHandler(
             `Original message by ${messageAuthor} (ID: ${messageAuthorId}):\n` +
             messageContent;
 
+          // If the reacted-to message is itself a reply, include that context.
+          let replyRefImages: ImageData[] = [];
+          if ((msg as any).reference?.messageId) {
+            try {
+              const replyRef = await resolveReplyReference(
+                msg as any,
+                params.botDisplayName,
+                params.log,
+              );
+              if (replyRef) {
+                prompt += `\n\nReplied-to message:\n${replyRef.section}`;
+                replyRefImages = replyRef.images;
+              }
+            } catch (err) {
+              params.log?.warn({ err }, `${logPrefix}:reply-ref fetch failed`);
+            }
+          }
+
           // Download image attachments and surface non-image attachment URLs as text.
           let inputImages: ImageData[] | undefined;
+          if (replyRefImages.length > 0) {
+            inputImages = [...replyRefImages];
+          }
           if (msg.attachments && msg.attachments.size > 0) {
             try {
               const dlResult = await downloadMessageImages([...msg.attachments.values()]);
               if (dlResult.images.length > 0) {
-                inputImages = dlResult.images;
+                inputImages = [...(inputImages ?? []), ...dlResult.images];
                 params.log?.info({ imageCount: dlResult.images.length }, `${logPrefix}:images downloaded`);
               }
               if (dlResult.errors.length > 0) {
