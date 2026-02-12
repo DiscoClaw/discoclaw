@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { validateDiscordToken, validateSnowflake, validateSnowflakes } from '../src/validate.js';
+import { missingEnvVars } from './doctor-env-diff.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -156,6 +157,23 @@ if (fs.existsSync(permPath)) {
 const envPath = path.join(root, '.env');
 if (fs.existsSync(envPath)) {
   ok('.env file exists');
+
+  // 6b. Env var coverage (informational only — never fails)
+  const examplePath = path.join(root, '.env.example');
+  if (fs.existsSync(examplePath)) {
+    const missing = missingEnvVars(
+      fs.readFileSync(examplePath, 'utf8'),
+      fs.readFileSync(envPath, 'utf8'),
+    );
+    if (missing.length === 0) {
+      ok('.env covers all .env.example vars');
+    } else {
+      console.log(`  ℹ ${missing.length} var(s) in .env.example not in your .env: ${missing.join(', ')}`);
+      console.log('    → See .env.example for descriptions');
+    }
+  } else {
+    console.log('  ℹ .env.example not found — skipping env coverage check');
+  }
 } else {
   fail('.env file missing', 'Run: cp .env.example .env  (or pnpm setup for guided configuration)');
 }

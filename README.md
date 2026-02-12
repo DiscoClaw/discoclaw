@@ -103,6 +103,24 @@ Author one plan file for an integration, share it, then let another user's Disco
    pnpm dev
    ```
 
+## Updating
+
+After pulling new changes:
+
+```bash
+git pull
+pnpm install
+pnpm build
+```
+
+Run `pnpm doctor` — it flags configuration options from `.env.example` that aren't in your `.env` yet.
+
+If running as a systemd service, restart it:
+
+```bash
+systemctl --user restart discoclaw.service
+```
+
 ## Platform support
 
 - **All platforms** — `pnpm dev` works everywhere Node.js runs (Linux, macOS, Windows)
