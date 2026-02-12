@@ -19,6 +19,8 @@ export type CoordinatorOptions = {
   forumCountSync?: ForumCountSync;
 };
 
+export type SyncSource = 'watcher' | 'user';
+
 /**
  * Shared sync coordinator that wraps runBeadSync() with a concurrency guard
  * and cache invalidation. Used by file watcher, startup sync, and beadSync action.
@@ -26,15 +28,43 @@ export type CoordinatorOptions = {
 export class BeadSyncCoordinator {
   private syncing = false;
   private pendingStatusPoster: StatusPoster | undefined | false = false;
+  private suppressedUntil = 0;
+  private catchUpScheduled = false;
 
   constructor(private readonly opts: CoordinatorOptions) {}
+
+  /**
+   * Suppress watcher-triggered syncs for the given duration.
+   * User-triggered syncs always bypass suppression.
+   * After the window expires, a catch-up sync fires automatically.
+   */
+  suppressSync(durationMs: number): void {
+    this.suppressedUntil = Date.now() + durationMs;
+  }
 
   /**
    * Run sync with concurrency guard.
    * - statusPoster: pass for explicit user-triggered syncs (beadSync action);
    *   omit for auto-triggered syncs (watcher, startup) to avoid status channel noise.
+   * - source: 'watcher' for file-watcher triggered syncs (respects suppression),
+   *   'user' (default) for user-initiated syncs (always runs).
    */
-  async sync(statusPoster?: StatusPoster): Promise<BeadSyncResult | null> {
+  async sync(statusPoster?: StatusPoster, source: SyncSource = 'user'): Promise<BeadSyncResult | null> {
+    // Watcher-triggered syncs respect the suppression window.
+    if (source === 'watcher' && Date.now() < this.suppressedUntil) {
+      if (!this.catchUpScheduled) {
+        this.catchUpScheduled = true;
+        const delayMs = Math.max(0, this.suppressedUntil - Date.now());
+        setTimeout(() => {
+          this.catchUpScheduled = false;
+          this.sync(undefined, 'watcher').catch((err) => {
+            this.opts.log?.warn({ err }, 'beads:coordinator catch-up sync failed');
+          });
+        }, delayMs);
+      }
+      return null;
+    }
+
     if (this.syncing) {
       // Preserve the most specific statusPoster from coalesced callers:
       // if any caller passes one, use it for the follow-up.

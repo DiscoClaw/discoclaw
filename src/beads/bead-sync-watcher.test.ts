@@ -83,8 +83,8 @@ describe('startBeadSyncWatcher', () => {
     await vi.advanceTimersByTimeAsync(150);
 
     expect(coordinator.sync).toHaveBeenCalledOnce();
-    // Auto-triggered: no statusPoster
-    expect(coordinator.sync).toHaveBeenCalledWith();
+    // Auto-triggered: watcher source, no statusPoster
+    expect(coordinator.sync).toHaveBeenCalledWith(undefined, 'watcher');
 
     handle.stop();
   });
