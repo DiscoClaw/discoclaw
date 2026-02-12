@@ -1,0 +1,211 @@
+#!/usr/bin/env tsx
+/**
+ * Interactive setup wizard for Discoclaw.
+ * Guides the user through creating a .env file with validated inputs.
+ *
+ * Usage:  pnpm setup
+ */
+
+import * as readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { validateDiscordToken, validateSnowflake, validateSnowflakes } from '../src/validate.js';
+import { buildEnvContent, backupFileName } from './setup-lib.js';
+
+const root = path.resolve(import.meta.dirname, '..');
+const envPath = path.join(root, '.env');
+
+let rl: readline.Interface | null = null;
+let canceled = false;
+
+function cleanup() {
+  canceled = true;
+  // Remove .env.tmp if it exists (incomplete write)
+  try { fs.unlinkSync(path.join(root, '.env.tmp')); } catch { /* ignore */ }
+  if (rl) rl.close();
+  console.log('\n\nSetup canceled.\n');
+  process.exit(1);
+}
+
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);
+
+rl = readline.createInterface({ input, output });
+
+console.log(`
+Discoclaw Setup
+===============
+This wizard creates a .env file with your Discord bot configuration.
+You'll need your bot token from https://discord.com/developers/applications
+`);
+
+// --- Check existing .env ---
+if (fs.existsSync(envPath)) {
+  const existing = fs.readFileSync(envPath, 'utf8');
+  const tokenMatch = existing.match(/^DISCORD_TOKEN=(.*)$/m);
+  const idsMatch = existing.match(/^DISCORD_ALLOW_USER_IDS=(.*)$/m);
+
+  console.log('Existing .env detected:');
+  if (tokenMatch?.[1]) {
+    const t = tokenMatch[1].trim();
+    console.log(`  DISCORD_TOKEN = ${t.slice(0, 8)}...(masked)`);
+  } else {
+    console.log('  DISCORD_TOKEN = (not set)');
+  }
+  if (idsMatch?.[1]) {
+    console.log(`  DISCORD_ALLOW_USER_IDS = ${idsMatch[1].trim()}`);
+  } else {
+    console.log('  DISCORD_ALLOW_USER_IDS = (not set)');
+  }
+  console.log('');
+
+  const overwrite = await ask('Overwrite with fresh config? [y/N] ');
+  if (overwrite.toLowerCase() !== 'y') {
+    console.log('Run pnpm setup after removing .env to reconfigure.\n');
+    rl.close();
+    process.exit(0);
+  }
+
+  // Timestamped backup
+  const bkName = backupFileName();
+  const backupPath = path.join(root, bkName);
+  fs.copyFileSync(envPath, backupPath);
+  console.log(`  Backed up to ${bkName}\n`);
+}
+
+// --- Required values ---
+const values: Record<string, string> = {};
+
+values.DISCORD_TOKEN = await askValidated(
+  'Discord bot token: ',
+  (val) => {
+    const r = validateDiscordToken(val);
+    return r.valid ? null : (r.reason ?? 'Invalid token format');
+  },
+);
+
+values.DISCORD_ALLOW_USER_IDS = await askValidated(
+  'Allowed user IDs (comma-separated): ',
+  (val) => {
+    const r = validateSnowflakes(val);
+    if (!val.trim()) return 'At least one user ID is required';
+    if (!r.valid && r.invalidIds.length > 0) return `Invalid IDs: ${r.invalidIds.join(', ')}`;
+    if (!r.valid) return 'At least one valid snowflake ID is required';
+    return null;
+  },
+);
+
+// --- Recommended values ---
+const configRecommended = await ask('\nConfigure recommended settings? [Y/n] ');
+if (configRecommended.toLowerCase() !== 'n') {
+  const guildId = await askOptional(
+    'Discord guild (server) ID [leave empty to skip]: ',
+    (val) => {
+      if (!val) return null;
+      return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
+    },
+  );
+  if (guildId) values.DISCORD_GUILD_ID = guildId;
+
+  const skipPerms = await ask(
+    'Enable CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS? (required for headless operation) [Y/n] ',
+  );
+  if (skipPerms.toLowerCase() !== 'n') {
+    values.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS = '1';
+  }
+
+  const streamJson = await ask('Use stream-json output format? (smoother streaming) [Y/n] ');
+  if (streamJson.toLowerCase() !== 'n') {
+    values.CLAUDE_OUTPUT_FORMAT = 'stream-json';
+  }
+}
+
+// --- Optional features ---
+const configOptional = await ask('\nConfigure optional features? [y/N] ');
+if (configOptional.toLowerCase() === 'y') {
+  const actions = await ask('Enable Discord Actions? (lets the AI manage your server) [y/N] ');
+  if (actions.toLowerCase() === 'y') {
+    values.DISCOCLAW_DISCORD_ACTIONS = '1';
+  }
+
+  const beadsForum = await askOptional(
+    'Beads forum channel ID [leave empty to skip]: ',
+    (val) => {
+      if (!val) return null;
+      return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
+    },
+  );
+  if (beadsForum) values.DISCOCLAW_BEADS_FORUM = beadsForum;
+
+  const cronForum = await askOptional(
+    'Cron forum channel ID [leave empty to skip]: ',
+    (val) => {
+      if (!val) return null;
+      return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
+    },
+  );
+  if (cronForum) values.DISCOCLAW_CRON_FORUM = cronForum;
+
+  const statusChannel = await askOptional(
+    'Status channel ID or name [leave empty to skip]: ',
+    () => null,
+  );
+  if (statusChannel) values.DISCOCLAW_STATUS_CHANNEL = statusChannel;
+}
+
+// --- Write .env atomically ---
+const envContent = buildEnvContent(values);
+const tmpPath = path.join(root, '.env.tmp');
+fs.writeFileSync(tmpPath, envContent, 'utf8');
+fs.renameSync(tmpPath, envPath);
+
+console.log('\n.env written successfully.\n');
+
+// --- Run doctor ---
+console.log('Running pnpm doctor to validate...\n');
+const { execFileSync } = await import('node:child_process');
+try {
+  execFileSync('pnpm', ['doctor'], { cwd: root, stdio: 'inherit' });
+} catch {
+  console.log('\nDoctor reported issues above. Fix them and run pnpm doctor again.\n');
+}
+
+console.log('\nNext steps:');
+console.log('  pnpm build && pnpm dev\n');
+
+rl.close();
+
+// ---- Helper functions ----
+
+async function ask(prompt: string): Promise<string> {
+  if (canceled || !rl) return '';
+  return rl.question(prompt);
+}
+
+async function askValidated(
+  prompt: string,
+  validate: (val: string) => string | null,
+): Promise<string> {
+  while (true) {
+    if (canceled) return '';
+    const val = await ask(prompt);
+    const err = validate(val.trim());
+    if (!err) return val.trim();
+    console.log(`  Error: ${err}. Try again.\n`);
+  }
+}
+
+async function askOptional(
+  prompt: string,
+  validate: (val: string) => string | null,
+): Promise<string> {
+  while (true) {
+    if (canceled) return '';
+    const val = await ask(prompt);
+    if (!val.trim()) return '';
+    const err = validate(val.trim());
+    if (!err) return val.trim();
+    console.log(`  Error: ${err}. Try again.\n`);
+  }
+}

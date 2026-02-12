@@ -36,7 +36,7 @@ Integration points (where actions are included in the prompt and executed):
 - `src/cron/executor.ts` (cron jobs)
 
 Env wiring:
-- `.env.example`
+- `.env.example` / `.env.example.full`
 - `src/index.ts`
 
 ## Enabling And Gating
@@ -133,7 +133,7 @@ Steps:
   - Add a dispatch branch in `executeDiscordActions(...)`.
   - Add prompt section inclusion in `discordActionsPromptSection(...)`.
 
-3. Add env flag plumbing in `src/index.ts` and `.env.example`.
+3. Add env flag plumbing in `src/index.ts` and `.env.example` / `.env.example.full`.
   - Add a `DISCOCLAW_DISCORD_ACTIONS_YOURCATEGORY` env var (default should be conservative: typically `0`).
   - Ensure the new boolean flows into the `actionFlags` object passed into both Discord message handling and cron context.
 

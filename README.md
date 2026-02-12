@@ -64,20 +64,6 @@ Discoclaw is a bridge between Discord and an AI runtime (Claude Code by default)
 
 ## Customization
 
-Discoclaw is designed to be yours. Identity, personality, and behavior are defined in plain markdown files in your workspace:
-
-| File | Purpose |
-|------|---------|
-| `SOUL.md` | Core personality and values |
-| `IDENTITY.md` | Name and vibe |
-| `USER.md` | Who you're helping |
-| `AGENTS.md` | Personal rules and conventions |
-| `TOOLS.md` | Available tools and integrations |
-
-Per-channel context lives in `content/discord/channels/` — one markdown file per channel telling the assistant how to behave there.
-
-On first run, these files are scaffolded from templates so you have a guided starting point. They're gitignored — yours, not the project's.
-
 ### Shareable integration plans
 
 Discoclaw supports a shareable markdown plan format for passing integrations between users:
@@ -107,8 +93,9 @@ Author one plan file for an integration, share it, then let another user's Disco
 2. **Install and configure:**
    ```bash
    pnpm install
-   cp .env.example .env
-   # Edit .env with your bot token, allowed user IDs, etc.
+   pnpm setup            # guided interactive setup
+   # Or manually: cp .env.example .env and fill in DISCORD_TOKEN + DISCORD_ALLOW_USER_IDS
+   # For all ~90 options: cp .env.example.full .env
    ```
 
 3. **Run:**

@@ -151,8 +151,8 @@ All actions are gated by category env flags (off by default except channels).
 ### Must-have for MVP
 
 - [ ] **README rewrite** — current README is developer-internal; needs a clear "what is this / quickstart / how to run" for anyone cloning the repo.
-- [x] **`.env.example`** — tiered layout: 2 required vars up top, core settings next, core subsystems and optional features by section.
-- [ ] **First-run experience** — verify that `git clone → pnpm install → copy .env.example → pnpm dev` works end-to-end for a fresh user. Document any one-time setup (Dropbox symlinks, bd CLI, etc.) or make them optional.
+- [x] **`.env.example`** — slimmed to essentials; `.env.example.full` has all ~90 options.
+- [x] **First-run experience** — `pnpm setup` provides guided interactive configuration; `pnpm doctor` validates the result.
 - [x] **Graceful degradation when external prerequisites missing** — beads requires `bd` CLI, cron requires a forum channel. Ensure clean errors / skip when these aren't configured.
 
 ### Nice-to-have before MVP

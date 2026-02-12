@@ -85,7 +85,10 @@ Notes:
 ## 4) Configure Discoclaw
 
 ```bash
-cp .env.example .env
+pnpm setup     # guided interactive setup
+# Or manually:
+cp .env.example .env   # quick start (essentials only)
+# cp .env.example.full .env   # all ~90 options
 pnpm i
 ```
 

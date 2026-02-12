@@ -4,7 +4,7 @@
 
 ```bash
 git clone <repo-url> && cd discoclaw
-cp .env.example .env       # fill in your Discord token + allowed user IDs
+pnpm setup                 # guided interactive setup (or: cp .env.example .env)
 pnpm install
 pnpm doctor                # preflight check
 pnpm dev                   # start dev mode
