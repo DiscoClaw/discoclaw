@@ -104,6 +104,7 @@ export type BotParams = {
   planPhasesEnabled?: boolean;
   planPhaseMaxContextFiles?: number;
   planPhaseTimeoutMs?: number;
+  planPhaseMaxAuditFixAttempts?: number;
   forgeCommandsEnabled?: boolean;
   forgeMaxAuditRounds?: number;
   forgeDrafterModel?: string;
@@ -470,6 +471,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     timeoutMs,
                     workspaceCwd: params.workspaceCwd,
                     log: params.log,
+                    maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
                   };
 
                   const editSummary = async (content: string) => {
