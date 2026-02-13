@@ -356,6 +356,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const planOpts = {
                 workspaceCwd: params.workspaceCwd,
                 beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                maxContextFiles: params.planPhaseMaxContextFiles,
               };
 
               // Phase-related commands require PLAN_PHASES_ENABLED
@@ -475,7 +476,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         // best-effort
                       }
                     },
-                  );
+                  ).catch((err) => {
+                    params.log?.error({ err }, 'plan-run: unhandled rejection in callback');
+                  });
                 } catch (err) {
                   releaseLock();
                   throw err;
@@ -646,7 +649,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     // best-effort
                   }
                 },
-              );
+              ).catch((err) => {
+                params.log?.error({ err }, 'forge: unhandled rejection in callback');
+              });
 
               return;
             }

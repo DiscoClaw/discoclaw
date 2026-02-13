@@ -206,6 +206,7 @@ _Filled in during/after implementation._
 export type HandlePlanCommandOpts = {
   workspaceCwd: string;
   beadsCwd: string;
+  maxContextFiles?: number;
 };
 
 export async function handlePlanCommand(
@@ -406,7 +407,7 @@ export async function handlePlanCommand(
         // Generate phases
         const planContent = await fs.readFile(found.filePath, 'utf-8');
         const planRelPath = `workspace/plans/${path.basename(found.filePath)}`;
-        phases = decomposePlan(planContent, found.header.planId, planRelPath);
+        phases = decomposePlan(planContent, found.header.planId, planRelPath, opts.maxContextFiles);
         writePhasesFile(phasesFilePath, phases);
       } else {
         // Read existing phases
@@ -510,7 +511,7 @@ export async function preparePlanRun(
   if (!fsSync.existsSync(phasesFilePath)) {
     const planContent = await fs.readFile(found.filePath, 'utf-8');
     const planRelPath = `workspace/plans/${path.basename(found.filePath)}`;
-    const phases = decomposePlan(planContent, found.header.planId, planRelPath);
+    const phases = decomposePlan(planContent, found.header.planId, planRelPath, opts.maxContextFiles);
     writePhasesFile(phasesFilePath, phases);
   }
 

@@ -240,7 +240,7 @@ export function extractChangeSpec(changesSection: string, filePaths: string[]): 
   return blocks.join('\n\n');
 }
 
-export function decomposePlan(planContent: string, planId: string, planFile: string): PlanPhases {
+export function decomposePlan(planContent: string, planId: string, planFile: string, maxContextFiles = 5): PlanPhases {
   const hash = computePlanHash(planContent);
   const now = new Date().toISOString().split('T')[0]!;
 
@@ -275,7 +275,7 @@ export function decomposePlan(planContent: string, planId: string, planFile: str
     });
   } else {
     // Group files into batches
-    const groups = groupFiles(filePaths, 5);
+    const groups = groupFiles(filePaths, maxContextFiles);
     const implPhaseIds: string[] = [];
 
     for (let i = 0; i < groups.length; i++) {
@@ -766,7 +766,7 @@ export function resolveContextFilePath(
     realResolved === realWorkspaceCwd ||
     realResolved.startsWith(realWorkspaceCwd + path.sep)
   ) {
-    return resolved;
+    return realResolved;
   }
 
   throw new Error(
@@ -815,7 +815,12 @@ export function writePhasesFile(filePath: string, phases: PlanPhases): void {
   const content = serializePhases(phases);
   const tmpPath = filePath + '.tmp';
   fsSync.writeFileSync(tmpPath, content, 'utf-8');
-  fsSync.renameSync(tmpPath, filePath);
+  try {
+    fsSync.renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { fsSync.unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
+    throw err;
+  }
 }
 
 export async function executePhase(
@@ -881,19 +886,19 @@ function gitAvailable(cwd: string): boolean {
   }
 }
 
-function gitDiffNames(cwd: string): Set<string> {
-  const result = new Set<string>();
+function gitDiffNames(cwd: string): Set<string> | null {
   try {
+    const result = new Set<string>();
     const unstaged = execFileSync('git', ['diff', '--name-only'], { cwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
     const staged = execFileSync('git', ['diff', '--staged', '--name-only'], { cwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
     const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
     for (const line of [...unstaged.split('\n'), ...staged.split('\n'), ...untracked.split('\n')]) {
       if (line.trim()) result.add(line.trim());
     }
+    return result;
   } catch {
-    // Best-effort
+    return null;
   }
-  return result;
 }
 
 function hashFileContent(filePath: string): string {
@@ -971,11 +976,11 @@ export async function runNextPhase(
   allPhases = updatePhaseStatus(allPhases, phase.id, 'in-progress');
   writePhasesFile(phasesFilePath, allPhases);
 
-  // 6. Git snapshot
-  const preSnapshot = isGitAvailable ? gitDiffNames(opts.projectCwd) : new Set<string>();
+  // 6. Git snapshot (null = git command failed, skip modified-files tracking)
+  const preSnapshot = isGitAvailable ? gitDiffNames(opts.projectCwd) : null;
 
   // 7. Auto-revert on retry
-  if (phase.status === 'failed' && phase.modifiedFiles && phase.failureHashes && isGitAvailable) {
+  if (phase.status === 'failed' && phase.modifiedFiles && phase.failureHashes && isGitAvailable && preSnapshot) {
     // Note: we are re-reading phase from the old allPhases data (before status update).
     // The status was 'failed' when getNextPhase returned it, and we updated to 'in-progress' in step 5.
     // The modifiedFiles/failureHashes are from the old data.
@@ -1023,17 +1028,26 @@ export async function runNextPhase(
   }
 
   // 8. Context injection for implement phases
+  const MAX_INJECTED_CONTEXT_BYTES = 100 * 1024; // 100 KB budget
   let injectedContext: string | undefined;
   if (phase.kind === 'implement') {
     const blocks: string[] = [];
+    let totalBytes = 0;
     for (const cf of phase.contextFiles) {
       if (!cf.startsWith('workspace/')) continue;
       const stripped = cf.slice('workspace/'.length);
       const absPath = path.resolve(opts.workspaceCwd, stripped);
       try {
         const content = fsSync.readFileSync(absPath, 'utf-8');
-        blocks.push(`### File: ${cf}\n\`\`\`\n${content}\n\`\`\``);
+        const block = `### File: ${cf}\n\`\`\`\n${content}\n\`\`\``;
+        if (totalBytes + block.length > MAX_INJECTED_CONTEXT_BYTES) {
+          opts.log?.warn({ file: cf, size: block.length, budget: MAX_INJECTED_CONTEXT_BYTES }, 'plan-manager: context file exceeds injection budget, skipping');
+          continue;
+        }
+        totalBytes += block.length;
+        blocks.push(block);
       } catch {
+        opts.log?.warn({ file: cf }, 'plan-manager: context file not found');
         blocks.push(`### File: ${cf}\n(File not found)`);
       }
     }
@@ -1047,12 +1061,14 @@ export async function runNextPhase(
   const currentPhase = allPhases.phases.find((p) => p.id === phase.id)!;
   const result = await executePhase(currentPhase, planContent, allPhases, opts, injectedContext);
 
-  // 10. Capture modified files
-  const postSnapshot = isGitAvailable ? gitDiffNames(opts.projectCwd) : new Set<string>();
+  // 10. Capture modified files (skip if either snapshot is unavailable)
+  const postSnapshot = preSnapshot ? gitDiffNames(opts.projectCwd) : null;
   const modifiedFiles: string[] = [];
-  for (const file of postSnapshot) {
-    if (!preSnapshot.has(file)) {
-      modifiedFiles.push(file);
+  if (preSnapshot && postSnapshot) {
+    for (const file of postSnapshot) {
+      if (!preSnapshot.has(file)) {
+        modifiedFiles.push(file);
+      }
     }
   }
 
@@ -1102,6 +1118,8 @@ export async function runNextPhase(
       };
       writePhasesFile(phasesFilePath, allPhases);
     } catch (err) {
+      // Unstage files so the next retry doesn't see stale staged state
+      try { execFileSync('git', ['reset'], { cwd: opts.projectCwd, stdio: 'pipe' }); } catch { /* best-effort */ }
       opts.log?.warn({ err, phase: phase.id }, 'plan-manager: git commit failed');
     }
   } else if (result.status === 'done' && isGitAvailable && modifiedFiles.length === 0) {

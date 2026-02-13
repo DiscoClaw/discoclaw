@@ -689,7 +689,9 @@ describe('resolveContextFilePath', () => {
   let wsDir: string;
 
   beforeEach(async () => {
-    tmpDir = await makeTmpDir();
+    const rawTmpDir = await makeTmpDir();
+    // Canonicalize so tests match realpath-based return values (e.g. macOS /tmp → /private/tmp)
+    tmpDir = fsSync.realpathSync(rawTmpDir);
     projectDir = path.join(tmpDir, 'project');
     wsDir = path.join(tmpDir, 'workspace');
     await fs.mkdir(projectDir, { recursive: true });
