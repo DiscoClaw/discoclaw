@@ -10,6 +10,7 @@ import {
   buildAuditorPrompt,
   buildRevisionPrompt,
   buildPlanSummary,
+  appendAuditRound,
   ForgeOrchestrator,
 } from './forge-commands.js';
 import type { ForgeOrchestratorOpts } from './forge-commands.js';
@@ -130,6 +131,17 @@ describe('parseForgeCommand', () => {
 
   it('parses help explicitly', () => {
     expect(parseForgeCommand('!forge help')).toEqual({ action: 'help', args: '' });
+  });
+
+  it('parses audit as reserved subcommand with plan-id arg', () => {
+    expect(parseForgeCommand('!forge audit plan-027')).toEqual({
+      action: 'audit',
+      args: 'plan-027',
+    });
+  });
+
+  it('parses audit with no args', () => {
+    expect(parseForgeCommand('!forge audit')).toEqual({ action: 'audit', args: '' });
   });
 
   it('treats unknown first word as create description', () => {
@@ -350,6 +362,44 @@ describe('buildPlanSummary', () => {
 
     const summary = buildPlanSummary(plan);
     expect(summary).toContain('(no objective)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// appendAuditRound (standalone)
+// ---------------------------------------------------------------------------
+
+describe('appendAuditRound', () => {
+  const basePlan = [
+    '# Plan: Test',
+    '',
+    '## Audit Log',
+    '',
+    '---',
+    '',
+    '## Implementation Notes',
+    '',
+    '_Filled in during/after implementation._',
+  ].join('\n');
+
+  it('inserts audit section before Implementation Notes', () => {
+    const verdict = { maxSeverity: 'low' as const, shouldLoop: false };
+    const result = appendAuditRound(basePlan, 1, 'All good.', verdict);
+    expect(result).toContain('### Review 1');
+    expect(result).toContain('All good.');
+    expect(result).toContain('**Status:** COMPLETE');
+    // Implementation Notes should still be present and come after the audit
+    const auditIdx = result.indexOf('### Review 1');
+    const implIdx = result.indexOf('## Implementation Notes');
+    expect(implIdx).toBeGreaterThan(auditIdx);
+  });
+
+  it('appends at end when no Implementation Notes section exists', () => {
+    const plan = '# Plan: Test\n\n## Audit Log\n';
+    const verdict = { maxSeverity: 'high' as const, shouldLoop: true };
+    const result = appendAuditRound(plan, 2, 'Needs work.', verdict);
+    expect(result).toContain('### Review 2');
+    expect(result).toContain('Needs work.');
   });
 });
 

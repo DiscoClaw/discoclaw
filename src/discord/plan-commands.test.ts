@@ -12,6 +12,7 @@ import {
   preparePlanRun,
   updatePlanFileStatus,
   listPlanFiles,
+  findPlanFile,
   NO_PHASES_SENTINEL,
 } from './plan-commands.js';
 import type { PlanCommand, HandlePlanCommandOpts } from './plan-commands.js';
@@ -148,6 +149,20 @@ describe('parsePlanCommand', () => {
     expect(parsePlanCommand('!plan cancel plan-011')).toEqual({
       action: 'cancel',
       args: 'plan-011',
+    });
+  });
+
+  it('parses audit subcommand', () => {
+    expect(parsePlanCommand('!plan audit plan-027')).toEqual({
+      action: 'audit',
+      args: 'plan-027',
+    });
+  });
+
+  it('parses audit with no args', () => {
+    expect(parsePlanCommand('!plan audit')).toEqual({
+      action: 'audit',
+      args: '',
     });
   });
 });
@@ -704,11 +719,12 @@ describe('handlePlanCommand', () => {
     expect(result2).toContain('Phases for plan-001');
   });
 
-  it('help — includes phases, run, skip commands', async () => {
+  it('help — includes phases, run, skip, audit commands', async () => {
     const result = await handlePlanCommand({ action: 'help', args: '' }, baseOpts());
     expect(result).toContain('!plan phases');
     expect(result).toContain('!plan run');
     expect(result).toContain('!plan skip');
+    expect(result).toContain('!plan audit');
   });
 
   it('approve — blocks when plan is IMPLEMENTING', async () => {

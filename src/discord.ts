@@ -21,6 +21,8 @@ import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
 import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, NO_PHASES_SENTINEL } from './discord/plan-commands.js';
+import { handlePlanAudit } from './discord/audit-handler.js';
+import type { PlanAuditResult } from './discord/audit-handler.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator } from './discord/forge-commands.js';
 import type { ForgeOrchestratorOpts } from './discord/forge-commands.js';
@@ -629,6 +631,64 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 } finally {
                   releaseLock();
                 }
+                return;
+              }
+
+              // --- !plan audit --- (async, fire-and-forget — AI audit can take 30-60s)
+              if (planCmd.action === 'audit') {
+                if (!planCmd.args) {
+                  await msg.reply({ content: 'Usage: `!plan audit <plan-id>`', allowedMentions: NO_MENTIONS });
+                  return;
+                }
+
+                const auditPlanId = planCmd.args;
+                const progressReply = await msg.reply({
+                  content: `Auditing **${auditPlanId}**...`,
+                  allowedMentions: NO_MENTIONS,
+                });
+
+                const plansDir = path.join(params.workspaceCwd, 'plans');
+                const auditorModel = params.forgeAuditorModel ?? params.runtimeModel;
+                const timeoutMs = params.forgeTimeoutMs ?? 5 * 60_000;
+
+                handlePlanAudit({
+                  planId: auditPlanId,
+                  plansDir,
+                  workspaceCwd: params.workspaceCwd,
+                  runtime: params.runtime,
+                  auditorModel,
+                  timeoutMs,
+                  acquireWriterLock,
+                }).then(
+                  async (result: PlanAuditResult) => {
+                    try {
+                      if (result.ok) {
+                        const verdictText = result.verdict.shouldLoop ? 'needs revision' : 'ready to approve';
+                        await progressReply.edit({
+                          content: `Audit complete for **${result.planId}** — review ${result.round}, verdict: **${result.verdict.maxSeverity}** (${verdictText}). See \`!plan show ${result.planId}\` for details.`,
+                          allowedMentions: NO_MENTIONS,
+                        });
+                      } else {
+                        await progressReply.edit({
+                          content: `Audit failed for **${auditPlanId}**: ${result.error}`,
+                          allowedMentions: NO_MENTIONS,
+                        });
+                      }
+                    } catch {
+                      // edit failure (message deleted, etc.) — best-effort
+                    }
+                  },
+                  async (err) => {
+                    try {
+                      await progressReply.edit({
+                        content: `Audit failed for **${auditPlanId}**: ${String(err)}`,
+                        allowedMentions: NO_MENTIONS,
+                      });
+                    } catch {
+                      // best-effort
+                    }
+                  },
+                );
                 return;
               }
 

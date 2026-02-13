@@ -19,7 +19,7 @@ import type { PlanPhase, PlanPhases } from './plan-manager.js';
 // ---------------------------------------------------------------------------
 
 export type PlanCommand = {
-  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'run-one' | 'skip';
+  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'run-one' | 'skip' | 'audit';
   args: string;
   context?: string;
 };
@@ -37,7 +37,7 @@ export type PlanFileHeader = {
 // Parsing
 // ---------------------------------------------------------------------------
 
-const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'cancel', 'help', 'phases', 'run', 'run-one', 'skip']);
+const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'cancel', 'help', 'phases', 'run', 'run-one', 'skip', 'audit']);
 
 export function parsePlanCommand(content: string): PlanCommand | null {
   const trimmed = content.trim();
@@ -123,7 +123,7 @@ async function getNextPlanNumber(plansDir: string): Promise<number> {
   return max + 1;
 }
 
-async function findPlanFile(plansDir: string, id: string): Promise<{ filePath: string; header: PlanFileHeader } | null> {
+export async function findPlanFile(plansDir: string, id: string): Promise<{ filePath: string; header: PlanFileHeader } | null> {
   let entries: string[];
   try {
     entries = await fs.readdir(plansDir);
@@ -259,6 +259,7 @@ export async function handlePlanCommand(
         '- `!plan run <plan-id>` — execute all remaining phases',
         '- `!plan run-one <plan-id>` — execute next pending phase only',
         '- `!plan skip <plan-id>` — skip a failed/in-progress phase',
+        '- `!plan audit <plan-id>` — run a standalone audit against a plan',
       ].join('\n');
     }
 
