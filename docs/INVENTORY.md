@@ -141,6 +141,7 @@ All actions are gated by category env flags (off by default except channels).
 | Discord actions | `docs/discord-actions.md` | **done** |
 | Context modules | `.context/*.md` | **done** |
 | Token usage & efficiency | `docs/token-efficiency.md` | **done** |
+| Plan & Forge reference | `docs/plan-and-forge.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
 
