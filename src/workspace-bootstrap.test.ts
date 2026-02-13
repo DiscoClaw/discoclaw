@@ -32,10 +32,22 @@ describe('isOnboardingComplete', () => {
     expect(await isOnboardingComplete(workspace)).toBe(false);
   });
 
-  it('returns false when IDENTITY.md is near-empty (template placeholder)', async () => {
+  it('returns false when IDENTITY.md still contains template placeholder', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-onboard-'));
     dirs.push(workspace);
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), '# Identity\n', 'utf-8');
+    await fs.writeFile(
+      path.join(workspace, 'IDENTITY.md'),
+      '# IDENTITY.md - Who Am I?\n\n- **Name:**\n  *(pick something you like)*\n- **Creature:**\n',
+      'utf-8',
+    );
+    expect(await isOnboardingComplete(workspace)).toBe(false);
+  });
+
+  it('returns false when IDENTITY.md is the untouched scaffolded template', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-onboard-'));
+    dirs.push(workspace);
+    // Scaffold files — this copies the real template IDENTITY.md.
+    await ensureWorkspaceBootstrapFiles(workspace);
     expect(await isOnboardingComplete(workspace)).toBe(false);
   });
 

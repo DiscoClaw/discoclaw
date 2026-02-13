@@ -17,18 +17,22 @@ const TEMPLATE_FILES = [
   'MEMORY.md',
 ];
 
+/** Marker text present in the template IDENTITY.md but removed during onboarding. */
+const IDENTITY_TEMPLATE_MARKER = '*(pick something you like)*';
+
 /**
- * Onboarding is considered complete when IDENTITY.md exists and contains
- * content beyond the bare template placeholder. Once complete, BOOTSTRAP.md
+ * Onboarding is considered complete when IDENTITY.md exists and no longer
+ * contains the template placeholder text. Once complete, BOOTSTRAP.md
  * is no longer scaffolded and any stale copy is auto-deleted.
  */
 export async function isOnboardingComplete(workspaceCwd: string): Promise<boolean> {
   const identityPath = path.join(workspaceCwd, 'IDENTITY.md');
   try {
     const content = await fs.readFile(identityPath, 'utf-8');
-    // The template IDENTITY.md is near-empty. Real onboarding populates it
-    // with the agent's name, vibe, etc. Treat any file >50 chars as complete.
-    return content.trim().length > 50;
+    // The template IDENTITY.md contains placeholder prompts like
+    // "*(pick something you like)*". If those are still present, the agent
+    // hasn't completed onboarding yet. If they're gone, someone filled it in.
+    return !content.includes(IDENTITY_TEMPLATE_MARKER);
   } catch {
     return false;
   }
