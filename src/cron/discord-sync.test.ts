@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { buildCronThreadName, formatStatusMessage, seedTagMap, ensureStatusMessage, resolveForumChannel } from './discord-sync.js';
+import { buildCronThreadName, stripCadencePrefix, formatStatusMessage, seedTagMap, ensureStatusMessage, resolveForumChannel } from './discord-sync.js';
 import type { CronRunRecord, CronRunStats } from './run-stats.js';
 
 describe('buildCronThreadName', () => {
@@ -11,7 +11,7 @@ describe('buildCronThreadName', () => {
   });
 
   it('uses frequent emoji', () => {
-    expect(buildCronThreadName('Health Check', 'frequent')).toBe('\u23F1 Health Check');
+    expect(buildCronThreadName('Health Check', 'frequent')).toBe('\u23F1\uFE0F Health Check');
   });
 
   it('omits emoji when cadence is null', () => {
@@ -23,6 +23,86 @@ describe('buildCronThreadName', () => {
     const result = buildCronThreadName(longName, 'daily');
     expect(result.length).toBeLessThanOrEqual(100);
     expect(result).toContain('\u2026');
+  });
+
+  it('strips existing emoji prefix before prepending', () => {
+    expect(buildCronThreadName('\uD83C\uDF05 Morning Report', 'daily')).toBe('\uD83C\uDF05 Morning Report');
+  });
+
+  it('strips accumulated prefixes', () => {
+    expect(buildCronThreadName('\uD83C\uDF05 \uD83C\uDF05 \uD83C\uDF05 Morning Report', 'daily')).toBe('\uD83C\uDF05 Morning Report');
+  });
+
+  it('corrects wrong cadence emoji', () => {
+    expect(buildCronThreadName('\uD83D\uDD50 Morning Report', 'daily')).toBe('\uD83C\uDF05 Morning Report');
+  });
+
+  it('strips mixed accumulated prefixes', () => {
+    expect(buildCronThreadName('\uD83C\uDF05 \uD83D\uDD50 Morning Report', 'daily')).toBe('\uD83C\uDF05 Morning Report');
+  });
+
+  it('is idempotent', () => {
+    const once = buildCronThreadName('Report', 'daily');
+    const twice = buildCronThreadName(once, 'daily');
+    expect(twice).toBe(once);
+  });
+
+  it('handles null cadence with prefixed name', () => {
+    expect(buildCronThreadName('\uD83C\uDF05 Morning Report', null)).toBe('Morning Report');
+  });
+
+  it('handles emoji with VS16 from Discord normalization', () => {
+    expect(buildCronThreadName('\u23F1\uFE0F Health Check', 'frequent')).toBe('\u23F1\uFE0F Health Check');
+  });
+
+  it('handles emoji without VS16 from old data', () => {
+    expect(buildCronThreadName('\u23F1 Health Check', 'frequent')).toBe('\u23F1\uFE0F Health Check');
+  });
+
+  it('preserves VS16 in base name', () => {
+    expect(buildCronThreadName('\uD83C\uDF05 Test \u2600\uFE0F Dashboard', 'daily')).toBe('\uD83C\uDF05 Test \u2600\uFE0F Dashboard');
+  });
+});
+
+describe('stripCadencePrefix', () => {
+  it('strips single prefix', () => {
+    expect(stripCadencePrefix('\uD83C\uDF05 Test')).toBe('Test');
+  });
+
+  it('strips multiple accumulated', () => {
+    expect(stripCadencePrefix('\uD83C\uDF05 \uD83C\uDF05 \uD83C\uDF05 Test')).toBe('Test');
+  });
+
+  it('strips mixed cadence emojis', () => {
+    expect(stripCadencePrefix('\uD83D\uDD50 \uD83C\uDF05 Test')).toBe('Test');
+  });
+
+  it('no-op for clean name', () => {
+    expect(stripCadencePrefix('Test')).toBe('Test');
+  });
+
+  it('no-op for empty string', () => {
+    expect(stripCadencePrefix('')).toBe('');
+  });
+
+  it('preserves non-cadence emoji', () => {
+    expect(stripCadencePrefix('\u26A1 Test')).toBe('\u26A1 Test');
+  });
+
+  it('strips prefix with VS16 variation selector', () => {
+    expect(stripCadencePrefix('\u23F1\uFE0F Test')).toBe('Test');
+  });
+
+  it('strips accumulated prefixes with mixed VS16', () => {
+    expect(stripCadencePrefix('\u23F1\uFE0F \u23F1 Test')).toBe('Test');
+  });
+
+  it('preserves VS16 in base name', () => {
+    expect(stripCadencePrefix('\uD83C\uDF05 Test \u2600\uFE0F Dashboard')).toBe('Test \u2600\uFE0F Dashboard');
+  });
+
+  it('preserves VS16 in base name when prefix also has VS16', () => {
+    expect(stripCadencePrefix('\u23F1\uFE0F Test \u2600\uFE0F End')).toBe('Test \u2600\uFE0F End');
   });
 });
 
