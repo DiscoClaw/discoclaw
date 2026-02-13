@@ -639,8 +639,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
-              // All other plan actions pass through
-              const response = await handlePlanCommand(planCmd, planOpts);
+              // All other plan actions pass through.
+              // For create, include reply context so "!plan fix this" knows what "this" is.
+              let effectivePlanCmd = planCmd;
+              if (planCmd.action === 'create' && planCmd.args) {
+                const replyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
+                if (replyRef?.section) {
+                  effectivePlanCmd = { ...planCmd, args: `${planCmd.args}\n\nContext (replied-to message):\n${replyRef.section}` };
+                }
+              }
+              const response = await handlePlanCommand(effectivePlanCmd, planOpts);
               await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
               return;
             }
@@ -691,6 +699,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
+              // Include reply context so "!forge fix this" knows what "this" refers to.
+              let forgeDescription = forgeCmd.args;
+              const forgeReplyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
+              if (forgeReplyRef?.section) {
+                forgeDescription = `${forgeCmd.args}\n\nContext (replied-to message):\n${forgeReplyRef.section}`;
+              }
+
               const forgeReleaseLock = await acquireWriterLock();
 
               const plansDir = path.join(params.workspaceCwd, 'plans');
@@ -736,7 +751,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
               // Run forge in the background — don't block the queue
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              forgeOrchestrator.run(forgeCmd.args, onProgress).then(
+              forgeOrchestrator.run(forgeDescription, onProgress).then(
                 async (result) => {
                   forgeReleaseLock();
                   if (progressMessageGone) {
