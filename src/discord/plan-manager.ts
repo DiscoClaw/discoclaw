@@ -50,6 +50,8 @@ export type PhaseExecutionOpts = {
   timeoutMs: number;
   workspaceCwd: string;
   log?: LoggerLike;
+  /** Max audit→fix→re-audit loops before giving up. Default: 2. */
+  maxAuditFixAttempts?: number;
 };
 
 export type RunPhaseResult =
@@ -680,6 +682,48 @@ export function buildPhasePrompt(
   return lines.join('\n');
 }
 
+export function buildAuditFixPrompt(
+  phase: PlanPhase,
+  planContent: string,
+  auditOutput: string,
+): string {
+  const lines: string[] = [];
+
+  // Extract objective
+  const objMatch = planContent.match(/## Objective\s*\n([\s\S]*?)(?=\n## )/);
+  const objective = objMatch?.[1]?.trim() ?? '(no objective found in plan)';
+
+  lines.push('## Objective');
+  lines.push('');
+  lines.push(objective);
+  lines.push('');
+
+  lines.push('## Task');
+  lines.push('');
+  lines.push('The post-implementation audit found deviations that need fixing.');
+  lines.push('');
+
+  lines.push('## Audit Findings');
+  lines.push('');
+  lines.push(auditOutput);
+  lines.push('');
+
+  lines.push('## Files to Fix');
+  lines.push('');
+  for (const f of phase.contextFiles) {
+    lines.push(`- \`${f}\``);
+  }
+  lines.push('');
+
+  lines.push('## Instructions');
+  lines.push('');
+  lines.push('Read the audit findings above and fix every high and medium severity concern.');
+  lines.push('Use the Read, Write, Edit, Glob, Grep, and Bash tools.');
+  lines.push('After making changes, output a brief summary of what was fixed.');
+
+  return lines.join('\n');
+}
+
 // ---------------------------------------------------------------------------
 // Project directory resolution
 // ---------------------------------------------------------------------------
@@ -1062,7 +1106,64 @@ export async function runNextPhase(
   // 9. Execute the phase
   // Reload the phase from allPhases to get the updated status
   const currentPhase = allPhases.phases.find((p) => p.id === phase.id)!;
-  const result = await executePhase(currentPhase, planContent, allPhases, opts, injectedContext);
+  let result = await executePhase(currentPhase, planContent, allPhases, opts, injectedContext);
+
+  // 9a. Audit fix loop: if audit failed and git is available, attempt fix→re-audit cycles
+  const maxFixAttempts = opts.maxAuditFixAttempts ?? 2;
+  if (result.status === 'audit_failed' && isGitAvailable && maxFixAttempts > 0) {
+    let fixAttempt = 0;
+    let lastAuditOutput = result.output;
+
+    while (fixAttempt < maxFixAttempts && result.status === 'audit_failed') {
+      fixAttempt++;
+      await onProgress(
+        `Audit found ${result.verdict.maxSeverity} severity deviations. Fix attempt ${fixAttempt}/${maxFixAttempts}...`,
+      );
+
+      // Run fix agent (implement phase tools + project cwd)
+      const fixPrompt = buildAuditFixPrompt(currentPhase, planContent, lastAuditOutput);
+      const realWorkspace = safeRealpath(opts.workspaceCwd);
+      const fixAddDirs = opts.addDirs.filter((d) => {
+        const realD = safeRealpath(d);
+        return !(realD === realWorkspace || realD.startsWith(realWorkspace + path.sep));
+      });
+
+      try {
+        await collectRuntimeText(
+          opts.runtime,
+          fixPrompt,
+          opts.model,
+          opts.projectCwd,
+          ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+          fixAddDirs,
+          opts.timeoutMs,
+          { requireFinalEvent: true },
+        );
+      } catch (err) {
+        opts.log?.warn({ err, phase: phase.id, fixAttempt }, 'plan-manager: audit fix agent failed');
+        break; // Don't continue looping if the fix agent itself errors
+      }
+
+      // Re-audit
+      await onProgress(`Fix attempt ${fixAttempt} complete. Re-auditing...`);
+      result = await executePhase(currentPhase, planContent, allPhases, opts);
+
+      if (result.status === 'audit_failed') {
+        lastAuditOutput = result.output;
+      }
+    }
+
+    // Exhausted fix attempts — rollback all uncommitted changes
+    if (result.status === 'audit_failed') {
+      await onProgress(`Audit fix loop exhausted (${maxFixAttempts} attempts). Rolling back uncommitted changes...`);
+      try {
+        execFileSync('git', ['checkout', '.'], { cwd: opts.projectCwd, stdio: 'pipe' });
+        execFileSync('git', ['clean', '-fd'], { cwd: opts.projectCwd, stdio: 'pipe' });
+      } catch (err) {
+        opts.log?.warn({ err, phase: phase.id }, 'plan-manager: rollback after exhausted audit fix attempts failed');
+      }
+    }
+  }
 
   // 10. Capture modified files (skip if either snapshot is unavailable)
   const postSnapshot = preSnapshot ? gitDiffNames(opts.projectCwd) : null;
