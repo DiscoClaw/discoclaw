@@ -96,7 +96,7 @@ export async function executeMessagingAction(
         const raw = findChannelRaw(guild, action.channel);
         if (raw) {
           const kind = describeChannelType(raw);
-          return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot be read directly. Use threadCreate or read individual threads instead.` };
+          return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot be read directly. Use readMessages with a thread ID instead.` };
         }
         return { ok: false, error: `Channel "${action.channel}" not found` };
       }
