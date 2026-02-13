@@ -64,20 +64,20 @@ DiscoClaw is a bridge between Discord and an AI runtime (Claude Code by default)
 
 ## Customization
 
-### Shareable integration plans
+### Shareable integration recipes
 
-DiscoClaw supports a shareable markdown plan format for passing integrations between users:
+DiscoClaw supports a shareable markdown recipe format for passing integrations between users:
 
-- Spec: `docs/discoclaw-plan-spec.md`
-- Template: `templates/plans/integration.discoclaw-plan.md`
-- Example files: `plans/examples/*.discoclaw-plan.md`
+- Spec: `docs/discoclaw-recipe-spec.md`
+- Template: `templates/recipes/integration.discoclaw-recipe.md`
+- Example files: `recipes/examples/*.discoclaw-recipe.md`
 - Skills:
-  - `skills/discoclaw-plan-generator/SKILL.md`
-  - `skills/discoclaw-plan-consumer/SKILL.md`
+  - `skills/discoclaw-recipe-generator/SKILL.md`
+  - `skills/discoclaw-recipe-consumer/SKILL.md`
 - Install/refresh invocable skill symlinks:
   - `pnpm claude:install-skills`
 
-Author one plan file for an integration, share it, then let another user's DiscoClaw agent consume it and produce a local implementation checklist before coding.
+Author one recipe file for an integration, share it, then let another user's DiscoClaw agent consume it and produce a local implementation checklist before coding.
 
 ## Prerequisites
 

@@ -26,6 +26,18 @@ async function main() {
   const entries = await fs.readdir(srcSkillsDir, { withFileTypes: true });
   const skillDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
 
+  // Remove stale symlinks in .claude/skills/ that no longer match a skills/ entry
+  let pruned = 0;
+  const existingDst = await fs.readdir(dstSkillsDir, { withFileTypes: true });
+  for (const entry of existingDst) {
+    if (entry.name === 'README.md') continue;
+    const dstPath = path.join(dstSkillsDir, entry.name);
+    if (!skillDirs.includes(entry.name)) {
+      await fs.rm(dstPath, { recursive: true, force: true });
+      pruned++;
+    }
+  }
+
   let linked = 0;
   let skipped = 0;
 
@@ -59,6 +71,7 @@ async function main() {
         dstSkillsDir,
         linked,
         skipped,
+        pruned,
       },
       null,
       2,

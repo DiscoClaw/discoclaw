@@ -1,17 +1,17 @@
 ---
-name: discoclaw-plan-generator
-description: Generate a spec-compliant `plans/*.discoclaw-plan.md` file for shareable DiscoClaw integrations (runtime, actions, or context), including YAML frontmatter metadata, risk-gated JSON contracts, safety details, and a consumer handoff prompt.
+name: discoclaw-recipe-generator
+description: Generate a spec-compliant `recipes/*.discoclaw-recipe.md` file for shareable DiscoClaw integrations (runtime, actions, or context), including YAML frontmatter metadata, risk-gated JSON contracts, safety details, and a consumer handoff prompt.
 ---
 
-# DiscoClaw Plan Generator
+# DiscoClaw Recipe Generator
 
-Generate shareable DiscoClaw integration plans using `docs/discoclaw-plan-spec.md`.
+Generate shareable DiscoClaw integration recipes using `docs/discoclaw-recipe-spec.md`.
 
 ## Use This Skill When
 
-- A user asks to create a reusable integration plan for another DiscoClaw user.
+- A user asks to create a reusable integration recipe for another DiscoClaw user.
 - A user wants a PRD-style handoff file for agent implementation.
-- A user asks for a `.discoclaw-plan.md` scaffold or draft.
+- A user asks for a `.discoclaw-recipe.md` scaffold or draft.
 
 ## Inputs To Collect
 
@@ -27,12 +27,12 @@ Collect only missing values:
 
 Create exactly one markdown file at:
 
-- `plans/community/<kebab-slug>.discoclaw-plan.md`
+- `recipes/community/<kebab-slug>.discoclaw-recipe.md`
 
 The file must include:
 
 - YAML frontmatter with all required metadata fields
-- All required headings from `docs/discoclaw-plan-spec.md`
+- All required headings from `docs/discoclaw-recipe-spec.md`
 
 Risk-gated JSON behavior:
 
@@ -57,8 +57,8 @@ Always include attribution fields in frontmatter:
 
 Before finalizing, verify:
 
-1. Filename ends with `.discoclaw-plan.md`.
+1. Filename ends with `.discoclaw-recipe.md`.
 2. YAML frontmatter is present and complete.
 3. Required headings exist exactly once.
 4. JSON contract blocks satisfy risk-level rules.
-5. Handoff prompt is present and plan-first (no auto-code by default).
+5. Handoff prompt is present and recipe-first (no auto-code by default).
