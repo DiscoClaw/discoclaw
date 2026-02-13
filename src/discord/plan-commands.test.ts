@@ -10,6 +10,9 @@ import {
   toSlug,
   handlePlanSkip,
   preparePlanRun,
+  updatePlanFileStatus,
+  listPlanFiles,
+  NO_PHASES_SENTINEL,
 } from './plan-commands.js';
 import type { PlanCommand, HandlePlanCommandOpts } from './plan-commands.js';
 
@@ -130,6 +133,13 @@ describe('parsePlanCommand', () => {
   it('parses skip subcommand', () => {
     expect(parsePlanCommand('!plan skip plan-011')).toEqual({
       action: 'skip',
+      args: 'plan-011',
+    });
+  });
+
+  it('parses cancel subcommand', () => {
+    expect(parsePlanCommand('!plan cancel plan-011')).toEqual({
+      action: 'cancel',
       args: 'plan-011',
     });
   });
@@ -521,7 +531,7 @@ describe('handlePlanCommand', () => {
     const filePath = path.join(plansDir, 'plan-001-test.md');
     await fs.writeFile(
       filePath,
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** APPROVED\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const result = await handlePlanCommand(
@@ -660,6 +670,44 @@ describe('handlePlanCommand', () => {
     expect(result).toContain('!plan phases');
     expect(result).toContain('!plan run');
     expect(result).toContain('!plan skip');
+  });
+
+  it('approve — blocks when plan is IMPLEMENTING', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'approve', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('currently being implemented');
+    expect(result).toContain('!plan cancel plan-001');
+  });
+
+  it('close — blocks when plan is IMPLEMENTING', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'close', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('currently being implemented');
+    expect(result).toContain('!plan cancel plan-001');
   });
 });
 
@@ -881,7 +929,7 @@ describe('preparePlanRun', () => {
     }
   });
 
-  it('returns error when all phases are done', async () => {
+  it('returns error with NO_PHASES_SENTINEL when all phases are done', async () => {
     const tmpDir = await makeTmpDir();
     const plansDir = path.join(tmpDir, 'plans');
     await fs.mkdir(plansDir, { recursive: true });
@@ -912,7 +960,93 @@ describe('preparePlanRun', () => {
     const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
     expect('error' in result).toBe(true);
     if ('error' in result) {
-      expect(result.error).toContain('No phases to run');
+      expect(result.error).toContain(NO_PHASES_SENTINEL);
+      expect(result.error.startsWith(NO_PHASES_SENTINEL)).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updatePlanFileStatus
+// ---------------------------------------------------------------------------
+
+describe('updatePlanFileStatus', () => {
+  it('updates the status field in a plan file', async () => {
+    const tmpDir = await makeTmpDir();
+    const filePath = path.join(tmpDir, 'plan-001-test.md');
+    await fs.writeFile(
+      filePath,
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    await updatePlanFileStatus(filePath, 'APPROVED');
+
+    const content = await fs.readFile(filePath, 'utf-8');
+    expect(content).toContain('**Status:** APPROVED');
+    expect(content).not.toContain('**Status:** DRAFT');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listPlanFiles
+// ---------------------------------------------------------------------------
+
+describe('listPlanFiles', () => {
+  it('returns parsed headers for all plan files', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-alpha.md'),
+      '# Plan: Alpha\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+    await fs.writeFile(
+      path.join(plansDir, 'plan-002-beta.md'),
+      '# Plan: Beta\n\n**ID:** plan-002\n**Bead:** ws-002\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-02\n',
+    );
+
+    const results = await listPlanFiles(plansDir);
+    expect(results).toHaveLength(2);
+    expect(results.map((r) => r.header.planId).sort()).toEqual(['plan-001', 'plan-002']);
+    expect(results[0]!.filePath).toContain('plans/');
+  });
+
+  it('skips dot-prefixed files and non-.md files', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(path.join(plansDir, '.plan-template.md'), '**ID:** template\n');
+    await fs.writeFile(path.join(plansDir, 'notes.txt'), 'not a plan');
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-real.md'),
+      '# Plan: Real\n\n**ID:** plan-001\n**Status:** DRAFT\n',
+    );
+
+    const results = await listPlanFiles(plansDir);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.header.planId).toBe('plan-001');
+  });
+
+  it('returns empty array when directory does not exist', async () => {
+    const results = await listPlanFiles('/tmp/nonexistent-plans-dir-12345');
+    expect(results).toEqual([]);
+  });
+
+  it('skips files that fail to parse', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(path.join(plansDir, 'bad-plan.md'), 'No valid header here');
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-good.md'),
+      '# Plan: Good\n\n**ID:** plan-001\n**Status:** DRAFT\n',
+    );
+
+    const results = await listPlanFiles(plansDir);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.header.planId).toBe('plan-001');
   });
 });

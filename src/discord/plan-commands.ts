@@ -19,7 +19,7 @@ import type { PlanPhase, PlanPhases } from './plan-manager.js';
 // ---------------------------------------------------------------------------
 
 export type PlanCommand = {
-  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'phases' | 'run' | 'skip';
+  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'skip';
   args: string;
 };
 
@@ -36,7 +36,7 @@ export type PlanFileHeader = {
 // Parsing
 // ---------------------------------------------------------------------------
 
-const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'help', 'phases', 'run', 'skip']);
+const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'cancel', 'help', 'phases', 'run', 'skip']);
 
 export function parsePlanCommand(content: string): PlanCommand | null {
   const trimmed = content.trim();
@@ -143,13 +143,43 @@ async function findPlanFile(plansDir: string, id: string): Promise<{ filePath: s
   return null;
 }
 
-async function updatePlanStatus(filePath: string, newStatus: string): Promise<void> {
+/**
+ * Update the status field in a plan file. Callers must hold the workspace writer lock.
+ */
+export async function updatePlanFileStatus(filePath: string, newStatus: string): Promise<void> {
   const content = await fs.readFile(filePath, 'utf-8');
   const updated = content.replace(
     /^\*\*Status:\*\*\s*.+$/m,
     `**Status:** ${newStatus}`,
   );
   await fs.writeFile(filePath, updated, 'utf-8');
+}
+
+/**
+ * List all plan files in the plans directory, returning parsed headers with file paths.
+ * Errors on individual files are caught and skipped.
+ */
+export async function listPlanFiles(plansDir: string): Promise<Array<{ filePath: string; header: PlanFileHeader }>> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(plansDir);
+  } catch {
+    return [];
+  }
+
+  const results: Array<{ filePath: string; header: PlanFileHeader }> = [];
+  for (const entry of entries) {
+    if (!entry.endsWith('.md') || entry.startsWith('.')) continue;
+    try {
+      const filePath = path.join(plansDir, entry);
+      const content = await fs.readFile(filePath, 'utf-8');
+      const header = parsePlanFileHeader(content);
+      if (header) results.push({ filePath, header });
+    } catch {
+      // skip unreadable files
+    }
+  }
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +382,9 @@ export async function handlePlanCommand(
       const found = await findPlanFile(plansDir, cmd.args);
       if (!found) return `Plan not found: ${cmd.args}`;
 
-      await updatePlanStatus(found.filePath, 'APPROVED');
+      if (found.header.status === 'IMPLEMENTING') return `Plan is currently being implemented. Use \`!plan cancel ${found.header.planId}\` to stop it first.`;
+
+      await updatePlanFileStatus(found.filePath, 'APPROVED');
 
       // Update backing bead to in_progress
       if (found.header.beadId) {
@@ -372,7 +404,9 @@ export async function handlePlanCommand(
       const found = await findPlanFile(plansDir, cmd.args);
       if (!found) return `Plan not found: ${cmd.args}`;
 
-      await updatePlanStatus(found.filePath, 'CLOSED');
+      if (found.header.status === 'IMPLEMENTING') return `Plan is currently being implemented. Use \`!plan cancel ${found.header.planId}\` to stop it first.`;
+
+      await updatePlanFileStatus(found.filePath, 'CLOSED');
 
       // Close backing bead
       if (found.header.beadId) {
@@ -492,6 +526,8 @@ export async function handlePlanSkip(
   return `Skipped **${target.id}**: ${target.title} (was ${target.status})`;
 }
 
+export const NO_PHASES_SENTINEL = 'No phases to run';
+
 export type PreparePlanRunResult =
   | { phasesFilePath: string; planFilePath: string; planContent: string; nextPhase: PlanPhase }
   | { error: string };
@@ -529,7 +565,7 @@ export async function preparePlanRun(
   if (staleness.stale) return { error: staleness.message };
 
   const nextPhase = getNextPhase(phases);
-  if (!nextPhase) return { error: 'No phases to run — all done or dependencies unmet.' };
+  if (!nextPhase) return { error: `${NO_PHASES_SENTINEL} — all done or dependencies unmet.` };
 
   return {
     phasesFilePath,
