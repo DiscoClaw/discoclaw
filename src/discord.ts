@@ -527,7 +527,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           break;
                         } else if (phaseResult.result === 'audit_failed') {
                           stopReason = 'error';
-                          stopMessage = `Audit phase **${phaseResult.phase.id}** found **${phaseResult.verdict.maxSeverity}** severity deviations. Use \`!plan run ${planId}\` to re-run the audit, \`!plan skip ${planId}\` to skip it, or \`!plan phases --regenerate ${planId}\` to regenerate phases.`;
+                          const fixNote = phaseResult.fixAttemptsUsed != null
+                            ? ` after ${phaseResult.fixAttemptsUsed} automatic fix attempt(s)`
+                            : '';
+                          stopMessage = `Audit phase **${phaseResult.phase.id}** found **${phaseResult.verdict.maxSeverity}** severity deviations${fixNote}. Use \`!plan run ${planId}\` to re-run the audit, \`!plan skip ${planId}\` to skip it, or \`!plan phases --regenerate ${planId}\` to regenerate phases.`;
                           break;
                         } else if (phaseResult.result === 'stale') {
                           stopReason = 'error';

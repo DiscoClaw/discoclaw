@@ -395,7 +395,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       planPhasesEnabled: parseBoolean(env, 'PLAN_PHASES_ENABLED', true),
       planPhaseMaxContextFiles: parsePositiveInt(env, 'PLAN_PHASE_MAX_CONTEXT_FILES', 5),
       planPhaseTimeoutMs: parsePositiveNumber(env, 'PLAN_PHASE_TIMEOUT_MS', 5 * 60_000),
-      planPhaseMaxAuditFixAttempts: parseNonNegativeInt(env, 'PLAN_PHASE_MAX_AUDIT_FIX_ATTEMPTS', 2),
+      planPhaseMaxAuditFixAttempts: parseNonNegativeInt(env, 'PLAN_PHASE_AUDIT_FIX_MAX', 2),
       forgeCommandsEnabled: parseBoolean(env, 'DISCOCLAW_FORGE_COMMANDS_ENABLED', true),
       forgeMaxAuditRounds: parsePositiveInt(env, 'FORGE_MAX_AUDIT_ROUNDS', 5),
       forgeDrafterModel: parseTrimmedString(env, 'FORGE_DRAFTER_MODEL'),

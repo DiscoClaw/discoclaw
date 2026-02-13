@@ -20,6 +20,7 @@ import {
   checkStaleness,
   buildPhasePrompt,
   buildAuditFixPrompt,
+  extractObjective,
   resolveProjectCwd,
   resolveContextFilePath,
   writePhasesFile,
@@ -1423,39 +1424,52 @@ describe('runNextPhase audit verdict', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildAuditFixPrompt', () => {
-  const auditPhase: PlanPhase = {
-    id: 'phase-2',
-    title: 'Post-implementation audit',
-    kind: 'audit',
-    description: 'Audit all changes against the plan specification.',
-    status: 'in-progress',
-    dependsOn: ['phase-1'],
-    contextFiles: ['src/foo.ts', 'src/bar.ts'],
-  };
+  const contextFiles = ['src/foo.ts', 'src/bar.ts'];
+  const modifiedFiles = ['src/foo.ts', 'src/baz.ts'];
 
   it('includes objective from plan', () => {
-    const prompt = buildAuditFixPrompt(auditPhase, SAMPLE_PLAN, 'Audit findings here');
+    const prompt = buildAuditFixPrompt(SAMPLE_PLAN, 'Audit findings here', contextFiles, modifiedFiles, 1, 2);
     expect(prompt).toContain('Add a plan manager');
   });
 
   it('includes audit findings', () => {
     const findings = '**Concern 1: Missing error handling**\n**Severity: HIGH**';
-    const prompt = buildAuditFixPrompt(auditPhase, SAMPLE_PLAN, findings);
+    const prompt = buildAuditFixPrompt(SAMPLE_PLAN, findings, contextFiles, modifiedFiles, 1, 2);
     expect(prompt).toContain('Missing error handling');
     expect(prompt).toContain('Severity: HIGH');
   });
 
-  it('lists files to fix', () => {
-    const prompt = buildAuditFixPrompt(auditPhase, SAMPLE_PLAN, 'findings');
+  it('lists context files', () => {
+    const prompt = buildAuditFixPrompt(SAMPLE_PLAN, 'findings', contextFiles, modifiedFiles, 1, 2);
     expect(prompt).toContain('src/foo.ts');
     expect(prompt).toContain('src/bar.ts');
   });
 
-  it('includes fix instructions with write tools', () => {
-    const prompt = buildAuditFixPrompt(auditPhase, SAMPLE_PLAN, 'findings');
-    expect(prompt).toContain('fix every high and medium severity concern');
-    expect(prompt).toContain('Write');
-    expect(prompt).toContain('Edit');
+  it('includes all required sections per plan spec', () => {
+    const prompt = buildAuditFixPrompt(SAMPLE_PLAN, 'findings', contextFiles, modifiedFiles, 1, 2);
+    // Anti-regression instruction
+    expect(prompt).toContain('Fix only the specific deviations');
+    expect(prompt).toContain('Do not refactor, reorganize, or modify code that the audit did not flag');
+    // Attempt counter
+    expect(prompt).toContain('Fix attempt 1 of 2');
+    // Limitation note
+    expect(prompt).toContain('read/write file tools only');
+    expect(prompt).toContain('cannot run tests, build commands, or install packages');
+    // Modified files
+    expect(prompt).toContain('src/baz.ts');
+    // Does NOT mention Bash
+    expect(prompt).not.toContain('Bash');
+  });
+
+  it('shows urgency escalation on final attempt', () => {
+    const prompt = buildAuditFixPrompt(SAMPLE_PLAN, 'findings', contextFiles, modifiedFiles, 2, 2);
+    expect(prompt).toContain('last chance');
+    expect(prompt).toContain('Fix attempt 2 of 2');
+  });
+
+  it('handles empty modified files list', () => {
+    const prompt = buildAuditFixPrompt(SAMPLE_PLAN, 'findings', contextFiles, [], 1, 1);
+    expect(prompt).not.toContain('## Modified Files');
   });
 });
 
@@ -1615,7 +1629,7 @@ describe('runNextPhase audit fix loop', () => {
     expect(result.result).toBe('audit_failed');
     // Rollback should have cleaned the dirty file
     expect(fsSync.existsSync(path.join(projectDir, 'dirty-file.txt'))).toBe(false);
-    expect(progressMsgs.some(m => m.includes('Rolling back'))).toBe(true);
+    expect(progressMsgs.some(m => m.includes('rolled back'))).toBe(true);
   });
 
   it('maxAuditFixAttempts=0 skips fix loop entirely', async () => {
@@ -1668,9 +1682,11 @@ describe('runNextPhase audit fix loop', () => {
     expect(result.result).toBe('audit_failed');
     // Should not attempt fixes without git
     expect(progressMsgs.some(m => m.includes('Fix attempt'))).toBe(false);
+    // Should emit skip message
+    expect(progressMsgs.some(m => m.includes('git not available'))).toBe(true);
   });
 
-  it('fix agent error breaks out of loop early', async () => {
+  it('fix agent error consumes attempt and continues', async () => {
     const planPath = path.join(plansDir, 'plan-011-test.md');
     await fs.writeFile(planPath, SAMPLE_PLAN);
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
@@ -1688,7 +1704,7 @@ describe('runNextPhase audit fix loop', () => {
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
         } else {
-          // Fix agent: throws error
+          // Fix agent: throws error (every time)
           yield { type: 'error', message: 'Runtime crashed' };
         }
       },
@@ -1701,13 +1717,274 @@ describe('runNextPhase audit fix loop', () => {
       addDirs: [],
       timeoutMs: 5000,
       workspaceCwd: wsDir,
-      maxAuditFixAttempts: 3,
+      maxAuditFixAttempts: 2,
     };
 
     const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
     expect(result.result).toBe('audit_failed');
-    // Should only have called: audit (1) + fix attempt (1) = 2 calls
-    // NOT 1 audit + 3 fix attempts
-    expect(callCount).toBe(2);
+    // With continue behavior: audit (1) + fix error (2) + fix error (3) = 3 calls
+    expect(callCount).toBe(3);
+  });
+
+  it('fix loop succeeds on second attempt after first re-audit fails', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writeAuditPhases(phasesPath);
+
+    let callCount = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke() {
+        callCount++;
+        if (callCount === 1) {
+          // Initial audit: fails
+          const text = '**Concern 1: Missing validation**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else if (callCount === 2) {
+          // First fix agent
+          const text = 'Attempted fix.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else if (callCount === 3) {
+          // First re-audit: still fails
+          const text = '**Concern 1: Still broken**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else if (callCount === 4) {
+          // Second fix agent
+          const text = 'Fixed properly this time.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else {
+          // Second re-audit: passes
+          const text = 'No concerns. **Verdict:** Ready to approve.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        }
+      },
+    };
+
+    const opts: PhaseExecutionOpts = {
+      runtime,
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 5000,
+      workspaceCwd: wsDir,
+      maxAuditFixAttempts: 2,
+    };
+
+    const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
+    expect(result.result).toBe('done');
+    expect(callCount).toBe(5); // audit + fix1 + re-audit1 + fix2 + re-audit2
+    // Both progress messages emitted with correct attempt counters
+    expect(progressMsgs.some(m => m.includes('attempting fix (1/2)'))).toBe(true);
+    expect(progressMsgs.some(m => m.includes('attempting fix (2/2)'))).toBe(true);
+  });
+
+  it('fix agent does not receive Bash tool', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writeAuditPhases(phasesPath);
+
+    const capturedTools: string[][] = [];
+    let callCount = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params: any) {
+        callCount++;
+        // Capture tools from the params passed to invoke
+        if (params?.tools) capturedTools.push([...params.tools]);
+        if (callCount === 1) {
+          // Audit: fails
+          const text = '**Concern 1: Issue**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else if (callCount === 2) {
+          // Fix agent
+          const text = 'Fixed.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else {
+          // Re-audit: passes
+          const text = 'No concerns. **Verdict:** Ready to approve.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        }
+      },
+    };
+
+    const opts: PhaseExecutionOpts = {
+      runtime,
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 5000,
+      workspaceCwd: wsDir,
+      maxAuditFixAttempts: 1,
+    };
+
+    await runNextPhase(phasesPath, planPath, opts, onProgress);
+    // The fix agent call is the second invocation (callCount === 2)
+    // Check that capturedTools has at least 2 entries and the second one has no Bash
+    expect(capturedTools.length).toBeGreaterThanOrEqual(2);
+    const fixAgentTools = capturedTools[1]!;
+    expect(fixAgentTools).not.toContain('Bash');
+    expect(fixAgentTools).toContain('Read');
+    expect(fixAgentTools).toContain('Write');
+    expect(fixAgentTools).toContain('Edit');
+    expect(fixAgentTools).toContain('Glob');
+    expect(fixAgentTools).toContain('Grep');
+  });
+
+  it('re-audit runtime error consumes attempt and triggers rollback', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writeAuditPhases(phasesPath);
+
+    let callCount = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke() {
+        callCount++;
+        if (callCount === 1) {
+          // Initial audit: fails
+          const text = '**Concern 1: Issue**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else if (callCount === 2) {
+          // Fix agent: succeeds
+          const text = 'Fixed the issues.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else {
+          // Re-audit: runtime error
+          yield { type: 'error', message: 'Model timeout' };
+        }
+      },
+    };
+
+    const opts: PhaseExecutionOpts = {
+      runtime,
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 5000,
+      workspaceCwd: wsDir,
+      maxAuditFixAttempts: 1,
+    };
+
+    const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
+    // Re-audit runtime error should be normalized to audit_failed after fix loop exhaustion
+    expect(result.result).toBe('audit_failed');
+    expect(progressMsgs.some(m => m.includes('rolled back'))).toBe(true);
+  });
+
+  it('rollback failure does not throw — returns audit_failed with warning', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writeAuditPhases(phasesPath);
+
+    // RuntimeAdapter: audit HIGH → fix agent (corrupts git) → re-audit HIGH → rollback fails
+    let callCount = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke() {
+        callCount++;
+        if (callCount === 2) {
+          // Fix agent: corrupt the git repo so rollback will fail
+          // Rename .git to break git commands
+          fsSync.renameSync(path.join(projectDir, '.git'), path.join(projectDir, '.git-broken'));
+          const text = 'Attempted fix.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else {
+          // Audit calls: always fail
+          const text = '**Concern 1: Still broken**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        }
+      },
+    };
+
+    const opts: PhaseExecutionOpts = {
+      runtime,
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 5000,
+      workspaceCwd: wsDir,
+      maxAuditFixAttempts: 1,
+    };
+
+    const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
+    // Should return audit_failed, not throw
+    expect(result.result).toBe('audit_failed');
+    // Should have emitted a rollback failed warning
+    expect(progressMsgs.some(m => m.includes('rollback failed'))).toBe(true);
+    // fixAttemptsUsed should be set
+    if (result.result === 'audit_failed') {
+      expect(result.fixAttemptsUsed).toBe(1);
+    }
+
+    // Restore .git for cleanup
+    if (fsSync.existsSync(path.join(projectDir, '.git-broken'))) {
+      fsSync.renameSync(path.join(projectDir, '.git-broken'), path.join(projectDir, '.git'));
+    }
+  });
+
+  it('fixAttemptsUsed is undefined when fix loop is skipped (maxAuditFixAttempts=0)', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writeAuditPhases(phasesPath);
+
+    const auditOutput = '**Concern 1: Issue**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+
+    const opts: PhaseExecutionOpts = {
+      runtime: makeSuccessRuntime(auditOutput),
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 5000,
+      workspaceCwd: wsDir,
+      maxAuditFixAttempts: 0,
+    };
+
+    const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
+    expect(result.result).toBe('audit_failed');
+    if (result.result === 'audit_failed') {
+      expect(result.fixAttemptsUsed).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractObjective
+// ---------------------------------------------------------------------------
+
+describe('extractObjective', () => {
+  it('extracts objective section from plan content', () => {
+    const result = extractObjective(SAMPLE_PLAN);
+    expect(result).toBe('Add a plan manager that decomposes complex plans into phases.');
+  });
+
+  it('returns fallback for missing objective', () => {
+    const result = extractObjective('# Plan\n\n## Changes\n\nSome changes.');
+    expect(result).toBe('(no objective found in plan)');
+  });
+
+  it('returns fallback for empty string', () => {
+    const result = extractObjective('');
+    expect(result).toBe('(no objective found in plan)');
   });
 });
