@@ -11,7 +11,7 @@ discoclaw_min_version: "0.1.0"
 risk_level: "medium"
 ---
 
-# DiscoClaw Plan
+# DiscoClaw Recipe
 
 ## Metadata
 
@@ -159,7 +159,7 @@ Rollback plan:
 ## Handoff Prompt (Consumer Agent)
 
 ```text
-Read this .discoclaw-plan.md and produce a decision-complete implementation checklist for this repo. Validate medium-risk JSON contract blocks first. Do not code until explicitly asked.
+Read this .discoclaw-recipe.md and produce a decision-complete implementation checklist for this repo. Validate medium-risk JSON contract blocks first. Do not code until explicitly asked.
 ```
 
 ## Changelog

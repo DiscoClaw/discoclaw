@@ -166,4 +166,4 @@ All actions are gated by category env flags (off by default except channels).
 - [ ] **Additional runtime adapters** — OpenAI-compatible and/or Gemini so the project isn't locked to Claude CLI.
 - [ ] **Runtime adapter selection via env** — e.g. `RUNTIME_ADAPTER=claude-cli|openai|gemini`.
 - [ ] Discord-native dashboard (status embeds, config commands, health checks in a dedicated channel)
-- [x] Shareable PRD packs — `docs/discoclaw-plan-spec.md`, `templates/plans/integration.discoclaw-plan.md`, and `skills/discoclaw-plan-{generator,consumer}/` define exchangeable `plans/*.discoclaw-plan.md` artifacts
+- [x] Shareable PRD packs — `docs/discoclaw-recipe-spec.md`, `templates/recipes/integration.discoclaw-recipe.md`, and `skills/discoclaw-recipe-{generator,consumer}/` define exchangeable `recipes/*.discoclaw-recipe.md` artifacts

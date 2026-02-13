@@ -1,29 +1,29 @@
-# DiscoClaw Plan Specification v1
+# DiscoClaw Recipe Specification v1
 
-`discoclaw-plan` is a shareable markdown scaffold for describing integration work that another DiscoClaw user (or agent) can safely implement.
+`discoclaw-recipe` is a shareable markdown scaffold for describing integration work that another DiscoClaw user (or agent) can safely implement.
 
 ## Goals
 
-- Keep plans small, explicit, and auditable.
-- Make plan exchange easy between users.
+- Keep recipes small, explicit, and auditable.
+- Make recipe exchange easy between users.
 - Preserve safety and provenance (author/source/license).
 - Support machine-assisted consumption without requiring new runtime code.
 
 ## Canonical Location And Filename
 
-Store plans under one of the standard subdirectories:
+Store recipes under one of the standard subdirectories:
 
-- `plans/starters/<kebab-slug>.discoclaw-plan.md` — production-ready
-- `plans/examples/<kebab-slug>.discoclaw-plan.md` — illustrative
-- `plans/community/<kebab-slug>.discoclaw-plan.md` — user-created (gitignored)
+- `recipes/starters/<kebab-slug>.discoclaw-recipe.md` — production-ready
+- `recipes/examples/<kebab-slug>.discoclaw-recipe.md` — illustrative
+- `recipes/community/<kebab-slug>.discoclaw-recipe.md` — user-created (gitignored)
 
 Example:
 
-- `plans/examples/openai-compatible-runtime-adapter.discoclaw-plan.md`
+- `recipes/examples/openai-compatible-runtime-adapter.discoclaw-recipe.md`
 
 ## Canonical Metadata Format (Required)
 
-Every plan must include YAML frontmatter at the top of the file.
+Every recipe must include YAML frontmatter at the top of the file.
 
 ```yaml
 ---
@@ -68,7 +68,7 @@ Frontmatter must include all fields below:
 
 Every file must include these headings exactly once:
 
-1. `# DiscoClaw Plan`
+1. `# DiscoClaw Recipe`
 2. `## Metadata`
 3. `## Use Case`
 4. `## Scope`
@@ -81,11 +81,11 @@ Every file must include these headings exactly once:
 
 ## Risk-Based JSON Requirements
 
-The format uses required markdown headings for all plans, and risk-gated JSON strictness for structured contracts.
+The format uses required markdown headings for all recipes, and risk-gated JSON strictness for structured contracts.
 
 - `low` risk:
   - `implementation_contract` and `acceptance_contract` JSON fences are recommended.
-  - A plan may omit those JSON fences if section prose is complete.
+  - A recipe may omit those JSON fences if section prose is complete.
 - `medium` or `high` risk:
   - `implementation_contract` and `acceptance_contract` JSON fences are required.
   - Missing required JSON is a validation failure for consumers.
@@ -129,7 +129,7 @@ For `medium/high`, include these fenced blocks.
 }
 ```
 
-If `low` risk plans omit JSON contracts, prose must still clearly state:
+If `low` risk recipes omit JSON contracts, prose must still clearly state:
 
 - Files to add/modify
 - Environment/config changes
@@ -140,7 +140,7 @@ If `low` risk plans omit JSON contracts, prose must still clearly state:
 
 ## Safety Requirements
 
-Every plan must include all of the following in `## Risk, Permissions, Rollback`:
+Every recipe must include all of the following in `## Risk, Permissions, Rollback`:
 
 - Risk rationale for the chosen `risk_level`.
 - Required permissions/capabilities (Discord, runtime tools, env variables).
@@ -148,7 +148,7 @@ Every plan must include all of the following in `## Risk, Permissions, Rollback`
 
 ## Integration Type Guidance
 
-Use `integration_type` to classify plans:
+Use `integration_type` to classify recipes:
 
 - `runtime`: runtime adapter behavior, model/tool routing, runtime config/env integration.
 - `actions`: Discord action categories, action handlers, or command/action plumbing.
@@ -156,7 +156,7 @@ Use `integration_type` to classify plans:
 
 ## Consumer Agent Behavior (Default)
 
-Consumers should use plan-first apply:
+Consumers should use recipe-first apply:
 
 1. Validate YAML frontmatter and required headings.
 2. Read risk level from frontmatter.
@@ -174,9 +174,9 @@ Consumers should use plan-first apply:
 
 Before sharing, verify:
 
-- Filename uses `.discoclaw-plan.md` suffix.
+- Filename uses `.discoclaw-recipe.md` suffix.
 - YAML frontmatter exists and includes all required metadata fields.
 - All required headings exist.
 - Metadata includes author/source/license.
 - Risk/permissions/rollback is explicit.
-- `medium/high` plans include both required JSON contract blocks.
+- `medium/high` recipes include both required JSON contract blocks.

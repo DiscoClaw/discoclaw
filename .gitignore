@@ -22,8 +22,9 @@ data/memory/
 groups/*
 !groups/README.md
 
-# User's own plans (not shipped)
+# Legacy plan files (not shipped)
 plans/*.md
-!plans/README.md
-plans/community/*
-!plans/community/.gitkeep
+
+# User's own recipes (not shipped)
+recipes/community/*
+!recipes/community/.gitkeep

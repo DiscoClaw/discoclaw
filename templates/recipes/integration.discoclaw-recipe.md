@@ -19,7 +19,7 @@ Author instructions (remove before sharing):
 - For medium/high-risk plans, JSON contract blocks are required.
 -->
 
-# DiscoClaw Plan
+# DiscoClaw Recipe
 
 ## Metadata
 
@@ -154,7 +154,7 @@ Rollback plan:
 Use this prompt when another DiscoClaw user asks their agent to implement this plan:
 
 ```text
-Read this .discoclaw-plan.md file and produce a decision-complete implementation checklist mapped to local repo files. Validate required headings, YAML frontmatter metadata, and risk-gated JSON contract requirements first. Do not start coding until explicitly asked.
+Read this .discoclaw-recipe.md file and produce a decision-complete implementation checklist mapped to local repo files. Validate required headings, YAML frontmatter metadata, and risk-gated JSON contract requirements first. Do not start coding until explicitly asked.
 ```
 
 ## Changelog

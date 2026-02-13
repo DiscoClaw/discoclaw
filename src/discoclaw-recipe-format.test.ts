@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.join(__dirname, '..');
 
 const REQUIRED_HEADINGS = [
-  '# DiscoClaw Plan',
+  '# DiscoClaw Recipe',
   '## Metadata',
   '## Use Case',
   '## Scope',
@@ -75,33 +75,33 @@ function getSection(content: string, heading: string): string {
   return (match?.[1] ?? '').trim();
 }
 
-async function findPlanFiles(dir: string): Promise<string[]> {
+async function findRecipeFiles(dir: string): Promise<string[]> {
   const results: string[] = [];
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      results.push(...(await findPlanFiles(full)));
-    } else if (entry.isFile() && entry.name.endsWith('.discoclaw-plan.md')) {
+      results.push(...(await findRecipeFiles(full)));
+    } else if (entry.isFile() && entry.name.endsWith('.discoclaw-recipe.md')) {
       results.push(full);
     }
   }
   return results;
 }
 
-async function loadPlanFiles(): Promise<string[]> {
-  const plansDir = path.join(REPO_ROOT, 'plans');
-  const planFiles = await findPlanFiles(plansDir);
+async function loadRecipeFiles(): Promise<string[]> {
+  const recipesDir = path.join(REPO_ROOT, 'recipes');
+  const recipeFiles = await findRecipeFiles(recipesDir);
 
   return [
-    path.join(REPO_ROOT, 'templates', 'plans', 'integration.discoclaw-plan.md'),
-    ...planFiles,
+    path.join(REPO_ROOT, 'templates', 'recipes', 'integration.discoclaw-recipe.md'),
+    ...recipeFiles,
   ];
 }
 
-describe('discoclaw-plan format', () => {
+describe('discoclaw-recipe format', () => {
   it('enforces frontmatter metadata, required headings, and risk-gated contract rules', async () => {
-    const files = await loadPlanFiles();
+    const files = await loadRecipeFiles();
     expect(files.length).toBeGreaterThan(1);
 
     for (const filePath of files) {
@@ -120,9 +120,9 @@ describe('discoclaw-plan format', () => {
         expect(headingCount(content, heading), `${path.relative(REPO_ROOT, filePath)} heading count for ${heading}`).toBe(1);
       }
 
-      const isTemplate = path.relative(REPO_ROOT, filePath) === 'templates/plans/integration.discoclaw-plan.md';
+      const isTemplate = path.relative(REPO_ROOT, filePath) === 'templates/recipes/integration.discoclaw-recipe.md';
       if (!isTemplate) {
-        const expectedPlanId = path.basename(filePath, '.discoclaw-plan.md');
+        const expectedPlanId = path.basename(filePath, '.discoclaw-recipe.md');
         expect(metadata.plan_id, `${path.relative(REPO_ROOT, filePath)} plan_id should match filename`).toBe(expectedPlanId);
       }
 

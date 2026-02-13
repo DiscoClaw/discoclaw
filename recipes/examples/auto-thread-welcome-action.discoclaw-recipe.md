@@ -11,7 +11,7 @@ discoclaw_min_version: "0.1.0"
 risk_level: "medium"
 ---
 
-# DiscoClaw Plan
+# DiscoClaw Recipe
 
 ## Metadata
 
@@ -154,7 +154,7 @@ Rollback plan:
 ## Handoff Prompt (Consumer Agent)
 
 ```text
-Validate this medium-risk actions plan, then generate a file-level implementation checklist for the local repo. Do not edit code until explicitly instructed.
+Validate this medium-risk actions recipe, then generate a file-level implementation checklist for the local repo. Do not edit code until explicitly instructed.
 ```
 
 ## Changelog

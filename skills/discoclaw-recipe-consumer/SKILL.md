@@ -1,23 +1,23 @@
 ---
-name: discoclaw-plan-consumer
-description: Consume a shared `*.discoclaw-plan.md` file and produce a decision-complete, local-repo implementation checklist with YAML metadata validation, risk-gated contract validation, and plan-first execution behavior.
+name: discoclaw-recipe-consumer
+description: Consume a shared `*.discoclaw-recipe.md` file and produce a decision-complete, local-repo implementation checklist with YAML metadata validation, risk-gated contract validation, and recipe-first execution behavior.
 ---
 
-# DiscoClaw Plan Consumer
+# DiscoClaw Recipe Consumer
 
-Consume a shared DiscoClaw integration plan without immediately coding.
+Consume a shared DiscoClaw integration recipe without immediately coding.
 
-Default mode is plan-first apply.
+Default mode is recipe-first apply.
 
 ## Use This Skill When
 
-- A user provides a `.discoclaw-plan.md` and asks to implement/adapt it.
-- A user asks for feasibility or migration mapping from a shared integration plan.
+- A user provides a `.discoclaw-recipe.md` and asks to implement/adapt it.
+- A user asks for feasibility or migration mapping from a shared integration recipe.
 - A user wants a safe checklist before code changes.
 
 ## Validation Workflow
 
-1. Confirm filename pattern and required headings from `docs/discoclaw-plan-spec.md`.
+1. Confirm filename pattern and required headings from `docs/discoclaw-recipe-spec.md`.
 2. Validate YAML frontmatter and read `risk_level` from frontmatter metadata.
 3. Apply risk-gated JSON checks:
    - `low`: `implementation_contract` and `acceptance_contract` JSON blocks are optional, but section prose must still be complete.
@@ -28,7 +28,7 @@ Default mode is plan-first apply.
    - Required permissions/capabilities
    - Rollback steps
 
-If required data is missing, stop and request a corrected plan before implementation.
+If required data is missing, stop and request a corrected recipe before implementation.
 
 ## Output Contract
 
@@ -55,4 +55,4 @@ When local repo structure differs:
 1. Validation result is explicit (`pass` or `blocked`).
 2. Missing fields are listed with exact corrections needed.
 3. Implementation checklist is file-specific and complete.
-4. Plan-first behavior is preserved unless user overrides.
+4. Recipe-first behavior is preserved unless user overrides.

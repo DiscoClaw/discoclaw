@@ -11,7 +11,7 @@ discoclaw_min_version: "0.1.0"
 risk_level: "low"
 ---
 
-# DiscoClaw Plan
+# DiscoClaw Recipe
 
 ## Metadata
 
@@ -104,7 +104,7 @@ Rollback plan:
 ## Handoff Prompt (Consumer Agent)
 
 ```text
-Read this low-risk context plan and produce a local implementation checklist. Since this is low risk, treat missing JSON contract blocks as acceptable if section prose is complete. Do not edit code until explicitly asked.
+Read this low-risk context recipe and produce a local implementation checklist. Since this is low risk, treat missing JSON contract blocks as acceptable if section prose is complete. Do not edit code until explicitly asked.
 ```
 
 ## Changelog
