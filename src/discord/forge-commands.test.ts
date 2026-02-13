@@ -207,6 +207,18 @@ describe('buildAuditorPrompt', () => {
     expect(prompt).toContain('Severity: high | medium | low');
     expect(prompt).toContain('audit round 1');
   });
+
+  it('includes project context when provided', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1, 'Single-user system. No concurrency guards.');
+    expect(prompt).toContain('## Project Context');
+    expect(prompt).toContain('Single-user system. No concurrency guards.');
+    expect(prompt).toContain('Respect them when auditing');
+  });
+
+  it('omits project context section when not provided', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    expect(prompt).not.toContain('## Project Context');
+  });
 });
 
 describe('buildRevisionPrompt', () => {
@@ -215,6 +227,18 @@ describe('buildRevisionPrompt', () => {
     expect(prompt).toContain('# Plan: Test');
     expect(prompt).toContain('Concern 1: bad thing');
     expect(prompt).toContain('Add feature');
+  });
+
+  it('includes project context when provided', () => {
+    const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature', 'Single-user system.');
+    expect(prompt).toContain('## Project Context');
+    expect(prompt).toContain('Single-user system.');
+    expect(prompt).toContain('do not re-introduce complexity');
+  });
+
+  it('omits project context section when not provided', () => {
+    const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
+    expect(prompt).not.toContain('## Project Context');
   });
 });
 
@@ -548,5 +572,45 @@ describe('ForgeOrchestrator', () => {
     // Cleanup: let the first one finish (it'll error, which is fine)
     resolveFirst!();
     await p1.catch(() => {});
+  });
+
+  it('includes .context/project.md in drafter and auditor prompts', async () => {
+    const tmpDir = await makeTmpDir();
+
+    // Create a .context/project.md in the cwd
+    const contextDir = path.join(tmpDir, '.context');
+    await fs.mkdir(contextDir, { recursive: true });
+    await fs.writeFile(
+      path.join(contextDir, 'project.md'),
+      'Single-user system. No concurrency guards needed.',
+    );
+
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    // Capture the prompts sent to the runtime
+    const prompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        prompts.push(params.prompt);
+        const responses = [draftPlan, auditClean];
+        const text = responses[prompts.length - 1] ?? '(no response)';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+    await orchestrator.run('Test', async () => {});
+
+    // Drafter prompt (first call) should include project context
+    expect(prompts[0]).toContain('Single-user system');
+    // Auditor prompt (second call) should include project context
+    expect(prompts[1]).toContain('Single-user system');
+    expect(prompts[1]).toContain('Project Context');
   });
 });

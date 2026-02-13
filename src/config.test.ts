@@ -159,6 +159,22 @@ describe('parseConfig', () => {
     expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE'))).toBe(true);
   });
 
+  // --- Forge auto-implement ---
+  it('defaults forgeAutoImplement to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.forgeAutoImplement).toBe(true);
+  });
+
+  it('parses FORGE_AUTO_IMPLEMENT=0 as false', () => {
+    const { config } = parseConfig(env({ FORGE_AUTO_IMPLEMENT: '0' }));
+    expect(config.forgeAutoImplement).toBe(false);
+  });
+
+  it('parses FORGE_AUTO_IMPLEMENT=true as true', () => {
+    const { config } = parseConfig(env({ FORGE_AUTO_IMPLEMENT: 'true' }));
+    expect(config.forgeAutoImplement).toBe(true);
+  });
+
   // --- Summary-to-durable ---
   it('defaults summaryToDurableEnabled to false', () => {
     const { config } = parseConfig(env());
