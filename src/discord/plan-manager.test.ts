@@ -633,16 +633,18 @@ describe('resolveProjectCwd', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('resolves known project from plan content', () => {
-    // This test relies on ~/code/discoclaw existing (which it does in the dev env)
-    const plan = '**Project:** discoclaw\n';
-    const result = resolveProjectCwd(plan, wsDir);
-    expect(result).toContain('discoclaw');
+  it('resolves known project from plan content', async () => {
+    const projectDir = path.join(tmpDir, 'my-project');
+    await fs.mkdir(projectDir, { recursive: true });
+    const map = { 'my-project': projectDir };
+    const plan = '**Project:** my-project\n';
+    const result = resolveProjectCwd(plan, wsDir, map);
+    expect(result).toBe(projectDir);
   });
 
   it('throws for unknown project', () => {
     const plan = '**Project:** unknown-project\n';
-    expect(() => resolveProjectCwd(plan, wsDir)).toThrow('not in project directory map');
+    expect(() => resolveProjectCwd(plan, wsDir, {})).toThrow('not in project directory map');
   });
 
   it('throws for missing Project field', () => {
@@ -651,22 +653,27 @@ describe('resolveProjectCwd', () => {
   });
 
   it('throws when project dir does not exist', () => {
-    // Temporarily override — we can't mock the hardcoded map, so skip this test
-    // if ~/code/discoclaw exists
+    const map = { 'gone-project': path.join(tmpDir, 'does-not-exist') };
+    const plan = '**Project:** gone-project\n';
+    expect(() => resolveProjectCwd(plan, wsDir, map)).toThrow('does not exist');
   });
 
-  it('passes validation when no symlinks to workspace', () => {
-    const plan = '**Project:** discoclaw\n';
-    // Should not throw — discoclaw dir has no symlink to wsDir
-    const result = resolveProjectCwd(plan, wsDir);
+  it('passes validation when no symlinks to workspace', async () => {
+    const projectDir = path.join(tmpDir, 'clean-project');
+    await fs.mkdir(projectDir, { recursive: true });
+    const map = { 'clean-project': projectDir };
+    const plan = '**Project:** clean-project\n';
+    const result = resolveProjectCwd(plan, wsDir, map);
     expect(result).toBeTruthy();
   });
 
-  it('allows project dir with symlink to workspace', () => {
-    const plan = '**Project:** discoclaw\n';
-    // Should not throw — symlinks to workspace are allowed; resolveContextFilePath
-    // handles boundary safety via path canonicalization
-    expect(() => resolveProjectCwd(plan, wsDir)).not.toThrow();
+  it('allows project dir with symlink to workspace', async () => {
+    const projectDir = path.join(tmpDir, 'linked-project');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.symlink(wsDir, path.join(projectDir, 'ws-link'));
+    const map = { 'linked-project': projectDir };
+    const plan = '**Project:** linked-project\n';
+    expect(() => resolveProjectCwd(plan, wsDir, map)).not.toThrow();
   });
 });
 

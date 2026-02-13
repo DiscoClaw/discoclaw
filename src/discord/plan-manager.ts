@@ -678,6 +678,7 @@ export function buildPhasePrompt(
 export function resolveProjectCwd(
   planContent: string,
   workspaceCwd: string,
+  projectDirMap: Record<string, string> = PROJECT_DIRS,
 ): string {
   const projectMatch = planContent.match(/^\*\*Project:\*\*\s*(.+)$/m);
   if (!projectMatch) {
@@ -685,7 +686,7 @@ export function resolveProjectCwd(
   }
 
   const projectName = projectMatch[1]!.trim();
-  const projectDir = PROJECT_DIRS[projectName];
+  const projectDir = projectDirMap[projectName];
 
   if (!projectDir) {
     throw new Error(
