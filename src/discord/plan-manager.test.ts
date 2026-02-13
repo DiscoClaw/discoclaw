@@ -662,19 +662,10 @@ describe('resolveProjectCwd', () => {
     expect(result).toBeTruthy();
   });
 
-  it('throws when project dir contains symlink to workspace', async () => {
-    const projectDir = path.join(tmpDir, 'project');
-    await fs.mkdir(projectDir);
-
-    // Create a symlink inside the project pointing to workspace
-    await fs.symlink(wsDir, path.join(projectDir, 'ws-link'));
-
-    // We can't easily test this with the hardcoded map, but we can test
-    // the validation logic by calling the function with a plan pointing
-    // to 'discoclaw' and checking the actual project dir
-    // For now, verify the function works with known good data
+  it('allows project dir with symlink to workspace', () => {
     const plan = '**Project:** discoclaw\n';
-    // Should not throw — actual project dir doesn't point to tmpDir/workspace
+    // Should not throw — symlinks to workspace are allowed; resolveContextFilePath
+    // handles boundary safety via path canonicalization
     expect(() => resolveProjectCwd(plan, wsDir)).not.toThrow();
   });
 });

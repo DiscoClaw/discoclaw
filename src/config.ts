@@ -56,6 +56,7 @@ export type DiscoclawConfig = {
   forgeAuditorModel?: string;
   forgeTimeoutMs: number;
   forgeProgressThrottleMs: number;
+  forgeAutoImplement: boolean;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermMaxEntries: number;
@@ -397,8 +398,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       forgeMaxAuditRounds: parsePositiveInt(env, 'FORGE_MAX_AUDIT_ROUNDS', 5),
       forgeDrafterModel: parseTrimmedString(env, 'FORGE_DRAFTER_MODEL'),
       forgeAuditorModel: parseTrimmedString(env, 'FORGE_AUDITOR_MODEL'),
-      forgeTimeoutMs: parsePositiveNumber(env, 'FORGE_TIMEOUT_MS', 5 * 60_000),
+      forgeTimeoutMs: parsePositiveNumber(env, 'FORGE_TIMEOUT_MS', 30 * 60_000),
       forgeProgressThrottleMs: parseNonNegativeInt(env, 'FORGE_PROGRESS_THROTTLE_MS', 3000),
+      forgeAutoImplement: parseBoolean(env, 'FORGE_AUTO_IMPLEMENT', true),
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', false),
       shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', false),
       shortTermMaxEntries: parsePositiveInt(env, 'DISCOCLAW_SHORTTERM_MAX_ENTRIES', 20),

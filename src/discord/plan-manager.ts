@@ -706,28 +706,9 @@ export function resolveProjectCwd(
     throw err;
   }
 
-  // Symlink validation: scan top-level entries for symlinks pointing to workspaceCwd
-  const realWorkspaceCwd = fsSync.realpathSync(workspaceCwd);
-  const entries = fsSync.readdirSync(projectDir);
-
-  for (const entry of entries) {
-    const entryPath = path.join(projectDir, entry);
-    const lstat = fsSync.lstatSync(entryPath);
-    if (lstat.isSymbolicLink()) {
-      let realTarget: string;
-      try {
-        realTarget = fsSync.realpathSync(entryPath);
-      } catch {
-        continue; // Broken symlink — skip
-      }
-      if (realTarget === realWorkspaceCwd || realTarget.startsWith(realWorkspaceCwd + path.sep)) {
-        throw new Error(
-          `Project directory contains a symlink to the workspace data directory (${entry} → ${realTarget}). ` +
-          'Implement phases cannot safely operate in this layout — remove the symlink or use a project directory without it.',
-        );
-      }
-    }
-  }
+  // Note: symlinks to workspaceCwd (e.g. workspace → discoclaw-data/workspace) are
+  // allowed here. The real safety gate is resolveContextFilePath, which canonicalizes
+  // all paths and checks they resolve under an allowed root (projectCwd or workspaceCwd).
 
   return projectDir;
 }
