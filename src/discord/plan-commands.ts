@@ -123,6 +123,30 @@ async function getNextPlanNumber(plansDir: string): Promise<number> {
   return max + 1;
 }
 
+/**
+ * Normalize a bare number or unpadded plan-N string to canonical plan-NNN format.
+ * Returns null if the input doesn't look like a plan ID reference.
+ */
+export function normalizePlanId(id: string): string | null {
+  // Bare number: "031" or "31" → "plan-031"
+  const bareNum = id.match(/^(\d+)$/);
+  if (bareNum) return `plan-${bareNum[1]!.padStart(3, '0')}`;
+
+  // Unpadded plan-N: "plan-31" → "plan-031"
+  const planNum = id.match(/^plan-(\d+)$/);
+  if (planNum) return `plan-${planNum[1]!.padStart(3, '0')}`;
+
+  return null;
+}
+
+/**
+ * Check if a raw string looks like a plan-ID reference (bare number or plan-N pattern).
+ * Used to gate plan-ID lookups vs. new plan creation in the forge dispatch path.
+ */
+export function looksLikePlanId(id: string): boolean {
+  return /^\d+$/.test(id) || /^plan-\d+$/.test(id);
+}
+
 export async function findPlanFile(plansDir: string, id: string): Promise<{ filePath: string; header: PlanFileHeader } | null> {
   let entries: string[];
   try {
@@ -131,13 +155,15 @@ export async function findPlanFile(plansDir: string, id: string): Promise<{ file
     return null;
   }
 
+  const normalizedId = normalizePlanId(id);
+
   for (const entry of entries) {
     if (!entry.endsWith('.md') || entry.startsWith('.')) continue;
     const filePath = path.join(plansDir, entry);
     const content = await fs.readFile(filePath, 'utf-8');
     const header = parsePlanFileHeader(content);
     if (!header) continue;
-    if (header.planId === id || header.beadId === id) {
+    if (header.planId === id || header.beadId === id || (normalizedId && header.planId === normalizedId)) {
       return { filePath, header };
     }
   }
