@@ -181,6 +181,36 @@ Skip the current in-progress or failed phase. Useful when a phase is stuck or no
 Skipped **phase-1**: Implement src/webhook.ts (was failed)
 ```
 
+### `!plan audit <plan-id>`
+
+Run a standalone audit against an existing plan. Performs a two-stage review:
+
+1. **Structural pre-flight** (instant) — checks for required sections (Objective, Scope, Changes, Risks, Testing), placeholder text, and missing file paths. If high or medium severity issues are found, the audit stops here and reports them without invoking the AI.
+2. **AI-powered audit** (30-60s) — invokes an adversarial auditor agent that deep-reviews the plan for correctness, completeness, risk gaps, and test coverage. Only runs if the structural check passes (or has only low-severity concerns).
+
+Both results are appended as a single review entry in the plan's Audit Log section.
+
+```
+!plan audit plan-017
+```
+
+**Output (progress message, updated on completion):**
+```
+Auditing **plan-017**...
+```
+
+**On success:**
+```
+Audit complete for **plan-017** — review 1, verdict: **low** (ready to approve). See `!plan show plan-017` for details.
+```
+
+**On failure (structural gate):**
+```
+Audit complete for **plan-017** — review 1, verdict: **high** (needs revision). See `!plan show plan-017` for details.
+```
+
+**Configuration:** Uses `FORGE_AUDITOR_MODEL` for the AI agent (falls back to `RUNTIME_MODEL`). Timeout follows `FORGE_TIMEOUT_MS`.
+
 ### `!plan cancel`
 
 **Known gap:** `cancel` is listed in the `RESERVED_SUBCOMMANDS` set in `plan-commands.ts` and is parsed as a valid subcommand, but has no handler implementation. It falls through to the default case and returns:

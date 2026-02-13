@@ -158,6 +158,13 @@ describe('parsePlanCommand', () => {
       args: 'plan-027',
     });
   });
+
+  it('parses audit with no args', () => {
+    expect(parsePlanCommand('!plan audit')).toEqual({
+      action: 'audit',
+      args: '',
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
