@@ -107,6 +107,7 @@ export type BotParams = {
   forgeAuditorModel?: string;
   forgeTimeoutMs?: number;
   forgeProgressThrottleMs?: number;
+  forgeAutoImplement?: boolean;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermDataDir: string;

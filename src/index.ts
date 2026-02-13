@@ -158,6 +158,7 @@ const forgeDrafterModel = cfg.forgeDrafterModel;
 const forgeAuditorModel = cfg.forgeAuditorModel;
 const forgeTimeoutMs = cfg.forgeTimeoutMs;
 const forgeProgressThrottleMs = cfg.forgeProgressThrottleMs;
+const forgeAutoImplement = cfg.forgeAutoImplement;
 const summaryToDurableEnabled = cfg.summaryToDurableEnabled;
 const shortTermMemoryEnabled = cfg.shortTermMemoryEnabled;
 const shortTermDataDir = cfg.shortTermDataDirOverride
@@ -412,6 +413,7 @@ const botParams = {
   forgeAuditorModel,
   forgeTimeoutMs,
   forgeProgressThrottleMs,
+  forgeAutoImplement,
   summaryToDurableEnabled,
   shortTermMemoryEnabled,
   shortTermDataDir,
