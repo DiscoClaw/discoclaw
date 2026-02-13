@@ -27,6 +27,15 @@ const ALL_TEMPLATE_FILES = [
 /** Real IDENTITY.md content that passes onboarding check (no template marker). */
 const REAL_IDENTITY = '# Identity\n\nName: Claw\nVibe: Snarky but helpful\nEmoji: \u{1F980}\nCreature: A sentient crustacean AI';
 
+/** Real USER.md content that passes onboarding check (no template marker). */
+const REAL_USER = '# USER.md - About Your Human\n\n- **Name:** Test User\n- **What to call them:** Test\n';
+
+/** Helper to write both IDENTITY.md and USER.md with real content. */
+async function writeOnboardedFiles(workspace: string) {
+  await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+  await fs.writeFile(path.join(workspace, 'USER.md'), REAL_USER, 'utf-8');
+}
+
 /** Helper to create a mock logger with info + warn. */
 function mockLog() {
   return { info: vi.fn(), warn: vi.fn() };
@@ -64,11 +73,31 @@ describe('isOnboardingComplete', () => {
     expect(await isOnboardingComplete(workspace)).toBe(false);
   });
 
-  it('returns true when IDENTITY.md has real content', async () => {
+  it('returns true when both IDENTITY.md and USER.md have real content', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-onboard-'));
+    dirs.push(workspace);
+    await writeOnboardedFiles(workspace);
+    expect(await isOnboardingComplete(workspace)).toBe(true);
+  });
+
+  it('returns false when IDENTITY.md is real but USER.md is missing', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-onboard-'));
     dirs.push(workspace);
     await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
-    expect(await isOnboardingComplete(workspace)).toBe(true);
+    expect(await isOnboardingComplete(workspace)).toBe(false);
+  });
+
+  it('returns false when IDENTITY.md is real but USER.md is still template', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-onboard-'));
+    dirs.push(workspace);
+    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    // Copy the template USER.md which contains the marker text
+    const templateUser = await fs.readFile(
+      path.join(__dirname, '..', 'templates', 'workspace', 'USER.md'),
+      'utf-8',
+    );
+    await fs.writeFile(path.join(workspace, 'USER.md'), templateUser, 'utf-8');
+    expect(await isOnboardingComplete(workspace)).toBe(false);
   });
 });
 
@@ -153,8 +182,8 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
-    // Simulate completed onboarding: IDENTITY.md has real content.
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    // Simulate completed onboarding: both files have real content.
+    await writeOnboardedFiles(workspace);
 
     const created = await ensureWorkspaceBootstrapFiles(workspace);
 
@@ -173,8 +202,8 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     await ensureWorkspaceBootstrapFiles(workspace);
     expect(await fs.access(path.join(workspace, 'BOOTSTRAP.md')).then(() => true)).toBe(true);
 
-    // Simulate completed onboarding: write real content to IDENTITY.md.
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    // Simulate completed onboarding: write real content to both files.
+    await writeOnboardedFiles(workspace);
 
     // Second run — should auto-delete BOOTSTRAP.md.
     const log = mockLog();
@@ -194,7 +223,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    await writeOnboardedFiles(workspace);
 
     const log = mockLog();
     await ensureWorkspaceBootstrapFiles(workspace, log as any);
@@ -212,7 +241,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    await writeOnboardedFiles(workspace);
     await fs.writeFile(path.join(workspace, 'BOOTSTRAP.md'), 'corrupted bootstrap content', 'utf-8');
 
     await ensureWorkspaceBootstrapFiles(workspace);
@@ -261,7 +290,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    await writeOnboardedFiles(workspace);
 
     await ensureWorkspaceBootstrapFiles(workspace);
 
@@ -275,7 +304,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    await writeOnboardedFiles(workspace);
     await fs.writeFile(path.join(workspace, 'BOOTSTRAP.md'), 'stale content', 'utf-8');
 
     const log = mockLog();
@@ -296,7 +325,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    await writeOnboardedFiles(workspace);
 
     const log = mockLog();
     await ensureWorkspaceBootstrapFiles(workspace, log as any);
@@ -328,7 +357,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    await writeOnboardedFiles(workspace);
     await fs.writeFile(path.join(workspace, 'BOOTSTRAP.md'), 'stale content', 'utf-8');
 
     const log = mockLog();
@@ -369,7 +398,7 @@ describe('ensureWorkspaceBootstrapFiles — unlink error handling', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    await writeOnboardedFiles(workspace);
 
     // Spy on unlink to throw EPERM for BOOTSTRAP.md paths.
     unlinkSpy = vi.spyOn(fs, 'unlink').mockImplementation(async (p: any) => {
@@ -390,7 +419,7 @@ describe('ensureWorkspaceBootstrapFiles — unlink error handling', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
+    await writeOnboardedFiles(workspace);
     await fs.writeFile(path.join(workspace, 'BOOTSTRAP.md'), 'stale content', 'utf-8');
 
     // Spy on unlink to throw EPERM for BOOTSTRAP.md paths.

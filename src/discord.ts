@@ -50,6 +50,9 @@ import { parseRestartCommand, handleRestartCommand } from './discord/restart-com
 import type { HealthConfigSnapshot } from './discord/health-command.js';
 import type { MetricsRegistry } from './observability/metrics.js';
 import { globalMetrics } from './observability/metrics.js';
+import { OnboardingFlow } from './onboarding/onboarding-flow.js';
+import { writeWorkspaceFiles } from './onboarding/onboarding-writer.js';
+import { isOnboardingComplete } from './workspace-bootstrap.js';
 
 export type BotParams = {
   token: string;
@@ -195,6 +198,29 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
   // Global forge orchestrator — one forge at a time across all channels.
   let forgeOrchestrator: ForgeOrchestrator | null = null;
 
+  // --- Onboarding state ---
+  let onboardingSession: OnboardingFlow | null = null;
+  let activeOnboardingUserId: string | null = null;
+  const sessionCreationGuards = new Map<string, Promise<void>>();
+  const ONBOARDING_TIMEOUT_MS = 15 * 60 * 1000;
+  let onboardingTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+  function destroyOnboardingSession() {
+    onboardingSession = null;
+    activeOnboardingUserId = null;
+    if (onboardingTimeoutHandle) {
+      clearTimeout(onboardingTimeoutHandle);
+      onboardingTimeoutHandle = null;
+    }
+  }
+
+  function resetOnboardingTimeout() {
+    if (onboardingTimeoutHandle) clearTimeout(onboardingTimeoutHandle);
+    onboardingTimeoutHandle = setTimeout(() => {
+      destroyOnboardingSession();
+    }, ONBOARDING_TIMEOUT_MS);
+  }
+
   return async (msg: any) => {
     try {
       if (!msg?.author || msg.author.bot) return;
@@ -314,6 +340,183 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         // The process will likely die during this call.
         result.deferred?.();
         return;
+      }
+
+      // --- Onboarding intercept ---
+      // When onboarding is incomplete, intercept messages before normal bot operation.
+      {
+        const messageText = String(msg.content ?? '').trim();
+        const userId = String(msg.author.id);
+
+        // 1. !cancel during active session → destroy session
+        if (messageText === '!cancel' && onboardingSession && activeOnboardingUserId === userId) {
+          destroyOnboardingSession();
+          await msg.reply({ content: 'Onboarding cancelled. Send me a message whenever you\'re ready to try again.', allowedMentions: NO_MENTIONS });
+          return;
+        }
+
+        // 2. Active session → check timeout, then forward to flow
+        if (onboardingSession && activeOnboardingUserId === userId) {
+          // Check timeout
+          if (Date.now() - onboardingSession.lastActivityTimestamp > ONBOARDING_TIMEOUT_MS) {
+            destroyOnboardingSession();
+            await msg.reply({ content: 'Onboarding timed out — no worries, just send me a message to start over.', allowedMentions: NO_MENTIONS });
+            return;
+          }
+
+          // Route: only accept input from the correct channel
+          if (onboardingSession.channelMode === 'dm' && !isDm) {
+            // Message is in a guild channel but onboarding is in DMs
+            if (!onboardingSession.hasRedirected) {
+              onboardingSession.hasRedirected = true;
+              await msg.reply({ content: 'I\'m setting things up with you in DMs — check your messages!', allowedMentions: NO_MENTIONS });
+            }
+            return;
+          }
+          if (onboardingSession.channelMode === 'guild' && msg.channelId !== onboardingSession.channelId) {
+            // Message is in a different guild channel than where onboarding is happening
+            if (!onboardingSession.hasRedirected) {
+              onboardingSession.hasRedirected = true;
+              await msg.reply({ content: `I'm setting things up with you in <#${onboardingSession.channelId}> — head over there to continue!`, allowedMentions: NO_MENTIONS });
+            }
+            return;
+          }
+
+          // Forward to flow
+          resetOnboardingTimeout();
+          const result = onboardingSession.handleInput(messageText);
+
+          if (result.writeResult === 'pending') {
+            // Send the "writing..." message first
+            await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
+
+            // Call the writer
+            try {
+              const writeResult = await writeWorkspaceFiles(
+                onboardingSession.getValues(),
+                params.workspaceCwd,
+              );
+
+              if (writeResult.errors.length > 0) {
+                const errorSummary = writeResult.errors.join('; ');
+                onboardingSession.markWriteFailed(errorSummary);
+                const sendTarget = onboardingSession.channelMode === 'dm' ? msg.author : msg.channel;
+                await sendTarget.send({
+                  content: `Something went wrong writing your files: ${errorSummary}\nType **retry** to try again, pick a number to edit a field, or \`!cancel\` to give up.`,
+                  allowedMentions: NO_MENTIONS,
+                });
+              } else {
+                onboardingSession.markWriteComplete();
+                const warnings = writeResult.warnings.length > 0
+                  ? `\n\n${writeResult.warnings.join('\n')}`
+                  : '';
+                const sendTarget = onboardingSession.channelMode === 'dm' ? msg.author : msg.channel;
+                await sendTarget.send({
+                  content: `All set! I've written your **IDENTITY.md** and **USER.md**. I'm ready to go.${warnings}`,
+                  allowedMentions: NO_MENTIONS,
+                });
+                destroyOnboardingSession();
+                params.log?.info({ workspaceCwd: params.workspaceCwd }, 'onboarding:complete');
+              }
+            } catch (err) {
+              params.log?.error({ err }, 'onboarding:write failed');
+              onboardingSession.markWriteFailed(String(err));
+              const sendTarget = onboardingSession.channelMode === 'dm' ? msg.author : msg.channel;
+              try {
+                await sendTarget.send({
+                  content: `Something went wrong writing your files: ${String(err)}\nType **retry** to try again or \`!cancel\` to give up.`,
+                  allowedMentions: NO_MENTIONS,
+                });
+              } catch {
+                // If we can't even send the error, destroy the session
+                destroyOnboardingSession();
+              }
+            }
+          } else {
+            // Normal flow step — send the reply
+            await msg.channel.send({ content: result.reply, allowedMentions: NO_MENTIONS });
+          }
+          return;
+        }
+
+        // 3. Active session for a different user → tell them to wait
+        if (onboardingSession && activeOnboardingUserId && activeOnboardingUserId !== userId) {
+          const onboarded = await isOnboardingComplete(params.workspaceCwd);
+          if (!onboarded) {
+            await msg.reply({ content: 'Someone else is already setting me up — hang tight and try again in a minute.', allowedMentions: NO_MENTIONS });
+            return;
+          }
+          // If somehow onboarding completed externally, clear the stale session
+          destroyOnboardingSession();
+        }
+
+        // 4. No active session → check if onboarding is needed
+        if (!onboardingSession) {
+          const onboarded = await isOnboardingComplete(params.workspaceCwd);
+          // Only start onboarding if the workspace was bootstrapped (IDENTITY.md exists).
+          // If IDENTITY.md doesn't exist at all, the workspace wasn't set up — skip.
+          const identityExists = await fs.access(path.join(params.workspaceCwd, 'IDENTITY.md')).then(() => true, () => false);
+          if (!onboarded && identityExists) {
+            // Ignore !cancel when no session exists
+            if (messageText === '!cancel') {
+              await msg.reply({ content: 'Nothing to cancel.', allowedMentions: NO_MENTIONS });
+              return;
+            }
+
+            // Race guard: prevent duplicate session creation from rapid messages
+            const existingGuard = sessionCreationGuards.get(userId);
+            if (existingGuard) {
+              await existingGuard;
+              // Re-check after guard resolves — session may now exist
+              if (onboardingSession) return;
+            }
+
+            const guard = (async () => {
+              // Re-check after acquiring guard
+              if (onboardingSession) return;
+
+              activeOnboardingUserId = userId;
+              onboardingSession = new OnboardingFlow();
+              resetOnboardingTimeout();
+
+              const displayName = msg.author.displayName || msg.author.username || 'there';
+              const startResult = onboardingSession.start(displayName);
+
+              if (isDm) {
+                // Already in DMs — just send the greeting
+                onboardingSession.channelMode = 'dm';
+                await msg.reply({ content: startResult.reply, allowedMentions: NO_MENTIONS });
+              } else {
+                // Try to DM the user
+                try {
+                  await msg.author.send({ content: startResult.reply, allowedMentions: NO_MENTIONS });
+                  onboardingSession.channelMode = 'dm';
+                  await msg.reply({ content: 'Let\'s set up in DMs — check your messages!', allowedMentions: NO_MENTIONS });
+                } catch (dmErr: any) {
+                  // DM failed — fall back to guild channel
+                  params.log?.info(
+                    { userId, channelId: msg.channelId, error: dmErr?.message },
+                    'onboarding:dm-failed, falling back to guild channel',
+                  );
+                  onboardingSession.channelMode = 'guild';
+                  onboardingSession.channelId = msg.channelId;
+                  try {
+                    await msg.reply({
+                      content: 'I can\'t DM you — looks like your DMs are disabled for this server. No worries, we can set up right here!\n\n' + startResult.reply,
+                      allowedMentions: NO_MENTIONS,
+                    });
+                  } catch {
+                    // Both DM and guild reply failed — destroy session
+                    destroyOnboardingSession();
+                  }
+                }
+              }
+            })().finally(() => sessionCreationGuards.delete(userId));
+            sessionCreationGuards.set(userId, guard);
+            await guard;
+            return;
+          }
+        }
       }
 
       const isThread = typeof (msg.channel as any)?.isThread === 'function' ? (msg.channel as any).isThread() : false;

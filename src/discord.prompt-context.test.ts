@@ -520,12 +520,10 @@ describe('workspace PA files in prompt', () => {
     expect(userIdx).toBeLessThan(paIdx);
   });
 
-  it('includes BOOTSTRAP.md when present, before SOUL', async () => {
+  it('intercepts with onboarding flow when IDENTITY.md has template marker', async () => {
     const queue = makeQueue();
-    let seenPrompt = '';
     const runtime = {
       invoke: vi.fn(async function* (p: any) {
-        seenPrompt = p.prompt;
         yield { type: 'text_final', text: 'ok' } as any;
       }),
     } as any;
@@ -586,11 +584,9 @@ describe('workspace PA files in prompt', () => {
 
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
 
-    expect(runtime.invoke).toHaveBeenCalled();
-    const bootstrapIdx = seenPrompt.indexOf('BOOTSTRAP.md');
-    const soulIdx = seenPrompt.indexOf('SOUL.md');
-    expect(bootstrapIdx).toBeGreaterThan(-1);
-    expect(bootstrapIdx).toBeLessThan(soulIdx);
+    // When onboarding is incomplete, the onboarding flow intercepts the message
+    // and the runtime is NOT invoked.
+    expect(runtime.invoke).not.toHaveBeenCalled();
   });
 
   it('includes TOOLS.md when present', async () => {
