@@ -856,7 +856,9 @@ describe('executePhase', () => {
   it('returns failed on runtime error', async () => {
     const result = await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(makeErrorRuntime('Runtime broke')));
     expect(result.status).toBe('failed');
-    expect(result.error).toContain('Runtime broke');
+    if (result.status === 'failed') {
+      expect(result.error).toContain('Runtime broke');
+    }
   });
 
   it('does not mutate phases object', async () => {
@@ -1179,5 +1181,238 @@ describe('updatePhaseStatus', () => {
     const updated = updatePhaseStatus(phases, phases.phases[0]!.id, 'failed', undefined, 'error msg');
     expect(updated.updatedAt).toBeTruthy();
     expect(updated.phases[0]!.error).toBe('error msg');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit verdict handling in executePhase
+// ---------------------------------------------------------------------------
+
+describe('executePhase audit verdict', () => {
+  const auditPhase: PlanPhase = {
+    id: 'phase-2',
+    title: 'Post-implementation audit',
+    kind: 'audit',
+    description: 'Audit all changes against the plan specification.',
+    status: 'in-progress',
+    dependsOn: ['phase-1'],
+    contextFiles: ['src/foo.ts'],
+  };
+
+  const implPhase: PlanPhase = {
+    id: 'phase-1',
+    title: 'Implement foo',
+    kind: 'implement',
+    description: 'Implement changes to foo.ts',
+    status: 'in-progress',
+    dependsOn: [],
+    contextFiles: ['src/foo.ts'],
+  };
+
+  const basePhases: PlanPhases = {
+    planId: 'plan-001',
+    planFile: 'test.md',
+    planContentHash: 'abc',
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+    phases: [implPhase, auditPhase],
+  };
+
+  let tmpDir: string;
+  let projectDir: string;
+  let wsDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir();
+    projectDir = path.join(tmpDir, 'project');
+    wsDir = path.join(tmpDir, 'workspace');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.mkdir(wsDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeOpts(runtime: RuntimeAdapter): PhaseExecutionOpts {
+    return {
+      runtime,
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 5000,
+      workspaceCwd: wsDir,
+    };
+  }
+
+  it('audit phase with HIGH severity returns audit_failed', async () => {
+    const auditOutput = '**Concern 1: Missing error handling**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('audit_failed');
+    if (result.status === 'audit_failed') {
+      expect(result.verdict.maxSeverity).toBe('high');
+      expect(result.verdict.shouldLoop).toBe(true);
+    }
+  });
+
+  it('audit phase with only LOW severity returns done', async () => {
+    const auditOutput = '**Concern 1: Minor nitpick**\n**Severity: low**\n\n**Verdict:** Ready to approve.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('done');
+  });
+
+  it('audit phase with no severity markers returns done', async () => {
+    const auditOutput = 'Everything looks great. No concerns.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('done');
+  });
+
+  it('implement phase ignores severity markers in output', async () => {
+    const implOutput = '**Severity: HIGH**\nDone implementing.';
+    const result = await executePhase(implPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(implOutput)));
+    expect(result.status).toBe('done');
+  });
+
+  it('audit phase with runtime error returns failed not audit_failed', async () => {
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeErrorRuntime('Connection timeout')));
+    expect(result.status).toBe('failed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit verdict handling in runNextPhase
+// ---------------------------------------------------------------------------
+
+describe('runNextPhase audit verdict', () => {
+  let tmpDir: string;
+  let projectDir: string;
+  let wsDir: string;
+  let plansDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir();
+    projectDir = path.join(tmpDir, 'project');
+    wsDir = path.join(tmpDir, 'workspace');
+    plansDir = path.join(wsDir, 'plans');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.mkdir(plansDir, { recursive: true });
+
+    // Init git in project dir
+    try {
+      execSync('git init', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git config user.email "test@test.com"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git config user.name "Test"', { cwd: projectDir, stdio: 'pipe' });
+      await fs.writeFile(path.join(projectDir, 'README.md'), 'test');
+      execSync('git add . && git commit -m "init"', { cwd: projectDir, stdio: 'pipe' });
+    } catch {
+      // git not available
+    }
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeOpts(runtime: RuntimeAdapter): PhaseExecutionOpts {
+    return {
+      runtime,
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 5000,
+      workspaceCwd: wsDir,
+    };
+  }
+
+  const progressMsgs: string[] = [];
+  const onProgress = async (msg: string) => { progressMsgs.push(msg); };
+
+  beforeEach(() => {
+    progressMsgs.length = 0;
+  });
+
+  // Helper to create a phases file with a single audit phase ready to run
+  function writeAuditPhases(phasesPath: string, planPath: string, overrides?: Partial<PlanPhase>) {
+    const phases: PlanPhases = {
+      planId: 'plan-011',
+      planFile: 'workspace/plans/plan-011-test.md',
+      planContentHash: computePlanHash(SAMPLE_PLAN),
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'Implement src/discord/',
+          kind: 'implement',
+          description: 'Implement changes.',
+          status: 'done',
+          dependsOn: [],
+          contextFiles: ['src/foo.ts'],
+          output: 'Done.',
+          ...({} as any), // base phase
+        },
+        {
+          id: 'phase-2',
+          title: 'Post-implementation audit',
+          kind: 'audit',
+          description: 'Audit all changes against the plan specification.',
+          status: 'pending',
+          dependsOn: ['phase-1'],
+          contextFiles: ['src/foo.ts'],
+          ...overrides,
+        },
+      ],
+    };
+    writePhasesFile(phasesPath, phases);
+  }
+
+  it('audit phase with HIGH severity returns audit_failed result', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writeAuditPhases(phasesPath, planPath);
+
+    const auditOutput = '**Concern 1: Missing error handling**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(auditOutput)), onProgress);
+
+    expect(result.result).toBe('audit_failed');
+    if (result.result === 'audit_failed') {
+      expect(result.verdict.maxSeverity).toBe('high');
+    }
+
+    // Verify on-disk status is 'failed' (not 'audit_failed')
+    const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
+    const auditPhase = updated.phases.find(p => p.id === 'phase-2')!;
+    expect(auditPhase.status).toBe('failed');
+  });
+
+  it('failed audit phase can be retried (not blocked by modifiedFiles check)', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    // Set audit phase to failed with no modifiedFiles (would block non-audit phases)
+    writeAuditPhases(phasesPath, planPath, {
+      status: 'failed',
+      error: 'previous audit failure',
+    });
+
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('All good. No concerns.')), onProgress);
+    // Should proceed to execution (not retry_blocked)
+    expect(result.result).not.toBe('retry_blocked');
+  });
+
+  it('failed implement phase without modifiedFiles is still retry_blocked', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    // Simulate a failed implement phase without modifiedFiles
+    phases.phases[0]!.status = 'failed';
+    phases.phases[0]!.error = 'previous error';
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    expect(result.result).toBe('retry_blocked');
   });
 });

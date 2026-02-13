@@ -7,6 +7,8 @@ import os from 'node:os';
 import { collectRuntimeText } from './runtime-utils.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
+import { parseAuditVerdict } from './forge-commands.js';
+import type { AuditVerdict } from './forge-commands.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,6 +55,7 @@ export type PhaseExecutionOpts = {
 export type RunPhaseResult =
   | { result: 'done'; phase: PlanPhase; output: string }
   | { result: 'failed'; phase: PlanPhase; output: string; error: string }
+  | { result: 'audit_failed'; phase: PlanPhase; output: string; verdict: AuditVerdict }
   | { result: 'stale'; message: string }
   | { result: 'nothing_to_run' }
   | { result: 'corrupt'; message: string }
@@ -664,7 +667,13 @@ export function buildPhasePrompt(
 
     lines.push('## Instructions');
     lines.push('');
-    lines.push('Compare the implementation against the plan specification. Report any deviations, missing pieces, or concerns.');
+    lines.push('Compare the implementation against the plan specification. For each concern found:');
+    lines.push('1. Give it a title (e.g., **Concern 1: Missing error handling**)');
+    lines.push('2. Describe the deviation');
+    lines.push('3. Rate it: **Severity: high** | **Severity: medium** | **Severity: low**');
+    lines.push('');
+    lines.push('End with a **Verdict:** line — either "Needs revision." (if any high/medium concerns) or "Ready to approve." (if only low or no concerns).');
+    lines.push('');
     lines.push('Use Read, Glob, and Grep tools only.');
   }
 
@@ -811,7 +820,11 @@ export async function executePhase(
   phases: PlanPhases,
   opts: PhaseExecutionOpts,
   injectedContext?: string,
-): Promise<{ status: 'done' | 'failed'; output: string; error?: string }> {
+): Promise<
+  | { status: 'done'; output: string }
+  | { status: 'failed'; output: string; error: string }
+  | { status: 'audit_failed'; output: string; error: string; verdict: AuditVerdict }
+> {
   // Derive tools from phase kind
   const tools = phase.kind === 'implement'
     ? ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash']
@@ -848,6 +861,14 @@ export async function executePhase(
       opts.timeoutMs,
       { requireFinalEvent: true },
     );
+
+    if (phase.kind === 'audit') {
+      const verdict = parseAuditVerdict(output);
+      if (verdict.shouldLoop) {
+        return { status: 'audit_failed', output, error: `Audit found ${verdict.maxSeverity} severity deviations`, verdict };
+      }
+    }
+
     return { status: 'done', output };
   } catch (err) {
     const errorMsg = String(err instanceof Error ? err.message : err);
@@ -933,7 +954,7 @@ export async function runNextPhase(
   // 4. Retry safety check
   const isGitAvailable = gitAvailable(opts.projectCwd);
 
-  if (phase.status === 'failed') {
+  if (phase.status === 'failed' && phase.kind !== 'audit') {
     if (isGitAvailable) {
       if (!phase.modifiedFiles || phase.modifiedFiles.length === 0) {
         return {
@@ -1065,7 +1086,9 @@ export async function runNextPhase(
   }
 
   // 11. Write done/failed status to disk
-  allPhases = updatePhaseStatus(allPhases, phase.id, result.status, result.output, result.error);
+  const diskStatus = result.status === 'audit_failed' ? 'failed' : result.status;
+  const diskError = result.status === 'done' ? undefined : result.error;
+  allPhases = updatePhaseStatus(allPhases, phase.id, diskStatus, result.output, diskError);
   // Attach modifiedFiles and failureHashes to the phase
   allPhases = {
     ...allPhases,
@@ -1112,6 +1135,8 @@ export async function runNextPhase(
 
   if (result.status === 'done') {
     return { result: 'done', phase: updatedPhase, output: result.output };
+  } else if (result.status === 'audit_failed') {
+    return { result: 'audit_failed', phase: updatedPhase, output: result.output, verdict: result.verdict };
   } else {
     return { result: 'failed', phase: updatedPhase, output: result.output, error: result.error ?? 'Unknown error' };
   }
