@@ -40,6 +40,7 @@ import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/sho
 import { editThenSendChunks } from './discord/output-common.js';
 import { downloadMessageImages, resolveMediaType } from './discord/image-download.js';
 import { resolveReplyReference } from './discord/reply-reference.js';
+import { resolveThreadContext } from './discord/thread-context.js';
 import { downloadTextAttachments } from './discord/file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
@@ -645,8 +646,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               let effectivePlanCmd = planCmd;
               if (planCmd.action === 'create' && planCmd.args) {
                 const replyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
+                const threadCtx = await resolveThreadContext(
+                  msg.channel as any,
+                  msg.id,
+                  { botDisplayName: params.botDisplayName, log: params.log },
+                );
+
+                const contextParts: string[] = [];
                 if (replyRef?.section) {
-                  effectivePlanCmd = { ...planCmd, context: `Context (replied-to message):\n${replyRef.section}` };
+                  contextParts.push(`Context (replied-to message):\n${replyRef.section}`);
+                }
+                if (threadCtx?.section) {
+                  contextParts.push(threadCtx.section);
+                }
+                if (contextParts.length > 0) {
+                  effectivePlanCmd = { ...planCmd, context: contextParts.join('\n\n') };
                 }
               }
               const response = await handlePlanCommand(effectivePlanCmd, planOpts);
@@ -700,11 +714,24 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
-              // Resolve reply context separately — don't concatenate into args
+              // Resolve reply + thread context separately — don't concatenate into args
               // (args drives the bead title and slug; context goes in the plan body).
               const forgeReplyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
-              const forgeContext = forgeReplyRef?.section
-                ? `Context (replied-to message):\n${forgeReplyRef.section}`
+              const forgeThreadCtx = await resolveThreadContext(
+                msg.channel as any,
+                msg.id,
+                { botDisplayName: params.botDisplayName, log: params.log },
+              );
+
+              const forgeContextParts: string[] = [];
+              if (forgeReplyRef?.section) {
+                forgeContextParts.push(`Context (replied-to message):\n${forgeReplyRef.section}`);
+              }
+              if (forgeThreadCtx?.section) {
+                forgeContextParts.push(forgeThreadCtx.section);
+              }
+              const forgeContext = forgeContextParts.length > 0
+                ? forgeContextParts.join('\n\n')
                 : undefined;
 
               const forgeReleaseLock = await acquireWriterLock();

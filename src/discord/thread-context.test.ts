@@ -1,23 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { resolveThreadContext } from './thread-context.js';
-import type { ThreadLikeChannel, StarterMessage, ThreadMessage } from './thread-context.js';
+import type { ThreadLikeChannel, ThreadMessage } from './thread-context.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fakeMsg(id: string, content: string, username: string, bot = false): ThreadMessage {
+function fakeMsg(
+  id: string, content: string, username: string, bot = false,
+  extra?: { attachments?: { size: number }; embeds?: unknown[] },
+): ThreadMessage {
   return {
     id,
     author: { username, displayName: username, bot },
     content,
+    ...extra,
   };
 }
 
 function fakeThread(opts: {
   name?: string;
-  starter?: StarterMessage | null;
+  starter?: ThreadMessage | null;
   starterError?: boolean;
   messages?: ThreadMessage[];
   fetchError?: boolean;
@@ -61,10 +65,11 @@ describe('resolveThreadContext', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null when thread has only a name but no starter or messages', async () => {
-    const ch = fakeThread({ name: 'some-thread', messages: [] });
+  it('returns thread name alone when no starter or messages are available', async () => {
+    const ch = fakeThread({ name: 'Login fails when session expires', messages: [] });
     const result = await resolveThreadContext(ch, '100');
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result!.section).toContain('Thread: "Login fails when session expires"');
   });
 
   it('returns context with starter message and thread name', async () => {
@@ -80,11 +85,11 @@ describe('resolveThreadContext', () => {
 
     const result = await resolveThreadContext(ch, '100');
     expect(result).not.toBeNull();
-    expect(result!.section).toContain('Thread: bug-discussion');
+    expect(result!.section).toContain('Thread: "bug-discussion"');
     expect(result!.section).toContain('[Alice (thread starter)]: We need to fix the login flow');
   });
 
-  it('returns context with recent messages', async () => {
+  it('returns context with recent messages in chronological order', async () => {
     const ch = fakeThread({
       name: 'feature-request',
       starter: {
@@ -100,11 +105,39 @@ describe('resolveThreadContext', () => {
 
     const result = await resolveThreadContext(ch, '100');
     expect(result).not.toBeNull();
-    expect(result!.section).toContain('Thread: feature-request');
     expect(result!.section).toContain('[Bob (thread starter)]: Add dark mode');
     expect(result!.section).toContain('Recent thread messages:');
     expect(result!.section).toContain('[Charlie]: I agree, dark mode would be great');
     expect(result!.section).toContain('[Bob]: What about the sidebar?');
+    // Verify chronological order: Charlie (id 2) before Bob (id 3)
+    const charlieIdx = result!.section.indexOf('[Charlie]');
+    const bobIdx = result!.section.indexOf('[Bob]: What');
+    expect(charlieIdx).toBeLessThan(bobIdx);
+  });
+
+  it('deduplicates starter message from recent messages', async () => {
+    const starter: ThreadMessage = {
+      id: '1',
+      author: { username: 'Alice', displayName: 'Alice', bot: false },
+      content: 'The original post',
+    };
+    const ch = fakeThread({
+      name: 'dedup-test',
+      starter,
+      // Simulate Discord returning the starter in recent messages too
+      messages: [
+        { ...starter },
+        fakeMsg('2', 'A reply', 'Bob'),
+      ],
+    });
+
+    const result = await resolveThreadContext(ch, '100');
+    expect(result).not.toBeNull();
+    // Starter should appear once as thread starter, not again in recent
+    const matches = result!.section.match(/The original post/g);
+    expect(matches).toHaveLength(1);
+    expect(result!.section).toContain('[Alice (thread starter)]: The original post');
+    expect(result!.section).toContain('[Bob]: A reply');
   });
 
   it('uses bot display name for bot-authored messages', async () => {
@@ -126,7 +159,7 @@ describe('resolveThreadContext', () => {
     expect(result!.section).toContain('[TestBot]: Here are the results');
   });
 
-  it('respects budget — truncates when content exceeds limit', async () => {
+  it('respects budget — truncates starter when content exceeds limit', async () => {
     const longContent = 'A'.repeat(500);
     const ch = fakeThread({
       name: 'test-thread',
@@ -140,8 +173,27 @@ describe('resolveThreadContext', () => {
 
     const result = await resolveThreadContext(ch, '100', { budgetChars: 100 });
     expect(result).not.toBeNull();
-    expect(result!.section.length).toBeLessThanOrEqual(120); // some tolerance
     expect(result!.section).toContain('...');
+  });
+
+  it('drops recent messages when budget is exhausted', async () => {
+    const ch = fakeThread({
+      name: 'budget-test',
+      starter: {
+        id: '1',
+        author: { username: 'Alice', displayName: 'Alice', bot: false },
+        content: 'A'.repeat(200),
+      },
+      messages: [
+        fakeMsg('2', 'B'.repeat(200), 'Bob'),
+        fakeMsg('3', 'should not appear', 'Charlie'),
+      ],
+    });
+
+    // Budget just enough for thread name + starter + maybe one message
+    const result = await resolveThreadContext(ch, '100', { budgetChars: 300 });
+    expect(result).not.toBeNull();
+    expect(result!.section).not.toContain('should not appear');
   });
 
   it('handles starter message fetch failure gracefully', async () => {
@@ -155,10 +207,24 @@ describe('resolveThreadContext', () => {
     });
 
     const result = await resolveThreadContext(ch, '100', { log });
-    // Should still return recent messages even if starter fails
     expect(result).not.toBeNull();
     expect(result!.section).toContain('[Dave]: still here');
     expect(log.warn).toHaveBeenCalled();
+  });
+
+  it('handles starter message returning null gracefully', async () => {
+    const ch = fakeThread({
+      name: 'null-starter-thread',
+      starter: null,
+      messages: [
+        fakeMsg('2', 'discussion continues', 'Eve'),
+      ],
+    });
+
+    const result = await resolveThreadContext(ch, '100');
+    expect(result).not.toBeNull();
+    expect(result!.section).toContain('[Eve]: discussion continues');
+    expect(result!.section).not.toContain('thread starter');
   });
 
   it('handles message fetch failure gracefully', async () => {
@@ -174,10 +240,23 @@ describe('resolveThreadContext', () => {
     });
 
     const result = await resolveThreadContext(ch, '100', { log });
-    // Should still return starter even if recent messages fail
     expect(result).not.toBeNull();
     expect(result!.section).toContain('[Alice (thread starter)]: The original post');
     expect(log.warn).toHaveBeenCalled();
+  });
+
+  it('returns thread name when both fetches fail', async () => {
+    const log = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const ch = fakeThread({
+      name: 'totally-broken',
+      starterError: true,
+      fetchError: true,
+    });
+
+    const result = await resolveThreadContext(ch, '100', { log });
+    expect(result).not.toBeNull();
+    expect(result!.section).toBe('Thread: "totally-broken"');
+    expect(log.warn).toHaveBeenCalledTimes(2);
   });
 
   it('returns null when thread has no name, no starter, and no messages', async () => {
@@ -186,7 +265,7 @@ describe('resolveThreadContext', () => {
     expect(result).toBeNull();
   });
 
-  it('skips empty content messages', async () => {
+  it('skips empty content messages without media', async () => {
     const ch = fakeThread({
       name: 'test',
       starter: {
@@ -204,6 +283,36 @@ describe('resolveThreadContext', () => {
     expect(result).not.toBeNull();
     expect(result!.section).not.toContain('[Bob]');
     expect(result!.section).toContain('[Charlie]: actual content');
+  });
+
+  it('renders empty-content messages with attachments as [attachment/embed]', async () => {
+    const ch = fakeThread({
+      name: 'media-test',
+      starter: {
+        id: '1',
+        author: { username: 'Alice', displayName: 'Alice', bot: false },
+        content: '',
+        attachments: { size: 1 },
+      },
+      messages: [],
+    });
+
+    const result = await resolveThreadContext(ch, '100');
+    expect(result).not.toBeNull();
+    expect(result!.section).toContain('[Alice (thread starter)]: [attachment/embed]');
+  });
+
+  it('renders empty-content messages with embeds as [attachment/embed]', async () => {
+    const ch = fakeThread({
+      name: 'embed-test',
+      messages: [
+        fakeMsg('2', '', 'Bob', false, { attachments: { size: 0 }, embeds: [{}] }),
+      ],
+    });
+
+    const result = await resolveThreadContext(ch, '100');
+    expect(result).not.toBeNull();
+    expect(result!.section).toContain('[Bob]: [attachment/embed]');
   });
 
   it('handles channel without fetchStarterMessage method', async () => {
@@ -241,7 +350,6 @@ describe('resolveThreadContext', () => {
     const result = await resolveThreadContext(ch, '100', { budgetChars: 200 });
     expect(result).not.toBeNull();
     expect(result!.section).toContain('...');
-    // Total should fit within budget + tolerance
     expect(result!.section.length).toBeLessThanOrEqual(250);
   });
 
@@ -262,8 +370,6 @@ describe('resolveThreadContext', () => {
 
     const result = await resolveThreadContext(ch, '100', { recentMessageLimit: 2 });
     expect(result).not.toBeNull();
-    // The fetch limit is passed through — we trust the mock to return all 3,
-    // but in production Discord would respect the limit parameter.
     expect(result!.section).toContain('Recent thread messages:');
   });
 
@@ -281,5 +387,31 @@ describe('resolveThreadContext', () => {
     const result = await resolveThreadContext(ch, '100');
     expect(result).not.toBeNull();
     expect(result!.section).toContain('[Discoclaw (thread starter)]');
+  });
+
+  it('sorts messages by snowflake ID for correct chronological order', async () => {
+    // Provide messages in non-chronological order in the Map
+    const ch: ThreadLikeChannel = {
+      isThread: () => true,
+      name: 'sort-test',
+      messages: {
+        fetch: async () => {
+          const map = new Map<string, ThreadMessage>();
+          // Insert out of order
+          map.set('300', fakeMsg('300', 'third', 'Charlie'));
+          map.set('100', fakeMsg('100', 'first', 'Alice'));
+          map.set('200', fakeMsg('200', 'second', 'Bob'));
+          return map;
+        },
+      },
+    };
+
+    const result = await resolveThreadContext(ch, '999');
+    expect(result).not.toBeNull();
+    const aliceIdx = result!.section.indexOf('first');
+    const bobIdx = result!.section.indexOf('second');
+    const charlieIdx = result!.section.indexOf('third');
+    expect(aliceIdx).toBeLessThan(bobIdx);
+    expect(bobIdx).toBeLessThan(charlieIdx);
   });
 });

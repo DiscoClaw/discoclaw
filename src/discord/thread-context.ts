@@ -13,22 +13,19 @@ export type ThreadContextResult = {
 export type ThreadLikeChannel = {
   isThread(): boolean;
   name?: string;
-  fetchStarterMessage?(): Promise<StarterMessage | null>;
+  id?: string;
+  fetchStarterMessage?(): Promise<ThreadMessage | null>;
   messages: {
     fetch(opts: { before?: string; limit?: number }): Promise<Map<string, ThreadMessage>>;
   };
-};
-
-export type StarterMessage = {
-  id: string;
-  author: { bot?: boolean; displayName?: string; username: string };
-  content?: string | null;
 };
 
 export type ThreadMessage = {
   id: string;
   author: { bot?: boolean; displayName?: string; username: string };
   content?: string | null;
+  attachments?: { size: number } | Map<string, unknown>;
+  embeds?: { length: number } | unknown[];
 };
 
 export type ThreadContextOpts = {
@@ -41,8 +38,34 @@ export type ThreadContextOpts = {
   log?: LoggerLike;
 };
 
-const DEFAULT_BUDGET_CHARS = 2000;
-const DEFAULT_RECENT_LIMIT = 5;
+const DEFAULT_BUDGET_CHARS = 3000;
+const DEFAULT_RECENT_LIMIT = 10;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function hasMedia(m: ThreadMessage): boolean {
+  const attSize = m.attachments && ('size' in m.attachments ? m.attachments.size : 0);
+  const embLen = m.embeds && ('length' in m.embeds ? m.embeds.length : 0);
+  return (attSize ?? 0) > 0 || (embLen ?? 0) > 0;
+}
+
+function formatMessageLine(m: ThreadMessage, botName: string, suffix?: string): string | null {
+  const content = String(m.content ?? '').trim();
+  const author = m.author.bot
+    ? botName
+    : (m.author.displayName || m.author.username);
+  const tag = suffix ? ` (${suffix})` : '';
+
+  if (content) {
+    return `[${author}${tag}]: ${content}`;
+  }
+  if (hasMedia(m)) {
+    return `[${author}${tag}]: [attachment/embed]`;
+  }
+  return null; // no content and no media — skip
+}
 
 // ---------------------------------------------------------------------------
 // Main function
@@ -51,7 +74,8 @@ const DEFAULT_RECENT_LIMIT = 5;
 /**
  * Resolve thread context: the thread's starter message and recent posts.
  *
- * Returns null if the channel is not a thread, or if no useful context is found.
+ * Returns null if the channel is not a thread.
+ * When only the thread name is available, returns it alone (still useful context).
  * Errors are caught and logged — never throws.
  */
 export async function resolveThreadContext(
@@ -67,13 +91,12 @@ export async function resolveThreadContext(
 
   const sections: string[] = [];
   let remaining = budget;
+  let starterId: string | undefined;
 
   // 1. Thread name
   const threadName = channel.name?.trim();
   if (threadName) {
-    const nameLine = `Thread: ${threadName}`;
-    sections.push(nameLine);
-    remaining -= nameLine.length + 1;
+    sections.push(`Thread: "${threadName}"`);
   }
 
   // 2. Starter message (the original post that started the thread)
@@ -81,19 +104,14 @@ export async function resolveThreadContext(
     try {
       const starter = await channel.fetchStarterMessage();
       if (starter) {
-        const content = String(starter.content ?? '').trim();
-        if (content) {
-          const author = starter.author.bot
-            ? botName
-            : (starter.author.displayName || starter.author.username);
-          const line = `[${author} (thread starter)]: ${content}`;
+        starterId = starter.id;
+        const line = formatMessageLine(starter, botName, 'thread starter');
+        if (line) {
           if (line.length <= remaining) {
             sections.push(line);
             remaining -= line.length + 1;
           } else if (remaining > 50) {
-            // Truncate to fit
-            const truncated = line.slice(0, remaining - 3) + '...';
-            sections.push(truncated);
+            sections.push(line.slice(0, remaining - 3) + '...');
             remaining = 0;
           }
         }
@@ -112,26 +130,23 @@ export async function resolveThreadContext(
       });
 
       if (messages && messages.size > 0) {
-        // Discord returns newest-first; reverse to chronological.
-        const sorted = [...messages.values()].reverse();
+        // Sort by snowflake ID (ascending = chronological).
+        const sorted = Array.from(messages.values())
+          .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
         const lines: string[] = [];
         for (const m of sorted) {
-          const content = String(m.content ?? '').trim();
-          if (!content) continue;
+          // Deduplicate: skip the starter message if it appears in recent messages
+          if (starterId && m.id === starterId) continue;
 
-          const author = m.author.bot
-            ? botName
-            : (m.author.displayName || m.author.username);
-          const line = `[${author}]: ${content}`;
+          const line = formatMessageLine(m, botName);
+          if (!line) continue;
 
           if (line.length <= remaining) {
             lines.push(line);
             remaining -= line.length + 1;
           } else if (remaining > 50 && m.author.bot) {
-            // Truncate bot messages to fit
-            const truncated = line.slice(0, remaining - 3) + '...';
-            lines.push(truncated);
+            lines.push(line.slice(0, remaining - 3) + '...');
             remaining = 0;
             break;
           } else {
@@ -149,8 +164,6 @@ export async function resolveThreadContext(
     }
   }
 
-  // Only the thread name isn't useful enough on its own
-  if (sections.length <= 1 && threadName) return null;
   if (sections.length === 0) return null;
 
   return { section: sections.join('\n') };
