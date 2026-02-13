@@ -30,12 +30,78 @@ export async function resolveForumChannel(client: Client, forumId: string): Prom
 // ---------------------------------------------------------------------------
 
 export const CADENCE_EMOJI: Record<string, string> = {
-  frequent: '\u23F1',  // ⏱
+  frequent: '\u23F1\uFE0F',  // ⏱️ (with VS16 to match Discord's normalization)
   hourly: '\uD83D\uDD50',    // 🕐
   daily: '\uD83C\uDF05',     // 🌅
   weekly: '\uD83D\uDCC5',    // 📅
   monthly: '\uD83D\uDCC6',   // 📆
 };
+
+// ---------------------------------------------------------------------------
+// Cadence prefix stripping
+// ---------------------------------------------------------------------------
+
+/**
+ * All known cadence emoji values with VS16 stripped, used to match prefixes
+ * regardless of whether the input contains variation selectors.
+ */
+const CADENCE_EMOJI_STRIPPED = new Set(
+  Object.values(CADENCE_EMOJI).map((e) => e.replaceAll('\uFE0F', '')),
+);
+
+/**
+ * Strip any leading cadence emoji prefix(es) from a thread name.
+ * Handles accumulated prefixes (e.g., "🌅 🌅 🌅 Test") by stripping
+ * repeatedly until no cadence emoji prefix remains.
+ *
+ * Matching is performed on a VS16-stripped "shadow" of the input to handle
+ * Discord's emoji normalization (Discord may add/remove U+FE0F). The
+ * remainder is sliced from the *original* string to preserve any VS16
+ * characters in the user-authored base name.
+ */
+export function stripCadencePrefix(name: string): string {
+  // Shadow copy with VS16 removed — used only for prefix matching.
+  const shadow = name.replaceAll('\uFE0F', '');
+
+  // Track how many characters we've consumed in the shadow string.
+  let shadowOffset = 0;
+
+  while (shadowOffset < shadow.length) {
+    let matched = false;
+    for (const emoji of CADENCE_EMOJI_STRIPPED) {
+      const prefix = `${emoji} `;
+      if (shadow.startsWith(prefix, shadowOffset)) {
+        shadowOffset += prefix.length;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) break;
+  }
+
+  if (shadowOffset === 0) return name;
+
+  // Map the shadow offset back to the original string.
+  // The shadow has all \uFE0F removed, so we advance through the original
+  // string, skipping \uFE0F characters, until we've consumed `shadowOffset`
+  // non-VS16 characters.
+  let origOffset = 0;
+  let consumed = 0;
+  while (consumed < shadowOffset && origOffset < name.length) {
+    if (name[origOffset] === '\uFE0F') {
+      origOffset++;
+    } else {
+      origOffset++;
+      consumed++;
+    }
+  }
+  // Also skip any trailing VS16 at the boundary.
+  while (origOffset < name.length && name[origOffset] === '\uFE0F') {
+    origOffset++;
+  }
+
+  return name.slice(origOffset);
+}
 
 // ---------------------------------------------------------------------------
 // Thread name builder
@@ -44,10 +110,11 @@ export const CADENCE_EMOJI: Record<string, string> = {
 const THREAD_NAME_MAX = 100;
 
 export function buildCronThreadName(name: string, cadence: CadenceTag | null): string {
+  const stripped = stripCadencePrefix(name);
   const emoji = cadence ? (CADENCE_EMOJI[cadence] ?? '') : '';
   const prefix = emoji ? `${emoji} ` : '';
   const maxName = THREAD_NAME_MAX - prefix.length;
-  const trimmed = name.length > maxName ? name.slice(0, maxName - 1) + '\u2026' : name;
+  const trimmed = stripped.length > maxName ? stripped.slice(0, maxName - 1) + '\u2026' : stripped;
   return `${prefix}${trimmed}`;
 }
 
