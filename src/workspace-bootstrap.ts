@@ -20,31 +20,21 @@ const TEMPLATE_FILES = [
 /** Marker text present in the template IDENTITY.md but removed during onboarding. */
 const IDENTITY_TEMPLATE_MARKER = '*(pick something you like)*';
 
-/** Marker text present in the template USER.md but removed during onboarding. */
-const USER_TEMPLATE_MARKER = '_Learn about the person you\'re helping. Update this as you go._';
-
 /**
- * Onboarding is considered complete when:
- * 1. IDENTITY.md exists and no longer contains the template placeholder text.
- * 2. USER.md exists and no longer contains the template placeholder text.
+ * Onboarding is considered complete when IDENTITY.md exists and no longer
+ * contains the template placeholder text. USER.md is NOT checked because
+ * it's designed to be incrementally filled in — existing installs may have
+ * a populated USER.md that still contains the template intro line, and
+ * flagging that as "not onboarded" would force re-onboarding and overwrite
+ * user-authored content.
  *
  * Once complete, BOOTSTRAP.md is no longer scaffolded and any stale copy is auto-deleted.
  */
 export async function isOnboardingComplete(workspaceCwd: string): Promise<boolean> {
-  // Check IDENTITY.md
   const identityPath = path.join(workspaceCwd, 'IDENTITY.md');
   try {
     const content = await fs.readFile(identityPath, 'utf-8');
     if (content.includes(IDENTITY_TEMPLATE_MARKER)) return false;
-  } catch {
-    return false;
-  }
-
-  // Check USER.md
-  const userPath = path.join(workspaceCwd, 'USER.md');
-  try {
-    const userContent = await fs.readFile(userPath, 'utf-8');
-    if (userContent.includes(USER_TEMPLATE_MARKER)) return false;
     return true;
   } catch {
     return false;

@@ -80,14 +80,14 @@ describe('isOnboardingComplete', () => {
     expect(await isOnboardingComplete(workspace)).toBe(true);
   });
 
-  it('returns false when IDENTITY.md is real but USER.md is missing', async () => {
+  it('returns true when IDENTITY.md is real but USER.md is missing (only IDENTITY checked)', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-onboard-'));
     dirs.push(workspace);
     await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
-    expect(await isOnboardingComplete(workspace)).toBe(false);
+    expect(await isOnboardingComplete(workspace)).toBe(true);
   });
 
-  it('returns false when IDENTITY.md is real but USER.md is still template', async () => {
+  it('returns true when IDENTITY.md is real but USER.md is still template (only IDENTITY checked)', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-onboard-'));
     dirs.push(workspace);
     await fs.writeFile(path.join(workspace, 'IDENTITY.md'), REAL_IDENTITY, 'utf-8');
@@ -97,7 +97,7 @@ describe('isOnboardingComplete', () => {
       'utf-8',
     );
     await fs.writeFile(path.join(workspace, 'USER.md'), templateUser, 'utf-8');
-    expect(await isOnboardingComplete(workspace)).toBe(false);
+    expect(await isOnboardingComplete(workspace)).toBe(true);
   });
 });
 

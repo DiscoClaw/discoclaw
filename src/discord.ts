@@ -432,8 +432,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 destroyOnboardingSession();
               }
             }
-          } else {
-            // Normal flow step — send the reply
+          } else if (result.reply) {
+            // Normal flow step — send the reply (guard against empty content from DONE state)
             await msg.channel.send({ content: result.reply, allowedMentions: NO_MENTIONS });
           }
           return;
