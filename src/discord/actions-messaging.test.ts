@@ -143,6 +143,35 @@ describe('sendMessage', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('non-empty string');
   });
+
+  it('returns descriptive error when targeting a forum channel by ID', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'forum1', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('forum channel');
+    expect((result as any).error).toContain('threadCreate');
+    expect((result as any).error).not.toContain('not found');
+  });
+
+  it('returns descriptive error when targeting a voice channel by ID', async () => {
+    const voice = makeMockChannel({ id: 'v1', name: 'voice', type: ChannelType.GuildVoice });
+    const ctx = makeCtx([voice]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'v1', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('voice channel');
+    expect((result as any).error).not.toContain('not found');
+  });
 });
 
 describe('react', () => {
@@ -221,6 +250,20 @@ describe('readMessages', () => {
     const summary = (result as any).summary as string;
     expect(summary).toContain('[alice] First');
     expect(summary).toContain('[bob] Second');
+  });
+
+  it('returns descriptive error when targeting a forum channel', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: 'forum1', limit: 5 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('forum channel');
+    expect((result as any).error).not.toContain('not found');
   });
 
   it('clamps limit to 20', async () => {
@@ -470,6 +513,20 @@ describe('listPins', () => {
 
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain('[alice] Important');
+  });
+
+  it('returns descriptive error when targeting a forum channel', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+
+    const result = await executeMessagingAction(
+      { type: 'listPins', channel: 'forum1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('forum channel');
+    expect((result as any).error).not.toContain('not found');
   });
 
   it('returns empty message when no pins', async () => {

@@ -40,6 +40,34 @@ function isTextBased(ch: any): boolean {
   );
 }
 
+/** Human-readable channel type name for error messages. */
+export function describeChannelType(ch: any): string {
+  switch (ch?.type) {
+    case ChannelType.GuildForum: return 'forum';
+    case ChannelType.GuildMedia: return 'media';
+    case ChannelType.GuildVoice: return 'voice';
+    case ChannelType.GuildStageVoice: return 'stage';
+    case ChannelType.GuildCategory: return 'category';
+    default: return 'unsupported';
+  }
+}
+
+/**
+ * Look up a channel by ref (ID or name) and return it raw, without filtering
+ * by type. Returns undefined only if the channel truly doesn't exist.
+ */
+export function findChannelRaw(guild: Guild, ref: string): any | undefined {
+  const cleaned = ref.replace(/^#/, '').trim();
+  if (!cleaned) return undefined;
+
+  const byId = guild.channels.cache.get(cleaned);
+  if (byId) return byId;
+
+  return guild.channels.cache.find(
+    (ch) => ch.name.toLowerCase() === cleaned.toLowerCase(),
+  );
+}
+
 /** Format a timestamp for display. */
 export function fmtTime(date: Date): string {
   return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
