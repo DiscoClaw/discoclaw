@@ -19,7 +19,7 @@ import type { PlanPhase, PlanPhases } from './plan-manager.js';
 // ---------------------------------------------------------------------------
 
 export type PlanCommand = {
-  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'skip';
+  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'run-one' | 'skip';
   args: string;
 };
 
@@ -36,7 +36,7 @@ export type PlanFileHeader = {
 // Parsing
 // ---------------------------------------------------------------------------
 
-const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'cancel', 'help', 'phases', 'run', 'skip']);
+const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'cancel', 'help', 'phases', 'run', 'run-one', 'skip']);
 
 export function parsePlanCommand(content: string): PlanCommand | null {
   const trimmed = content.trim();
@@ -255,7 +255,8 @@ export async function handlePlanCommand(
         '- `!plan approve <plan-id|bead-id>` — approve for implementation',
         '- `!plan close <plan-id|bead-id>` — close/abandon a plan',
         '- `!plan phases <plan-id>` — show/generate phase checklist',
-        '- `!plan run <plan-id>` — execute next pending phase',
+        '- `!plan run <plan-id>` — execute all remaining phases',
+        '- `!plan run-one <plan-id>` — execute next pending phase only',
         '- `!plan skip <plan-id>` — skip a failed/in-progress phase',
       ].join('\n');
     }
