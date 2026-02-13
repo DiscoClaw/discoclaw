@@ -1,6 +1,6 @@
 import { ChannelType } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
-import { resolveChannel, fmtTime } from './action-utils.js';
+import { resolveChannel, fmtTime, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,15 @@ export async function executeMessagingAction(
         return { ok: false, error: `Content exceeds Discord's ${DISCORD_MAX_CONTENT} character limit (got ${action.content.length})` };
       }
       const channel = resolveChannel(guild, action.channel);
-      if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
+      if (!channel) {
+        const raw = findChannelRaw(guild, action.channel);
+        if (raw) {
+          const kind = describeChannelType(raw);
+          const hint = kind === 'forum' ? ' Use threadCreate to post in forum channels.' : '';
+          return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot receive messages directly.${hint}` };
+        }
+        return { ok: false, error: `Channel "${action.channel}" not found` };
+      }
 
       const opts: any = { content: action.content, allowedMentions: NO_MENTIONS };
       if (action.replyTo) {
@@ -84,7 +92,14 @@ export async function executeMessagingAction(
 
     case 'readMessages': {
       const channel = resolveChannel(guild, action.channel);
-      if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
+      if (!channel) {
+        const raw = findChannelRaw(guild, action.channel);
+        if (raw) {
+          const kind = describeChannelType(raw);
+          return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot be read directly. Use readMessages with a thread ID instead.` };
+        }
+        return { ok: false, error: `Channel "${action.channel}" not found` };
+      }
 
       const limit = Math.min(Math.max(1, action.limit ?? 10), 20);
       const opts: any = { limit };
@@ -206,7 +221,14 @@ export async function executeMessagingAction(
 
     case 'listPins': {
       const channel = resolveChannel(guild, action.channel);
-      if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
+      if (!channel) {
+        const raw = findChannelRaw(guild, action.channel);
+        if (raw) {
+          const kind = describeChannelType(raw);
+          return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel. Use individual thread IDs to list pins.` };
+        }
+        return { ok: false, error: `Channel "${action.channel}" not found` };
+      }
       const pinned = await channel.messages.fetchPinned();
 
       if (pinned.size === 0) {
@@ -237,6 +259,7 @@ export function messagingActionsPromptSection(): string {
 - \`channel\` (required): Channel name (with or without #) or channel ID.
 - \`content\` (required): Message text.
 - \`replyTo\` (optional): Message ID to reply to.
+- **Important:** Forum channels do NOT support sendMessage. To post in a forum, use \`threadCreate\` instead.
 
 **react** — Add a reaction to a message:
 \`\`\`

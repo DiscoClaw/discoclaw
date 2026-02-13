@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
-import { resolveChannel } from './action-utils.js';
+import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 
 function makeGuild(channels: any[]) {
   return {
@@ -30,6 +30,43 @@ describe('resolveChannel', () => {
 
     const out = resolveChannel(guild, 'general');
     expect(out).toBeUndefined();
+  });
+});
+
+describe('findChannelRaw', () => {
+  it('finds a forum channel by ID', () => {
+    const forum = { id: '123', name: 'beads', type: ChannelType.GuildForum };
+    const guild = makeGuild([forum]);
+
+    const out = findChannelRaw(guild, '123');
+    expect(out).toBe(forum);
+  });
+
+  it('finds a forum channel by name', () => {
+    const forum = { id: '123', name: 'beads', type: ChannelType.GuildForum };
+    const guild = makeGuild([forum]);
+
+    const out = findChannelRaw(guild, 'beads');
+    expect(out).toBe(forum);
+  });
+
+  it('returns undefined for nonexistent channel', () => {
+    const guild = makeGuild([]);
+    expect(findChannelRaw(guild, '999')).toBeUndefined();
+  });
+});
+
+describe('describeChannelType', () => {
+  it('returns "forum" for forum channels', () => {
+    expect(describeChannelType({ type: ChannelType.GuildForum })).toBe('forum');
+  });
+
+  it('returns "voice" for voice channels', () => {
+    expect(describeChannelType({ type: ChannelType.GuildVoice })).toBe('voice');
+  });
+
+  it('returns "unsupported" for unknown types', () => {
+    expect(describeChannelType({ type: 999 })).toBe('unsupported');
   });
 });
 
