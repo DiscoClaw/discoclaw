@@ -18,8 +18,29 @@ const TEMPLATE_FILES = [
 ];
 
 /**
+ * Onboarding is considered complete when IDENTITY.md exists and contains
+ * content beyond the bare template placeholder. Once complete, BOOTSTRAP.md
+ * is no longer scaffolded and any stale copy is auto-deleted.
+ */
+export async function isOnboardingComplete(workspaceCwd: string): Promise<boolean> {
+  const identityPath = path.join(workspaceCwd, 'IDENTITY.md');
+  try {
+    const content = await fs.readFile(identityPath, 'utf-8');
+    // The template IDENTITY.md is near-empty. Real onboarding populates it
+    // with the agent's name, vibe, etc. Treat any file >50 chars as complete.
+    return content.trim().length > 50;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Ensure workspace PA template files exist. Copies any missing files from
  * `templates/workspace/` to the workspace directory. Never overwrites existing files.
+ *
+ * When onboarding is complete (IDENTITY.md has real content), BOOTSTRAP.md is
+ * excluded from scaffolding and any existing copy is auto-deleted to prevent
+ * wasted context tokens and confusing first-run instructions.
  *
  * @returns list of files that were newly created (empty if workspace was already set up)
  */
@@ -30,8 +51,13 @@ export async function ensureWorkspaceBootstrapFiles(
   const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
   await fs.mkdir(workspaceCwd, { recursive: true });
 
+  const onboarded = await isOnboardingComplete(workspaceCwd);
+
   const created: string[] = [];
   for (const file of TEMPLATE_FILES) {
+    // Skip BOOTSTRAP.md entirely once onboarding is complete.
+    if (file === 'BOOTSTRAP.md' && onboarded) continue;
+
     const dest = path.join(workspaceCwd, file);
     try {
       await fs.access(dest);
@@ -40,6 +66,17 @@ export async function ensureWorkspaceBootstrapFiles(
       const src = path.join(templatesDir, file);
       await fs.copyFile(src, dest);
       created.push(file);
+    }
+  }
+
+  // Auto-delete stale BOOTSTRAP.md after onboarding.
+  if (onboarded) {
+    const bootstrapPath = path.join(workspaceCwd, 'BOOTSTRAP.md');
+    try {
+      await fs.unlink(bootstrapPath);
+      log?.info({ workspaceCwd }, 'workspace:bootstrap auto-deleted stale BOOTSTRAP.md');
+    } catch {
+      // Already gone — nothing to do.
     }
   }
 
