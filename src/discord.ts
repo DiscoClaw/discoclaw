@@ -21,6 +21,7 @@ import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
 import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, NO_PHASES_SENTINEL } from './discord/plan-commands.js';
+import { handlePlanAudit } from './discord/audit-handler.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator } from './discord/forge-commands.js';
 import type { ForgeOrchestratorOpts } from './discord/forge-commands.js';
@@ -625,6 +626,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const releaseLock = await acquireWriterLock();
                 try {
                   const response = await handlePlanSkip(planCmd.args, planOpts);
+                  await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+                } finally {
+                  releaseLock();
+                }
+                return;
+              }
+
+              // --- !plan audit ---
+              if (planCmd.action === 'audit') {
+                if (!planCmd.args) {
+                  await msg.reply({ content: 'Usage: `!plan audit <plan-id>`', allowedMentions: NO_MENTIONS });
+                  return;
+                }
+
+                const releaseLock = await acquireWriterLock();
+                try {
+                  const response = await handlePlanAudit(planCmd.args, planOpts);
                   await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
                 } finally {
                   releaseLock();
