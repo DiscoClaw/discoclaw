@@ -40,6 +40,7 @@ import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/sho
 import { editThenSendChunks } from './discord/output-common.js';
 import { downloadMessageImages, resolveMediaType } from './discord/image-download.js';
 import { resolveReplyReference } from './discord/reply-reference.js';
+import { resolveThreadContext } from './discord/thread-context.js';
 import { downloadTextAttachments } from './discord/file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
@@ -520,6 +521,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           stopReason = 'error';
                           stopMessage = `Phase **${phaseResult.phase.id}** failed: ${phaseResult.error}`;
                           break;
+                        } else if (phaseResult.result === 'audit_failed') {
+                          stopReason = 'error';
+                          stopMessage = `Audit phase **${phaseResult.phase.id}** found **${phaseResult.verdict.maxSeverity}** severity deviations. Use \`!plan run ${planId}\` to re-run the audit, \`!plan skip ${planId}\` to skip it, or \`!plan phases --regenerate ${planId}\` to regenerate phases.`;
+                          break;
                         } else if (phaseResult.result === 'stale') {
                           stopReason = 'error';
                           stopMessage = phaseResult.message;
@@ -639,8 +644,30 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
-              // All other plan actions pass through
-              const response = await handlePlanCommand(planCmd, planOpts);
+              // All other plan actions pass through.
+              // For create, include reply context so "!plan fix this" knows what "this" is.
+              // Context travels separately so slug/bead/title stay clean.
+              let effectivePlanCmd = planCmd;
+              if (planCmd.action === 'create' && planCmd.args) {
+                const replyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
+                const threadCtx = await resolveThreadContext(
+                  msg.channel as any,
+                  msg.id,
+                  { botDisplayName: params.botDisplayName, log: params.log },
+                );
+
+                const contextParts: string[] = [];
+                if (replyRef?.section) {
+                  contextParts.push(`Context (replied-to message):\n${replyRef.section}`);
+                }
+                if (threadCtx?.section) {
+                  contextParts.push(threadCtx.section);
+                }
+                if (contextParts.length > 0) {
+                  effectivePlanCmd = { ...planCmd, context: contextParts.join('\n\n') };
+                }
+              }
+              const response = await handlePlanCommand(effectivePlanCmd, planOpts);
               await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
               return;
             }
@@ -691,6 +718,26 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
+              // Resolve reply + thread context separately — don't concatenate into args
+              // (args drives the bead title and slug; context goes in the plan body).
+              const forgeReplyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
+              const forgeThreadCtx = await resolveThreadContext(
+                msg.channel as any,
+                msg.id,
+                { botDisplayName: params.botDisplayName, log: params.log },
+              );
+
+              const forgeContextParts: string[] = [];
+              if (forgeReplyRef?.section) {
+                forgeContextParts.push(`Context (replied-to message):\n${forgeReplyRef.section}`);
+              }
+              if (forgeThreadCtx?.section) {
+                forgeContextParts.push(forgeThreadCtx.section);
+              }
+              const forgeContext = forgeContextParts.length > 0
+                ? forgeContextParts.join('\n\n')
+                : undefined;
+
               const forgeReleaseLock = await acquireWriterLock();
 
               const plansDir = path.join(params.workspaceCwd, 'plans');
@@ -736,7 +783,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
               // Run forge in the background — don't block the queue
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              forgeOrchestrator.run(forgeCmd.args, onProgress).then(
+              forgeOrchestrator.run(forgeCmd.args, onProgress, forgeContext).then(
                 async (result) => {
                   forgeReleaseLock();
                   if (progressMessageGone) {

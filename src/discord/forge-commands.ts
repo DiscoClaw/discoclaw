@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { handlePlanCommand } from './plan-commands.js';
-import { parsePlanFileHeader } from './plan-commands.js';
+import { handlePlanCommand, parsePlanFileHeader } from './plan-commands.js';
+import { bdUpdate } from '../beads/bd-cli.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
 import { collectRuntimeText } from './runtime-utils.js';
@@ -327,6 +327,7 @@ export class ForgeOrchestrator {
   async run(
     description: string,
     onProgress: ProgressFn,
+    context?: string,
   ): Promise<ForgeResult> {
     if (this.running) {
       throw new Error('A forge is already running');
@@ -340,8 +341,9 @@ export class ForgeOrchestrator {
 
     try {
       // 1. Create the plan file via handlePlanCommand
+      // Pass context separately so bead title/slug stay clean (context goes in plan body).
       const createResult = await handlePlanCommand(
-        { action: 'create', args: description },
+        { action: 'create', args: description, context },
         { workspaceCwd: this.opts.workspaceCwd, beadsCwd: this.opts.beadsCwd },
       );
 
@@ -408,8 +410,12 @@ export class ForgeOrchestrator {
         if (round === 1) {
           await onProgress(`Forging ${planId}... Drafting (reading codebase)`);
 
+          // Include context in the drafter's task description so it knows what to fix.
+          const drafterDescription = context
+            ? `${description}\n\n${context}`
+            : description;
           const drafterPrompt = buildDrafterPrompt(
-            description,
+            drafterDescription,
             templateContent,
             contextSummary,
           );
@@ -427,6 +433,20 @@ export class ForgeOrchestrator {
           // Write the draft — preserve the header (planId, beadId) from the created file
           planContent = this.mergeDraftWithHeader(planContent, draftOutput);
           await this.atomicWrite(filePath, planContent);
+
+          // Update bead title to match the drafter's Plan title (raw user input is often messy).
+          // Extract title from draftOutput (pre-merge), since mergeDraftWithHeader preserves
+          // the original header's title line for plan ID/bead ID continuity.
+          const drafterTitleMatch = draftOutput.match(/^# Plan:\s*(.+)$/m);
+          const mergedHeader = parsePlanFileHeader(planContent);
+          const drafterTitle = drafterTitleMatch?.[1]?.trim();
+          if (mergedHeader?.beadId && drafterTitle && drafterTitle !== description) {
+            try {
+              await bdUpdate(mergedHeader.beadId, { title: drafterTitle }, this.opts.beadsCwd);
+            } catch {
+              // best-effort — bead title update failure shouldn't block the forge
+            }
+          }
         } else {
           await onProgress(
             `Forging ${planId}... Revision complete. Audit round ${round}/${this.opts.maxAuditRounds}...`,

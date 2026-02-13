@@ -21,6 +21,7 @@ import type { PlanPhase, PlanPhases } from './plan-manager.js';
 export type PlanCommand = {
   action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'run-one' | 'skip';
   args: string;
+  context?: string;
 };
 
 export type PlanFileHeader = {
@@ -306,7 +307,12 @@ export async function handlePlanCommand(
           '**Status:** DRAFT',
         );
 
-      await fs.writeFile(filePath, content, 'utf-8');
+      // Append reply context below the template body (keeps slug/bead/title clean)
+      const finalContent = cmd.context
+        ? content + `\n## Context\n\n${cmd.context}\n`
+        : content;
+
+      await fs.writeFile(filePath, finalContent, 'utf-8');
 
       return [
         `Plan created: **${planId}** (bead: \`${bead.id}\`)`,
