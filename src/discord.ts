@@ -635,6 +635,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       // best-effort
                     }
                   }
+                  // Send CTA prompt for approval + implementation
+                  if (!result.error && result.planId && params.forgeAutoImplement && !result.reachedMaxRounds && result.finalVerdict !== 'CANCELLED') {
+                    try {
+                      await msg.channel.send({
+                        content: `Reply \`!plan approve ${result.planId}\` to approve, then \`!plan run ${result.planId}\` to start implementation. Or \`!plan show ${result.planId}\` to review first.`,
+                        allowedMentions: NO_MENTIONS,
+                      });
+                    } catch {
+                      // best-effort
+                    }
+                  }
                 },
                 async (err) => {
                   forgeReleaseLock();
