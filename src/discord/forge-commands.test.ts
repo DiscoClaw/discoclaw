@@ -707,3 +707,239 @@ describe('ForgeOrchestrator', () => {
     expect(mockBdUpdate).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// ForgeOrchestrator.resume()
+// ---------------------------------------------------------------------------
+
+function makePlanContent(overrides: { status?: string; title?: string; planId?: string; reviews?: number; includeChanges?: boolean } = {}): string {
+  const status = overrides.status ?? 'REVIEW';
+  const title = overrides.title ?? 'Test Plan';
+  const planId = overrides.planId ?? 'plan-001';
+  const includeChanges = overrides.includeChanges ?? true;
+  const reviews = overrides.reviews ?? 0;
+
+  const lines = [
+    `# Plan: ${title}`,
+    '',
+    `**ID:** ${planId}`,
+    `**Bead:** ws-test-001`,
+    `**Created:** 2026-01-01`,
+    `**Status:** ${status}`,
+    `**Project:** discoclaw`,
+    '',
+    '---',
+    '',
+    '## Objective',
+    '',
+    'Build the test feature with proper error handling.',
+    '',
+    '## Scope',
+    '',
+    'In scope: everything related to testing.',
+    '',
+    '## Changes',
+    '',
+    ...(includeChanges
+      ? ['### File-by-file breakdown', '', '#### `src/foo.ts`', '', 'Add bar function.', '']
+      : ['']),
+    '## Risks',
+    '',
+    '- Low risk of breaking existing tests.',
+    '',
+    '## Testing',
+    '',
+    '- Unit tests for the new feature.',
+    '',
+    '---',
+    '',
+    '## Audit Log',
+    '',
+  ];
+
+  for (let i = 1; i <= reviews; i++) {
+    lines.push(`### Review ${i} — 2026-01-01`);
+    lines.push('**Status:** COMPLETE');
+    lines.push('');
+    lines.push(`Audit round ${i} notes.`);
+    lines.push('');
+  }
+
+  lines.push('---', '', '## Implementation Notes', '', '_Filled in during/after implementation._', '');
+  return lines.join('\n');
+}
+
+describe('ForgeOrchestrator.resume()', () => {
+  it('loads existing plan and runs audit loop (skipping draft)', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(tmpDir, makeMockRuntime([
+      // Only audit output — no draft call
+      '**Verdict:** Ready to approve.',
+    ]));
+
+    // Write plan file directly
+    const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    const progress: string[] = [];
+    const result = await orchestrator.resume('plan-001', filePath, 'Test Plan', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.planId).toBe('plan-001');
+    expect(result.rounds).toBe(1);
+    expect(result.reachedMaxRounds).toBe(false);
+    expect(result.error).toBeUndefined();
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+    // Should NOT contain draft-phase progress
+    expect(progress.some((p) => p.includes('Drafting'))).toBe(false);
+  });
+
+  it('handles audit-then-revise loop', async () => {
+    const tmpDir = await makeTmpDir();
+    const auditMedium = '**Concern 1: Issue**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    const revisedPlan = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const opts = await baseOpts(tmpDir, makeMockRuntime([
+      auditMedium,  // first audit
+      revisedPlan,  // revision
+      auditClean,   // second audit
+    ]));
+
+    const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    const result = await orchestrator.resume('plan-001', filePath, 'Test Plan', async () => {});
+
+    expect(result.rounds).toBe(2);
+    expect(result.reachedMaxRounds).toBe(false);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('respects cancel', async () => {
+    const tmpDir = await makeTmpDir();
+    const auditMedium = '**Concern 1: Issue**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    const revisedPlan = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const opts = await baseOpts(tmpDir, makeMockRuntime([auditMedium, revisedPlan, auditClean]));
+
+    const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    const result = await orchestrator.resume('plan-001', filePath, 'Test Plan', async (msg) => {
+      if (msg.includes('medium concerns')) {
+        orchestrator.requestCancel();
+      }
+    });
+
+    expect(result.finalVerdict).toBe('CANCELLED');
+  });
+
+  it('rejects IMPLEMENTING plans', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(tmpDir, makeMockRuntime([]));
+
+    const planContent = makePlanContent({ planId: 'plan-001', status: 'IMPLEMENTING' });
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    const result = await orchestrator.resume('plan-001', filePath, 'Test Plan', async () => {});
+
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('currently being implemented');
+  });
+
+  it('rejects APPROVED plans', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(tmpDir, makeMockRuntime([]));
+
+    const planContent = makePlanContent({ planId: 'plan-001', status: 'APPROVED' });
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    const result = await orchestrator.resume('plan-001', filePath, 'Test Plan', async () => {});
+
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('approved');
+    expect(result.error).toContain('downgrade');
+  });
+
+  it('uses correct round numbers when plan has existing reviews', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(tmpDir, makeMockRuntime([
+      '**Verdict:** Ready to approve.',
+    ]));
+
+    // Plan already has Review 1 and Review 2
+    const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW', reviews: 2 });
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    await orchestrator.resume('plan-001', filePath, 'Test Plan', async () => {});
+
+    // Read the plan file and verify the new review is Review 3
+    const updatedContent = await fs.readFile(filePath, 'utf-8');
+    expect(updatedContent).toContain('### Review 3');
+  });
+
+  it('rejects plans with missing required sections', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(tmpDir, makeMockRuntime([]));
+
+    // Plan missing Changes and Testing sections
+    const planContent = [
+      '# Plan: Incomplete Plan',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-test-001',
+      '**Created:** 2026-01-01',
+      '**Status:** REVIEW',
+      '**Project:** discoclaw',
+      '',
+      '---',
+      '',
+      '## Objective',
+      '',
+      'Build the test feature with proper error handling.',
+      '',
+      '## Scope',
+      '',
+      'In scope: everything.',
+      '',
+      '## Risks',
+      '',
+      '- None.',
+      '',
+      '---',
+      '',
+      '## Audit Log',
+      '',
+      '---',
+      '',
+      '## Implementation Notes',
+      '',
+      '_Filled in during/after implementation._',
+    ].join('\n');
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    const result = await orchestrator.resume('plan-001', filePath, 'Incomplete Plan', async () => {});
+
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('structural issues');
+    expect(result.error).toContain('Changes');
+    expect(result.error).toContain('Testing');
+  });
+});

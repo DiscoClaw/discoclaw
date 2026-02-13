@@ -5,6 +5,7 @@ import { bdUpdate } from '../beads/bd-cli.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
 import { collectRuntimeText } from './runtime-utils.js';
+import { auditPlanStructure, maxReviewNumber } from './audit-handler.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -419,179 +420,18 @@ export class ForgeOrchestrator {
       // Build context summary from workspace files (includes project context)
       const contextSummary = await this.buildContextSummary(projectContext);
 
-      const drafterModel = this.opts.drafterModel ?? this.opts.model;
-      const auditorModel = this.opts.auditorModel ?? this.opts.model;
-      const readOnlyTools = ['Read', 'Glob', 'Grep'];
-      const addDirs = [this.opts.cwd];
-
-      let round = 0;
-      let planContent = await fs.readFile(filePath, 'utf-8');
-      let lastAuditNotes = '';
-      let lastVerdict: AuditVerdict = { maxSeverity: 'none', shouldLoop: false };
-
-      while (round < this.opts.maxAuditRounds) {
-        if (this.cancelRequested) {
-          await this.updatePlanStatus(filePath, 'CANCELLED');
-          return {
-            planId,
-            filePath,
-            finalVerdict: 'CANCELLED',
-            rounds: round,
-            reachedMaxRounds: false,
-          };
-        }
-
-        round++;
-
-        // Draft phase (or revision phase on subsequent rounds)
-        if (round === 1) {
-          await onProgress(`Forging ${planId}... Drafting (reading codebase)`);
-
-          // Include context in the drafter's task description so it knows what to fix.
-          const drafterDescription = context
-            ? `${description}\n\n${context}`
-            : description;
-          const drafterPrompt = buildDrafterPrompt(
-            drafterDescription,
-            templateContent,
-            contextSummary,
-          );
-
-          const draftOutput = await collectRuntimeText(
-            this.opts.runtime,
-            drafterPrompt,
-            drafterModel,
-            this.opts.cwd,
-            readOnlyTools,
-            addDirs,
-            this.opts.timeoutMs,
-          );
-
-          // Write the draft — preserve the header (planId, beadId) from the created file
-          planContent = this.mergeDraftWithHeader(planContent, draftOutput);
-          await this.atomicWrite(filePath, planContent);
-
-          // Update bead title to match the drafter's Plan title (raw user input is often messy).
-          // Extract title from draftOutput (pre-merge), since mergeDraftWithHeader preserves
-          // the original header's title line for plan ID/bead ID continuity.
-          const drafterTitleMatch = draftOutput.match(/^# Plan:\s*(.+)$/m);
-          const mergedHeader = parsePlanFileHeader(planContent);
-          const drafterTitle = drafterTitleMatch?.[1]?.trim();
-          if (mergedHeader?.beadId && drafterTitle && drafterTitle !== description) {
-            try {
-              await bdUpdate(mergedHeader.beadId, { title: drafterTitle }, this.opts.beadsCwd);
-            } catch {
-              // best-effort — bead title update failure shouldn't block the forge
-            }
-          }
-        } else {
-          await onProgress(
-            `Forging ${planId}... Revision complete. Audit round ${round}/${this.opts.maxAuditRounds}...`,
-          );
-        }
-
-        // Audit phase
-        await onProgress(
-          round === 1
-            ? `Forging ${planId}... Draft complete. Audit round ${round}/${this.opts.maxAuditRounds}...`
-            : `Forging ${planId}... Audit round ${round}/${this.opts.maxAuditRounds}...`,
-        );
-
-        const auditorPrompt = buildAuditorPrompt(planContent, round, projectContext);
-        const auditOutput = await collectRuntimeText(
-          this.opts.runtime,
-          auditorPrompt,
-          auditorModel,
-          this.opts.cwd,
-          [], // auditor doesn't need tools
-          [],
-          this.opts.timeoutMs,
-        );
-
-        lastAuditNotes = auditOutput;
-        lastVerdict = parseAuditVerdict(auditOutput);
-
-        // Append audit notes to the plan file
-        planContent = appendAuditRound(planContent, round, auditOutput, lastVerdict);
-        await this.atomicWrite(filePath, planContent);
-
-        // Check if we should loop
-        if (!lastVerdict.shouldLoop) {
-          await this.updatePlanStatus(filePath, 'REVIEW');
-          // Re-read to get updated status in the summary
-          planContent = await fs.readFile(filePath, 'utf-8');
-          const summary = buildPlanSummary(planContent);
-          const elapsed = Math.round((Date.now() - t0) / 1000);
-          await onProgress(
-            `Forge complete. Plan ${planId} ready for review (${round} round${round > 1 ? 's' : ''}, ${elapsed}s)`,
-            { force: true },
-          );
-          return {
-            planId,
-            filePath,
-            finalVerdict: lastVerdict.maxSeverity,
-            rounds: round,
-            reachedMaxRounds: false,
-            planSummary: summary,
-          };
-        }
-
-        // Check if we've hit the cap
-        if (round >= this.opts.maxAuditRounds) {
-          break;
-        }
-
-        // Revision phase
-        await onProgress(
-          `Forging ${planId}... Audit round ${round} found ${lastVerdict.maxSeverity} concerns. Revising...`,
-        );
-
-        const revisionPrompt = buildRevisionPrompt(
-          planContent,
-          auditOutput,
-          description,
-          projectContext,
-        );
-
-        const revisionOutput = await collectRuntimeText(
-          this.opts.runtime,
-          revisionPrompt,
-          drafterModel,
-          this.opts.cwd,
-          readOnlyTools,
-          addDirs,
-          this.opts.timeoutMs,
-        );
-
-        planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
-        await this.atomicWrite(filePath, planContent);
-      }
-
-      // Cap reached
-      planContent = planContent.replace(
-        /(\n---\n\n## Implementation Notes)/,
-        `\n\nVERDICT: CAP_REACHED\n$1`,
-      );
-      await this.atomicWrite(filePath, planContent);
-      await this.updatePlanStatus(filePath, 'REVIEW');
-      // Re-read to get updated status in the summary
-      planContent = await fs.readFile(filePath, 'utf-8');
-      const summary = buildPlanSummary(planContent);
-
-      const elapsed = Math.round((Date.now() - t0) / 1000);
-      await onProgress(
-        `Forge stopped after ${this.opts.maxAuditRounds} audit rounds — concerns remain. Review manually: \`!plan show ${planId}\``,
-        { force: true },
-      );
-
-      return {
+      return await this.auditLoop({
         planId,
         filePath,
-        finalVerdict: lastVerdict.maxSeverity,
-        rounds: round,
-        reachedMaxRounds: true,
-        planSummary: summary,
-      };
+        description: context ? `${description}\n\n${context}` : description,
+        startRound: 1,
+        onProgress,
+        projectContext,
+        // Draft-phase specifics (only used when startRound === 1)
+        templateContent,
+        contextSummary,
+        t0,
+      });
     } catch (err) {
       const errorMsg = String(err instanceof Error ? err.message : err);
       this.opts.log?.error({ err, planId }, 'forge:error');
@@ -623,9 +463,287 @@ export class ForgeOrchestrator {
     }
   }
 
+  async resume(
+    planId: string,
+    filePath: string,
+    planTitle: string,
+    onProgress: ProgressFn,
+  ): Promise<ForgeResult> {
+    if (this.running) {
+      throw new Error('A forge is already running');
+    }
+    this.running = true;
+    this.cancelRequested = false;
+    const t0 = Date.now();
+
+    let originalStatus = '';
+
+    try {
+      const planContent = await fs.readFile(filePath, 'utf-8');
+      const header = parsePlanFileHeader(planContent);
+      originalStatus = header?.status ?? '';
+
+      // Validate plan status
+      if (originalStatus === 'IMPLEMENTING') {
+        throw new Error('Plan is currently being implemented. Use `!plan cancel` to stop it first.');
+      }
+      if (originalStatus === 'APPROVED') {
+        throw new Error('Plan is approved — re-auditing would downgrade its status. Use `!plan audit` for a standalone audit instead.');
+      }
+
+      // Structural pre-flight: reject plans with high-severity structural issues
+      const structuralConcerns = auditPlanStructure(planContent);
+      const highSeverity = structuralConcerns.filter((c) => c.severity === 'high');
+      if (highSeverity.length > 0) {
+        const missing = highSeverity.map((c) => c.title).join(', ');
+        throw new Error(`Plan has structural issues: ${missing}. Fix the plan file before re-auditing.`);
+      }
+
+      // Load project context
+      const projectContext = await this.loadProjectContext();
+
+      // Determine start round from existing reviews
+      const startRound = maxReviewNumber(planContent) + 1;
+
+      return await this.auditLoop({
+        planId,
+        filePath,
+        description: planTitle,
+        startRound,
+        onProgress,
+        projectContext,
+        t0,
+      });
+    } catch (err) {
+      const errorMsg = String(err instanceof Error ? err.message : err);
+      this.opts.log?.error({ err, planId }, 'forge:resume:error');
+
+      // Best-effort: restore original status if we changed it
+      if (filePath && originalStatus) {
+        try {
+          await this.updatePlanStatus(filePath, originalStatus);
+        } catch {
+          // best-effort
+        }
+      }
+
+      await onProgress(
+        `Forge resume failed for ${planId}: ${errorMsg}`,
+        { force: true },
+      );
+
+      return {
+        planId,
+        filePath,
+        finalVerdict: 'error',
+        rounds: 0,
+        reachedMaxRounds: false,
+        error: errorMsg,
+      };
+    } finally {
+      this.running = false;
+    }
+  }
+
   // -----------------------------------------------------------------------
   // Private helpers
   // -----------------------------------------------------------------------
+
+  private async auditLoop(params: {
+    planId: string;
+    filePath: string;
+    description: string;
+    startRound: number;
+    onProgress: ProgressFn;
+    projectContext?: string;
+    // Draft-phase specifics (only present when startRound === 1, i.e. from run())
+    templateContent?: string;
+    contextSummary?: string;
+    t0?: number;
+  }): Promise<ForgeResult> {
+    const {
+      planId,
+      filePath,
+      description,
+      startRound,
+      onProgress,
+      projectContext,
+      templateContent,
+      contextSummary,
+    } = params;
+    const t0 = params.t0 ?? Date.now();
+
+    const drafterModel = this.opts.drafterModel ?? this.opts.model;
+    const auditorModel = this.opts.auditorModel ?? this.opts.model;
+    const readOnlyTools = ['Read', 'Glob', 'Grep'];
+    const addDirs = [this.opts.cwd];
+
+    let round = startRound - 1; // will be incremented at top of loop
+    let planContent = await fs.readFile(filePath, 'utf-8');
+    let lastAuditNotes = '';
+    let lastVerdict: AuditVerdict = { maxSeverity: 'none', shouldLoop: false };
+
+    // The effective max round number is startRound + maxAuditRounds - 1
+    const maxRound = startRound + this.opts.maxAuditRounds - 1;
+
+    while (round < maxRound) {
+      if (this.cancelRequested) {
+        await this.updatePlanStatus(filePath, 'CANCELLED');
+        return {
+          planId,
+          filePath,
+          finalVerdict: 'CANCELLED',
+          rounds: round - startRound + 1,
+          reachedMaxRounds: false,
+        };
+      }
+
+      round++;
+
+      // Draft phase (only on first round of a fresh forge, not resume)
+      if (round === 1 && startRound === 1 && templateContent && contextSummary) {
+        await onProgress(`Forging ${planId}... Drafting (reading codebase)`);
+
+        const drafterPrompt = buildDrafterPrompt(
+          description,
+          templateContent,
+          contextSummary,
+        );
+
+        const draftOutput = await collectRuntimeText(
+          this.opts.runtime,
+          drafterPrompt,
+          drafterModel,
+          this.opts.cwd,
+          readOnlyTools,
+          addDirs,
+          this.opts.timeoutMs,
+        );
+
+        // Write the draft — preserve the header (planId, beadId) from the created file
+        planContent = this.mergeDraftWithHeader(planContent, draftOutput);
+        await this.atomicWrite(filePath, planContent);
+
+        // Update bead title to match the drafter's Plan title (raw user input is often messy).
+        const drafterTitleMatch = draftOutput.match(/^# Plan:\s*(.+)$/m);
+        const mergedHeader = parsePlanFileHeader(planContent);
+        const drafterTitle = drafterTitleMatch?.[1]?.trim();
+        if (mergedHeader?.beadId && drafterTitle && drafterTitle !== description) {
+          try {
+            await bdUpdate(mergedHeader.beadId, { title: drafterTitle }, this.opts.beadsCwd);
+          } catch {
+            // best-effort — bead title update failure shouldn't block the forge
+          }
+        }
+      } else if (round > startRound) {
+        await onProgress(
+          `Forging ${planId}... Revision complete. Audit round ${round}/${maxRound}...`,
+        );
+      }
+
+      // Audit phase
+      await onProgress(
+        round === startRound && startRound === 1
+          ? `Forging ${planId}... Draft complete. Audit round ${round}/${maxRound}...`
+          : `Forging ${planId}... Audit round ${round}/${maxRound}...`,
+      );
+
+      const auditorPrompt = buildAuditorPrompt(planContent, round, projectContext);
+      const auditOutput = await collectRuntimeText(
+        this.opts.runtime,
+        auditorPrompt,
+        auditorModel,
+        this.opts.cwd,
+        [], // auditor doesn't need tools
+        [],
+        this.opts.timeoutMs,
+      );
+
+      lastAuditNotes = auditOutput;
+      lastVerdict = parseAuditVerdict(auditOutput);
+
+      // Append audit notes to the plan file
+      planContent = appendAuditRound(planContent, round, auditOutput, lastVerdict);
+      await this.atomicWrite(filePath, planContent);
+
+      // Check if we should loop
+      if (!lastVerdict.shouldLoop) {
+        await this.updatePlanStatus(filePath, 'REVIEW');
+        // Re-read to get updated status in the summary
+        planContent = await fs.readFile(filePath, 'utf-8');
+        const summary = buildPlanSummary(planContent);
+        const elapsed = Math.round((Date.now() - t0) / 1000);
+        await onProgress(
+          `Forge complete. Plan ${planId} ready for review (${round - startRound + 1} round${round - startRound + 1 > 1 ? 's' : ''}, ${elapsed}s)`,
+          { force: true },
+        );
+        return {
+          planId,
+          filePath,
+          finalVerdict: lastVerdict.maxSeverity,
+          rounds: round - startRound + 1,
+          reachedMaxRounds: false,
+          planSummary: summary,
+        };
+      }
+
+      // Check if we've hit the cap
+      if (round >= maxRound) {
+        break;
+      }
+
+      // Revision phase
+      await onProgress(
+        `Forging ${planId}... Audit round ${round} found ${lastVerdict.maxSeverity} concerns. Revising...`,
+      );
+
+      const revisionPrompt = buildRevisionPrompt(
+        planContent,
+        auditOutput,
+        description,
+        projectContext,
+      );
+
+      const revisionOutput = await collectRuntimeText(
+        this.opts.runtime,
+        revisionPrompt,
+        drafterModel,
+        this.opts.cwd,
+        readOnlyTools,
+        addDirs,
+        this.opts.timeoutMs,
+      );
+
+      planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
+      await this.atomicWrite(filePath, planContent);
+    }
+
+    // Cap reached
+    planContent = planContent.replace(
+      /(\n---\n\n## Implementation Notes)/,
+      `\n\nVERDICT: CAP_REACHED\n$1`,
+    );
+    await this.atomicWrite(filePath, planContent);
+    await this.updatePlanStatus(filePath, 'REVIEW');
+    // Re-read to get updated status in the summary
+    planContent = await fs.readFile(filePath, 'utf-8');
+    const summary = buildPlanSummary(planContent);
+
+    const elapsed = Math.round((Date.now() - t0) / 1000);
+    await onProgress(
+      `Forge stopped after ${this.opts.maxAuditRounds} audit rounds — concerns remain. Review manually: \`!plan show ${planId}\``,
+      { force: true },
+    );
+
+    return {
+      planId,
+      filePath,
+      finalVerdict: lastVerdict.maxSeverity,
+      rounds: round - startRound + 1,
+      reachedMaxRounds: true,
+      planSummary: summary,
+    };
+  }
 
   private async buildContextSummary(projectContext?: string): Promise<string> {
     const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];

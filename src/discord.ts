@@ -20,7 +20,7 @@ import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
-import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, NO_PHASES_SENTINEL } from './discord/plan-commands.js';
+import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './discord/plan-commands.js';
 import { handlePlanAudit } from './discord/audit-handler.js';
 import type { PlanAuditResult } from './discord/audit-handler.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
@@ -502,6 +502,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           break;
                         }
 
+                        // Reset throttle so the phase-start message from runNextPhase
+                        // (onProgress at plan-manager.ts line 1041) is displayed immediately
+                        // rather than being suppressed by the previous phase's final edit.
+                        if (i > 0) lastEditAt = 0;
+
                         const releaseLock = await acquireWriterLock();
                         let phaseResult;
                         const phaseStart = Date.now();
@@ -517,7 +522,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           // Between-phase progress update (bypass throttle)
                           lastEditAt = 0;
                           try {
-                            await onProgress(`Phase **${phaseResult.phase.id}** done. Checking for next phase...`);
+                            const nextNote = phaseResult.nextPhase
+                              ? ` Next: ${phaseResult.nextPhase.id}: ${phaseResult.nextPhase.title}...`
+                              : '';
+                            await onProgress(`Phase **${phaseResult.phase.id}** done.${nextNote}`);
                           } catch { /* edit failure doesn't break the loop */ }
                         } else if (phaseResult.result === 'nothing_to_run') {
                           break;
@@ -780,6 +788,112 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   content: 'A forge is already running. Use `!forge cancel` to stop it first.',
                   allowedMentions: NO_MENTIONS,
                 });
+                return;
+              }
+
+              // --- Detect plan-ID references (resume existing plan) ---
+              if (looksLikePlanId(forgeCmd.args)) {
+                const plansDir = path.join(params.workspaceCwd, 'plans');
+                const found = await findPlanFile(plansDir, forgeCmd.args);
+                if (!found) {
+                  await msg.reply({
+                    content: `No plan found matching "${forgeCmd.args}". Use \`!forge <description>\` to create a new plan.`,
+                    allowedMentions: NO_MENTIONS,
+                  });
+                  return;
+                }
+
+                // Resume path
+                const forgeReleaseLock = await acquireWriterLock();
+
+                forgeOrchestrator = new ForgeOrchestrator({
+                  runtime: params.runtime,
+                  model: params.runtimeModel,
+                  cwd: params.workspaceCwd,
+                  workspaceCwd: params.workspaceCwd,
+                  beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                  plansDir,
+                  maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
+                  progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,
+                  timeoutMs: params.forgeTimeoutMs ?? 5 * 60_000,
+                  drafterModel: params.forgeDrafterModel,
+                  auditorModel: params.forgeAuditorModel,
+                  log: params.log,
+                });
+
+                const progressReply = await msg.reply({
+                  content: `Re-auditing **${found.header.planId}**...`,
+                  allowedMentions: NO_MENTIONS,
+                });
+
+                let lastEditAt = 0;
+                const throttleMs = params.forgeProgressThrottleMs ?? 3000;
+                let progressMessageGone = false;
+
+                const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
+                  if (progressMessageGone) return;
+                  const now = Date.now();
+                  if (!opts?.force && now - lastEditAt < throttleMs) return;
+                  lastEditAt = now;
+                  try {
+                    await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
+                  } catch (editErr: any) {
+                    if (editErr?.code === 10008) {
+                      progressMessageGone = true;
+                    }
+                  }
+                };
+
+                // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                forgeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress).then(
+                  async (result) => {
+                    forgeReleaseLock();
+                    if (progressMessageGone) {
+                      try {
+                        const statusMsg = result.error
+                          ? `Forge resume failed: ${result.error}`
+                          : `Forge complete. Plan **${result.planId}** ready for review (${result.rounds} round${result.rounds > 1 ? 's' : ''}).`;
+                        await msg.channel.send({ content: statusMsg, allowedMentions: NO_MENTIONS });
+                      } catch {
+                        // best-effort
+                      }
+                    }
+                    if (result.planSummary && !result.error) {
+                      try {
+                        await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
+                      } catch {
+                        // best-effort
+                      }
+                    }
+                    if (!result.error && result.planId && params.forgeAutoImplement && !result.reachedMaxRounds && result.finalVerdict !== 'CANCELLED') {
+                      try {
+                        await msg.channel.send({
+                          content: `Reply \`!plan approve ${result.planId}\` to approve, then \`!plan run ${result.planId}\` to start implementation. Or \`!plan show ${result.planId}\` to review first.`,
+                          allowedMentions: NO_MENTIONS,
+                        });
+                      } catch {
+                        // best-effort
+                      }
+                    }
+                  },
+                  async (err) => {
+                    forgeReleaseLock();
+                    params.log?.error({ err }, 'forge:resume:unhandled error');
+                    try {
+                      const errMsg = `Forge resume crashed: ${String(err)}`;
+                      if (progressMessageGone) {
+                        await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
+                      } else {
+                        await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                      }
+                    } catch {
+                      // best-effort
+                    }
+                  },
+                ).catch((err) => {
+                  params.log?.error({ err }, 'forge:resume: unhandled rejection in callback');
+                });
+
                 return;
               }
 

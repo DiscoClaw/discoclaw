@@ -1130,6 +1130,147 @@ describe('runNextPhase', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Phase progress messages and nextPhase on RunPhaseResult
+// ---------------------------------------------------------------------------
+
+describe('phase progress messages and nextPhase', () => {
+  let tmpDir: string;
+  let projectDir: string;
+  let wsDir: string;
+  let plansDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir();
+    projectDir = path.join(tmpDir, 'project');
+    wsDir = path.join(tmpDir, 'workspace');
+    plansDir = path.join(wsDir, 'plans');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.mkdir(plansDir, { recursive: true });
+
+    // Init git in project dir
+    try {
+      execSync('git init', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git config user.email "test@test.com"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git config user.name "Test"', { cwd: projectDir, stdio: 'pipe' });
+      await fs.writeFile(path.join(projectDir, 'README.md'), 'test');
+      execSync('git add . && git commit -m "init"', { cwd: projectDir, stdio: 'pipe' });
+    } catch {
+      // git not available
+    }
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const progressMsgs: string[] = [];
+  const onProgress = async (msg: string) => { progressMsgs.push(msg); };
+
+  beforeEach(() => {
+    progressMsgs.length = 0;
+  });
+
+  function makeOpts(runtime: RuntimeAdapter): PhaseExecutionOpts {
+    return {
+      runtime,
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 5000,
+      workspaceCwd: wsDir,
+    };
+  }
+
+  it('phase-start message includes bold phase ID prefix', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Done!')), onProgress);
+
+    const firstPhaseId = phases.phases[0]!.id;
+    const firstPhaseTitle = phases.phases[0]!.title;
+    expect(progressMsgs.some(m => m === `**${firstPhaseId}**: Running ${firstPhaseTitle}...`)).toBe(true);
+  });
+
+  it('sub-step messages include phase ID prefix', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    // Build a phases file with an implement phase that has workspace context files
+    const phases: PlanPhases = {
+      planId: 'plan-011',
+      planFile: 'workspace/plans/plan-011-test.md',
+      planContentHash: computePlanHash(SAMPLE_PLAN),
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'Implement plan',
+          kind: 'implement',
+          description: 'Implement changes.',
+          status: 'pending',
+          dependsOn: [],
+          contextFiles: ['src/foo.ts', 'workspace/TOOLS.md'],
+        },
+      ],
+    };
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Done!')), onProgress);
+
+    // "Executing" sub-step includes phase ID prefix
+    expect(progressMsgs.some(m => m === '**phase-1**: Executing implement phase...')).toBe(true);
+    // "Reading context files" sub-step includes phase ID prefix (fires because workspace/ files present)
+    expect(progressMsgs.some(m => m === '**phase-1**: Reading context files...')).toBe(true);
+  });
+
+  it('nextPhase is present on done result for multi-phase plans', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    // Ensure there are at least 2 phases
+    expect(phases.phases.length).toBeGreaterThanOrEqual(2);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Done!')), onProgress);
+    expect(result.result).toBe('done');
+    if (result.result === 'done') {
+      expect(result.nextPhase).toBeDefined();
+      expect(result.nextPhase!.id).toBe(phases.phases[1]!.id);
+      expect(result.nextPhase!.title).toBe(phases.phases[1]!.title);
+    }
+  });
+
+  it('nextPhase is undefined when last phase completes', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    // Mark all phases except the last as done
+    for (let i = 0; i < phases.phases.length - 1; i++) {
+      phases.phases[i]!.status = 'done';
+      phases.phases[i]!.output = 'Previously completed.';
+    }
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Final phase done!')), onProgress);
+    expect(result.result).toBe('done');
+    if (result.result === 'done') {
+      expect(result.nextPhase).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Workspace filename normalization in decomposePlan
 // ---------------------------------------------------------------------------
 

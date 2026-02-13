@@ -13,6 +13,8 @@ import {
   updatePlanFileStatus,
   listPlanFiles,
   findPlanFile,
+  normalizePlanId,
+  looksLikePlanId,
   NO_PHASES_SENTINEL,
 } from './plan-commands.js';
 import type { PlanCommand, HandlePlanCommandOpts } from './plan-commands.js';
@@ -1103,5 +1105,166 @@ describe('listPlanFiles', () => {
     const results = await listPlanFiles(plansDir);
     expect(results).toHaveLength(1);
     expect(results[0]!.header.planId).toBe('plan-001');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizePlanId
+// ---------------------------------------------------------------------------
+
+describe('normalizePlanId', () => {
+  it('normalizes bare "031" to "plan-031"', () => {
+    expect(normalizePlanId('031')).toBe('plan-031');
+  });
+
+  it('normalizes bare "31" to "plan-031"', () => {
+    expect(normalizePlanId('31')).toBe('plan-031');
+  });
+
+  it('normalizes bare "1" to "plan-001"', () => {
+    expect(normalizePlanId('1')).toBe('plan-001');
+  });
+
+  it('normalizes "plan-31" to "plan-031"', () => {
+    expect(normalizePlanId('plan-31')).toBe('plan-031');
+  });
+
+  it('normalizes "plan-1" to "plan-001"', () => {
+    expect(normalizePlanId('plan-1')).toBe('plan-001');
+  });
+
+  it('passes through "plan-031" as "plan-031"', () => {
+    expect(normalizePlanId('plan-031')).toBe('plan-031');
+  });
+
+  it('returns null for bead IDs', () => {
+    expect(normalizePlanId('workspace-abc')).toBeNull();
+  });
+
+  it('returns null for descriptions', () => {
+    expect(normalizePlanId('add rate limiting')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// looksLikePlanId
+// ---------------------------------------------------------------------------
+
+describe('looksLikePlanId', () => {
+  it('returns true for bare numbers', () => {
+    expect(looksLikePlanId('031')).toBe(true);
+    expect(looksLikePlanId('31')).toBe(true);
+    expect(looksLikePlanId('1')).toBe(true);
+  });
+
+  it('returns true for plan-N patterns', () => {
+    expect(looksLikePlanId('plan-031')).toBe(true);
+    expect(looksLikePlanId('plan-31')).toBe(true);
+  });
+
+  it('returns false for descriptions', () => {
+    expect(looksLikePlanId('add rate limiting')).toBe(false);
+    expect(looksLikePlanId('fix the bug')).toBe(false);
+    expect(looksLikePlanId('31 flavors of ice cream')).toBe(false);
+  });
+
+  it('returns false for bead IDs', () => {
+    expect(looksLikePlanId('workspace-abc')).toBe(false);
+    expect(looksLikePlanId('ws-test-001')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findPlanFile — bare-number resolution
+// ---------------------------------------------------------------------------
+
+describe('findPlanFile — bare-number resolution', () => {
+  it('resolves bare number "031" to "plan-031"', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-031-test.md'),
+      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await findPlanFile(plansDir, '031');
+    expect(result).not.toBeNull();
+    expect(result!.header.planId).toBe('plan-031');
+  });
+
+  it('resolves unpadded number "31" to "plan-031"', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-031-test.md'),
+      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await findPlanFile(plansDir, '31');
+    expect(result).not.toBeNull();
+    expect(result!.header.planId).toBe('plan-031');
+  });
+
+  it('resolves "plan-31" to "plan-031"', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-031-test.md'),
+      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await findPlanFile(plansDir, 'plan-31');
+    expect(result).not.toBeNull();
+    expect(result!.header.planId).toBe('plan-031');
+  });
+
+  it('still resolves full "plan-031" format', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-031-test.md'),
+      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await findPlanFile(plansDir, 'plan-031');
+    expect(result).not.toBeNull();
+    expect(result!.header.planId).toBe('plan-031');
+  });
+
+  it('still resolves bead ID', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-031-test.md'),
+      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-special-bead\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await findPlanFile(plansDir, 'ws-special-bead');
+    expect(result).not.toBeNull();
+    expect(result!.header.planId).toBe('plan-031');
+  });
+
+  it('returns null for number that does not match any plan', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await findPlanFile(plansDir, '999');
+    expect(result).toBeNull();
   });
 });
