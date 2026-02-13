@@ -533,7 +533,8 @@ describe('workspace PA files in prompt', () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pa-prompt-'));
     await fs.writeFile(path.join(workspace, 'BOOTSTRAP.md'), '# Bootstrap', 'utf-8');
     await fs.writeFile(path.join(workspace, 'SOUL.md'), '# Soul', 'utf-8');
-    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), '# Identity', 'utf-8');
+    // IDENTITY.md must contain template marker so onboarding is incomplete.
+    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), '# Identity\n*(pick something you like)*', 'utf-8');
     await fs.writeFile(path.join(workspace, 'USER.md'), '# User', 'utf-8');
 
     const handler = createMessageCreateHandler({

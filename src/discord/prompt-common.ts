@@ -4,6 +4,7 @@ import type { DiscordChannelContext } from './channel-context.js';
 import { formatDurableSection, loadDurableMemory, selectItemsForInjection } from './durable-memory.js';
 import { buildShortTermMemorySection } from './shortterm-memory.js';
 import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
+import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import type { LoggerLike } from './action-types.js';
 import type { BeadData } from '../beads/types.js';
 import type { BeadContext } from './actions-beads.js';
@@ -15,9 +16,15 @@ export async function loadWorkspacePaFiles(
 ): Promise<string[]> {
   if (opts?.skip) return [];
   const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
-  const bootstrapPath = path.join(workspaceCwd, 'BOOTSTRAP.md');
   const paFiles: string[] = [];
-  try { await fs.access(bootstrapPath); paFiles.push(bootstrapPath); } catch { /* ignore */ }
+
+  // Only include BOOTSTRAP.md when onboarding is still in progress.
+  const onboarded = await isOnboardingComplete(workspaceCwd);
+  if (!onboarded) {
+    const bootstrapPath = path.join(workspaceCwd, 'BOOTSTRAP.md');
+    try { await fs.access(bootstrapPath); paFiles.push(bootstrapPath); } catch { /* ignore */ }
+  }
+
   for (const f of paFileNames) {
     const p = path.join(workspaceCwd, f);
     try { await fs.access(p); paFiles.push(p); } catch { /* ignore */ }

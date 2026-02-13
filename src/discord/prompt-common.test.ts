@@ -45,15 +45,34 @@ describe('loadWorkspacePaFiles', () => {
     expect(files).toEqual([path.join(workspace, 'USER.md')]);
   });
 
-  it('includes BOOTSTRAP.md before PA files when it exists', async () => {
+  it('includes BOOTSTRAP.md before PA files when onboarding is incomplete', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pc-test-'));
     dirs.push(workspace);
     await fs.writeFile(path.join(workspace, 'BOOTSTRAP.md'), '# Bootstrap', 'utf-8');
     await fs.writeFile(path.join(workspace, 'SOUL.md'), '# Soul', 'utf-8');
+    // No IDENTITY.md with real content — onboarding incomplete.
 
     const files = await loadWorkspacePaFiles(workspace);
     expect(files[0]).toBe(path.join(workspace, 'BOOTSTRAP.md'));
     expect(files[1]).toBe(path.join(workspace, 'SOUL.md'));
+  });
+
+  it('excludes BOOTSTRAP.md when onboarding is complete', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pc-test-'));
+    dirs.push(workspace);
+    await fs.writeFile(path.join(workspace, 'BOOTSTRAP.md'), '# Bootstrap', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'SOUL.md'), '# Soul', 'utf-8');
+    // IDENTITY.md with real content — onboarding complete.
+    await fs.writeFile(
+      path.join(workspace, 'IDENTITY.md'),
+      '# Identity\n\nName: Claw\nVibe: Snarky but helpful\nEmoji: 🦀\nCreature: A sentient crustacean AI',
+      'utf-8',
+    );
+
+    const files = await loadWorkspacePaFiles(workspace);
+    expect(files).not.toContainEqual(expect.stringContaining('BOOTSTRAP.md'));
+    expect(files).toContainEqual(expect.stringContaining('SOUL.md'));
+    expect(files).toContainEqual(expect.stringContaining('IDENTITY.md'));
   });
 });
 
