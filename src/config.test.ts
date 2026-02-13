@@ -176,9 +176,9 @@ describe('parseConfig', () => {
   });
 
   // --- Summary-to-durable ---
-  it('defaults summaryToDurableEnabled to false', () => {
+  it('defaults summaryToDurableEnabled to true', () => {
     const { config } = parseConfig(env());
-    expect(config.summaryToDurableEnabled).toBe(false);
+    expect(config.summaryToDurableEnabled).toBe(true);
   });
 
   it('parses DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED=1 as true', () => {
