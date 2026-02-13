@@ -55,7 +55,7 @@ export type PhaseExecutionOpts = {
 };
 
 export type RunPhaseResult =
-  | { result: 'done'; phase: PlanPhase; output: string }
+  | { result: 'done'; phase: PlanPhase; output: string; nextPhase?: { id: string; title: string } }
   | { result: 'failed'; phase: PlanPhase; output: string; error: string }
   | { result: 'audit_failed'; phase: PlanPhase; output: string; verdict: AuditVerdict; fixAttemptsUsed?: number }
   | { result: 'stale'; message: string }
@@ -1038,7 +1038,7 @@ export async function runNextPhase(
   }
 
   // 5. Write in-progress status to disk
-  await onProgress(`Running ${phase.id}: ${phase.title}...`);
+  await onProgress(`**${phase.id}**: Running ${phase.title}...`);
   allPhases = updatePhaseStatus(allPhases, phase.id, 'in-progress');
   writePhasesFile(phasesFilePath, allPhases);
 
@@ -1097,6 +1097,10 @@ export async function runNextPhase(
   const MAX_INJECTED_CONTEXT_BYTES = 100 * 1024; // 100 KB budget
   let injectedContext: string | undefined;
   if (phase.kind === 'implement') {
+    const hasWorkspaceFiles = phase.contextFiles.some((cf) => cf.startsWith('workspace/'));
+    if (hasWorkspaceFiles) {
+      await onProgress(`**${phase.id}**: Reading context files...`);
+    }
     const blocks: string[] = [];
     let totalBytes = 0;
     for (const cf of phase.contextFiles) {
@@ -1125,6 +1129,7 @@ export async function runNextPhase(
   // 9. Execute the phase
   // Reload the phase from allPhases to get the updated status
   const currentPhase = allPhases.phases.find((p) => p.id === phase.id)!;
+  await onProgress(`**${phase.id}**: Executing ${phase.kind} phase...`);
   let result = await executePhase(currentPhase, planContent, allPhases, opts, injectedContext);
 
   // 9a. Audit fix loop: if audit failed and git is available, attempt fix→re-audit cycles
@@ -1147,11 +1152,11 @@ export async function runNextPhase(
         // Progress message — different wording for first vs subsequent
         if (attempt === 1) {
           await onProgress(
-            `Audit found **${lastSeverity}** deviations \u2014 attempting fix (${attempt}/${maxFixAttempts})...`,
+            `**${phase.id}**: Audit found **${lastSeverity}** deviations \u2014 attempting fix (${attempt}/${maxFixAttempts})...`,
           );
         } else {
           await onProgress(
-            `Audit still found deviations \u2014 attempting fix (${attempt}/${maxFixAttempts})...`,
+            `**${phase.id}**: Audit still found deviations \u2014 attempting fix (${attempt}/${maxFixAttempts})...`,
           );
         }
 
@@ -1194,7 +1199,7 @@ export async function runNextPhase(
         }
 
         // Re-audit
-        await onProgress(`Fix attempt ${attempt} complete. Re-auditing...`);
+        await onProgress(`**${phase.id}**: Fix attempt ${attempt} complete. Re-auditing...`);
         result = await executePhase(currentPhase, planContent, allPhases, opts);
 
         if (result.status === 'done') {
@@ -1303,7 +1308,9 @@ export async function runNextPhase(
   const updatedPhase = allPhases.phases.find((p) => p.id === phase.id)!;
 
   if (result.status === 'done') {
-    return { result: 'done', phase: updatedPhase, output: result.output };
+    const upcoming = getNextPhase(allPhases);
+    const nextPhase = upcoming ? { id: upcoming.id, title: upcoming.title } : undefined;
+    return { result: 'done', phase: updatedPhase, output: result.output, nextPhase };
   } else if (result.status === 'audit_failed') {
     return { result: 'audit_failed', phase: updatedPhase, output: result.output, verdict: result.verdict, fixAttemptsUsed };
   } else {

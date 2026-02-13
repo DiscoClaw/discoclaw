@@ -517,7 +517,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           // Between-phase progress update (bypass throttle)
                           lastEditAt = 0;
                           try {
-                            await onProgress(`Phase **${phaseResult.phase.id}** done. Checking for next phase...`);
+                            const nextNote = phaseResult.nextPhase
+                              ? ` Next: ${phaseResult.nextPhase.id}: ${phaseResult.nextPhase.title}...`
+                              : '';
+                            await onProgress(`Phase **${phaseResult.phase.id}** done.${nextNote}`);
                           } catch { /* edit failure doesn't break the loop */ }
                         } else if (phaseResult.result === 'nothing_to_run') {
                           break;
