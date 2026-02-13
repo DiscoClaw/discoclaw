@@ -22,17 +22,20 @@ const IDENTITY_TEMPLATE_MARKER = '*(pick something you like)*';
 
 /**
  * Onboarding is considered complete when IDENTITY.md exists and no longer
- * contains the template placeholder text. Once complete, BOOTSTRAP.md
- * is no longer scaffolded and any stale copy is auto-deleted.
+ * contains the template placeholder text. USER.md is NOT checked because
+ * it's designed to be incrementally filled in — existing installs may have
+ * a populated USER.md that still contains the template intro line, and
+ * flagging that as "not onboarded" would force re-onboarding and overwrite
+ * user-authored content.
+ *
+ * Once complete, BOOTSTRAP.md is no longer scaffolded and any stale copy is auto-deleted.
  */
 export async function isOnboardingComplete(workspaceCwd: string): Promise<boolean> {
   const identityPath = path.join(workspaceCwd, 'IDENTITY.md');
   try {
     const content = await fs.readFile(identityPath, 'utf-8');
-    // The template IDENTITY.md contains placeholder prompts like
-    // "*(pick something you like)*". If those are still present, the agent
-    // hasn't completed onboarding yet. If they're gone, someone filled it in.
-    return !content.includes(IDENTITY_TEMPLATE_MARKER);
+    if (content.includes(IDENTITY_TEMPLATE_MARKER)) return false;
+    return true;
   } catch {
     return false;
   }

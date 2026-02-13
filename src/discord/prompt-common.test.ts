@@ -68,6 +68,12 @@ describe('loadWorkspacePaFiles', () => {
       '# Identity\n\nName: Claw\nVibe: Snarky but helpful\nEmoji: 🦀\nCreature: A sentient crustacean AI',
       'utf-8',
     );
+    // USER.md with real content — required for onboarding complete.
+    await fs.writeFile(
+      path.join(workspace, 'USER.md'),
+      '# USER.md - About Your Human\n\n- **Name:** Test User\n- **What to call them:** Test\n',
+      'utf-8',
+    );
 
     const files = await loadWorkspacePaFiles(workspace);
     expect(files).not.toContainEqual(expect.stringContaining('BOOTSTRAP.md'));

@@ -231,6 +231,19 @@ describe('buildAuditorPrompt', () => {
     const prompt = buildAuditorPrompt('# Plan: Test', 1);
     expect(prompt).not.toContain('## Project Context');
   });
+
+  it('includes prior audit history instructions for round > 1', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 3);
+    expect(prompt).toContain('Prior Audit History');
+    expect(prompt).toContain('DO NOT re-raise concerns that were adequately resolved');
+    expect(prompt).toContain('Focus on genuinely new issues');
+  });
+
+  it('omits prior audit history instructions for round 1', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    expect(prompt).not.toContain('Prior Audit History');
+    expect(prompt).not.toContain('DO NOT re-raise');
+  });
 });
 
 describe('buildRevisionPrompt', () => {
@@ -251,6 +264,11 @@ describe('buildRevisionPrompt', () => {
   it('omits project context section when not provided', () => {
     const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
     expect(prompt).not.toContain('## Project Context');
+  });
+
+  it('includes instruction to preserve prior resolutions', () => {
+    const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
+    expect(prompt).toContain('Preserve resolutions from prior audit rounds');
   });
 });
 

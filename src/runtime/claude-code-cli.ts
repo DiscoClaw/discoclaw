@@ -286,12 +286,15 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       }
     }
 
-    // When images are present, switch to stdin-based input with stream-json.
+    // Use stdin-based input when images are present OR when the prompt is too
+    // large for a CLI positional argument (Linux E2BIG limit ~128 KB).
     const hasImages = params.images && params.images.length > 0;
+    const promptTooLarge = Buffer.byteLength(params.prompt, 'utf-8') > 100_000;
+    const useStdin = hasImages || promptTooLarge;
     // Images require stream-json for content block parsing; compute once before arg construction.
-    const effectiveOutputFormat = hasImages ? 'stream-json' as const : opts.outputFormat;
+    const effectiveOutputFormat = useStdin ? 'stream-json' as const : opts.outputFormat;
 
-    if (hasImages) {
+    if (useStdin) {
       args.push('--input-format', 'stream-json');
     }
 
@@ -317,11 +320,11 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
 
     if (opts.log) {
       // Log args without the prompt to avoid leaking user content at debug level.
-      opts.log.debug({ args, hasImages: Boolean(hasImages) }, 'claude-cli: constructed args');
+      opts.log.debug({ args, hasImages: Boolean(hasImages), promptTooLarge, useStdin }, 'claude-cli: constructed args');
     }
 
-    // When images are present, prompt is sent via stdin; otherwise as positional arg.
-    if (!hasImages) {
+    // When using stdin, prompt is sent via pipe; otherwise as positional arg.
+    if (!useStdin) {
       // POSIX `--` terminates option parsing, preventing variadic flags
       // (--tools, --add-dir) from consuming the positional prompt.
       args.push('--', params.prompt);
@@ -332,8 +335,8 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       timeout: params.timeoutMs,
       reject: false,
       forceKillAfterDelay: 5000,
-      // When images are present we pipe stdin; otherwise ignore to prevent auth hangs.
-      stdin: hasImages ? 'pipe' : 'ignore',
+      // When using stdin (images or large prompts) we pipe; otherwise ignore to prevent auth hangs.
+      stdin: useStdin ? 'pipe' : 'ignore',
       env: {
         ...process.env,
         // Prefer plain output: Discord doesn't render ANSI well.
@@ -345,16 +348,20 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       stderr: 'pipe',
     });
 
-    // When images are present, write the prompt + images to stdin as NDJSON, then close.
-    if (hasImages && subprocess.stdin) {
+    // When using stdin, write the prompt (+ optional images) as NDJSON, then close.
+    if (useStdin && subprocess.stdin) {
       try {
-        const content = [
+        const content: Array<Record<string, unknown>> = [
           { type: 'text', text: params.prompt },
-          ...params.images!.map((img) => ({
-            type: 'image',
-            source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
-          })),
         ];
+        if (hasImages) {
+          for (const img of params.images!) {
+            content.push({
+              type: 'image',
+              source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
+            });
+          }
+        }
         const stdinMsg = JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
         subprocess.stdin.write(stdinMsg);
         subprocess.stdin.end();

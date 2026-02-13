@@ -171,11 +171,27 @@ export function buildAuditorPrompt(planContent: string, roundNumber: number, pro
     `## This is audit round ${roundNumber}.`,
   );
 
-  return [
+  const instructions = [
     ...sections,
     '',
     '## Instructions',
     '',
+  ];
+
+  if (roundNumber > 1) {
+    instructions.push(
+      '### Prior Audit History',
+      '',
+      'The plan contains prior audit reviews (### Review N sections) with resolutions inline. These represent concerns that were already raised and addressed in earlier rounds.',
+      '',
+      '- **DO NOT re-raise concerns that were adequately resolved.** If a prior resolution is sound, move on.',
+      '- **If a prior resolution is inadequate**, reference the specific prior review (e.g., "Review 1, Concern 3\'s resolution fails because...") and explain why it doesn\'t hold. This counts as a new concern.',
+      '- **Focus on genuinely new issues** — things not yet examined, edge cases the prior rounds missed, or problems introduced by the revisions themselves.',
+      '',
+    );
+  }
+
+  instructions.push(
     'Review the plan for:',
     '1. Missing or underspecified details (vague scope, unclear file changes)',
     '2. Architectural issues (wrong abstraction, missing error handling, wrong patterns)',
@@ -199,7 +215,9 @@ export function buildAuditorPrompt(planContent: string, roundNumber: number, pro
     '',
     'Be thorough but fair. Don\'t nitpick style — focus on correctness, safety, and completeness.',
     'Output only the audit notes and verdict. No preamble.',
-  ].join('\n');
+  );
+
+  return instructions.join('\n');
 }
 
 export function buildRevisionPrompt(
@@ -244,6 +262,7 @@ export function buildRevisionPrompt(
     '- Address all high and medium severity concerns from the audit.',
     '- Read the codebase using your tools if needed to resolve concerns.',
     '- Keep the same plan structure and format.',
+    '- Preserve resolutions from prior audit rounds that were accepted — do not weaken, revert, or remove them unless the current audit explicitly challenges them.',
     '- Output the complete revised plan markdown starting with `# Plan:`. Output ONLY the plan markdown — no preamble, no explanation.',
   );
 
