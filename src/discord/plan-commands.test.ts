@@ -349,6 +349,38 @@ describe('handlePlanCommand', () => {
     expect(content).toContain('**Status:** DRAFT');
   });
 
+  it('create — appends context to plan file body without polluting slug or bead title', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'fix the login flow', context: 'Context (replied-to message):\n[Weston]: The login handler crashes on empty passwords.' },
+      opts,
+    );
+
+    expect(result).toContain('plan-001');
+    expect(result).toContain('fix the login flow');
+
+    // Bead title should be the raw args, not polluted with context
+    expect(bdCreate).toHaveBeenCalledWith(
+      { title: 'fix the login flow', labels: ['plan'] },
+      opts.beadsCwd,
+    );
+
+    // Slug should not contain context text
+    const plansDir = path.join(tmpDir, 'plans');
+    const files = await fs.readdir(plansDir);
+    const planFile = files.find((f) => f.startsWith('plan-001'));
+    expect(planFile).toBeTruthy();
+    expect(planFile).not.toContain('context');
+    expect(planFile).not.toContain('replied');
+
+    // But the file body should contain the context section
+    const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+    expect(content).toContain('## Context');
+    expect(content).toContain('The login handler crashes on empty passwords');
+  });
+
   it('create — creates plans dir when missing', async () => {
     const tmpDir = await makeTmpDir();
     // Don't create plansDir — handlePlanCommand should create it.

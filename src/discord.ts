@@ -641,11 +641,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
               // All other plan actions pass through.
               // For create, include reply context so "!plan fix this" knows what "this" is.
+              // Context travels separately so slug/bead/title stay clean.
               let effectivePlanCmd = planCmd;
               if (planCmd.action === 'create' && planCmd.args) {
                 const replyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
                 if (replyRef?.section) {
-                  effectivePlanCmd = { ...planCmd, args: `${planCmd.args}\n\nContext (replied-to message):\n${replyRef.section}` };
+                  effectivePlanCmd = { ...planCmd, context: `Context (replied-to message):\n${replyRef.section}` };
                 }
               }
               const response = await handlePlanCommand(effectivePlanCmd, planOpts);
@@ -699,12 +700,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
-              // Include reply context so "!forge fix this" knows what "this" refers to.
-              let forgeDescription = forgeCmd.args;
+              // Resolve reply context separately — don't concatenate into args
+              // (args drives the bead title and slug; context goes in the plan body).
               const forgeReplyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
-              if (forgeReplyRef?.section) {
-                forgeDescription = `${forgeCmd.args}\n\nContext (replied-to message):\n${forgeReplyRef.section}`;
-              }
+              const forgeContext = forgeReplyRef?.section
+                ? `Context (replied-to message):\n${forgeReplyRef.section}`
+                : undefined;
 
               const forgeReleaseLock = await acquireWriterLock();
 
@@ -751,7 +752,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
               // Run forge in the background — don't block the queue
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              forgeOrchestrator.run(forgeDescription, onProgress).then(
+              forgeOrchestrator.run(forgeCmd.args, onProgress, forgeContext).then(
                 async (result) => {
                   forgeReleaseLock();
                   if (progressMessageGone) {

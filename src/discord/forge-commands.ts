@@ -327,6 +327,7 @@ export class ForgeOrchestrator {
   async run(
     description: string,
     onProgress: ProgressFn,
+    context?: string,
   ): Promise<ForgeResult> {
     if (this.running) {
       throw new Error('A forge is already running');
@@ -340,8 +341,9 @@ export class ForgeOrchestrator {
 
     try {
       // 1. Create the plan file via handlePlanCommand
+      // Pass context separately so bead title/slug stay clean (context goes in plan body).
       const createResult = await handlePlanCommand(
-        { action: 'create', args: description },
+        { action: 'create', args: description, context },
         { workspaceCwd: this.opts.workspaceCwd, beadsCwd: this.opts.beadsCwd },
       );
 
@@ -408,8 +410,12 @@ export class ForgeOrchestrator {
         if (round === 1) {
           await onProgress(`Forging ${planId}... Drafting (reading codebase)`);
 
+          // Include context in the drafter's task description so it knows what to fix.
+          const drafterDescription = context
+            ? `${description}\n\n${context}`
+            : description;
           const drafterPrompt = buildDrafterPrompt(
-            description,
+            drafterDescription,
             templateContent,
             contextSummary,
           );
