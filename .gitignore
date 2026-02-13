@@ -24,6 +24,7 @@ groups/*
 
 # Legacy plan files (not shipped)
 plans/*.md
+plans/community/*
 
 # User's own recipes (not shipped)
 recipes/community/*
