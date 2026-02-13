@@ -403,7 +403,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       forgeTimeoutMs: parsePositiveNumber(env, 'FORGE_TIMEOUT_MS', 30 * 60_000),
       forgeProgressThrottleMs: parseNonNegativeInt(env, 'FORGE_PROGRESS_THROTTLE_MS', 3000),
       forgeAutoImplement: parseBoolean(env, 'FORGE_AUTO_IMPLEMENT', true),
-      summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', false),
+      summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', true),
       shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', false),
       shortTermMaxEntries: parsePositiveInt(env, 'DISCOCLAW_SHORTTERM_MAX_ENTRIES', 20),
       shortTermMaxAgeHours: parsePositiveNumber(env, 'DISCOCLAW_SHORTTERM_MAX_AGE_HOURS', 6),
