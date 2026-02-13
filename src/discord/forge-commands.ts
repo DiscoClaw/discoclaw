@@ -11,7 +11,7 @@ import { collectRuntimeText } from './runtime-utils.js';
 // ---------------------------------------------------------------------------
 
 export type ForgeCommand = {
-  action: 'create' | 'help' | 'status' | 'cancel';
+  action: 'create' | 'help' | 'status' | 'cancel' | 'audit';
   args: string;
 };
 
@@ -46,7 +46,7 @@ type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
 // Parsing
 // ---------------------------------------------------------------------------
 
-const RESERVED_SUBCOMMANDS = new Set(['status', 'cancel', 'help']);
+const RESERVED_SUBCOMMANDS = new Set(['status', 'cancel', 'help', 'audit']);
 
 export function parseForgeCommand(content: string): ForgeCommand | null {
   const trimmed = content.trim();
@@ -304,6 +304,43 @@ export function buildPlanSummary(planContent: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Audit-round append (standalone, used by ForgeOrchestrator and !plan audit)
+// ---------------------------------------------------------------------------
+
+export function appendAuditRound(
+  planContent: string,
+  round: number,
+  auditNotes: string,
+  verdict: AuditVerdict,
+): string {
+  const date = new Date().toISOString().split('T')[0]!;
+  const verdictText = verdict.shouldLoop ? 'Needs revision.' : 'Ready to approve.';
+
+  const auditSection = [
+    '',
+    `### Review ${round} — ${date}`,
+    `**Status:** COMPLETE`,
+    '',
+    auditNotes.trim(),
+    '',
+  ].join('\n');
+
+  // Insert before Implementation Notes section
+  const implNotesIdx = planContent.indexOf('## Implementation Notes');
+  if (implNotesIdx !== -1) {
+    return (
+      planContent.slice(0, implNotesIdx) +
+      auditSection +
+      '\n---\n\n' +
+      planContent.slice(implNotesIdx)
+    );
+  }
+
+  // Fallback: append at end
+  return planContent + '\n' + auditSection;
+}
+
+// ---------------------------------------------------------------------------
 // ForgeOrchestrator
 // ---------------------------------------------------------------------------
 
@@ -475,7 +512,7 @@ export class ForgeOrchestrator {
         lastVerdict = parseAuditVerdict(auditOutput);
 
         // Append audit notes to the plan file
-        planContent = this.appendAuditRound(planContent, round, auditOutput, lastVerdict);
+        planContent = appendAuditRound(planContent, round, auditOutput, lastVerdict);
         await this.atomicWrite(filePath, planContent);
 
         // Check if we should loop
@@ -653,39 +690,6 @@ export class ForgeOrchestrator {
     }
 
     return header + draftBody;
-  }
-
-  private appendAuditRound(
-    planContent: string,
-    round: number,
-    auditNotes: string,
-    verdict: AuditVerdict,
-  ): string {
-    const date = new Date().toISOString().split('T')[0]!;
-    const verdictText = verdict.shouldLoop ? 'Needs revision.' : 'Ready to approve.';
-
-    const auditSection = [
-      '',
-      `### Review ${round} — ${date}`,
-      `**Status:** COMPLETE`,
-      '',
-      auditNotes.trim(),
-      '',
-    ].join('\n');
-
-    // Insert before Implementation Notes section
-    const implNotesIdx = planContent.indexOf('## Implementation Notes');
-    if (implNotesIdx !== -1) {
-      return (
-        planContent.slice(0, implNotesIdx) +
-        auditSection +
-        '\n---\n\n' +
-        planContent.slice(implNotesIdx)
-      );
-    }
-
-    // Fallback: append at end
-    return planContent + '\n' + auditSection;
   }
 
   private async atomicWrite(filePath: string, content: string): Promise<void> {
