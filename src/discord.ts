@@ -502,6 +502,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           break;
                         }
 
+                        // Reset throttle so the phase-start message from runNextPhase
+                        // (onProgress at plan-manager.ts line 1041) is displayed immediately
+                        // rather than being suppressed by the previous phase's final edit.
+                        if (i > 0) lastEditAt = 0;
+
                         const releaseLock = await acquireWriterLock();
                         let phaseResult;
                         const phaseStart = Date.now();
