@@ -130,6 +130,13 @@ describe('parsePlanCommand', () => {
     });
   });
 
+  it('parses run-one subcommand', () => {
+    expect(parsePlanCommand('!plan run-one plan-011')).toEqual({
+      action: 'run-one',
+      args: 'plan-011',
+    });
+  });
+
   it('parses skip subcommand', () => {
     expect(parsePlanCommand('!plan skip plan-011')).toEqual({
       action: 'skip',

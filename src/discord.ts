@@ -20,7 +20,7 @@ import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
-import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip } from './discord/plan-commands.js';
+import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, NO_PHASES_SENTINEL } from './discord/plan-commands.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator } from './discord/forge-commands.js';
 import type { ForgeOrchestratorOpts } from './discord/forge-commands.js';
@@ -151,6 +151,9 @@ function acquireWriterLock(): Promise<() => void> {
   workspaceWriterLock = new Promise<void>((resolve) => { release = resolve; });
   return prev.then(() => release);
 }
+
+const MAX_PLAN_RUN_PHASES = 50;
+const runningPlanIds = new Set<string>();
 
 export function groupDirNameFromSessionKey(sessionKey: string): string {
   // Keep it filesystem-safe and easy to inspect.
@@ -361,7 +364,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               };
 
               // Phase-related commands require PLAN_PHASES_ENABLED
-              if (planCmd.action === 'run' || planCmd.action === 'skip' || planCmd.action === 'phases') {
+              if (planCmd.action === 'run' || planCmd.action === 'run-one' || planCmd.action === 'skip' || planCmd.action === 'phases') {
                 if (!(params.planPhasesEnabled ?? true)) {
                   await msg.reply({
                     content: 'Phase decomposition is disabled. Set PLAN_PHASES_ENABLED=true to enable.',
@@ -371,38 +374,73 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 }
               }
 
-              // --- !plan run --- (async, fire-and-forget)
-              if (planCmd.action === 'run') {
+              // --- !plan run / !plan run-one --- (shared handler, async, fire-and-forget)
+              if (planCmd.action === 'run' || planCmd.action === 'run-one') {
+                const isRunOne = planCmd.action === 'run-one';
+                const maxPhases = isRunOne ? 1 : MAX_PLAN_RUN_PHASES;
+                const usageCmd = isRunOne ? 'run-one' : 'run';
+
                 if (!planCmd.args) {
-                  await msg.reply({ content: 'Usage: `!plan run <plan-id>`', allowedMentions: NO_MENTIONS });
+                  await msg.reply({ content: `Usage: \`!plan ${usageCmd} <plan-id>\``, allowedMentions: NO_MENTIONS });
                   return;
                 }
 
-                const releaseLock = await acquireWriterLock();
-                try {
-                  const prepResult = await preparePlanRun(planCmd.args, planOpts);
-                  if ('error' in prepResult) {
-                    await msg.reply({ content: prepResult.error, allowedMentions: NO_MENTIONS });
-                    releaseLock();
-                    return;
-                  }
+                const planId = planCmd.args;
 
+                // Concurrency guard: reject if a multi-phase run is already active for this plan
+                if (runningPlanIds.has(planId)) {
+                  await msg.reply({ content: `A multi-phase run is already in progress for ${planId}.`, allowedMentions: NO_MENTIONS });
+                  return;
+                }
+
+                runningPlanIds.add(planId);
+                try { // outer try: guarantees runningPlanIds cleanup
+
+                  // Acquire lock for initial validation only
+                  let phasesFilePath: string;
+                  let planFilePath: string;
                   let projectCwd: string;
-                  try {
-                    projectCwd = resolveProjectCwd(prepResult.planContent, params.workspaceCwd);
-                  } catch (err) {
-                    await msg.reply({
-                      content: `Failed to resolve project directory: ${String(err instanceof Error ? err.message : err)}`,
-                      allowedMentions: NO_MENTIONS,
-                    });
-                    releaseLock();
-                    return;
-                  }
+                  let progressReply: typeof msg;
 
-                  const progressReply = await msg.reply({
-                    content: `Running ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}...`,
-                    allowedMentions: NO_MENTIONS,
-                  });
+                  const validationLock = await acquireWriterLock();
+                  try {
+                    const prepResult = await preparePlanRun(planId, planOpts);
+                    if ('error' in prepResult) {
+                      // Distinguish "all done" from actual errors via NO_PHASES_SENTINEL
+                      const isAllDone = prepResult.error.startsWith(NO_PHASES_SENTINEL);
+                      const content = isAllDone
+                        ? `All phases already complete for ${planId}.`
+                        : prepResult.error;
+                      await msg.reply({ content, allowedMentions: NO_MENTIONS });
+                      validationLock();
+                      runningPlanIds.delete(planId);
+                      return;
+                    }
+
+                    phasesFilePath = prepResult.phasesFilePath;
+                    planFilePath = prepResult.planFilePath;
+
+                    try {
+                      projectCwd = resolveProjectCwd(prepResult.planContent, params.workspaceCwd);
+                    } catch (err) {
+                      await msg.reply({
+                        content: `Failed to resolve project directory: ${String(err instanceof Error ? err.message : err)}`,
+                        allowedMentions: NO_MENTIONS,
+                      });
+                      validationLock();
+                      runningPlanIds.delete(planId);
+                      return;
+                    }
+
+                    const startMsg = isRunOne
+                      ? `Running ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}...`
+                      : `Running all phases for **${planId}** — starting ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}...`;
+                    progressReply = await msg.reply({ content: startMsg, allowedMentions: NO_MENTIONS });
+                  } catch (err) {
+                    validationLock();
+                    throw err; // outer catch cleans up runningPlanIds
+                  }
+                  validationLock(); // release validation lock before phase execution
 
                   let lastEditAt = 0;
                   const throttleMs = params.forgeProgressThrottleMs ?? 3000;
@@ -431,57 +469,141 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     log: params.log,
                   };
 
-                  // Fire-and-forget: release lock in .then() callbacks
-                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                  runNextPhase(prepResult.phasesFilePath, prepResult.planFilePath, phaseOpts, onProgress).then(
-                    async (phaseResult) => {
-                      releaseLock();
-                      let resultMsg: string;
-                      if (phaseResult.result === 'done') {
-                        resultMsg = `Phase **${phaseResult.phase.id}** done: ${phaseResult.phase.title}`;
-                      } else if (phaseResult.result === 'failed') {
-                        resultMsg = `Phase **${phaseResult.phase.id}** failed: ${phaseResult.error}. Use \`!plan run ${planCmd.args}\` to retry or \`!plan skip ${planCmd.args}\` to skip.`;
-                      } else if (phaseResult.result === 'stale') {
-                        resultMsg = phaseResult.message;
-                      } else if (phaseResult.result === 'nothing_to_run') {
-                        resultMsg = 'All phases are done (or dependencies unmet).';
-                      } else if (phaseResult.result === 'corrupt') {
-                        resultMsg = phaseResult.message;
-                      } else if (phaseResult.result === 'retry_blocked') {
-                        resultMsg = phaseResult.message;
+                  const editSummary = async (content: string) => {
+                    try {
+                      if (progressMessageGone) {
+                        await msg.channel.send({ content, allowedMentions: NO_MENTIONS });
                       } else {
-                        resultMsg = 'Phase run completed.';
+                        await progressReply.edit({ content, allowedMentions: NO_MENTIONS });
                       }
+                    } catch {
+                      // best-effort
+                    }
+                  };
 
-                      try {
-                        if (progressMessageGone) {
-                          await msg.channel.send({ content: resultMsg, allowedMentions: NO_MENTIONS });
-                        } else {
-                          await progressReply.edit({ content: resultMsg, allowedMentions: NO_MENTIONS });
+                  // Fire-and-forget: phase execution loop
+                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                  (async () => {
+                    const phaseResults: Array<{ id: string; title: string; elapsedMs: number }> = [];
+                    let phasesRun = 0;
+                    let stopReason: 'error' | 'limit' | 'shutdown' | null = null;
+                    let stopMessage = '';
+
+                    let i = 0;
+                    try {
+                      for (; i < maxPhases; i++) {
+                        if (isShuttingDown()) {
+                          stopReason = 'shutdown';
+                          break;
                         }
-                      } catch {
-                        // best-effort
+
+                        const releaseLock = await acquireWriterLock();
+                        let phaseResult;
+                        const phaseStart = Date.now();
+                        try {
+                          phaseResult = await runNextPhase(phasesFilePath, planFilePath, phaseOpts, onProgress);
+                        } finally {
+                          releaseLock();
+                        }
+
+                        if (phaseResult.result === 'done') {
+                          phasesRun++;
+                          phaseResults.push({ id: phaseResult.phase.id, title: phaseResult.phase.title, elapsedMs: Date.now() - phaseStart });
+                          // Between-phase progress update (bypass throttle)
+                          lastEditAt = 0;
+                          try {
+                            await onProgress(`Phase **${phaseResult.phase.id}** done. Checking for next phase...`);
+                          } catch { /* edit failure doesn't break the loop */ }
+                        } else if (phaseResult.result === 'nothing_to_run') {
+                          break;
+                        } else if (phaseResult.result === 'failed') {
+                          stopReason = 'error';
+                          stopMessage = `Phase **${phaseResult.phase.id}** failed: ${phaseResult.error}`;
+                          break;
+                        } else if (phaseResult.result === 'stale') {
+                          stopReason = 'error';
+                          stopMessage = phaseResult.message;
+                          break;
+                        } else if (phaseResult.result === 'corrupt') {
+                          stopReason = 'error';
+                          stopMessage = phaseResult.message;
+                          break;
+                        } else if (phaseResult.result === 'retry_blocked') {
+                          stopReason = 'error';
+                          stopMessage = `Phase **${phaseResult.phase.id}** retry blocked. Use \`!plan skip ${planId}\` or \`!plan phases --regenerate ${planId}\`.`;
+                          break;
+                        } else {
+                          break;
+                        }
+
+                        // Yield between phases to prevent writer lock starvation
+                        await new Promise(resolve => setImmediate(resolve));
                       }
-                    },
-                    async (err) => {
-                      releaseLock();
+                      if (i >= maxPhases && !stopReason) stopReason = 'limit';
+                    } catch (loopErr) {
+                      stopReason = 'error';
+                      stopMessage = `Unexpected error: ${String(loopErr)}`;
+                      params.log?.error({ err: loopErr, phasesRun, planId }, 'plan-run: crash in phase loop');
+                    }
+
+                    // Build summary — always runs regardless of how the loop terminated
+                    const fmtElapsed = (ms: number) => ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`;
+                    const phaseList = phaseResults.map(p => `[x] ${p.id}: ${p.title} (${fmtElapsed(p.elapsedMs)})`).join('\n');
+
+                    let summaryMsg: string;
+
+                    if (isRunOne) {
+                      // Single-phase format (matches old !plan run UX)
+                      if (stopReason === 'error') {
+                        summaryMsg = `${stopMessage}\nUse \`!plan run-one ${planId}\` to retry or \`!plan skip ${planId}\` to skip.`;
+                      } else if (phasesRun > 0) {
+                        const p = phaseResults[0];
+                        summaryMsg = `Phase **${p.id}** done: ${p.title}`;
+                      } else {
+                        summaryMsg = 'All phases are done (or dependencies unmet).';
+                      }
+                    } else if (stopReason === null && phasesRun > 0) {
+                      const totalMs = phaseResults.reduce((s, p) => s + p.elapsedMs, 0);
+                      summaryMsg = `Plan run complete for **${planId}**: ${phasesRun} phase${phasesRun !== 1 ? 's' : ''} executed (${fmtElapsed(totalMs)})\n${phaseList}`;
+                    } else if (stopReason === null && phasesRun === 0) {
+                      summaryMsg = `All phases already complete for ${planId}.`;
+                    } else if (stopReason === 'error') {
+                      summaryMsg = `Plan run stopped: ${stopMessage}. ${phasesRun}/${phasesRun + 1} phases completed.\nUse \`!plan run ${planId}\` to retry or \`!plan skip ${planId}\` to skip.`;
+                      if (phaseList) summaryMsg += `\n${phaseList}`;
+                    } else if (stopReason === 'limit') {
+                      summaryMsg = `Plan run stopped after ${MAX_PLAN_RUN_PHASES} phases (safety limit). Use \`!plan run ${planId}\` to continue.\n${phaseList}`;
+                    } else {
+                      // shutdown
+                      summaryMsg = `Plan run interrupted (bot shutting down). ${phasesRun} phase${phasesRun !== 1 ? 's' : ''} completed.`;
+                      if (phaseList) summaryMsg += `\n${phaseList}`;
+                    }
+
+                    await editSummary(summaryMsg);
+                  })().then(
+                    () => { /* success — cleanup handled by outer finally */ },
+                    (err) => {
                       params.log?.error({ err }, 'plan-run:unhandled error');
-                      try {
-                        const errMsg = `Plan phase run crashed: ${String(err)}`;
-                        if (progressMessageGone) {
-                          await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
-                        } else {
-                          await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                      (async () => {
+                        try {
+                          const errMsg = `Plan run crashed: ${String(err)}`;
+                          if (progressMessageGone) {
+                            await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
+                          } else {
+                            await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                          }
+                        } catch {
+                          // best-effort
                         }
-                      } catch {
-                        // best-effort
-                      }
+                      })().catch(() => {});
                     },
                   ).catch((err) => {
                     params.log?.error({ err }, 'plan-run: unhandled rejection in callback');
+                  }).finally(() => {
+                    runningPlanIds.delete(planId);
                   });
+
                 } catch (err) {
-                  releaseLock();
+                  runningPlanIds.delete(planId);
                   throw err;
                 }
 
