@@ -4,6 +4,7 @@ import { handlePlanCommand } from './plan-commands.js';
 import { parsePlanFileHeader } from './plan-commands.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
+import { collectRuntimeText } from './runtime-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -265,40 +266,6 @@ export function buildPlanSummary(planContent: string): string {
   }
 
   return lines.join('\n');
-}
-
-// ---------------------------------------------------------------------------
-// Runtime text collector
-// ---------------------------------------------------------------------------
-
-async function collectRuntimeText(
-  runtime: RuntimeAdapter,
-  prompt: string,
-  model: string,
-  cwd: string,
-  tools: string[],
-  addDirs: string[],
-  timeoutMs: number,
-): Promise<string> {
-  let text = '';
-  for await (const evt of runtime.invoke({
-    prompt,
-    model,
-    cwd,
-    tools,
-    addDirs: addDirs.length > 0 ? addDirs : undefined,
-    timeoutMs,
-  })) {
-    if (evt.type === 'text_final') {
-      text = evt.text;
-    } else if (evt.type === 'text_delta') {
-      // Accumulate deltas in case text_final isn't emitted
-      text += evt.text;
-    } else if (evt.type === 'error') {
-      throw new Error(`Runtime error: ${evt.message}`);
-    }
-  }
-  return text;
 }
 
 // ---------------------------------------------------------------------------

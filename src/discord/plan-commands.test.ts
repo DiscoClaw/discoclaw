@@ -8,6 +8,8 @@ import {
   handlePlanCommand,
   parsePlanFileHeader,
   toSlug,
+  handlePlanSkip,
+  preparePlanRun,
 } from './plan-commands.js';
 import type { PlanCommand, HandlePlanCommandOpts } from './plan-commands.js';
 
@@ -102,6 +104,34 @@ describe('parsePlanCommand', () => {
 
   it('parses help explicitly', () => {
     expect(parsePlanCommand('!plan help')).toEqual({ action: 'help', args: '' });
+  });
+
+  it('parses phases subcommand', () => {
+    expect(parsePlanCommand('!plan phases plan-011')).toEqual({
+      action: 'phases',
+      args: 'plan-011',
+    });
+  });
+
+  it('parses phases with --regenerate flag', () => {
+    expect(parsePlanCommand('!plan phases --regenerate plan-011')).toEqual({
+      action: 'phases',
+      args: '--regenerate plan-011',
+    });
+  });
+
+  it('parses run subcommand', () => {
+    expect(parsePlanCommand('!plan run plan-011')).toEqual({
+      action: 'run',
+      args: 'plan-011',
+    });
+  });
+
+  it('parses skip subcommand', () => {
+    expect(parsePlanCommand('!plan skip plan-011')).toEqual({
+      action: 'skip',
+      args: 'plan-011',
+    });
   });
 });
 
@@ -526,5 +556,363 @@ describe('handlePlanCommand', () => {
       baseOpts({ workspaceCwd: tmpDir }),
     );
     expect(result).toContain('Plan not found');
+  });
+
+  it('phases — returns usage when no args', async () => {
+    const result = await handlePlanCommand(
+      { action: 'phases', args: '' },
+      baseOpts(),
+    );
+    expect(result).toContain('Usage');
+  });
+
+  it('phases — returns not found for unknown plan', async () => {
+    const tmpDir = await makeTmpDir();
+    await fs.mkdir(path.join(tmpDir, 'plans'), { recursive: true });
+
+    const result = await handlePlanCommand(
+      { action: 'phases', args: 'plan-999' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+    expect(result).toContain('Plan not found');
+  });
+
+  it('phases — generates and returns phases checklist', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test phases',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add the foo module',
+      '- `src/foo.test.ts` — add tests',
+      '',
+    ].join('\n');
+
+    await fs.writeFile(path.join(plansDir, 'plan-001-test-phases.md'), planContent);
+
+    const result = await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Phases for plan-001');
+    expect(result).toContain('phase-');
+    // Phases file should have been created
+    const phasesFile = path.join(plansDir, 'plan-001-phases.md');
+    const exists = await fs.access(phasesFile).then(() => true, () => false);
+    expect(exists).toBe(true);
+  });
+
+  it('phases — reads existing phases file without regenerating', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add the foo module',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    // First call generates phases
+    await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    // Read the generated file to confirm it exists
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const content1 = await fs.readFile(phasesPath, 'utf-8');
+
+    // Second call should read existing, not regenerate
+    const result2 = await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const content2 = await fs.readFile(phasesPath, 'utf-8');
+    expect(content1).toBe(content2);
+    expect(result2).toContain('Phases for plan-001');
+  });
+
+  it('help — includes phases, run, skip commands', async () => {
+    const result = await handlePlanCommand({ action: 'help', args: '' }, baseOpts());
+    expect(result).toContain('!plan phases');
+    expect(result).toContain('!plan run');
+    expect(result).toContain('!plan skip');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handlePlanSkip
+// ---------------------------------------------------------------------------
+
+describe('handlePlanSkip', () => {
+  it('returns not found for unknown plan', async () => {
+    const tmpDir = await makeTmpDir();
+    await fs.mkdir(path.join(tmpDir, 'plans'), { recursive: true });
+
+    const result = await handlePlanSkip('plan-999', baseOpts({ workspaceCwd: tmpDir }));
+    expect(result).toContain('Plan not found');
+  });
+
+  it('returns error when no phases file exists', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** APPROVED\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+    );
+
+    const result = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect(result).toContain('No phases file found');
+  });
+
+  it('returns nothing to skip when no failed/in-progress phases', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    // Generate phases (all will be pending)
+    await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const result = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect(result).toBe('Nothing to skip.');
+  });
+
+  it('skips a failed phase and writes to disk', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '- `src/bar.ts` — add bar',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    // Generate phases
+    await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    // Manually edit phases file to mark phase-1 as failed
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    let phasesContent = await fs.readFile(phasesPath, 'utf-8');
+    phasesContent = phasesContent.replace('**Status:** pending', '**Status:** failed');
+    await fs.writeFile(phasesPath, phasesContent);
+
+    const result = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect(result).toContain('Skipped');
+    expect(result).toContain('was failed');
+
+    // Verify the file was updated
+    const updatedContent = await fs.readFile(phasesPath, 'utf-8');
+    expect(updatedContent).toContain('**Status:** skipped');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// preparePlanRun
+// ---------------------------------------------------------------------------
+
+describe('preparePlanRun', () => {
+  it('returns error for unknown plan', async () => {
+    const tmpDir = await makeTmpDir();
+    await fs.mkdir(path.join(tmpDir, 'plans'), { recursive: true });
+
+    const result = await preparePlanRun('plan-999', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('Plan not found');
+    }
+  });
+
+  it('generates phases file if missing', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(false);
+    if (!('error' in result)) {
+      expect(result.nextPhase).toBeDefined();
+      expect(result.planContent).toBe(planContent);
+      expect(result.phasesFilePath).toContain('plan-001-phases.md');
+    }
+
+    // Verify phases file was created
+    const phasesExists = await fs.access(path.join(plansDir, 'plan-001-phases.md')).then(() => true, () => false);
+    expect(phasesExists).toBe(true);
+  });
+
+  it('detects stale phases and returns error', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    // Generate phases
+    await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+
+    // Now modify the plan content (make it stale)
+    const modifiedContent = planContent + '\n\n## Extra section\n';
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), modifiedContent);
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('changed since phases');
+    }
+  });
+
+  it('returns next phase info when ready', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '- `src/bar.ts` — add bar',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(false);
+    if (!('error' in result)) {
+      expect(result.nextPhase.status).toBe('pending');
+      expect(result.nextPhase.kind).toBeDefined();
+      expect(result.planFilePath).toContain('plan-001-test.md');
+    }
+  });
+
+  it('returns error when all phases are done', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    // Generate phases then mark them all done
+    await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    let content = await fs.readFile(phasesPath, 'utf-8');
+    content = content.replace(/\*\*Status:\*\* pending/g, '**Status:** done');
+    await fs.writeFile(phasesPath, content);
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('No phases to run');
+    }
   });
 });

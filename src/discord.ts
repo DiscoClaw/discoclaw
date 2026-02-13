@@ -20,9 +20,11 @@ import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
-import { parsePlanCommand, handlePlanCommand } from './discord/plan-commands.js';
+import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip } from './discord/plan-commands.js';
+import type { PreparePlanRunResult } from './discord/plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator } from './discord/forge-commands.js';
 import type { ForgeOrchestratorOpts } from './discord/forge-commands.js';
+import { runNextPhase, resolveProjectCwd } from './discord/plan-manager.js';
 import { applyUserTurnToDurable } from './discord/user-turn-to-durable.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster } from './discord/status-channel.js';
@@ -96,6 +98,9 @@ export type BotParams = {
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
   planCommandsEnabled?: boolean;
+  planPhasesEnabled?: boolean;
+  planPhaseMaxContextFiles?: number;
+  planPhaseTimeoutMs?: number;
   forgeCommandsEnabled?: boolean;
   forgeMaxAuditRounds?: number;
   forgeDrafterModel?: string;
@@ -132,6 +137,19 @@ export type BotParams = {
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 
 const turnCounters = new Map<string, number>();
+
+// ---------------------------------------------------------------------------
+// Global workspace writer lock — serializes forge creates and plan phase runs.
+// ---------------------------------------------------------------------------
+
+let workspaceWriterLock: Promise<void> = Promise.resolve();
+
+function acquireWriterLock(): Promise<() => void> {
+  let release!: () => void;
+  const prev = workspaceWriterLock;
+  workspaceWriterLock = new Promise<void>((resolve) => { release = resolve; });
+  return prev.then(() => release);
+}
 
 export function groupDirNameFromSessionKey(sessionKey: string): string {
   // Keep it filesystem-safe and easy to inspect.
@@ -335,10 +353,168 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (params.planCommandsEnabled) {
             const planCmd = parsePlanCommand(String(msg.content ?? ''));
             if (planCmd) {
-              const response = await handlePlanCommand(planCmd, {
+              const planOpts = {
                 workspaceCwd: params.workspaceCwd,
                 beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
-              });
+              };
+
+              // Phase-related commands require PLAN_PHASES_ENABLED
+              if (planCmd.action === 'run' || planCmd.action === 'skip' || planCmd.action === 'phases') {
+                if (!(params.planPhasesEnabled ?? true)) {
+                  await msg.reply({
+                    content: 'Phase decomposition is disabled. Set PLAN_PHASES_ENABLED=true to enable.',
+                    allowedMentions: NO_MENTIONS,
+                  });
+                  return;
+                }
+              }
+
+              // --- !plan run --- (async, fire-and-forget)
+              if (planCmd.action === 'run') {
+                if (!planCmd.args) {
+                  await msg.reply({ content: 'Usage: `!plan run <plan-id>`', allowedMentions: NO_MENTIONS });
+                  return;
+                }
+
+                const releaseLock = await acquireWriterLock();
+                try {
+                  const prepResult = await preparePlanRun(planCmd.args, planOpts);
+                  if ('error' in prepResult) {
+                    await msg.reply({ content: prepResult.error, allowedMentions: NO_MENTIONS });
+                    releaseLock();
+                    return;
+                  }
+
+                  let projectCwd: string;
+                  try {
+                    projectCwd = resolveProjectCwd(prepResult.planContent, params.workspaceCwd);
+                  } catch (err) {
+                    await msg.reply({
+                      content: `Failed to resolve project directory: ${String(err instanceof Error ? err.message : err)}`,
+                      allowedMentions: NO_MENTIONS,
+                    });
+                    releaseLock();
+                    return;
+                  }
+
+                  const progressReply = await msg.reply({
+                    content: `Running ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}...`,
+                    allowedMentions: NO_MENTIONS,
+                  });
+
+                  let lastEditAt = 0;
+                  const throttleMs = params.forgeProgressThrottleMs ?? 3000;
+                  let progressMessageGone = false;
+
+                  const onProgress = async (progressMsg: string) => {
+                    if (progressMessageGone) return;
+                    const now = Date.now();
+                    if (now - lastEditAt < throttleMs) return;
+                    lastEditAt = now;
+                    try {
+                      await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
+                    } catch (editErr: any) {
+                      if (editErr?.code === 10008) progressMessageGone = true;
+                    }
+                  };
+
+                  const timeoutMs = params.planPhaseTimeoutMs ?? 5 * 60_000;
+                  const phaseOpts = {
+                    runtime: params.runtime,
+                    model: params.runtimeModel,
+                    projectCwd,
+                    addDirs: [] as string[],
+                    timeoutMs,
+                    workspaceCwd: params.workspaceCwd,
+                    log: params.log,
+                  };
+
+                  // Fire-and-forget: release lock in .then() callbacks
+                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                  runNextPhase(prepResult.phasesFilePath, prepResult.planFilePath, phaseOpts, onProgress).then(
+                    async (phaseResult) => {
+                      releaseLock();
+                      let resultMsg: string;
+                      if (phaseResult.result === 'done') {
+                        resultMsg = `Phase **${phaseResult.phase.id}** done: ${phaseResult.phase.title}`;
+                      } else if (phaseResult.result === 'failed') {
+                        resultMsg = `Phase **${phaseResult.phase.id}** failed: ${phaseResult.error}. Use \`!plan run ${planCmd.args}\` to retry or \`!plan skip ${planCmd.args}\` to skip.`;
+                      } else if (phaseResult.result === 'stale') {
+                        resultMsg = phaseResult.message;
+                      } else if (phaseResult.result === 'nothing_to_run') {
+                        resultMsg = 'All phases are done (or dependencies unmet).';
+                      } else if (phaseResult.result === 'corrupt') {
+                        resultMsg = phaseResult.message;
+                      } else if (phaseResult.result === 'retry_blocked') {
+                        resultMsg = phaseResult.message;
+                      } else {
+                        resultMsg = 'Phase run completed.';
+                      }
+
+                      try {
+                        if (progressMessageGone) {
+                          await msg.channel.send({ content: resultMsg, allowedMentions: NO_MENTIONS });
+                        } else {
+                          await progressReply.edit({ content: resultMsg, allowedMentions: NO_MENTIONS });
+                        }
+                      } catch {
+                        // best-effort
+                      }
+                    },
+                    async (err) => {
+                      releaseLock();
+                      params.log?.error({ err }, 'plan-run:unhandled error');
+                      try {
+                        const errMsg = `Plan phase run crashed: ${String(err)}`;
+                        if (progressMessageGone) {
+                          await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
+                        } else {
+                          await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                        }
+                      } catch {
+                        // best-effort
+                      }
+                    },
+                  );
+                } catch (err) {
+                  releaseLock();
+                  throw err;
+                }
+
+                return;
+              }
+
+              // --- !plan skip ---
+              if (planCmd.action === 'skip') {
+                if (!planCmd.args) {
+                  await msg.reply({ content: 'Usage: `!plan skip <plan-id>`', allowedMentions: NO_MENTIONS });
+                  return;
+                }
+
+                const releaseLock = await acquireWriterLock();
+                try {
+                  const response = await handlePlanSkip(planCmd.args, planOpts);
+                  await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+                } finally {
+                  releaseLock();
+                }
+                return;
+              }
+
+              // --- !plan phases --- (acquires lock for write, releases early for read)
+              if (planCmd.action === 'phases') {
+                const releaseLock = await acquireWriterLock();
+                try {
+                  const response = await handlePlanCommand(planCmd, planOpts);
+                  await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+                } finally {
+                  releaseLock();
+                }
+                return;
+              }
+
+              // All other plan actions pass through
+              const response = await handlePlanCommand(planCmd, planOpts);
               await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
               return;
             }
@@ -389,6 +565,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
+              const forgeReleaseLock = await acquireWriterLock();
+
               const plansDir = path.join(params.workspaceCwd, 'plans');
               forgeOrchestrator = new ForgeOrchestrator({
                 runtime: params.runtime,
@@ -434,6 +612,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
               forgeOrchestrator.run(forgeCmd.args, onProgress).then(
                 async (result) => {
+                  forgeReleaseLock();
                   if (progressMessageGone) {
                     try {
                       const statusMsg = result.error
@@ -454,6 +633,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   }
                 },
                 async (err) => {
+                  forgeReleaseLock();
                   params.log?.error({ err }, 'forge:unhandled error');
                   try {
                     const errMsg = `Forge crashed: ${String(err)}`;

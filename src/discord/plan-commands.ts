@@ -1,14 +1,25 @@
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { bdCreate, bdClose, bdUpdate, bdAddLabel } from '../beads/bd-cli.js';
 import type { BeadData } from '../beads/types.js';
+import {
+  decomposePlan,
+  serializePhases,
+  deserializePhases,
+  getNextPhase,
+  updatePhaseStatus,
+  checkStaleness,
+  writePhasesFile,
+} from './plan-manager.js';
+import type { PlanPhase, PlanPhases } from './plan-manager.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type PlanCommand = {
-  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close';
+  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'phases' | 'run' | 'skip';
   args: string;
 };
 
@@ -25,7 +36,7 @@ export type PlanFileHeader = {
 // Parsing
 // ---------------------------------------------------------------------------
 
-const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'help']);
+const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'help', 'phases', 'run', 'skip']);
 
 export function parsePlanCommand(content: string): PlanCommand | null {
   const trimmed = content.trim();
@@ -212,6 +223,9 @@ export async function handlePlanCommand(
         '- `!plan show <plan-id|bead-id>` — show plan details',
         '- `!plan approve <plan-id|bead-id>` — approve for implementation',
         '- `!plan close <plan-id|bead-id>` — close/abandon a plan',
+        '- `!plan phases <plan-id>` — show/generate phase checklist',
+        '- `!plan run <plan-id>` — execute next pending phase',
+        '- `!plan skip <plan-id>` — skip a failed/in-progress phase',
       ].join('\n');
     }
 
@@ -371,8 +385,155 @@ export async function handlePlanCommand(
       return `Plan **${found.header.planId}** closed.`;
     }
 
+    if (cmd.action === 'phases') {
+      if (!cmd.args) return 'Usage: `!plan phases <plan-id>`';
+
+      // Parse --regenerate flag
+      const regenerate = cmd.args.includes('--regenerate');
+      const planIdArg = cmd.args.replace('--regenerate', '').trim();
+      if (!planIdArg) return 'Usage: `!plan phases <plan-id>`';
+
+      const found = await findPlanFile(plansDir, planIdArg);
+      if (!found) return `Plan not found: ${planIdArg}`;
+
+      const phasesFileName = `${found.header.planId}-phases.md`;
+      const phasesFilePath = path.join(plansDir, phasesFileName);
+
+      let phases: PlanPhases;
+
+      const phasesFileExists = fsSync.existsSync(phasesFilePath);
+      if (!phasesFileExists || regenerate) {
+        // Generate phases
+        const planContent = await fs.readFile(found.filePath, 'utf-8');
+        const planRelPath = `workspace/plans/${path.basename(found.filePath)}`;
+        phases = decomposePlan(planContent, found.header.planId, planRelPath);
+        writePhasesFile(phasesFilePath, phases);
+      } else {
+        // Read existing phases
+        const content = fsSync.readFileSync(phasesFilePath, 'utf-8');
+        phases = deserializePhases(content);
+      }
+
+      // Format checklist
+      return formatPhasesChecklist(phases);
+    }
+
+    // Note: 'run' and 'skip' are intercepted by discord.ts before reaching here.
+
     return 'Unknown plan command. Try `!plan` for help.';
   } catch (err) {
     return `Plan command error: ${String(err)}`;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase status emoji
+// ---------------------------------------------------------------------------
+
+const STATUS_EMOJI: Record<string, string> = {
+  'pending': '[ ]',
+  'in-progress': '[~]',
+  'done': '[x]',
+  'failed': '[!]',
+  'skipped': '[-]',
+};
+
+function formatPhasesChecklist(phases: PlanPhases): string {
+  const lines: string[] = [];
+  lines.push(`**Phases for ${phases.planId}** (hash: \`${phases.planContentHash}\`)`);
+  lines.push('');
+
+  for (const phase of phases.phases) {
+    const emoji = STATUS_EMOJI[phase.status] ?? '[ ]';
+    const deps = phase.dependsOn.length > 0 ? ` (depends: ${phase.dependsOn.join(', ')})` : '';
+    lines.push(`${emoji} **${phase.id}:** ${phase.title} [${phase.kind}]${deps}`);
+    if (phase.error) lines.push(`  Error: ${phase.error}`);
+    if (phase.gitCommit) lines.push(`  Commit: \`${phase.gitCommit}\``);
+  }
+
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Exported helpers for discord.ts
+// ---------------------------------------------------------------------------
+
+export async function handlePlanSkip(
+  planId: string,
+  opts: HandlePlanCommandOpts,
+): Promise<string> {
+  const plansDir = path.join(opts.workspaceCwd, 'plans');
+  const found = await findPlanFile(plansDir, planId);
+  if (!found) return `Plan not found: ${planId}`;
+
+  const phasesFileName = `${found.header.planId}-phases.md`;
+  const phasesFilePath = path.join(plansDir, phasesFileName);
+
+  if (!fsSync.existsSync(phasesFilePath)) {
+    return `No phases file found for ${planId}. Run \`!plan phases ${planId}\` first.`;
+  }
+
+  const content = fsSync.readFileSync(phasesFilePath, 'utf-8');
+  let phases: PlanPhases;
+  try {
+    phases = deserializePhases(content);
+  } catch (err) {
+    return `Failed to read phases file: ${String(err)}`;
+  }
+
+  // Find the first in-progress or failed phase
+  const target = phases.phases.find((p) => p.status === 'in-progress' || p.status === 'failed');
+  if (!target) return 'Nothing to skip.';
+
+  phases = updatePhaseStatus(phases, target.id, 'skipped');
+  writePhasesFile(phasesFilePath, phases);
+
+  return `Skipped **${target.id}**: ${target.title} (was ${target.status})`;
+}
+
+export type PreparePlanRunResult =
+  | { phasesFilePath: string; planFilePath: string; planContent: string; nextPhase: PlanPhase }
+  | { error: string };
+
+export async function preparePlanRun(
+  planId: string,
+  opts: HandlePlanCommandOpts,
+): Promise<PreparePlanRunResult> {
+  const plansDir = path.join(opts.workspaceCwd, 'plans');
+  const found = await findPlanFile(plansDir, planId);
+  if (!found) return { error: `Plan not found: ${planId}` };
+
+  const phasesFileName = `${found.header.planId}-phases.md`;
+  const phasesFilePath = path.join(plansDir, phasesFileName);
+
+  // Generate phases if needed
+  if (!fsSync.existsSync(phasesFilePath)) {
+    const planContent = await fs.readFile(found.filePath, 'utf-8');
+    const planRelPath = `workspace/plans/${path.basename(found.filePath)}`;
+    const phases = decomposePlan(planContent, found.header.planId, planRelPath);
+    writePhasesFile(phasesFilePath, phases);
+  }
+
+  // Read and validate
+  let phases: PlanPhases;
+  try {
+    const phasesContent = fsSync.readFileSync(phasesFilePath, 'utf-8');
+    phases = deserializePhases(phasesContent);
+  } catch (err) {
+    return { error: `Failed to read phases file: ${String(err)}` };
+  }
+
+  const planContent = await fs.readFile(found.filePath, 'utf-8');
+  const staleness = checkStaleness(phases, planContent);
+  if (staleness.stale) return { error: staleness.message };
+
+  const nextPhase = getNextPhase(phases);
+  if (!nextPhase) return { error: 'No phases to run — all done or dependencies unmet.' };
+
+  return {
+    phasesFilePath,
+    planFilePath: found.filePath,
+    planContent,
+    nextPhase,
+  };
 }
