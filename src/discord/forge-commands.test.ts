@@ -613,4 +613,47 @@ describe('ForgeOrchestrator', () => {
     expect(prompts[1]).toContain('Single-user system');
     expect(prompts[1]).toContain('Project Context');
   });
+
+  it('updates bead title when drafter produces a different title than raw description', async () => {
+    const { bdUpdate } = await import('../beads/bd-cli.js');
+    const mockBdUpdate = vi.mocked(bdUpdate);
+    mockBdUpdate.mockClear();
+
+    const tmpDir = await makeTmpDir();
+    // Drafter returns a clean title ("Add webhook retry logic") different from raw input
+    const draftPlan = `# Plan: Add webhook retry logic\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nAdd retry logic.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    // Raw description differs from the drafter's clean title
+    await orchestrator.run('a]plan to add webhook retry stuff', async () => {});
+
+    expect(mockBdUpdate).toHaveBeenCalledWith(
+      'ws-test-001',
+      { title: 'Add webhook retry logic' },
+      tmpDir,
+    );
+  });
+
+  it('skips bead title update when drafter title matches description', async () => {
+    const { bdUpdate } = await import('../beads/bd-cli.js');
+    const mockBdUpdate = vi.mocked(bdUpdate);
+    mockBdUpdate.mockClear();
+
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild it.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    // Description matches the drafter's title exactly
+    await orchestrator.run('Test feature', async () => {});
+
+    expect(mockBdUpdate).not.toHaveBeenCalled();
+  });
 });
