@@ -143,10 +143,24 @@ export function buildDrafterPrompt(
   ].join('\n');
 }
 
-export function buildAuditorPrompt(planContent: string, roundNumber: number): string {
-  return [
+export function buildAuditorPrompt(planContent: string, roundNumber: number, projectContext?: string): string {
+  const sections = [
     'You are an adversarial senior engineer auditing a technical plan. Your job is to find flaws, gaps, and risks.',
     '',
+  ];
+
+  if (projectContext) {
+    sections.push(
+      '## Project Context',
+      '',
+      'These are standing constraints for this project. Respect them when auditing — do not flag concerns that contradict these constraints.',
+      '',
+      projectContext,
+      '',
+    );
+  }
+
+  sections.push(
     '## Plan to Audit',
     '',
     '```markdown',
@@ -154,6 +168,10 @@ export function buildAuditorPrompt(planContent: string, roundNumber: number): st
     '```',
     '',
     `## This is audit round ${roundNumber}.`,
+  );
+
+  return [
+    ...sections,
     '',
     '## Instructions',
     '',
@@ -187,10 +205,25 @@ export function buildRevisionPrompt(
   planContent: string,
   auditNotes: string,
   description: string,
+  projectContext?: string,
 ): string {
-  return [
+  const sections = [
     'You are a senior software engineer revising a technical plan based on audit feedback.',
     '',
+  ];
+
+  if (projectContext) {
+    sections.push(
+      '## Project Context',
+      '',
+      'These are standing constraints for this project. Respect them when revising — do not re-introduce complexity that contradicts these constraints.',
+      '',
+      projectContext,
+      '',
+    );
+  }
+
+  sections.push(
     '## Original Description',
     '',
     description,
@@ -211,7 +244,9 @@ export function buildRevisionPrompt(
     '- Read the codebase using your tools if needed to resolve concerns.',
     '- Keep the same plan structure and format.',
     '- Output the complete revised plan markdown starting with `# Plan:`. Output ONLY the plan markdown — no preamble, no explanation.',
-  ].join('\n');
+  );
+
+  return sections.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -339,8 +374,11 @@ export class ForgeOrchestrator {
         templateContent = await fs.readFile(filePath, 'utf-8');
       }
 
-      // Build context summary from workspace files
-      const contextSummary = await this.buildContextSummary();
+      // Load project context once — used by drafter (via context summary), auditor, and reviser
+      const projectContext = await this.loadProjectContext();
+
+      // Build context summary from workspace files (includes project context)
+      const contextSummary = await this.buildContextSummary(projectContext);
 
       const drafterModel = this.opts.drafterModel ?? this.opts.model;
       const auditorModel = this.opts.auditorModel ?? this.opts.model;
@@ -402,7 +440,7 @@ export class ForgeOrchestrator {
             : `Forging ${planId}... Audit round ${round}/${this.opts.maxAuditRounds}...`,
         );
 
-        const auditorPrompt = buildAuditorPrompt(planContent, round);
+        const auditorPrompt = buildAuditorPrompt(planContent, round, projectContext);
         const auditOutput = await collectRuntimeText(
           this.opts.runtime,
           auditorPrompt,
@@ -455,6 +493,7 @@ export class ForgeOrchestrator {
           planContent,
           auditOutput,
           description,
+          projectContext,
         );
 
         const revisionOutput = await collectRuntimeText(
@@ -531,7 +570,7 @@ export class ForgeOrchestrator {
   // Private helpers
   // -----------------------------------------------------------------------
 
-  private async buildContextSummary(): Promise<string> {
+  private async buildContextSummary(projectContext?: string): Promise<string> {
     const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
     const sections: string[] = [];
     for (const name of contextFiles) {
@@ -543,10 +582,26 @@ export class ForgeOrchestrator {
         // skip missing files
       }
     }
+
+    // Append project context if already loaded
+    if (projectContext) {
+      sections.push(`--- project.md (repo) ---\n${projectContext.trimEnd()}`);
+    }
+
     if (sections.length === 0) {
       return '(No workspace context files found.)';
     }
     return sections.join('\n\n');
+  }
+
+  private async loadProjectContext(): Promise<string | undefined> {
+    const projectContextPath = path.join(this.opts.cwd, '.context', 'project.md');
+    try {
+      const content = await fs.readFile(projectContextPath, 'utf-8');
+      return content.trim() || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

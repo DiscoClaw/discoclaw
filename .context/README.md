@@ -17,6 +17,7 @@ Core instructions live in `CLAUDE.md` at the repo root.
 | **Memory system** | `memory.md` |
 | **Beads / task tracking / bd CLI** | `beads.md` |
 | **Architecture / system overview** | `architecture.md` |
+| **Forge/plan standing constraints** | `project.md` *(auto-loaded by forge)* |
 
 ## Context Hygiene (Strict)
 - Read the minimum necessary modules for the task.
@@ -33,3 +34,4 @@ Core instructions live in `CLAUDE.md` at the repo root.
 - **beads.md** — Bead task tracker: data model, bd CLI, hooks, Discord sync, auto-tagging
 - **architecture.md** — System overview, data flow, directory layout, key concepts
 - **bot-setup.md** — One-time bot creation and invite guide
+- **project.md** — Standing constraints auto-loaded by forge drafter and auditor
