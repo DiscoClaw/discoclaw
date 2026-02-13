@@ -50,10 +50,23 @@ export async function isOnboardingComplete(workspaceCwd: string): Promise<boolea
  */
 export async function ensureWorkspaceBootstrapFiles(
   workspaceCwd: string,
-  log?: { info: (obj: Record<string, unknown>, msg: string) => void },
+  log?: {
+    info: (obj: Record<string, unknown>, msg: string) => void;
+    warn: (obj: Record<string, unknown>, msg: string) => void;
+  },
 ): Promise<string[]> {
   const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
   await fs.mkdir(workspaceCwd, { recursive: true });
+
+  const forceBootstrap = process.env.DISCOCLAW_FORCE_BOOTSTRAP === '1';
+
+  if (forceBootstrap) {
+    log?.warn(
+      { workspaceCwd },
+      'workspace:bootstrap DISCOCLAW_FORCE_BOOTSTRAP=1 is active — BOOTSTRAP.md will be forcibly (re)created from template. ' +
+        'This env var is for one-shot use; unset it after this restart.',
+    );
+  }
 
   const onboarded = await isOnboardingComplete(workspaceCwd);
 
@@ -73,14 +86,50 @@ export async function ensureWorkspaceBootstrapFiles(
     }
   }
 
-  // Auto-delete stale BOOTSTRAP.md after onboarding.
-  if (onboarded) {
-    const bootstrapPath = path.join(workspaceCwd, 'BOOTSTRAP.md');
+  // BOOTSTRAP.md-specific post-loop logic.
+  if (forceBootstrap) {
+    // Force path: delete existing BOOTSTRAP.md (if any), then copy from template.
+    const bootstrapDest = path.join(workspaceCwd, 'BOOTSTRAP.md');
     try {
-      await fs.unlink(bootstrapPath);
-      log?.info({ workspaceCwd }, 'workspace:bootstrap auto-deleted stale BOOTSTRAP.md');
+      await fs.unlink(bootstrapDest);
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    const templateBootstrapPath = path.join(templatesDir, 'BOOTSTRAP.md');
+    await fs.copyFile(templateBootstrapPath, bootstrapDest);
+    log?.info({ workspaceCwd }, 'workspace:bootstrap BOOTSTRAP.md force-created from template');
+  } else if (onboarded) {
+    // Normal onboarded path: warn about stale file, then auto-delete.
+    const bootstrapPath = path.join(workspaceCwd, 'BOOTSTRAP.md');
+    let bootstrapExists = false;
+    try {
+      await fs.access(bootstrapPath);
+      bootstrapExists = true;
     } catch {
-      // Already gone — nothing to do.
+      // File doesn't exist — nothing to clean up.
+    }
+    if (bootstrapExists) {
+      log?.warn(
+        { workspaceCwd },
+        'workspace:bootstrap stale BOOTSTRAP.md found in onboarded workspace — auto-deleting. ' +
+          'If this recurs on every restart, check for external automation or macOS app conflicts ' +
+          'that may be re-creating the file.',
+      );
+      try {
+        await fs.unlink(bootstrapPath);
+        log?.info({ workspaceCwd }, 'workspace:bootstrap auto-deleted stale BOOTSTRAP.md');
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          // Race: another process deleted it between access and unlink.
+          log?.info({ workspaceCwd }, 'workspace:bootstrap stale BOOTSTRAP.md already deleted by another process');
+        } else {
+          log?.warn(
+            { workspaceCwd, error: (err as Error).message },
+            'workspace:bootstrap failed to auto-delete stale BOOTSTRAP.md — check file permissions',
+          );
+          throw err;
+        }
+      }
     }
   }
 
