@@ -566,6 +566,11 @@ export async function preparePlanRun(
   if (staleness.stale) return { error: staleness.message };
 
   const nextPhase = getNextPhase(phases);
+  // NOTE: The multi-phase loop in discord.ts depends on NO_PHASES_SENTINEL only here
+  // (initial validation before the loop starts). The loop itself uses runNextPhase's
+  // `nothing_to_run` discriminated union result — not this sentinel string. If this
+  // error message is refactored, only the initial "already all done" detection breaks,
+  // and the failure mode is benign (user sees an error instead of "all done").
   if (!nextPhase) return { error: `${NO_PHASES_SENTINEL} — all done or dependencies unmet.` };
 
   return {
