@@ -39,6 +39,8 @@ export type ForgeOrchestratorOpts = {
   drafterModel?: string;
   auditorModel?: string;
   log?: LoggerLike;
+  /** When set, reuse this bead instead of creating a new one (e.g. when issued in a bead forum thread). */
+  existingBeadId?: string;
 };
 
 type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
@@ -414,7 +416,7 @@ export class ForgeOrchestrator {
       // 1. Create the plan file via handlePlanCommand
       // Pass context separately so bead title/slug stay clean (context goes in plan body).
       const createResult = await handlePlanCommand(
-        { action: 'create', args: description, context },
+        { action: 'create', args: description, context, existingBeadId: this.opts.existingBeadId },
         { workspaceCwd: this.opts.workspaceCwd, beadsCwd: this.opts.beadsCwd },
       );
 

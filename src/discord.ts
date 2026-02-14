@@ -38,6 +38,7 @@ import { registerInFlightReply, isShuttingDown } from './discord/inflight-replie
 import { createReactionAddHandler, createReactionRemoveHandler } from './discord/reaction-handler.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
+import { beadThreadCache } from './beads/bead-thread-cache.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/shortterm-memory.js';
 import { editThenSendChunks } from './discord/output-common.js';
 import { downloadMessageImages, resolveMediaType } from './discord/image-download.js';
@@ -942,6 +943,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // Context travels separately so slug/bead/title stay clean.
               let effectivePlanCmd = planCmd;
               if (planCmd.action === 'create' && planCmd.args) {
+                // Resolve existing bead from thread context to avoid orphan beads
+                let existingBeadId: string | undefined;
+                if (isThread && threadId && threadParentId && params.beadCtx) {
+                  if (threadParentId === params.beadCtx.forumId) {
+                    try {
+                      const bead = await beadThreadCache.get(threadId, params.beadCtx.beadsCwd);
+                      if (bead) existingBeadId = bead.id;
+                    } catch {
+                      // best-effort — fall through to create a new bead
+                    }
+                  }
+                }
+
                 const replyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
                 const threadCtx = await resolveThreadContext(
                   msg.channel as any,
@@ -957,7 +971,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   contextParts.push(threadCtx.section);
                 }
                 if (contextParts.length > 0) {
-                  effectivePlanCmd = { ...planCmd, context: contextParts.join('\n\n') };
+                  effectivePlanCmd = { ...planCmd, context: contextParts.join('\n\n'), existingBeadId };
+                } else if (existingBeadId) {
+                  effectivePlanCmd = { ...planCmd, existingBeadId };
                 }
               }
               const response = await handlePlanCommand(effectivePlanCmd, planOpts);
@@ -1118,6 +1134,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
+              // Resolve existing bead from thread context to avoid orphan beads
+              let forgeExistingBeadId: string | undefined;
+              if (isThread && threadId && threadParentId && params.beadCtx) {
+                if (threadParentId === params.beadCtx.forumId) {
+                  try {
+                    const bead = await beadThreadCache.get(threadId, params.beadCtx.beadsCwd);
+                    if (bead) forgeExistingBeadId = bead.id;
+                  } catch {
+                    // best-effort
+                  }
+                }
+              }
+
               // Resolve reply + thread context separately — don't concatenate into args
               // (args drives the bead title and slug; context goes in the plan body).
               const forgeReplyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
@@ -1154,6 +1183,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 drafterModel: params.forgeDrafterModel,
                 auditorModel: params.forgeAuditorModel,
                 log: params.log,
+                existingBeadId: forgeExistingBeadId,
               });
               _activeForgeOrchestrator = forgeOrchestrator;
 

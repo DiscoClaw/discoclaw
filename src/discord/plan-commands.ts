@@ -2,7 +2,6 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { bdCreate, bdClose, bdUpdate, bdAddLabel } from '../beads/bd-cli.js';
-import type { BeadData } from '../beads/types.js';
 import {
   decomposePlan,
   serializePhases,
@@ -22,6 +21,8 @@ export type PlanCommand = {
   action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'run-one' | 'skip' | 'audit';
   args: string;
   context?: string;
+  /** When set, reuse this bead instead of creating a new one (e.g. when issued in a bead forum thread). */
+  existingBeadId?: string;
 };
 
 export type PlanFileHeader = {
@@ -301,15 +302,26 @@ export async function handlePlanCommand(
       const filePath = path.join(plansDir, fileName);
       const date = new Date().toISOString().split('T')[0]!;
 
-      // Create backing bead
-      let bead: BeadData;
-      try {
-        bead = await bdCreate(
-          { title: cmd.args, labels: ['plan'] },
-          opts.beadsCwd,
-        );
-      } catch (err) {
-        return `Failed to create backing bead: ${String(err)}`;
+      // Create backing bead — or reuse existing one from bead thread context
+      let beadId: string;
+      if (cmd.existingBeadId) {
+        beadId = cmd.existingBeadId;
+        // Ensure the reused bead has the 'plan' label for label-based filtering
+        try {
+          await bdAddLabel(beadId, 'plan', opts.beadsCwd);
+        } catch {
+          // best-effort — label addition failure shouldn't block plan creation
+        }
+      } else {
+        try {
+          const bead = await bdCreate(
+            { title: cmd.args, labels: ['plan'] },
+            opts.beadsCwd,
+          );
+          beadId = bead.id;
+        } catch (err) {
+          return `Failed to create backing bead: ${String(err)}`;
+        }
       }
 
       // Load template or use fallback
@@ -325,7 +337,7 @@ export async function handlePlanCommand(
       const content = template
         .replace(/\{\{TITLE\}\}/g, cmd.args)
         .replace(/\{\{PLAN_ID\}\}/g, planId)
-        .replace(/\{\{BEAD_ID\}\}/g, bead.id)
+        .replace(/\{\{BEAD_ID\}\}/g, beadId)
         .replace(/\{\{DATE\}\}/g, date)
         .replace(/\{\{PROJECT\}\}/g, 'discoclaw')
         // Set status to DRAFT (remove the options list)
@@ -342,7 +354,7 @@ export async function handlePlanCommand(
       await fs.writeFile(filePath, finalContent, 'utf-8');
 
       return [
-        `Plan created: **${planId}** (bead: \`${bead.id}\`)`,
+        `Plan created: **${planId}** (bead: \`${beadId}\`)`,
         `File: \`workspace/plans/${fileName}\``,
         `Description: ${cmd.args}`,
       ].join('\n');

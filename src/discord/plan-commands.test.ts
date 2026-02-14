@@ -412,6 +412,62 @@ describe('handlePlanCommand', () => {
     expect(stat.isDirectory()).toBe(true);
   });
 
+  it('create — skips bdCreate when existingBeadId is provided', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'fix the bug', existingBeadId: 'bead-abc' },
+      opts,
+    );
+
+    expect(result).toContain('plan-001');
+    expect(result).toContain('bead-abc');
+    expect(bdCreate).not.toHaveBeenCalled();
+
+    // Verify the plan file contains the existing bead ID
+    const plansDir = path.join(tmpDir, 'plans');
+    const files = await fs.readdir(plansDir);
+    const planFile = files.find((f) => f.startsWith('plan-001'));
+    const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+    expect(content).toContain('**Bead:** bead-abc');
+  });
+
+  it('create — calls bdAddLabel when reusing existing bead', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const { bdAddLabel } = await import('../beads/bd-cli.js');
+
+    await handlePlanCommand(
+      { action: 'create', args: 'test', existingBeadId: 'bead-xyz' },
+      opts,
+    );
+
+    expect(vi.mocked(bdAddLabel)).toHaveBeenCalledWith('bead-xyz', 'plan', opts.beadsCwd);
+  });
+
+  it('create — bdAddLabel failure does not block plan creation', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const { bdAddLabel } = await import('../beads/bd-cli.js');
+    vi.mocked(bdAddLabel).mockRejectedValueOnce(new Error('label fail'));
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'test', existingBeadId: 'bead-fail' },
+      opts,
+    );
+
+    expect(result).toContain('plan-001');
+    expect(result).toContain('bead-fail');
+
+    // Plan file should still be created with the correct bead ID
+    const plansDir = path.join(tmpDir, 'plans');
+    const files = await fs.readdir(plansDir);
+    const planFile = files.find((f) => f.startsWith('plan-001'));
+    const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+    expect(content).toContain('**Bead:** bead-fail');
+  });
+
   it('list — shows active plans as bullet list', async () => {
     const tmpDir = await makeTmpDir();
     const plansDir = path.join(tmpDir, 'plans');
