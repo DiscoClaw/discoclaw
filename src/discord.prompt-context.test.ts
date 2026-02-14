@@ -1232,4 +1232,159 @@ describe('bead resolution dispatch wiring', () => {
     // beadThreadCache.get should NOT be called — forum ID mismatch short-circuits
     expect(mockedCacheGet).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // Plan/forge channel history fallback
+  // -------------------------------------------------------------------------
+
+  describe('plan/forge channel history fallback', () => {
+    function fakeHistoryMsg(id: string, content: string, username: string, bot = false) {
+      return {
+        id,
+        content,
+        author: { username, displayName: username, bot },
+      };
+    }
+
+    it('!plan create in regular channel with history — captures context', async () => {
+      const { queue, params, workspaceCwd } = makePlanForgeParams({ messageHistoryBudget: 3000 });
+      const handler = createMessageCreateHandler(params, queue);
+
+      const channelFetch = vi.fn(async () => new Map([
+        ['1', fakeHistoryMsg('1', 'the header is misaligned', 'Alice')],
+        ['2', fakeHistoryMsg('2', 'yeah I see it too', 'Bob')],
+      ]));
+
+      await handler(makeMsg({
+        content: '!plan fix the layout bug',
+        channelId: 'regular-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'regular-chan',
+          messages: { fetch: channelFetch },
+        },
+      }));
+
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      expect(planFile).toBeTruthy();
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).toContain('Context (recent channel messages):');
+      expect(content).toContain('[Alice]: the header is misaligned');
+    });
+
+    it('!plan create in regular channel with empty history — no context section', async () => {
+      const { queue, params, workspaceCwd } = makePlanForgeParams({ messageHistoryBudget: 3000 });
+      const handler = createMessageCreateHandler(params, queue);
+
+      await handler(makeMsg({
+        content: '!plan fix something',
+        channelId: 'empty-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'empty-chan',
+          messages: { fetch: vi.fn(async () => new Map()) },
+        },
+      }));
+
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      expect(planFile).toBeTruthy();
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).not.toContain('## Context');
+    });
+
+    it('!plan create with reply reference — fallback NOT called', async () => {
+      const { queue, params, workspaceCwd } = makePlanForgeParams({ messageHistoryBudget: 3000 });
+      const handler = createMessageCreateHandler(params, queue);
+
+      const channelFetch = vi.fn(async (opts: any) => {
+        // Single-ID fetch for resolveReplyReference
+        if (typeof opts === 'string') {
+          return fakeHistoryMsg('ref-1', 'the original issue description', 'Alice');
+        }
+        // History-style fetch should not be called
+        throw new Error('history fetch should not be called');
+      });
+
+      await handler(makeMsg({
+        content: '!plan fix the layout bug',
+        channelId: 'reply-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'reply-chan',
+          messages: { fetch: channelFetch },
+        },
+        reference: { messageId: 'ref-1' },
+      }));
+
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      expect(planFile).toBeTruthy();
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).toContain('Context (replied-to message):');
+      expect(content).not.toContain('Context (recent channel messages):');
+    });
+
+    it('!plan create with budget 0 — fallback NOT called', async () => {
+      const { queue, params, workspaceCwd } = makePlanForgeParams({ messageHistoryBudget: 0 });
+      const handler = createMessageCreateHandler(params, queue);
+
+      const channelFetch = vi.fn(async () => new Map([
+        ['1', fakeHistoryMsg('1', 'some message', 'Alice')],
+      ]));
+
+      await handler(makeMsg({
+        content: '!plan fix the bug',
+        channelId: 'budget-zero-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'budget-zero-chan',
+          messages: { fetch: channelFetch },
+        },
+      }));
+
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      expect(planFile).toBeTruthy();
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).not.toContain('## Context');
+    });
+
+    it('!plan create with history fetch error — proceeds without context', async () => {
+      const { queue, params, workspaceCwd } = makePlanForgeParams({ messageHistoryBudget: 3000 });
+      const handler = createMessageCreateHandler(params, queue);
+
+      await handler(makeMsg({
+        content: '!plan fix the bug',
+        channelId: 'error-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'error-chan',
+          messages: { fetch: vi.fn(async () => { throw new Error('forbidden'); }) },
+        },
+      }));
+
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      expect(planFile).toBeTruthy();
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).not.toContain('## Context');
+    });
+  });
 });

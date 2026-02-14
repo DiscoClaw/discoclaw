@@ -970,6 +970,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 if (threadCtx?.section) {
                   contextParts.push(threadCtx.section);
                 }
+
+                // Fallback: grab recent channel history when no reply or thread context exists
+                if (contextParts.length === 0 && params.messageHistoryBudget > 0) {
+                  try {
+                    const history = await fetchMessageHistory(
+                      msg.channel,
+                      msg.id,
+                      { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
+                    );
+                    if (history) {
+                      contextParts.push(`Context (recent channel messages):\n${history}`);
+                    }
+                  } catch (err) {
+                    params.log?.warn({ err }, 'discord:plan-create history fallback failed');
+                  }
+                }
+
                 if (contextParts.length > 0) {
                   effectivePlanCmd = { ...planCmd, context: contextParts.join('\n\n'), existingBeadId };
                 } else if (existingBeadId) {
@@ -1163,6 +1180,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (forgeThreadCtx?.section) {
                 forgeContextParts.push(forgeThreadCtx.section);
               }
+
+              // Fallback: grab recent channel history when no reply or thread context exists
+              if (forgeContextParts.length === 0 && params.messageHistoryBudget > 0) {
+                try {
+                  const history = await fetchMessageHistory(
+                    msg.channel,
+                    msg.id,
+                    { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
+                  );
+                  if (history) {
+                    forgeContextParts.push(`Context (recent channel messages):\n${history}`);
+                  }
+                } catch (err) {
+                  params.log?.warn({ err }, 'discord:forge-create history fallback failed');
+                }
+              }
+
               const forgeContext = forgeContextParts.length > 0
                 ? forgeContextParts.join('\n\n')
                 : undefined;
