@@ -72,13 +72,6 @@ const dataDir = cfg.dataDir;
 const pidLockDir = dataDir ?? path.join(__dirname, '..', 'data');
 const pidLockPath = path.join(pidLockDir, 'discoclaw.pid');
 const pidLockDirPath = `${pidLockPath}.lock`;
-// Detect first-ever boot: lock dir won't exist yet if we've never run before.
-let firstBoot = false;
-try {
-  await fs.access(pidLockDirPath);
-} catch {
-  firstBoot = true;
-}
 try {
   await fs.mkdir(pidLockDir, { recursive: true });
   await acquirePidLock(pidLockPath);
@@ -86,6 +79,17 @@ try {
 } catch (err) {
   log.error({ err }, 'Failed to acquire PID lock');
   process.exit(1);
+}
+
+// Detect first-ever boot via a stable marker file (persists across restarts).
+// The PID lock dir is transient (removed on shutdown) so it can't be used here.
+const bootMarkerPath = path.join(pidLockDir, '.boot-marker');
+let firstBoot = false;
+try {
+  await fs.access(bootMarkerPath);
+} catch {
+  firstBoot = true;
+  await fs.writeFile(bootMarkerPath, new Date().toISOString() + '\n', 'utf-8');
 }
 
 // --- Configure inflight reply persistence (for graceful shutdown + cold-start recovery) ---
