@@ -244,6 +244,14 @@ describe('buildAuditorPrompt', () => {
     expect(prompt).not.toContain('Prior Audit History');
     expect(prompt).not.toContain('DO NOT re-raise');
   });
+
+  it('includes verification instructions for tool use', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    expect(prompt).toContain('## Verification');
+    expect(prompt).toContain('Read, Glob, and Grep tools');
+    expect(prompt).toContain('Use them before raising concerns');
+    expect(prompt).toContain('concern evaporates after checking the code');
+  });
 });
 
 describe('buildRevisionPrompt', () => {
@@ -680,6 +688,40 @@ describe('ForgeOrchestrator', () => {
     // Auditor prompt (second call) should include project context
     expect(prompts[1]).toContain('Single-user system');
     expect(prompts[1]).toContain('Project Context');
+  });
+
+  it('passes read-only tools to auditor invoke call', async () => {
+    const tmpDir = await makeTmpDir();
+
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    // Capture invoke params for each call
+    const invocations: Array<Record<string, unknown>> = [];
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        invocations.push({ tools: params.tools, addDirs: params.addDirs });
+        const responses = [draftPlan, auditClean];
+        const text = responses[invocations.length - 1] ?? '(no response)';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+    await orchestrator.run('Test', async () => {});
+
+    // Drafter (first call) gets read-only tools
+    expect(invocations[0]!.tools).toEqual(['Read', 'Glob', 'Grep']);
+    expect(invocations[0]!.addDirs).toEqual([tmpDir]);
+
+    // Auditor (second call) also gets read-only tools
+    expect(invocations[1]!.tools).toEqual(['Read', 'Glob', 'Grep']);
+    expect(invocations[1]!.addDirs).toEqual([tmpDir]);
   });
 
   it('updates bead title when drafter produces a different title than raw description', async () => {
