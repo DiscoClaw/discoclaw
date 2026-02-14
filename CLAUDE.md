@@ -28,6 +28,7 @@ Never auto-load all `.context/` modules. Read only what the task requires.
 | Memory system (layers, config, concurrency) | `.context/memory.md` |
 | Beads / task tracking | `.context/beads.md` |
 | Architecture / system overview | `.context/architecture.md` |
+| Tool capabilities / browser automation | `.context/tools.md` |
 
 See `.context/README.md` for details.
 

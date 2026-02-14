@@ -70,6 +70,61 @@ describe('parseDiscordActions', () => {
     expect(cleanText).not.toMatch(/\n{3,}/);
     expect(cleanText).toBe('Here is the list:\n\nDone.');
   });
+
+  it('strips malformed action blocks with wrong closing tags', () => {
+    const input = 'Here is the bead:\n<discord-action>{"type":"channelList"}</parameter>\n</invoke>';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelList' }]);
+    expect(cleanText).toBe('Here is the bead:');
+  });
+
+  it('strips malformed action blocks with no closing tag', () => {
+    const input = 'Done.\n<discord-action>{"type":"channelList"}';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelList' }]);
+    expect(cleanText).toBe('Done.');
+  });
+
+  it('strips malformed action blocks with complex JSON payloads', () => {
+    const json = '{"type":"channelCreate","name":"test","parent":"Dev","topic":"A topic"}';
+    const input = `Creating channel.\n<discord-action>${json}</parameter>\n</invoke>\nExtra text.`;
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelCreate', name: 'test', parent: 'Dev', topic: 'A topic' }]);
+    expect(cleanText).toBe('Creating channel.\n\nExtra text.');
+  });
+
+  it('handles nested braces in JSON string values', () => {
+    const json = '{"type":"channelCreate","name":"test","topic":"Fix {braces} in output"}';
+    const input = `Text.\n<discord-action>${json}</parameter>\n</invoke>`;
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelCreate', name: 'test', topic: 'Fix {braces} in output' }]);
+    expect(cleanText).toBe('Text.');
+  });
+
+  it('handles two malformed action blocks in one response', () => {
+    const input =
+      'First.\n<discord-action>{"type":"channelList"}</parameter>\n</invoke>\n' +
+      'Second.\n<discord-action>{"type":"channelCreate","name":"x"}</parameter>';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(2);
+    expect(actions[0]).toEqual({ type: 'channelList' });
+    expect(actions[1]).toEqual({ type: 'channelCreate', name: 'x' });
+    expect(cleanText).toBe('First.\n\nSecond.');
+  });
+
+  it('preserves text after an unterminated malformed action block', () => {
+    const input = 'Before\n<discord-action>{"type":"channelList","x":"oops\nAfter text';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(0);
+    expect(cleanText).toBe('Before\n\nAfter text');
+  });
+
+  it('strips trailing XML tags after an unterminated malformed action block', () => {
+    const input = 'Before\n<discord-action>{"type":"channelList","x":"oops\n</parameter>\n</invoke>\nAfter';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(0);
+    expect(cleanText).toBe('Before\n\nAfter');
+  });
 });
 
 // ---------------------------------------------------------------------------

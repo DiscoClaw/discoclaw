@@ -690,6 +690,47 @@ describe('ForgeOrchestrator', () => {
     expect(prompts[1]).toContain('Project Context');
   });
 
+  it('includes .context/tools.md in drafter prompt but not auditor prompt', async () => {
+    const tmpDir = await makeTmpDir();
+
+    // Create a .context/tools.md in the cwd
+    const contextDir = path.join(tmpDir, '.context');
+    await fs.mkdir(contextDir, { recursive: true });
+    await fs.writeFile(
+      path.join(contextDir, 'tools.md'),
+      'Browser escalation: WebFetch → Playwright → CDP',
+    );
+
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    // Capture the prompts sent to the runtime
+    const prompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        prompts.push(params.prompt);
+        const responses = [draftPlan, auditClean];
+        const text = responses[prompts.length - 1] ?? '(no response)';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+    await orchestrator.run('Test', async () => {});
+
+    // Drafter prompt (first call) should include tools context
+    expect(prompts[0]).toContain('Browser escalation: WebFetch');
+    expect(prompts[0]).toContain('tools.md (repo)');
+    // Auditor prompt (second call) should NOT include tools context
+    expect(prompts[1]).not.toContain('Browser escalation: WebFetch');
+    expect(prompts[1]).not.toContain('tools.md (repo)');
+  });
+
   it('passes read-only tools to auditor invoke call', async () => {
     const tmpDir = await makeTmpDir();
 

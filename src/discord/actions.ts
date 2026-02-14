@@ -77,13 +77,103 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
 
 const ACTION_RE = /<discord-action>([\s\S]*?)<\/discord-action>/g;
 
+// Trailing XML closing tags left by garbled AI output (e.g. </parameter>\n</invoke>).
+const TRAILING_XML_RE = /^(?:\s*<\/[a-z-]+>)+/;
+
+/**
+ * Extract a JSON object starting at `text[start]` (which must be '{') by
+ * counting brace depth, respecting string literals. Returns the substring
+ * including the outer braces, or null if braces never balance.
+ */
+function extractJsonObject(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\' && inString) { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
+  }
+  return null;
+}
+
+/**
+ * Second-pass scanner for malformed `<discord-action>` blocks whose closing
+ * tag is wrong or missing (e.g. `</parameter>\n</invoke>` instead of
+ * `</discord-action>`).  Uses brace-counting to reliably extract the JSON
+ * object regardless of nested braces in string values, then consumes any
+ * trailing XML-like closing tags.
+ */
+function stripMalformedActions(
+  text: string,
+  validTypes: Set<string>,
+  actions: DiscordActionRequest[],
+): string {
+  const MARKER = '<discord-action>';
+  let result = '';
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const idx = text.indexOf(MARKER, cursor);
+    if (idx === -1) { result += text.slice(cursor); break; }
+
+    // Copy text before the marker.
+    result += text.slice(cursor, idx);
+
+    // Find the opening brace after the marker.
+    let afterMarker = idx + MARKER.length;
+    // Skip whitespace between marker and brace.
+    while (afterMarker < text.length && /\s/.test(text[afterMarker])) afterMarker++;
+
+    if (afterMarker >= text.length || text[afterMarker] !== '{') {
+      // No JSON object follows — keep the marker text as-is and move on.
+      result += MARKER;
+      cursor = idx + MARKER.length;
+      continue;
+    }
+
+    const jsonStr = extractJsonObject(text, afterMarker);
+    if (!jsonStr) {
+      // Unbalanced braces — strip this line, then consume any trailing XML closing tags.
+      const nl = text.indexOf('\n', afterMarker);
+      cursor = nl === -1 ? text.length : nl;
+      const trailing = text.slice(cursor).match(TRAILING_XML_RE);
+      if (trailing) cursor += trailing[0].length;
+      continue;
+    }
+
+    // Try to parse and collect the action.
+    try {
+      const parsed = JSON.parse(jsonStr);
+      if (parsed && typeof parsed.type === 'string' && validTypes.has(parsed.type)) {
+        actions.push(parsed as DiscordActionRequest);
+      }
+    } catch {
+      // Malformed JSON — strip it from display anyway.
+    }
+
+    // Advance past the JSON object and consume any trailing XML closing tags.
+    cursor = afterMarker + jsonStr.length;
+    const trailing = text.slice(cursor).match(TRAILING_XML_RE);
+    if (trailing) cursor += trailing[0].length;
+  }
+
+  return result;
+}
+
 export function parseDiscordActions(
   text: string,
   flags: ActionCategoryFlags,
 ): { cleanText: string; actions: DiscordActionRequest[] } {
   const validTypes = buildValidTypes(flags);
   const actions: DiscordActionRequest[] = [];
-  const cleanText = text.replace(ACTION_RE, (_match, json: string) => {
+
+  // First pass: well-formed <discord-action>...</discord-action> blocks.
+  let cleaned = text.replace(ACTION_RE, (_match, json: string) => {
     try {
       const parsed = JSON.parse(json.trim());
       if (parsed && typeof parsed.type === 'string' && validTypes.has(parsed.type)) {
@@ -93,7 +183,12 @@ export function parseDiscordActions(
       // Malformed JSON — skip silently.
     }
     return '';
-  }).replace(/\n{3,}/g, '\n\n').trim();
+  });
+
+  // Second pass: malformed blocks (wrong closing tag or no closing tag).
+  cleaned = stripMalformedActions(cleaned, validTypes, actions);
+
+  const cleanText = cleaned.replace(/\n{3,}/g, '\n\n').trim();
 
   return { cleanText, actions };
 }
