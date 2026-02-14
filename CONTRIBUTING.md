@@ -4,9 +4,9 @@
 
 ```bash
 git clone <repo-url> && cd discoclaw
-pnpm setup                 # guided interactive setup (or: cp .env.example .env)
 pnpm install
-pnpm doctor                # preflight check
+pnpm setup                 # guided interactive setup (or: cp .env.example .env)
+pnpm preflight             # preflight check
 pnpm dev                   # start dev mode
 ```
 
@@ -34,7 +34,7 @@ Developer docs live in `.context/*.md` and are loaded on-demand. See
 ## Commands
 
 ```bash
-pnpm doctor     # preflight check (Node, pnpm, Claude CLI, .env)
+pnpm preflight  # preflight check (Node, pnpm, Claude CLI, .env)
 pnpm dev        # start dev mode
 pnpm build      # compile TypeScript
 pnpm test       # run tests

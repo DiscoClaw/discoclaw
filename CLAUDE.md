@@ -74,7 +74,7 @@ Skip deploy for test-only, docs-only, or template-only changes.
 ## Commands
 
 ```bash
-pnpm doctor     # preflight check (Node, pnpm, Claude CLI, .env)
+pnpm preflight  # preflight check (Node, pnpm, Claude CLI, .env)
 pnpm dev        # start dev mode
 pnpm build      # compile TypeScript
 pnpm test       # run tests

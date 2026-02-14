@@ -85,16 +85,18 @@ Notes:
 ## 4) Configure DiscoClaw
 
 ```bash
+pnpm i
 pnpm setup     # guided interactive setup
 # Or manually:
 cp .env.example .env   # quick start (essentials only)
 # cp .env.example.full .env   # all ~90 options
-pnpm i
 ```
 
 Edit `.env`:
 - `DISCORD_TOKEN=...`
 - `DISCORD_ALLOW_USER_IDS=...` (required; if empty, the bot responds to nobody)
+- `DISCOCLAW_BEADS_FORUM=...` (required when beads enabled; enabled by default)
+- `DISCOCLAW_CRON_FORUM=...` (required when crons enabled; enabled by default)
 - `DISCORD_CHANNEL_IDS=...` (recommended for servers)
 - `DISCOCLAW_DATA_DIR=...` (optional; defaults workspace/content under this folder)
 
@@ -112,7 +114,7 @@ Run through this checklist in order. Each step should produce the expected outpu
    ```bash
    claude --version
    ```
-   Expected: a version string (e.g. `1.x.x`). If not found, install it first — see [Claude CLI docs](https://docs.anthropic.com/en/docs/claude-code).
+   Expected: a version string `>= 2.1.0`. If not found, install it first — see [Claude CLI docs](https://docs.anthropic.com/en/docs/claude-code).
 
 2. **Node and pnpm:**
    ```bash

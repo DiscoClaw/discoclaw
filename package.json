@@ -23,6 +23,8 @@
     "discord:join-threads": "node scripts/discord-join-threads.mjs",
     "claude:install-skills": "tsx scripts/install-claude-skills.ts",
     "sync:discord-context": "tsx scripts/sync-discord-context.ts",
+    "preflight": "tsx scripts/doctor.ts",
+    "preflight:online": "tsx scripts/doctor.ts --check-connection",
     "doctor": "tsx scripts/doctor.ts",
     "doctor:online": "tsx scripts/doctor.ts --check-connection",
     "setup": "tsx scripts/setup.ts",

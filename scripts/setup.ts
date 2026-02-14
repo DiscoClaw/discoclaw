@@ -19,12 +19,17 @@ const envPath = path.join(root, '.env');
 
 let rl: readline.Interface | null = null;
 let canceled = false;
+let completed = false;
 
 function cleanup() {
   canceled = true;
   // Remove .env.tmp if it exists (incomplete write)
   try { fs.unlinkSync(path.join(root, '.env.tmp')); } catch { /* ignore */ }
-  if (rl) rl.close();
+  if (rl) {
+    const toClose = rl;
+    rl = null;
+    toClose.close();
+  }
   console.log('\n\nSetup canceled.\n');
   process.exit(1);
 }
@@ -39,7 +44,7 @@ if (!input.isTTY) {
 
 rl = readline.createInterface({ input, output });
 rl.on('close', () => {
-  if (!canceled) cleanup();
+  if (!canceled && !completed) cleanup();
 });
 
 console.log(`
@@ -47,6 +52,7 @@ Discoclaw Setup
 ===============
 This wizard creates a .env file with your Discord bot configuration.
 You'll need your bot token from https://discord.com/developers/applications
+and your Beads/Cron forum channel IDs from Discord.
 `);
 
 // --- Check existing .env ---
@@ -74,6 +80,7 @@ if (fs.existsSync(envPath)) {
   const overwrite = await ask('Overwrite with fresh config? [y/N] ');
   if (overwrite.toLowerCase() !== 'y') {
     console.log('Run pnpm setup after removing .env to reconfigure.\n');
+    completed = true;
     rl.close();
     process.exit(0);
   }
@@ -105,6 +112,16 @@ values.DISCORD_ALLOW_USER_IDS = await askValidated(
     if (!r.valid) return 'At least one valid snowflake ID is required';
     return null;
   },
+);
+
+values.DISCOCLAW_BEADS_FORUM = await askValidated(
+  'Beads forum channel ID (required): ',
+  (val) => validateSnowflake(val) ? null : 'Must be a 17-20 digit number',
+);
+
+values.DISCOCLAW_CRON_FORUM = await askValidated(
+  'Cron forum channel ID (required): ',
+  (val) => validateSnowflake(val) ? null : 'Must be a 17-20 digit number',
 );
 
 // --- Recommended values ---
@@ -140,24 +157,6 @@ if (configOptional.toLowerCase() === 'y') {
     values.DISCOCLAW_DISCORD_ACTIONS = '1';
   }
 
-  const beadsForum = await askOptional(
-    'Beads forum channel ID [leave empty to skip]: ',
-    (val) => {
-      if (!val) return null;
-      return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
-    },
-  );
-  if (beadsForum) values.DISCOCLAW_BEADS_FORUM = beadsForum;
-
-  const cronForum = await askOptional(
-    'Cron forum channel ID [leave empty to skip]: ',
-    (val) => {
-      if (!val) return null;
-      return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
-    },
-  );
-  if (cronForum) values.DISCOCLAW_CRON_FORUM = cronForum;
-
   const statusChannel = await askOptional(
     'Status channel ID or name [leave empty to skip]: ',
     () => null,
@@ -173,17 +172,18 @@ fs.renameSync(tmpPath, envPath);
 
 console.log('\n.env written successfully.\n');
 
-// --- Run doctor ---
-console.log('Running pnpm doctor to validate...\n');
+// --- Run preflight ---
+console.log('Running pnpm preflight to validate...\n');
 try {
-  execFileSync('pnpm', ['doctor'], { cwd: root, stdio: 'inherit' });
+  execFileSync('pnpm', ['run', 'preflight'], { cwd: root, stdio: 'inherit' });
 } catch {
-  console.log('\nDoctor reported issues above. Fix them and run pnpm doctor again.\n');
+  console.log('\nPreflight reported issues above. Fix them and run pnpm preflight again.\n');
 }
 
 console.log('\nNext steps:');
 console.log('  pnpm build && pnpm dev\n');
 
+completed = true;
 rl.close();
 
 // ---- Helper functions ----

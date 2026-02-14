@@ -94,7 +94,11 @@ Author one recipe file for an integration, share it, then let another user's Dis
    ```bash
    pnpm install
    pnpm setup            # guided interactive setup
-   # Or manually: cp .env.example .env and fill in DISCORD_TOKEN + DISCORD_ALLOW_USER_IDS
+   # Or manually: cp .env.example .env and fill in required vars:
+   #   DISCORD_TOKEN
+   #   DISCORD_ALLOW_USER_IDS
+   #   DISCOCLAW_BEADS_FORUM
+   #   DISCOCLAW_CRON_FORUM
    # For all ~90 options: cp .env.example.full .env
    ```
 
@@ -113,7 +117,7 @@ pnpm install
 pnpm build
 ```
 
-Run `pnpm doctor` — it flags configuration options from `.env.example` that aren't in your `.env` yet.
+Run `pnpm preflight` — it flags configuration options from `.env.example` that aren't in your `.env` yet.
 
 If running as a systemd service, restart it:
 
@@ -151,7 +155,7 @@ DiscoClaw runs the AI runtime in a separate working directory (`WORKSPACE_CWD`),
 ## Development
 
 ```bash
-pnpm doctor     # preflight check (Node, pnpm, Claude CLI, .env)
+pnpm preflight  # preflight check (Node, pnpm, Claude CLI, .env)
 pnpm dev        # start dev mode
 pnpm build      # compile TypeScript
 pnpm test       # run tests
