@@ -11,11 +11,22 @@ vi.mock('./beads/bead-thread-cache.js', () => ({
   },
 }));
 
+// Mock bd-cli so plan/forge dispatch tests don't shell out.
+vi.mock('./beads/bd-cli.js', () => ({
+  bdCreate: vi.fn(async () => ({ id: 'ws-test-001', title: 'test', status: 'open' })),
+  bdClose: vi.fn(async () => {}),
+  bdUpdate: vi.fn(async () => {}),
+  bdAddLabel: vi.fn(async () => {}),
+}));
+
 import { beadThreadCache } from './beads/bead-thread-cache.js';
+import { bdCreate } from './beads/bd-cli.js';
 import { createMessageCreateHandler } from './discord.js';
 import { loadDurableMemory, saveDurableMemory, addItem } from './discord/durable-memory.js';
 import { inlineContextFiles } from './discord/prompt-common.js';
 import type { DurableMemoryStore } from './discord/durable-memory.js';
+
+const mockedBdCreate = vi.mocked(bdCreate);
 
 const mockedCacheGet = vi.mocked(beadThreadCache.get);
 
@@ -982,5 +993,235 @@ describe('inlineContextFiles required option', () => {
     const missingPath = path.join(os.tmpdir(), 'nonexistent-file-' + Date.now() + '.md');
     const result = await inlineContextFiles([missingPath]);
     expect(result).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bead resolution dispatch wiring for !plan and !forge create
+// ---------------------------------------------------------------------------
+
+describe('bead resolution dispatch wiring', () => {
+  beforeEach(() => {
+    mockedCacheGet.mockReset().mockResolvedValue(null);
+    mockedBdCreate.mockReset().mockResolvedValue({
+      id: 'ws-test-001',
+      title: 'test',
+      status: 'open',
+    });
+  });
+
+  function makePlanForgeParams(overrides?: Partial<any>) {
+    const tmpDir = os.tmpdir();
+    const workspaceCwd = path.join(tmpDir, `plan-forge-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const queue = makeQueue();
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const params: any = {
+      allowUserIds: new Set(['123']),
+      runtime,
+      sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
+      workspaceCwd,
+      groupsDir: '/tmp',
+      useGroupDirCwd: false,
+      runtimeModel: 'opus',
+      runtimeTools: [],
+      runtimeTimeoutMs: 1000,
+      requireChannelContext: false,
+      autoIndexChannelContext: false,
+      autoJoinThreads: false,
+      useRuntimeSessions: true,
+      discordActionsEnabled: false,
+      discordActionsChannels: false,
+      discordActionsMessaging: false,
+      discordActionsGuild: false,
+      discordActionsModeration: false,
+      discordActionsPolls: false,
+      discordActionsBeads: false,
+      discordActionsBotProfile: false,
+      messageHistoryBudget: 0,
+      summaryEnabled: false,
+      summaryModel: 'haiku',
+      summaryMaxChars: 2000,
+      summaryEveryNTurns: 5,
+      summaryDataDir: '/tmp/summaries',
+      summaryToDurableEnabled: false,
+      shortTermMemoryEnabled: false,
+      shortTermDataDir: '/tmp/shortterm',
+      shortTermMaxEntries: 20,
+      shortTermMaxAgeMs: 21600000,
+      shortTermInjectMaxChars: 1000,
+      durableMemoryEnabled: false,
+      durableDataDir: '/tmp/durable',
+      durableInjectMaxChars: 2000,
+      durableMaxItems: 200,
+      memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
+      reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
+      reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
+      botDisplayName: 'TestBot',
+      planCommandsEnabled: true,
+      beadCtx: {
+        beadsCwd: '/tmp/beads',
+        forumId: BEAD_FORUM_ID,
+        tagMap: {},
+        runtime: {} as any,
+        autoTag: false,
+        autoTagModel: 'haiku',
+      },
+      ...overrides,
+    };
+    return { queue, runtime, params, workspaceCwd };
+  }
+
+  it('!plan create in bead forum thread resolves existingBeadId — skips bdCreate', async () => {
+    mockedCacheGet.mockResolvedValue({
+      id: 'existing-bead-42',
+      title: 'Existing bead',
+      status: 'open',
+      priority: 2,
+      owner: 'David',
+    } as any);
+
+    const { queue, params, workspaceCwd } = makePlanForgeParams();
+    const handler = createMessageCreateHandler(params, queue);
+
+    await handler(makeMsg({
+      content: '!plan fix the thread bug',
+      channelId: 'bead-thread-plan',
+      channel: {
+        send: vi.fn(async () => {}),
+        isThread: () => true,
+        parentId: BEAD_FORUM_ID,
+        name: 'bead-thread',
+        id: 'bead-thread-plan',
+      },
+    }));
+
+    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-plan', '/tmp/beads');
+    expect(mockedBdCreate).not.toHaveBeenCalled();
+
+    // Verify the plan file uses the existing bead ID
+    const plansDir = path.join(workspaceCwd, 'plans');
+    const files = await fs.readdir(plansDir);
+    const planFile = files.find((f) => f.endsWith('.md'));
+    expect(planFile).toBeTruthy();
+    const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+    expect(content).toContain('**Bead:** existing-bead-42');
+  });
+
+  it('!plan create in non-bead-forum thread does NOT resolve — calls bdCreate', async () => {
+    const { queue, params } = makePlanForgeParams();
+    const handler = createMessageCreateHandler(params, queue);
+
+    await handler(makeMsg({
+      content: '!plan fix something',
+      channelId: 'other-thread',
+      channel: {
+        send: vi.fn(async () => {}),
+        isThread: () => true,
+        parentId: '99998888777766665555', // Different from BEAD_FORUM_ID
+        name: 'other-thread',
+        id: 'other-thread',
+      },
+    }));
+
+    expect(mockedCacheGet).not.toHaveBeenCalled();
+    expect(mockedBdCreate).toHaveBeenCalled();
+  });
+
+  it('!plan create when cache returns null falls through to bdCreate', async () => {
+    mockedCacheGet.mockResolvedValue(null);
+
+    const { queue, params } = makePlanForgeParams();
+    const handler = createMessageCreateHandler(params, queue);
+
+    await handler(makeMsg({
+      content: '!plan fix the thread bug',
+      channelId: 'bead-thread-null',
+      channel: {
+        send: vi.fn(async () => {}),
+        isThread: () => true,
+        parentId: BEAD_FORUM_ID,
+        name: 'bead-thread',
+        id: 'bead-thread-null',
+      },
+    }));
+
+    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-null', '/tmp/beads');
+    expect(mockedBdCreate).toHaveBeenCalled();
+  });
+
+  it('!plan create without beadCtx skips bead lookup entirely', async () => {
+    const { queue, params } = makePlanForgeParams({ beadCtx: undefined });
+    const handler = createMessageCreateHandler(params, queue);
+
+    await handler(makeMsg({
+      content: '!plan fix the bug',
+      channelId: 'bead-thread-no-ctx',
+      channel: {
+        send: vi.fn(async () => {}),
+        isThread: () => true,
+        parentId: BEAD_FORUM_ID,
+        name: 'bead-thread',
+        id: 'bead-thread-no-ctx',
+      },
+    }));
+
+    expect(mockedCacheGet).not.toHaveBeenCalled();
+    expect(mockedBdCreate).toHaveBeenCalled();
+  });
+
+  it('!forge create in bead forum thread resolves existingBeadId', async () => {
+    mockedCacheGet.mockResolvedValue({
+      id: 'existing-forge-bead',
+      title: 'Forge bead',
+      status: 'open',
+      priority: 2,
+      owner: 'David',
+    } as any);
+
+    const { queue, params } = makePlanForgeParams({ forgeCommandsEnabled: true });
+    const handler = createMessageCreateHandler(params, queue);
+
+    await handler(makeMsg({
+      content: '!forge fix the thread bug',
+      channelId: 'bead-thread-forge',
+      channel: {
+        send: vi.fn(async () => {}),
+        isThread: () => true,
+        parentId: BEAD_FORUM_ID,
+        name: 'bead-thread',
+        id: 'bead-thread-forge',
+      },
+    }));
+
+    // Verify the bead lookup happened for the forge path
+    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-forge', '/tmp/beads');
+  });
+
+  it('!forge create in non-bead-forum thread does NOT resolve existingBeadId', async () => {
+    const { queue, params } = makePlanForgeParams({ forgeCommandsEnabled: true });
+    const handler = createMessageCreateHandler(params, queue);
+
+    await handler(makeMsg({
+      content: '!forge fix something',
+      channelId: 'other-forge-thread',
+      channel: {
+        send: vi.fn(async () => {}),
+        isThread: () => true,
+        parentId: '99998888777766665555',
+        name: 'other-thread',
+        id: 'other-forge-thread',
+      },
+    }));
+
+    // beadThreadCache.get should NOT be called — forum ID mismatch short-circuits
+    expect(mockedCacheGet).not.toHaveBeenCalled();
   });
 });
