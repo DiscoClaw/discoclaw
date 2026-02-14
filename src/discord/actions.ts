@@ -138,9 +138,11 @@ function stripMalformedActions(
 
     const jsonStr = extractJsonObject(text, afterMarker);
     if (!jsonStr) {
-      // Unbalanced braces — strip just this line, preserve text after the next newline.
+      // Unbalanced braces — strip this line, then consume any trailing XML closing tags.
       const nl = text.indexOf('\n', afterMarker);
       cursor = nl === -1 ? text.length : nl;
+      const trailing = text.slice(cursor).match(TRAILING_XML_RE);
+      if (trailing) cursor += trailing[0].length;
       continue;
     }
 

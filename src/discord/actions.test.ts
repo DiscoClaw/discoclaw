@@ -118,6 +118,13 @@ describe('parseDiscordActions', () => {
     expect(actions).toHaveLength(0);
     expect(cleanText).toBe('Before\n\nAfter text');
   });
+
+  it('strips trailing XML tags after an unterminated malformed action block', () => {
+    const input = 'Before\n<discord-action>{"type":"channelList","x":"oops\n</parameter>\n</invoke>\nAfter';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(0);
+    expect(cleanText).toBe('Before\n\nAfter');
+  });
 });
 
 // ---------------------------------------------------------------------------
