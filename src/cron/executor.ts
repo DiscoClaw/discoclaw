@@ -12,7 +12,7 @@ import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import { parseDiscordActions, executeDiscordActions } from '../discord/actions.js';
 import { sendChunks } from '../discord/output-common.js';
-import { resolveEffectiveTools } from '../discord/prompt-common.js';
+import { loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
@@ -120,7 +120,20 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       }
     }
 
+    let inlinedContext = '';
+    try {
+      const paFiles = await loadWorkspacePaFiles(ctx.cwd);
+      inlinedContext = await inlineContextFiles(paFiles);
+      (ctx.log as any)?.debug?.(
+        { jobId: job.id, paFileCount: paFiles.length },
+        'cron:exec loaded workspace PA files',
+      );
+    } catch (paErr) {
+      ctx.log?.warn?.({ jobId: job.id, err: paErr }, 'cron:exec PA file loading failed, continuing without context');
+    }
+
     let prompt =
+      (inlinedContext ? inlinedContext + '\n\n' : '') +
       `You are executing a scheduled cron job named "${job.name}".\n\n` +
       `Instruction: ${job.def.prompt}\n\n` +
       `Your output will be posted automatically to the Discord channel #${job.def.channel}. ` +
