@@ -7,7 +7,31 @@ const VALID_KINDS = new Set<DurableItem['kind']>([
   'preference', 'fact', 'project', 'constraint', 'person', 'tool', 'workflow',
 ]);
 
-const EXTRACTION_PROMPT = `You are a fact extractor. Given a user's message, extract at most 3 notable long-term facts, preferences, or decisions stated by the user. Only extract information the user explicitly stated. Return a JSON array of objects with "kind" and "text" fields. Valid kinds: preference, fact, project, constraint, person, tool, workflow. If nothing is worth remembering, return [].
+export const EXTRACTION_PROMPT = `You are a long-term memory extractor. Given a user message, decide whether it contains anything worth remembering permanently, and if so extract up to 3 items.
+
+## One-month test
+Only extract something if it would still be useful to know in a month. Most messages contain nothing worth storing — return [] liberally.
+
+## KEEP — stable, lasting facts
+- User preferences and opinions (editor, language, style, communication preferences)
+- Personal facts (name, location, timezone, family, pets, hobbies, job title)
+- Stable project context (project names, tech stacks, team structure, architecture decisions)
+- Cross-session conventions and workflows (branching strategy, deploy process, naming conventions)
+- Relationships between people, teams, or projects
+
+## EXCLUDE — transient task state
+- Current bugs being fixed, PRs in flight, features being built right now
+- One-time setup steps or installation instructions
+- Transient decisions that will resolve within days
+- Specific code line numbers, file paths, commit hashes, or error messages
+- Anything that reads like a status update rather than a lasting fact
+- In-progress test gaps or TODO items
+- Summaries of what was just done in the current session
+
+## Output format
+Return a JSON array of objects with "kind" and "text" fields. Valid kinds: preference, fact, project, constraint, person, tool, workflow. Max 3 items. If nothing passes the one-month test, return [].
+
+Only extract information the user explicitly stated.
 
 User message:
 {userMessage}
