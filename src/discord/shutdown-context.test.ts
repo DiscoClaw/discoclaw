@@ -287,4 +287,16 @@ describe('formatStartupInjection', () => {
     const result = formatStartupInjection(ctx);
     expect(result).toContain('plan-042');
   });
+
+  it('includes resolved-task guard for all non-null results', () => {
+    const cases: StartupContext[] = [
+      { type: 'intentional', shutdown: { reason: 'restart-command', timestamp: '' } },
+      { type: 'graceful-unknown', shutdown: { reason: 'unknown', timestamp: '' } },
+      { type: 'crash' },
+    ];
+    for (const ctx of cases) {
+      const result = formatStartupInjection(ctx);
+      expect(result).toContain('already resolved');
+    }
+  });
 });

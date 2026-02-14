@@ -141,5 +141,7 @@ export function formatStartupInjection(ctx: StartupContext): string | null {
     line += ` A forge run was in progress: ${ctx.shutdown.activeForge}.`;
   }
 
+  line += ' If the current thread\'s task is already resolved, don\'t announce it — just respond to the user.';
+
   return line;
 }
