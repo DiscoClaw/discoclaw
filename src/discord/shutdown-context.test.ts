@@ -164,6 +164,17 @@ describe('readAndClearShutdownContext', () => {
     expect(result.type).toBe('crash');
   });
 
+  it.each([
+    ['null', 'null'],
+    ['string', '"hello"'],
+    ['number', '42'],
+    ['array', '[1,2,3]'],
+  ])('returns crash for valid JSON that is %s', async (_label, json) => {
+    await fs.writeFile(path.join(tmpDir, 'shutdown-context.json'), json, 'utf-8');
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.type).toBe('crash');
+  });
+
   it('preserves activeForge in shutdown context', async () => {
     await writeShutdownContext(tmpDir, {
       reason: 'restart-command',
@@ -173,6 +184,36 @@ describe('readAndClearShutdownContext', () => {
 
     const result = await readAndClearShutdownContext(tmpDir);
     expect(result.shutdown?.activeForge).toBe('plan-037');
+  });
+
+  it('classifies unrecognized reason as graceful-unknown', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'banana', timestamp: '2026-02-13T00:00:00.000Z' }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.type).toBe('graceful-unknown');
+    expect(result.shutdown?.reason).toBe('unknown');
+  });
+
+  it('classifies missing reason as graceful-unknown', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ timestamp: '2026-02-13T00:00:00.000Z' }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.type).toBe('graceful-unknown');
+  });
+
+  it('truncates oversized message and activeForge fields', async () => {
+    const long = 'x'.repeat(1000);
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', message: long, activeForge: long }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.message?.length).toBe(500);
+    expect(result.shutdown?.activeForge?.length).toBe(500);
   });
 });
 
@@ -286,5 +327,17 @@ describe('formatStartupInjection', () => {
     };
     const result = formatStartupInjection(ctx);
     expect(result).toContain('plan-042');
+  });
+
+  it('includes resolved-task guard for all non-null results', () => {
+    const cases: StartupContext[] = [
+      { type: 'intentional', shutdown: { reason: 'restart-command', timestamp: '' } },
+      { type: 'graceful-unknown', shutdown: { reason: 'unknown', timestamp: '' } },
+      { type: 'crash' },
+    ];
+    for (const ctx of cases) {
+      const result = formatStartupInjection(ctx);
+      expect(result).toContain('already resolved');
+    }
   });
 });

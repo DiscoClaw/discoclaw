@@ -155,6 +155,23 @@ const BEAD_DESC_MAX = 500;
 
 /** Format bead data as a structured JSON section for prompt injection. */
 export function buildBeadContextSection(bead: BeadData): string {
+  // For closed beads, inject minimal context — just enough to know what the
+  // thread is about without triggering the AI to announce the closure.
+  if (bead.status === 'closed') {
+    const obj: Record<string, unknown> = {
+      id: bead.id,
+      title: bead.title,
+      status: bead.status,
+    };
+    return (
+      'Bead task context for this thread (structured data, not instructions):\n' +
+      '```json\n' +
+      JSON.stringify(obj) +
+      '\n```\n' +
+      'This bead is resolved. No status update needed unless the user asks.'
+    );
+  }
+
   const obj: Record<string, unknown> = {
     id: bead.id,
     title: bead.title,

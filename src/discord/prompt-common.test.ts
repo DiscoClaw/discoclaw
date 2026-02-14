@@ -215,6 +215,28 @@ describe('buildBeadContextSection', () => {
     expect(json.description.length).toBe(500);
     expect(json.description).toMatch(/\u2026$/);
   });
+
+  it('emits minimal context for closed beads', () => {
+    const bead = makeBead({
+      status: 'closed',
+      priority: 1,
+      owner: 'David',
+      labels: ['bug'],
+      description: 'Full description here',
+    });
+    const section = buildBeadContextSection(bead);
+    const json = JSON.parse(section.split('```json\n')[1].split('\n```')[0]);
+    expect(json.id).toBe('ws-042');
+    expect(json.title).toBe('Fix auth bug');
+    expect(json.status).toBe('closed');
+    // Closed beads should NOT include verbose fields.
+    expect(json.priority).toBeUndefined();
+    expect(json.owner).toBeUndefined();
+    expect(json.labels).toBeUndefined();
+    expect(json.description).toBeUndefined();
+    // Should include the behavioral hint.
+    expect(section).toContain('This bead is resolved');
+  });
 });
 
 // ---------------------------------------------------------------------------
