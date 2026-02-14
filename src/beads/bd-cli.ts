@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { execa } from 'execa';
 import type { BeadData, BeadCreateParams, BeadUpdateParams, BeadListParams } from './types.js';
 
@@ -71,6 +72,46 @@ export async function checkBdAvailable(): Promise<{ available: boolean; version?
     return { available: false };
   } catch {
     return { available: false };
+  }
+}
+
+/**
+ * Verify the beads database at `cwd` is initialized with an issue_prefix.
+ * Without a prefix, bd silently falls through to the global daemon registry
+ * and may write to a completely different instance's database.
+ *
+ * If the prefix is missing, attempt to auto-set it from the data directory name.
+ * Returns the detected prefix or null if the database cannot be reached.
+ */
+export async function ensureBdDatabaseReady(cwd: string): Promise<{ ready: boolean; prefix?: string }> {
+  const dbPath = path.resolve(cwd, '.beads', 'beads.db');
+  try {
+    const result = await execa(BD_BIN, ['--db', dbPath, '--no-daemon', 'config', 'get', 'issue_prefix'], {
+      cwd,
+      reject: false,
+    });
+    const output = result.stdout.trim();
+    // bd config get returns "key (not set)" when unset, or just the value when set.
+    if (result.exitCode === 0 && output && !output.includes('(not set)')) {
+      return { ready: true, prefix: output };
+    }
+    // Prefix not set — auto-initialize from directory name.
+    // Resolve symlinks so that e.g. code/discoclaw/workspace → discoclaw-data/workspace
+    // derives "data" from the real target, not "dc" from the symlink parent.
+    const realCwd = await fs.realpath(cwd);
+    const dirName = path.basename(path.resolve(realCwd, '..'));
+    // Derive a short prefix: "discoclaw-personal" → "personal", "discoclaw-data" → "data", fallback to "dc"
+    const prefix = dirName.replace(/^discoclaw-?/, '').replace(/[^a-z0-9]/gi, '') || 'dc';
+    const setResult = await execa(BD_BIN, ['--db', dbPath, '--no-daemon', 'config', 'set', 'issue_prefix', prefix], {
+      cwd,
+      reject: false,
+    });
+    if (setResult.exitCode === 0) {
+      return { ready: true, prefix };
+    }
+    return { ready: false };
+  } catch {
+    return { ready: false };
   }
 }
 
