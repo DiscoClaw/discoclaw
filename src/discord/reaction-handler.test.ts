@@ -253,6 +253,12 @@ describe('createReactionAddHandler', () => {
     expect(prompt).toContain('Some important message');
     expect(prompt).toContain('Bob');
     expect(prompt).toContain('#');
+
+    // Boundary instruction appears before the reaction event line.
+    const boundaryIdx = prompt.indexOf('internal system context');
+    const reactionIdx = prompt.indexOf('Reaction event:');
+    expect(boundaryIdx).toBeGreaterThan(-1);
+    expect(boundaryIdx).toBeLessThan(reactionIdx);
   });
 
   it('image attachments are downloaded and passed to runtime.invoke', async () => {

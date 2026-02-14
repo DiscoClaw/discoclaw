@@ -158,6 +158,14 @@ describe('prompt inlines context file contents', () => {
     expect(seenPrompt).toContain('# General channel');
     expect(seenPrompt).not.toContain('Context files (read with Read tool');
     expect(seenPrompt).toContain('User message:\nhello');
+
+    // Boundary instruction appears between context sections and user message.
+    const boundaryIdx = seenPrompt.indexOf('internal system context');
+    const userMsgIdx = seenPrompt.indexOf('User message:');
+    const paIdx = seenPrompt.indexOf('# PA context');
+    expect(boundaryIdx).toBeGreaterThan(-1);
+    expect(boundaryIdx).toBeLessThan(userMsgIdx);
+    expect(boundaryIdx).toBeGreaterThan(paIdx);
   });
 
   it('thread uses parent channel context file', async () => {
