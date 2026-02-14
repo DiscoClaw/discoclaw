@@ -164,6 +164,17 @@ describe('readAndClearShutdownContext', () => {
     expect(result.type).toBe('crash');
   });
 
+  it.each([
+    ['null', 'null'],
+    ['string', '"hello"'],
+    ['number', '42'],
+    ['array', '[1,2,3]'],
+  ])('returns crash for valid JSON that is %s', async (_label, json) => {
+    await fs.writeFile(path.join(tmpDir, 'shutdown-context.json'), json, 'utf-8');
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.type).toBe('crash');
+  });
+
   it('preserves activeForge in shutdown context', async () => {
     await writeShutdownContext(tmpDir, {
       reason: 'restart-command',

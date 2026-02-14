@@ -92,6 +92,11 @@ export async function readAndClearShutdownContext(
     return { type: 'crash' };
   }
 
+  // Non-object JSON (null, string, array, number) → treat as crash.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { type: 'crash' };
+  }
+
   // Validate reason against known union; unknown/missing → graceful-unknown.
   const reason: ShutdownReason = VALID_REASONS.has(parsed.reason) ? parsed.reason : 'unknown';
   const ctx: ShutdownContext = {
