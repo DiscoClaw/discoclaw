@@ -7,6 +7,12 @@ vi.mock('execa', () => ({
   execa: vi.fn(),
 }));
 
+vi.mock('node:fs/promises', () => ({
+  default: {
+    realpath: vi.fn(async (p: string) => p),
+  },
+}));
+
 // ---------------------------------------------------------------------------
 // parseBdJson
 // ---------------------------------------------------------------------------
@@ -227,11 +233,18 @@ describe('runBd argument construction', () => {
 
 describe('ensureBdDatabaseReady', () => {
   let mockExeca: ReturnType<typeof vi.fn>;
+  let mockRealpath: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     const mod = await import('execa');
     mockExeca = mod.execa as unknown as ReturnType<typeof vi.fn>;
     mockExeca.mockReset();
+
+    const fsMod = await import('node:fs/promises');
+    mockRealpath = fsMod.default.realpath as unknown as ReturnType<typeof vi.fn>;
+    // Default: identity (no symlink). Tests that need symlink behavior override this.
+    mockRealpath.mockReset();
+    mockRealpath.mockImplementation(async (p: string) => p);
   });
 
   it('returns ready with prefix when prefix already set', async () => {
@@ -378,5 +391,20 @@ describe('ensureBdDatabaseReady', () => {
     expect(getArgs[dbIdx + 1]).toBe(
       path.resolve('/home/user/discoclaw-personal/workspace', '.beads', 'beads.db'),
     );
+  });
+
+  it('resolves symlinks before deriving prefix', async () => {
+    // Symlink: code/discoclaw/workspace → discoclaw-data/workspace
+    // Without realpath, parent would be "discoclaw" → "dc" (wrong)
+    // With realpath, parent is "discoclaw-data" → "data" (correct)
+    mockRealpath.mockResolvedValueOnce('/home/user/discoclaw-data/workspace');
+    mockExeca.mockResolvedValueOnce({ exitCode: 0, stdout: '(not set)', stderr: '' });
+    mockExeca.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+    const result = await ensureBdDatabaseReady('/home/user/code/discoclaw/workspace');
+    expect(result).toEqual({ ready: true, prefix: 'data' });
+    expect(mockRealpath).toHaveBeenCalledWith('/home/user/code/discoclaw/workspace');
+    const setArgs = mockExeca.mock.calls[1][1] as string[];
+    expect(setArgs).toContain('data');
   });
 });
