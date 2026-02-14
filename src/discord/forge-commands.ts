@@ -617,6 +617,12 @@ export class ForgeOrchestrator {
     const readOnlyTools = ['Read', 'Glob', 'Grep'];
     const addDirs = [this.opts.cwd];
 
+    // Stable session keys — one per role — enable multi-turn reuse across
+    // the audit-revise loop.  Including the model prevents silent mismatch
+    // when drafter/auditor use different models.
+    const drafterSessionKey = `forge:${planId}:${drafterModel}:drafter`;
+    const auditorSessionKey = `forge:${planId}:${auditorModel}:auditor`;
+
     let round = startRound - 1; // will be incremented at top of loop
     let planContent = await fs.readFile(filePath, 'utf-8');
     let lastAuditNotes = '';
@@ -657,6 +663,7 @@ export class ForgeOrchestrator {
           readOnlyTools,
           addDirs,
           this.opts.timeoutMs,
+          { sessionKey: drafterSessionKey },
         );
 
         // Write the draft — preserve the header (planId, beadId) from the created file
@@ -696,6 +703,7 @@ export class ForgeOrchestrator {
         readOnlyTools,
         addDirs,
         this.opts.timeoutMs,
+        { sessionKey: auditorSessionKey },
       );
 
       lastAuditNotes = auditOutput;
@@ -751,6 +759,7 @@ export class ForgeOrchestrator {
         readOnlyTools,
         addDirs,
         this.opts.timeoutMs,
+        { sessionKey: drafterSessionKey },
       );
 
       planContent = this.mergeDraftWithHeader(planContent, revisionOutput);

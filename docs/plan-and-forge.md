@@ -147,25 +147,44 @@ Regenerate phases from the current plan content, overwriting the existing phases
 
 ### `!plan run <plan-id>`
 
-Execute the next pending phase. Requires `PLAN_PHASES_ENABLED=true` (default). Acquires the workspace writer lock, validates staleness, then fires the phase in the background.
+Execute all pending phases sequentially (up to 50, safety cap). Acquires the workspace writer lock per-phase, validates staleness, then fires in the background. Stops on failure, audit deviation, staleness, or shutdown — resume with another `!plan run`.
 
 ```
 !plan run plan-017
 ```
 
-**Output (progress message, updated as the phase runs):**
+**Output (progress message, updated as phases run):**
+```
+Running all phases for **plan-017** — starting phase-1: Implement src/webhook.ts...
+Phase **phase-1** done. Next: phase-2: Implement src/webhook.test.ts...
+```
+
+**On completion (all phases):**
+```
+Plan run complete for **plan-017**: 3 phases executed (87s)
+[x] phase-1: Implement src/webhook.ts (32s)
+[x] phase-2: Implement src/webhook.test.ts (28s)
+[x] phase-3: Post-implementation audit (27s)
+```
+
+**On failure (stops at the failed phase):**
+```
+Plan run stopped: Phase **phase-2** failed: Build error. 1/2 phases completed.
+Use `!plan run plan-017` to retry or `!plan skip plan-017` to skip.
+```
+
+### `!plan run-one <plan-id>`
+
+Execute only the next pending phase (single-phase mode). Same validation and locking as `!plan run`, but stops after one phase regardless of outcome.
+
+```
+!plan run-one plan-017
+```
+
+**Output:**
 ```
 Running phase-1: Implement src/webhook.ts...
-```
-
-**On completion:**
-```
 Phase **phase-1** done: Implement src/webhook.ts
-```
-
-**On failure:**
-```
-Phase **phase-1** failed: <error>. Use `!plan run plan-017` to retry or `!plan skip plan-017` to skip.
 ```
 
 ### `!plan skip <plan-id>`
@@ -696,7 +715,7 @@ The lock is module-level in `discord.ts` — it covers all sessions within a sin
 1. Forge drafts the plan, audits it, revises if needed
 2. Review the plan: `!plan show plan-NNN`
 3. `!plan approve plan-NNN`
-4. `!plan run plan-NNN` — repeat until all phases complete
+4. `!plan run plan-NNN` — executes all phases automatically, stops on failure
 5. Review the final audit phase output
 
 ### Recovering from a failed phase
@@ -718,7 +737,7 @@ Use `!plan run plan-017` to retry or `!plan skip plan-017` to skip.
 **Option B: Skip** — Move past the failed phase:
 ```
 !plan skip plan-017
-!plan run plan-017    ← runs the next phase
+!plan run plan-017    ← continues with remaining phases
 ```
 
 **Option C: Regenerate** — If the plan itself needs changes:
@@ -772,13 +791,13 @@ The forge checks the cancel flag at the start of each audit loop iteration. The 
 
 - **Writer lock:** Promise-chain mutex (`workspaceWriterLock` in `discord.ts`) serializes all plan/forge file writes within a single process.
 - **Forge singleton:** Only one `ForgeOrchestrator` instance can be running at a time (module-level variable in `discord.ts`).
-- **Phase execution:** Fire-and-forget from the Discord queue — the phase runs in the background, releasing the queue for other messages. The writer lock is held until the phase completes.
+- **Phase execution:** `!plan run` auto-chains all pending phases in a loop (up to `MAX_PLAN_RUN_PHASES` = 50). `!plan run-one` executes a single phase. Both are fire-and-forget from the Discord queue. The writer lock is acquired and released per-phase to avoid starvation.
 - **Single-user design:** No multi-user concurrency guards. The Discord allowlist is the access boundary.
 
 ### Command dispatch split
 
 `!plan` commands are dispatched in `discord.ts` but handled primarily by `plan-commands.ts`:
-- `run`, `skip`, and `phases` are intercepted in `discord.ts` for lock acquisition and async execution
+- `run`, `run-one`, `skip`, and `phases` are intercepted in `discord.ts` for lock acquisition and async execution
 - All other subcommands pass through to `handlePlanCommand()` in `plan-commands.ts`
 
 `!forge` commands are fully dispatched in `discord.ts`:
