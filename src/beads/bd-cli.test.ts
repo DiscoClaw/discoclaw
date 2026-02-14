@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
-import { parseBdJson, normalizeBeadData, bdShow } from './bd-cli.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import path from 'node:path';
+import { parseBdJson, normalizeBeadData, bdShow, bdList } from './bd-cli.js';
 import type { BeadData } from './types.js';
 
 vi.mock('execa', () => ({
@@ -151,5 +152,71 @@ describe('bdShow', () => {
     });
 
     await expect(bdShow('ws-001', '/tmp')).rejects.toThrow('database corruption');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runBd — argument construction (--db, --no-daemon pinning)
+// ---------------------------------------------------------------------------
+
+describe('runBd argument construction', () => {
+  let mockExeca: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const mod = await import('execa');
+    mockExeca = mod.execa as unknown as ReturnType<typeof vi.fn>;
+    mockExeca.mockReset();
+  });
+
+  it('prepends --db and --no-daemon to execa args', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: '[]',
+      stderr: '',
+    });
+
+    await bdList({}, '/home/user/workspace');
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining([
+        '--db', '/home/user/workspace/.beads/beads.db',
+        '--no-daemon',
+      ]),
+      expect.objectContaining({ cwd: '/home/user/workspace' }),
+    );
+  });
+
+  it('resolves relative cwd to absolute dbPath', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: '[]',
+      stderr: '',
+    });
+
+    await bdList({}, 'workspace');
+
+    const calledArgs = mockExeca.mock.calls[0][1] as string[];
+    const dbArg = calledArgs[calledArgs.indexOf('--db') + 1];
+    // path.resolve('workspace', ...) produces an absolute path
+    expect(path.isAbsolute(dbArg)).toBe(true);
+    expect(dbArg).toBe(path.resolve('workspace', '.beads', 'beads.db'));
+  });
+
+  it('places --db and --no-daemon before subcommand args', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: '[]',
+      stderr: '',
+    });
+
+    await bdList({ status: 'open' }, '/tmp');
+
+    const calledArgs = mockExeca.mock.calls[0][1] as string[];
+    const dbIdx = calledArgs.indexOf('--db');
+    const noDaemonIdx = calledArgs.indexOf('--no-daemon');
+    const listIdx = calledArgs.indexOf('list');
+    expect(dbIdx).toBeLessThan(listIdx);
+    expect(noDaemonIdx).toBeLessThan(listIdx);
   });
 });

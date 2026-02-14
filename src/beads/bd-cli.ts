@@ -82,7 +82,7 @@ async function runBd(args: string[], cwd: string): Promise<string> {
   // Pin bd to the exact database for this workspace. Without this, bd's
   // auto-discovery walks up parent directories and may connect to a daemon
   // belonging to a different discoclaw instance (e.g. dev vs personal).
-  const dbPath = path.join(cwd, '.beads', 'beads.db');
+  const dbPath = path.resolve(cwd, '.beads', 'beads.db');
   const pinnedArgs = ['--db', dbPath, '--no-daemon', ...args];
   const result = await execa(BD_BIN, pinnedArgs, { cwd, reject: false });
   if (result.exitCode !== 0) {
