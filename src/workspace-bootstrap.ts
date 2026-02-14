@@ -85,6 +85,12 @@ export async function ensureWorkspaceBootstrapFiles(
     } catch {
       const src = path.join(templatesDir, file);
       await fs.copyFile(src, dest);
+      // Inject the system timezone into USER.md for new workspaces.
+      if (file === 'USER.md') {
+        const content = await fs.readFile(dest, 'utf-8');
+        const systemTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        await fs.writeFile(dest, content.replace('- **Timezone:**', `- **Timezone:** ${systemTz}`), 'utf-8');
+      }
       created.push(file);
     }
   }

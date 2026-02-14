@@ -13,6 +13,7 @@ import { buildCronThreadName, ensureStatusMessage, resolveForumChannel } from '.
 import type { TagMap } from '../cron/discord-sync.js';
 import type { CronSyncCoordinator } from '../cron/cron-sync-coordinator.js';
 import { reloadCronTagMapInPlace } from '../cron/tag-map.js';
+import { getDefaultTimezone } from '../cron/default-timezone.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,7 +100,7 @@ export async function executeCronAction(
       }
 
       const cronId = generateCronId();
-      const timezone = action.timezone ?? 'UTC';
+      const timezone = action.timezone ?? getDefaultTimezone();
       const cadence = detectCadence(action.schedule);
 
       // Create forum thread.
@@ -586,7 +587,7 @@ export function cronActionsPromptSection(): string {
 - \`schedule\` (required): 5-field cron expression (e.g., "0 7 * * 1-5").
 - \`channel\` (required): Target channel name or ID.
 - \`prompt\` (required): The instruction text.
-- \`timezone\` (optional, default: UTC): IANA timezone.
+- \`timezone\` (optional, default: system timezone, or DEFAULT_TIMEZONE env if set): IANA timezone.
 - \`tags\` (optional): Comma-separated purpose tags.
 - \`model\` (optional): "haiku" or "opus" (auto-classified if omitted).
 

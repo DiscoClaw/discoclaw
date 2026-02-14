@@ -315,6 +315,27 @@ describe('executeCronAction', () => {
     expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith('cron-test0001', 'thread-1', expect.objectContaining({ modelOverride: 'opus' }));
   });
 
+  it('cronCreate without timezone uses getDefaultTimezone', async () => {
+    vi.stubEnv('DEFAULT_TIMEZONE', 'America/Chicago');
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'TZ Test', schedule: '0 12 * * *', channel: 'general', prompt: 'Test timezone' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    // The scheduler.register call should receive a def with America/Chicago timezone.
+    expect(cronCtx.scheduler.register).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      'TZ Test',
+      expect.objectContaining({ timezone: 'America/Chicago' }),
+      expect.any(String),
+    );
+    vi.unstubAllEnvs();
+  });
+
   it('cronCreate does not set modelOverride', async () => {
     const cronCtx = makeCronCtx();
     await executeCronAction(
