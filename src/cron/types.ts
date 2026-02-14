@@ -2,7 +2,7 @@ import type { Cron } from 'croner';
 
 export type ParsedCronDef = {
   schedule: string;   // 5-field cron expression (e.g., "0 7 * * 1-5")
-  timezone: string;   // IANA timezone (e.g., "America/Los_Angeles"), default "UTC"
+  timezone: string;   // IANA timezone (e.g., "America/Los_Angeles"), default: system timezone
   channel: string;    // target channel name or ID (e.g., "general")
   prompt: string;     // the instruction text for the runtime
 };
