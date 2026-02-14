@@ -304,15 +304,17 @@ describe('parseConfig', () => {
     expect(config.reactionRemoveHandlerEnabled).toBe(true);
   });
 
-  // --- Forum ID validation (snowflake required when subsystem enabled) ---
-  it('throws when cronEnabled=true and cronForum is missing', () => {
-    expect(() => parseConfig(env({ DISCOCLAW_CRON_ENABLED: '1', DISCOCLAW_CRON_FORUM: undefined })))
-      .toThrow('DISCOCLAW_CRON_FORUM must be a Discord channel ID (snowflake) when crons are enabled');
+  // --- Forum ID validation (auto-create when missing, warn on invalid) ---
+  it('allows missing cronForum when cronEnabled (bootstrap will auto-create)', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_CRON_ENABLED: '1', DISCOCLAW_CRON_FORUM: undefined }));
+    expect(config.cronEnabled).toBe(true);
+    expect(config.cronForum).toBeUndefined();
   });
 
-  it('throws when cronEnabled=true and cronForum is not a snowflake', () => {
-    expect(() => parseConfig(env({ DISCOCLAW_CRON_ENABLED: '1', DISCOCLAW_CRON_FORUM: 'crons' })))
-      .toThrow('DISCOCLAW_CRON_FORUM must be a Discord channel ID (snowflake) when crons are enabled');
+  it('warns and clears cronForum when not a snowflake', () => {
+    const { config, warnings } = parseConfig(env({ DISCOCLAW_CRON_ENABLED: '1', DISCOCLAW_CRON_FORUM: 'crons' }));
+    expect(config.cronForum).toBeUndefined();
+    expect(warnings.some(w => w.includes('DISCOCLAW_CRON_FORUM is not a valid snowflake'))).toBe(true);
   });
 
   it('accepts valid snowflake for cronForum when cronEnabled=true', () => {
@@ -326,14 +328,16 @@ describe('parseConfig', () => {
     expect(config.cronEnabled).toBe(false);
   });
 
-  it('throws when beadsEnabled=true and beadsForum is missing', () => {
-    expect(() => parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '1', DISCOCLAW_BEADS_FORUM: undefined })))
-      .toThrow('DISCOCLAW_BEADS_FORUM must be a Discord channel ID (snowflake) when beads are enabled');
+  it('allows missing beadsForum when beadsEnabled (bootstrap will auto-create)', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '1', DISCOCLAW_BEADS_FORUM: undefined }));
+    expect(config.beadsEnabled).toBe(true);
+    expect(config.beadsForum).toBeUndefined();
   });
 
-  it('throws when beadsEnabled=true and beadsForum is not a snowflake', () => {
-    expect(() => parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '1', DISCOCLAW_BEADS_FORUM: 'beads' })))
-      .toThrow('DISCOCLAW_BEADS_FORUM must be a Discord channel ID (snowflake) when beads are enabled');
+  it('warns and clears beadsForum when not a snowflake', () => {
+    const { config, warnings } = parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '1', DISCOCLAW_BEADS_FORUM: 'beads' }));
+    expect(config.beadsForum).toBeUndefined();
+    expect(warnings.some(w => w.includes('DISCOCLAW_BEADS_FORUM is not a valid snowflake'))).toBe(true);
   });
 
   it('accepts valid snowflake for beadsForum when beadsEnabled=true', () => {

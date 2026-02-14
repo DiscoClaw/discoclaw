@@ -32,44 +32,36 @@ If you don't have a private Discord server yet, click the **+** button at the bo
 
 ## 2) Invite The Bot To Your Server
 
-Use the Developer Portal:
+In the Developer Portal:
 
-1. OAuth2 -> URL Generator
-2. Scopes:
-   - `bot`
-3. Bot permissions (minimal recommended):
-   - View Channels
-   - Send Messages
-   - Read Message History
-   - Send Messages in Threads
-4. Open the generated URL, pick your server, and authorize.
+1. Go to **OAuth2** -> **URL Generator**
+2. Under **Scopes**, tick `bot` (optional: `applications.commands` for slash commands)
+3. A **Bot Permissions** grid appears below — tick the checkboxes for the permission level you want (see profiles below)
+4. Copy the generated URL at the bottom, open it in your browser, pick your server, and authorize
 
 ### Permission profiles (choose intentionally)
 
-DiscoClaw has 4 common “permission profiles”. You can always re-invite the bot later with a different permission set.
+These are recommended sets of Discord permissions. You pick them by ticking the matching checkboxes in the Bot Permissions grid on the OAuth2 URL Generator page. You can always re-invite the bot later with a different set.
 
-- **Minimal** (recommended default)
-  - What works: read/send messages in channels it can see; reply inside threads it can see.
-  - What won't work: creating/archiving/deleting threads; moderating; changing channels/roles; Discord Actions.
-  - Pros: lowest blast radius, easier to recommend publicly.
-  - Cons: more "it can't do X" situations if you want it to administer Discord.
-- **Threads**
-  - Adds: thread creation + thread management.
-  - Pros: "works in threads" even when you want the bot to create/manage them.
-  - Cons: higher risk than minimal; still not "server admin". Discord Actions won't work (no Manage Channels).
-- **Moderator**
-  - Adds: channel management, message management, thread management, webhooks, uploads, etc. (still not `Administrator`).
-  - Pros: broad ops capabilities while avoiding full admin. **Required for Discord Actions** (`DISCOCLAW_DISCORD_ACTIONS=1`) — includes Manage Channels permission.
-  - Cons: meaningful blast radius if the bot is misconfigured/compromised; still may hit edge cases that require admin.
+- **Administrator** (recommended for private servers)
+  - Tick: `Administrator` (under General Permissions, top-left of the grid)
+  - That's it — one checkbox. Everything works.
+  - Only use on a private server you control. If the bot token or runtime is compromised, an attacker can do anything in that server.
+
+- **Moderator** (recommended for shared servers)
+  - Tick: `Manage Channels`, `Manage Messages`, `Manage Threads`, `View Channels`, `Send Messages`, `Send Messages in Threads`, `Read Message History`, `Add Reactions`, `Attach Files`, `Embed Links`, `Use External Emojis`, `Manage Webhooks`
+  - **Required for Discord Actions** (`DISCOCLAW_DISCORD_ACTIONS=1`), beads, and crons.
   - **Role hierarchy:** The bot can only manage roles below its own role. In **Server Settings → Roles**, drag the bot's role above any roles you want it to manage.
-- **Administrator**
-  - Pros: lowest operational friction; “everything will always work” (as far as Discord permissions go).
-  - Cons: highest blast radius. Only use on a private server you control. If the bot token or runtime is compromised, an attacker can do essentially anything in that server.
+
+- **Threads**
+  - Tick: `View Channels`, `Send Messages`, `Send Messages in Threads`, `Read Message History`, `Create Public Threads`, `Manage Threads`
+  - Bot can read/send and create/manage threads, but can't create channels or use Discord Actions.
+
+- **Minimal**
+  - Tick: `View Channels`, `Send Messages`, `Send Messages in Threads`, `Read Message History`
+  - Bot can read and reply in channels and existing threads. Can't create threads, manage channels, or use Discord Actions. Beads and crons won't work.
 
 Notes:
-- “Work inside threads” means: being able to read/respond **in** threads. Minimal covers this for threads the bot can see. Private threads may require additional permission or being explicitly added.
-- If you want slash commands: add the `applications.commands` scope.
-- Discord does not expose the same full-text “search like the client” via the public bot API; if you want search, you generally need to log/index messages yourself.
 - If you want the bot to reply inside threads reliably, set `DISCORD_AUTO_JOIN_THREADS=1` so it joins threads it encounters (public threads; private threads still require adding the bot).
 - To join all *active public* threads in a server (one-time):
   - Dry run: `pnpm discord:join-threads -- --guild-id <YOUR_SERVER_ID>`
@@ -95,8 +87,7 @@ cp .env.example .env   # quick start (essentials only)
 Edit `.env`:
 - `DISCORD_TOKEN=...`
 - `DISCORD_ALLOW_USER_IDS=...` (required; if empty, the bot responds to nobody)
-- `DISCOCLAW_BEADS_FORUM=...` (required when beads enabled; enabled by default)
-- `DISCOCLAW_CRON_FORUM=...` (required when crons enabled; enabled by default)
+- `DISCORD_GUILD_ID=...` (recommended; required for auto-creating forum channels)
 - `DISCORD_CHANNEL_IDS=...` (recommended for servers)
 - `DISCOCLAW_DATA_DIR=...` (optional; defaults workspace/content under this folder)
 

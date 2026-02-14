@@ -141,7 +141,7 @@ describe('ensureSystemScaffold', () => {
     expect(cronCreateCalls).toHaveLength(0);
   });
 
-  it('returns no ID when existingId is not found anywhere (fail closed, stale ID)', async () => {
+  it('falls back to name lookup / creation when existingId is stale (not found)', async () => {
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
@@ -153,16 +153,16 @@ describe('ensureSystemScaffold', () => {
       existingCronsId: '9999999999999999999',
     }, log as any);
     expect(res).not.toBeNull();
-    expect(res?.cronsForumId).toBeUndefined();
-    // Should have logged error about not found.
-    expect(log.error).toHaveBeenCalledWith(
+    // Should have warned about stale ID and fallen through to creation.
+    expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ existingId: '9999999999999999999' }),
       expect.stringContaining('not found in guild'),
     );
-    // Should NOT have created a new crons forum.
+    // Should have created a new crons forum via fallback.
+    expect(res?.cronsForumId).toBeDefined();
     const createCalls = guild.__create.mock.calls;
     const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'crons');
-    expect(cronCreateCalls).toHaveLength(0);
+    expect(cronCreateCalls).toHaveLength(1);
   });
 
   it('finds channel by existingId via API fetch when not in cache', async () => {
