@@ -88,9 +88,28 @@ Author one recipe file for an integration, share it, then let another user's Dis
 
 ## Quick start
 
-1. **Create a Discord bot** and invite it to a private server (see the [bot setup guide](docs/discord-bot-setup.md))
+### Discord setup (private server + bot)
 
-2. **Install and configure:**
+1. Create a **private Discord server** dedicated to DiscoClaw (not a shared/public server).
+2. In the [Discord Developer Portal](https://discord.com/developers/applications), create an application, then go to **Bot** -> **Add Bot**.
+3. Under **Bot** -> **Privileged Gateway Intents**, enable **Message Content Intent**.
+4. Copy the bot token and set it in `.env` as `DISCORD_TOKEN=...`.
+5. Invite the bot to your server:
+   - Go to **OAuth2** -> **URL Generator**
+   - Scopes: `bot` (optional: `applications.commands` for slash commands)
+   - Bot permissions (minimal): `View Channels`, `Send Messages`, `Read Message History`, `Send Messages in Threads`
+   - Open generated URL, pick your private server, and authorize
+6. In Discord, enable **Developer Mode** (User Settings -> Advanced), then copy IDs and set:
+   - `DISCORD_ALLOW_USER_IDS=<your user id>` (required; fail-closed if empty)
+   - `DISCOCLAW_BEADS_FORUM=<forum channel id>` (required when beads enabled; default on)
+   - `DISCOCLAW_CRON_FORUM=<forum channel id>` (required when crons enabled; default on)
+   - `DISCORD_GUILD_ID=<server id>` (recommended)
+
+Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
+
+### Install and run
+
+1. **Install and configure:**
    ```bash
    pnpm install
    pnpm setup            # guided interactive setup
@@ -102,7 +121,7 @@ Author one recipe file for an integration, share it, then let another user's Dis
    # For all ~90 options: cp .env.example.full .env
    ```
 
-3. **Run:**
+2. **Run:**
    ```bash
    pnpm dev
    ```
