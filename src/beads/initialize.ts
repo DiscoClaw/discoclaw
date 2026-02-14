@@ -56,7 +56,7 @@ export async function initializeBeadsContext(
     return { beadCtx: undefined, bdAvailable: false };
   }
 
-  const effectiveForum = opts.beadsForum || opts.systemBeadsForumId || '';
+  const effectiveForum = opts.systemBeadsForumId || opts.beadsForum || '';
   if (!effectiveForum) {
     opts.log.warn(
       'beads: no forum resolved — set DISCORD_GUILD_ID or DISCOCLAW_BEADS_FORUM ' +

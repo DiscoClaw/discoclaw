@@ -148,9 +148,8 @@ async function ensureChild(
       }
       return { id: String((byId as any).id ?? ''), created: false, moved };
     }
-    // ID not found anywhere — fail closed.
-    log?.error({ existingId, name: spec.name }, 'system-bootstrap: configured channel ID not found in guild');
-    return { created: false, moved: false }; // no ID returned, no creation
+    // ID not found — stale config or deleted channel. Fall through to name-based lookup / creation.
+    log?.warn({ existingId, name: spec.name }, 'system-bootstrap: configured channel ID not found in guild, falling back to name lookup');
   }
 
   const exact = findByNameAndType(guild, spec.name, spec.type);

@@ -300,7 +300,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsGuild = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_GUILD', false);
   const discordActionsModeration = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MODERATION', false);
   const discordActionsPolls = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_POLLS', false);
-  const discordActionsBeads = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BEADS', false);
+  const discordActionsBeads = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BEADS', true);
   const discordActionsCrons = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_CRONS', true);
   const discordActionsBotProfile = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', false);
 
@@ -323,15 +323,17 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
 
   const cronEnabled = parseBoolean(env, 'DISCOCLAW_CRON_ENABLED', true);
-  const cronForum = parseTrimmedString(env, 'DISCOCLAW_CRON_FORUM');
-  if (cronEnabled && (!cronForum || !/^\d{8,}$/.test(cronForum))) {
-    throw new Error('DISCOCLAW_CRON_FORUM must be a Discord channel ID (snowflake) when crons are enabled');
+  let cronForum = parseTrimmedString(env, 'DISCOCLAW_CRON_FORUM');
+  if (cronForum && !/^\d{8,}$/.test(cronForum)) {
+    warnings.push('DISCOCLAW_CRON_FORUM is not a valid snowflake; ignoring (system bootstrap will auto-create)');
+    cronForum = undefined;
   }
 
   const beadsEnabled = parseBoolean(env, 'DISCOCLAW_BEADS_ENABLED', true);
-  const beadsForum = parseTrimmedString(env, 'DISCOCLAW_BEADS_FORUM');
-  if (beadsEnabled && (!beadsForum || !/^\d{8,}$/.test(beadsForum))) {
-    throw new Error('DISCOCLAW_BEADS_FORUM must be a Discord channel ID (snowflake) when beads are enabled');
+  let beadsForum = parseTrimmedString(env, 'DISCOCLAW_BEADS_FORUM');
+  if (beadsForum && !/^\d{8,}$/.test(beadsForum)) {
+    warnings.push('DISCOCLAW_BEADS_FORUM is not a valid snowflake; ignoring (system bootstrap will auto-create)');
+    beadsForum = undefined;
   }
 
   return {

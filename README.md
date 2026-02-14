@@ -96,14 +96,12 @@ Author one recipe file for an integration, share it, then let another user's Dis
 4. Copy the bot token and set it in `.env` as `DISCORD_TOKEN=...`.
 5. Invite the bot to your server:
    - Go to **OAuth2** -> **URL Generator**
-   - Scopes: `bot` (optional: `applications.commands` for slash commands)
-   - Bot permissions (minimal): `View Channels`, `Send Messages`, `Read Message History`, `Send Messages in Threads`
-   - Open generated URL, pick your private server, and authorize
+   - Under **Scopes**, tick `bot`
+   - A **Bot Permissions** grid appears below. For a private server, tick `Administrator` (top-left, under General Permissions) — it's one checkbox and covers everything. For tighter permissions, see the [permission profiles](docs/discord-bot-setup.md#permission-profiles-choose-intentionally) in the full guide.
+   - Copy the generated URL at the bottom, open it, pick your server, and authorize
 6. In Discord, enable **Developer Mode** (User Settings -> Advanced), then copy IDs and set:
    - `DISCORD_ALLOW_USER_IDS=<your user id>` (required; fail-closed if empty)
-   - `DISCOCLAW_BEADS_FORUM=<forum channel id>` (required when beads enabled; default on)
-   - `DISCOCLAW_CRON_FORUM=<forum channel id>` (required when crons enabled; default on)
-   - `DISCORD_GUILD_ID=<server id>` (recommended)
+   - `DISCORD_GUILD_ID=<server id>` (recommended; required for auto-creating forum channels)
 
 Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 
@@ -116,8 +114,6 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    # Or manually: cp .env.example .env and fill in required vars:
    #   DISCORD_TOKEN
    #   DISCORD_ALLOW_USER_IDS
-   #   DISCOCLAW_BEADS_FORUM
-   #   DISCOCLAW_CRON_FORUM
    # For all ~90 options: cp .env.example.full .env
    ```
 

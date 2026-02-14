@@ -240,6 +240,26 @@ describe('OnboardingFlow', () => {
     expect(r.reply).toContain('(skipped)');
   });
 
+  it.each(['skip', 'Skip', '-', 'none', 'n/a'])('working dirs skip word "%s" is treated as skip', (word) => {
+    const { flow } = startFlow();
+    flow.handleInput('Bot');
+    flow.handleInput('User');
+    flow.handleInput('1'); // dev
+    const r = flow.handleInput(word);
+    expect(r.reply).toContain('yes'); // Confirmation
+    expect(r.reply).toContain('(skipped)');
+  });
+
+  it.each(['skip', 'Skip', '-', 'none', 'n/a'])('personality skip word "%s" is treated as skip', (word) => {
+    const { flow } = startFlow();
+    flow.handleInput('Bot');
+    flow.handleInput('User');
+    flow.handleInput('2'); // pa
+    const r = flow.handleInput(word);
+    expect(r.reply).toContain('yes'); // Confirmation
+    expect(r.reply).toContain('(skipped)');
+  });
+
   // --- Getters ---
   it('getValues returns collected values', () => {
     const flow = flowToConfirm();

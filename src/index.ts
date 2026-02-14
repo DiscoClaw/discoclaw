@@ -215,7 +215,6 @@ const healthVerboseAllowlist = cfg.healthVerboseAllowlist;
 const statusChannel = cfg.statusChannel;
 const guildId = cfg.guildId;
 const cronEnabled = cfg.cronEnabled;
-const cronForum = cfg.cronForum;
 const cronModel = cfg.cronModel;
 const discordActionsCrons = cfg.discordActionsCrons;
 const cronAutoTag = cfg.cronAutoTag;
@@ -266,10 +265,30 @@ const botDisplayName = await resolveDisplayName({
 });
 log.info({ botDisplayName }, 'resolved bot display name');
 
+// --- Load persisted scaffold state (forum IDs created on previous boots) ---
+const scaffoldStatePath = path.join(pidLockDir, 'system-scaffold.json');
+let scaffoldState: { guildId?: string; cronsForumId?: string; beadsForumId?: string } = {};
+try {
+  const raw = await fs.readFile(scaffoldStatePath, 'utf8');
+  const parsed = JSON.parse(raw);
+  if (parsed && typeof parsed === 'object') {
+    // Invalidate if guild changed — IDs from a different guild are meaningless.
+    if (guildId && typeof parsed.guildId === 'string' && parsed.guildId !== guildId) {
+      log.warn({ savedGuild: parsed.guildId, currentGuild: guildId }, 'system-scaffold: guild mismatch, ignoring persisted forum IDs');
+    } else {
+      if (typeof parsed.cronsForumId === 'string') scaffoldState.cronsForumId = parsed.cronsForumId;
+      if (typeof parsed.beadsForumId === 'string') scaffoldState.beadsForumId = parsed.beadsForumId;
+    }
+  }
+} catch {
+  // No persisted state yet — first boot or file missing.
+}
+const cronForum = cfg.cronForum || scaffoldState.cronsForumId;
+
 // --- Beads subsystem ---
 const beadsEnabled = cfg.beadsEnabled;
 const beadsCwd = cfg.beadsCwdOverride || workspaceCwd;
-const beadsForum = cfg.beadsForum || '';
+const beadsForum = cfg.beadsForum || scaffoldState.beadsForumId || '';
 const beadsTagMapPath = cfg.beadsTagMapPathOverride
   || path.join(__dirname, '..', 'scripts', 'beads', 'bead-hooks', 'tag-map.json');
 const beadsMentionUser = cfg.beadsMentionUser;
@@ -504,6 +523,23 @@ const botParams = {
 const { client, status, system } = await startDiscordBot(botParams);
 botStatus = status;
 
+// --- Persist scaffold state (forum IDs) for next boot ---
+if (system) {
+  const newState: Record<string, string> = {};
+  const resolvedGuild = guildId || system.guildId || '';
+  if (resolvedGuild) newState.guildId = resolvedGuild;
+  if (system.cronsForumId) newState.cronsForumId = system.cronsForumId;
+  if (system.beadsForumId) newState.beadsForumId = system.beadsForumId;
+  if (Object.keys(newState).length > 0) {
+    try {
+      await fs.writeFile(scaffoldStatePath, JSON.stringify(newState, null, 2) + '\n', 'utf8');
+      log.info({ scaffoldStatePath }, 'system-scaffold: persisted forum IDs');
+    } catch (err) {
+      log.warn({ err, scaffoldStatePath }, 'system-scaffold: failed to persist forum IDs');
+    }
+  }
+}
+
 // --- Cold-start: clean up orphaned in-flight replies from a previous unclean exit ---
 await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'inflight.json'), log });
 
@@ -577,7 +613,7 @@ if (beadCtx) {
 }
 
 // --- Cron subsystem ---
-const effectiveCronForum = cronForum || system?.cronsForumId || undefined;
+const effectiveCronForum = system?.cronsForumId || cronForum || undefined;
 if (cronEnabled && effectiveCronForum) {
   // Seed tag map from repo if target doesn't exist yet.
   await seedTagMap(cronTagMapSeedPath, cronTagMapPath);

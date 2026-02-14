@@ -34,6 +34,7 @@ type Step =
 
 const MAX_INPUT_LENGTH = 200;
 const PLACEHOLDER_RE = /\{\{[^}]+\}\}/;
+const SKIP_WORDS = new Set(['skip', '-', 'none', 'n/a']);
 
 // Numbered fields displayed in the confirmation summary. Order matters.
 type FieldDef = { label: string; key: keyof OnboardingValues };
@@ -171,7 +172,7 @@ export class OnboardingFlow {
             done: false,
             reply:
               `**What directories do you usually work in?**\n` +
-              `List the paths, like \`~/code/my-project\`. Or just hit enter to skip.`,
+              `List the paths, like \`~/code/my-project\`. Or say **skip** to skip.`,
           };
         }
         if (purpose === 'pa') {
@@ -180,7 +181,7 @@ export class OnboardingFlow {
             done: false,
             reply:
               `**Any vibe or personality preferences for me?**\n` +
-              `(e.g., "direct and dry", "warm and chatty", "snarky but helpful") Or hit enter to skip.`,
+              `(e.g., "direct and dry", "warm and chatty", "snarky but helpful") Or say **skip** to skip.`,
           };
         }
         // Shouldn't reach here, but TypeScript
@@ -188,7 +189,7 @@ export class OnboardingFlow {
       }
 
       case 'WORKING_DIRS':
-        this.values.workingDirs = input || undefined;
+        this.values.workingDirs = (SKIP_WORDS.has(input.toLowerCase()) ? '' : input) || undefined;
         if (this.editing) return this.finishEdit();
         if (this.values.purpose === 'both') {
           this.step = 'PERSONALITY';
@@ -196,13 +197,13 @@ export class OnboardingFlow {
             done: false,
             reply:
               `**Any vibe or personality preferences for me?**\n` +
-              `(e.g., "direct and dry", "warm and chatty", "snarky but helpful") Or hit enter to skip.`,
+              `(e.g., "direct and dry", "warm and chatty", "snarky but helpful") Or say **skip** to skip.`,
           };
         }
         return this.showConfirmation();
 
       case 'PERSONALITY':
-        this.values.personality = input || undefined;
+        this.values.personality = (SKIP_WORDS.has(input.toLowerCase()) ? '' : input) || undefined;
         if (this.editing) return this.finishEdit();
         return this.showConfirmation();
 
@@ -310,13 +311,13 @@ export class OnboardingFlow {
         this.step = 'WORKING_DIRS';
         return {
           done: false,
-          reply: '**What directories do you usually work in?** Or hit enter to skip.',
+          reply: '**What directories do you usually work in?** Or say **skip** to skip.',
         };
       case 'personality':
         this.step = 'PERSONALITY';
         return {
           done: false,
-          reply: '**Any vibe or personality preferences for me?** Or hit enter to skip.',
+          reply: '**Any vibe or personality preferences for me?** Or say **skip** to skip.',
         };
       default:
         return this.showConfirmation();
