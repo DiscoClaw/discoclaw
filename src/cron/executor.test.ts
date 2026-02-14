@@ -231,6 +231,34 @@ describe('executeCronJob', () => {
     expect(channel.send).toHaveBeenCalledOnce();
   });
 
+  it('suppresses sendMessage Done line from posted output', async () => {
+    const responseWithAction = 'Sending now.\n<discord-action>{"type":"sendMessage","channelId":"ch-1","content":"hello"}</discord-action>';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: responseWithAction };
+        yield { type: 'done' };
+      },
+    };
+    const ctx = makeCtx({
+      runtime,
+      discordActionsEnabled: true,
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false },
+    });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalled();
+    // The posted content should NOT contain 'Done: Sent message'.
+    const sentContent = channel.send.mock.calls[0][0].content;
+    expect(sentContent).not.toContain('Done: Sent message');
+    // The clean text should still be present.
+    expect(sentContent).toContain('Sending now.');
+  });
+
   it('does not post if output is empty', async () => {
     const ctx = makeCtx({ runtime: makeMockRuntime('') });
     const job = makeJob();

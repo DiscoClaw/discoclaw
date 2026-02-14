@@ -326,6 +326,81 @@ describe('auto-follow-up for query actions', () => {
     expect(queue.run).toHaveBeenCalledTimes(1);
   });
 
+  it('suppresses sendMessage Done line from posted message but keeps it in follow-up prompt', async () => {
+    let callCount = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        callCount++;
+        if (callCount === 1) {
+          // First call: emit a channelList (query) + sendMessage action.
+          yield {
+            type: 'text_final',
+            text: 'Here you go:\n<discord-action>{"type":"channelList"}</discord-action>\n<discord-action>{"type":"sendMessage","channel":"general","content":"hello"}</discord-action>',
+          } as any;
+        } else {
+          yield { type: 'text_final', text: 'Analysis complete with enough length to avoid suppression threshold for testing.' } as any;
+        }
+      }),
+    } as any;
+
+    // Build a guild mock that supports both cache.get() and cache.find() with a sendable channel.
+    const generalCh = {
+      id: 'ch1',
+      name: 'general',
+      type: ChannelType.GuildText,
+      parent: { name: 'Dev' },
+      send: vi.fn(async () => ({})),
+    };
+    const catCh = {
+      id: 'cat1',
+      name: 'Dev',
+      type: ChannelType.GuildCategory,
+      parent: null,
+    };
+    const channelsMap = new Map<string, any>([
+      ['ch1', generalCh],
+      ['cat1', catCh],
+    ]);
+    const guild = {
+      channels: {
+        cache: {
+          get: (id: string) => channelsMap.get(id),
+          find: (fn: (ch: any) => boolean) => {
+            for (const ch of channelsMap.values()) if (fn(ch)) return ch;
+            return undefined;
+          },
+          values: () => channelsMap.values(),
+          get size() { return channelsMap.size; },
+        },
+        create: vi.fn(async (opts: any) => ({ name: opts.name, id: 'new-id' })),
+      },
+    } as any;
+
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { discordActionsMessaging: true }),
+      makeQueue(),
+    );
+    const msg = makeMsg({ guild });
+    await handler(msg);
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
+
+    // The follow-up prompt should contain the sendMessage Done line (all results unfiltered).
+    const secondPrompt = runtime.invoke.mock.calls[1][0].prompt;
+    expect(secondPrompt).toContain('[Auto-follow-up]');
+    expect(secondPrompt).toContain('Done: Sent message');
+
+    // The posted message (first reply edit) should NOT contain 'Done: Sent message'.
+    const replyObj = await msg.reply.mock.results[0]?.value;
+    if (replyObj) {
+      const allEditContents = replyObj.edit.mock.calls.map((c: any[]) =>
+        typeof c[0] === 'string' ? c[0] : c[0]?.content ?? '',
+      );
+      const postedContent = allEditContents[allEditContents.length - 1];
+      expect(postedContent).not.toContain('Done: Sent message');
+    }
+  });
+
   it('does not follow up when query action fails', async () => {
     // Guild with no channels — channelList still succeeds with empty list.
     // Use a channelInfo with bad ID to get a failure.
