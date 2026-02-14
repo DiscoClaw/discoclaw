@@ -9,7 +9,7 @@ import { createClaudeCliRuntime, killActiveSubprocesses } from './runtime/claude
 import { withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
-import { startDiscordBot } from './discord.js';
+import { startDiscordBot, getActiveForgeId } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
 import { CronScheduler } from './cron/scheduler.js';
@@ -35,6 +35,7 @@ import { parseConfig } from './config.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
 import { setDataFilePath, drainInFlightReplies, cleanupOrphanedReplies } from './discord/inflight-replies.js';
+import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -80,8 +81,31 @@ try {
   process.exit(1);
 }
 
+// Detect first-ever boot via a stable marker file (persists across restarts).
+// The PID lock dir is transient (removed on shutdown) so it can't be used here.
+const bootMarkerPath = path.join(pidLockDir, '.boot-marker');
+let firstBoot = false;
+try {
+  await fs.access(bootMarkerPath);
+} catch {
+  firstBoot = true;
+  await fs.writeFile(bootMarkerPath, new Date().toISOString() + '\n', 'utf-8');
+}
+
 // --- Configure inflight reply persistence (for graceful shutdown + cold-start recovery) ---
 setDataFilePath(path.join(pidLockDir, 'inflight.json'));
+
+// --- Read shutdown context from previous run (before bot connects to avoid race) ---
+let startupInjection: string | null = null;
+{
+  const startupCtx = await readAndClearShutdownContext(pidLockDir, { firstBoot });
+  startupInjection = formatStartupInjection(startupCtx);
+  if (startupInjection) {
+    log.info({ type: startupCtx.type, activeForge: startupCtx.shutdown?.activeForge }, 'startup:context loaded');
+  } else if (startupCtx.type === 'first-boot') {
+    log.info('startup:first boot detected (no prior shutdown context)');
+  }
+}
 
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
@@ -90,6 +114,21 @@ let cronTagMapWatcher: { stop(): void } | null = null;
 let beadForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
 const shutdown = async () => {
+  // Write default shutdown context (skip if !restart already wrote a richer one).
+  try {
+    await writeShutdownContext(
+      pidLockDir,
+      {
+        reason: 'unknown',
+        timestamp: new Date().toISOString(),
+        activeForge: getActiveForgeId(),
+      },
+      { skipIfExists: true },
+    );
+  } catch (err) {
+    log.warn({ err }, 'shutdown:failed to write shutdown context');
+  }
+
   // Edit all in-progress Discord replies before killing subprocesses.
   await drainInFlightReplies({ timeoutMs: 3000, log });
   // Kill Claude subprocesses so they release session locks before the new instance starts.
@@ -368,6 +407,7 @@ const botParams = {
   allowUserIds,
   guildId,
   botDisplayName,
+  dataDir: pidLockDir,
   allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
   log,
   discordChannelContext,
@@ -457,6 +497,7 @@ const botParams = {
   },
   metrics: globalMetrics,
   appendSystemPrompt,
+  startupInjection,
 };
 
 const { client, status, system } = await startDiscordBot(botParams);

@@ -1,8 +1,16 @@
 import { execFile } from 'node:child_process';
 import type { LoggerLike } from './action-types.js';
+import { writeShutdownContext } from './shutdown-context.js';
 
 export type RestartCommand = {
   action: 'restart' | 'status' | 'logs' | 'help';
+};
+
+export type RestartOpts = {
+  log?: LoggerLike;
+  dataDir?: string;
+  userId?: string;
+  activeForge?: string;
 };
 
 export function parseRestartCommand(content: string): RestartCommand | null {
@@ -38,7 +46,13 @@ export type RestartResult = {
   deferred?: () => void;
 };
 
-export async function handleRestartCommand(cmd: RestartCommand, log?: LoggerLike): Promise<RestartResult> {
+export async function handleRestartCommand(cmd: RestartCommand, opts?: RestartOpts | LoggerLike): Promise<RestartResult> {
+  // Support both legacy (log) and new (opts bag) signatures.
+  const resolved: RestartOpts = opts && typeof opts === 'object' && 'info' in opts
+    ? { log: opts as LoggerLike }
+    : (opts as RestartOpts | undefined) ?? {};
+  const { log, dataDir, userId, activeForge } = resolved;
+
   try {
     if (cmd.action === 'help') {
       return {
@@ -71,6 +85,21 @@ export async function handleRestartCommand(cmd: RestartCommand, log?: LoggerLike
     const before = await run('systemctl', ['--user', 'status', 'discoclaw']);
     const wasActive = before.stdout.includes('active (running)');
     log?.info({ wasActive }, 'restart-command:restart');
+
+    // Write shutdown context before triggering restart.
+    if (dataDir) {
+      try {
+        await writeShutdownContext(dataDir, {
+          reason: 'restart-command',
+          message: 'User requested via !restart',
+          timestamp: new Date().toISOString(),
+          requestedBy: userId,
+          activeForge,
+        });
+      } catch (err) {
+        log?.warn({ err }, 'restart-command:failed to write shutdown context');
+      }
+    }
 
     // We can't restart inline — the restart kills this process before
     // we can reply. Instead, return a deferred function that the caller

@@ -367,6 +367,7 @@ export function appendAuditRound(
 export class ForgeOrchestrator {
   private running = false;
   private cancelRequested = false;
+  private currentPlanId: string | undefined;
   private opts: ForgeOrchestratorOpts;
 
   constructor(opts: ForgeOrchestratorOpts) {
@@ -375,6 +376,10 @@ export class ForgeOrchestrator {
 
   get isRunning(): boolean {
     return this.running;
+  }
+
+  get activePlanId(): string | undefined {
+    return this.running ? this.currentPlanId : undefined;
   }
 
   requestCancel(): void {
@@ -391,6 +396,7 @@ export class ForgeOrchestrator {
     }
     this.running = true;
     this.cancelRequested = false;
+    this.currentPlanId = undefined;
     const t0 = Date.now();
 
     let planId = '';
@@ -411,6 +417,7 @@ export class ForgeOrchestrator {
       if (!planId) {
         throw new Error(`Failed to create plan: ${createResult}`);
       }
+      this.currentPlanId = planId;
 
       // Find the plan file
       const plansDir = this.opts.plansDir;
@@ -479,6 +486,7 @@ export class ForgeOrchestrator {
       };
     } finally {
       this.running = false;
+      this.currentPlanId = undefined;
     }
   }
 
@@ -493,6 +501,7 @@ export class ForgeOrchestrator {
     }
     this.running = true;
     this.cancelRequested = false;
+    this.currentPlanId = planId;
     const t0 = Date.now();
 
     let originalStatus = '';
@@ -561,6 +570,7 @@ export class ForgeOrchestrator {
       };
     } finally {
       this.running = false;
+      this.currentPlanId = undefined;
     }
   }
 
