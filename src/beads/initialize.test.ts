@@ -7,6 +7,7 @@ import type { InitializeBeadsOpts } from './initialize.js';
 
 vi.mock('./bd-cli.js', () => ({
   checkBdAvailable: vi.fn(),
+  ensureBdDatabaseReady: vi.fn(),
 }));
 
 vi.mock('./discord-sync.js', () => ({
@@ -27,13 +28,14 @@ vi.mock('./bead-sync-watcher.js', () => ({
   startBeadSyncWatcher: vi.fn().mockReturnValue({ stop: vi.fn() }),
 }));
 
-import { checkBdAvailable } from './bd-cli.js';
+import { checkBdAvailable, ensureBdDatabaseReady } from './bd-cli.js';
 import { initBeadsForumGuard } from './forum-guard.js';
 import { BeadSyncCoordinator } from './bead-sync-coordinator.js';
 import { startBeadSyncWatcher } from './bead-sync-watcher.js';
 import { initializeBeadsContext, wireBeadsSync } from './initialize.js';
 
 const mockCheckBd = vi.mocked(checkBdAvailable);
+const mockEnsureDbReady = vi.mocked(ensureBdDatabaseReady);
 
 function fakeLog() {
   return {
@@ -78,8 +80,22 @@ describe('initializeBeadsContext', () => {
     );
   });
 
+  it('returns undefined and errors when database not ready', async () => {
+    mockCheckBd.mockResolvedValue({ available: true, version: '1.0.0' });
+    mockEnsureDbReady.mockResolvedValue({ ready: false });
+    const log = fakeLog();
+    const result = await initializeBeadsContext(baseOpts({ log }));
+    expect(result.beadCtx).toBeUndefined();
+    expect(result.bdAvailable).toBe(true);
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ beadsCwd: '/tmp/beads' }),
+      expect.stringContaining('database not initialized'),
+    );
+  });
+
   it('returns undefined and warns when no forum resolved', async () => {
     mockCheckBd.mockResolvedValue({ available: true, version: '1.0.0' });
+    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
       beadsForum: '',
@@ -96,6 +112,7 @@ describe('initializeBeadsContext', () => {
 
   it('returns BeadContext when all prerequisites met', async () => {
     mockCheckBd.mockResolvedValue({ available: true, version: '1.2.3' });
+    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({ log }));
     expect(result.beadCtx).toBeDefined();
@@ -107,6 +124,7 @@ describe('initializeBeadsContext', () => {
 
   it('resolves forum from systemBeadsForumId when beadsForum is empty', async () => {
     mockCheckBd.mockResolvedValue({ available: true });
+    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const result = await initializeBeadsContext(baseOpts({
       beadsForum: '',
       systemBeadsForumId: 'system-forum-456',
@@ -117,6 +135,7 @@ describe('initializeBeadsContext', () => {
 
   it('sets sidebarMentionUserId when sidebar enabled with mention user', async () => {
     mockCheckBd.mockResolvedValue({ available: true });
+    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
       beadsSidebar: true,
@@ -130,6 +149,7 @@ describe('initializeBeadsContext', () => {
 
   it('warns when sidebar enabled but mention user not set', async () => {
     mockCheckBd.mockResolvedValue({ available: true });
+    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
       beadsSidebar: true,
@@ -145,6 +165,7 @@ describe('initializeBeadsContext', () => {
 
   it('does not set sidebarMentionUserId when sidebar disabled', async () => {
     mockCheckBd.mockResolvedValue({ available: true });
+    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
       beadsSidebar: false,
@@ -158,6 +179,7 @@ describe('initializeBeadsContext', () => {
 
   it('propagates tagMapPath to BeadContext', async () => {
     mockCheckBd.mockResolvedValue({ available: true });
+    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const result = await initializeBeadsContext(baseOpts({
       beadsTagMapPath: '/my/custom/tag-map.json',
     }));

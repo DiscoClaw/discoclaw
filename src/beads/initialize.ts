@@ -5,7 +5,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import { loadTagMap } from './discord-sync.js';
-import { checkBdAvailable } from './bd-cli.js';
+import { checkBdAvailable, ensureBdDatabaseReady } from './bd-cli.js';
 import { initBeadsForumGuard } from './forum-guard.js';
 
 export type InitializeBeadsOpts = {
@@ -55,6 +55,20 @@ export async function initializeBeadsContext(
     );
     return { beadCtx: undefined, bdAvailable: false };
   }
+
+  // Verify the database is initialized with a prefix. Without this, bd may
+  // silently route operations to a different instance's database via the
+  // global daemon registry (~/.beads/registry.json).
+  const dbCheck = await ensureBdDatabaseReady(opts.beadsCwd);
+  if (!dbCheck.ready) {
+    opts.log.error(
+      { beadsCwd: opts.beadsCwd },
+      'beads: database not initialized and auto-init failed — ' +
+      'run "bd --db <path> --no-daemon config set issue_prefix <prefix>" manually',
+    );
+    return { beadCtx: undefined, bdAvailable: bd.available, bdVersion: bd.version };
+  }
+  opts.log.info({ beadsCwd: opts.beadsCwd, prefix: dbCheck.prefix }, 'beads:database prefix verified');
 
   const effectiveForum = opts.systemBeadsForumId || opts.beadsForum || '';
   if (!effectiveForum) {
