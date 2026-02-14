@@ -127,6 +127,31 @@ describe('writeWorkspaceFiles', () => {
     expect(identity).toContain('{{USER_NAME}} Bot');
   });
 
+  it('deletes BOOTSTRAP.md on successful onboarding', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-writer-'));
+    dirs.push(workspace);
+
+    // Simulate a pre-existing BOOTSTRAP.md from scaffolding
+    await fs.writeFile(path.join(workspace, 'BOOTSTRAP.md'), '# First run\n', 'utf-8');
+
+    const result = await writeWorkspaceFiles(baseValues, workspace);
+    expect(result.errors).toHaveLength(0);
+
+    // BOOTSTRAP.md should be gone
+    await expect(fs.access(path.join(workspace, 'BOOTSTRAP.md'))).rejects.toThrow();
+  });
+
+  it('succeeds when BOOTSTRAP.md does not exist', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-writer-'));
+    dirs.push(workspace);
+
+    // No BOOTSTRAP.md present — ENOENT should be silently swallowed
+    const result = await writeWorkspaceFiles(baseValues, workspace);
+    expect(result.errors).toHaveLength(0);
+    expect(result.written).toContain('IDENTITY.md');
+    expect(result.written).toContain('USER.md');
+  });
+
   it('overwrites existing files on retry', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-writer-'));
     dirs.push(workspace);

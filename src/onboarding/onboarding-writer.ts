@@ -142,6 +142,16 @@ export async function writeWorkspaceFiles(
     const complete = await isOnboardingComplete(workspaceCwd);
     if (!complete) {
       result.errors.push('Post-write validation failed: isOnboardingComplete() returned false.');
+    } else {
+      // Onboarding is done — remove BOOTSTRAP.md immediately so stale
+      // first-run instructions don't linger until the next service restart.
+      try {
+        await fs.unlink(path.join(workspaceCwd, 'BOOTSTRAP.md'));
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw new Error(`Failed to delete BOOTSTRAP.md after onboarding: ${(err as Error).message}`);
+        }
+      }
     }
   }
 
