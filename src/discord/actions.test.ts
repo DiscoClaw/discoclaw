@@ -92,6 +92,25 @@ describe('parseDiscordActions', () => {
     expect(actions).toEqual([{ type: 'channelCreate', name: 'test', parent: 'Dev', topic: 'A topic' }]);
     expect(cleanText).toBe('Creating channel.\n\nExtra text.');
   });
+
+  it('handles nested braces in JSON string values', () => {
+    const json = '{"type":"channelCreate","name":"test","topic":"Fix {braces} in output"}';
+    const input = `Text.\n<discord-action>${json}</parameter>\n</invoke>`;
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelCreate', name: 'test', topic: 'Fix {braces} in output' }]);
+    expect(cleanText).toBe('Text.');
+  });
+
+  it('handles two malformed action blocks in one response', () => {
+    const input =
+      'First.\n<discord-action>{"type":"channelList"}</parameter>\n</invoke>\n' +
+      'Second.\n<discord-action>{"type":"channelCreate","name":"x"}</parameter>';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(2);
+    expect(actions[0]).toEqual({ type: 'channelList' });
+    expect(actions[1]).toEqual({ type: 'channelCreate', name: 'x' });
+    expect(cleanText).toBe('First.\n\nSecond.');
+  });
 });
 
 // ---------------------------------------------------------------------------
