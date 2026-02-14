@@ -9,7 +9,7 @@ import { createClaudeCliRuntime, killActiveSubprocesses } from './runtime/claude
 import { withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
-import { startDiscordBot } from './discord.js';
+import { startDiscordBot, getActiveForgeId } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
 import { CronScheduler } from './cron/scheduler.js';
@@ -35,6 +35,7 @@ import { parseConfig } from './config.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
 import { setDataFilePath, drainInFlightReplies, cleanupOrphanedReplies } from './discord/inflight-replies.js';
+import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -90,6 +91,21 @@ let cronTagMapWatcher: { stop(): void } | null = null;
 let beadForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
 const shutdown = async () => {
+  // Write default shutdown context (skip if !restart already wrote a richer one).
+  try {
+    await writeShutdownContext(
+      pidLockDir,
+      {
+        reason: 'unknown',
+        timestamp: new Date().toISOString(),
+        activeForge: getActiveForgeId(),
+      },
+      { skipIfExists: true },
+    );
+  } catch (err) {
+    log.warn({ err }, 'shutdown:failed to write shutdown context');
+  }
+
   // Edit all in-progress Discord replies before killing subprocesses.
   await drainInFlightReplies({ timeoutMs: 3000, log });
   // Kill Claude subprocesses so they release session locks before the new instance starts.
@@ -368,6 +384,7 @@ const botParams = {
   allowUserIds,
   guildId,
   botDisplayName,
+  dataDir: pidLockDir,
   allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
   log,
   discordChannelContext,
@@ -457,6 +474,7 @@ const botParams = {
   },
   metrics: globalMetrics,
   appendSystemPrompt,
+  startupInjection: null as string | null,
 };
 
 const { client, status, system } = await startDiscordBot(botParams);
@@ -464,6 +482,16 @@ botStatus = status;
 
 // --- Cold-start: clean up orphaned in-flight replies from a previous unclean exit ---
 await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'inflight.json'), log });
+
+// --- Read shutdown context from previous run ---
+{
+  const startupCtx = await readAndClearShutdownContext(pidLockDir);
+  const startupInjection = formatStartupInjection(startupCtx);
+  if (startupInjection) {
+    botParams.startupInjection = startupInjection;
+    log.info({ type: startupCtx.type, activeForge: startupCtx.shutdown?.activeForge }, 'startup:context loaded');
+  }
+}
 
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
 let beadCtx: BeadContext | undefined;

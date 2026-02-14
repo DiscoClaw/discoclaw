@@ -57,6 +57,10 @@ import { isOnboardingComplete } from './workspace-bootstrap.js';
 export type BotParams = {
   token: string;
   allowUserIds: Set<string>;
+  /** Directory for persistent data files (shutdown-context.json, inflight.json, etc.). */
+  dataDir?: string;
+  /** One-shot startup context injection (consumed on first AI invocation). */
+  startupInjection?: string | null;
   // If set and the bot is in multiple guilds, selects the guild used for system bootstrap.
   // If unset and the bot is in exactly one guild, that guild is used.
   guildId?: string;
@@ -161,6 +165,14 @@ function acquireWriterLock(): Promise<() => void> {
 
 const MAX_PLAN_RUN_PHASES = 50;
 const runningPlanIds = new Set<string>();
+
+// Module-level forge reference — allows index.ts to query active forge at shutdown.
+let _activeForgeOrchestrator: ForgeOrchestrator | null = null;
+
+/** Returns the active forge plan ID if a forge is running, undefined otherwise. */
+export function getActiveForgeId(): string | undefined {
+  return _activeForgeOrchestrator?.activePlanId;
+}
 
 export function groupDirNameFromSessionKey(sessionKey: string): string {
   // Keep it filesystem-safe and easy to inspect.
@@ -334,7 +346,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       // Handle !restart commands before queue/session — this is a system command.
       const restartCmd = parseRestartCommand(String(msg.content ?? ''));
       if (restartCmd) {
-        const result = await handleRestartCommand(restartCmd, params.log);
+        const result = await handleRestartCommand(restartCmd, {
+          log: params.log,
+          dataDir: params.dataDir,
+          userId: msg.author.id,
+          activeForge: forgeOrchestrator?.activePlanId,
+        });
         await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
         // Deferred action (e.g., restart) runs after the reply is sent.
         // The process will likely die during this call.
@@ -1023,6 +1040,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   auditorModel: params.forgeAuditorModel,
                   log: params.log,
                 });
+                _activeForgeOrchestrator = forgeOrchestrator;
 
                 const progressReply = await msg.reply({
                   content: `Re-auditing **${found.header.planId}**...`,
@@ -1137,6 +1155,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 auditorModel: params.forgeAuditorModel,
                 log: params.log,
               });
+              _activeForgeOrchestrator = forgeOrchestrator;
 
               // Send initial progress message
               const progressReply = await msg.reply({
@@ -1351,6 +1370,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             { required: new Set(params.discordChannelContext?.paContextFiles ?? []) },
           );
 
+          // Consume one-shot startup injection (cleared after first use).
+          let startupLine = '';
+          if (params.startupInjection) {
+            startupLine = params.startupInjection;
+            params.startupInjection = null;
+          }
+
           let prompt =
             (inlinedContext
               ? inlinedContext + '\n\n'
@@ -1372,6 +1398,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               : '') +
             (replyRef
               ? `---\nReplied-to message:\n${replyRef.section}\n\n`
+              : '') +
+            (startupLine
+              ? `---\nStartup context:\n${startupLine}\n\n`
               : '') +
             `---\nUser message:\n` +
             String(msg.content ?? '');
