@@ -199,6 +199,14 @@ export function buildAuditorPrompt(planContent: string, roundNumber: number, pro
     '4. Test coverage gaps (missing edge cases, untested error paths)',
     '5. Dependency issues (circular deps, version conflicts, missing imports)',
     '',
+    '## Verification',
+    '',
+    'You have read-only access to the codebase via Read, Glob, and Grep tools. **Use them before raising concerns.** Specifically:',
+    '- Before claiming a file is missing or incomplete, Glob/Read it.',
+    '- Before claiming test coverage gaps, Grep for existing tests.',
+    '- Before claiming missing error handling, Read the relevant code.',
+    '- If your concern evaporates after checking the code, do not raise it.',
+    '',
     '## Output Format',
     '',
     'For each concern, write:',
@@ -683,8 +691,8 @@ export class ForgeOrchestrator {
         auditorPrompt,
         auditorModel,
         this.opts.cwd,
-        [], // auditor doesn't need tools
-        [],
+        readOnlyTools,
+        addDirs,
         this.opts.timeoutMs,
       );
 
