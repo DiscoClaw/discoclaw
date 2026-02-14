@@ -153,7 +153,7 @@ All actions are gated by category env flags (off by default except channels).
 
 - [ ] **README rewrite** — current README is developer-internal; needs a clear "what is this / quickstart / how to run" for anyone cloning the repo.
 - [x] **`.env.example`** — slimmed to essentials; `.env.example.full` has all ~90 options.
-- [x] **First-run experience** — `pnpm setup` provides guided interactive configuration; `pnpm doctor` validates the result.
+- [x] **First-run experience** — `pnpm setup` provides guided interactive configuration; `pnpm preflight` validates the result.
 - [x] **Graceful degradation when external prerequisites missing** — beads requires `bd` CLI, cron requires a forum channel. Ensure clean errors / skip when these aren't configured.
 
 ### Nice-to-have before MVP

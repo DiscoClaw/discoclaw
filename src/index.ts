@@ -395,10 +395,11 @@ if (beadsEnabled) {
   bdAvailable = bd.available;
   bdVersion = bd.version;
   if (!bd.available) {
-    log.warn(
-      'beads: bd CLI not found — install bd or set BD_BIN to a custom path ' +
-      '(set DISCOCLAW_BEADS_ENABLED=0 to suppress this warning)',
+    log.error(
+      'beads: bd CLI not found — beads is enabled and required. ' +
+      'Install bd, set BD_BIN to a custom path, or set DISCOCLAW_BEADS_ENABLED=0 to bypass.',
     );
+    process.exit(1);
   }
 }
 

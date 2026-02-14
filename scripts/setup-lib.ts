@@ -21,6 +21,8 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   lines.push('# REQUIRED');
   lines.push(`DISCORD_TOKEN=${vals.DISCORD_TOKEN ?? ''}`);
   lines.push(`DISCORD_ALLOW_USER_IDS=${vals.DISCORD_ALLOW_USER_IDS ?? ''}`);
+  lines.push(`DISCOCLAW_BEADS_FORUM=${vals.DISCOCLAW_BEADS_FORUM ?? ''}`);
+  lines.push(`DISCOCLAW_CRON_FORUM=${vals.DISCOCLAW_CRON_FORUM ?? ''}`);
   lines.push('');
 
   // Core
@@ -37,8 +39,6 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   // Optional
   const optionalKeys = [
     'DISCOCLAW_DISCORD_ACTIONS',
-    'DISCOCLAW_BEADS_FORUM',
-    'DISCOCLAW_CRON_FORUM',
     'DISCOCLAW_STATUS_CHANNEL',
   ];
   const hasOptional = optionalKeys.some((k) => vals[k]);

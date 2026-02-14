@@ -3,8 +3,8 @@
  * Preflight check for Discoclaw — verifies that the local environment is
  * ready to run.  Exit 0 if everything passes, 1 if any check fails.
  *
- * Usage:  pnpm doctor
- *         pnpm doctor:online   (adds Discord connection test)
+ * Usage:  pnpm run preflight
+ *         pnpm run preflight:online   (adds Discord connection test)
  */
 
 import 'dotenv/config';
@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { validateDiscordToken, validateSnowflake, validateSnowflakes } from '../src/validate.js';
 import { missingEnvVars } from './doctor-env-diff.js';
+import { checkRequiredForums, parseBooleanSetting } from './doctor-lib.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -30,7 +31,9 @@ function fail(label: string, hint?: string) {
 
 function which(bin: string): string | null {
   try {
-    return execFileSync('which', [bin], { encoding: 'utf8' }).trim();
+    const finder = process.platform === 'win32' ? 'where' : 'which';
+    const out = execFileSync(finder, [bin], { encoding: 'utf8' }).trim();
+    return out.split(/\r?\n/)[0]?.trim() || null;
   } catch {
     return null;
   }
@@ -109,13 +112,22 @@ if (claudePath) {
   fail(`Claude CLI not found (looked for "${claudeBin}")`, 'Install from https://docs.anthropic.com/en/docs/claude-code');
 }
 
-// 3b. bd CLI (informational — beads is default-on)
+// 3b. bd CLI (required when beads are enabled)
 const bdBin = process.env.BD_BIN || 'bd';
 const bdPath = which(bdBin);
+const beadsEnabledSetting = parseBooleanSetting(process.env, 'DISCOCLAW_BEADS_ENABLED', true);
+const beadsEnabledForBdCheck = beadsEnabledSetting.error ? true : beadsEnabledSetting.value;
 if (bdPath) {
   ok(`bd CLI: ${bdPath}`);
 } else {
-  console.log(`  ℹ bd CLI not found (beads task tracking will be inactive until bd is installed)`);
+  if (beadsEnabledForBdCheck) {
+    fail(
+      `bd CLI not found (looked for "${bdBin}")`,
+      'Beads is enabled by default and required. Install bd, set BD_BIN, or set DISCOCLAW_BEADS_ENABLED=0 to bypass.',
+    );
+  } else {
+    console.log('  ℹ bd CLI not found (beads disabled via DISCOCLAW_BEADS_ENABLED=0)');
+  }
 }
 
 // 4. Pre-push hook (informational)
@@ -239,7 +251,13 @@ if (channelIds) {
   }
 }
 
-// 10. Discord connection test (--check-connection only)
+// 10. Required subsystem forums (runtime blockers)
+for (const check of checkRequiredForums(process.env)) {
+  if (check.ok) ok(check.label);
+  else fail(check.label, check.hint);
+}
+
+// 11. Discord connection test (--check-connection only)
 if (checkConnection) {
   console.log('\n  Discord connection test...');
 

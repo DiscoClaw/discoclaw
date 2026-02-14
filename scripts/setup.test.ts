@@ -18,9 +18,13 @@ describe('setup: .env content generation', () => {
     const content = buildEnvContent({
       DISCORD_TOKEN: 'abc.def.ghi',
       DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      DISCOCLAW_BEADS_FORUM: '111111111111111111',
+      DISCOCLAW_CRON_FORUM: '222222222222222222',
     });
     expect(content).toContain('DISCORD_TOKEN=abc.def.ghi');
     expect(content).toContain('DISCORD_ALLOW_USER_IDS=12345678901234567');
+    expect(content).toContain('DISCOCLAW_BEADS_FORUM=111111111111111111');
+    expect(content).toContain('DISCOCLAW_CRON_FORUM=222222222222222222');
   });
 
   it('includes core values when provided', () => {
@@ -40,11 +44,13 @@ describe('setup: .env content generation', () => {
     const content = buildEnvContent({
       DISCORD_TOKEN: 'abc.def.ghi',
       DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      DISCOCLAW_BEADS_FORUM: '111111111111111111',
+      DISCOCLAW_CRON_FORUM: '222222222222222222',
       DISCOCLAW_DISCORD_ACTIONS: '1',
-      DISCOCLAW_BEADS_FORUM: '12345678901234567',
+      DISCOCLAW_STATUS_CHANNEL: 'status',
     });
     expect(content).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
-    expect(content).toContain('DISCOCLAW_BEADS_FORUM=12345678901234567');
+    expect(content).toContain('DISCOCLAW_STATUS_CHANNEL=status');
   });
 
   it('omits optional section when no optional values', () => {
