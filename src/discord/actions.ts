@@ -77,13 +77,21 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
 
 const ACTION_RE = /<discord-action>([\s\S]*?)<\/discord-action>/g;
 
+// Fallback: catches <discord-action> blocks with garbled/missing closing tags
+// (e.g. AI emits </parameter></invoke> instead of </discord-action>).
+// Matches from <discord-action> through the end of the JSON object, then
+// consumes any trailing XML-like closing tags separated by whitespace.
+const ACTION_MALFORMED_RE = /<discord-action>\s*(\{[\s\S]*?\})(?:\s*<\/[a-z-]+>)*/g;
+
 export function parseDiscordActions(
   text: string,
   flags: ActionCategoryFlags,
 ): { cleanText: string; actions: DiscordActionRequest[] } {
   const validTypes = buildValidTypes(flags);
   const actions: DiscordActionRequest[] = [];
-  const cleanText = text.replace(ACTION_RE, (_match, json: string) => {
+
+  // First pass: well-formed <discord-action>...</discord-action> blocks.
+  let cleaned = text.replace(ACTION_RE, (_match, json: string) => {
     try {
       const parsed = JSON.parse(json.trim());
       if (parsed && typeof parsed.type === 'string' && validTypes.has(parsed.type)) {
@@ -93,7 +101,22 @@ export function parseDiscordActions(
       // Malformed JSON — skip silently.
     }
     return '';
-  }).replace(/\n{3,}/g, '\n\n').trim();
+  });
+
+  // Second pass: malformed blocks (wrong closing tag or no closing tag).
+  cleaned = cleaned.replace(ACTION_MALFORMED_RE, (_match, json: string) => {
+    try {
+      const parsed = JSON.parse(json.trim());
+      if (parsed && typeof parsed.type === 'string' && validTypes.has(parsed.type)) {
+        actions.push(parsed as DiscordActionRequest);
+      }
+    } catch {
+      // Malformed JSON — strip it from display anyway.
+    }
+    return '';
+  });
+
+  const cleanText = cleaned.replace(/\n{3,}/g, '\n\n').trim();
 
   return { cleanText, actions };
 }

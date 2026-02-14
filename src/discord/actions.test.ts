@@ -70,6 +70,28 @@ describe('parseDiscordActions', () => {
     expect(cleanText).not.toMatch(/\n{3,}/);
     expect(cleanText).toBe('Here is the list:\n\nDone.');
   });
+
+  it('strips malformed action blocks with wrong closing tags', () => {
+    const input = 'Here is the bead:\n<discord-action>{"type":"channelList"}</parameter>\n</invoke>';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelList' }]);
+    expect(cleanText).toBe('Here is the bead:');
+  });
+
+  it('strips malformed action blocks with no closing tag', () => {
+    const input = 'Done.\n<discord-action>{"type":"channelList"}';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelList' }]);
+    expect(cleanText).toBe('Done.');
+  });
+
+  it('strips malformed action blocks with complex JSON payloads', () => {
+    const json = '{"type":"channelCreate","name":"test","parent":"Dev","topic":"A topic"}';
+    const input = `Creating channel.\n<discord-action>${json}</parameter>\n</invoke>\nExtra text.`;
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelCreate', name: 'test', parent: 'Dev', topic: 'A topic' }]);
+    expect(cleanText).toBe('Creating channel.\n\nExtra text.');
+  });
 });
 
 // ---------------------------------------------------------------------------
