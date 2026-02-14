@@ -366,7 +366,7 @@ describe('handlePlanCommand', () => {
     expect(content).toContain('**Status:** DRAFT');
   });
 
-  it('create — appends context to plan file body without polluting slug or bead title', async () => {
+  it('create — appends context to plan file body and bead description without polluting slug or bead title', async () => {
     const tmpDir = await makeTmpDir();
     const opts = baseOpts({ workspaceCwd: tmpDir });
 
@@ -380,7 +380,11 @@ describe('handlePlanCommand', () => {
 
     // Bead title should be the raw args, not polluted with context
     expect(bdCreate).toHaveBeenCalledWith(
-      { title: 'fix the login flow', labels: ['plan'] },
+      {
+        title: 'fix the login flow',
+        labels: ['plan'],
+        description: 'Context (replied-to message):\n[Weston]: The login handler crashes on empty passwords.',
+      },
       opts.beadsCwd,
     );
 
@@ -396,6 +400,51 @@ describe('handlePlanCommand', () => {
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
     expect(content).toContain('## Context');
     expect(content).toContain('The login handler crashes on empty passwords');
+  });
+
+  it('create — does not pass description when context is absent', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    await handlePlanCommand(
+      { action: 'create', args: 'simple plan' },
+      opts,
+    );
+
+    expect(bdCreate).toHaveBeenCalledWith(
+      { title: 'simple plan', labels: ['plan'] },
+      opts.beadsCwd,
+    );
+  });
+
+  it('create — does not pass description when context is whitespace-only', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    await handlePlanCommand(
+      { action: 'create', args: 'plan with blank context', context: '  \n  ' },
+      opts,
+    );
+
+    expect(bdCreate).toHaveBeenCalledWith(
+      { title: 'plan with blank context', labels: ['plan'] },
+      opts.beadsCwd,
+    );
+  });
+
+  it('create — truncates long context in bead description', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const longContext = 'x'.repeat(5000);
+
+    await handlePlanCommand(
+      { action: 'create', args: 'plan with long context', context: longContext },
+      opts,
+    );
+
+    const call = (bdCreate as any).mock.calls[0];
+    expect(call[0].description).toHaveLength(1800);
+    expect(call[0].description).toBe('x'.repeat(1800));
   });
 
   it('create — creates plans dir when missing', async () => {
