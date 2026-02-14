@@ -142,6 +142,16 @@ export async function writeWorkspaceFiles(
     const complete = await isOnboardingComplete(workspaceCwd);
     if (!complete) {
       result.errors.push('Post-write validation failed: isOnboardingComplete() returned false.');
+    } else {
+      // Clean up first-run instructions now that onboarding is done.
+      const bootstrapPath = path.join(workspaceCwd, 'BOOTSTRAP.md');
+      try {
+        await fs.unlink(bootstrapPath);
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw new Error(`Failed to clean up BOOTSTRAP.md: ${(err as Error).message}`);
+        }
+      }
     }
   }
 
