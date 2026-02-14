@@ -14,7 +14,7 @@ export async function collectRuntimeText(
   tools: string[],
   addDirs: string[],
   timeoutMs: number,
-  opts?: { requireFinalEvent?: boolean },
+  opts?: { requireFinalEvent?: boolean; sessionKey?: string },
 ): Promise<string> {
   let text = '';
   let sawFinal = false;
@@ -25,6 +25,7 @@ export async function collectRuntimeText(
     tools,
     addDirs: addDirs.length > 0 ? addDirs : undefined,
     timeoutMs,
+    ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
   })) {
     if (evt.type === 'text_final') {
       text = evt.text;

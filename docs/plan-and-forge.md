@@ -791,13 +791,13 @@ The forge checks the cancel flag at the start of each audit loop iteration. The 
 
 - **Writer lock:** Promise-chain mutex (`workspaceWriterLock` in `discord.ts`) serializes all plan/forge file writes within a single process.
 - **Forge singleton:** Only one `ForgeOrchestrator` instance can be running at a time (module-level variable in `discord.ts`).
-- **Phase execution:** Fire-and-forget from the Discord queue — the phase runs in the background, releasing the queue for other messages. The writer lock is held until the phase completes.
+- **Phase execution:** `!plan run` auto-chains all pending phases in a loop (up to `MAX_PLAN_RUN_PHASES` = 50). `!plan run-one` executes a single phase. Both are fire-and-forget from the Discord queue. The writer lock is acquired and released per-phase to avoid starvation.
 - **Single-user design:** No multi-user concurrency guards. The Discord allowlist is the access boundary.
 
 ### Command dispatch split
 
 `!plan` commands are dispatched in `discord.ts` but handled primarily by `plan-commands.ts`:
-- `run`, `skip`, and `phases` are intercepted in `discord.ts` for lock acquisition and async execution
+- `run`, `run-one`, `skip`, and `phases` are intercepted in `discord.ts` for lock acquisition and async execution
 - All other subcommands pass through to `handlePlanCommand()` in `plan-commands.ts`
 
 `!forge` commands are fully dispatched in `discord.ts`:
