@@ -72,6 +72,13 @@ const dataDir = cfg.dataDir;
 const pidLockDir = dataDir ?? path.join(__dirname, '..', 'data');
 const pidLockPath = path.join(pidLockDir, 'discoclaw.pid');
 const pidLockDirPath = `${pidLockPath}.lock`;
+// Detect first-ever boot: lock dir won't exist yet if we've never run before.
+let firstBoot = false;
+try {
+  await fs.access(pidLockDirPath);
+} catch {
+  firstBoot = true;
+}
 try {
   await fs.mkdir(pidLockDir, { recursive: true });
   await acquirePidLock(pidLockPath);
@@ -83,6 +90,18 @@ try {
 
 // --- Configure inflight reply persistence (for graceful shutdown + cold-start recovery) ---
 setDataFilePath(path.join(pidLockDir, 'inflight.json'));
+
+// --- Read shutdown context from previous run (before bot connects to avoid race) ---
+let startupInjection: string | null = null;
+{
+  const startupCtx = await readAndClearShutdownContext(pidLockDir, { firstBoot });
+  startupInjection = formatStartupInjection(startupCtx);
+  if (startupInjection) {
+    log.info({ type: startupCtx.type, activeForge: startupCtx.shutdown?.activeForge }, 'startup:context loaded');
+  } else if (startupCtx.type === 'first-boot') {
+    log.info('startup:first boot detected (no prior shutdown context)');
+  }
+}
 
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
@@ -474,7 +493,7 @@ const botParams = {
   },
   metrics: globalMetrics,
   appendSystemPrompt,
-  startupInjection: null as string | null,
+  startupInjection,
 };
 
 const { client, status, system } = await startDiscordBot(botParams);
@@ -482,16 +501,6 @@ botStatus = status;
 
 // --- Cold-start: clean up orphaned in-flight replies from a previous unclean exit ---
 await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'inflight.json'), log });
-
-// --- Read shutdown context from previous run ---
-{
-  const startupCtx = await readAndClearShutdownContext(pidLockDir);
-  const startupInjection = formatStartupInjection(startupCtx);
-  if (startupInjection) {
-    botParams.startupInjection = startupInjection;
-    log.info({ type: startupCtx.type, activeForge: startupCtx.shutdown?.activeForge }, 'startup:context loaded');
-  }
-}
 
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
 let beadCtx: BeadContext | undefined;

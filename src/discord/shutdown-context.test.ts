@@ -96,6 +96,21 @@ describe('readAndClearShutdownContext', () => {
     expect(result.shutdown).toBeUndefined();
   });
 
+  it('returns first-boot when no file exists and firstBoot hint is set', async () => {
+    const result = await readAndClearShutdownContext(tmpDir, { firstBoot: true });
+    expect(result.type).toBe('first-boot');
+    expect(result.shutdown).toBeUndefined();
+  });
+
+  it('ignores firstBoot hint when file exists', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'restart-command',
+      timestamp: '2026-02-13T00:00:00.000Z',
+    });
+    const result = await readAndClearShutdownContext(tmpDir, { firstBoot: true });
+    expect(result.type).toBe('intentional');
+  });
+
   it('returns graceful-unknown for reason: unknown', async () => {
     await writeShutdownContext(tmpDir, {
       reason: 'unknown',
@@ -189,6 +204,39 @@ describe('formatStartupInjection', () => {
     const result = formatStartupInjection(ctx);
     expect(result).toContain('restarted via !restart');
     expect(result).not.toContain('<@');
+  });
+
+  it('formats deploy reason correctly', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'deploy',
+        timestamp: '2026-02-13T00:00:00.000Z',
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('restarted for a deploy');
+    expect(result).not.toContain('!restart');
+  });
+
+  it('formats code-fix reason correctly', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'code-fix',
+        message: 'Applied hotfix for memory leak',
+        timestamp: '2026-02-13T00:00:00.000Z',
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('apply a code fix');
+    expect(result).toContain('Applied hotfix for memory leak');
+    expect(result).not.toContain('!restart');
+  });
+
+  it('returns null for first-boot', () => {
+    const ctx: StartupContext = { type: 'first-boot' };
+    expect(formatStartupInjection(ctx)).toBeNull();
   });
 
   it('formats graceful-unknown', () => {

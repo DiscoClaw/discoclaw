@@ -16,7 +16,7 @@ export type ShutdownContext = {
 };
 
 export type StartupContext = {
-  type: 'intentional' | 'graceful-unknown' | 'crash';
+  type: 'intentional' | 'graceful-unknown' | 'crash' | 'first-boot';
   shutdown?: ShutdownContext;
 };
 
@@ -58,16 +58,21 @@ export async function writeShutdownContext(
 
 /**
  * Read and delete the shutdown context file. Returns startup classification.
+ * Pass `firstBoot: true` when the data directory was freshly created (no prior run)
+ * to avoid a false "crash" warning on first-ever boot.
  */
-export async function readAndClearShutdownContext(dataDir: string): Promise<StartupContext> {
+export async function readAndClearShutdownContext(
+  dataDir: string,
+  opts?: { firstBoot?: boolean },
+): Promise<StartupContext> {
   const filePath = path.join(dataDir, FILENAME);
 
   let raw: string;
   try {
     raw = await fs.readFile(filePath, 'utf-8');
   } catch {
-    // No file → crash / first boot.
-    return { type: 'crash' };
+    // No file → crash unless this is the first-ever boot.
+    return { type: opts?.firstBoot ? 'first-boot' : 'crash' };
   }
 
   // Delete the file regardless of parse outcome.
@@ -106,13 +111,18 @@ export function formatStartupInjection(ctx: StartupContext): string | null {
 
   switch (ctx.type) {
     case 'intentional': {
+      const reason = ctx.shutdown?.reason ?? 'restart-command';
       const who = ctx.shutdown?.requestedBy
         ? ` by <@${ctx.shutdown.requestedBy}>`
         : '';
       const msg = ctx.shutdown?.message
         ? ` (${ctx.shutdown.message})`
         : '';
-      line = `You were restarted via !restart${who}${msg}.`;
+      const via = reason === 'restart-command' ? ' via !restart'
+        : reason === 'deploy' ? ' for a deploy'
+        : reason === 'code-fix' ? ' to apply a code fix'
+        : '';
+      line = `You were restarted${via}${who}${msg}.`;
       break;
     }
     case 'graceful-unknown':
@@ -121,6 +131,8 @@ export function formatStartupInjection(ctx: StartupContext): string | null {
     case 'crash':
       line = 'You appear to have crashed or been killed (no shutdown context found). Consider checking journalctl logs.';
       break;
+    case 'first-boot':
+      return null; // Nothing to inject on first-ever boot.
     default:
       return null;
   }
