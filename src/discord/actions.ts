@@ -138,8 +138,9 @@ function stripMalformedActions(
 
     const jsonStr = extractJsonObject(text, afterMarker);
     if (!jsonStr) {
-      // Unbalanced braces — strip from marker to end (best-effort cleanup).
-      cursor = text.length;
+      // Unbalanced braces — strip just this line, preserve text after the next newline.
+      const nl = text.indexOf('\n', afterMarker);
+      cursor = nl === -1 ? text.length : nl;
       continue;
     }
 

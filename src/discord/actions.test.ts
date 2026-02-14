@@ -111,6 +111,13 @@ describe('parseDiscordActions', () => {
     expect(actions[1]).toEqual({ type: 'channelCreate', name: 'x' });
     expect(cleanText).toBe('First.\n\nSecond.');
   });
+
+  it('preserves text after an unterminated malformed action block', () => {
+    const input = 'Before\n<discord-action>{"type":"channelList","x":"oops\nAfter text';
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(0);
+    expect(cleanText).toBe('Before\n\nAfter text');
+  });
 });
 
 // ---------------------------------------------------------------------------
