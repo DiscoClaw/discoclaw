@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { parseExtractionResult, applyUserTurnToDurable } from './user-turn-to-durable.js';
+import { parseExtractionResult, applyUserTurnToDurable, EXTRACTION_PROMPT } from './user-turn-to-durable.js';
 import { loadDurableMemory, addItem, saveDurableMemory } from './durable-memory.js';
 import type { DurableMemoryStore } from './durable-memory.js';
 
@@ -71,6 +71,45 @@ describe('parseExtractionResult', () => {
     const raw = '[{"kind":"fact","text":"ok"}] some text [more stuff]';
     const items = parseExtractionResult(raw);
     expect(items).toEqual([{ kind: 'fact', text: 'ok' }]);
+  });
+});
+
+describe('EXTRACTION_PROMPT', () => {
+  it('is exported', () => {
+    expect(typeof EXTRACTION_PROMPT).toBe('string');
+    expect(EXTRACTION_PROMPT.length).toBeGreaterThan(0);
+  });
+
+  it('contains the one-month test heuristic', () => {
+    expect(EXTRACTION_PROMPT).toContain('one-month test');
+    expect(EXTRACTION_PROMPT).toContain('still be useful to know in a month');
+  });
+
+  it('includes keep criteria for preferences and personal facts', () => {
+    expect(EXTRACTION_PROMPT).toContain('preferences');
+    expect(EXTRACTION_PROMPT).toContain('Personal facts');
+    expect(EXTRACTION_PROMPT).toContain('Stable project context');
+    expect(EXTRACTION_PROMPT).toContain('Cross-session conventions');
+  });
+
+  it('includes exclude criteria for transient task state', () => {
+    expect(EXTRACTION_PROMPT).toContain('bugs being fixed');
+    expect(EXTRACTION_PROMPT).toContain('PRs in flight');
+    expect(EXTRACTION_PROMPT).toContain('One-time setup steps');
+    expect(EXTRACTION_PROMPT).toContain('commit hashes');
+    expect(EXTRACTION_PROMPT).toContain('status update');
+  });
+
+  it('preserves the JSON output contract', () => {
+    expect(EXTRACTION_PROMPT).toContain('"kind"');
+    expect(EXTRACTION_PROMPT).toContain('"text"');
+    expect(EXTRACTION_PROMPT).toContain('preference, fact, project, constraint, person, tool, workflow');
+    expect(EXTRACTION_PROMPT).toContain('Max 3 items');
+    expect(EXTRACTION_PROMPT).toContain('return []');
+  });
+
+  it('contains the {userMessage} placeholder', () => {
+    expect(EXTRACTION_PROMPT).toContain('{userMessage}');
   });
 });
 
