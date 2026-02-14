@@ -6,9 +6,18 @@ import os from 'node:os';
 import { executeCronJob } from './executor.js';
 import { safeCronId } from './job-lock.js';
 import { CronRunControl } from './run-control.js';
+import { loadWorkspacePaFiles } from '../discord/prompt-common.js';
 import type { CronJob, ParsedCronDef } from './types.js';
 import type { CronExecutorContext } from './executor.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
+
+vi.mock('../discord/prompt-common.js', async (importOriginal) => {
+  const actual = await importOriginal() as any;
+  return {
+    ...actual,
+    loadWorkspacePaFiles: vi.fn(actual.loadWorkspacePaFiles),
+  };
+});
 
 function makeDef(overrides?: Partial<ParsedCronDef>): ParsedCronDef {
   return {
@@ -417,5 +426,157 @@ describe('executeCronJob permissionNote injection', () => {
     expect(invokeSpy).toHaveBeenCalledOnce();
     const passedPrompt = invokeSpy.mock.calls[0][0].prompt;
     expect(passedPrompt).not.toContain('Permission note:');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workspace PA context injection
+// ---------------------------------------------------------------------------
+
+describe('executeCronJob workspace PA context', () => {
+  let wsDir: string;
+
+  beforeEach(async () => {
+    wsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-pa-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(wsDir, { recursive: true, force: true });
+  });
+
+  function makeCapturingRuntime(response: string) {
+    const invokeSpy = vi.fn();
+    return {
+      runtime: {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(params: any): AsyncIterable<EngineEvent> {
+          invokeSpy(params);
+          yield { type: 'text_final', text: response };
+          yield { type: 'done' };
+        },
+      } as RuntimeAdapter,
+      invokeSpy,
+    };
+  }
+
+  it('inlines all PA files into the prompt', async () => {
+    await fs.writeFile(path.join(wsDir, 'SOUL.md'), 'Be helpful.');
+    await fs.writeFile(path.join(wsDir, 'IDENTITY.md'), 'Test Bot Identity');
+    await fs.writeFile(path.join(wsDir, 'USER.md'), 'User info here.');
+    await fs.writeFile(path.join(wsDir, 'TOOLS.md'), 'Tool list here.');
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
+    const ctx = makeCtx({ runtime, cwd: wsDir });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('--- SOUL.md ---');
+    expect(prompt).toContain('Be helpful.');
+    expect(prompt).toContain('--- IDENTITY.md ---');
+    expect(prompt).toContain('Test Bot Identity');
+    expect(prompt).toContain('--- USER.md ---');
+    expect(prompt).toContain('User info here.');
+    expect(prompt).toContain('--- TOOLS.md ---');
+    expect(prompt).toContain('Tool list here.');
+  });
+
+  it('executes normally when no PA files exist', async () => {
+    const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
+    const ctx = makeCtx({ runtime, cwd: wsDir });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('You are executing a scheduled cron job');
+    expect(prompt).not.toContain('--- ');
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+  });
+
+  it('includes only existing PA files (partial set)', async () => {
+    await fs.writeFile(path.join(wsDir, 'SOUL.md'), 'Soul content.');
+    await fs.writeFile(path.join(wsDir, 'IDENTITY.md'), 'Identity content');
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
+    const ctx = makeCtx({ runtime, cwd: wsDir });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('--- SOUL.md ---');
+    expect(prompt).toContain('Soul content.');
+    expect(prompt).toContain('--- IDENTITY.md ---');
+    expect(prompt).toContain('Identity content');
+    expect(prompt).not.toContain('--- USER.md ---');
+    expect(prompt).not.toContain('--- TOOLS.md ---');
+  });
+
+  it('places PA context before the cron instruction', async () => {
+    await fs.writeFile(path.join(wsDir, 'IDENTITY.md'), 'Bot identity here');
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
+    const ctx = makeCtx({ runtime, cwd: wsDir });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    const paIndex = prompt.indexOf('--- IDENTITY.md ---');
+    const cronIndex = prompt.indexOf('You are executing a scheduled cron job');
+    expect(paIndex).toBeGreaterThanOrEqual(0);
+    expect(cronIndex).toBeGreaterThan(paIndex);
+  });
+
+  it('includes IDENTITY.md alone without errors', async () => {
+    await fs.writeFile(path.join(wsDir, 'IDENTITY.md'), 'Just identity');
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
+    const ctx = makeCtx({ runtime, cwd: wsDir });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('--- IDENTITY.md ---');
+    expect(prompt).toContain('Just identity');
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+  });
+
+  it('continues with bare prompt when PA loading throws (try/catch fallback)', async () => {
+    vi.mocked(loadWorkspacePaFiles).mockRejectedValueOnce(new Error('disk exploded'));
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
+    const ctx = makeCtx({ runtime, cwd: wsDir });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('You are executing a scheduled cron job');
+    expect(prompt).not.toContain('--- ');
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+
+    expect(ctx.log?.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: job.id, err: expect.any(Error) }),
+      'cron:exec PA file loading failed, continuing without context',
+    );
   });
 });
