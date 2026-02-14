@@ -314,8 +314,13 @@ export async function handlePlanCommand(
         }
       } else {
         try {
+          const trimmedContext = cmd.context?.trim();
           const bead = await bdCreate(
-            { title: cmd.args, labels: ['plan'] },
+            {
+              title: cmd.args,
+              labels: ['plan'],
+              ...(trimmedContext ? { description: trimmedContext.slice(0, 1800) } : {}),
+            },
             opts.beadsCwd,
           );
           beadId = bead.id;
