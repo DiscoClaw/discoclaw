@@ -86,21 +86,6 @@ export async function handleRestartCommand(cmd: RestartCommand, opts?: RestartOp
     const wasActive = before.stdout.includes('active (running)');
     log?.info({ wasActive }, 'restart-command:restart');
 
-    // Write shutdown context before triggering restart.
-    if (dataDir) {
-      try {
-        await writeShutdownContext(dataDir, {
-          reason: 'restart-command',
-          message: 'User requested via !restart',
-          timestamp: new Date().toISOString(),
-          requestedBy: userId,
-          activeForge,
-        });
-      } catch (err) {
-        log?.warn({ err }, 'restart-command:failed to write shutdown context');
-      }
-    }
-
     // We can't restart inline — the restart kills this process before
     // we can reply. Instead, return a deferred function that the caller
     // invokes *after* sending the reply to Discord.
@@ -109,6 +94,21 @@ export async function handleRestartCommand(cmd: RestartCommand, opts?: RestartOp
         ? 'Restarting discoclaw... back in a moment.'
         : 'Starting discoclaw...',
       deferred: () => {
+        // Write shutdown context right before triggering restart so it
+        // doesn't linger if the deferred never fires or restart fails.
+        if (dataDir) {
+          const ctx = {
+            reason: 'restart-command' as const,
+            message: 'User requested via !restart',
+            timestamp: new Date().toISOString(),
+            requestedBy: userId,
+            activeForge,
+          };
+          // Synchronous-ish: writeFile + rename, then exec restart.
+          writeShutdownContext(dataDir, ctx).catch((err) => {
+            log?.warn({ err }, 'restart-command:failed to write shutdown context');
+          });
+        }
         // Fire and forget — the process will die during this call.
         execFile('systemctl', ['--user', 'restart', 'discoclaw'], (err) => {
           // If we somehow survive (e.g., the service unit changed), log it.

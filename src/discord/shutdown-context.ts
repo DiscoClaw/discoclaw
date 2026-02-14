@@ -21,6 +21,8 @@ export type StartupContext = {
 };
 
 const FILENAME = 'shutdown-context.json';
+const VALID_REASONS = new Set<ShutdownReason>(['restart-command', 'deploy', 'code-fix', 'unknown']);
+const MAX_FIELD_LENGTH = 500;
 
 // ---------------------------------------------------------------------------
 // Write (shutdown side)
@@ -82,13 +84,23 @@ export async function readAndClearShutdownContext(
     // Best-effort deletion.
   }
 
-  let ctx: ShutdownContext;
+  let parsed: any;
   try {
-    ctx = JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
     // Corrupted file → treat as crash.
     return { type: 'crash' };
   }
+
+  // Validate reason against known union; unknown/missing → graceful-unknown.
+  const reason: ShutdownReason = VALID_REASONS.has(parsed.reason) ? parsed.reason : 'unknown';
+  const ctx: ShutdownContext = {
+    reason,
+    timestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : new Date().toISOString(),
+    message: typeof parsed.message === 'string' ? parsed.message.slice(0, MAX_FIELD_LENGTH) : undefined,
+    activeForge: typeof parsed.activeForge === 'string' ? parsed.activeForge.slice(0, MAX_FIELD_LENGTH) : undefined,
+    requestedBy: typeof parsed.requestedBy === 'string' ? parsed.requestedBy : undefined,
+  };
 
   if (ctx.reason === 'unknown') {
     return { type: 'graceful-unknown', shutdown: ctx };

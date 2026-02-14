@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { parseRestartCommand, handleRestartCommand } from './restart-command.js';
+import * as shutdownCtx from './shutdown-context.js';
 
 vi.mock('node:child_process', () => ({
   execFile: vi.fn((cmd: string, args: string[], optsOrCb: any, maybeCb?: any) => {
@@ -81,6 +82,25 @@ describe('handleRestartCommand', () => {
     const result = await handleRestartCommand({ action: 'restart' });
     expect(result.reply).toBe('Restarting discoclaw... back in a moment.');
     expect(typeof result.deferred).toBe('function');
+  });
+
+  it('does not write shutdown context until deferred is called', async () => {
+    const spy = vi.spyOn(shutdownCtx, 'writeShutdownContext').mockResolvedValue();
+    const result = await handleRestartCommand(
+      { action: 'restart' },
+      { dataDir: '/tmp/test', userId: '123', activeForge: 'plan-001' },
+    );
+    // Before deferred: no write.
+    expect(spy).not.toHaveBeenCalled();
+    // After deferred: write happens.
+    result.deferred!();
+    expect(spy).toHaveBeenCalledOnce();
+    expect(spy.mock.calls[0][1]).toMatchObject({
+      reason: 'restart-command',
+      requestedBy: '123',
+      activeForge: 'plan-001',
+    });
+    spy.mockRestore();
   });
 
   it('restart reports "Starting" when service was not active', async () => {

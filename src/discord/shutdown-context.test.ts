@@ -174,6 +174,36 @@ describe('readAndClearShutdownContext', () => {
     const result = await readAndClearShutdownContext(tmpDir);
     expect(result.shutdown?.activeForge).toBe('plan-037');
   });
+
+  it('classifies unrecognized reason as graceful-unknown', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'banana', timestamp: '2026-02-13T00:00:00.000Z' }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.type).toBe('graceful-unknown');
+    expect(result.shutdown?.reason).toBe('unknown');
+  });
+
+  it('classifies missing reason as graceful-unknown', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ timestamp: '2026-02-13T00:00:00.000Z' }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.type).toBe('graceful-unknown');
+  });
+
+  it('truncates oversized message and activeForge fields', async () => {
+    const long = 'x'.repeat(1000);
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', message: long, activeForge: long }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.message?.length).toBe(500);
+    expect(result.shutdown?.activeForge?.length).toBe(500);
+  });
 });
 
 describe('formatStartupInjection', () => {
