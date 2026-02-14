@@ -537,6 +537,148 @@ describe('createReactionAddHandler', () => {
     expect(invokeSpy.mock.calls[0][0].sessionId).toBe('ses-abc');
   });
 
+  it('suppresses trivial responses (e.g. HEARTBEAT_OK) and deletes placeholder', async () => {
+    const params = makeParams({ runtime: makeMockRuntime('HEARTBEAT_OK') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).toHaveBeenCalledOnce();
+    // edit is called during streaming (placeholder update), but editThenSendChunks should NOT be reached.
+    // The log should confirm suppression.
+    expect(params.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: expect.any(String), chars: expect.any(Number) }),
+      expect.stringContaining('trivial response suppressed'),
+    );
+  });
+
+  it('does not suppress genuine short responses (e.g. "ok")', async () => {
+    const shortResponse = 'ok';
+    const params = makeParams({ runtime: makeMockRuntime(shortResponse) });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).not.toHaveBeenCalled();
+    // editThenSendChunks calls reply.edit with the final text
+    expect(replyObj.edit).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining(shortResponse) }),
+    );
+  });
+
+  it('does not suppress HEARTBEAT_OK when it has Discord actions', async () => {
+    const responseWithAction = 'HEARTBEAT_OK\n<discord-action>{"type":"react","channelId":"ch-1","messageId":"msg-1","emoji":"👍"}</discord-action>';
+    const params = makeParams({
+      runtime: makeMockRuntime(responseWithAction),
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    // Should NOT be suppressed because there are parsed actions.
+    expect(replyObj.delete).not.toHaveBeenCalled();
+  });
+
+  it('suppresses whitespace-only responses', async () => {
+    const params = makeParams({ runtime: makeMockRuntime('   \n  ') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).toHaveBeenCalledOnce();
+  });
+
+  it('does not suppress short responses that have images', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Here.' };
+        yield { type: 'image_data', image: { data: 'abc', mediaType: 'image/png' } } as any;
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    // Should NOT be suppressed because images are present.
+    expect(replyObj.delete).not.toHaveBeenCalled();
+  });
+
+  it('suppresses (no output) fallback response', async () => {
+    // When runtime produces empty text and no images, processedText becomes '(no output)' (11 chars).
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: '' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).toHaveBeenCalledOnce();
+  });
+
+  it('dispose() is called even when suppression triggers early return', async () => {
+    const params = makeParams({ runtime: makeMockRuntime('HEARTBEAT_OK') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    // In-flight reply should be cleaned up (count back to 0).
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
   it('swallows 50083 (thread archived) without triggering handlerError', async () => {
     const statusPoster = {
       online: vi.fn(),

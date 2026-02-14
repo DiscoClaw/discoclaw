@@ -432,8 +432,10 @@ function createReactionHandler(
           params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0, hadError: Boolean(invokeError) }, `${logPrefix}:invoke:end`);
 
           // Parse and execute Discord actions.
+          let parsedActionCount = 0;
           if (params.discordActionsEnabled && msg.guild) {
             const parsed = parseDiscordActions(processedText, actionFlags);
+            parsedActionCount = parsed.actions.length;
             if (parsed.actions.length > 0) {
               const actCtx = {
                 guild: msg.guild,
@@ -460,6 +462,19 @@ function createReactionHandler(
             } else {
               processedText = parsed.cleanText;
             }
+          }
+
+          // Suppress empty responses and the HEARTBEAT_OK sentinel — delete placeholder and bail.
+          const strippedText = processedText.replace(/\s+/g, ' ').trim();
+          const isSuppressible = strippedText.length === 0 || strippedText === 'HEARTBEAT_OK' || strippedText === '(no output)';
+          if (parsedActionCount === 0 && collectedImages.length === 0 && isSuppressible) {
+            params.log?.info({ sessionKey, chars: strippedText.length }, `${logPrefix}:trivial response suppressed`);
+            try {
+              await (reply as any)?.delete();
+            } catch (delErr) {
+              params.log?.warn({ sessionKey, err: delErr }, `${logPrefix}:placeholder delete failed`);
+            }
+            return;
           }
 
           if (!isShuttingDown()) {
