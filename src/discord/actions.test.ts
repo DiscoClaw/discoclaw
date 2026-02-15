@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
-import { parseDiscordActions, executeDiscordActions } from './actions.js';
-import type { ActionCategoryFlags } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, buildDisplayResultLines, buildAllResultLines } from './actions.js';
+import type { ActionCategoryFlags, DiscordActionResult } from './actions.js';
 
 const ALL_FLAGS: ActionCategoryFlags = {
   channels: true,
@@ -272,5 +272,85 @@ describe('executeDiscordActions', () => {
     expect(results).toHaveLength(2);
     expect(results[0].ok).toBe(false);
     expect(results[1].ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDisplayResultLines / buildAllResultLines
+// ---------------------------------------------------------------------------
+
+describe('buildDisplayResultLines', () => {
+  it('filters successful sendMessage results', () => {
+    const actions = [{ type: 'sendMessage' }, { type: 'channelCreate' }];
+    const results: DiscordActionResult[] = [
+      { ok: true, summary: 'Sent message to #general' },
+      { ok: true, summary: 'Created #status' },
+    ];
+    const lines = buildDisplayResultLines(actions, results);
+    expect(lines).toEqual(['Done: Created #status']);
+  });
+
+  it('keeps failed sendMessage results', () => {
+    const actions = [{ type: 'sendMessage' }];
+    const results: DiscordActionResult[] = [
+      { ok: false, error: 'Missing Permissions' },
+    ];
+    const lines = buildDisplayResultLines(actions, results);
+    expect(lines).toEqual(['Failed: Missing Permissions']);
+  });
+
+  it('keeps non-sendMessage successes', () => {
+    const actions = [{ type: 'channelCreate' }, { type: 'react' }, { type: 'channelList' }];
+    const results: DiscordActionResult[] = [
+      { ok: true, summary: 'Created #foo' },
+      { ok: true, summary: 'Reacted with ✅' },
+      { ok: true, summary: 'Listed 3 channels' },
+    ];
+    const lines = buildDisplayResultLines(actions, results);
+    expect(lines).toEqual([
+      'Done: Created #foo',
+      'Done: Reacted with ✅',
+      'Done: Listed 3 channels',
+    ]);
+  });
+
+  it('returns empty array when all actions are successful sendMessage', () => {
+    const actions = [{ type: 'sendMessage' }, { type: 'sendMessage' }];
+    const results: DiscordActionResult[] = [
+      { ok: true, summary: 'Sent message to #general' },
+      { ok: true, summary: 'Sent message to #random' },
+    ];
+    const lines = buildDisplayResultLines(actions, results);
+    expect(lines).toEqual([]);
+  });
+
+  it('handles mixed actions correctly', () => {
+    const actions = [{ type: 'sendMessage' }, { type: 'channelCreate' }, { type: 'sendMessage' }];
+    const results: DiscordActionResult[] = [
+      { ok: true, summary: 'Sent message to #general' },
+      { ok: true, summary: 'Created #status' },
+      { ok: false, error: 'Channel not found' },
+    ];
+    const lines = buildDisplayResultLines(actions, results);
+    expect(lines).toEqual([
+      'Done: Created #status',
+      'Failed: Channel not found',
+    ]);
+  });
+});
+
+describe('buildAllResultLines', () => {
+  it('returns all result lines without filtering', () => {
+    const results: DiscordActionResult[] = [
+      { ok: true, summary: 'Sent message to #general' },
+      { ok: true, summary: 'Created #status' },
+      { ok: false, error: 'Missing Permissions' },
+    ];
+    const lines = buildAllResultLines(results);
+    expect(lines).toEqual([
+      'Done: Sent message to #general',
+      'Done: Created #status',
+      'Failed: Missing Permissions',
+    ]);
   });
 });

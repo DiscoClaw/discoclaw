@@ -10,7 +10,7 @@ import type { CronRunStats } from './run-stats.js';
 import type { CronRunControl } from './run-control.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
-import { parseDiscordActions, executeDiscordActions } from '../discord/actions.js';
+import { parseDiscordActions, executeDiscordActions, buildDisplayResultLines } from '../discord/actions.js';
 import { sendChunks } from '../discord/output-common.js';
 import { loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
@@ -259,8 +259,10 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           metrics.recordActionResult(result.ok);
           ctx.log?.info({ flow: 'cron', jobId: job.id, ok: result.ok }, 'obs.action.result');
         }
-        const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
-        processedText = cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
+        const displayLines = buildDisplayResultLines(actions, results);
+        processedText = displayLines.length > 0
+          ? cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
+          : cleanText.trimEnd();
 
         if (ctx.status) {
           for (let i = 0; i < results.length; i++) {

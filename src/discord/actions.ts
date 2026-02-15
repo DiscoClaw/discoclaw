@@ -253,6 +253,38 @@ export async function executeDiscordActions(
 }
 
 // ---------------------------------------------------------------------------
+// Result-line helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build result lines for display in Discord (posted message).
+ * Suppresses successful sendMessage results since the sent message
+ * is its own confirmation.
+ */
+export function buildDisplayResultLines(
+  actions: { type: string }[],
+  results: DiscordActionResult[],
+): string[] {
+  return results
+    .map((r, i) => {
+      if (r.ok && actions[i]?.type === 'sendMessage') return null;
+      return r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`;
+    })
+    .filter((line): line is string => line !== null);
+}
+
+/**
+ * Build result lines for follow-up prompts (AI sees all results).
+ */
+export function buildAllResultLines(
+  results: DiscordActionResult[],
+): string[] {
+  return results.map((r) =>
+    r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Prompt section
 // ---------------------------------------------------------------------------
 

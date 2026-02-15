@@ -386,6 +386,35 @@ describe('createReactionAddHandler', () => {
     expect(replyContent).toMatch(/Done:|Failed:/);
   });
 
+  it('suppresses sendMessage Done line from posted output', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Sending a message for you.\n\n<discord-action>{"type":"sendMessage","channelId":"ch-1","content":"hello"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction();
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    const replyContent: string = lastEditCall[0].content;
+    // Should NOT contain 'Done: Sent message'.
+    expect(replyContent).not.toContain('Done: Sent message');
+    // Clean text should still be present.
+    expect(replyContent).toContain('Sending a message for you.');
+  });
+
   it('fetches partial reaction before processing', async () => {
     const params = makeParams();
     const queue = mockQueue();
