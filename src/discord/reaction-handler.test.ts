@@ -387,16 +387,12 @@ describe('createReactionAddHandler', () => {
     expect(replyContent).toMatch(/Done:|Failed:/);
   });
 
-  it('passes threadParentId in actCtx when reaction is in a thread', async () => {
-    // We spy on the actions module to capture the context passed to executeDiscordActions.
-    const actionsModule = await import('./actions.js');
-    const executeSpy = vi.spyOn(actionsModule, 'executeDiscordActions');
-
+  it('suppresses sendMessage targeting parent forum when reaction is in a forum thread', async () => {
     const runtime: RuntimeAdapter = {
       id: 'claude_code',
       capabilities: new Set(['streaming_text']),
       async *invoke(): AsyncIterable<EngineEvent> {
-        yield { type: 'text_final', text: 'Done\n\n<discord-action>{"type":"react","channelId":"thread-1","messageId":"msg-1","emoji":"✅"}</discord-action>' };
+        yield { type: 'text_final', text: 'Here is my response.\n\n<discord-action>{"type":"sendMessage","channel":"forum-parent-1","content":"hello"}</discord-action>' };
         yield { type: 'done' };
       },
     };
@@ -408,6 +404,13 @@ describe('createReactionAddHandler', () => {
     const queue = mockQueue();
     const handler = createReactionAddHandler(params, queue);
 
+    // Build a guild with the forum channel in the cache.
+    const forumCh = {
+      id: 'forum-parent-1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      send: vi.fn().mockResolvedValue(undefined),
+    };
     const threadChannel = {
       id: 'thread-1',
       name: 'my-thread',
@@ -415,19 +418,38 @@ describe('createReactionAddHandler', () => {
       isThread: () => true,
       joinable: false,
       joined: true,
-      parent: { name: 'general' },
+      parent: { name: 'beads' },
       send: vi.fn().mockResolvedValue(undefined),
     };
+    const channelsMap = new Map<string, any>([
+      ['forum-parent-1', forumCh],
+      ['thread-1', threadChannel],
+    ]);
+    const guild = {
+      channels: {
+        cache: {
+          get: (id: string) => channelsMap.get(id),
+          find: (fn: (ch: any) => boolean) => {
+            for (const ch of channelsMap.values()) if (fn(ch)) return ch;
+            return undefined;
+          },
+          values: () => channelsMap.values(),
+        },
+      },
+    };
     const reaction = mockReaction({
-      message: mockMessage({ channel: threadChannel, channelId: 'thread-1' }),
+      message: mockMessage({ channel: threadChannel, channelId: 'thread-1', guild }),
     });
     await handler(reaction as any, mockUser() as any);
 
-    expect(executeSpy).toHaveBeenCalledOnce();
-    const actCtx = executeSpy.mock.calls[0][1];
-    expect(actCtx.threadParentId).toBe('forum-parent-1');
-
-    executeSpy.mockRestore();
+    // The reply should contain prose and NOT contain a Failed: line.
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    const replyContent: string = lastEditCall[0].content;
+    expect(replyContent).toContain('Here is my response.');
+    expect(replyContent).not.toContain('Failed:');
+    // Forum channel's .send() should NOT have been called.
+    expect(forumCh.send).not.toHaveBeenCalled();
   });
 
   it('suppresses sendMessage Done line from posted output', async () => {
