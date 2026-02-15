@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import { parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 
 export const KNOWN_TOOLS = new Set(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch']);
@@ -63,6 +65,8 @@ export type DiscoclawConfig = {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   openaiModel?: string;
+  openaiAuthMode?: 'apikey' | 'chatgpt';
+  openaiAuthFile?: string;
   forgeAuditorRuntime?: string;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
@@ -344,7 +348,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const forgeAuditorRuntime = parseTrimmedString(env, 'FORGE_AUDITOR_RUNTIME');
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
-  if (forgeAuditorRuntime === 'openai' && !openaiApiKey) {
+  const openaiAuthMode = parseEnum(env, 'OPENAI_AUTH_MODE', ['apikey', 'chatgpt'] as const);
+  const openaiAuthFileRaw = parseTrimmedString(env, 'OPENAI_AUTH_FILE');
+  const openaiAuthFile: string | undefined = openaiAuthMode === 'chatgpt'
+    ? (() => {
+        if (!openaiAuthFileRaw) return path.join(os.homedir(), '.codex', 'auth.json');
+        if (openaiAuthFileRaw.startsWith('~/')) return path.join(os.homedir(), openaiAuthFileRaw.slice(2));
+        return openaiAuthFileRaw;
+      })()
+    : undefined;
+  if (forgeAuditorRuntime === 'openai' && !openaiApiKey && openaiAuthMode !== 'chatgpt') {
     warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to Claude.');
   }
 
@@ -421,6 +434,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiApiKey: parseTrimmedString(env, 'OPENAI_API_KEY'),
       openaiBaseUrl: parseTrimmedString(env, 'OPENAI_BASE_URL'),
       openaiModel: parseTrimmedString(env, 'OPENAI_MODEL'),
+      openaiAuthMode,
+      openaiAuthFile,
       forgeAuditorRuntime: parseTrimmedString(env, 'FORGE_AUDITOR_RUNTIME'),
 
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', true),

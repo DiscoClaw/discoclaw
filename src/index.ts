@@ -409,7 +409,18 @@ const limitedRuntime = withConcurrencyLimit(runtime, { maxConcurrentInvocations,
 const runtimeRegistry = new RuntimeRegistry();
 runtimeRegistry.register('claude', limitedRuntime);
 
-if (cfg.openaiApiKey) {
+if (cfg.openaiAuthMode === 'chatgpt' && cfg.openaiAuthFile) {
+  const { createChatGptTokenProvider } = await import('./runtime/openai-auth.js');
+  const tokenProvider = createChatGptTokenProvider({ authFilePath: cfg.openaiAuthFile, log });
+  const openaiRuntime = createOpenAICompatRuntime({
+    auth: 'chatgpt_oauth',
+    baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
+    tokenProvider,
+    defaultModel: cfg.openaiModel ?? 'gpt-4o',
+    log,
+  });
+  runtimeRegistry.register('openai', openaiRuntime);
+} else if (cfg.openaiApiKey) {
   const openaiRuntime = createOpenAICompatRuntime({
     baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
     apiKey: cfg.openaiApiKey,
