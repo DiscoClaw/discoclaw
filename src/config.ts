@@ -1,4 +1,3 @@
-import os from 'node:os';
 import path from 'node:path';
 import { parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 
@@ -65,9 +64,11 @@ export type DiscoclawConfig = {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   openaiModel?: string;
-  openaiAuthMode?: 'apikey' | 'chatgpt';
-  openaiAuthFile?: string;
   forgeAuditorRuntime?: string;
+
+  // Codex CLI adapter config
+  codexBin: string;
+  codexModel: string;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermMaxEntries: number;
@@ -348,16 +349,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const forgeAuditorRuntime = parseTrimmedString(env, 'FORGE_AUDITOR_RUNTIME');
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
-  const openaiAuthMode = parseEnum(env, 'OPENAI_AUTH_MODE', ['apikey', 'chatgpt'] as const);
-  const openaiAuthFileRaw = parseTrimmedString(env, 'OPENAI_AUTH_FILE');
-  const openaiAuthFile: string | undefined = openaiAuthMode === 'chatgpt'
-    ? (() => {
-        if (!openaiAuthFileRaw) return path.join(os.homedir(), '.codex', 'auth.json');
-        if (openaiAuthFileRaw.startsWith('~/')) return path.join(os.homedir(), openaiAuthFileRaw.slice(2));
-        return openaiAuthFileRaw;
-      })()
-    : undefined;
-  if (forgeAuditorRuntime === 'openai' && !openaiApiKey && openaiAuthMode !== 'chatgpt') {
+  if (forgeAuditorRuntime === 'openai' && !openaiApiKey) {
     warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to Claude.');
   }
 
@@ -421,7 +413,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       planCommandsEnabled: parseBoolean(env, 'DISCOCLAW_PLAN_COMMANDS_ENABLED', true),
       planPhasesEnabled: parseBoolean(env, 'PLAN_PHASES_ENABLED', true),
       planPhaseMaxContextFiles: parsePositiveInt(env, 'PLAN_PHASE_MAX_CONTEXT_FILES', 5),
-      planPhaseTimeoutMs: parsePositiveNumber(env, 'PLAN_PHASE_TIMEOUT_MS', 5 * 60_000),
+      planPhaseTimeoutMs: parsePositiveNumber(env, 'PLAN_PHASE_TIMEOUT_MS', 30 * 60_000),
       planPhaseMaxAuditFixAttempts: parseNonNegativeInt(env, 'PLAN_PHASE_AUDIT_FIX_MAX', 2),
       forgeCommandsEnabled: parseBoolean(env, 'DISCOCLAW_FORGE_COMMANDS_ENABLED', true),
       forgeMaxAuditRounds: parsePositiveInt(env, 'FORGE_MAX_AUDIT_ROUNDS', 5),
@@ -434,9 +426,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiApiKey: parseTrimmedString(env, 'OPENAI_API_KEY'),
       openaiBaseUrl: parseTrimmedString(env, 'OPENAI_BASE_URL'),
       openaiModel: parseTrimmedString(env, 'OPENAI_MODEL'),
-      openaiAuthMode,
-      openaiAuthFile,
       forgeAuditorRuntime: parseTrimmedString(env, 'FORGE_AUDITOR_RUNTIME'),
+
+      codexBin: parseTrimmedString(env, 'CODEX_BIN') ?? 'codex',
+      codexModel: parseTrimmedString(env, 'CODEX_MODEL') ?? 'gpt-5.3-codex',
 
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', true),
       shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', false),

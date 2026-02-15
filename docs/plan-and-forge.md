@@ -430,15 +430,18 @@ Only one forge can run at a time per DM handler instance. The `forgeOrchestrator
 
 The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTIME_MODEL`. The auditor uses `FORGE_AUDITOR_MODEL` if set, otherwise the main model. The drafter/reviser gets read-only tools (Read, Glob, Grep); the auditor gets read-only tools when using Claude, no tools when using a non-Claude runtime.
 
-**Multi-provider auditor:** The auditor can optionally use a non-Claude runtime via `FORGE_AUDITOR_RUNTIME`. When set to `openai`, the auditor is routed through the OpenAI-compatible adapter (`src/runtime/openai-compat.ts`) instead of the Claude CLI. This enables cross-model auditing — the plan is drafted by one model family and audited by another.
+**Multi-provider auditor:** The auditor can optionally use a non-Claude runtime via `FORGE_AUDITOR_RUNTIME`. Two adapters are available:
 
-**ChatGPT OAuth authentication:** As an alternative to a static `OPENAI_API_KEY`, the OpenAI adapter supports ChatGPT OAuth authentication via `OPENAI_AUTH_MODE=chatgpt`. In this mode, the adapter reads an `access_token` and `refresh_token` from a credentials file (default `~/.codex/auth.json`, configurable via `OPENAI_AUTH_FILE`). This allows discoclaw to piggyback on an existing ChatGPT Pro subscription — the same credentials used by Codex CLI — without requiring a separate OpenAI Platform API key or billing account. The adapter handles token refresh automatically when the access token expires.
+- `FORGE_AUDITOR_RUNTIME=codex` — routes through the Codex CLI adapter (`src/runtime/codex-cli.ts`), which shells out to `codex exec`. Auth is handled natively by the Codex CLI (`~/.codex/auth.json`). This is the recommended path for OpenAI models like `gpt-5.3-codex` that aren't available on the public chat completions API.
+- `FORGE_AUDITOR_RUNTIME=openai` — routes through the OpenAI-compatible HTTP adapter (`src/runtime/openai-compat.ts`) using a static `OPENAI_API_KEY`. Works for models available on the `/v1/chat/completions` endpoint.
+
+This enables cross-model auditing — the plan is drafted by one model family and audited by another.
 
 When the auditor uses a non-Claude runtime:
 - Tools are disabled (the OpenAI adapter is text-only, no tool execution)
 - The auditor prompt includes a "no codebase access" instruction block instead of the verification block
 - Session keys are not used (no multi-turn reuse)
-- If `FORGE_AUDITOR_MODEL` is not set, the model defaults to the adapter's `defaultModel` (configured via `OPENAI_MODEL`, default `gpt-4o`)
+- If `FORGE_AUDITOR_MODEL` is not set, the model defaults to the adapter's `defaultModel`: for codex, `CODEX_MODEL` (default `gpt-5.3-codex`); for openai, `OPENAI_MODEL` (default `gpt-4o`)
 
 ---
 
@@ -664,10 +667,10 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 
 | Variable | Default | Parser | Description |
 |----------|---------|--------|-------------|
-| `FORGE_AUDITOR_RUNTIME` | *(empty)* | `parseTrimmedString` | Runtime adapter name for the auditor (e.g., `openai`). When empty, the auditor uses the default Claude runtime. |
-| `OPENAI_API_KEY` | *(empty)* | `parseTrimmedString` | API key for the OpenAI-compatible adapter. Required when `FORGE_AUDITOR_RUNTIME=openai` and `OPENAI_AUTH_MODE` is not `chatgpt`. |
-| `OPENAI_AUTH_MODE` | *(empty)* | `parseTrimmedString` | Authentication mode for the OpenAI adapter. Set to `chatgpt` to use ChatGPT OAuth tokens instead of an API key. When empty or unset, standard API key auth is used. |
-| `OPENAI_AUTH_FILE` | `~/.codex/auth.json` | `parseTrimmedString` | Path to the ChatGPT OAuth credentials file (contains `access_token` and `refresh_token`). Only used when `OPENAI_AUTH_MODE=chatgpt`. |
+| `FORGE_AUDITOR_RUNTIME` | *(empty)* | `parseTrimmedString` | Runtime adapter name for the auditor (`codex` or `openai`). When empty, the auditor uses the default Claude runtime. |
+| `CODEX_BIN` | `codex` | `parseTrimmedString` | Path to the Codex CLI binary. |
+| `CODEX_MODEL` | `gpt-5.3-codex` | `parseTrimmedString` | Default model for the Codex CLI adapter. Used when `FORGE_AUDITOR_MODEL` is not set. |
+| `OPENAI_API_KEY` | *(empty)* | `parseTrimmedString` | API key for the OpenAI-compatible adapter. Required when `FORGE_AUDITOR_RUNTIME=openai`. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | `parseTrimmedString` | Base URL for the OpenAI-compatible API. Override for proxies or alternative providers (e.g., Azure OpenAI, Ollama). |
 | `OPENAI_MODEL` | `gpt-4o` | `parseTrimmedString` | Default model for the OpenAI adapter. Used when `FORGE_AUDITOR_MODEL` is not set. |
 
@@ -808,6 +811,7 @@ The forge checks the cancel flag at the start of each audit loop iteration. The 
 | `src/discord.ts` | Discord message handler: command dispatch for both `!plan` and `!forge`, writer lock, forge lifecycle management |
 | `src/config.ts` | All plan/forge env var parsing |
 | `src/runtime/openai-compat.ts` | OpenAI-compatible runtime adapter (SSE streaming, text-only) |
+| `src/runtime/codex-cli.ts` | Codex CLI runtime adapter (subprocess, text-only) |
 | `src/runtime/registry.ts` | Runtime adapter registry (name → adapter lookup) |
 | `src/runtime/types.ts` | `RuntimeAdapter` interface, `EngineEvent` types |
 
