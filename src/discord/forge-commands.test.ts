@@ -786,7 +786,7 @@ describe('ForgeOrchestrator', () => {
     const invocations: Array<Record<string, unknown>> = [];
     const runtime: RuntimeAdapter = {
       id: 'claude_code' as const,
-      capabilities: new Set(['streaming_text' as const]),
+      capabilities: new Set(['streaming_text', 'tools_fs'] as const),
       invoke(params) {
         invocations.push({ tools: params.tools, addDirs: params.addDirs });
         const responses = [draftPlan, auditClean];

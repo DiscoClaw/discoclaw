@@ -757,6 +757,7 @@ export class ForgeOrchestrator {
 
       const auditorRt = this.opts.auditorRuntime ?? this.opts.runtime;
       const isClaudeAuditor = auditorRt.id === 'claude_code';
+      const auditorHasFileTools = auditorRt.capabilities.has('tools_fs');
       const hasExplicitAuditorModel = Boolean(this.opts.auditorModel);
       const effectiveAuditorModel = isClaudeAuditor
         ? auditorModel
@@ -766,15 +767,15 @@ export class ForgeOrchestrator {
         planContent,
         round,
         projectContext,
-        { hasTools: isClaudeAuditor },
+        { hasTools: auditorHasFileTools },
       );
       const auditOutput = await collectRuntimeText(
         auditorRt,
         auditorPrompt,
         effectiveAuditorModel,
         this.opts.cwd,
-        isClaudeAuditor ? readOnlyTools : [],
-        isClaudeAuditor ? addDirs : [],
+        auditorHasFileTools ? readOnlyTools : [],
+        auditorHasFileTools ? addDirs : [],
         this.opts.timeoutMs,
         isClaudeAuditor ? { sessionKey: auditorSessionKey } : undefined,
       );
