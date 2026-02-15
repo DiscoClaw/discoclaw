@@ -1741,6 +1741,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   client: msg.client,
                   channelId: msg.channelId,
                   messageId: msg.id,
+                  threadParentId,
                 };
                 actionResults = await executeDiscordActions(parsed.actions, actCtx, params.log, params.beadCtx, params.cronCtx);
                 for (const result of actionResults) {
