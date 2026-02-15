@@ -22,6 +22,18 @@ function makeSSEResponse(chunks: string[], status = 200, statusText = 'OK'): Res
   return new Response(stream, { status, statusText });
 }
 
+/** Like makeSSEResponse but does NOT append a trailing newline — simulates EOF without \n. */
+function makeSSEResponseRaw(rawText: string, status = 200, statusText = 'OK'): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(rawText));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status, statusText });
+}
+
 function makeSSEData(content: string): string {
   return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`;
 }
@@ -268,5 +280,64 @@ describe('OpenAI-compat runtime adapter', () => {
     // Request body should not contain tools
     const parsed = JSON.parse(capturedBody!);
     expect(parsed.tools).toBeUndefined();
+  });
+
+  it('data: without space after colon is parsed correctly', async () => {
+    // SSE spec allows "data:payload" (no space) — some endpoints emit this form
+    const noSpaceData = `data:${JSON.stringify({ choices: [{ delta: { content: 'no-space' } }] })}`;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      makeSSEResponse([noSpaceData, 'data:[DONE]']),
+    );
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const deltas = events.filter((e) => e.type === 'text_delta');
+    expect(deltas).toHaveLength(1);
+    expect((deltas[0] as { text: string }).text).toBe('no-space');
+
+    const final = events.find((e) => e.type === 'text_final');
+    expect(final).toBeDefined();
+    expect((final as { text: string }).text).toBe('no-space');
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
+  it('stream ending without trailing newline still processes buffered data', async () => {
+    // Simulate a stream that ends with a data line but no trailing \n
+    const chunk = makeSSEData('buffered');
+    const rawText = `${chunk}`; // no trailing newline
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      makeSSEResponseRaw(rawText),
+    );
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const deltas = events.filter((e) => e.type === 'text_delta');
+    expect(deltas).toHaveLength(1);
+    expect((deltas[0] as { text: string }).text).toBe('buffered');
+
+    const final = events.find((e) => e.type === 'text_final');
+    expect(final).toBeDefined();
+    expect((final as { text: string }).text).toBe('buffered');
+    expect(events[events.length - 1]!.type).toBe('done');
   });
 });
