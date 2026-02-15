@@ -8,6 +8,7 @@ import fs from 'node:fs/promises';
 import { createClaudeCliRuntime, killActiveSubprocesses } from './runtime/claude-code-cli.js';
 import { RuntimeRegistry } from './runtime/registry.js';
 import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
+import { createCodexCliRuntime, killActiveCodexSubprocesses } from './runtime/codex-cli.js';
 import { withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
@@ -135,6 +136,7 @@ const shutdown = async () => {
   await drainInFlightReplies({ timeoutMs: 3000, log });
   // Kill Claude subprocesses so they release session locks before the new instance starts.
   killActiveSubprocesses();
+  killActiveCodexSubprocesses();
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
   beadForumCountSync?.stop();
   cronForumCountSync?.stop();
@@ -409,18 +411,7 @@ const limitedRuntime = withConcurrencyLimit(runtime, { maxConcurrentInvocations,
 const runtimeRegistry = new RuntimeRegistry();
 runtimeRegistry.register('claude', limitedRuntime);
 
-if (cfg.openaiAuthMode === 'chatgpt' && cfg.openaiAuthFile) {
-  const { createChatGptTokenProvider } = await import('./runtime/openai-auth.js');
-  const tokenProvider = createChatGptTokenProvider({ authFilePath: cfg.openaiAuthFile, log });
-  const openaiRuntime = createOpenAICompatRuntime({
-    auth: 'chatgpt_oauth',
-    baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
-    tokenProvider,
-    defaultModel: cfg.openaiModel ?? 'gpt-4o',
-    log,
-  });
-  runtimeRegistry.register('openai', openaiRuntime);
-} else if (cfg.openaiApiKey) {
+if (cfg.openaiApiKey) {
   const openaiRuntime = createOpenAICompatRuntime({
     baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
     apiKey: cfg.openaiApiKey,
@@ -429,6 +420,15 @@ if (cfg.openaiAuthMode === 'chatgpt' && cfg.openaiAuthFile) {
   });
   runtimeRegistry.register('openai', openaiRuntime);
 }
+
+// Register Codex CLI runtime
+const codexRuntime = createCodexCliRuntime({
+  codexBin: cfg.codexBin,
+  defaultModel: cfg.codexModel,
+  log,
+});
+runtimeRegistry.register('codex', codexRuntime);
+log.info({ codexBin: cfg.codexBin, model: cfg.codexModel }, 'runtime:codex registered');
 
 // Resolve the auditor runtime (if configured)
 let auditorRuntime: import('./runtime/types.js').RuntimeAdapter | undefined;
