@@ -33,9 +33,10 @@ See: `src/runtime/types.ts`
 - Default tools: `Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch` (8 tools).
 - `Glob` + `Grep` are purpose-built for file search — faster than `find`/`grep` via Bash.
 - `Write` enables proper file creation (previously required Bash echo/cat workarounds).
-- If/when we add OpenAI/Gemini adapters:
-  - Start with **analysis-only** routes (no tools).
-  - Add a tool layer only if we explicitly decide we need full parity.
+- Non-Claude adapters use a **capability gate** (`tools_fs`) to determine tool access:
+  - Codex CLI adapter: declares `tools_fs` — receives read-only tools (Read, Glob, Grep) in auditor role.
+  - OpenAI HTTP adapter: text-only (`streaming_text` only) — no tool execution.
+  - Future adapters (Gemini, etc.): declare capabilities as appropriate.
 
 ## Per-Workspace Permissions
 - `workspace/PERMISSIONS.json` controls the tool surface per workspace.

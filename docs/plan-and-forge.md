@@ -428,7 +428,7 @@ Only one forge can run at a time per DM handler instance. The `forgeOrchestrator
 
 ### Model and runtime selection
 
-The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTIME_MODEL`. The auditor uses `FORGE_AUDITOR_MODEL` if set, otherwise the main model. The drafter/reviser gets read-only tools (Read, Glob, Grep); the auditor gets read-only tools when using Claude, no tools when using a non-Claude runtime.
+The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTIME_MODEL`. The auditor uses `FORGE_AUDITOR_MODEL` if set, otherwise the main model. The drafter/reviser gets read-only tools (Read, Glob, Grep); the auditor also gets read-only tools when its runtime declares the `tools_fs` capability (Claude and Codex both do). Runtimes without `tools_fs` (e.g., the OpenAI HTTP adapter) get a text-only prompt instead.
 
 **Multi-provider auditor:** The auditor can optionally use a non-Claude runtime via `FORGE_AUDITOR_RUNTIME`. Two adapters are available:
 
@@ -438,8 +438,7 @@ The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTI
 This enables cross-model auditing — the plan is drafted by one model family and audited by another.
 
 When the auditor uses a non-Claude runtime:
-- Tools are disabled (the OpenAI adapter is text-only, no tool execution)
-- The auditor prompt includes a "no codebase access" instruction block instead of the verification block
+- Tool access depends on the adapter's capabilities. The Codex CLI adapter declares `tools_fs` and receives read-only tools (Read, Glob, Grep) just like Claude. The OpenAI HTTP adapter does not — it gets a text-only "no codebase access" prompt instead.
 - Session keys are not used (no multi-turn reuse)
 - If `FORGE_AUDITOR_MODEL` is not set, the model defaults to the adapter's `defaultModel`: for codex, `CODEX_MODEL` (default `gpt-5.3-codex`); for openai, `OPENAI_MODEL` (default `gpt-4o`)
 
@@ -810,8 +809,8 @@ The forge checks the cancel flag at the start of each audit loop iteration. The 
 | `src/discord/plan-manager.ts` | Phase decomposition, serialization, staleness detection, phase execution, git integration |
 | `src/discord.ts` | Discord message handler: command dispatch for both `!plan` and `!forge`, writer lock, forge lifecycle management |
 | `src/config.ts` | All plan/forge env var parsing |
-| `src/runtime/openai-compat.ts` | OpenAI-compatible runtime adapter (SSE streaming, text-only) |
-| `src/runtime/codex-cli.ts` | Codex CLI runtime adapter (subprocess, text-only) |
+| `src/runtime/openai-compat.ts` | OpenAI-compatible runtime adapter (SSE streaming, text-only — no tool support) |
+| `src/runtime/codex-cli.ts` | Codex CLI runtime adapter (subprocess, supports read-only tools via `tools_fs` capability) |
 | `src/runtime/registry.ts` | Runtime adapter registry (name → adapter lookup) |
 | `src/runtime/types.ts` | `RuntimeAdapter` interface, `EngineEvent` types |
 
