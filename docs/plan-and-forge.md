@@ -432,6 +432,8 @@ The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTI
 
 **Multi-provider auditor:** The auditor can optionally use a non-Claude runtime via `FORGE_AUDITOR_RUNTIME`. When set to `openai`, the auditor is routed through the OpenAI-compatible adapter (`src/runtime/openai-compat.ts`) instead of the Claude CLI. This enables cross-model auditing — the plan is drafted by one model family and audited by another.
 
+**ChatGPT OAuth authentication:** As an alternative to a static `OPENAI_API_KEY`, the OpenAI adapter supports ChatGPT OAuth authentication via `OPENAI_AUTH_MODE=chatgpt`. In this mode, the adapter reads an `access_token` and `refresh_token` from a credentials file (default `~/.codex/auth.json`, configurable via `OPENAI_AUTH_FILE`). This allows discoclaw to piggyback on an existing ChatGPT Pro subscription — the same credentials used by Codex CLI — without requiring a separate OpenAI Platform API key or billing account. The adapter handles token refresh automatically when the access token expires.
+
 When the auditor uses a non-Claude runtime:
 - Tools are disabled (the OpenAI adapter is text-only, no tool execution)
 - The auditor prompt includes a "no codebase access" instruction block instead of the verification block
@@ -663,7 +665,9 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | Variable | Default | Parser | Description |
 |----------|---------|--------|-------------|
 | `FORGE_AUDITOR_RUNTIME` | *(empty)* | `parseTrimmedString` | Runtime adapter name for the auditor (e.g., `openai`). When empty, the auditor uses the default Claude runtime. |
-| `OPENAI_API_KEY` | *(empty)* | `parseTrimmedString` | API key for the OpenAI-compatible adapter. Required when `FORGE_AUDITOR_RUNTIME=openai`. |
+| `OPENAI_API_KEY` | *(empty)* | `parseTrimmedString` | API key for the OpenAI-compatible adapter. Required when `FORGE_AUDITOR_RUNTIME=openai` and `OPENAI_AUTH_MODE` is not `chatgpt`. |
+| `OPENAI_AUTH_MODE` | *(empty)* | `parseTrimmedString` | Authentication mode for the OpenAI adapter. Set to `chatgpt` to use ChatGPT OAuth tokens instead of an API key. When empty or unset, standard API key auth is used. |
+| `OPENAI_AUTH_FILE` | `~/.codex/auth.json` | `parseTrimmedString` | Path to the ChatGPT OAuth credentials file (contains `access_token` and `refresh_token`). Only used when `OPENAI_AUTH_MODE=chatgpt`. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | `parseTrimmedString` | Base URL for the OpenAI-compatible API. Override for proxies or alternative providers (e.g., Azure OpenAI, Ollama). |
 | `OPENAI_MODEL` | `gpt-4o` | `parseTrimmedString` | Default model for the OpenAI adapter. Used when `FORGE_AUDITOR_MODEL` is not set. |
 
