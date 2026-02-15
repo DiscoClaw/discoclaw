@@ -528,7 +528,7 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs[secondIdx + 1]).toBe('/home/user/shared');
   });
 
-  it('omits --add-dir when addDirs is empty or undefined', async () => {
+  it('omits --add-dir when addDirs is empty', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stdout: 'ok',
       exitCode: 0,
@@ -544,6 +544,29 @@ describe('Codex CLI runtime adapter', () => {
       model: '',
       cwd: '/tmp',
       addDirs: [],
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(callArgs).not.toContain('--add-dir');
+  });
+
+  it('omits --add-dir when addDirs is undefined', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+      // addDirs intentionally omitted (undefined)
     }));
 
     expect(mockExeca).toHaveBeenCalledTimes(1);

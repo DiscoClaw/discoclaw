@@ -59,7 +59,9 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
 
     const args: string[] = ['exec', '-m', model, '--skip-git-repo-check', '--ephemeral', '-s', 'read-only'];
 
-    // Pass --add-dir flags for additional read-only directories (mirrors claude-code-cli.ts).
+    // Pass --add-dir flags for additional directories (mirrors claude-code-cli.ts).
+    // Note: Codex's --help describes --add-dir as "writable", but -s read-only overrides
+    // that — verified empirically (Codex v0.101.0). The dirs become read-accessible only.
     if (params.addDirs && params.addDirs.length > 0) {
       for (const dir of params.addDirs) {
         args.push('--add-dir', dir);
