@@ -196,6 +196,46 @@ describe('parseAuditVerdict', () => {
     const text = '**Severity: medium**\n**Severity: high**\n**Verdict:** Needs revision.';
     expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'high', shouldLoop: true });
   });
+
+  it('detects severity in markdown table rows (without fallback)', () => {
+    // Table where severity is bare bold in data cells — no "Severity:" label prefix.
+    // Verdict is "Ready to approve" so fallback would give low/no-loop — only
+    // direct bold-keyword detection should catch the medium.
+    const text = '| # | Concern | Severity |\n|---|---------|----------|\n| 1 | Missing tests | **medium** |\n| 2 | Minor naming | **low** |\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+  });
+
+  it('detects severity in table cells without bold formatting', () => {
+    const text = '| Concern | Rating |\n|---|---|\n| Missing tests | medium |\n\n**Verdict:** Ready to approve.';
+    // "medium" inside a table cell (| medium |) is detected via tableCellSeverity
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+  });
+
+  it('detects severity in table header column', () => {
+    const text = '| Concern | Severity |\n|---|---|\n| Missing tests | Severity: medium |\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+  });
+
+  it('severity markers win over contradictory verdict text', () => {
+    // Table has **high** but verdict says "Ready to approve" — markers should win
+    const text = '| # | Concern | Severity |\n|---|---------|----------|\n| 1 | SQL injection | **high** |\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'high', shouldLoop: true });
+  });
+
+  it('falls back to "Needs revision" verdict when no severity markers present', () => {
+    const text = 'Some concerns found.\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+  });
+
+  it('falls back to "Ready to approve" verdict when no severity markers present', () => {
+    const text = 'Minor things but overall good.\n\nVerdict: Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+  });
+
+  it('does not false-positive on "high" in prose without formatting', () => {
+    const text = 'The code quality is high.\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+  });
 });
 
 // ---------------------------------------------------------------------------
