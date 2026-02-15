@@ -260,9 +260,14 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           ctx.log?.info({ flow: 'cron', jobId: job.id, ok: result.ok }, 'obs.action.result');
         }
         const displayLines = buildDisplayResultLines(actions, results);
+        const anyActionSucceeded = results.some((r) => r.ok);
         processedText = displayLines.length > 0
           ? cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
           : cleanText.trimEnd();
+        // When all display lines were suppressed and there's no prose, skip posting.
+        if (!processedText.trim() && anyActionSucceeded) {
+          ctx.log?.info({ jobId: job.id }, 'cron:reply suppressed (actions-only, no display text)');
+        }
 
         if (ctx.status) {
           for (let i = 0; i < results.length; i++) {

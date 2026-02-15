@@ -1742,9 +1742,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   );
                 }
                 const displayLines = buildDisplayResultLines(actions, actionResults);
+                const anyActionSucceeded = actionResults.some((r) => r.ok);
                 processedText = displayLines.length > 0
                   ? parsed.cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
                   : parsed.cleanText.trimEnd();
+                // When all display lines were suppressed (e.g. sendMessage-only) and there's
+                // no prose, delete the placeholder instead of posting "(no output)".
+                if (!processedText.trim() && anyActionSucceeded && collectedImages.length === 0) {
+                  try { await reply.delete(); } catch { /* ignore */ }
+                  params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
+                  break;
+                }
                 if (statusRef?.current) {
                   for (let i = 0; i < actionResults.length; i++) {
                     const r = actionResults[i];

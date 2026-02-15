@@ -232,7 +232,7 @@ describe('executeCronJob', () => {
   });
 
   it('suppresses sendMessage Done line from posted output', async () => {
-    const responseWithAction = 'Sending now.\n<discord-action>{"type":"sendMessage","channelId":"ch-1","content":"hello"}</discord-action>';
+    const responseWithAction = 'Sending now.\n<discord-action>{"type":"sendMessage","channel":"general","content":"hello"}</discord-action>';
     const runtime: RuntimeAdapter = {
       id: 'claude_code',
       capabilities: new Set(['streaming_text']),
@@ -251,12 +251,37 @@ describe('executeCronJob', () => {
 
     const guild = (ctx.client as any).guilds.cache.get('guild-1');
     const channel = guild.channels.cache.get('general');
-    expect(channel.send).toHaveBeenCalled();
-    // The posted content should NOT contain 'Done: Sent message'.
-    const sentContent = channel.send.mock.calls[0][0].content;
-    expect(sentContent).not.toContain('Done: Sent message');
-    // The clean text should still be present.
-    expect(sentContent).toContain('Sending now.');
+    // Two sends: action's sendMessage ("hello") + cron output ("Sending now.").
+    expect(channel.send).toHaveBeenCalledTimes(2);
+    // The cron output post (second call) should contain the prose but not "Done:".
+    const outputContent = channel.send.mock.calls[1][0].content;
+    expect(outputContent).not.toContain('Done: Sent message');
+    expect(outputContent).toContain('Sending now.');
+  });
+
+  it('skips cron output post when sendMessage-only with no prose', async () => {
+    const responseActionOnly = '<discord-action>{"type":"sendMessage","channel":"general","content":"hello"}</discord-action>';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: responseActionOnly };
+        yield { type: 'done' };
+      },
+    };
+    const ctx = makeCtx({
+      runtime,
+      discordActionsEnabled: true,
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false },
+    });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    // Only one send: the action's sendMessage. No cron output post.
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    expect(channel.send.mock.calls[0][0].content).toBe('hello');
   });
 
   it('does not post if output is empty', async () => {

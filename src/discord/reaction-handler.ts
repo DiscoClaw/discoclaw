@@ -450,9 +450,17 @@ function createReactionHandler(
                 params.log?.info({ flow: 'reaction', sessionKey, ok: result.ok }, 'obs.action.result');
               }
               const displayLines = buildDisplayResultLines(parsed.actions, results);
+              const anyActionSucceeded = results.some((r) => r.ok);
               processedText = displayLines.length > 0
                 ? parsed.cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
                 : parsed.cleanText.trimEnd();
+              // When all display lines were suppressed (e.g. sendMessage-only) and there's
+              // no prose, delete the placeholder instead of posting "(no output)".
+              if (!processedText.trim() && anyActionSucceeded && collectedImages.length === 0) {
+                try { await (reply as any)?.delete(); } catch { /* ignore */ }
+                params.log?.info({ sessionKey }, `${logPrefix}:reply suppressed (actions-only, no display text)`);
+                return;
+              }
 
               if (statusRef?.current) {
                 for (let i = 0; i < results.length; i++) {
