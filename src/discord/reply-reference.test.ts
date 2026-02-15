@@ -97,7 +97,7 @@ describe('resolveReplyReference', () => {
   });
 
   it('downloads image attachments from referenced message', async () => {
-    const imgData = Buffer.from('fake-png');
+    const imgData = (() => { const b = Buffer.alloc(45); Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]).copy(b); return b; })();
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       arrayBuffer: () => Promise.resolve(imgData.buffer.slice(imgData.byteOffset, imgData.byteOffset + imgData.byteLength)),
@@ -114,7 +114,7 @@ describe('resolveReplyReference', () => {
   });
 
   it('respects shared image budget', async () => {
-    const imgData = Buffer.from('fake-png');
+    const imgData = (() => { const b = Buffer.alloc(45); Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]).copy(b); return b; })();
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       arrayBuffer: () => Promise.resolve(imgData.buffer.slice(imgData.byteOffset, imgData.byteOffset + imgData.byteLength)),

@@ -1,5 +1,41 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { resolveMediaType, downloadAttachment, downloadMessageImages, type AttachmentLike } from './image-download.js';
+import {
+  resolveMediaType, downloadAttachment, downloadMessageImages,
+  sniffMediaType,
+  MIN_PNG_BYTES, MIN_JPEG_BYTES, MIN_GIF_BYTES, MIN_WEBP_BYTES,
+  type AttachmentLike,
+} from './image-download.js';
+
+// --- Helper buffers with valid magic bytes ---
+
+/** PNG: 8-byte signature padded to >= MIN_PNG_BYTES */
+function makePngBuffer(size: number = MIN_PNG_BYTES): Buffer {
+  const buf = Buffer.alloc(size);
+  Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).copy(buf);
+  return buf;
+}
+
+/** JPEG: FF D8 FF E0 padded to >= MIN_JPEG_BYTES */
+function makeJpegBuffer(size: number = MIN_JPEG_BYTES): Buffer {
+  const buf = Buffer.alloc(size);
+  Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]).copy(buf);
+  return buf;
+}
+
+/** GIF89a padded to >= MIN_GIF_BYTES */
+function makeGifBuffer(size: number = MIN_GIF_BYTES): Buffer {
+  const buf = Buffer.alloc(size);
+  Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]).copy(buf);
+  return buf;
+}
+
+/** WebP: RIFF....WEBP padded to >= MIN_WEBP_BYTES */
+function makeWebpBuffer(size: number = MIN_WEBP_BYTES): Buffer {
+  const buf = Buffer.alloc(size);
+  Buffer.from([0x52, 0x49, 0x46, 0x46]).copy(buf, 0);
+  Buffer.from([0x57, 0x45, 0x42, 0x50]).copy(buf, 8);
+  return buf;
+}
 
 describe('resolveMediaType', () => {
   it('returns MIME from contentType for PNG', () => {
@@ -51,6 +87,83 @@ describe('resolveMediaType', () => {
   });
 });
 
+describe('sniffMediaType', () => {
+  it('detects PNG from 8-byte signature', () => {
+    expect(sniffMediaType(makePngBuffer())).toBe('image/png');
+  });
+
+  it('detects JPEG from FF D8 FF (JFIF)', () => {
+    expect(sniffMediaType(makeJpegBuffer())).toBe('image/jpeg');
+  });
+
+  it('detects JPEG from FF D8 FF E1 (EXIF)', () => {
+    const buf = Buffer.alloc(20);
+    Buffer.from([0xFF, 0xD8, 0xFF, 0xE1]).copy(buf);
+    expect(sniffMediaType(buf)).toBe('image/jpeg');
+  });
+
+  it('detects GIF89a', () => {
+    expect(sniffMediaType(makeGifBuffer())).toBe('image/gif');
+  });
+
+  it('detects GIF87a', () => {
+    const buf = Buffer.alloc(26);
+    Buffer.from([0x47, 0x49, 0x46, 0x38, 0x37, 0x61]).copy(buf);
+    expect(sniffMediaType(buf)).toBe('image/gif');
+  });
+
+  it('detects WebP from RIFF...WEBP', () => {
+    expect(sniffMediaType(makeWebpBuffer())).toBe('image/webp');
+  });
+
+  it('returns null for empty buffer', () => {
+    expect(sniffMediaType(Buffer.alloc(0))).toBeNull();
+  });
+
+  it('returns null for random bytes', () => {
+    expect(sniffMediaType(Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04]))).toBeNull();
+  });
+
+  it('returns null for 1-byte buffer', () => {
+    expect(sniffMediaType(Buffer.from([0xFF]))).toBeNull();
+  });
+
+  it('returns null for 2-byte buffer', () => {
+    expect(sniffMediaType(Buffer.from([0xFF, 0xD8]))).toBeNull();
+  });
+
+  it('returns null for 7-byte buffer matching PNG prefix', () => {
+    const buf = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A]);
+    expect(sniffMediaType(buf)).toBeNull();
+  });
+
+  it('returns null for 5-byte buffer matching GIF prefix', () => {
+    const buf = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39]);
+    expect(sniffMediaType(buf)).toBeNull();
+  });
+
+  it('returns null for RIFF + WAVE (not WebP)', () => {
+    const buf = Buffer.alloc(12);
+    Buffer.from([0x52, 0x49, 0x46, 0x46]).copy(buf, 0);
+    Buffer.from([0x57, 0x41, 0x56, 0x45]).copy(buf, 8); // WAVE, not WEBP
+    expect(sniffMediaType(buf)).toBeNull();
+  });
+
+  it('returns null for 11-byte WebP-like buffer', () => {
+    const buf = Buffer.alloc(11);
+    Buffer.from([0x52, 0x49, 0x46, 0x46]).copy(buf, 0);
+    // Too short to check offset 8-11
+    expect(sniffMediaType(buf)).toBeNull();
+  });
+
+  it('detects format at exact minimum signature lengths', () => {
+    expect(sniffMediaType(makePngBuffer(8))).toBe('image/png');
+    expect(sniffMediaType(makeJpegBuffer(3))).toBe('image/jpeg');
+    expect(sniffMediaType(makeGifBuffer(6))).toBe('image/gif');
+    expect(sniffMediaType(makeWebpBuffer(12))).toBe('image/webp');
+  });
+});
+
 describe('downloadAttachment', () => {
   const originalFetch = globalThis.fetch;
 
@@ -63,7 +176,7 @@ describe('downloadAttachment', () => {
   });
 
   it('downloads and base64-encodes a valid image', async () => {
-    const data = Buffer.from('fake-png-data');
+    const data = makePngBuffer();
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
@@ -77,7 +190,7 @@ describe('downloadAttachment', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.image.mediaType).toBe('image/png');
-      expect(Buffer.from(result.image.base64, 'base64').toString()).toBe('fake-png-data');
+      expect(result.image.base64).toBe(data.toString('base64'));
     }
   });
 
@@ -196,7 +309,7 @@ describe('downloadAttachment', () => {
     if (!result.ok) expect(result.error).toContain('blocked (unexpected redirect)');
   });
 
-  it('handles zero-byte image', async () => {
+  it('rejects zero-byte image (unrecognized magic bytes)', async () => {
     const data = Buffer.alloc(0);
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
@@ -208,10 +321,9 @@ describe('downloadAttachment', () => {
       'image/png',
     );
 
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.image.base64).toBe('');
-      expect(result.image.mediaType).toBe('image/png');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('unsupported image format');
     }
   });
 
@@ -228,6 +340,219 @@ describe('downloadAttachment', () => {
       expect(result.error).not.toContain('secret');
       expect(result.error).not.toContain('https://');
     }
+  });
+
+  it('overrides declared MIME when magic bytes differ', async () => {
+    // Declare image/webp but send JPEG bytes
+    const data = makeJpegBuffer();
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/photo.webp', name: 'photo.webp', size: data.length },
+      'image/webp',
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.image.mediaType).toBe('image/jpeg');
+    }
+  });
+
+  it('rejects unsupported format (random bytes)', async () => {
+    const data = Buffer.alloc(64, 0x42);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/mystery.png', name: 'mystery.png', size: data.length },
+      'image/png',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('unsupported image format');
+    }
+  });
+
+  it('rejects truncated PNG (7 bytes, incomplete signature)', async () => {
+    const data = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A]);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/trunc.png', name: 'trunc.png', size: data.length },
+      'image/png',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('unsupported image format');
+  });
+
+  it('rejects header-only JPEG (3 bytes, below MIN_JPEG_BYTES)', async () => {
+    const data = Buffer.from([0xFF, 0xD8, 0xFF]);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/tiny.jpg', name: 'tiny.jpg', size: data.length },
+      'image/jpeg',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('image too small');
+  });
+
+  it('rejects header-only PNG (8 bytes, below MIN_PNG_BYTES)', async () => {
+    const data = makePngBuffer(8);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/tiny.png', name: 'tiny.png', size: data.length },
+      'image/png',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('image too small');
+  });
+
+  it('accepts GIF at exactly MIN_GIF_BYTES', async () => {
+    const data = makeGifBuffer(MIN_GIF_BYTES);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/tiny.gif', name: 'tiny.gif', size: data.length },
+      'image/gif',
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.image.mediaType).toBe('image/gif');
+  });
+
+  it('rejects GIF at MIN_GIF_BYTES - 1', async () => {
+    const data = makeGifBuffer(MIN_GIF_BYTES - 1);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/tiny.gif', name: 'tiny.gif', size: data.length },
+      'image/gif',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('image too small');
+  });
+
+  it('accepts PNG at exactly MIN_PNG_BYTES', async () => {
+    const data = makePngBuffer(MIN_PNG_BYTES);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/min.png', name: 'min.png', size: data.length },
+      'image/png',
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.image.mediaType).toBe('image/png');
+  });
+
+  it('rejects PNG at MIN_PNG_BYTES - 1', async () => {
+    const data = makePngBuffer(MIN_PNG_BYTES - 1);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/almost.png', name: 'almost.png', size: data.length },
+      'image/png',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('image too small');
+  });
+
+  it('accepts WebP at exactly MIN_WEBP_BYTES', async () => {
+    const data = makeWebpBuffer(MIN_WEBP_BYTES);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/min.webp', name: 'min.webp', size: data.length },
+      'image/webp',
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.image.mediaType).toBe('image/webp');
+  });
+
+  it('rejects WebP at MIN_WEBP_BYTES - 1', async () => {
+    const data = makeWebpBuffer(MIN_WEBP_BYTES - 1);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/almost.webp', name: 'almost.webp', size: data.length },
+      'image/webp',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('image too small');
+  });
+
+  it('accepts JPEG at exactly MIN_JPEG_BYTES', async () => {
+    const data = makeJpegBuffer(MIN_JPEG_BYTES);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/min.jpg', name: 'min.jpg', size: data.length },
+      'image/jpeg',
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.image.mediaType).toBe('image/jpeg');
+  });
+
+  it('rejects JPEG at MIN_JPEG_BYTES - 1', async () => {
+    const data = makeJpegBuffer(MIN_JPEG_BYTES - 1);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/almost.jpg', name: 'almost.jpg', size: data.length },
+      'image/jpeg',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('image too small');
   });
 });
 
@@ -247,11 +572,17 @@ describe('downloadMessageImages', () => {
   }
 
   it('downloads multiple image attachments', async () => {
-    const data = Buffer.from('img');
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    const pngData = makePngBuffer();
+    const jpegData = makeJpegBuffer();
+    (globalThis.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(pngData.buffer.slice(pngData.byteOffset, pngData.byteOffset + pngData.byteLength)),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(jpegData.buffer.slice(jpegData.byteOffset, jpegData.byteOffset + jpegData.byteLength)),
+      });
 
     const result = await downloadMessageImages([
       makeAttachment('a.png', 'image/png', 100),
@@ -265,10 +596,10 @@ describe('downloadMessageImages', () => {
   });
 
   it('filters out non-image attachments silently', async () => {
-    const data = Buffer.from('img');
+    const pngData = makePngBuffer();
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+      arrayBuffer: () => Promise.resolve(pngData.buffer.slice(pngData.byteOffset, pngData.byteOffset + pngData.byteLength)),
     });
 
     const result = await downloadMessageImages([
@@ -277,12 +608,14 @@ describe('downloadMessageImages', () => {
       makeAttachment('b.jpg', 'image/jpeg', 200),
     ]);
 
+    // Both images download, but magic bytes are PNG for both (single mock).
+    // The important assertion is that the PDF was filtered out.
     expect(result.images).toHaveLength(2);
     expect(result.errors).toHaveLength(0);
   });
 
   it('respects maxImages cap', async () => {
-    const data = Buffer.from('img');
+    const data = makePngBuffer();
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
@@ -295,7 +628,7 @@ describe('downloadMessageImages', () => {
   });
 
   it('stops downloading when total byte cap is exceeded', async () => {
-    const data = Buffer.from('img');
+    const data = makePngBuffer();
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
@@ -320,7 +653,7 @@ describe('downloadMessageImages', () => {
   });
 
   it('rejects single attachment exceeding total byte cap', async () => {
-    const data = Buffer.from('img');
+    const data = makePngBuffer();
     (globalThis.fetch as any).mockResolvedValue({
       ok: true,
       arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
@@ -336,10 +669,11 @@ describe('downloadMessageImages', () => {
   });
 
   it('collects errors from individual failed downloads', async () => {
+    const data = makePngBuffer();
     (globalThis.fetch as any)
       .mockResolvedValueOnce({
         ok: true,
-        arrayBuffer: () => Promise.resolve(Buffer.from('ok').buffer),
+        arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
       })
       .mockResolvedValueOnce({ ok: false, status: 500 });
 
