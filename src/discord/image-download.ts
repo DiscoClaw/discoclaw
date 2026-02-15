@@ -30,6 +30,54 @@ const EXT_TO_MIME: Record<string, string> = {
   gif: 'image/gif',
 };
 
+// Per-format minimum payload sizes (structural floors for each format).
+export const MIN_PNG_BYTES = 45;   // sig(8) + IHDR(25) + IEND(12)
+export const MIN_JPEG_BYTES = 20;  // SOI(2) + marker(4) + frame(11) + EOI(2) ≈ 19, rounded up
+export const MIN_GIF_BYTES = 26;   // header(6) + LSD(7) + image desc(10) + LZW(2) + trailer(1)
+export const MIN_WEBP_BYTES = 26;  // RIFF(12) + VP8 chunk header(8) + minimal frame(6)
+
+const MIN_BYTES_FOR_TYPE: Record<string, number> = {
+  'image/png': MIN_PNG_BYTES,
+  'image/jpeg': MIN_JPEG_BYTES,
+  'image/gif': MIN_GIF_BYTES,
+  'image/webp': MIN_WEBP_BYTES,
+};
+
+/**
+ * Sniff the image format from magic bytes.
+ * Returns the MIME type string or null if unrecognized.
+ */
+export function sniffMediaType(buffer: Buffer): string | null {
+  // PNG: 8-byte signature 89 50 4E 47 0D 0A 1A 0A
+  if (buffer.length >= 8 &&
+      buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47 &&
+      buffer[4] === 0x0D && buffer[5] === 0x0A && buffer[6] === 0x1A && buffer[7] === 0x0A) {
+    return 'image/png';
+  }
+
+  // JPEG: 3-byte SOI + marker FF D8 FF
+  if (buffer.length >= 3 &&
+      buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    return 'image/jpeg';
+  }
+
+  // GIF: 6-byte version string GIF87a or GIF89a
+  if (buffer.length >= 6 &&
+      buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38 &&
+      (buffer[4] === 0x37 || buffer[4] === 0x39) && buffer[5] === 0x61) {
+    return 'image/gif';
+  }
+
+  // WebP: RIFF....WEBP (bytes 0-3 = RIFF, bytes 8-11 = WEBP)
+  if (buffer.length >= 12 &&
+      buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+      buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+    return 'image/webp';
+  }
+
+  return null;
+}
+
 export type DownloadResult = {
   images: ImageData[];
   errors: string[];
@@ -118,11 +166,23 @@ export async function downloadAttachment(
       return { ok: false, error: `${name}: too large (${sizeMB} MB, max 20 MB)` };
     }
 
+    // Sniff actual format from magic bytes — override declared MIME.
+    const sniffed = sniffMediaType(buffer);
+    if (!sniffed) {
+      return { ok: false, error: `${name}: unsupported image format (magic bytes don't match PNG, JPEG, GIF, or WebP)` };
+    }
+
+    // Reject truncated payloads below format structural minimums.
+    const minBytes = MIN_BYTES_FOR_TYPE[sniffed];
+    if (minBytes && buffer.length < minBytes) {
+      return { ok: false, error: `${name}: image too small to be valid ${sniffed} (${buffer.length} bytes, minimum ${minBytes})` };
+    }
+
     return {
       ok: true,
       image: {
         base64: buffer.toString('base64'),
-        mediaType,
+        mediaType: sniffed,
       },
     };
   } catch (err: unknown) {
