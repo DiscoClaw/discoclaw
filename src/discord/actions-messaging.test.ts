@@ -309,11 +309,16 @@ describe('sendMessage', () => {
   });
 
   // Test 10: sendMessage with non-string action.channel — returns channel validation error
-  it('returns channel validation error for non-string channel', async () => {
+  it.each([
+    ['number', 123],
+    ['undefined', undefined],
+    ['null', null],
+    ['object', {}],
+  ])('returns channel validation error for non-string channel (%s)', async (_label, channel) => {
     const ctx = makeCtx([]);
 
     const result = await executeMessagingAction(
-      { type: 'sendMessage', channel: 123 as any, content: 'Hello' },
+      { type: 'sendMessage', channel: channel as any, content: 'Hello' },
       ctx,
     );
 

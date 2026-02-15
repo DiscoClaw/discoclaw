@@ -32,7 +32,7 @@ function mockLog() {
 }
 
 function mockReplyObject() {
-  return { edit: vi.fn().mockResolvedValue(undefined) };
+  return { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
 }
 
 function mockMessage(overrides?: Record<string, any>) {
@@ -442,12 +442,15 @@ describe('createReactionAddHandler', () => {
     });
     await handler(reaction as any, mockUser() as any);
 
-    // The reply should contain prose and NOT contain a Failed: line.
+    // The reply should contain prose and NOT contain a Failed: line or forum channel error text.
     const replyObj = reaction.message._replyObj;
     const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
     const replyContent: string = lastEditCall[0].content;
     expect(replyContent).toContain('Here is my response.');
     expect(replyContent).not.toContain('Failed:');
+    expect(replyContent).not.toContain('forum channel');
+    // Reply should NOT have been deleted (response was posted, not suppressed as empty).
+    expect(replyObj.delete).not.toHaveBeenCalled();
     // Forum channel's .send() should NOT have been called.
     expect(forumCh.send).not.toHaveBeenCalled();
   });
@@ -850,7 +853,7 @@ describe('createReactionAddHandler', () => {
 
     // Make reply.edit throw a Discord 50083 "Thread is archived" error.
     const err50083 = Object.assign(new Error('Thread is archived'), { code: 50083 });
-    const replyObj = { edit: vi.fn().mockRejectedValue(err50083) };
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50083), delete: vi.fn().mockResolvedValue(undefined) };
     const msg = mockMessage();
     msg._replyObj = replyObj;
     msg.reply = vi.fn().mockResolvedValue(replyObj);
@@ -1077,7 +1080,7 @@ describe('createReactionAddHandler', () => {
     const handler = createReactionAddHandler(params, queue, statusRef);
 
     const err50013 = Object.assign(new Error('Missing Permissions'), { code: 50013 });
-    const replyObj = { edit: vi.fn().mockRejectedValue(err50013) };
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50013), delete: vi.fn().mockResolvedValue(undefined) };
     const msg = mockMessage();
     msg._replyObj = replyObj;
     msg.reply = vi.fn().mockResolvedValue(replyObj);

@@ -462,16 +462,18 @@ describe('auto-follow-up for query actions', () => {
 
     // The reply should contain the prose text.
     const replyObj = await msg.reply.mock.results[0]?.value;
-    if (replyObj) {
-      const allEditContents = replyObj.edit.mock.calls.map((c: any[]) =>
-        typeof c[0] === 'string' ? c[0] : c[0]?.content ?? '',
-      );
-      const postedContent = allEditContents[allEditContents.length - 1];
-      // Prose should be present.
-      expect(postedContent).toContain('Here is my response.');
-      // Should NOT contain a Failed: line (the forum sendMessage was suppressed, not errored).
-      expect(postedContent).not.toContain('Failed:');
-    }
+    expect(replyObj).toBeDefined();
+    const allEditContents = replyObj.edit.mock.calls.map((c: any[]) =>
+      typeof c[0] === 'string' ? c[0] : c[0]?.content ?? '',
+    );
+    const postedContent = allEditContents[allEditContents.length - 1];
+    // Prose should be present.
+    expect(postedContent).toContain('Here is my response.');
+    // Should NOT contain a Failed: line or forum channel error text.
+    expect(postedContent).not.toContain('Failed:');
+    expect(postedContent).not.toContain('forum channel');
+    // Reply should NOT have been deleted (response was posted, not suppressed as empty).
+    expect(replyObj.delete).not.toHaveBeenCalled();
     // Forum channel's .send() should NOT have been called.
     expect(forumCh.send).not.toHaveBeenCalled();
   });
