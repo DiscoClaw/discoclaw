@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
+import { ChannelType } from 'discord.js';
 import { createReactionAddHandler, createReactionRemoveHandler } from './reaction-handler.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
@@ -384,6 +385,89 @@ describe('createReactionAddHandler', () => {
     expect(replyContent).not.toContain('<discord-action>');
     // Action results (Done: or Failed:) should be appended.
     expect(replyContent).toMatch(/Done:|Failed:/);
+  });
+
+  it('suppresses sendMessage Done line from posted output', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Sending a message for you.\n\n<discord-action>{"type":"sendMessage","channel":"general","content":"hello"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    // Build a mock channel that resolveChannel can find by name.
+    const targetChannel = { id: 'ch-target', name: 'general', type: ChannelType.GuildText, send: vi.fn().mockResolvedValue({ id: 'sent-1' }) };
+    const reaction = mockReaction({
+      message: mockMessage({
+        guild: {
+          channels: {
+            cache: {
+              get: vi.fn(),
+              find: vi.fn((pred: (ch: any) => boolean) => pred(targetChannel) ? targetChannel : undefined),
+            },
+          },
+        },
+      }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    const replyContent: string = lastEditCall[0].content;
+    // Should NOT contain 'Done: Sent message'.
+    expect(replyContent).not.toContain('Done: Sent message');
+    // Clean text should still be present.
+    expect(replyContent).toContain('Sending a message for you.');
+  });
+
+  it('deletes placeholder when sendMessage-only with no prose', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: '<discord-action>{"type":"sendMessage","channel":"general","content":"hello"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const targetChannel = { id: 'ch-target', name: 'general', type: ChannelType.GuildText, send: vi.fn().mockResolvedValue({ id: 'sent-1' }) };
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const reaction = mockReaction({
+      message: mockMessage({
+        guild: {
+          channels: {
+            cache: {
+              get: vi.fn(),
+              find: vi.fn((pred: (ch: any) => boolean) => pred(targetChannel) ? targetChannel : undefined),
+            },
+          },
+        },
+        reply: vi.fn().mockResolvedValue(replyObj),
+        _replyObj: replyObj,
+      }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    // The sendMessage action should have fired.
+    expect(targetChannel.send).toHaveBeenCalledOnce();
+    // Placeholder should have been deleted (no output to display).
+    expect(replyObj.delete).toHaveBeenCalledOnce();
   });
 
   it('fetches partial reaction before processing', async () => {

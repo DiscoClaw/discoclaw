@@ -6,7 +6,7 @@ import type { KeyedQueue } from '../group-queue.js';
 import { isAllowlisted } from './allowlist.js';
 import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines } from './actions.js';
 import type { ActionCategoryFlags } from './actions.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
 import { editThenSendChunks } from './output-common.js';
@@ -449,8 +449,18 @@ function createReactionHandler(
                 metrics.recordActionResult(result.ok);
                 params.log?.info({ flow: 'reaction', sessionKey, ok: result.ok }, 'obs.action.result');
               }
-              const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
-              processedText = parsed.cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
+              const displayLines = buildDisplayResultLines(parsed.actions, results);
+              const anyActionSucceeded = results.some((r) => r.ok);
+              processedText = displayLines.length > 0
+                ? parsed.cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
+                : parsed.cleanText.trimEnd();
+              // When all display lines were suppressed (e.g. sendMessage-only) and there's
+              // no prose, delete the placeholder instead of posting "(no output)".
+              if (!processedText.trim() && anyActionSucceeded && collectedImages.length === 0) {
+                try { await (reply as any)?.delete(); } catch { /* ignore */ }
+                params.log?.info({ sessionKey }, `${logPrefix}:reply suppressed (actions-only, no display text)`);
+                return;
+              }
 
               if (statusRef?.current) {
                 for (let i = 0; i < results.length; i++) {

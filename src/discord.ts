@@ -10,7 +10,7 @@ import { KeyedQueue } from './group-queue.js';
 import type { DiscordChannelContext } from './discord/channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { discordSessionKey } from './discord/session-key.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection } from './discord/actions.js';
+import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './discord/actions.js';
 import type { ActionCategoryFlags, DiscordActionResult } from './discord/actions.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
 import type { BeadContext } from './discord/actions-beads.js';
@@ -1741,8 +1741,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     'obs.action.result',
                   );
                 }
-                const resultLines = actionResults.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
-                processedText = parsed.cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
+                const displayLines = buildDisplayResultLines(actions, actionResults);
+                const anyActionSucceeded = actionResults.some((r) => r.ok);
+                processedText = displayLines.length > 0
+                  ? parsed.cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
+                  : parsed.cleanText.trimEnd();
+                // When all display lines were suppressed (e.g. sendMessage-only) and there's
+                // no prose, delete the placeholder instead of posting "(no output)".
+                if (!processedText.trim() && anyActionSucceeded && collectedImages.length === 0) {
+                  try { await reply.delete(); } catch { /* ignore */ }
+                  params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
+                  break;
+                }
                 if (statusRef?.current) {
                   for (let i = 0; i < actionResults.length; i++) {
                     const r = actionResults[i];
@@ -1797,9 +1807,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (!anyQuerySucceeded) break;
 
             // Build follow-up prompt with action results.
-            const followUpLines = actionResults.map((r) =>
-              r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`,
-            );
+            const followUpLines = buildAllResultLines(actionResults);
             currentPrompt =
               `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
               followUpLines.join('\n') +
