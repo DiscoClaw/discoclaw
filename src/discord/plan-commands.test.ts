@@ -611,6 +611,311 @@ describe('handlePlanCommand', () => {
     expect(result).toContain('Ready with minor revisions');
   });
 
+  it('show — extracts **Verdict:** inline bold format from audit log', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      [
+        '# Plan: Test feature',
+        '',
+        '**ID:** plan-001',
+        '**Bead:** ws-001',
+        '**Status:** DRAFT',
+        '**Project:** discoclaw',
+        '**Created:** 2026-02-12',
+        '',
+        '---',
+        '',
+        '## Objective',
+        '',
+        'Build the test feature.',
+        '',
+        '## Audit Log',
+        '',
+        '### Round 1',
+        '',
+        'Some audit commentary.',
+        '',
+        '**Verdict:** Ready to approve. The plan is solid.',
+        '',
+        '---',
+      ].join('\n'),
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Ready to approve. The plan is solid.');
+    expect(result).not.toContain('(no audit yet)');
+  });
+
+  it('show — picks latest verdict when multiple audit rounds exist', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      [
+        '# Plan: Test feature',
+        '',
+        '**ID:** plan-001',
+        '**Bead:** ws-001',
+        '**Status:** DRAFT',
+        '**Project:** discoclaw',
+        '**Created:** 2026-02-12',
+        '',
+        '---',
+        '',
+        '## Objective',
+        '',
+        'Build the test feature.',
+        '',
+        '## Audit Log',
+        '',
+        '### Round 1',
+        '',
+        '**Verdict:** Needs revision. Missing error handling.',
+        '',
+        '### Round 2',
+        '',
+        '**Verdict:** Ready to approve. All issues addressed.',
+        '',
+        '---',
+      ].join('\n'),
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Ready to approve. All issues addressed.');
+    expect(result).not.toContain('Needs revision');
+  });
+
+  it('show — handles mixed legacy #### Verdict and **Verdict:** formats', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      [
+        '# Plan: Test feature',
+        '',
+        '**ID:** plan-001',
+        '**Bead:** ws-001',
+        '**Status:** DRAFT',
+        '**Project:** discoclaw',
+        '**Created:** 2026-02-12',
+        '',
+        '---',
+        '',
+        '## Objective',
+        '',
+        'Build the test feature.',
+        '',
+        '## Audit Log',
+        '',
+        '### Round 1 (legacy)',
+        '',
+        '#### Verdict',
+        '',
+        '**Old format verdict.**',
+        '',
+        '### Round 2 (new)',
+        '',
+        '**Verdict:** Ready to approve. Updated format.',
+        '',
+        '---',
+      ].join('\n'),
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Ready to approve. Updated format.');
+    expect(result).not.toContain('Old format verdict');
+  });
+
+  it('show — returns "(no audit yet)" when audit log section has no verdicts', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      [
+        '# Plan: Test feature',
+        '',
+        '**ID:** plan-001',
+        '**Bead:** ws-001',
+        '**Status:** DRAFT',
+        '**Project:** discoclaw',
+        '**Created:** 2026-02-12',
+        '',
+        '---',
+        '',
+        '## Objective',
+        '',
+        'Build the test feature.',
+        '',
+        '## Audit Log',
+        '',
+        '_Audit notes go here._',
+        '',
+        '---',
+      ].join('\n'),
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('(no audit yet)');
+  });
+
+  it('show — ignores **Verdict:** inside fenced code blocks', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      [
+        '# Plan: Test feature',
+        '',
+        '**ID:** plan-001',
+        '**Bead:** ws-001',
+        '**Status:** DRAFT',
+        '**Project:** discoclaw',
+        '**Created:** 2026-02-12',
+        '',
+        '---',
+        '',
+        '## Objective',
+        '',
+        'Build the test feature.',
+        '',
+        '## Audit Log',
+        '',
+        '### Round 1',
+        '',
+        'Here is an example of what the auditor writes:',
+        '',
+        '```',
+        '**Verdict:** This is inside a code block and should be ignored.',
+        '```',
+        '',
+        '**Verdict:** Ready to approve. Real verdict outside the fence.',
+        '',
+        '---',
+      ].join('\n'),
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Ready to approve. Real verdict outside the fence.');
+    expect(result).not.toContain('inside a code block');
+  });
+
+  it('show — ignores mid-line **Verdict:** in prose after the real verdict', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      [
+        '# Plan: Test feature',
+        '',
+        '**ID:** plan-001',
+        '**Bead:** ws-001',
+        '**Status:** DRAFT',
+        '**Project:** discoclaw',
+        '**Created:** 2026-02-12',
+        '',
+        '---',
+        '',
+        '## Objective',
+        '',
+        'Build the test feature.',
+        '',
+        '## Audit Log',
+        '',
+        '### Round 1',
+        '',
+        '**Verdict:** Ready to approve. The plan is solid.',
+        '',
+        'Note: Use **Verdict:** [text] format for future audits. This mid-line mention should not override the real verdict above.',
+        '',
+        '---',
+      ].join('\n'),
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Ready to approve. The plan is solid.');
+    expect(result).not.toContain('future audits');
+  });
+
+  it('show — captures multi-line legacy #### Verdict blocks', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      [
+        '# Plan: Test feature',
+        '',
+        '**ID:** plan-001',
+        '**Bead:** ws-001',
+        '**Status:** DRAFT',
+        '**Project:** discoclaw',
+        '**Created:** 2026-02-12',
+        '',
+        '---',
+        '',
+        '## Objective',
+        '',
+        'Build the test feature.',
+        '',
+        '## Audit Log',
+        '',
+        '#### Verdict',
+        '',
+        '**Ready with minor revisions.**',
+        'Some additional detail about the verdict.',
+        '',
+        '---',
+      ].join('\n'),
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Ready with minor revisions.');
+    expect(result).toContain('additional detail');
+  });
+
   it('show — finds plan by bead ID', async () => {
     const tmpDir = await makeTmpDir();
     const plansDir = path.join(tmpDir, 'plans');

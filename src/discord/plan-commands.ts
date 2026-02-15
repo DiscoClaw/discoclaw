@@ -408,10 +408,20 @@ export async function handlePlanCommand(
       const objMatch = content.match(/## Objective\s*\n([\s\S]*?)(?=\n## |\n---)/);
       const objective = objMatch?.[1]?.trim() || '(no objective)';
 
-      // Extract latest audit verdict
-      const verdicts = [...content.matchAll(/#### Verdict\s*\n([\s\S]*?)(?=\n###|\n---|\n$)/g)];
-      const latestVerdict = verdicts.length > 0
-        ? verdicts[verdicts.length - 1]![1]!.trim()
+      // Extract latest audit verdict — scope to the Audit Log section to
+      // avoid false positives from **Verdict:** appearing in plan body prose.
+      const auditLogMatch = content.match(/## Audit Log\s*\n([\s\S]*?)(?=\n## [^#]|\n---\s*\n## |$)/);
+      // Strip fenced code blocks so **Verdict:** inside examples/snippets isn't matched.
+      const auditSection = (auditLogMatch?.[1] ?? '').replace(/```[\s\S]*?```/g, '');
+
+      // Current format: **Verdict:** <text> on the same line, anchored to line start
+      const boldVerdicts = [...auditSection.matchAll(/^\*\*Verdict:\*\*\s*(.+)/gm)];
+      // Legacy format (older plans): #### Verdict heading with text on next line(s)
+      const headingVerdicts = [...auditSection.matchAll(/#### Verdict\s*\n+([\s\S]*?)(?=\n###|\n---|\n$)/g)];
+
+      const allVerdicts = [...boldVerdicts, ...headingVerdicts];
+      const latestVerdict = allVerdicts.length > 0
+        ? allVerdicts.reduce((a, b) => (a.index! > b.index! ? a : b))[1]!.trim()
         : '(no audit yet)';
 
       return [
