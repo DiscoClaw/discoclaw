@@ -58,6 +58,16 @@ export async function executeMessagingAction(
         const raw = findChannelRaw(guild, action.channel);
         if (raw) {
           const kind = describeChannelType(raw);
+          // Silent suppression: if the AI targets its own parent forum from
+          // within a bead thread, the response is already being posted to the
+          // thread — just swallow the spurious action instead of surfacing an
+          // error to the user.
+          if (kind === 'forum') {
+            const currentCh = guild.channels.cache.get(ctx.channelId);
+            if (currentCh && (currentCh as any).parentId === raw.id) {
+              return { ok: true, summary: 'Suppressed sendMessage to parent forum (already in thread)' };
+            }
+          }
           const hint = kind === 'forum' ? ' Use threadCreate to post in forum channels.' : '';
           return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot receive messages directly.${hint}` };
         }
