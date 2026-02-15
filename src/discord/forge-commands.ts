@@ -141,6 +141,7 @@ export function buildDrafterPrompt(
     '- Be specific in the file-by-file changes section — include actual file paths, function names, and type signatures.',
     '- Identify real risks and dependencies based on the actual codebase.',
     '- Write concrete, verifiable test cases.',
+    '- Include documentation updates in the Changes section when adding new features, config options, or public APIs. Consider: docs/*.md, .env.example files, README.md, INVENTORY.md, and inline code comments.',
     '- Set the status to DRAFT.',
     '- Replace all {{PLACEHOLDER}} tokens with actual values. The plan ID and bead ID will be filled in by the system — use `(system)` as placeholders for those.',
     '- Output the complete plan markdown and nothing else.',
@@ -208,6 +209,7 @@ export function buildAuditorPrompt(
     '3. Risk gaps (unidentified failure modes, missing rollback plans)',
     '4. Test coverage gaps (missing edge cases, untested error paths)',
     '5. Dependency issues (circular deps, version conflicts, missing imports)',
+    '6. Documentation gaps (does the plan update relevant docs, README, .env.example, INVENTORY.md, or inline comments for new/changed features, config options, or public APIs? Missing doc updates are medium severity.)',
     '',
   );
 
