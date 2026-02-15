@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createStatusPoster } from './status-channel.js';
+import { createStatusPoster, sanitizeErrorMessage } from './status-channel.js';
 
 function mockChannel() {
   return { send: vi.fn().mockResolvedValue(undefined) } as any;
@@ -56,6 +56,16 @@ describe('createStatusPoster', () => {
     expect(embed.data.color).toBe(0xed4245);
     expect(embed.data.title).toBe('Handler Failure');
     expect(embed.data.description).toContain('boom');
+  });
+
+  it('handlerError() sanitizes messages containing prompt content', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    const leakyErr = new Error('Command was killed with SIGKILL (Forced termination): claude -p "You are a helpful assistant..."');
+    await poster.handlerError({ sessionKey: 'g:1:c:2' }, leakyErr);
+    const embed = ch.send.mock.calls[0][0].embeds[0];
+    expect(embed.data.description).not.toContain('claude -p');
+    expect(embed.data.description).toContain('SIGKILL');
   });
 
   it('actionFailed() sends an orange embed', async () => {
@@ -131,11 +141,51 @@ describe('createStatusPoster', () => {
     expect(ch.send).not.toHaveBeenCalled();
   });
 
+  it('runtimeError() sanitizes messages containing prompt content', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    const leakyMsg = 'Command was killed with SIGKILL (Forced termination): claude -p "You are a helpful assistant called Weston..."';
+    await poster.runtimeError({ sessionKey: 'dm:123' }, leakyMsg);
+    const embed = ch.send.mock.calls[0][0].embeds[0];
+    expect(embed.data.description).toBe('Command was killed with SIGKILL (Forced termination)');
+    expect(embed.data.description).not.toContain('claude -p');
+  });
+
   it('does not throw when channel.send fails', async () => {
     const ch = { send: vi.fn().mockRejectedValue(new Error('network')) } as any;
     const log = mockLog();
     const poster = createStatusPoster(ch, { log });
     await expect(poster.online()).resolves.toBeUndefined();
     expect(log.warn).toHaveBeenCalledOnce();
+  });
+});
+
+describe('sanitizeErrorMessage', () => {
+  it('passes through short clean messages unchanged', () => {
+    expect(sanitizeErrorMessage('timeout')).toBe('timeout');
+  });
+
+  it('returns "(no message)" for empty/falsy input', () => {
+    expect(sanitizeErrorMessage('')).toBe('(no message)');
+  });
+
+  it('strips prompt after "Command was killed with SIGKILL": claude -p ...', () => {
+    const msg = 'Command was killed with SIGKILL (Forced termination): claude -p "You are a helpful..."';
+    expect(sanitizeErrorMessage(msg)).toBe('Command was killed with SIGKILL (Forced termination)');
+  });
+
+  it('strips prompt after "Command failed with exit code 1": claude -p ...', () => {
+    const msg = 'Command failed with exit code 1: claude -p "big prompt here..."';
+    expect(sanitizeErrorMessage(msg)).toBe('Command failed with exit code 1');
+  });
+
+  it('strips content when "claude -p" appears mid-message without colon-space separator', () => {
+    const msg = 'Something went wrong while running claude -p "giant prompt"';
+    expect(sanitizeErrorMessage(msg)).toBe('Something went wrong while running');
+  });
+
+  it('truncates long messages to 500 chars', () => {
+    const long = 'x'.repeat(1000);
+    expect(sanitizeErrorMessage(long).length).toBe(500);
   });
 });
