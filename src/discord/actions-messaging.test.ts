@@ -173,6 +173,187 @@ describe('sendMessage', () => {
     expect((result as any).error).not.toContain('not found');
   });
 
+  // Test 1: sendMessage to forum by ID — suppressed when ctx.threadParentId matches
+  it('silently suppresses sendMessage to parent forum by ID when threadParentId matches', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+    ctx.channelId = 'thread1';
+    ctx.threadParentId = 'forum1';
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'forum1', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toBe('Suppressed: response is already posted to this thread');
+    expect(forum.send).not.toHaveBeenCalled();
+  });
+
+  // Test 2: sendMessage to forum by name — suppressed
+  it('silently suppresses sendMessage to parent forum by name when threadParentId matches', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+    ctx.channelId = 'thread1';
+    ctx.threadParentId = 'forum1';
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'beads', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toBe('Suppressed: response is already posted to this thread');
+  });
+
+  // Test 3: sendMessage to non-forum — works normally when threadParentId set
+  it('sends to non-forum channel normally even when threadParentId is set', async () => {
+    const ch = makeMockChannel({ id: 'ch2', name: 'general', type: ChannelType.GuildText });
+    const ctx = makeCtx([ch]);
+    ctx.threadParentId = 'forum1';
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: '#general', content: 'Hello!' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Sent message to #general' });
+    expect(ch.send).toHaveBeenCalled();
+  });
+
+  // Test 4: sendMessage to forum — errors when threadParentId not set
+  it('errors when targeting a forum channel without threadParentId', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+    // No threadParentId set (undefined)
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'forum1', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('forum channel');
+    expect((result as any).error).toContain('threadCreate');
+  });
+
+  // Test 5: sendMessage to *different* forum — errors
+  it('errors when targeting a different forum channel (threadParentId does not match)', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+    ctx.channelId = 'thread1';
+    ctx.threadParentId = 'other-forum-id';
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'forum1', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('forum channel');
+  });
+
+  // Test 6: sendMessage with empty content to parent forum — suppressed (not content error)
+  it('suppresses sendMessage with empty content targeting parent forum', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+    ctx.threadParentId = 'forum1';
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'forum1', content: '' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toBe('Suppressed: response is already posted to this thread');
+  });
+
+  // Test 7: sendMessage with unresolvable channel ref when threadParentId set
+  it('returns not-found error for unresolvable channel even when threadParentId set', async () => {
+    const ctx = makeCtx([]);
+    ctx.threadParentId = 'forum1';
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'nonexistent', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Channel "nonexistent" not found' });
+  });
+
+  // Test 8: sendMessage with empty action.channel — returns channel validation error
+  it('returns channel validation error for empty channel string', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: '', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'sendMessage requires a non-empty channel name or ID' });
+  });
+
+  // Test 9: sendMessage when threadParentId is "" — guard inert
+  it('does not suppress when threadParentId is empty string', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+    ctx.threadParentId = '';
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'forum1', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('forum channel');
+  });
+
+  // Test 10: sendMessage with non-string action.channel — returns channel validation error
+  it.each([
+    ['number', 123],
+    ['undefined', undefined],
+    ['null', null],
+    ['object', {}],
+  ])('returns channel validation error for non-string channel (%s)', async (_label, channel) => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: channel as any, content: 'Hello' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'sendMessage requires a non-empty channel name or ID' });
+  });
+
+  // Test 11: sendMessage targeting forum by name with duplicate-named non-forum channel
+  it('does not suppress when channel name resolves to a non-forum channel', async () => {
+    const textCh = makeMockChannel({ id: 'ch-text', name: 'beads', type: ChannelType.GuildText });
+    const ctx = makeCtx([textCh]);
+    ctx.threadParentId = 'forum1';
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'beads', content: 'Hello!' },
+      ctx,
+    );
+
+    // The text channel named 'beads' is resolved by resolveChannel, not suppressed
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toBe('Sent message to #beads');
+    expect(textCh.send).toHaveBeenCalled();
+  });
+
+  // Test 12: sendMessage with whitespace-only action.channel — returns channel validation error
+  it('returns channel validation error for whitespace-only channel', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: '   ', content: 'Hello' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'sendMessage requires a non-empty channel name or ID' });
+  });
+
   it('returns descriptive error when targeting a voice channel by ID', async () => {
     const voice = makeMockChannel({ id: 'v1', name: 'voice', type: ChannelType.GuildVoice });
     const ctx = makeCtx([voice]);

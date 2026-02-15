@@ -32,7 +32,7 @@ function mockLog() {
 }
 
 function mockReplyObject() {
-  return { edit: vi.fn().mockResolvedValue(undefined) };
+  return { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
 }
 
 function mockMessage(overrides?: Record<string, any>) {
@@ -385,6 +385,74 @@ describe('createReactionAddHandler', () => {
     expect(replyContent).not.toContain('<discord-action>');
     // Action results (Done: or Failed:) should be appended.
     expect(replyContent).toMatch(/Done:|Failed:/);
+  });
+
+  it('suppresses sendMessage targeting parent forum when reaction is in a forum thread', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Here is my response.\n\n<discord-action>{"type":"sendMessage","channel":"forum-parent-1","content":"hello"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    // Build a guild with the forum channel in the cache.
+    const forumCh = {
+      id: 'forum-parent-1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      send: vi.fn().mockResolvedValue(undefined),
+    };
+    const threadChannel = {
+      id: 'thread-1',
+      name: 'my-thread',
+      parentId: 'forum-parent-1',
+      isThread: () => true,
+      joinable: false,
+      joined: true,
+      parent: { name: 'beads' },
+      send: vi.fn().mockResolvedValue(undefined),
+    };
+    const channelsMap = new Map<string, any>([
+      ['forum-parent-1', forumCh],
+      ['thread-1', threadChannel],
+    ]);
+    const guild = {
+      channels: {
+        cache: {
+          get: (id: string) => channelsMap.get(id),
+          find: (fn: (ch: any) => boolean) => {
+            for (const ch of channelsMap.values()) if (fn(ch)) return ch;
+            return undefined;
+          },
+          values: () => channelsMap.values(),
+        },
+      },
+    };
+    const reaction = mockReaction({
+      message: mockMessage({ channel: threadChannel, channelId: 'thread-1', guild }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    // The reply should contain prose and NOT contain a Failed: line or forum channel error text.
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    const replyContent: string = lastEditCall[0].content;
+    expect(replyContent).toContain('Here is my response.');
+    expect(replyContent).not.toContain('Failed:');
+    expect(replyContent).not.toContain('forum channel');
+    // Reply should NOT have been deleted (response was posted, not suppressed as empty).
+    expect(replyObj.delete).not.toHaveBeenCalled();
+    // Forum channel's .send() should NOT have been called.
+    expect(forumCh.send).not.toHaveBeenCalled();
   });
 
   it('suppresses sendMessage Done line from posted output', async () => {
@@ -785,7 +853,7 @@ describe('createReactionAddHandler', () => {
 
     // Make reply.edit throw a Discord 50083 "Thread is archived" error.
     const err50083 = Object.assign(new Error('Thread is archived'), { code: 50083 });
-    const replyObj = { edit: vi.fn().mockRejectedValue(err50083) };
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50083), delete: vi.fn().mockResolvedValue(undefined) };
     const msg = mockMessage();
     msg._replyObj = replyObj;
     msg.reply = vi.fn().mockResolvedValue(replyObj);
@@ -1012,7 +1080,7 @@ describe('createReactionAddHandler', () => {
     const handler = createReactionAddHandler(params, queue, statusRef);
 
     const err50013 = Object.assign(new Error('Missing Permissions'), { code: 50013 });
-    const replyObj = { edit: vi.fn().mockRejectedValue(err50013) };
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50013), delete: vi.fn().mockResolvedValue(undefined) };
     const msg = mockMessage();
     msg._replyObj = replyObj;
     msg.reply = vi.fn().mockResolvedValue(replyObj);

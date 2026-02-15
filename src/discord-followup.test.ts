@@ -401,6 +401,83 @@ describe('auto-follow-up for query actions', () => {
     }
   });
 
+  it('suppresses sendMessage targeting parent forum when in a bead thread', async () => {
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield {
+          type: 'text_final',
+          text: 'Here is my response.\n<discord-action>{"type":"sendMessage","channel":"forum1","content":"hello"}</discord-action>',
+        } as any;
+      }),
+    } as any;
+
+    // Build a guild with a forum channel and thread channel in the cache.
+    const forumCh = {
+      id: 'forum1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      parent: null,
+      send: vi.fn(async () => ({})),
+    };
+    const threadCh = {
+      id: 'thread1',
+      name: 'my-bead',
+      type: ChannelType.PublicThread,
+      parentId: 'forum1',
+      parent: { name: 'beads' },
+      isThread: () => true,
+      joinable: false,
+      joined: true,
+      send: vi.fn(async () => ({ edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) })),
+    };
+    const channelsMap = new Map<string, any>([
+      ['forum1', forumCh],
+      ['thread1', threadCh],
+    ]);
+    const guild = {
+      channels: {
+        cache: {
+          get: (id: string) => channelsMap.get(id),
+          find: (fn: (ch: any) => boolean) => {
+            for (const ch of channelsMap.values()) if (fn(ch)) return ch;
+            return undefined;
+          },
+          values: () => channelsMap.values(),
+          get size() { return channelsMap.size; },
+        },
+        create: vi.fn(async (opts: any) => ({ name: opts.name, id: 'new-id' })),
+      },
+    } as any;
+
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { discordActionsMessaging: true }),
+      makeQueue(),
+    );
+    const msg = makeMsg({
+      guild,
+      channel: threadCh,
+      channelId: 'thread1',
+    });
+    await handler(msg);
+
+    // The reply should contain the prose text.
+    const replyObj = await msg.reply.mock.results[0]?.value;
+    expect(replyObj).toBeDefined();
+    const allEditContents = replyObj.edit.mock.calls.map((c: any[]) =>
+      typeof c[0] === 'string' ? c[0] : c[0]?.content ?? '',
+    );
+    const postedContent = allEditContents[allEditContents.length - 1];
+    // Prose should be present.
+    expect(postedContent).toContain('Here is my response.');
+    // Should NOT contain a Failed: line or forum channel error text.
+    expect(postedContent).not.toContain('Failed:');
+    expect(postedContent).not.toContain('forum channel');
+    // Reply should NOT have been deleted (response was posted, not suppressed as empty).
+    expect(replyObj.delete).not.toHaveBeenCalled();
+    // Forum channel's .send() should NOT have been called.
+    expect(forumCh.send).not.toHaveBeenCalled();
+  });
+
   it('does not follow up when query action fails', async () => {
     // Guild with no channels — channelList still succeeds with empty list.
     // Use a channelInfo with bad ID to get a failure.

@@ -25,6 +25,7 @@ export type ActionContext = {
   client: Client;
   channelId: string;
   messageId: string;
+  threadParentId?: string | null;
 };
 
 export type ActionCategoryFlags = {

@@ -47,6 +47,19 @@ export async function executeMessagingAction(
 
   switch (action.type) {
     case 'sendMessage': {
+      if (typeof action.channel !== 'string' || !action.channel.trim()) {
+        return { ok: false, error: 'sendMessage requires a non-empty channel name or ID' };
+      }
+      // Silent suppression: if the AI targets its own parent forum from
+      // within a bead thread, the response is already being posted to the
+      // thread — just swallow the spurious action instead of surfacing an
+      // error to the user.
+      if (ctx.threadParentId) {
+        const raw = findChannelRaw(guild, action.channel);
+        if (raw && raw.id === ctx.threadParentId && raw.type === ChannelType.GuildForum) {
+          return { ok: true, summary: 'Suppressed: response is already posted to this thread' };
+        }
+      }
       if (typeof action.content !== 'string' || !action.content.trim()) {
         return { ok: false, error: 'sendMessage requires non-empty string content' };
       }
