@@ -25,6 +25,10 @@ function createMockSubprocess(opts: {
   exitCode?: number;
   timedOut?: boolean;
   failed?: boolean;
+  /** Extra fields merged into the resolved result (e.g. code, errno, originalMessage). */
+  resultExtra?: Record<string, unknown>;
+  /** If set, the promise rejects with this error object instead of resolving. */
+  rejectWith?: Record<string, unknown>;
 }) {
   const stdoutChunks = opts.stdout ? [Buffer.from(opts.stdout)] : [];
   const stdoutListeners: Record<string, ((...args: any[]) => void)[]> = {};
@@ -87,16 +91,9 @@ function createMockSubprocess(opts: {
     for (const cb of (stderrListeners['end'] || [])) cb();
 
     // Resolve/reject the process promise.
-    const exitCode = opts.exitCode ?? 0;
-    const result = {
-      exitCode,
-      stdout: opts.stdout ?? '',
-      stderr: opts.stderr ?? '',
-      timedOut: opts.timedOut ?? false,
-      failed: exitCode !== 0 || (opts.failed ?? false),
-    };
-
-    if (opts.timedOut) {
+    if (opts.rejectWith) {
+      catchCb?.(opts.rejectWith);
+    } else if (opts.timedOut) {
       catchCb?.({
         timedOut: true,
         message: 'timed out',
@@ -104,6 +101,15 @@ function createMockSubprocess(opts: {
         shortMessage: 'timed out',
       });
     } else {
+      const exitCode = opts.exitCode ?? 0;
+      const result = {
+        exitCode,
+        stdout: opts.stdout ?? '',
+        stderr: opts.stderr ?? '',
+        timedOut: false,
+        failed: exitCode !== 0 || (opts.failed ?? false),
+        ...opts.resultExtra,
+      };
       thenCb?.(result);
     }
   });
@@ -332,5 +338,163 @@ describe('Codex CLI runtime adapter', () => {
     // No text_final for empty response.
     expect(events.find((e) => e.type === 'text_final')).toBeUndefined();
     expect(events[events.length - 1]!.type).toBe('done');
+  });
+
+  it('error messages are sanitized: multi-line stderr truncated to first line', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: '',
+      stderr: 'auth token expired\nfull prompt: You are a helpful assistant...\nsession: /tmp/codex/abc123',
+      exitCode: 1,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Say hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    const msg = (errorEvt as { message: string }).message;
+    // Should contain first line only.
+    expect(msg).toContain('auth token expired');
+    // Should NOT contain prompt or session content from subsequent lines.
+    expect(msg).not.toContain('full prompt');
+    expect(msg).not.toContain('session:');
+  });
+
+  it('ENOENT via tryFinalize: uses fixed message, never leaks prompt', async () => {
+    // Simulates execa resolving (reject: false) with failed=true, exitCode=null, code=ENOENT.
+    // The real execa shortMessage would contain the full command line including the prompt.
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: '',
+      exitCode: undefined as any,
+      failed: true,
+      resultExtra: {
+        exitCode: null,
+        failed: true,
+        code: 'ENOENT',
+        originalMessage: 'spawn codex ENOENT',
+        shortMessage: "Command failed: codex exec -m gpt-5.3-codex --skip-git-repo-check --ephemeral -s read-only 'TOP SECRET PROMPT DATA'\nspawn codex ENOENT",
+      },
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'TOP SECRET PROMPT DATA',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    const msg = (errorEvt as { message: string }).message;
+    // Should use the fixed "not found" message.
+    expect(msg).toContain('codex binary not found');
+    // Must never contain prompt text.
+    expect(msg).not.toContain('TOP SECRET');
+    expect(msg).not.toContain('Command failed');
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
+  it('ENOENT via catch handler: uses fixed message, never leaks prompt', async () => {
+    // Simulates the .catch() path — execa rejects with an error that includes the command line.
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: '',
+      rejectWith: {
+        code: 'ENOENT',
+        originalMessage: 'spawn codex ENOENT',
+        shortMessage: "Command failed: codex exec -m gpt-5.3-codex --skip-git-repo-check --ephemeral -s read-only 'TOP SECRET PROMPT DATA'\nspawn codex ENOENT",
+        message: "Command failed: codex exec -m gpt-5.3-codex --skip-git-repo-check --ephemeral -s read-only 'TOP SECRET PROMPT DATA'\nspawn codex ENOENT",
+      },
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'TOP SECRET PROMPT DATA',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    const msg = (errorEvt as { message: string }).message;
+    // Should use the fixed "not found" message.
+    expect(msg).toContain('codex binary not found');
+    // Must never contain prompt text.
+    expect(msg).not.toContain('TOP SECRET');
+    expect(msg).not.toContain('Command failed');
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
+  it('non-ENOENT spawn failure via catch handler: generic message, no raw error', async () => {
+    // Simulates a non-ENOENT rejection (e.g. EACCES) — should get generic message.
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: '',
+      rejectWith: {
+        code: 'EACCES',
+        originalMessage: 'spawn codex EACCES',
+        shortMessage: "Command failed: codex exec -m gpt-5.3-codex --skip-git-repo-check --ephemeral -s read-only 'secret prompt'\nspawn codex EACCES",
+        message: "Command failed: codex exec ...",
+      },
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'secret prompt',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    const msg = (errorEvt as { message: string }).message;
+    // Should use the generic fixed message with error code.
+    expect(msg).toBe('codex process failed unexpectedly (EACCES)');
+    // Must never contain prompt text or raw command.
+    expect(msg).not.toContain('secret prompt');
+    expect(msg).not.toContain('Command failed');
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
+  it('args include read-only sandbox flag', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    const sandboxIdx = callArgs.indexOf('-s');
+    expect(sandboxIdx).toBeGreaterThan(-1);
+    expect(callArgs[sandboxIdx + 1]).toBe('read-only');
   });
 });
