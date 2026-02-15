@@ -208,20 +208,21 @@ export async function handlePlanAudit(opts: PlanAuditOpts): Promise<PlanAuditRes
   let auditOutput: string;
   try {
     const rt = opts.auditorRuntime ?? opts.runtime;
-    const isClaudeAuditor = rt.id === 'claude_code';
+    const auditorHasFileTools = rt.capabilities.has('tools_fs');
+    const readOnlyTools = ['Read', 'Glob', 'Grep'];
     const auditorPrompt = buildAuditorPrompt(
       planContent,
       preliminaryRound,
       projectContext,
-      { hasTools: isClaudeAuditor },
+      { hasTools: auditorHasFileTools },
     );
     auditOutput = await collectRuntimeText(
       rt,
       auditorPrompt,
       opts.auditorModel,
       opts.workspaceCwd,
-      [],
-      [],
+      auditorHasFileTools ? readOnlyTools : [],
+      auditorHasFileTools ? [opts.workspaceCwd] : [],
       opts.timeoutMs,
     );
   } catch (err) {

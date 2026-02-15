@@ -50,7 +50,7 @@ export type CodexCliRuntimeOpts = {
 };
 
 export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter {
-  const capabilities = new Set(['streaming_text'] as const);
+  const capabilities = new Set(['streaming_text', 'tools_fs'] as const);
 
   async function* invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent> {
     const model = params.model || opts.defaultModel;
@@ -58,6 +58,15 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     const useStdin = Buffer.byteLength(params.prompt, 'utf-8') > STDIN_THRESHOLD;
 
     const args: string[] = ['exec', '-m', model, '--skip-git-repo-check', '--ephemeral', '-s', 'read-only'];
+
+    // Pass --add-dir flags for additional directories (mirrors claude-code-cli.ts).
+    // Note: Codex's --help describes --add-dir as "writable", but -s read-only overrides
+    // that — verified empirically (Codex v0.101.0). The dirs become read-accessible only.
+    if (params.addDirs && params.addDirs.length > 0) {
+      for (const dir of params.addDirs) {
+        args.push('--add-dir', dir);
+      }
+    }
 
     if (useStdin) {
       // Use `-` to signal stdin reading.

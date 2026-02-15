@@ -344,6 +344,56 @@ _Filled in during/after implementation._
     expect(content).not.toContain('### Review');
   });
 
+  it('tools_fs runtime receives tools and addDirs', async () => {
+    await writeTestPlan(plansDir);
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text', 'tools_fs'] as const),
+      invoke(params) {
+        invokeSpy(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: 'No concerns.\n\n**Verdict:** Ready to approve.' };
+        })();
+      },
+    };
+    const lock = makeLockFn();
+    const result = await handlePlanAudit(baseOpts(plansDir, runtime, lock, tmpDir));
+
+    expect(result.ok).toBe(true);
+    expect(invokeSpy).toHaveBeenCalledTimes(1);
+    const params = invokeSpy.mock.calls[0][0];
+    // Should receive the read-only tool list
+    expect(params.tools).toEqual(['Read', 'Glob', 'Grep']);
+    // Should receive addDirs containing the workspace cwd
+    expect(params.addDirs).toEqual([tmpDir]);
+  });
+
+  it('non-tools_fs runtime receives no tools or addDirs', async () => {
+    await writeTestPlan(plansDir);
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text'] as const),
+      invoke(params) {
+        invokeSpy(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: 'No concerns.\n\n**Verdict:** Ready to approve.' };
+        })();
+      },
+    };
+    const lock = makeLockFn();
+    const result = await handlePlanAudit(baseOpts(plansDir, runtime, lock, tmpDir));
+
+    expect(result.ok).toBe(true);
+    expect(invokeSpy).toHaveBeenCalledTimes(1);
+    const params = invokeSpy.mock.calls[0][0];
+    // Should receive empty tools
+    expect(params.tools).toEqual([]);
+    // addDirs should be undefined (collectRuntimeText converts [] to undefined)
+    expect(params.addDirs).toBeUndefined();
+  });
+
   it('empty plan ID', async () => {
     await fs.mkdir(plansDir, { recursive: true });
     const runtime = makeMockRuntime('unused');
