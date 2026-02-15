@@ -184,6 +184,22 @@ describe('sanitizeErrorMessage', () => {
     expect(sanitizeErrorMessage(msg)).toBe('Something went wrong while running');
   });
 
+  it('strips prompt with absolute binary path and positional arg (double quotes)', () => {
+    const msg = 'Command was killed with SIGKILL (Forced termination): /usr/local/bin/claude --tools bash -- "You are a helpful assistant..."';
+    expect(sanitizeErrorMessage(msg)).toBe('Command was killed with SIGKILL (Forced termination)');
+  });
+
+  it('strips prompt with absolute binary path and positional arg (single quotes)', () => {
+    // execa formats args with single quotes in shortMessage
+    const msg = "Command was killed with SIGKILL (Forced termination): /usr/local/bin/claude --tools bash -- 'You are a helpful assistant...'";
+    expect(sanitizeErrorMessage(msg)).toBe('Command was killed with SIGKILL (Forced termination)');
+  });
+
+  it('strips single-quoted positional prompt when binary name is not "claude"', () => {
+    const msg = "Command was killed with SIGKILL (Forced termination): /opt/mybin --tools bash -- 'You are a helpful assistant...'";
+    expect(sanitizeErrorMessage(msg)).not.toContain('You are a helpful');
+  });
+
   it('truncates long messages to 500 chars', () => {
     const long = 'x'.repeat(1000);
     expect(sanitizeErrorMessage(long).length).toBe(500);

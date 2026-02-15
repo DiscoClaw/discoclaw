@@ -13,10 +13,18 @@ export function sanitizeErrorMessage(raw: string): string {
 
   // execa kill messages look like:
   //   "Command was killed with SIGKILL (Forced termination): claude -p \"You are...\""
-  // Strip everything after the signal description by splitting on ": claude "
-  const claudeCliIdx = raw.indexOf(': claude ');
-  if (claudeCliIdx !== -1) {
-    return raw.slice(0, claudeCliIdx).slice(0, 500);
+  //   "Command was killed with SIGKILL (Forced termination): /usr/local/bin/claude ... -- \"You are...\""
+  // Match ": " followed by a path or bare name containing "claude" (the binary invocation).
+  const cliBinMatch = raw.match(/:\s+(?:\/\S*\/)?claude\s/);
+  if (cliBinMatch) {
+    return raw.slice(0, cliBinMatch.index!).slice(0, 500);
+  }
+
+  // Positional prompt separator: " -- " followed by a quoted string (prompt content).
+  // execa formats args with single quotes in shortMessage, so check both quote styles.
+  const positionalMatch = raw.match(/ -- ["']/);
+  if (positionalMatch) {
+    return raw.slice(0, positionalMatch.index!).slice(0, 500);
   }
 
   // Generic: if the message contains "claude -p" anywhere, truncate before it
