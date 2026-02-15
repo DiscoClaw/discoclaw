@@ -165,10 +165,15 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       }
 
       if (procResult.failed && procResult.exitCode == null) {
-        const raw = (procResult.shortMessage || procResult.originalMessage || procResult.message || '').trim();
+        // Spawn failures (ENOENT, EACCES, etc.) — execa's shortMessage includes the full
+        // command line with prompt text, so we use a fixed message with only the error code.
+        const code = procResult.code || procResult.errno || '';
+        const isNotFound = code === 'ENOENT' || (procResult.originalMessage || '').includes('ENOENT');
         push({
           type: 'error',
-          message: sanitizeError(raw || 'codex failed (no exit code)'),
+          message: isNotFound
+            ? `codex binary not found (${opts.codexBin}). Check CODEX_BIN or PATH.`
+            : `codex failed to start${code ? ` (${code})` : ''}`,
         });
         push({ type: 'done' });
         finished = true;
@@ -200,14 +205,17 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     }).catch((err: any) => {
       if (finished) return;
       const timedOut = Boolean(err?.timedOut);
-      const raw = String(
-        (err?.originalMessage || err?.shortMessage || err?.message || err || '')
-      ).trim();
+      // Use fixed messages — err.shortMessage/originalMessage can contain the full
+      // command line (including prompt text), so we never expose raw error strings.
+      const code = err?.code || err?.errno || '';
+      const isNotFound = code === 'ENOENT' || String(err?.originalMessage || '').includes('ENOENT');
       push({
         type: 'error',
         message: timedOut
           ? `codex timed out after ${params.timeoutMs ?? 0}ms`
-          : sanitizeError(raw),
+          : isNotFound
+            ? `codex binary not found (${opts.codexBin}). Check CODEX_BIN or PATH.`
+            : `codex process failed unexpectedly${code ? ` (${code})` : ''}`,
       });
       push({ type: 'done' });
       finished = true;
