@@ -649,7 +649,7 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | `DISCOCLAW_PLAN_COMMANDS_ENABLED` | `true` | `parseBoolean` | Enable/disable `!plan` commands |
 | `PLAN_PHASES_ENABLED` | `true` | `parseBoolean` | Enable/disable phase decomposition (`!plan phases`, `!plan run`, `!plan skip`) |
 | `PLAN_PHASE_MAX_CONTEXT_FILES` | `5` | `parsePositiveInt` | Max files per phase batch |
-| `PLAN_PHASE_TIMEOUT_MS` | `300000` (5 min) | `parsePositiveNumber` | Per-phase execution timeout |
+| `PLAN_PHASE_TIMEOUT_MS` | `1800000` (30 min) | `parsePositiveNumber` | Per-phase execution timeout |
 
 ### Forge commands
 

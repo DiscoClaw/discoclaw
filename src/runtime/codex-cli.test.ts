@@ -333,4 +333,56 @@ describe('Codex CLI runtime adapter', () => {
     expect(events.find((e) => e.type === 'text_final')).toBeUndefined();
     expect(events[events.length - 1]!.type).toBe('done');
   });
+
+  it('error messages are sanitized: multi-line stderr truncated to first line', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: '',
+      stderr: 'auth token expired\nfull prompt: You are a helpful assistant...\nsession: /tmp/codex/abc123',
+      exitCode: 1,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Say hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    const msg = (errorEvt as { message: string }).message;
+    // Should contain first line only.
+    expect(msg).toContain('auth token expired');
+    // Should NOT contain prompt or session content from subsequent lines.
+    expect(msg).not.toContain('full prompt');
+    expect(msg).not.toContain('session:');
+  });
+
+  it('args include read-only sandbox flag', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    const sandboxIdx = callArgs.indexOf('-s');
+    expect(sandboxIdx).toBeGreaterThan(-1);
+    expect(callArgs[sandboxIdx + 1]).toBe('read-only');
+  });
 });

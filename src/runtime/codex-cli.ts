@@ -7,6 +7,7 @@
 //   - `-m MODEL` selects the model.
 //   - `--skip-git-repo-check` allows running outside a git repo.
 //   - `--ephemeral` skips session persistence.
+//   - `-s read-only` forces read-only sandbox (no workspace writes).
 //   - Plain text stdout by default; `--json` for JSONL.
 //   - Diagnostic/progress output goes to stderr.
 
@@ -16,6 +17,20 @@ import type { EngineEvent, RuntimeAdapter, RuntimeInvokeParams } from './types.j
 
 /** Byte threshold above which prompts are piped via stdin instead of positional arg. */
 const STDIN_THRESHOLD = 100_000;
+
+/** Max chars for error messages exposed outside the adapter. Prevents prompt/session leaks. */
+const MAX_ERROR_LENGTH = 200;
+
+/**
+ * Strip prompt content and internal details from error messages.
+ * Codex CLI can include the full prompt, session paths, and auth details in stderr on failure.
+ */
+function sanitizeError(raw: string): string {
+  if (!raw) return 'codex failed (no details)';
+  // Take only the first line — subsequent lines often contain prompt/session content.
+  const firstLine = raw.split('\n')[0]!.trim();
+  return (firstLine || 'codex failed').slice(0, MAX_ERROR_LENGTH);
+}
 
 // Track active Codex subprocesses so we can kill them on shutdown.
 const activeSubprocesses = new Set<ResultPromise>();
@@ -42,7 +57,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
 
     const useStdin = Buffer.byteLength(params.prompt, 'utf-8') > STDIN_THRESHOLD;
 
-    const args: string[] = ['exec', '-m', model, '--skip-git-repo-check', '--ephemeral'];
+    const args: string[] = ['exec', '-m', model, '--skip-git-repo-check', '--ephemeral', '-s', 'read-only'];
 
     if (useStdin) {
       // Use `-` to signal stdin reading.
@@ -139,10 +154,9 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       if (!stderrEnded) return;
 
       if (procResult.timedOut) {
-        const msg = (procResult.originalMessage || procResult.shortMessage || procResult.message || '').trim();
         push({
           type: 'error',
-          message: `codex timed out after ${params.timeoutMs ?? 0}ms${msg ? `: ${msg}` : ''}`,
+          message: `codex timed out after ${params.timeoutMs ?? 0}ms`,
         });
         push({ type: 'done' });
         finished = true;
@@ -151,10 +165,10 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       }
 
       if (procResult.failed && procResult.exitCode == null) {
-        const msg = (procResult.shortMessage || procResult.originalMessage || procResult.message || '').trim();
+        const raw = (procResult.shortMessage || procResult.originalMessage || procResult.message || '').trim();
         push({
           type: 'error',
-          message: msg || 'codex failed (no exit code)',
+          message: sanitizeError(raw || 'codex failed (no exit code)'),
         });
         push({ type: 'done' });
         finished = true;
@@ -163,8 +177,8 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       }
 
       if (procResult.exitCode !== 0) {
-        const msg = (stderrForError || procResult.stderr || procResult.stdout || `codex exit ${procResult.exitCode}`).trim();
-        push({ type: 'error', message: msg });
+        const raw = (stderrForError || procResult.stderr || procResult.stdout || `codex exit ${procResult.exitCode}`).trim();
+        push({ type: 'error', message: sanitizeError(raw) });
         push({ type: 'done' });
         finished = true;
         wake();
@@ -186,14 +200,14 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     }).catch((err: any) => {
       if (finished) return;
       const timedOut = Boolean(err?.timedOut);
-      const msg = String(
+      const raw = String(
         (err?.originalMessage || err?.shortMessage || err?.message || err || '')
       ).trim();
       push({
         type: 'error',
         message: timedOut
-          ? `codex timed out after ${params.timeoutMs ?? 0}ms${msg ? `: ${msg}` : ''}`
-          : (msg || 'codex failed'),
+          ? `codex timed out after ${params.timeoutMs ?? 0}ms`
+          : sanitizeError(raw),
       });
       push({ type: 'done' });
       finished = true;
