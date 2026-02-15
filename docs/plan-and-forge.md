@@ -426,9 +426,17 @@ The forge runs a draft → audit → revise cycle:
 
 Only one forge can run at a time per DM handler instance. The `forgeOrchestrator` variable in `discord.ts` is a module-level singleton. If you attempt a second forge while one is running, the handler returns a rejection message without creating a new orchestrator.
 
-### Model selection
+### Model and runtime selection
 
-The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTIME_MODEL`. The auditor uses `FORGE_AUDITOR_MODEL` if set, otherwise the main model. The drafter/reviser gets read-only tools (Read, Glob, Grep); the auditor gets no tools.
+The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTIME_MODEL`. The auditor uses `FORGE_AUDITOR_MODEL` if set, otherwise the main model. The drafter/reviser gets read-only tools (Read, Glob, Grep); the auditor gets read-only tools when using Claude, no tools when using a non-Claude runtime.
+
+**Multi-provider auditor:** The auditor can optionally use a non-Claude runtime via `FORGE_AUDITOR_RUNTIME`. When set to `openai`, the auditor is routed through the OpenAI-compatible adapter (`src/runtime/openai-compat.ts`) instead of the Claude CLI. This enables cross-model auditing — the plan is drafted by one model family and audited by another.
+
+When the auditor uses a non-Claude runtime:
+- Tools are disabled (the OpenAI adapter is text-only, no tool execution)
+- The auditor prompt includes a "no codebase access" instruction block instead of the verification block
+- Session keys are not used (no multi-turn reuse)
+- If `FORGE_AUDITOR_MODEL` is not set, the model defaults to the adapter's `defaultModel` (configured via `OPENAI_MODEL`, default `gpt-4o`)
 
 ---
 
@@ -650,6 +658,15 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | `FORGE_AUDITOR_MODEL` | *(empty)* | `parseTrimmedString` | Model override for auditor; falls back to main `RUNTIME_MODEL` |
 | `FORGE_AUTO_IMPLEMENT` | `true` | `parseBoolean` | When true, sends a CTA prompt after successful forge completion suggesting `!plan approve` and `!plan run`. When false, the forge completes silently (plan summary is still posted). Does **not** auto-implement — the name is aspirational. |
 
+### Multi-provider auditor
+
+| Variable | Default | Parser | Description |
+|----------|---------|--------|-------------|
+| `FORGE_AUDITOR_RUNTIME` | *(empty)* | `parseTrimmedString` | Runtime adapter name for the auditor (e.g., `openai`). When empty, the auditor uses the default Claude runtime. |
+| `OPENAI_API_KEY` | *(empty)* | `parseTrimmedString` | API key for the OpenAI-compatible adapter. Required when `FORGE_AUDITOR_RUNTIME=openai`. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | `parseTrimmedString` | Base URL for the OpenAI-compatible API. Override for proxies or alternative providers (e.g., Azure OpenAI, Ollama). |
+| `OPENAI_MODEL` | `gpt-4o` | `parseTrimmedString` | Default model for the OpenAI adapter. Used when `FORGE_AUDITOR_MODEL` is not set. |
+
 ---
 
 ## 10. Project Context
@@ -786,6 +803,9 @@ The forge checks the cancel flag at the start of each audit loop iteration. The 
 | `src/discord/plan-manager.ts` | Phase decomposition, serialization, staleness detection, phase execution, git integration |
 | `src/discord.ts` | Discord message handler: command dispatch for both `!plan` and `!forge`, writer lock, forge lifecycle management |
 | `src/config.ts` | All plan/forge env var parsing |
+| `src/runtime/openai-compat.ts` | OpenAI-compatible runtime adapter (SSE streaming, text-only) |
+| `src/runtime/registry.ts` | Runtime adapter registry (name → adapter lookup) |
+| `src/runtime/types.ts` | `RuntimeAdapter` interface, `EngineEvent` types |
 
 ### Concurrency model
 

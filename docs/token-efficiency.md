@@ -106,6 +106,7 @@ Anthropic's automatic prompt caching can reuse prompt prefixes that don't change
 - **Cron execution** — each scheduled job fires its own API call (model per `DISCOCLAW_CRON_MODEL`, default: haiku)
 - **Cron auto-tagging** — Haiku call per new cron (when `DISCOCLAW_CRON_AUTO_TAG=1`)
 - **Bead auto-tagging** — Haiku call per new bead (when `DISCOCLAW_BEADS_AUTO_TAG=1`, model per `DISCOCLAW_BEADS_AUTO_TAG_MODEL`, default: haiku)
+- **Forge auditor (OpenAI runtime)** — When `FORGE_AUDITOR_RUNTIME=openai`, each audit round in a forge run calls the OpenAI API instead of Claude. These calls are billed by OpenAI, not Anthropic. The forge drafter/reviser still uses Claude.
 
 ### Cache-breaking changes
 
