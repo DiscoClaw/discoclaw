@@ -216,6 +216,18 @@ describe('buildBeadContextSection', () => {
     expect(json.description).toMatch(/\u2026$/);
   });
 
+  it('includes forum sendMessage guidance for active beads', () => {
+    const bead = makeBead();
+    const section = buildBeadContextSection(bead);
+    expect(section).toContain('Do not emit a sendMessage action targeting the parent forum channel');
+  });
+
+  it('omits forum sendMessage guidance for closed beads', () => {
+    const bead = makeBead({ status: 'closed' });
+    const section = buildBeadContextSection(bead);
+    expect(section).not.toContain('Do not emit a sendMessage action targeting the parent forum channel');
+  });
+
   it('emits minimal context for closed beads', () => {
     const bead = makeBead({
       status: 'closed',
