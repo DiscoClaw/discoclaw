@@ -236,6 +236,11 @@ describe('parseAuditVerdict', () => {
     const text = 'The code quality is high.\n\n**Verdict:** Ready to approve.';
     expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
   });
+
+  it('does not false-positive on bold "high" in prose without severity marker', () => {
+    const text = '**Concern 1: Throughput concerns**\nExpected load is **high** during peak windows.\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+  });
 });
 
 // ---------------------------------------------------------------------------

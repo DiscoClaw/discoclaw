@@ -91,15 +91,15 @@ export function parseAuditVerdict(auditText: string): AuditVerdict {
 
   // --- Severity detection ---
   // Primary: "Severity: high" or "Severity: **high**" (structured format we ask for)
-  // Secondary: bare severity words in bold (**high**) or table cells (| high |)
-  // These catch LLM outputs that ignore the "no tables" instruction.
-  const severityLabel = /severity[:\s]*\**\s*(high|medium|low)/gi;
-  const boldSeverity = /\*\*\s*(high|medium|low)\s*\*\*/gi;
+  // Secondary: table cells like "| **high** |" or "| medium |".
+  // We intentionally avoid matching free-form bold words in prose to prevent
+  // false positives like "the impact is **high**" in a description paragraph.
+  const severityLabel = /\bseverity\b[:\s]*\**\s*(high|medium|low)\b/gi;
   const tableCellSeverity = /\|\s*\**\s*(high|medium|low)\s*\**\s*\|/gi;
 
   // Collect all severity mentions from all patterns
   const found = new Set<string>();
-  for (const re of [severityLabel, boldSeverity, tableCellSeverity]) {
+  for (const re of [severityLabel, tableCellSeverity]) {
     let m;
     while ((m = re.exec(auditText)) !== null) {
       found.add(m[1].toLowerCase());
