@@ -1,11 +1,23 @@
 import type { RuntimeAdapter, EngineEvent, RuntimeCapability } from './types.js';
+import type { ChatGptTokenProvider } from './openai-auth.js';
 
-export type OpenAICompatOpts = {
+type CommonOpts = {
   baseUrl: string;
-  apiKey: string;
   defaultModel: string;
   log?: { debug(...args: unknown[]): void };
 };
+
+type ApiKeyOpts = CommonOpts & {
+  auth?: 'api_key';
+  apiKey: string;
+};
+
+type ChatGptOAuthOpts = CommonOpts & {
+  auth: 'chatgpt_oauth';
+  tokenProvider: ChatGptTokenProvider;
+};
+
+export type OpenAICompatOpts = ApiKeyOpts | ChatGptOAuthOpts;
 
 /** Extract the data payload from an SSE line, or undefined if not a data line. */
 function parseSSEData(line: string): string | undefined {
@@ -46,15 +58,35 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
         try {
           opts.log?.debug({ url, model }, 'openai-compat: request');
 
-          const response = await fetch(url, {
+          // Resolve bearer token: static key or dynamic OAuth
+          let bearerToken = opts.auth === 'chatgpt_oauth'
+            ? await opts.tokenProvider.getAccessToken()
+            : opts.apiKey;
+
+          let response = await fetch(url, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${opts.apiKey}`,
+              'Authorization': `Bearer ${bearerToken}`,
               'Content-Type': 'application/json',
             },
             body,
             signal: controller.signal,
           });
+
+          // On 401 with OAuth, force-refresh the token and retry once
+          if (!response.ok && response.status === 401 && opts.auth === 'chatgpt_oauth') {
+            opts.log?.debug('openai-compat: 401 received, force-refreshing OAuth token');
+            bearerToken = await opts.tokenProvider.getAccessToken(true);
+            response = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${bearerToken}`,
+                'Content-Type': 'application/json',
+              },
+              body,
+              signal: controller.signal,
+            });
+          }
 
           if (!response.ok) {
             yield { type: 'error', message: `OpenAI API error: ${response.status} ${response.statusText}` };

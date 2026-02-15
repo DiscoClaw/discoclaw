@@ -675,10 +675,13 @@ export function buildPhasePrompt(
 
     lines.push('## Instructions');
     lines.push('');
-    lines.push('Compare the implementation against the plan specification. For each concern found:');
-    lines.push('1. Give it a title (e.g., **Concern 1: Missing error handling**)');
-    lines.push('2. Describe the deviation');
-    lines.push('3. Rate it: **Severity: high** | **Severity: medium** | **Severity: low**');
+    lines.push('Compare the implementation against the plan specification. For each concern found, use this EXACT format:');
+    lines.push('');
+    lines.push('**Concern N: [title]**');
+    lines.push('Description of the deviation.');
+    lines.push('**Severity: high | medium | low**');
+    lines.push('');
+    lines.push('IMPORTANT: Each concern MUST have its own **Severity: X** line. Do NOT use tables, summary grids, or any other format for severity ratings — the automated fix loop parses these markers to decide whether to trigger revisions.');
     lines.push('');
     lines.push('End with a **Verdict:** line — either "Needs revision." (if any high/medium concerns) or "Ready to approve." (if only low or no concerns).');
     lines.push('');

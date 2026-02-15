@@ -35,7 +35,7 @@ Legend: **done** | *stub* | ~~cut~~
 |-----------|---------|--------|
 | `RuntimeAdapter` interface | `src/runtime/types.ts` | **done** |
 | Claude Code CLI adapter (text + stream-json) | `src/runtime/claude-code-cli.ts` | **done** |
-| OpenAI-compatible adapter (SSE streaming, text-only) | `src/runtime/openai-compat.ts` | **done** |
+| OpenAI-compatible adapter (SSE streaming, text-only, API key + ChatGPT OAuth) | `src/runtime/openai-compat.ts` | **done** |
 | Runtime registry (name → adapter lookup) | `src/runtime/registry.ts` | **done** |
 | Adapter selection via env (`FORGE_AUDITOR_RUNTIME`) | `src/index.ts` | **done** |
 | Gemini adapter | — | *stub — not started* |

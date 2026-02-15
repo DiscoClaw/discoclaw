@@ -89,17 +89,49 @@ export function parseAuditVerdict(auditText: string): AuditVerdict {
 
   const lower = auditText.toLowerCase();
 
-  // Look for severity markers
-  const hasHigh = /severity:\s*high/i.test(auditText) || /\*\*severity:\s*high/i.test(auditText);
-  const hasMedium = /severity:\s*medium/i.test(auditText) || /\*\*severity:\s*medium/i.test(auditText);
-  const hasLow = /severity:\s*low/i.test(auditText) || /\*\*severity:\s*low/i.test(auditText);
+  // --- Severity detection ---
+  // Primary: "Severity: high" or "Severity: **high**" (structured format we ask for)
+  // Secondary: table cells like "| **high** |" or "| medium |".
+  // We intentionally avoid matching free-form bold words in prose to prevent
+  // false positives like "the impact is **high**" in a description paragraph.
+  const severityLabel = /\bseverity\b[:\s]*\**\s*(high|medium|low)\b/gi;
+  const tableCellSeverity = /\|\s*\**\s*(high|medium|low)\s*\**\s*\|/gi;
 
-  if (hasHigh) return { maxSeverity: 'high', shouldLoop: true };
-  if (hasMedium) return { maxSeverity: 'medium', shouldLoop: true };
-  if (hasLow) return { maxSeverity: 'low', shouldLoop: false };
+  // Collect all severity mentions from all patterns
+  const found = new Set<string>();
+  for (const re of [severityLabel, tableCellSeverity]) {
+    let m;
+    while ((m = re.exec(auditText)) !== null) {
+      found.add(m[1].toLowerCase());
+    }
+  }
 
-  // Fallback: look for "ready to approve" as a clean signal
-  if (lower.includes('ready to approve')) {
+  // Determine max severity from markers (high > medium > low)
+  const markerSeverity: AuditVerdict['maxSeverity'] = found.has('high')
+    ? 'high'
+    : found.has('medium')
+      ? 'medium'
+      : found.has('low')
+        ? 'low'
+        : 'none';
+
+  // Determine verdict from text
+  const needsRevision = lower.includes('needs revision');
+  const readyToApprove = lower.includes('ready to approve');
+
+  // Severity markers win over verdict text when they disagree.
+  // A "Ready to approve" verdict with high-severity findings is contradictory —
+  // trust the severity markers.
+  if (markerSeverity !== 'none') {
+    const shouldLoop = markerSeverity === 'high' || markerSeverity === 'medium';
+    return { maxSeverity: markerSeverity, shouldLoop };
+  }
+
+  // No severity markers found — fall back to verdict text
+  if (needsRevision) {
+    return { maxSeverity: 'medium', shouldLoop: true };
+  }
+  if (readyToApprove) {
     return { maxSeverity: 'low', shouldLoop: false };
   }
 
@@ -238,11 +270,13 @@ export function buildAuditorPrompt(
   instructions.push(
     '## Output Format',
     '',
-    'For each concern, write:',
+    'For each concern, use this EXACT format:',
     '',
     '**Concern N: [title]**',
     'Description of the issue.',
     '**Severity: high | medium | low**',
+    '',
+    'IMPORTANT: Each concern MUST have its own **Severity: X** line on a separate line. Do NOT use tables, summary grids, or any other format for severity ratings — the automated revision loop parses these markers to decide whether to trigger revisions.',
     '',
     'Then write a verdict:',
     '',
