@@ -36,7 +36,7 @@ Legend: **done** | *stub* | ~~cut~~
 | `RuntimeAdapter` interface | `src/runtime/types.ts` | **done** |
 | Claude Code CLI adapter (text + stream-json) | `src/runtime/claude-code-cli.ts` | **done** |
 | OpenAI-compatible adapter (SSE streaming, text-only, API key) | `src/runtime/openai-compat.ts` | **done** |
-| Codex CLI adapter (subprocess, text-only) | `src/runtime/codex-cli.ts` | **done** |
+| Codex CLI adapter (subprocess, `tools_fs` capable) | `src/runtime/codex-cli.ts` | **done** |
 | Runtime registry (name → adapter lookup) | `src/runtime/registry.ts` | **done** |
 | Adapter selection via env (`FORGE_AUDITOR_RUNTIME`) | `src/index.ts` | **done** |
 | Gemini adapter | — | *stub — not started* |
@@ -168,6 +168,6 @@ All actions are gated by category env flags (off by default except channels).
 - [x] **OpenAI-compatible runtime adapter** — `src/runtime/openai-compat.ts` with registry and forge auditor routing via `FORGE_AUDITOR_RUNTIME`.
 - [x] **Codex CLI runtime adapter** — `src/runtime/codex-cli.ts` shells out to `codex exec` for models that aren't available on the public completions API (e.g., `gpt-5.3-codex`). Selectable via `FORGE_AUDITOR_RUNTIME=codex`.
 - [ ] **Additional runtime adapters** — Gemini adapter so the project supports three model families.
-- [ ] **Full runtime selection for all roles** — currently only the forge auditor can be routed to a non-Claude runtime. Extending to drafter/reviser, cron executor, and message handler would require tool support in non-Claude adapters.
+- [ ] **Full runtime selection for all roles** — currently only the forge auditor can be routed to a non-Claude runtime. The Codex CLI adapter now supports read-only tools (`tools_fs`), but extending to drafter/reviser would require write tool support. Cron executor and message handler still need evaluation.
 - [ ] Discord-native dashboard (status embeds, config commands, health checks in a dedicated channel)
 - [x] Shareable PRD packs — `docs/discoclaw-recipe-spec.md`, `templates/recipes/integration.discoclaw-recipe.md`, and `skills/discoclaw-recipe-{generator,consumer}/` define exchangeable `recipes/*.discoclaw-recipe.md` artifacts
