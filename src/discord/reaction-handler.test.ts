@@ -387,6 +387,49 @@ describe('createReactionAddHandler', () => {
     expect(replyContent).toMatch(/Done:|Failed:/);
   });
 
+  it('passes threadParentId in actCtx when reaction is in a thread', async () => {
+    // We spy on the actions module to capture the context passed to executeDiscordActions.
+    const actionsModule = await import('./actions.js');
+    const executeSpy = vi.spyOn(actionsModule, 'executeDiscordActions');
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Done\n\n<discord-action>{"type":"react","channelId":"thread-1","messageId":"msg-1","emoji":"✅"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const threadChannel = {
+      id: 'thread-1',
+      name: 'my-thread',
+      parentId: 'forum-parent-1',
+      isThread: () => true,
+      joinable: false,
+      joined: true,
+      parent: { name: 'general' },
+      send: vi.fn().mockResolvedValue(undefined),
+    };
+    const reaction = mockReaction({
+      message: mockMessage({ channel: threadChannel, channelId: 'thread-1' }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(executeSpy).toHaveBeenCalledOnce();
+    const actCtx = executeSpy.mock.calls[0][1];
+    expect(actCtx.threadParentId).toBe('forum-parent-1');
+
+    executeSpy.mockRestore();
+  });
+
   it('suppresses sendMessage Done line from posted output', async () => {
     const runtime: RuntimeAdapter = {
       id: 'claude_code',

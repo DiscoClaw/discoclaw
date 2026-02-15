@@ -443,6 +443,7 @@ function createReactionHandler(
                 client: msg.client,
                 channelId: msg.channelId,
                 messageId: msg.id,
+                threadParentId,
               };
               const results = await executeDiscordActions(parsed.actions, actCtx, params.log, params.beadCtx, params.cronCtx);
               for (const result of results) {
