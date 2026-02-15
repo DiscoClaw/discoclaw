@@ -120,6 +120,7 @@ export type BotParams = {
   forgeTimeoutMs?: number;
   forgeProgressThrottleMs?: number;
   forgeAutoImplement?: boolean;
+  auditorRuntime?: RuntimeAdapter;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermDataDir: string;
@@ -884,13 +885,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const plansDir = path.join(params.workspaceCwd, 'plans');
                 const auditorModel = params.forgeAuditorModel ?? params.runtimeModel;
                 const timeoutMs = params.forgeTimeoutMs ?? 5 * 60_000;
+                const auditRt = params.auditorRuntime;
+                const isClaudeAudit = !auditRt || auditRt.id === 'claude_code';
+                const effectiveAuditModel = isClaudeAudit
+                  ? auditorModel
+                  : (params.forgeAuditorModel ? auditorModel : '');
 
                 handlePlanAudit({
                   planId: auditPlanId,
                   plansDir,
                   workspaceCwd: params.workspaceCwd,
                   runtime: params.runtime,
-                  auditorModel,
+                  auditorRuntime: params.auditorRuntime,
+                  auditorModel: effectiveAuditModel,
                   timeoutMs,
                   acquireWriterLock,
                 }).then(
@@ -1061,6 +1068,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                 forgeOrchestrator = new ForgeOrchestrator({
                   runtime: params.runtime,
+                  auditorRuntime: params.auditorRuntime,
                   model: params.runtimeModel,
                   cwd: params.workspaceCwd,
                   workspaceCwd: params.workspaceCwd,
@@ -1206,6 +1214,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const plansDir = path.join(params.workspaceCwd, 'plans');
               forgeOrchestrator = new ForgeOrchestrator({
                 runtime: params.runtime,
+                auditorRuntime: params.auditorRuntime,
                 model: params.runtimeModel,
                 cwd: params.workspaceCwd,
                 workspaceCwd: params.workspaceCwd,

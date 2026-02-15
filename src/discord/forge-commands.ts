@@ -28,6 +28,7 @@ export type ForgeResult = {
 
 export type ForgeOrchestratorOpts = {
   runtime: RuntimeAdapter;
+  auditorRuntime?: RuntimeAdapter;
   model: string;
   cwd: string;
   workspaceCwd: string;
@@ -146,7 +147,12 @@ export function buildDrafterPrompt(
   ].join('\n');
 }
 
-export function buildAuditorPrompt(planContent: string, roundNumber: number, projectContext?: string): string {
+export function buildAuditorPrompt(
+  planContent: string,
+  roundNumber: number,
+  projectContext?: string,
+  opts?: { hasTools?: boolean },
+): string {
   const sections = [
     'You are an adversarial senior engineer auditing a technical plan. Your job is to find flaws, gaps, and risks.',
     '',
@@ -193,6 +199,8 @@ export function buildAuditorPrompt(planContent: string, roundNumber: number, pro
     );
   }
 
+  const hasTools = opts?.hasTools ?? true;
+
   instructions.push(
     'Review the plan for:',
     '1. Missing or underspecified details (vague scope, unclear file changes)',
@@ -201,14 +209,31 @@ export function buildAuditorPrompt(planContent: string, roundNumber: number, pro
     '4. Test coverage gaps (missing edge cases, untested error paths)',
     '5. Dependency issues (circular deps, version conflicts, missing imports)',
     '',
-    '## Verification',
-    '',
-    'You have read-only access to the codebase via Read, Glob, and Grep tools. **Use them before raising concerns.** Specifically:',
-    '- Before claiming a file is missing or incomplete, Glob/Read it.',
-    '- Before claiming test coverage gaps, Grep for existing tests.',
-    '- Before claiming missing error handling, Read the relevant code.',
-    '- If your concern evaporates after checking the code, do not raise it.',
-    '',
+  );
+
+  if (hasTools) {
+    instructions.push(
+      '## Verification',
+      '',
+      'You have read-only access to the codebase via Read, Glob, and Grep tools. **Use them before raising concerns.** Specifically:',
+      '- Before claiming a file is missing or incomplete, Glob/Read it.',
+      '- Before claiming test coverage gaps, Grep for existing tests.',
+      '- Before claiming missing error handling, Read the relevant code.',
+      '- If your concern evaporates after checking the code, do not raise it.',
+      '',
+    );
+  } else {
+    instructions.push(
+      '## Verification',
+      '',
+      'You do not have access to the codebase. Audit the plan based on its text alone.',
+      '- If you are uncertain whether a file exists or a function signature is correct, note it as a concern rather than stating it as fact.',
+      '- Focus on logical consistency, completeness, and architectural soundness.',
+      '',
+    );
+  }
+
+  instructions.push(
     '## Output Format',
     '',
     'For each concern, write:',
@@ -694,16 +719,28 @@ export class ForgeOrchestrator {
           : `Forging ${planId}... Audit round ${round}/${maxRound}...`,
       );
 
-      const auditorPrompt = buildAuditorPrompt(planContent, round, projectContext);
+      const auditorRt = this.opts.auditorRuntime ?? this.opts.runtime;
+      const isClaudeAuditor = auditorRt.id === 'claude_code';
+      const hasExplicitAuditorModel = Boolean(this.opts.auditorModel);
+      const effectiveAuditorModel = isClaudeAuditor
+        ? auditorModel
+        : (hasExplicitAuditorModel ? auditorModel : '');
+
+      const auditorPrompt = buildAuditorPrompt(
+        planContent,
+        round,
+        projectContext,
+        { hasTools: isClaudeAuditor },
+      );
       const auditOutput = await collectRuntimeText(
-        this.opts.runtime,
+        auditorRt,
         auditorPrompt,
-        auditorModel,
+        effectiveAuditorModel,
         this.opts.cwd,
-        readOnlyTools,
-        addDirs,
+        isClaudeAuditor ? readOnlyTools : [],
+        isClaudeAuditor ? addDirs : [],
         this.opts.timeoutMs,
-        { sessionKey: auditorSessionKey },
+        isClaudeAuditor ? { sessionKey: auditorSessionKey } : undefined,
       );
 
       lastAuditNotes = auditOutput;

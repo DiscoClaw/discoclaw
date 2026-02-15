@@ -22,6 +22,7 @@ export type PlanAuditOpts = {
   plansDir: string;
   workspaceCwd: string;
   runtime: RuntimeAdapter;
+  auditorRuntime?: RuntimeAdapter;
   auditorModel: string;
   timeoutMs: number;
   acquireWriterLock: () => Promise<() => void>;
@@ -206,13 +207,20 @@ export async function handlePlanAudit(opts: PlanAuditOpts): Promise<PlanAuditRes
   // 6. Invoke AI auditor agent (outside the lock)
   let auditOutput: string;
   try {
-    const auditorPrompt = buildAuditorPrompt(planContent, preliminaryRound, projectContext);
+    const rt = opts.auditorRuntime ?? opts.runtime;
+    const isClaudeAuditor = rt.id === 'claude_code';
+    const auditorPrompt = buildAuditorPrompt(
+      planContent,
+      preliminaryRound,
+      projectContext,
+      { hasTools: isClaudeAuditor },
+    );
     auditOutput = await collectRuntimeText(
-      opts.runtime,
+      rt,
       auditorPrompt,
       opts.auditorModel,
       opts.workspaceCwd,
-      [], // auditor gets no tools
+      [],
       [],
       opts.timeoutMs,
     );
