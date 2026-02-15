@@ -4,6 +4,40 @@ import type { BeadSyncResult } from '../beads/types.js';
 
 type Sendable = { send(opts: { embeds: EmbedBuilder[] }): Promise<unknown> };
 
+/**
+ * Strip CLI args and prompt content from error messages so internals
+ * (SOUL.md, IDENTITY.md, full prompts) don't leak into status channel embeds.
+ */
+export function sanitizeErrorMessage(raw: string): string {
+  if (!raw) return '(no message)';
+
+  // execa kill messages look like:
+  //   "Command was killed with SIGKILL (Forced termination): claude -p \"You are...\""
+  //   "Command was killed with SIGKILL (Forced termination): /usr/local/bin/claude ... -- \"You are...\""
+  // Match ": " followed by a path or bare name containing "claude" (the binary invocation).
+  const cliBinMatch = raw.match(/:\s+(?:\/\S*\/)?claude\s/);
+  if (cliBinMatch) {
+    return raw.slice(0, cliBinMatch.index!).slice(0, 500);
+  }
+
+  // Positional prompt separator: " -- " followed by a quoted string (prompt content).
+  // execa formats args with single quotes in shortMessage, so check both quote styles.
+  const positionalMatch = raw.match(/ -- ["']/);
+  if (positionalMatch) {
+    return raw.slice(0, positionalMatch.index!).slice(0, 500);
+  }
+
+  // Generic: if the message contains "claude -p" anywhere, truncate before it
+  const dashPIdx = raw.indexOf('claude -p');
+  if (dashPIdx !== -1) {
+    const prefix = raw.slice(0, dashPIdx).trimEnd();
+    return (prefix || 'Command failed').slice(0, 500);
+  }
+
+  // Safety-net truncation for any other long message
+  return raw.slice(0, 500);
+}
+
 export type StatusPoster = {
   online(): Promise<void>;
   offline(): Promise<void>;
@@ -61,7 +95,7 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       const embed = new EmbedBuilder()
         .setColor(Colors.red)
         .setTitle('Runtime Error')
-        .setDescription((message || '(no message)').slice(0, 4096))
+        .setDescription(sanitizeErrorMessage(message).slice(0, 4096))
         .setTimestamp();
       if (context.sessionKey) embed.addFields({ name: 'Session', value: context.sessionKey, inline: true });
       if (context.channelName) embed.addFields({ name: 'Channel', value: context.channelName, inline: true });
@@ -72,7 +106,7 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       const embed = new EmbedBuilder()
         .setColor(Colors.red)
         .setTitle('Handler Failure')
-        .setDescription((String(err) || '(unknown error)').slice(0, 4096))
+        .setDescription(sanitizeErrorMessage(String(err) || '(unknown error)').slice(0, 4096))
         .setTimestamp();
       if (context.sessionKey) embed.addFields({ name: 'Session', value: context.sessionKey, inline: true });
       await send(embed);
