@@ -58,6 +58,12 @@ export type DiscoclawConfig = {
   forgeTimeoutMs: number;
   forgeProgressThrottleMs: number;
   forgeAutoImplement: boolean;
+
+  // OpenAI-compat adapter config
+  openaiApiKey?: string;
+  openaiBaseUrl?: string;
+  openaiModel?: string;
+  forgeAuditorRuntime?: string;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermMaxEntries: number;
@@ -336,6 +342,12 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     beadsForum = undefined;
   }
 
+  const forgeAuditorRuntime = parseTrimmedString(env, 'FORGE_AUDITOR_RUNTIME');
+  const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
+  if (forgeAuditorRuntime === 'openai' && !openaiApiKey) {
+    warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to Claude.');
+  }
+
   return {
     config: {
       token,
@@ -405,6 +417,12 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       forgeTimeoutMs: parsePositiveNumber(env, 'FORGE_TIMEOUT_MS', 30 * 60_000),
       forgeProgressThrottleMs: parseNonNegativeInt(env, 'FORGE_PROGRESS_THROTTLE_MS', 3000),
       forgeAutoImplement: parseBoolean(env, 'FORGE_AUTO_IMPLEMENT', true),
+
+      openaiApiKey: parseTrimmedString(env, 'OPENAI_API_KEY'),
+      openaiBaseUrl: parseTrimmedString(env, 'OPENAI_BASE_URL'),
+      openaiModel: parseTrimmedString(env, 'OPENAI_MODEL'),
+      forgeAuditorRuntime: parseTrimmedString(env, 'FORGE_AUDITOR_RUNTIME'),
+
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', true),
       shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', false),
       shortTermMaxEntries: parsePositiveInt(env, 'DISCOCLAW_SHORTTERM_MAX_ENTRIES', 20),

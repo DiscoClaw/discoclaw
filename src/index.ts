@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 
 import { createClaudeCliRuntime, killActiveSubprocesses } from './runtime/claude-code-cli.js';
+import { RuntimeRegistry } from './runtime/registry.js';
+import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
 import { withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
@@ -403,6 +405,31 @@ const runtime = createClaudeCliRuntime({
 });
 const limitedRuntime = withConcurrencyLimit(runtime, { maxConcurrentInvocations, log });
 
+// Build runtime registry
+const runtimeRegistry = new RuntimeRegistry();
+runtimeRegistry.register('claude', limitedRuntime);
+
+if (cfg.openaiApiKey) {
+  const openaiRuntime = createOpenAICompatRuntime({
+    baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
+    apiKey: cfg.openaiApiKey,
+    defaultModel: cfg.openaiModel ?? 'gpt-4o',
+    log,
+  });
+  runtimeRegistry.register('openai', openaiRuntime);
+}
+
+// Resolve the auditor runtime (if configured)
+let auditorRuntime: import('./runtime/types.js').RuntimeAdapter | undefined;
+if (cfg.forgeAuditorRuntime) {
+  auditorRuntime = runtimeRegistry.get(cfg.forgeAuditorRuntime);
+  if (!auditorRuntime) {
+    log.warn(
+      `FORGE_AUDITOR_RUNTIME='${cfg.forgeAuditorRuntime}' but no adapter registered with that name. Available: ${runtimeRegistry.list().join(', ')}. Falling back to Claude.`,
+    );
+  }
+}
+
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
 // Pre-flight: detect whether the bd CLI is installed (used to decide whether to bootstrap the beads forum).
@@ -474,6 +501,7 @@ const botParams = {
   forgeTimeoutMs,
   forgeProgressThrottleMs,
   forgeAutoImplement,
+  auditorRuntime,
   summaryToDurableEnabled,
   shortTermMemoryEnabled,
   shortTermDataDir,

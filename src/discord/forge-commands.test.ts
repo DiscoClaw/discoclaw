@@ -1201,3 +1201,134 @@ describe('Forge session keys', () => {
     expect(invocations[0]!.sessionKey).toContain('plan-001');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Auditor runtime tests
+// ---------------------------------------------------------------------------
+
+describe('auditorRuntime support', () => {
+  it('auditorRuntime is used for audit calls when set', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const drafterRuntime = makeMockRuntime([draftPlan]);
+
+    // Separate auditor runtime
+    const auditorInvocations: RuntimeInvokeParams[] = [];
+    const auditorRuntime: RuntimeAdapter = {
+      id: 'openai' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        auditorInvocations.push(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: auditClean };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, drafterRuntime, { auditorRuntime });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(result.rounds).toBe(1);
+    // The auditor runtime should have been called
+    expect(auditorInvocations).toHaveLength(1);
+  });
+
+  it('falls back to default runtime when auditorRuntime is undefined', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const { runtime, invocations } = makeCaptureRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime, { auditorRuntime: undefined });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    // Both drafter and auditor calls go to the same runtime
+    expect(invocations).toHaveLength(2);
+  });
+
+  it('non-Claude auditor runtime receives empty model string when auditorModel not set', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const drafterRuntime = makeMockRuntime([draftPlan]);
+
+    const auditorInvocations: RuntimeInvokeParams[] = [];
+    const auditorRuntime: RuntimeAdapter = {
+      id: 'openai' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        auditorInvocations.push(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: auditClean };
+        })();
+      },
+    };
+
+    // auditorModel is not set, so it defaults to opts.model ('test-model')
+    const opts = await baseOpts(tmpDir, drafterRuntime, { auditorRuntime });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    // Non-Claude auditor should receive empty model (to fall back to adapter's defaultModel)
+    expect(auditorInvocations[0]!.model).toBe('');
+  });
+
+  it('non-Claude auditor receives no tools, addDirs, or sessionKey', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const drafterRuntime = makeMockRuntime([draftPlan]);
+
+    const auditorInvocations: RuntimeInvokeParams[] = [];
+    const auditorRuntime: RuntimeAdapter = {
+      id: 'openai' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        auditorInvocations.push(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: auditClean };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, drafterRuntime, { auditorRuntime });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    expect(auditorInvocations[0]!.tools).toEqual([]);
+    expect(auditorInvocations[0]!.addDirs).toBeUndefined();
+    expect(auditorInvocations[0]!.sessionKey).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildAuditorPrompt hasTools option
+// ---------------------------------------------------------------------------
+
+describe('buildAuditorPrompt hasTools option', () => {
+  it('hasTools=false omits tool instructions', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1, undefined, { hasTools: false });
+    expect(prompt).not.toContain('Read, Glob, and Grep tools');
+    expect(prompt).not.toContain('Use them before raising concerns');
+    expect(prompt).toContain('You do not have access to the codebase');
+    expect(prompt).toContain('logical consistency');
+  });
+
+  it('hasTools=true (default) includes tool instructions', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    expect(prompt).toContain('Read, Glob, and Grep tools');
+    expect(prompt).toContain('Use them before raising concerns');
+    expect(prompt).not.toContain('You do not have access to the codebase');
+  });
+});
