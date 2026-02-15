@@ -311,6 +311,126 @@ describe('OpenAI-compat runtime adapter', () => {
     expect(events[events.length - 1]!.type).toBe('done');
   });
 
+  // ---------------------------------------------------------------------------
+  // OAuth 401 retry tests
+  // ---------------------------------------------------------------------------
+
+  it('401 with OAuth: force-refresh token and retry succeeds', async () => {
+    const capturedHeaders: string[] = [];
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      callCount++;
+      capturedHeaders.push(init?.headers && (init.headers as Record<string, string>)['Authorization'] || '');
+      if (callCount === 1) {
+        // First call returns 401
+        return Promise.resolve(new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }));
+      }
+      // Retry succeeds
+      return Promise.resolve(makeSSEResponse([
+        makeSSEData('retried'),
+        'data: [DONE]',
+      ]));
+    });
+
+    let forceRefreshCalled = false;
+    const tokenProvider = {
+      getAccessToken: vi.fn().mockImplementation((forceRefresh?: boolean) => {
+        if (forceRefresh) forceRefreshCalled = true;
+        return Promise.resolve(forceRefresh ? 'refreshed-token' : 'stale-token');
+      }),
+    };
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      auth: 'chatgpt_oauth',
+      tokenProvider,
+      defaultModel: 'gpt-4o',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(forceRefreshCalled).toBe(true);
+    expect(callCount).toBe(2);
+
+    // First request used the stale token, retry used the refreshed token
+    expect(capturedHeaders[0]).toBe('Bearer stale-token');
+    expect(capturedHeaders[1]).toBe('Bearer refreshed-token');
+
+    const final = events.find((e) => e.type === 'text_final');
+    expect(final).toBeDefined();
+    expect((final as { text: string }).text).toBe('retried');
+    expect(events[events.length - 1]!.type).toBe('done');
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+  });
+
+  it('401 with OAuth: retry also fails yields error + done', async () => {
+    // Both calls return 401
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }),
+    );
+
+    const tokenProvider = {
+      getAccessToken: vi.fn().mockImplementation((forceRefresh?: boolean) =>
+        Promise.resolve(forceRefresh ? 'refreshed-token' : 'stale-token'),
+      ),
+    };
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      auth: 'chatgpt_oauth',
+      tokenProvider,
+      defaultModel: 'gpt-4o',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    // Should have called getAccessToken twice (initial + force refresh)
+    expect(tokenProvider.getAccessToken).toHaveBeenCalledTimes(2);
+    expect(tokenProvider.getAccessToken).toHaveBeenLastCalledWith(true);
+
+    // Should have made two HTTP attempts (initial + retry)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    expect((errorEvt as { message: string }).message).toContain('401');
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
+  it('401 with static API key: no retry, yields error + done', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }),
+    );
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'bad-key',
+      defaultModel: 'gpt-4o',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    // fetch should only be called once — no retry for static API keys
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    expect((errorEvt as { message: string }).message).toContain('401');
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
   it('stream ending without trailing newline still processes buffered data', async () => {
     // Simulate a stream that ends with a data line but no trailing \n
     const chunk = makeSSEData('buffered');
