@@ -6,6 +6,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
 import { collectRuntimeText } from './runtime-utils.js';
 import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
+import { resolveModel } from '../runtime/model-tiers.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -696,7 +697,7 @@ export class ForgeOrchestrator {
     } = params;
     const t0 = params.t0 ?? Date.now();
 
-    const drafterModel = this.opts.drafterModel ?? this.opts.model;
+    const drafterModel = resolveModel(this.opts.drafterModel ?? this.opts.model, this.opts.runtime.id);
     const auditorModel = this.opts.auditorModel ?? this.opts.model;
     const readOnlyTools = ['Read', 'Glob', 'Grep'];
     const addDirs = [this.opts.cwd];
@@ -783,8 +784,8 @@ export class ForgeOrchestrator {
       const auditorHasFileTools = auditorRt.capabilities.has('tools_fs');
       const hasExplicitAuditorModel = Boolean(this.opts.auditorModel);
       const effectiveAuditorModel = isClaudeAuditor
-        ? auditorModel
-        : (hasExplicitAuditorModel ? auditorModel : '');
+        ? resolveModel(auditorModel, auditorRt.id)
+        : (hasExplicitAuditorModel ? resolveModel(auditorModel, auditorRt.id) : '');
 
       const auditorPrompt = buildAuditorPrompt(
         planContent,
