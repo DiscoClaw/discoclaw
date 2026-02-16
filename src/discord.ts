@@ -304,6 +304,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           const liveTools = await resolveEffectiveTools({
             workspaceCwd: params.workspaceCwd,
             runtimeTools: params.runtimeTools,
+            runtimeCapabilities: params.runtime.capabilities,
+            runtimeId: params.runtime.id,
             log: params.log,
           });
           const toolsReport = renderHealthToolsReport({
@@ -904,11 +906,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const plansDir = path.join(params.workspaceCwd, 'plans');
                 const rawAuditorModel = params.forgeAuditorModel ?? params.runtimeModel;
                 const timeoutMs = params.forgeTimeoutMs ?? 5 * 60_000;
-                const auditRt = params.auditorRuntime;
-                const isClaudeAudit = !auditRt || auditRt.id === 'claude_code';
-                const effectiveAuditModel = isClaudeAudit
-                  ? resolveModel(rawAuditorModel, 'claude_code')
-                  : (params.forgeAuditorModel ? resolveModel(rawAuditorModel, auditRt.id) : '');
+                const auditRt = params.auditorRuntime ?? params.runtime;
+                const hasExplicitAuditorModel = Boolean(params.forgeAuditorModel);
+                const effectiveAuditModel = auditRt.id === 'claude_code'
+                  ? resolveModel(rawAuditorModel, auditRt.id)
+                  : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditRt.id) : '');
 
                 handlePlanAudit({
                   planId: auditPlanId,
@@ -1514,11 +1516,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           const tools = await resolveEffectiveTools({
             workspaceCwd: params.workspaceCwd,
             runtimeTools: params.runtimeTools,
+            runtimeCapabilities: params.runtime.capabilities,
+            runtimeId: params.runtime.id,
             log: params.log,
           });
           const effectiveTools = tools.effectiveTools;
-          if (tools.permissionNote) {
-            prompt += `\n\n---\nPermission note: ${tools.permissionNote}\n`;
+          if (tools.permissionNote || tools.runtimeCapabilityNote) {
+            const noteLines = [
+              tools.permissionNote ? `Permission note: ${tools.permissionNote}` : null,
+              tools.runtimeCapabilityNote ? `Runtime capability note: ${tools.runtimeCapabilityNote}` : null,
+            ].filter((line): line is string => Boolean(line));
+            prompt += `\n\n---\n${noteLines.join('\n')}\n`;
           }
 
           params.log?.info(

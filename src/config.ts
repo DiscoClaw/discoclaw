@@ -14,6 +14,7 @@ export type DiscoclawConfig = {
   allowUserIds: Set<string>;
   allowChannelIds: Set<string>;
   restrictChannelIds: boolean;
+  primaryRuntime: string;
 
   runtimeModel: string;
   runtimeTools: string[];
@@ -72,6 +73,8 @@ export type DiscoclawConfig = {
   // Codex CLI adapter config
   codexBin: string;
   codexModel: string;
+  codexDangerouslyBypassApprovalsAndSandbox: boolean;
+  codexDisableSessions: boolean;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermMaxEntries: number;
@@ -216,6 +219,17 @@ function parseTrimmedString(
   return trimmed || undefined;
 }
 
+function parseRuntimeName(
+  env: NodeJS.ProcessEnv,
+  name: string,
+): string | undefined {
+  const raw = parseTrimmedString(env, name);
+  if (!raw) return undefined;
+  const normalized = raw.toLowerCase();
+  if (normalized === 'claude_code') return 'claude';
+  return normalized;
+}
+
 function parseEnum<T extends string>(
   env: NodeJS.ProcessEnv,
   name: string,
@@ -357,10 +371,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     beadsForum = undefined;
   }
 
-  const forgeAuditorRuntime = parseTrimmedString(env, 'FORGE_AUDITOR_RUNTIME');
+  const primaryRuntime = parseRuntimeName(env, 'PRIMARY_RUNTIME') ?? 'claude';
+  const forgeAuditorRuntime = parseRuntimeName(env, 'FORGE_AUDITOR_RUNTIME');
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
+  const openaiBaseUrl = parseTrimmedString(env, 'OPENAI_BASE_URL');
+  const openaiModel = parseTrimmedString(env, 'OPENAI_MODEL');
+  if (primaryRuntime === 'openai' && !openaiApiKey) {
+    warnings.push('PRIMARY_RUNTIME=openai but OPENAI_API_KEY is not set; startup will fail unless another runtime is selected.');
+  }
   if (forgeAuditorRuntime === 'openai' && !openaiApiKey) {
-    warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to Claude.');
+    warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to the primary runtime.');
   }
 
   return {
@@ -369,6 +389,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       allowUserIds,
       allowChannelIds,
       restrictChannelIds,
+      primaryRuntime,
 
       runtimeModel: parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'capable',
       runtimeTools: parseRuntimeTools(env, warnings),
@@ -436,13 +457,15 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       forgeProgressThrottleMs: parseNonNegativeInt(env, 'FORGE_PROGRESS_THROTTLE_MS', 3000),
       forgeAutoImplement: parseBoolean(env, 'FORGE_AUTO_IMPLEMENT', true),
 
-      openaiApiKey: parseTrimmedString(env, 'OPENAI_API_KEY'),
-      openaiBaseUrl: parseTrimmedString(env, 'OPENAI_BASE_URL'),
-      openaiModel: parseTrimmedString(env, 'OPENAI_MODEL'),
-      forgeAuditorRuntime: parseTrimmedString(env, 'FORGE_AUDITOR_RUNTIME'),
+      openaiApiKey,
+      openaiBaseUrl,
+      openaiModel,
+      forgeAuditorRuntime,
 
       codexBin: parseTrimmedString(env, 'CODEX_BIN') ?? 'codex',
       codexModel: parseTrimmedString(env, 'CODEX_MODEL') ?? 'gpt-5.3-codex',
+      codexDangerouslyBypassApprovalsAndSandbox: parseBoolean(env, 'CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX', false),
+      codexDisableSessions: parseBoolean(env, 'CODEX_DISABLE_SESSIONS', false),
 
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', true),
       shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', false),

@@ -301,11 +301,17 @@ function createReactionHandler(
           const tools = await resolveEffectiveTools({
             workspaceCwd: params.workspaceCwd,
             runtimeTools: params.runtimeTools,
+            runtimeCapabilities: params.runtime.capabilities,
+            runtimeId: params.runtime.id,
             log: params.log,
           });
           const effectiveTools = tools.effectiveTools;
-          if (tools.permissionNote) {
-            prompt += `\n\n---\nPermission note: ${tools.permissionNote}\n`;
+          if (tools.permissionNote || tools.runtimeCapabilityNote) {
+            const noteLines = [
+              tools.permissionNote ? `Permission note: ${tools.permissionNote}` : null,
+              tools.runtimeCapabilityNote ? `Runtime capability note: ${tools.runtimeCapabilityNote}` : null,
+            ].filter((line): line is string => Boolean(line));
+            prompt += `\n\n---\n${noteLines.join('\n')}\n`;
           }
 
           // Session continuity.

@@ -42,8 +42,26 @@ class Semaphore {
   }
 }
 
+export type ConcurrencyLimiter = {
+  max: number;
+  acquire(): Promise<() => void>;
+};
+
+export function createConcurrencyLimiter(maxConcurrentInvocations: number): ConcurrencyLimiter | null {
+  const max = Number.isFinite(maxConcurrentInvocations)
+    ? Math.max(0, Math.floor(maxConcurrentInvocations))
+    : 0;
+  if (max <= 0) return null;
+  const sem = new Semaphore(max);
+  return {
+    max,
+    acquire: () => sem.acquire(),
+  };
+}
+
 export type ConcurrencyLimitOpts = {
   maxConcurrentInvocations: number;
+  limiter?: ConcurrencyLimiter | null;
   log?: { debug?(obj: unknown, msg?: string): void };
 };
 
@@ -54,27 +72,22 @@ export type ConcurrencyLimitOpts = {
  * so consumers must exhaust/close the iterator to release the slot.
  */
 export function withConcurrencyLimit(runtime: RuntimeAdapter, opts: ConcurrencyLimitOpts): RuntimeAdapter {
-  const max = Number.isFinite(opts.maxConcurrentInvocations)
-    ? Math.max(0, Math.floor(opts.maxConcurrentInvocations))
-    : 0;
-  if (max <= 0) return runtime;
-
-  const sem = new Semaphore(max);
+  const limiter = opts.limiter ?? createConcurrencyLimiter(opts.maxConcurrentInvocations);
+  if (!limiter) return runtime;
 
   return {
     ...runtime,
     async *invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent> {
-      const release = await sem.acquire();
-      opts.log?.debug?.({ max }, 'runtime:concurrency slot acquired');
+      const release = await limiter.acquire();
+      opts.log?.debug?.({ max: limiter.max }, 'runtime:concurrency slot acquired');
       try {
         for await (const evt of runtime.invoke(params)) {
           yield evt;
         }
       } finally {
         release();
-        opts.log?.debug?.({ max }, 'runtime:concurrency slot released');
+        opts.log?.debug?.({ max: limiter.max }, 'runtime:concurrency slot released');
       }
     },
   };
 }
-

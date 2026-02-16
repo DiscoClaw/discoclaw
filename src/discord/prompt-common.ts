@@ -9,6 +9,8 @@ import type { LoggerLike } from './action-types.js';
 import type { BeadData } from '../beads/types.js';
 import type { BeadContext } from './actions-beads.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
+import type { RuntimeCapability } from '../runtime/types.js';
+import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';
 
 export async function loadWorkspacePaFiles(
   workspaceCwd: string,
@@ -124,10 +126,32 @@ export function _resetToolsAuditState(): void {
 export async function resolveEffectiveTools(opts: {
   workspaceCwd: string;
   runtimeTools: string[];
+  runtimeCapabilities?: ReadonlySet<RuntimeCapability>;
+  runtimeId?: string;
   log?: LoggerLike;
-}): Promise<{ effectiveTools: string[]; permissionTier: string; permissionNote?: string }> {
+}): Promise<{ effectiveTools: string[]; permissionTier: string; permissionNote?: string; runtimeCapabilityNote?: string }> {
   const permissions = await loadWorkspacePermissions(opts.workspaceCwd, opts.log);
-  const effectiveTools = resolveTools(permissions, opts.runtimeTools);
+  const configuredTools = resolveTools(permissions, opts.runtimeTools);
+  let effectiveTools = configuredTools;
+  let runtimeCapabilityNote: string | undefined;
+
+  if (opts.runtimeCapabilities) {
+    const filtered = filterToolsByCapabilities(configuredTools, opts.runtimeCapabilities);
+    effectiveTools = filtered.tools;
+    if (filtered.dropped.length > 0) {
+      runtimeCapabilityNote =
+        `${opts.runtimeId ?? 'runtime'} lacks required capabilities for tools: ${filtered.dropped.join(', ')}`;
+      opts.log?.warn(
+        {
+          workspaceCwd: opts.workspaceCwd,
+          runtimeId: opts.runtimeId,
+          droppedTools: filtered.dropped,
+          supportedTools: filtered.tools,
+        },
+        'runtime capability filter dropped unsupported tools',
+      );
+    }
+  }
 
   // Audit: detect effective-tools changes between invocations.
   const fingerprint = effectiveTools.slice().sort().join(',');
@@ -144,6 +168,7 @@ export async function resolveEffectiveTools(opts: {
     effectiveTools,
     permissionTier: permissions?.tier ?? 'env',
     permissionNote: permissions?.note,
+    runtimeCapabilityNote,
   };
 }
 
