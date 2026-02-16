@@ -661,6 +661,7 @@ if (beadCtx) {
         log,
       );
       beadCtx.forumCountSync = beadForumCountSync;
+      beadForumCountSync.requestUpdate();
     }
 
     // Install forum guard before any async operations that touch the forum.
