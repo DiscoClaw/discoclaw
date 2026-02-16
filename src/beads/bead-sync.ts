@@ -226,7 +226,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
       let archivedThreads: Map<string, any> = new Map();
       try {
         const fetched = await forum.threads.fetchArchived();
-        archivedThreads = fetched.threads;
+        archivedThreads = new Map(fetched.threads);
       } catch (err) {
         log?.warn({ err }, 'bead-sync:phase5 failed to fetch archived threads');
         warnings++;
