@@ -5,7 +5,7 @@ import { bdUpdate } from '../beads/bd-cli.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
 import { collectRuntimeText } from './runtime-utils.js';
-import { auditPlanStructure, maxReviewNumber } from './audit-handler.js';
+import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -612,11 +612,12 @@ export class ForgeOrchestrator {
         throw new Error('Plan is approved — re-auditing would downgrade its status. Use `!plan audit` for a standalone audit instead.');
       }
 
-      // Structural pre-flight: reject plans with high-severity structural issues
+      // Structural pre-flight: reject plans with high or medium structural issues
       const structuralConcerns = auditPlanStructure(planContent);
-      const highSeverity = structuralConcerns.filter((c) => c.severity === 'high');
-      if (highSeverity.length > 0) {
-        const missing = highSeverity.map((c) => c.title).join(', ');
+      const structuralVerdict = deriveVerdict(structuralConcerns);
+      if (structuralVerdict.shouldLoop) {
+        const gating = structuralConcerns.filter((c) => c.severity === 'high' || c.severity === 'medium');
+        const missing = gating.map((c) => c.title).join(', ');
         throw new Error(`Plan has structural issues: ${missing}. Fix the plan file before re-auditing.`);
       }
 

@@ -98,7 +98,7 @@ export function auditPlanStructure(content: string): AuditConcern[] {
   return concerns;
 }
 
-function deriveVerdict(concerns: AuditConcern[]): AuditVerdict {
+export function deriveVerdict(concerns: AuditConcern[]): AuditVerdict {
   const hasHigh = concerns.some((c) => c.severity === 'high');
   const hasMedium = concerns.some((c) => c.severity === 'medium');
 

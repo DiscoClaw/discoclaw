@@ -1252,6 +1252,63 @@ describe('ForgeOrchestrator.resume()', () => {
     expect(result.error).toContain('Changes');
     expect(result.error).toContain('Testing');
   });
+
+  it('rejects plans with placeholder sections (medium structural)', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(tmpDir, makeMockRuntime([]));
+
+    // Plan has all required sections but Objective is placeholder text
+    const planContent = [
+      '# Plan: Placeholder Plan',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-test-001',
+      '**Created:** 2026-01-01',
+      '**Status:** REVIEW',
+      '**Project:** discoclaw',
+      '',
+      '---',
+      '',
+      '## Objective',
+      '',
+      '_(TODO)_',
+      '',
+      '## Scope',
+      '',
+      'In scope: everything related to testing.',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — Add bar function.',
+      '',
+      '## Risks',
+      '',
+      '- Low risk.',
+      '',
+      '## Testing',
+      '',
+      '- Unit tests for the new feature.',
+      '',
+      '---',
+      '',
+      '## Audit Log',
+      '',
+      '---',
+      '',
+      '## Implementation Notes',
+      '',
+      '_Filled in during/after implementation._',
+    ].join('\n');
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    const result = await orchestrator.resume('plan-001', filePath, 'Placeholder Plan', async () => {});
+
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('structural issues');
+    expect(result.error).toContain('Objective');
+  });
 });
 
 // ---------------------------------------------------------------------------
