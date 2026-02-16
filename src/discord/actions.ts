@@ -15,6 +15,12 @@ import { CRON_ACTION_TYPES, executeCronAction, cronActionsPromptSection } from '
 import type { CronActionRequest, CronContext } from './actions-crons.js';
 import { BOT_PROFILE_ACTION_TYPES, executeBotProfileAction, botProfileActionsPromptSection } from './actions-bot-profile.js';
 import type { BotProfileActionRequest } from './actions-bot-profile.js';
+import { FORGE_ACTION_TYPES, executeForgeAction, forgeActionsPromptSection } from './actions-forge.js';
+import type { ForgeActionRequest, ForgeContext } from './actions-forge.js';
+import { PLAN_ACTION_TYPES, executePlanAction, planActionsPromptSection } from './actions-plan.js';
+import type { PlanActionRequest, PlanContext } from './actions-plan.js';
+import { MEMORY_ACTION_TYPES, executeMemoryAction, memoryActionsPromptSection } from './actions-memory.js';
+import type { MemoryActionRequest, MemoryContext } from './actions-memory.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +43,9 @@ export type ActionCategoryFlags = {
   beads: boolean;
   crons: boolean;
   botProfile: boolean;
+  forge: boolean;
+  plan: boolean;
+  memory: boolean;
 };
 
 export type DiscordActionRequest =
@@ -47,13 +56,24 @@ export type DiscordActionRequest =
   | PollActionRequest
   | BeadActionRequest
   | CronActionRequest
-  | BotProfileActionRequest;
+  | BotProfileActionRequest
+  | ForgeActionRequest
+  | PlanActionRequest
+  | MemoryActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
   | { ok: false; error: string };
 
 import type { LoggerLike } from './action-types.js';
+
+export type SubsystemContexts = {
+  beadCtx?: BeadContext;
+  cronCtx?: CronContext;
+  forgeCtx?: ForgeContext;
+  planCtx?: PlanContext;
+  memoryCtx?: MemoryContext;
+};
 
 // ---------------------------------------------------------------------------
 // Valid types (union of all sub-module type sets)
@@ -69,6 +89,9 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.beads) for (const t of BEAD_ACTION_TYPES) types.add(t);
   if (flags.crons) for (const t of CRON_ACTION_TYPES) types.add(t);
   if (flags.botProfile) for (const t of BOT_PROFILE_ACTION_TYPES) types.add(t);
+  if (flags.forge) for (const t of FORGE_ACTION_TYPES) types.add(t);
+  if (flags.plan) for (const t of PLAN_ACTION_TYPES) types.add(t);
+  if (flags.memory) for (const t of MEMORY_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -202,9 +225,17 @@ export async function executeDiscordActions(
   actions: DiscordActionRequest[],
   ctx: ActionContext,
   log?: LoggerLike,
-  beadCtx?: BeadContext,
+  beadCtxOrSubs?: BeadContext | SubsystemContexts,
   cronCtx?: CronContext,
 ): Promise<DiscordActionResult[]> {
+  // Support both legacy positional args and new bag-style call.
+  let subs: SubsystemContexts;
+  if (beadCtxOrSubs && typeof beadCtxOrSubs === 'object' && 'beadCtx' in beadCtxOrSubs) {
+    subs = beadCtxOrSubs;
+  } else {
+    subs = { beadCtx: beadCtxOrSubs as BeadContext | undefined, cronCtx };
+  }
+
   const results: DiscordActionResult[] = [];
 
   for (const action of actions) {
@@ -222,19 +253,37 @@ export async function executeDiscordActions(
       } else if (POLL_ACTION_TYPES.has(action.type)) {
         result = await executePollAction(action as PollActionRequest, ctx);
       } else if (BEAD_ACTION_TYPES.has(action.type)) {
-        if (!beadCtx) {
+        if (!subs.beadCtx) {
           result = { ok: false, error: 'Beads subsystem not configured' };
         } else {
-          result = await executeBeadAction(action as BeadActionRequest, ctx, beadCtx);
+          result = await executeBeadAction(action as BeadActionRequest, ctx, subs.beadCtx);
         }
       } else if (CRON_ACTION_TYPES.has(action.type)) {
-        if (!cronCtx) {
+        if (!subs.cronCtx) {
           result = { ok: false, error: 'Cron subsystem not configured' };
         } else {
-          result = await executeCronAction(action as CronActionRequest, ctx, cronCtx);
+          result = await executeCronAction(action as CronActionRequest, ctx, subs.cronCtx);
         }
       } else if (BOT_PROFILE_ACTION_TYPES.has(action.type)) {
         result = await executeBotProfileAction(action as BotProfileActionRequest, ctx);
+      } else if (FORGE_ACTION_TYPES.has(action.type)) {
+        if (!subs.forgeCtx) {
+          result = { ok: false, error: 'Forge subsystem not configured' };
+        } else {
+          result = await executeForgeAction(action as ForgeActionRequest, ctx, subs.forgeCtx);
+        }
+      } else if (PLAN_ACTION_TYPES.has(action.type)) {
+        if (!subs.planCtx) {
+          result = { ok: false, error: 'Plan subsystem not configured' };
+        } else {
+          result = await executePlanAction(action as PlanActionRequest, ctx, subs.planCtx);
+        }
+      } else if (MEMORY_ACTION_TYPES.has(action.type)) {
+        if (!subs.memoryCtx) {
+          result = { ok: false, error: 'Memory subsystem not configured' };
+        } else {
+          result = await executeMemoryAction(action as MemoryActionRequest, ctx, subs.memoryCtx);
+        }
       } else {
         result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
       }
@@ -329,11 +378,23 @@ You can perform Discord server actions by including structured action blocks in 
     sections.push(botProfileActionsPromptSection());
   }
 
+  if (flags.forge) {
+    sections.push(forgeActionsPromptSection());
+  }
+
+  if (flags.plan) {
+    sections.push(planActionsPromptSection());
+  }
+
+  if (flags.memory) {
+    sections.push(memoryActionsPromptSection());
+  }
+
   sections.push(`### Rules
 - Only the action types listed above are supported.
 - Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
 - Action blocks are removed from the displayed message; results are appended automatically.
-- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, beadList, beadShow, cronList, cronShow) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
+- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, beadList, beadShow, cronList, cronShow, planList, planShow, memoryShow, forgeStatus) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
 - Include all needed actions in a single response when possible (e.g., a channelList and multiple channelDelete blocks together).
 
 ### Permissions
