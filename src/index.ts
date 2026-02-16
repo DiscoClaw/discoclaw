@@ -275,7 +275,7 @@ log.info({ botDisplayName }, 'resolved bot display name');
 
 // --- Load persisted scaffold state (forum IDs created on previous boots) ---
 const scaffoldStatePath = path.join(pidLockDir, 'system-scaffold.json');
-let scaffoldState: { guildId?: string; cronsForumId?: string; beadsForumId?: string } = {};
+let scaffoldState: { guildId?: string; systemCategoryId?: string; cronsForumId?: string; beadsForumId?: string } = {};
 try {
   const raw = await fs.readFile(scaffoldStatePath, 'utf8');
   const parsed = JSON.parse(raw);
@@ -284,6 +284,7 @@ try {
     if (guildId && typeof parsed.guildId === 'string' && parsed.guildId !== guildId) {
       log.warn({ savedGuild: parsed.guildId, currentGuild: guildId }, 'system-scaffold: guild mismatch, ignoring persisted forum IDs');
     } else {
+      if (typeof parsed.systemCategoryId === 'string') scaffoldState.systemCategoryId = parsed.systemCategoryId;
       if (typeof parsed.cronsForumId === 'string') scaffoldState.cronsForumId = parsed.cronsForumId;
       if (typeof parsed.beadsForumId === 'string') scaffoldState.beadsForumId = parsed.beadsForumId;
     }
@@ -575,6 +576,7 @@ if (system) {
   const newState: Record<string, string> = {};
   const resolvedGuild = guildId || system.guildId || '';
   if (resolvedGuild) newState.guildId = resolvedGuild;
+  if (system.systemCategoryId) newState.systemCategoryId = system.systemCategoryId;
   if (system.cronsForumId) newState.cronsForumId = system.cronsForumId;
   if (system.beadsForumId) newState.beadsForumId = system.beadsForumId;
   if (Object.keys(newState).length > 0) {

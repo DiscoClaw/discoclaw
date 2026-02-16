@@ -14,7 +14,7 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
       type: ch.type,
       parentId: ch.parentId ?? null,
       setParent: vi.fn(async function (this: any, pid: string) { this.parentId = pid; }),
-      edit: vi.fn(async function (this: any, opts: any) { if ('parent' in opts) this.parentId = opts.parent; }),
+      edit: vi.fn(async function (this: any, opts: any) { if ('parent' in opts) this.parentId = opts.parent; if ('name' in opts) this.name = opts.name; }),
     });
   }
 
@@ -27,7 +27,7 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
       type: opts.type,
       parentId: opts.parent ?? null,
       setParent: vi.fn(async function (this: any, pid: string) { this.parentId = pid; }),
-      edit: vi.fn(async function (this: any, o: any) { if ('parent' in o) this.parentId = o.parent; }),
+      edit: vi.fn(async function (this: any, o: any) { if ('parent' in o) this.parentId = o.parent; if ('name' in o) this.name = o.name; }),
     };
     cache.set(id, ch);
     return ch;
@@ -225,6 +225,84 @@ describe('ensureSystemScaffold', () => {
     const createCalls = guild.__create.mock.calls;
     const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'crons');
     expect(cronCreateCalls).toHaveLength(0);
+  });
+
+  it('reconciles name drift when channel found by existingId has a stale name', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: '1000000000000000001', name: 'crons ・ 3', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: '1000000000000000002', name: 'beads-6', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const res = await ensureSystemScaffold({
+      guild,
+      ensureBeads: true,
+      existingCronsId: '1000000000000000001',
+      existingBeadsId: '1000000000000000002',
+    }, log as any);
+    expect(res).not.toBeNull();
+    expect(res?.cronsForumId).toBe('1000000000000000001');
+    expect(res?.beadsForumId).toBe('1000000000000000002');
+
+    // Names should have been reconciled back to canonical.
+    const cronsCh = (guild.__cache as Map<string, any>).get('1000000000000000001');
+    const beadsCh = (guild.__cache as Map<string, any>).get('1000000000000000002');
+    expect(cronsCh.name).toBe('crons');
+    expect(beadsCh.name).toBe('beads');
+
+    // Should have logged name reconciliation.
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'crons', was: 'crons ・ 3' }),
+      expect.stringContaining('reconciled name'),
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'beads', was: 'beads-6' }),
+      expect.stringContaining('reconciled name'),
+    );
+  });
+
+  it('reconciles name drift when channel found by name-based lookup (stripped suffix)', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: 'crons-1', name: 'crons ・ 5', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const res = await ensureSystemScaffold({ guild, ensureBeads: false }, log as any);
+    expect(res).not.toBeNull();
+    expect(res?.cronsForumId).toBe('crons-1');
+
+    // Name should have been reconciled.
+    const cronsCh = (guild.__cache as Map<string, any>).get('crons-1');
+    expect(cronsCh.name).toBe('crons');
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'crons', was: 'crons ・ 5' }),
+      expect.stringContaining('reconciled name'),
+    );
+  });
+
+  it('does not reconcile name when it already matches canonical', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: '1000000000000000001', name: 'crons', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await ensureSystemScaffold({
+      guild,
+      ensureBeads: false,
+      existingCronsId: '1000000000000000001',
+    }, log as any);
+
+    // edit should not have been called for name reconciliation.
+    const cronsCh = (guild.__cache as Map<string, any>).get('1000000000000000001');
+    expect(cronsCh.edit).not.toHaveBeenCalledWith(expect.objectContaining({ name: expect.anything() }));
+    // Should not have logged name reconciliation.
+    const nameReconcileCalls = log.info.mock.calls.filter(
+      (c: any) => typeof c[1] === 'string' && c[1].includes('reconciled name'),
+    );
+    expect(nameReconcileCalls).toHaveLength(0);
   });
 });
 
