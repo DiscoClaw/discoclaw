@@ -35,6 +35,9 @@ export type DiscoclawConfig = {
   discordActionsBeads: boolean;
   discordActionsCrons: boolean;
   discordActionsBotProfile: boolean;
+  discordActionsForge: boolean;
+  discordActionsPlan: boolean;
+  discordActionsMemory: boolean;
 
   messageHistoryBudget: number;
   summaryEnabled: boolean;
@@ -314,6 +317,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsBeads = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BEADS', true);
   const discordActionsCrons = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_CRONS', true);
   const discordActionsBotProfile = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', false);
+  const discordActionsForge = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_FORGE', true);
+  const discordActionsPlan = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_PLAN', true);
+  const discordActionsMemory = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', true);
 
   if (!discordActionsEnabled) {
     const enabledCategories = [
@@ -325,6 +331,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       { name: 'DISCOCLAW_DISCORD_ACTIONS_BEADS', enabled: discordActionsBeads },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_CRONS', enabled: discordActionsCrons },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', enabled: discordActionsBotProfile },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_FORGE', enabled: discordActionsForge },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_PLAN', enabled: discordActionsPlan },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', enabled: discordActionsMemory },
     ]
       .filter((entry) => (env[entry.name] ?? '').trim().length > 0 && entry.enabled)
       .map((entry) => entry.name);
@@ -398,6 +407,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsBeads,
       discordActionsCrons,
       discordActionsBotProfile,
+      discordActionsForge,
+      discordActionsPlan,
+      discordActionsMemory,
 
       messageHistoryBudget: parseNonNegativeInt(env, 'DISCOCLAW_MESSAGE_HISTORY_BUDGET', 3000),
       summaryEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_ENABLED', true),

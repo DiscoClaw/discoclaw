@@ -22,6 +22,10 @@ import { CronRunControl } from './cron/run-control.js';
 import type { ActionCategoryFlags } from './discord/actions.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
+import type { ForgeContext } from './discord/actions-forge.js';
+import type { PlanContext } from './discord/actions-plan.js';
+import type { MemoryContext } from './discord/actions-memory.js';
+import { ForgeOrchestrator } from './discord/forge-commands.js';
 import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
 import { checkBdAvailable, bdList } from './beads/bd-cli.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
@@ -182,6 +186,9 @@ const discordActionsGuild = cfg.discordActionsGuild;
 const discordActionsModeration = cfg.discordActionsModeration;
 const discordActionsPolls = cfg.discordActionsPolls;
 const discordActionsBotProfile = cfg.discordActionsBotProfile;
+const discordActionsForge = cfg.discordActionsForge;
+const discordActionsPlan = cfg.discordActionsPlan;
+const discordActionsMemory = cfg.discordActionsMemory;
 const messageHistoryBudget = cfg.messageHistoryBudget;
 const summaryEnabled = cfg.summaryEnabled;
 const summaryModel = cfg.summaryModel;
@@ -501,8 +508,15 @@ const botParams = {
   // Enable beads/crons actions only after contexts are configured.
   discordActionsBeads: false,
   discordActionsCrons: false,
+  // Forge/plan/memory action flags — contexts are wired below after subsystem init.
+  discordActionsForge: discordActionsForge && forgeCommandsEnabled,
+  discordActionsPlan: discordActionsPlan && planCommandsEnabled,
+  discordActionsMemory: discordActionsMemory && durableMemoryEnabled,
   beadCtx: undefined as BeadContext | undefined,
   cronCtx: undefined as CronContext | undefined,
+  forgeCtx: undefined as ForgeContext | undefined,
+  planCtx: undefined as PlanContext | undefined,
+  memoryCtx: undefined as MemoryContext | undefined,
   messageHistoryBudget,
   summaryEnabled,
   summaryModel,
@@ -850,6 +864,63 @@ if (cronEnabled && effectiveCronForum) {
   );
 } else if (cronEnabled && !effectiveCronForum) {
   log.warn('DISCOCLAW_CRON_ENABLED=1 but no cron forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_CRON_FORUM); cron subsystem disabled');
+}
+
+// --- Forge / Plan / Memory action contexts ---
+{
+  const plansDir = path.join(workspaceCwd, 'plans');
+  const effectiveBeadsCwd = beadCtx?.beadsCwd ?? workspaceCwd;
+
+  if (forgeCommandsEnabled && discordActionsForge) {
+    botParams.forgeCtx = {
+      orchestratorFactory: () =>
+        new ForgeOrchestrator({
+          runtime: limitedRuntime,
+          auditorRuntime,
+          model: runtimeModel,
+          cwd: workspaceCwd,
+          workspaceCwd,
+          beadsCwd: effectiveBeadsCwd,
+          plansDir,
+          maxAuditRounds: forgeMaxAuditRounds,
+          progressThrottleMs: forgeProgressThrottleMs,
+          timeoutMs: forgeTimeoutMs,
+          drafterModel: forgeDrafterModel,
+          auditorModel: forgeAuditorModel,
+          log,
+        }),
+      plansDir,
+      workspaceCwd,
+      beadsCwd: effectiveBeadsCwd,
+      onProgress: async (msg) => {
+        // Action-initiated forges log progress rather than posting to a channel.
+        log.info({ msg }, 'forge:action:progress');
+      },
+      log,
+    };
+    log.info('forge:action context initialized');
+  }
+
+  if (planCommandsEnabled && discordActionsPlan) {
+    botParams.planCtx = {
+      plansDir,
+      workspaceCwd,
+      beadsCwd: effectiveBeadsCwd,
+      log,
+    };
+    log.info('plan:action context initialized');
+  }
+
+  if (durableMemoryEnabled && discordActionsMemory) {
+    botParams.memoryCtx = {
+      userId: 'action',  // Action-initiated memory ops use a synthetic user ID.
+      durableDataDir,
+      durableMaxItems,
+      durableInjectMaxChars,
+      log,
+    };
+    log.info('memory:action context initialized');
+  }
 }
 
 if (reactionHandlerEnabled) {
