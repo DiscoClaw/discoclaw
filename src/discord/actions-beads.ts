@@ -266,11 +266,12 @@ export async function executeBeadAction(
     }
 
     case 'beadList': {
+      // Default to 50 for interactive queries to avoid unbounded prompt payloads.
       const beads = await bdList(
         {
           status: action.status,
           label: action.label,
-          limit: action.limit,
+          limit: action.limit ?? 50,
         },
         beadCtx.beadsCwd,
       );

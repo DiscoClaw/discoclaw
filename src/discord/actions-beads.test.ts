@@ -388,6 +388,40 @@ describe('executeBeadAction', () => {
     expect((result as any).summary).toContain('ws-002');
   });
 
+  it('beadList defaults to limit 50 when no limit provided', async () => {
+    const { bdList } = await import('../beads/bd-cli.js');
+    const mockBdList = bdList as ReturnType<typeof vi.fn>;
+    mockBdList.mockClear();
+
+    await executeBeadAction(
+      { type: 'beadList', status: 'all' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+
+    expect(mockBdList).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 50 }),
+      expect.any(String),
+    );
+  });
+
+  it('beadList respects explicit limit', async () => {
+    const { bdList } = await import('../beads/bd-cli.js');
+    const mockBdList = bdList as ReturnType<typeof vi.fn>;
+    mockBdList.mockClear();
+
+    await executeBeadAction(
+      { type: 'beadList', status: 'all', limit: 5 },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+
+    expect(mockBdList).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 5 }),
+      expect.any(String),
+    );
+  });
+
   it('beadSync returns extended sync summary', async () => {
     const result = await executeBeadAction(
       { type: 'beadSync' },
