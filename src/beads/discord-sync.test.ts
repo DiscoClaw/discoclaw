@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage, closeBeadThread, isBeadThreadAlreadyClosed, isThreadArchived, reloadTagMapInPlace, getStatusTagIds, buildAppliedTagsWithStatus, updateBeadThreadTags, createBeadThread } from './discord-sync.js';
+import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage, closeBeadThread, isBeadThreadAlreadyClosed, isThreadArchived, reloadTagMapInPlace, getStatusTagIds, buildAppliedTagsWithStatus, updateBeadThreadTags, createBeadThread, shortBeadId, beadIdToken, extractShortIdFromThreadName } from './discord-sync.js';
 import type { BeadData, TagMap } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -769,5 +769,88 @@ describe('isThreadArchived', () => {
     };
     const result = await isThreadArchived(makeClient(thread), '123');
     expect(result).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shortBeadId
+// ---------------------------------------------------------------------------
+
+describe('shortBeadId', () => {
+  it('strips project prefix', () => {
+    expect(shortBeadId('ws-001')).toBe('001');
+  });
+
+  it('returns full string when no dash', () => {
+    expect(shortBeadId('001')).toBe('001');
+  });
+
+  it('strips only first dash segment', () => {
+    expect(shortBeadId('my-proj-042')).toBe('proj-042');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// beadIdToken
+// ---------------------------------------------------------------------------
+
+describe('beadIdToken', () => {
+  it('wraps short ID in brackets', () => {
+    expect(beadIdToken('ws-001')).toBe('[001]');
+  });
+
+  it('works without prefix', () => {
+    expect(beadIdToken('042')).toBe('[042]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractShortIdFromThreadName
+// ---------------------------------------------------------------------------
+
+describe('extractShortIdFromThreadName', () => {
+  it('extracts ID from open emoji thread name', () => {
+    expect(extractShortIdFromThreadName('\u{1F7E2} [001] Fix login bug')).toBe('001');
+  });
+
+  it('extracts ID from in_progress emoji thread name', () => {
+    expect(extractShortIdFromThreadName('\u{1F7E1} [042] Add feature')).toBe('042');
+  });
+
+  it('extracts ID from blocked emoji thread name (multi-codepoint ⚠️)', () => {
+    expect(extractShortIdFromThreadName('\u26A0\uFE0F [007] Blocked task')).toBe('007');
+  });
+
+  it('extracts ID from closed emoji thread name (multi-codepoint ☑️)', () => {
+    expect(extractShortIdFromThreadName('\u2611\uFE0F [123] Done task')).toBe('123');
+  });
+
+  it('returns null for non-bead thread name', () => {
+    expect(extractShortIdFromThreadName('Bug [123] some issue')).toBeNull();
+  });
+
+  it('returns null for empty string', () => {
+    expect(extractShortIdFromThreadName('')).toBeNull();
+  });
+
+  it('returns null when bracket is not at start after emoji', () => {
+    expect(extractShortIdFromThreadName('General discussion about [001]')).toBeNull();
+  });
+
+  it('handles no space between emoji and bracket', () => {
+    expect(extractShortIdFromThreadName('\u{1F7E2}[001] Test')).toBe('001');
+  });
+
+  it('handles multiple spaces between emoji and bracket', () => {
+    expect(extractShortIdFromThreadName('\u{1F7E2}  [001] Test')).toBe('001');
+  });
+
+  it('returns null for non-numeric bracket content', () => {
+    expect(extractShortIdFromThreadName('\u{1F7E2} [abc] Test')).toBeNull();
+  });
+
+  it('roundtrips with buildThreadName', () => {
+    const name = buildThreadName('ws-085', 'Plan execution', 'in_progress');
+    expect(extractShortIdFromThreadName(name)).toBe('085');
   });
 });
