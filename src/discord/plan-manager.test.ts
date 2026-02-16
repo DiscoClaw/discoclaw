@@ -232,6 +232,24 @@ describe('extractFilePaths', () => {
     const section = '#### `src/foo.ts`\n\n- `src/foo.ts` — same file again';
     expect(extractFilePaths(section)).toEqual(['src/foo.ts']);
   });
+
+  it('extracts bold-wrapped backtick paths in list items', () => {
+    const section = '- **`src/index.ts`** (lines ~622–691) — Reorder\n- **`src/beads/initialize.ts`** — Two options';
+    expect(extractFilePaths(section)).toEqual([
+      'src/index.ts',
+      'src/beads/initialize.ts',
+    ]);
+  });
+
+  it('extracts bold-wrapped backtick paths in headings', () => {
+    const section = '#### **`src/discord/forge-commands.ts`**\n\nSome changes.';
+    expect(extractFilePaths(section)).toEqual(['src/discord/forge-commands.ts']);
+  });
+
+  it('extracts italic-wrapped backtick paths', () => {
+    const section = '- *`src/foo.ts`* — italic wrapped';
+    expect(extractFilePaths(section)).toEqual(['src/foo.ts']);
+  });
 });
 
 // ---------------------------------------------------------------------------
