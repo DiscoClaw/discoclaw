@@ -5,6 +5,7 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'channelList',
   'channelInfo',
   'threadListArchived',
+  'forumTagList',
   // Messaging
   'readMessages',
   'fetchMessage',
