@@ -195,6 +195,10 @@ const durableInjectMaxChars = cfg.durableInjectMaxChars;
 const durableMaxItems = cfg.durableMaxItems;
 const memoryCommandsEnabled = cfg.memoryCommandsEnabled;
 const planCommandsEnabled = cfg.planCommandsEnabled;
+const planPhasesEnabled = cfg.planPhasesEnabled;
+const planPhaseMaxContextFiles = cfg.planPhaseMaxContextFiles;
+const planPhaseTimeoutMs = cfg.planPhaseTimeoutMs;
+const planPhaseMaxAuditFixAttempts = cfg.planPhaseMaxAuditFixAttempts;
 const forgeCommandsEnabled = cfg.forgeCommandsEnabled;
 const forgeMaxAuditRounds = cfg.forgeMaxAuditRounds;
 const forgeDrafterModel = cfg.forgeDrafterModel;
@@ -505,6 +509,10 @@ const botParams = {
   durableMaxItems,
   memoryCommandsEnabled,
   planCommandsEnabled,
+  planPhasesEnabled,
+  planPhaseMaxContextFiles,
+  planPhaseTimeoutMs,
+  planPhaseMaxAuditFixAttempts,
   forgeCommandsEnabled,
   forgeMaxAuditRounds,
   forgeDrafterModel,
