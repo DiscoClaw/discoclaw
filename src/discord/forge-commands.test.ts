@@ -157,24 +157,44 @@ describe('parseForgeCommand', () => {
 // ---------------------------------------------------------------------------
 
 describe('parseAuditVerdict', () => {
-  it('text containing "Severity: high" -> high, shouldLoop', () => {
-    const text = '**Concern 1: Missing error handling**\n**Severity: high**\n\n**Verdict:** Needs revision.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'high', shouldLoop: true });
+  it('text containing "Severity: blocking" -> blocking, shouldLoop', () => {
+    const text = '**Concern 1: Missing error handling**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
   });
 
-  it('text containing "Severity: medium" -> medium, shouldLoop', () => {
+  it('text containing "Severity: medium" -> medium, no loop', () => {
     const text = '**Concern 1: Unclear scope**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
   });
 
-  it('text containing only "Severity: low" -> low, no loop', () => {
+  it('text containing "Severity: minor" -> minor, no loop', () => {
+    const text = '**Concern 1: Minor naming**\n**Severity: minor**\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'minor', shouldLoop: false });
+  });
+
+  it('text containing "Severity: suggestion" -> suggestion, no loop', () => {
+    const text = '**Concern 1: Future idea**\n**Severity: suggestion**\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'suggestion', shouldLoop: false });
+  });
+
+  it('backward compat: "Severity: high" -> blocking, shouldLoop', () => {
+    const text = '**Concern 1: Missing error handling**\n**Severity: high**\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('backward compat: "Severity: HIGH" (uppercase) -> blocking, shouldLoop', () => {
+    const text = '**Concern 1: Missing error handling**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('backward compat: "Severity: low" -> minor, no loop', () => {
     const text = '**Concern 1: Minor naming**\n**Severity: low**\n\n**Verdict:** Ready to approve.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'minor', shouldLoop: false });
   });
 
-  it('"Ready to approve" with no severity markers -> low, no loop', () => {
+  it('"Ready to approve" with no severity markers -> minor, no loop', () => {
     const text = 'No concerns found.\n\n**Verdict:** Ready to approve.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'minor', shouldLoop: false });
   });
 
   it('empty text -> none, no loop', () => {
@@ -192,54 +212,128 @@ describe('parseAuditVerdict', () => {
     });
   });
 
-  it('high takes precedence over medium', () => {
-    const text = '**Severity: medium**\n**Severity: high**\n**Verdict:** Needs revision.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'high', shouldLoop: true });
+  it('blocking takes precedence over medium', () => {
+    const text = '**Severity: medium**\n**Severity: blocking**\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('medium takes precedence over minor and suggestion', () => {
+    const text = '**Severity: minor**\n**Severity: medium**\n**Severity: suggestion**\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
   });
 
   it('detects severity in markdown table rows (without fallback)', () => {
-    // Table where severity is bare bold in data cells — no "Severity:" label prefix.
-    // Verdict is "Ready to approve" so fallback would give low/no-loop — only
-    // direct bold-keyword detection should catch the medium.
-    const text = '| # | Concern | Severity |\n|---|---------|----------|\n| 1 | Missing tests | **medium** |\n| 2 | Minor naming | **low** |\n\n**Verdict:** Ready to approve.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+    const text = '| # | Concern | Severity |\n|---|---------|----------|\n| 1 | Missing tests | **medium** |\n| 2 | Minor naming | **minor** |\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
   });
 
   it('detects severity in table cells without bold formatting', () => {
     const text = '| Concern | Rating |\n|---|---|\n| Missing tests | medium |\n\n**Verdict:** Ready to approve.';
-    // "medium" inside a table cell (| medium |) is detected via tableCellSeverity
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
+  });
+
+  it('detects blocking severity in table cells', () => {
+    const text = '| Concern | Rating |\n|---|---|\n| SQL injection | blocking |\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
   });
 
   it('detects severity in table header column', () => {
     const text = '| Concern | Severity |\n|---|---|\n| Missing tests | Severity: medium |\n\n**Verdict:** Needs revision.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
   });
 
   it('severity markers win over contradictory verdict text', () => {
-    // Table has **high** but verdict says "Ready to approve" — markers should win
+    const text = '| # | Concern | Severity |\n|---|---------|----------|\n| 1 | SQL injection | **blocking** |\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('backward compat: table with **high** maps to blocking', () => {
     const text = '| # | Concern | Severity |\n|---|---------|----------|\n| 1 | SQL injection | **high** |\n\n**Verdict:** Ready to approve.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'high', shouldLoop: true });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
   });
 
   it('falls back to "Needs revision" verdict when no severity markers present', () => {
     const text = 'Some concerns found.\n\n**Verdict:** Needs revision.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
   });
 
   it('falls back to "Ready to approve" verdict when no severity markers present', () => {
     const text = 'Minor things but overall good.\n\nVerdict: Ready to approve.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'minor', shouldLoop: false });
   });
 
   it('does not false-positive on "high" in prose without formatting', () => {
     const text = 'The code quality is high.\n\n**Verdict:** Ready to approve.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'minor', shouldLoop: false });
   });
 
   it('does not false-positive on bold "high" in prose without severity marker', () => {
     const text = '**Concern 1: Throughput concerns**\nExpected load is **high** during peak windows.\n\n**Verdict:** Ready to approve.';
-    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'minor', shouldLoop: false });
+  });
+
+  it('does not false-positive on "blocking" in prose without severity marker', () => {
+    const text = '**Concern 1: I/O pattern**\nUses blocking I/O for file reads.\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'minor', shouldLoop: false });
+  });
+
+  // --- Legacy Concern N (severity) format tests ---
+
+  it('legacy format: "Concern 1 (high)" with no Severity label -> blocking, shouldLoop', () => {
+    const text = '**Concern 1 (high): Missing validation**\nDetails here.\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('legacy format: "Concern 1 (medium)" with no Severity label -> medium, no loop', () => {
+    const text = '**Concern 1 (medium): Edge case missing**\nDetails here.\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
+  });
+
+  it('legacy format: "Concern 1 (low)" with no Severity label -> minor, no loop', () => {
+    const text = '**Concern 1 (low): Naming issue**\nDetails here.\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'minor', shouldLoop: false });
+  });
+
+  it('legacy format: "Concern 1 (blocking)" with no Severity label -> blocking, shouldLoop', () => {
+    const text = '**Concern 1 (blocking): Security flaw**\nDetails here.\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('mixed format: "Severity: medium" + "Concern 2 (high)" -> blocking, shouldLoop', () => {
+    const text = '**Concern 1: Issue A**\n**Severity: medium**\n\n**Concern 2 (high): Issue B**\nDetails.\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('mixed format: "Severity: medium" + "Concern 2 (minor)" -> medium, no loop', () => {
+    const text = '**Concern 1: Issue A**\n**Severity: medium**\n\n**Concern 2 (minor): Issue B**\nDetails.\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
+  });
+
+  it('legacy format: "**Item count mismatch (medium):**" -> medium, no loop', () => {
+    const text = '**Item count mismatch (medium):**\nExpected 5, got 3.\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
+  });
+
+  // --- Precedence tests: severity markers vs verdict text ---
+
+  it('precedence: "Severity: medium" + "Needs revision" -> medium, no loop (severity markers win)', () => {
+    const text = '**Concern 1: Issue**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
+  });
+
+  it('precedence: "Severity: blocking" + "Ready to approve" -> blocking, shouldLoop (severity markers win)', () => {
+    const text = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('precedence: "Severity: minor" + "Needs revision" -> minor, no loop (severity markers win)', () => {
+    const text = '**Concern 1: Issue**\n**Severity: minor**\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'minor', shouldLoop: false });
+  });
+
+  it('precedence: "Severity: medium" + "Severity: minor" + "Needs revision" -> medium, no loop', () => {
+    const text = '**Concern 1: Issue A**\n**Severity: medium**\n\n**Concern 2: Issue B**\n**Severity: minor**\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
   });
 });
 
@@ -258,11 +352,20 @@ describe('buildDrafterPrompt', () => {
 });
 
 describe('buildAuditorPrompt', () => {
-  it('includes plan content and structured instructions', () => {
+  it('includes plan content and structured instructions with new severity vocabulary', () => {
     const prompt = buildAuditorPrompt('# Plan: Test\n\n## Objective\nDo stuff.', 1);
     expect(prompt).toContain('# Plan: Test');
-    expect(prompt).toContain('Severity: high | medium | low');
+    expect(prompt).toContain('blocking | medium | minor | suggestion');
+    expect(prompt).not.toContain('Severity: high | medium | low');
     expect(prompt).toContain('audit round 1');
+  });
+
+  it('includes severity level definitions', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    expect(prompt).toContain('Correctness bugs, security issues, architectural flaws');
+    expect(prompt).toContain('Substantive improvements');
+    expect(prompt).toContain('Small issues: naming, style');
+    expect(prompt).toContain('Ideas for future improvement');
   });
 
   it('includes project context when provided', () => {
@@ -322,6 +425,12 @@ describe('buildRevisionPrompt', () => {
   it('includes instruction to preserve prior resolutions', () => {
     const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
     expect(prompt).toContain('Preserve resolutions from prior audit rounds');
+  });
+
+  it('references blocking severity concerns (not high and medium)', () => {
+    const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
+    expect(prompt).toContain('blocking severity concerns');
+    expect(prompt).not.toContain('high and medium severity');
   });
 });
 
@@ -454,7 +563,7 @@ describe('appendAuditRound', () => {
   ].join('\n');
 
   it('inserts audit section before Implementation Notes', () => {
-    const verdict = { maxSeverity: 'low' as const, shouldLoop: false };
+    const verdict = { maxSeverity: 'minor' as const, shouldLoop: false };
     const result = appendAuditRound(basePlan, 1, 'All good.', verdict);
     expect(result).toContain('### Review 1');
     expect(result).toContain('All good.');
@@ -467,7 +576,7 @@ describe('appendAuditRound', () => {
 
   it('appends at end when no Implementation Notes section exists', () => {
     const plan = '# Plan: Test\n\n## Audit Log\n';
-    const verdict = { maxSeverity: 'high' as const, shouldLoop: true };
+    const verdict = { maxSeverity: 'blocking' as const, shouldLoop: true };
     const result = appendAuditRound(plan, 2, 'Needs work.', verdict);
     expect(result).toContain('### Review 2');
     expect(result).toContain('Needs work.');
@@ -503,15 +612,15 @@ describe('ForgeOrchestrator', () => {
     expect(result.planSummary).toContain('plan-001');
   });
 
-  it('completes in 2 rounds when first audit has medium concerns', async () => {
+  it('completes in 2 rounds when first audit has blocking concerns', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
-    const auditMedium = '**Concern 1: Missing details**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    const auditBlocking = '**Concern 1: Missing details**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
     const revisedPlan = draftPlan; // Same structure, orchestrator handles merge
     const auditClean = '**Verdict:** Ready to approve.';
 
-    // Draft -> Audit (medium) -> Revise -> Audit (clean)
-    const runtime = makeMockRuntime([draftPlan, auditMedium, revisedPlan, auditClean]);
+    // Draft -> Audit (blocking) -> Revise -> Audit (clean)
+    const runtime = makeMockRuntime([draftPlan, auditBlocking, revisedPlan, auditClean]);
     const opts = await baseOpts(tmpDir, runtime);
     const orchestrator = new ForgeOrchestrator(opts);
 
@@ -522,14 +631,36 @@ describe('ForgeOrchestrator', () => {
 
     expect(result.rounds).toBe(2);
     expect(result.reachedMaxRounds).toBe(false);
-    expect(progress.some((p) => p.includes('medium concerns'))).toBe(true);
+    expect(progress.some((p) => p.includes('blocking concerns'))).toBe(true);
     expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
   });
 
-  it('stops at max rounds when audit always returns high concerns', async () => {
+  it('medium severity auto-approves without revision', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditMedium = '**Concern 1: Missing details**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+
+    // Draft -> Audit (medium) -> should auto-approve (no revision)
+    const runtime = makeMockRuntime([draftPlan, auditMedium]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.rounds).toBe(1);
+    expect(result.reachedMaxRounds).toBe(false);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+    // Should NOT include revision progress
+    expect(progress.some((p) => p.includes('Revising'))).toBe(false);
+  });
+
+  it('stops at max rounds when audit always returns blocking concerns', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
-    const auditHigh = '**Concern 1: Fundamental flaw**\n**Severity: high**\n\n**Verdict:** Needs revision.';
+    const auditHigh = '**Concern 1: Fundamental flaw**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
 
     // 3 rounds max: draft, audit, revise, audit, revise, audit = 6 runtime calls
     const responses: string[] = [];
@@ -640,11 +771,11 @@ describe('ForgeOrchestrator', () => {
   it('cancel stops the forge between phases', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
-    const auditMedium = '**Concern 1: Issue**\n**Severity: medium**\n**Verdict:** Needs revision.';
+    const auditBlocking = '**Concern 1: Issue**\n**Severity: blocking**\n**Verdict:** Needs revision.';
     const revisedPlan = draftPlan;
     const auditClean = '**Verdict:** Ready to approve.';
 
-    const runtime = makeMockRuntime([draftPlan, auditMedium, revisedPlan, auditClean]);
+    const runtime = makeMockRuntime([draftPlan, auditBlocking, revisedPlan, auditClean]);
     const opts = await baseOpts(tmpDir, runtime);
     const orchestrator = new ForgeOrchestrator(opts);
 
@@ -652,7 +783,7 @@ describe('ForgeOrchestrator', () => {
     // Cancel after the first audit
     const result = await orchestrator.run('Test', async (msg) => {
       progress.push(msg);
-      if (msg.includes('medium concerns')) {
+      if (msg.includes('blocking concerns')) {
         orchestrator.requestCancel();
       }
     });
@@ -978,14 +1109,14 @@ describe('ForgeOrchestrator.resume()', () => {
 
   it('handles audit-then-revise loop', async () => {
     const tmpDir = await makeTmpDir();
-    const auditMedium = '**Concern 1: Issue**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    const auditBlocking = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
     const revisedPlan = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const auditClean = '**Verdict:** Ready to approve.';
 
     const opts = await baseOpts(tmpDir, makeMockRuntime([
-      auditMedium,  // first audit
-      revisedPlan,  // revision
-      auditClean,   // second audit
+      auditBlocking,  // first audit
+      revisedPlan,    // revision
+      auditClean,     // second audit
     ]));
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
@@ -1002,11 +1133,11 @@ describe('ForgeOrchestrator.resume()', () => {
 
   it('respects cancel', async () => {
     const tmpDir = await makeTmpDir();
-    const auditMedium = '**Concern 1: Issue**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    const auditBlocking = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
     const revisedPlan = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const auditClean = '**Verdict:** Ready to approve.';
 
-    const opts = await baseOpts(tmpDir, makeMockRuntime([auditMedium, revisedPlan, auditClean]));
+    const opts = await baseOpts(tmpDir, makeMockRuntime([auditBlocking, revisedPlan, auditClean]));
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -1014,7 +1145,7 @@ describe('ForgeOrchestrator.resume()', () => {
 
     const orchestrator = new ForgeOrchestrator(opts);
     const result = await orchestrator.resume('plan-001', filePath, 'Test Plan', async (msg) => {
-      if (msg.includes('medium concerns')) {
+      if (msg.includes('blocking concerns')) {
         orchestrator.requestCancel();
       }
     });
@@ -1121,6 +1252,63 @@ describe('ForgeOrchestrator.resume()', () => {
     expect(result.error).toContain('Changes');
     expect(result.error).toContain('Testing');
   });
+
+  it('rejects plans with placeholder sections (medium structural)', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(tmpDir, makeMockRuntime([]));
+
+    // Plan has all required sections but Objective is placeholder text
+    const planContent = [
+      '# Plan: Placeholder Plan',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-test-001',
+      '**Created:** 2026-01-01',
+      '**Status:** REVIEW',
+      '**Project:** discoclaw',
+      '',
+      '---',
+      '',
+      '## Objective',
+      '',
+      '_(TODO)_',
+      '',
+      '## Scope',
+      '',
+      'In scope: everything related to testing.',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — Add bar function.',
+      '',
+      '## Risks',
+      '',
+      '- Low risk.',
+      '',
+      '## Testing',
+      '',
+      '- Unit tests for the new feature.',
+      '',
+      '---',
+      '',
+      '## Audit Log',
+      '',
+      '---',
+      '',
+      '## Implementation Notes',
+      '',
+      '_Filled in during/after implementation._',
+    ].join('\n');
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    const result = await orchestrator.resume('plan-001', filePath, 'Placeholder Plan', async () => {});
+
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('structural issues');
+    expect(result.error).toContain('Objective');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1207,12 +1395,12 @@ describe('Forge session keys', () => {
   it('revision step reuses drafter session key', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
-    const auditMedium = '**Concern 1: Missing details**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    const auditBlocking = '**Concern 1: Missing details**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
     const revisedPlan = draftPlan;
     const auditClean = '**Verdict:** Ready to approve.';
 
-    // Draft -> Audit (medium) -> Revise -> Audit (clean)
-    const { runtime, invocations } = makeCaptureRuntime([draftPlan, auditMedium, revisedPlan, auditClean]);
+    // Draft -> Audit (blocking) -> Revise -> Audit (clean)
+    const { runtime, invocations } = makeCaptureRuntime([draftPlan, auditBlocking, revisedPlan, auditClean]);
     const opts = await baseOpts(tmpDir, runtime);
     const orchestrator = new ForgeOrchestrator(opts);
 

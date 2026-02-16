@@ -197,6 +197,41 @@ describe('extractFilePaths', () => {
       'src/config.ts',
     ]);
   });
+
+  it('extracts paths from heading format (h4)', () => {
+    const section = '#### `src/discord/forge-commands.ts`\n\nSome changes here.\n\n#### `src/discord/audit-handler.ts`\n\nMore changes.';
+    expect(extractFilePaths(section)).toEqual([
+      'src/discord/forge-commands.ts',
+      'src/discord/audit-handler.ts',
+    ]);
+  });
+
+  it('extracts paths from mixed list and heading formats', () => {
+    const section = [
+      '#### `src/discord/forge-commands.ts`',
+      '',
+      '- `AuditVerdict` type: changes',
+      '- `parseAuditVerdict()` updates',
+      '',
+      '#### `src/discord/plan-manager.ts`',
+      '',
+      '- `buildPhasePrompt()` audit section',
+    ].join('\n');
+    expect(extractFilePaths(section)).toEqual([
+      'src/discord/forge-commands.ts',
+      'src/discord/plan-manager.ts',
+    ]);
+  });
+
+  it('rejects non-file-path headings', () => {
+    const section = '#### `PlanPhase` type\n\n#### `src/foo.ts`\n\n#### `PLAN_PHASES_ENABLED`';
+    expect(extractFilePaths(section)).toEqual(['src/foo.ts']);
+  });
+
+  it('deduplicates across list and heading formats', () => {
+    const section = '#### `src/foo.ts`\n\n- `src/foo.ts` — same file again';
+    expect(extractFilePaths(section)).toEqual(['src/foo.ts']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -614,6 +649,27 @@ describe('buildPhasePrompt', () => {
     const prompt = buildPhasePrompt(phase, SAMPLE_PLAN);
     expect(prompt).not.toContain('Do not modify workspace');
     expect(prompt).not.toContain('workspace exclusion');
+  });
+
+  it('audit phase prompt uses new severity vocabulary', () => {
+    const auditPhase: PlanPhase = { ...phase, kind: 'audit' };
+    const prompt = buildPhasePrompt(auditPhase, SAMPLE_PLAN);
+    expect(prompt).toContain('blocking | medium | minor | suggestion');
+    expect(prompt).not.toContain('Severity: high | medium | low');
+  });
+
+  it('audit phase prompt includes severity definitions', () => {
+    const auditPhase: PlanPhase = { ...phase, kind: 'audit' };
+    const prompt = buildPhasePrompt(auditPhase, SAMPLE_PLAN);
+    expect(prompt).toContain('Correctness bugs, security issues, architectural flaws');
+  });
+
+  it('audit phase prompt uses blocking-only verdict logic', () => {
+    const auditPhase: PlanPhase = { ...phase, kind: 'audit' };
+    const prompt = buildPhasePrompt(auditPhase, SAMPLE_PLAN);
+    expect(prompt).toContain('if any blocking concerns');
+    expect(prompt).toContain('if no blocking concerns');
+    expect(prompt).not.toContain('if any high/medium concerns');
   });
 });
 
@@ -1388,18 +1444,24 @@ describe('executePhase audit verdict', () => {
     };
   }
 
-  it('audit phase with HIGH severity returns audit_failed', async () => {
+  it('audit phase with HIGH severity returns audit_failed (backward compat)', async () => {
     const auditOutput = '**Concern 1: Missing error handling**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
     const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
     expect(result.status).toBe('audit_failed');
     if (result.status === 'audit_failed') {
-      expect(result.verdict.maxSeverity).toBe('high');
+      expect(result.verdict.maxSeverity).toBe('blocking');
       expect(result.verdict.shouldLoop).toBe(true);
     }
   });
 
-  it('audit phase with only LOW severity returns done', async () => {
-    const auditOutput = '**Concern 1: Minor nitpick**\n**Severity: low**\n\n**Verdict:** Ready to approve.';
+  it('audit phase with only minor severity returns done', async () => {
+    const auditOutput = '**Concern 1: Minor nitpick**\n**Severity: minor**\n\n**Verdict:** Ready to approve.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('done');
+  });
+
+  it('audit phase with only medium severity returns done (auto-approves)', async () => {
+    const auditOutput = '**Concern 1: Missing edge case**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
     const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
     expect(result.status).toBe('done');
   });
@@ -1509,24 +1571,38 @@ describe('runNextPhase audit verdict', () => {
     writePhasesFile(phasesPath, phases);
   }
 
-  it('audit phase with HIGH severity returns audit_failed result', async () => {
+  it('audit phase with blocking severity returns audit_failed result', async () => {
     const planPath = path.join(plansDir, 'plan-011-test.md');
     await fs.writeFile(planPath, SAMPLE_PLAN);
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writeAuditPhases(phasesPath, planPath);
 
-    const auditOutput = '**Concern 1: Missing error handling**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+    const auditOutput = '**Concern 1: Missing error handling**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
     const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(auditOutput)), onProgress);
 
     expect(result.result).toBe('audit_failed');
     if (result.result === 'audit_failed') {
-      expect(result.verdict.maxSeverity).toBe('high');
+      expect(result.verdict.maxSeverity).toBe('blocking');
     }
 
     // Verify on-disk status is 'failed' (not 'audit_failed')
     const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
     const auditPhase = updated.phases.find(p => p.id === 'phase-2')!;
     expect(auditPhase.status).toBe('failed');
+  });
+
+  it('audit phase with medium-only severity returns done (auto-approves)', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writeAuditPhases(phasesPath, planPath);
+
+    const auditOutput = '**Concern 1: Missing edge case**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(auditOutput)), onProgress);
+
+    expect(result.result).toBe('done');
+    // No fix attempt messages — medium auto-approves
+    expect(progressMsgs.some(m => m.includes('Fix attempt'))).toBe(false);
   });
 
   it('failed audit phase can be retried (not blocked by modifiedFiles check)', async () => {
@@ -1574,10 +1650,10 @@ describe('buildAuditFixPrompt', () => {
   });
 
   it('includes audit findings', () => {
-    const findings = '**Concern 1: Missing error handling**\n**Severity: HIGH**';
+    const findings = '**Concern 1: Missing error handling**\n**Severity: blocking**';
     const prompt = buildAuditFixPrompt(SAMPLE_PLAN, findings, contextFiles, modifiedFiles, 1, 2);
     expect(prompt).toContain('Missing error handling');
-    expect(prompt).toContain('Severity: HIGH');
+    expect(prompt).toContain('Severity: blocking');
   });
 
   it('lists context files', () => {
@@ -1703,7 +1779,7 @@ describe('runNextPhase audit fix loop', () => {
         callCount++;
         if (callCount === 1) {
           // First audit: fails
-          const text = '**Concern 1: Missing validation**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          const text = '**Concern 1: Missing validation**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
         } else if (callCount === 2) {
@@ -1779,7 +1855,7 @@ describe('runNextPhase audit fix loop', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writeAuditPhases(phasesPath);
 
-    const auditOutput = '**Concern 1: Issue**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+    const auditOutput = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
 
     const opts: PhaseExecutionOpts = {
       runtime: makeSuccessRuntime(auditOutput),
@@ -1807,7 +1883,7 @@ describe('runNextPhase audit fix loop', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writeAuditPhases(phasesPath);
 
-    const auditOutput = '**Concern 1: Issue**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+    const auditOutput = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
 
     const opts: PhaseExecutionOpts = {
       runtime: makeSuccessRuntime(auditOutput),
@@ -1841,7 +1917,7 @@ describe('runNextPhase audit fix loop', () => {
         callCount++;
         if (callCount === 1) {
           // First audit: fails
-          const text = '**Concern 1: Problem**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          const text = '**Concern 1: Problem**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
         } else {
@@ -1881,7 +1957,7 @@ describe('runNextPhase audit fix loop', () => {
         callCount++;
         if (callCount === 1) {
           // Initial audit: fails
-          const text = '**Concern 1: Missing validation**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          const text = '**Concern 1: Missing validation**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
         } else if (callCount === 2) {
@@ -1891,7 +1967,7 @@ describe('runNextPhase audit fix loop', () => {
           yield { type: 'text_final', text };
         } else if (callCount === 3) {
           // First re-audit: still fails
-          const text = '**Concern 1: Still broken**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          const text = '**Concern 1: Still broken**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
         } else if (callCount === 4) {
@@ -1943,7 +2019,7 @@ describe('runNextPhase audit fix loop', () => {
         if (params?.tools) capturedTools.push([...params.tools]);
         if (callCount === 1) {
           // Audit: fails
-          const text = '**Concern 1: Issue**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          const text = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
         } else if (callCount === 2) {
@@ -1997,7 +2073,7 @@ describe('runNextPhase audit fix loop', () => {
         callCount++;
         if (callCount === 1) {
           // Initial audit: fails
-          const text = '**Concern 1: Issue**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          const text = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
         } else if (callCount === 2) {
@@ -2089,7 +2165,7 @@ describe('runNextPhase audit fix loop', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writeAuditPhases(phasesPath);
 
-    const auditOutput = '**Concern 1: Issue**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+    const auditOutput = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
 
     const opts: PhaseExecutionOpts = {
       runtime: makeSuccessRuntime(auditOutput),

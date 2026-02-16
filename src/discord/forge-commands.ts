@@ -5,7 +5,7 @@ import { bdUpdate } from '../beads/bd-cli.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
 import { collectRuntimeText } from './runtime-utils.js';
-import { auditPlanStructure, maxReviewNumber } from './audit-handler.js';
+import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,7 +78,7 @@ export function parseForgeCommand(content: string): ForgeCommand | null {
 // ---------------------------------------------------------------------------
 
 export type AuditVerdict = {
-  maxSeverity: 'high' | 'medium' | 'low' | 'none';
+  maxSeverity: 'blocking' | 'medium' | 'minor' | 'suggestion' | 'none';
   shouldLoop: boolean;
 };
 
@@ -90,49 +90,63 @@ export function parseAuditVerdict(auditText: string): AuditVerdict {
   const lower = auditText.toLowerCase();
 
   // --- Severity detection ---
-  // Primary: "Severity: high" or "Severity: **high**" (structured format we ask for)
-  // Secondary: table cells like "| **high** |" or "| medium |".
+  // Primary: "Severity: blocking" or "Severity: **high**" (structured format we ask for)
+  // Secondary: table cells like "| **blocking** |" or "| medium |".
+  // Tertiary: parenthesized severity like "Concern 1 (high)" or "(medium)".
   // We intentionally avoid matching free-form bold words in prose to prevent
   // false positives like "the impact is **high**" in a description paragraph.
-  const severityLabel = /\bseverity\b[:\s]*\**\s*(high|medium|low)\b/gi;
-  const tableCellSeverity = /\|\s*\**\s*(high|medium|low)\s*\**\s*\|/gi;
+  const severityLabel = /\bseverity\b[:\s]*\**\s*(blocking|high|medium|minor|low|suggestion)\b/gi;
+  const tableCellSeverity = /\|\s*\**\s*(blocking|high|medium|minor|low|suggestion)\s*\**\s*\|/gi;
+  const bareSeverity = /\((blocking|high|medium|minor|low|suggestion)\)/gi;
 
   // Collect all severity mentions from all patterns
   const found = new Set<string>();
-  for (const re of [severityLabel, tableCellSeverity]) {
+  for (const re of [severityLabel, tableCellSeverity, bareSeverity]) {
     let m;
     while ((m = re.exec(auditText)) !== null) {
-      found.add(m[1].toLowerCase());
+      found.add(m[1]!.toLowerCase());
     }
   }
 
-  // Determine max severity from markers (high > medium > low)
-  const markerSeverity: AuditVerdict['maxSeverity'] = found.has('high')
-    ? 'high'
+  // Normalize backward-compat aliases: high -> blocking, low -> minor
+  if (found.has('high')) {
+    found.delete('high');
+    found.add('blocking');
+  }
+  if (found.has('low')) {
+    found.delete('low');
+    found.add('minor');
+  }
+
+  // Determine max severity from markers (blocking > medium > minor > suggestion)
+  const markerSeverity: AuditVerdict['maxSeverity'] = found.has('blocking')
+    ? 'blocking'
     : found.has('medium')
       ? 'medium'
-      : found.has('low')
-        ? 'low'
-        : 'none';
+      : found.has('minor')
+        ? 'minor'
+        : found.has('suggestion')
+          ? 'suggestion'
+          : 'none';
 
   // Determine verdict from text
   const needsRevision = lower.includes('needs revision');
   const readyToApprove = lower.includes('ready to approve');
 
   // Severity markers win over verdict text when they disagree.
-  // A "Ready to approve" verdict with high-severity findings is contradictory —
+  // A "Ready to approve" verdict with blocking-severity findings is contradictory —
   // trust the severity markers.
   if (markerSeverity !== 'none') {
-    const shouldLoop = markerSeverity === 'high' || markerSeverity === 'medium';
+    const shouldLoop = markerSeverity === 'blocking';
     return { maxSeverity: markerSeverity, shouldLoop };
   }
 
   // No severity markers found — fall back to verdict text
   if (needsRevision) {
-    return { maxSeverity: 'medium', shouldLoop: true };
+    return { maxSeverity: 'blocking', shouldLoop: true };
   }
   if (readyToApprove) {
-    return { maxSeverity: 'low', shouldLoop: false };
+    return { maxSeverity: 'minor', shouldLoop: false };
   }
 
   // Malformed output — stop and let the human review
@@ -274,15 +288,21 @@ export function buildAuditorPrompt(
     '',
     '**Concern N: [title]**',
     'Description of the issue.',
-    '**Severity: high | medium | low**',
+    '**Severity: blocking | medium | minor | suggestion**',
+    '',
+    'Severity level definitions:',
+    '- **blocking** — Correctness bugs, security issues, architectural flaws, missing critical functionality. The plan cannot ship with this unresolved.',
+    '- **medium** — Substantive improvements that would make the plan better but aren\'t showstoppers. Missing edge case handling, incomplete error paths.',
+    '- **minor** — Small issues: naming, style, minor clarity gaps. Worth noting, not worth looping over.',
+    '- **suggestion** — Ideas for future improvement. Not problems with the current plan.',
     '',
     'IMPORTANT: Each concern MUST have its own **Severity: X** line on a separate line. Do NOT use tables, summary grids, or any other format for severity ratings — the automated revision loop parses these markers to decide whether to trigger revisions.',
     '',
     'Then write a verdict:',
     '',
     '**Verdict:** [one of:]',
-    '- "Needs revision." — if any high or medium severity concerns exist',
-    '- "Ready to approve." — if only low severity concerns remain',
+    '- "Needs revision." — if any blocking severity concerns exist',
+    '- "Ready to approve." — if no blocking concerns (medium/minor/suggestion are fine)',
     '',
     'Be thorough but fair. Don\'t nitpick style — focus on correctness, safety, and completeness.',
     'Output only the audit notes and verdict. No preamble.',
@@ -330,7 +350,7 @@ export function buildRevisionPrompt(
     '',
     '## Instructions',
     '',
-    '- Address all high and medium severity concerns from the audit.',
+    '- Address all blocking severity concerns. Consider medium concerns if the fix is straightforward, but do not loop over them.',
     '- Read the codebase using your tools if needed to resolve concerns.',
     '- Keep the same plan structure and format.',
     '- Preserve resolutions from prior audit rounds that were accepted — do not weaken, revert, or remove them unless the current audit explicitly challenges them.',
@@ -592,11 +612,12 @@ export class ForgeOrchestrator {
         throw new Error('Plan is approved — re-auditing would downgrade its status. Use `!plan audit` for a standalone audit instead.');
       }
 
-      // Structural pre-flight: reject plans with high-severity structural issues
+      // Structural pre-flight: reject plans with high or medium structural issues
       const structuralConcerns = auditPlanStructure(planContent);
-      const highSeverity = structuralConcerns.filter((c) => c.severity === 'high');
-      if (highSeverity.length > 0) {
-        const missing = highSeverity.map((c) => c.title).join(', ');
+      const structuralVerdict = deriveVerdict(structuralConcerns);
+      if (structuralVerdict.shouldLoop) {
+        const gating = structuralConcerns.filter((c) => c.severity === 'high' || c.severity === 'medium');
+        const missing = gating.map((c) => c.title).join(', ');
         throw new Error(`Plan has structural issues: ${missing}. Fix the plan file before re-auditing.`);
       }
 
