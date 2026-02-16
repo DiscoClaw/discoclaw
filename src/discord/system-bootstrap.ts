@@ -137,6 +137,16 @@ async function ensureChild(
         return { created: false, moved: false }; // fail closed — no ID returned
       }
       const moved = await moveUnderCategory(byId, parentCategoryId, log);
+      // Reconcile name if it differs from canonical (e.g. count-sync stacking).
+      const currentName = String((byId as any).name ?? '');
+      if (norm(currentName) !== norm(spec.name)) {
+        try {
+          await (byId as any).edit({ name: spec.name });
+          log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
+        } catch (err) {
+          log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+        }
+      }
       // Reconcile topic if it differs from expected.
       if (spec.topic && (byId as any).topic !== spec.topic) {
         try {
@@ -155,6 +165,16 @@ async function ensureChild(
   const exact = findByNameAndType(guild, spec.name, spec.type);
   if (exact) {
     const moved = await moveUnderCategory(exact, parentCategoryId, log);
+    // Reconcile name if it differs from canonical (e.g. found via stripped count suffix).
+    const currentName = String((exact as any).name ?? '');
+    if (norm(currentName) !== norm(spec.name)) {
+      try {
+        await (exact as any).edit({ name: spec.name });
+        log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
+      } catch (err) {
+        log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+      }
+    }
     // Reconcile topic if it differs from expected.
     if (spec.topic && (exact as any).topic !== spec.topic) {
       try {
