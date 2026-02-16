@@ -180,6 +180,26 @@ export async function bdList(params: BeadListParams, cwd: string): Promise<BeadD
   return items.map(normalizeBeadData);
 }
 
+/**
+ * Find a non-closed bead whose title matches the given string
+ * (case-insensitive, trimmed). Optionally filter by label.
+ * Returns the first match, or null if none found.
+ */
+export async function bdFindByTitle(
+  title: string,
+  cwd: string,
+  opts?: { label?: string },
+): Promise<BeadData | null> {
+  const normalizedTitle = title.trim().toLowerCase();
+  if (!normalizedTitle) return null;
+
+  const beads = await bdList(opts?.label ? { label: opts.label } : {}, cwd);
+  const match = beads.find(
+    (b) => b.status !== 'closed' && b.title.trim().toLowerCase() === normalizedTitle,
+  );
+  return match ?? null;
+}
+
 /** Create a new bead. Returns the created bead data. */
 export async function bdCreate(params: BeadCreateParams, cwd: string): Promise<BeadData> {
   const args = ['create', '--json', params.title];
