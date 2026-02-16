@@ -21,7 +21,12 @@ if [[ -z "$api_key" ]]; then
 fi
 
 # Load available tags from tag-map, excluding status tags.
-TAG_MAP="${DISCOCLAW_BEADS_TAG_MAP:-$SCRIPT_DIR/tag-map.json}"
+if [[ -n "${DISCOCLAW_DATA_DIR:-}" ]]; then
+  _default_tag_map="$DISCOCLAW_DATA_DIR/beads/tag-map.json"
+else
+  _default_tag_map="$SCRIPT_DIR/tag-map.json"
+fi
+TAG_MAP="${DISCOCLAW_BEADS_TAG_MAP:-$_default_tag_map}"
 content_tags_json=$(jq '{} + (to_entries | map(select(.key != "open" and .key != "in_progress" and .key != "blocked" and .key != "closed")) | from_entries)' "$TAG_MAP" 2>/dev/null) || { echo ""; exit 0; }
 available_tags=$(echo "$content_tags_json" | jq -r 'keys | join(", ")') || { echo ""; exit 0; }
 

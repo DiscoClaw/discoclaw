@@ -470,5 +470,292 @@ describe('ensureForumTags', () => {
     const updatedMap = JSON.parse(updatedRaw);
     expect(updatedMap.monitoring).toBe('existing-tag-2');
   });
+
+  it('clears stale IDs that do not exist on the forum', async () => {
+    const tagMapPath = path.join(tmpDir, 'tags.json');
+    await fs.writeFile(tagMapPath, '{"open": "stale-id-999", "closed": ""}', 'utf8');
+
+    let forumTags: any[] = [];
+    const forum = {
+      id: 'forum-1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      availableTags: forumTags,
+      edit: vi.fn(async (opts: any) => {
+        forumTags = opts.availableTags.map((t: any, i: number) => ({
+          ...t,
+          id: t.id ?? `tag-new-${i}`,
+          name: t.name,
+          moderated: false,
+          emoji: null,
+        }));
+        forum.availableTags = forumTags;
+      }),
+    };
+
+    const cache = new Map<string, any>([['forum-1', forum]]);
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        cache: {
+          get: (id: string) => cache.get(id),
+          find: () => undefined,
+          values: () => cache.values(),
+        },
+      },
+    } as any;
+
+    const logMock = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const result = await ensureForumTags(guild, 'forum-1', tagMapPath, { log: logMock as any });
+    // Both tags should be created (stale ID was cleared).
+    expect(result).toBe(2);
+
+    const updatedRaw = await fs.readFile(tagMapPath, 'utf8');
+    const updatedMap = JSON.parse(updatedRaw);
+    expect(updatedMap.open).toBeTruthy();
+    expect(updatedMap.open).not.toBe('stale-id-999');
+    expect(updatedMap.closed).toBeTruthy();
+  });
+
+  it('clears swapped IDs that map to wrong tag name', async () => {
+    const tagMapPath = path.join(tmpDir, 'tags.json');
+    // "open" has the ID that actually belongs to "closed" on the forum.
+    await fs.writeFile(tagMapPath, '{"open": "tag-closed-id", "closed": "tag-open-id"}', 'utf8');
+
+    const forum = {
+      id: 'forum-1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      availableTags: [
+        { id: 'tag-open-id', name: 'open', moderated: false, emoji: null },
+        { id: 'tag-closed-id', name: 'closed', moderated: false, emoji: null },
+      ],
+      edit: vi.fn(),
+    };
+
+    const cache = new Map<string, any>([['forum-1', forum]]);
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        cache: {
+          get: (id: string) => cache.get(id),
+          find: () => undefined,
+          values: () => cache.values(),
+        },
+      },
+    } as any;
+
+    const logMock = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const result = await ensureForumTags(guild, 'forum-1', tagMapPath, { log: logMock as any });
+    // No new tags created — they already exist, IDs just needed backfill after clearing swapped ones.
+    expect(result).toBe(0);
+
+    const updatedRaw = await fs.readFile(tagMapPath, 'utf8');
+    const updatedMap = JSON.parse(updatedRaw);
+    // After clearing swapped IDs, they should be backfilled with the correct IDs.
+    expect(updatedMap.open).toBe('tag-open-id');
+    expect(updatedMap.closed).toBe('tag-closed-id');
+  });
+
+  it('preserves valid IDs without clearing them', async () => {
+    const tagMapPath = path.join(tmpDir, 'tags.json');
+    await fs.writeFile(tagMapPath, '{"open": "tag-open-id", "closed": "tag-closed-id"}', 'utf8');
+
+    const forum = {
+      id: 'forum-1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      availableTags: [
+        { id: 'tag-open-id', name: 'open', moderated: false, emoji: null },
+        { id: 'tag-closed-id', name: 'closed', moderated: false, emoji: null },
+      ],
+      edit: vi.fn(),
+    };
+
+    const cache = new Map<string, any>([['forum-1', forum]]);
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        cache: {
+          get: (id: string) => cache.get(id),
+          find: () => undefined,
+          values: () => cache.values(),
+        },
+      },
+    } as any;
+
+    const result = await ensureForumTags(guild, 'forum-1', tagMapPath);
+    expect(result).toBe(0);
+    expect(forum.edit).not.toHaveBeenCalled();
+
+    const updatedRaw = await fs.readFile(tagMapPath, 'utf8');
+    const updatedMap = JSON.parse(updatedRaw);
+    expect(updatedMap.open).toBe('tag-open-id');
+    expect(updatedMap.closed).toBe('tag-closed-id');
+  });
+
+  it('prioritizes status tags over content tags when slots are limited', async () => {
+    // Forum already has 18 tags — only 2 slots left.
+    const existingForumTags = Array.from({ length: 18 }, (_, i) => ({
+      id: `existing-${i}`,
+      name: `tag-${i}`,
+      moderated: false,
+      emoji: null,
+    }));
+
+    const tagMapPath = path.join(tmpDir, 'tags.json');
+    // 4 status tags + 2 content tags = 6, but only 2 slots.
+    await fs.writeFile(tagMapPath, JSON.stringify({
+      feature: '', bug: '', open: '', in_progress: '', blocked: '', closed: '',
+    }), 'utf8');
+
+    let forumTags = [...existingForumTags];
+    const forum = {
+      id: 'forum-1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      availableTags: forumTags,
+      edit: vi.fn(async (opts: any) => {
+        forumTags = opts.availableTags.map((t: any, i: number) => ({
+          ...t,
+          id: t.id ?? `tag-new-${i}`,
+          name: t.name,
+          moderated: false,
+          emoji: null,
+        }));
+        forum.availableTags = forumTags;
+      }),
+    };
+
+    const cache = new Map<string, any>([['forum-1', forum]]);
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        cache: {
+          get: (id: string) => cache.get(id),
+          find: () => undefined,
+          values: () => cache.values(),
+        },
+      },
+    } as any;
+
+    const result = await ensureForumTags(guild, 'forum-1', tagMapPath);
+    expect(result).toBe(2);
+
+    // The 2 created tags should be the highest-priority status tags (open, in_progress),
+    // not blocked/closed or content tags — verifying deterministic lifecycle-priority ordering.
+    const updatedRaw = await fs.readFile(tagMapPath, 'utf8');
+    const updatedMap = JSON.parse(updatedRaw);
+    // open and in_progress should have IDs (created first by lifecycle priority).
+    expect(updatedMap.open).toBeTruthy();
+    expect(updatedMap.in_progress).toBeTruthy();
+    // blocked and closed should NOT have IDs (not enough slots).
+    expect(updatedMap.blocked).toBe('');
+    expect(updatedMap.closed).toBe('');
+    // Content tags should NOT have IDs (not enough slots).
+    expect(updatedMap.feature).toBe('');
+    expect(updatedMap.bug).toBe('');
+  });
+
+  it('merges new keys from seed file via options.seedPath', async () => {
+    const tagMapPath = path.join(tmpDir, 'tags.json');
+    await fs.writeFile(tagMapPath, '{"open": "existing-id", "closed": ""}', 'utf8');
+
+    const seedPath = path.join(tmpDir, 'seed.json');
+    await fs.writeFile(seedPath, '{"open": "", "closed": "", "feature": "", "bug": ""}', 'utf8');
+
+    let forumTags: any[] = [
+      { id: 'existing-id', name: 'open', moderated: false, emoji: null },
+    ];
+    const forum = {
+      id: 'forum-1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      availableTags: forumTags,
+      edit: vi.fn(async (opts: any) => {
+        forumTags = opts.availableTags.map((t: any, i: number) => ({
+          ...t,
+          id: t.id ?? `tag-new-${i}`,
+          name: t.name,
+          moderated: false,
+          emoji: null,
+        }));
+        forum.availableTags = forumTags;
+      }),
+    };
+
+    const cache = new Map<string, any>([['forum-1', forum]]);
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        cache: {
+          get: (id: string) => cache.get(id),
+          find: () => undefined,
+          values: () => cache.values(),
+        },
+      },
+    } as any;
+
+    const result = await ensureForumTags(guild, 'forum-1', tagMapPath, { seedPath });
+    // closed, feature, bug should be created (open already exists with valid ID).
+    expect(result).toBe(3);
+
+    const updatedRaw = await fs.readFile(tagMapPath, 'utf8');
+    const updatedMap = JSON.parse(updatedRaw);
+    // open should keep its existing ID.
+    expect(updatedMap.open).toBe('existing-id');
+    // New keys from seed should have been merged and created.
+    expect(updatedMap.feature).toBeTruthy();
+    expect(updatedMap.bug).toBeTruthy();
+    expect(updatedMap.closed).toBeTruthy();
+  });
+
+  it('does not overwrite existing keys when merging from seed', async () => {
+    const tagMapPath = path.join(tmpDir, 'tags.json');
+    await fs.writeFile(tagMapPath, '{"open": "my-id"}', 'utf8');
+
+    const seedPath = path.join(tmpDir, 'seed.json');
+    // Seed has open with empty ID — should NOT overwrite the existing "my-id".
+    await fs.writeFile(seedPath, '{"open": ""}', 'utf8');
+
+    const forum = {
+      id: 'forum-1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      availableTags: [
+        { id: 'my-id', name: 'open', moderated: false, emoji: null },
+      ],
+      edit: vi.fn(),
+    };
+
+    const cache = new Map<string, any>([['forum-1', forum]]);
+    const guild = {
+      id: 'guild-1',
+      channels: {
+        cache: {
+          get: (id: string) => cache.get(id),
+          find: () => undefined,
+          values: () => cache.values(),
+        },
+      },
+    } as any;
+
+    const result = await ensureForumTags(guild, 'forum-1', tagMapPath, { seedPath });
+    expect(result).toBe(0);
+
+    const updatedRaw = await fs.readFile(tagMapPath, 'utf8');
+    const updatedMap = JSON.parse(updatedRaw);
+    expect(updatedMap.open).toBe('my-id');
+  });
+
+  it('accepts options bag for backward compatibility', async () => {
+    const tagMapPath = path.join(tmpDir, 'tags.json');
+    await fs.writeFile(tagMapPath, '{}', 'utf8');
+
+    const guild = makeMockGuild([]);
+    // Calling with no options (undefined) should still work.
+    const result = await ensureForumTags(guild, 'forum-1', tagMapPath);
+    expect(result).toBe(0);
+  });
 });
 

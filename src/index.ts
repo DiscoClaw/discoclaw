@@ -25,7 +25,7 @@ import type { CronContext } from './discord/actions-crons.js';
 import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
 import { checkBdAvailable, bdList } from './beads/bd-cli.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
-import { resolveBeadsForum } from './beads/discord-sync.js';
+import { resolveBeadsForum, reloadTagMapInPlace } from './beads/discord-sync.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { probeWorkspacePermissions } from './workspace-permissions.js';
 import { loadRunStats } from './cron/run-stats.js';
@@ -298,8 +298,12 @@ const cronForum = cfg.cronForum || scaffoldState.cronsForumId;
 const beadsEnabled = cfg.beadsEnabled;
 const beadsCwd = cfg.beadsCwdOverride || workspaceCwd;
 const beadsForum = cfg.beadsForum || scaffoldState.beadsForumId || '';
+const beadsDataDir = dataDir
+  ? path.join(dataDir, 'beads')
+  : path.join(__dirname, '..', 'data', 'beads');
 const beadsTagMapPath = cfg.beadsTagMapPathOverride
-  || path.join(__dirname, '..', 'scripts', 'beads', 'bead-hooks', 'tag-map.json');
+  || path.join(beadsDataDir, 'tag-map.json');
+const beadsTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'beads', 'bead-hooks', 'tag-map.json');
 const beadsMentionUser = cfg.beadsMentionUser;
 const beadsSidebar = cfg.beadsSidebar;
 const sidebarMentionUserId = beadsSidebar ? beadsMentionUser : undefined;
@@ -595,6 +599,9 @@ await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'infl
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
 let beadCtx: BeadContext | undefined;
 if (beadsEnabled && bdAvailable) {
+  // Seed tag map from repo if data-dir copy doesn't exist yet.
+  await seedTagMap(beadsTagMapSeedPath, beadsTagMapPath);
+
   const beadsResult = await initializeBeadsContext({
     enabled: true,
     beadsCwd,
@@ -651,6 +658,28 @@ if (beadCtx) {
       forumCountSync: beadForumCountSync,
     });
     beadSyncWatcher = wired.syncWatcher;
+
+    // Tag bootstrap: create missing status/content tags on the beads forum.
+    if (beadForum) {
+      try {
+        await ensureForumTags(guild, beadForum.id, beadsTagMapPath, {
+          seedPath: beadsTagMapSeedPath,
+          log,
+        });
+      } catch (err) {
+        log.warn({ err }, 'beads:tag bootstrap failed');
+      }
+      try {
+        // Reload in-memory tag map to pick up newly-created tag IDs.
+        await reloadTagMapInPlace(beadsTagMapPath, beadCtx.tagMap);
+      } catch (err) {
+        log.warn({ err }, 'beads:tag map reload failed');
+      }
+      // Post-bootstrap sync: re-tag existing threads with any newly-created tags.
+      beadCtx.syncCoordinator?.sync().catch((err) => {
+        log.warn({ err }, 'beads:post-tag-bootstrap sync failed');
+      });
+    }
   } else {
     log.warn({ resolvedGuildId }, 'beads:sync-watcher skipped; guild not in cache');
   }
