@@ -10,7 +10,7 @@ vi.mock('./discord-sync.js', () => ({
   resolveBeadsForum: vi.fn(async () => ({})),
   createBeadThread: vi.fn(async () => 'thread-new'),
   closeBeadThread: vi.fn(async () => {}),
-  isBeadThreadAlreadyClosed: vi.fn(async () => false),
+  isThreadArchived: vi.fn(async () => false),
   updateBeadThreadName: vi.fn(async () => true),
   updateBeadStarterMessage: vi.fn(async () => true),
   updateBeadThreadTags: vi.fn(async () => false),
@@ -232,12 +232,12 @@ describe('runBeadSync', () => {
 
   it('skips already-archived closed bead threads in phase 4', async () => {
     const { bdList } = await import('./bd-cli.js');
-    const { closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
+    const { closeBeadThread, isThreadArchived } = await import('./discord-sync.js');
 
     (bdList as any).mockResolvedValueOnce([
       { id: 'ws-006', title: 'F', status: 'closed', labels: [], external_ref: 'discord:888' },
     ]);
-    (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true);
+    (isThreadArchived as any).mockResolvedValueOnce(true);
 
     const result = await runBeadSync({
       client: makeClient(),
@@ -248,7 +248,7 @@ describe('runBeadSync', () => {
       throttleMs: 0,
     } as any);
 
-    expect(isBeadThreadAlreadyClosed).toHaveBeenCalledWith(expect.anything(), '888', expect.objectContaining({ id: 'ws-006' }), expect.any(Object));
+    expect(isThreadArchived).toHaveBeenCalledWith(expect.anything(), '888');
     expect(closeBeadThread).not.toHaveBeenCalled();
     expect(result.threadsArchived).toBe(0);
   });
