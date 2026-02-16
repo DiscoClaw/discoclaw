@@ -209,6 +209,38 @@ describe('runBd argument construction', () => {
     expect(dbArg).toBe(path.resolve('workspace', '.beads', 'beads.db'));
   });
 
+  it('passes --limit 0 when status is all and no explicit limit', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: '[]',
+      stderr: '',
+    });
+
+    await bdList({ status: 'all' }, '/tmp');
+
+    const calledArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(calledArgs).toContain('--all');
+    expect(calledArgs).toContain('--limit');
+    const limitIdx = calledArgs.indexOf('--limit');
+    expect(calledArgs[limitIdx + 1]).toBe('0');
+  });
+
+  it('respects explicit limit when status is all', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: '[]',
+      stderr: '',
+    });
+
+    await bdList({ status: 'all', limit: 10 }, '/tmp');
+
+    const calledArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(calledArgs).toContain('--all');
+    expect(calledArgs).toContain('--limit');
+    const limitIdx = calledArgs.indexOf('--limit');
+    expect(calledArgs[limitIdx + 1]).toBe('10');
+  });
+
   it('places --db and --no-daemon before subcommand args', async () => {
     mockExeca.mockResolvedValueOnce({
       exitCode: 0,

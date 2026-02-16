@@ -168,11 +168,14 @@ export async function bdList(params: BeadListParams, cwd: string): Promise<BeadD
   const args = ['list', '--json'];
   if (params.status === 'all') {
     args.push('--all');
+    // The bd CLI applies a default limit of 50.  When fetching *all* beads
+    // and no explicit limit was provided, pass --limit 0 to disable the cap.
+    if (params.limit == null) args.push('--limit', '0');
   } else if (params.status) {
     args.push('--status', params.status);
   }
   if (params.label) args.push('--label', params.label);
-  if (params.limit) args.push('--limit', String(params.limit));
+  if (params.limit != null) args.push('--limit', String(params.limit));
 
   const stdout = await runBd(args, cwd);
   const items = parseBdJson<BeadData>(stdout);

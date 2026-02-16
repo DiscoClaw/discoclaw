@@ -655,8 +655,8 @@ if (beadCtx) {
         client,
         beadForum.id,
         async () => {
-          const all = await bdList({ status: 'all' }, beadsCwd);
-          return all.filter(b => b.status !== 'closed').length;
+          const nonClosed = await bdList({ limit: 0 }, beadsCwd);
+          return nonClosed.length;
         },
         log,
       );
