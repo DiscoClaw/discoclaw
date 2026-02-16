@@ -6,7 +6,7 @@ Where tokens go on every API call, and how to keep costs down.
 
 ## 1. Prompt Anatomy — Three Invocation Paths
 
-DiscoClaw assembles prompts differently depending on the trigger.
+The orchestrator assembles prompts differently depending on the trigger.
 
 ### Message prompts (`src/discord.ts`)
 

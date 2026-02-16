@@ -6,7 +6,7 @@ This walks you through creating a fresh Discord bot for DiscoClaw and configurin
 
 ## Safety disclaimer (read first)
 
-DiscoClaw can drive powerful local automation through an agent runtime connected to Discord.
+DiscoClaw orchestrates powerful local automation by coordinating between Discord and AI runtimes.
 
 Recommended starting point:
 - Create a **standalone private Discord server** for DiscoClaw.

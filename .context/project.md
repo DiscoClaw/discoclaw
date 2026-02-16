@@ -4,7 +4,8 @@ Standing constraints for planning and auditing. These apply to all forge/plan op
 
 ## Architecture
 
-- Single-user system (one Discord bot, one human operator). No concurrent access guards needed.
+- Personal AI orchestrator — coordinates between Discord, AI runtimes, and local system resources.
+- Single-user system (one orchestrator, one human operator). No concurrent access guards needed.
 - Phase runner already has its own writer lock — don't design new locking mechanisms.
 - No cancellation/abort support required beyond what already exists.
 

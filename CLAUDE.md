@@ -2,7 +2,7 @@
 
 <!-- KEEP THIS FILE UNDER 3 KB. Details go in .context/*.md modules. -->
 
-Minimal Discord bridge routing messages to AI runtimes (Claude Code first; others later).
+Personal AI orchestrator — coordinates between Discord, AI runtimes (Claude Code, OpenAI, Codex), and local system resources.
 Philosophy: small, explicit, auditable. See `docs/philosophy.md`.
 
 ## Safety

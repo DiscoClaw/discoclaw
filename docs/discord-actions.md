@@ -1,8 +1,8 @@
 # DiscoClaw Discord Actions
 
-DiscoClaw supports "Discord Actions": structured JSON blocks embedded in the model's response that the bot parses and executes against the Discord API.
+DiscoClaw supports "Discord Actions": structured JSON blocks embedded in the AI runtime's response that the orchestrator parses and executes against the Discord API.
 
-This is intentionally not slash commands. Actions are internal plumbing that let the model do things like create channels, read messages, manage roles, etc, when enabled.
+This is intentionally not slash commands. Actions are internal plumbing that let the AI runtime do things like create channels, read messages, manage roles, etc, when enabled. The orchestrator handles parsing, dispatch, and result reporting.
 
 ## Quick Overview
 
@@ -12,7 +12,7 @@ This is intentionally not slash commands. Actions are internal plumbing that let
 <discord-action>{"type":"channelList"}</discord-action>
 ```
 
-- The bot strips these blocks out of the message before posting, executes them, then appends a short "Done:" or "Failed:" line for each action.
+- The orchestrator strips these blocks out of the message before posting, executes them, then appends a short "Done:" or "Failed:" line for each action.
 - Actions are only available in guild contexts (not DMs), and only if enabled via env flags.
 
 ## Where Things Live

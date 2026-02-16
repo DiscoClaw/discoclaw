@@ -1,7 +1,8 @@
 # Architecture
 
-DiscoClaw is a minimal Discord bridge that routes messages to AI runtimes
-(Claude Code first; others later). It emphasizes small, explicit, auditable code.
+DiscoClaw is a personal AI orchestrator that coordinates between Discord, AI runtimes
+(Claude Code, OpenAI, Codex), and local system resources — managing conversation state,
+task routing, scheduling, and tool access. It emphasizes small, explicit, auditable code.
 
 ## Data Flow
 
@@ -40,7 +41,8 @@ Discord message
 - **Session keys** — `user:channel` composites that map to runtime sessions, giving
   each user+channel pair its own conversation continuity.
 - **Runtime adapters** — pluggable interface (`src/runtime/types.ts`) that wraps an AI
-  CLI/API. Currently only Claude Code CLI (`src/runtime/claude-code-cli.ts`).
+  CLI/API. The orchestrator routes to the appropriate adapter based on context (message
+  handling, forge drafting, auditing). Available: Claude Code CLI, OpenAI HTTP, Codex CLI.
 - **Discord actions** — structured JSON actions the AI can emit in its response
   (send messages, create channels, manage beads, etc.), parsed and executed post-response.
 - **Beads** — built-in task tracker synced to Discord forum threads via the `bd` CLI.
@@ -50,7 +52,7 @@ Discord message
 
 ## Entry Points
 
-- `src/index.ts` — loads config, builds runtime + session manager + channel context,
-  starts the Discord bot.
-- `src/discord.ts` — creates the Discord client, registers event handlers,
-  assembles prompts, streams responses.
+- `src/index.ts` — loads config, wires up runtime adapters + session manager + channel
+  context, starts the orchestrator.
+- `src/discord.ts` — Discord interface layer: event handlers, context assembly, prompt
+  routing, response streaming.

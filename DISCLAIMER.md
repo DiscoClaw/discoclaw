@@ -2,9 +2,9 @@
 
 ## Important usage terms
 
-DiscoClaw is a **bridge layer** between Discord and an AI runtime (Claude Code by default). It is a convenience layer, not a safety layer. Using DiscoClaw does not add guardrails beyond what the underlying runtime already provides.
+DiscoClaw is an **orchestration layer** that coordinates between Discord and AI runtimes (Claude Code by default, with OpenAI and Codex adapters available). It is a coordination layer, not a safety layer. Using DiscoClaw does not add guardrails beyond what the underlying runtimes already provide.
 
-- The AI runtime has full tool access to your local system — Discord doesn't change that.
+- The AI runtimes have full tool access to your local system — the Discord interface doesn't change that.
 - You should take the same precautions you would when running Claude Code directly: use a private server, keep the allowlist tight, and understand what tools are available.
 - DiscoClaw is provided **as-is**, without warranty of any kind. See the [LICENSE](LICENSE) for full terms.
 - The authors and contributors are not liable for any damages or losses arising from use of this software.
