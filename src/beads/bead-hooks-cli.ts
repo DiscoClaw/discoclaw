@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { bdAddLabel, bdShow, bdUpdate } from './bd-cli.js';
 import { findExistingThreadForBead, createBeadThread, ensureUnarchived, getThreadIdFromBead, resolveBeadsForum, updateBeadThreadName, updateBeadThreadTags, closeBeadThread, isThreadArchived } from './discord-sync.js';
@@ -50,7 +51,9 @@ async function run(): Promise<void> {
   const guildId = env('DISCORD_GUILD_ID');
   const forumId = env('DISCOCLAW_BEADS_FORUM');
   const beadsCwd = envOpt('DISCOCLAW_BEADS_CWD') ?? process.cwd();
-  const tagMapPath = envOpt('DISCOCLAW_BEADS_TAG_MAP');
+  const dataDir = envOpt('DISCOCLAW_DATA_DIR');
+  const tagMapPath = envOpt('DISCOCLAW_BEADS_TAG_MAP')
+    ?? (dataDir ? path.join(dataDir, 'beads', 'tag-map.json') : undefined);
   const mentionUserId = envOpt('DISCOCLAW_BEADS_MENTION_USER');
 
   const extraLabels = parseTagsCsv(tagsCsv);

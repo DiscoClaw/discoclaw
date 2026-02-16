@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { loadTagMap } from './discord-sync.js';
 import { runBeadSync } from './bead-sync.js';
@@ -29,7 +30,9 @@ const discordToken = env('DISCORD_TOKEN');
 const guildId = env('DISCORD_GUILD_ID');
 const forumId = env('DISCOCLAW_BEADS_FORUM');
 const beadsCwd = envOpt('DISCOCLAW_BEADS_CWD') ?? process.cwd();
-const tagMapPath = envOpt('DISCOCLAW_BEADS_TAG_MAP');
+const dataDir = envOpt('DISCOCLAW_DATA_DIR');
+const tagMapPath = envOpt('DISCOCLAW_BEADS_TAG_MAP')
+  ?? (dataDir ? path.join(dataDir, 'beads', 'tag-map.json') : undefined);
 
 const throttleMs = parseArgInt(args, '--throttle-ms') ?? 250;
 const archivedLimit = parseArgInt(args, '--archived-limit') ?? 200;

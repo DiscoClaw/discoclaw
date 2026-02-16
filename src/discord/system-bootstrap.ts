@@ -211,7 +211,7 @@ async function ensureChild(
 }
 
 export async function ensureSystemScaffold(
-  params: { guild: Guild; ensureBeads: boolean; botDisplayName?: string; existingCronsId?: string; existingBeadsId?: string },
+  params: { guild: Guild; ensureBeads: boolean; botDisplayName?: string; existingCronsId?: string; existingBeadsId?: string; beadsTagMapPath?: string },
   log?: LoggerLike,
 ): Promise<SystemScaffold | null> {
   const { guild, ensureBeads } = params;
@@ -252,6 +252,15 @@ export async function ensureSystemScaffold(
     );
     if (beads.created) created.push('beads');
     if (beads.moved) moved.push('beads');
+
+    // Bootstrap status tags on the beads forum.
+    if (beads.id && params.beadsTagMapPath) {
+      try {
+        await ensureForumTags(guild, beads.id, params.beadsTagMapPath, { log });
+      } catch (err) {
+        log?.warn({ err, forumId: beads.id }, 'system-bootstrap: beads forum tag bootstrap failed');
+      }
+    }
   }
 
   if (created.length > 0 || moved.length > 0) {
@@ -280,6 +289,15 @@ export async function ensureSystemScaffold(
 // Forum tag bootstrapping
 // ---------------------------------------------------------------------------
 
+export type EnsureForumTagsOptions = {
+  /** Path to the repo seed file; keys are merged into tagMapPath before processing. */
+  seedPath?: string;
+  log?: LoggerLike;
+};
+
+const STATUS_PRIORITY = ['open', 'in_progress', 'blocked', 'closed'] as const;
+const STATUS_TAG_NAMES = new Set<string>(STATUS_PRIORITY);
+
 /**
  * Ensure a forum channel has tags matching a tag-map file.
  * Creates missing tags on the Discord forum and writes their IDs back to the
@@ -291,8 +309,11 @@ export async function ensureForumTags(
   guild: Guild,
   forumId: string,
   tagMapPath: string,
-  log?: LoggerLike,
+  options?: EnsureForumTagsOptions,
 ): Promise<number> {
+  const log = options?.log;
+  const seedPath = options?.seedPath;
+
   let tagMap: Record<string, string>;
   try {
     const raw = await fs.readFile(tagMapPath, 'utf8');
@@ -301,19 +322,57 @@ export async function ensureForumTags(
     return 0;
   }
 
+  // Key-merge: if a seed file is provided, merge any new keys from the seed
+  // into the data-dir tag map (existing keys are preserved).
+  if (seedPath) {
+    try {
+      const seedRaw = await fs.readFile(seedPath, 'utf8');
+      const seedMap = JSON.parse(seedRaw) as Record<string, string>;
+      let merged = 0;
+      for (const key of Object.keys(seedMap)) {
+        if (!(key in tagMap)) {
+          tagMap[key] = '';
+          merged++;
+        }
+      }
+      if (merged > 0) {
+        log?.info({ seedPath, merged }, 'system-bootstrap: merged new keys from seed tag map');
+      }
+    } catch {
+      // Seed file missing or invalid — continue with existing tag map.
+    }
+  }
+
   const forum = guild.channels.cache.get(forumId);
   if (!forum || forum.type !== ChannelType.GuildForum) return 0;
   const forumChannel = forum as ForumChannel;
 
-  // Build a set of existing tag names (case-insensitive).
+  // Build lookup structures for existing forum tags.
   const existingTags = forumChannel.availableTags ?? [];
+  const existingById = new Map(existingTags.map((t) => [t.id, t]));
   const existingNames = new Set(existingTags.map((t) => t.name.toLowerCase()));
+
+  // Stale-ID reconciliation: validate entries that have non-empty IDs.
+  // If the ID doesn't exist on the forum, or maps to a different tag name, clear it.
+  let staleCleared = 0;
+  for (const [name, id] of Object.entries(tagMap)) {
+    if (!id) continue;
+    const forumTag = existingById.get(id);
+    if (!forumTag || forumTag.name.toLowerCase() !== name.toLowerCase()) {
+      log?.warn(
+        { tagName: name, staleId: id, forumTagName: forumTag?.name },
+        'system-bootstrap: clearing stale/swapped tag ID',
+      );
+      tagMap[name] = '';
+      staleCleared++;
+    }
+  }
 
   // Identify tags that need to be created.
   const toCreate: string[] = [];
   let backfilled = 0;
   for (const [name, id] of Object.entries(tagMap)) {
-    if (id) continue; // Already has a Discord tag ID.
+    if (id) continue; // Already has a validated Discord tag ID.
     if (existingNames.has(name.toLowerCase())) {
       // Tag exists on the forum but not in our map — backfill the ID.
       const existing = existingTags.find((t) => t.name.toLowerCase() === name.toLowerCase());
@@ -326,14 +385,20 @@ export async function ensureForumTags(
     toCreate.push(name);
   }
 
-  if (toCreate.length === 0 && backfilled === 0) {
+  if (toCreate.length === 0 && backfilled === 0 && staleCleared === 0) {
     // Nothing to create, nothing changed.
     return 0;
   }
 
   // Discord forums allow max 20 tags.
   const maxNew = Math.max(0, 20 - existingTags.length);
-  const creating = toCreate.slice(0, maxNew);
+
+  // Status-first prioritization: ensure status tags get slots before content tags,
+  // in deterministic lifecycle-priority order (open > in_progress > blocked > closed).
+  const statusFirst = STATUS_PRIORITY.filter((n) => toCreate.includes(n));
+  const contentRest = toCreate.filter((n) => !STATUS_TAG_NAMES.has(n));
+  const prioritized = [...statusFirst, ...contentRest];
+  const creating = prioritized.slice(0, maxNew);
 
   if (creating.length > 0) {
     try {

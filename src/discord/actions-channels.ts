@@ -14,13 +14,17 @@ export type ChannelActionRequest =
   | { type: 'channelInfo'; channelId: string }
   | { type: 'categoryCreate'; name: string; position?: number }
   | { type: 'channelMove'; channelId: string; parent?: string; position?: number }
-  | { type: 'threadListArchived'; channelId: string; limit?: number };
+  | { type: 'threadListArchived'; channelId: string; limit?: number }
+  | { type: 'forumTagCreate'; channelId: string; name: string; emoji?: { id?: string; name?: string } }
+  | { type: 'forumTagDelete'; channelId: string; tagId: string }
+  | { type: 'forumTagList'; channelId: string };
 
 // Record ensures every union member is listed; TS errors if a new type is added to the union but not here.
 const CHANNEL_TYPE_MAP: Record<ChannelActionRequest['type'], true> = {
   channelCreate: true, channelEdit: true, channelDelete: true,
   channelList: true, channelInfo: true, categoryCreate: true,
   channelMove: true, threadListArchived: true,
+  forumTagCreate: true, forumTagDelete: true, forumTagList: true,
 };
 export const CHANNEL_ACTION_TYPES = new Set<string>(Object.keys(CHANNEL_TYPE_MAP));
 
@@ -211,6 +215,73 @@ export async function executeChannelAction(
         summary: `Archived threads in #${channel.name} (${threads.length}):\n${lines.join('\n')}`,
       };
     }
+
+    case 'forumTagCreate': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (channel.type !== ChannelType.GuildForum) {
+        return { ok: false, error: `Channel #${channel.name} is not a forum channel` };
+      }
+      const forum = channel as ForumChannel;
+      const existingTags = forum.availableTags ?? [];
+      if (existingTags.length >= 20) {
+        return { ok: false, error: `Forum #${channel.name} already has 20 tags (Discord maximum)` };
+      }
+      const newTag: { name: string; emoji?: { id?: string | null; name?: string | null } } = { name: action.name };
+      if (action.emoji) {
+        newTag.emoji = { id: action.emoji.id ?? null, name: action.emoji.name ?? null };
+      }
+      const updatedTags = [
+        ...existingTags.map((t) => ({ id: t.id, name: t.name, moderated: t.moderated, emoji: t.emoji })),
+        newTag,
+      ];
+      await forum.edit({ availableTags: updatedTags as any });
+
+      // Re-fetch to get the created tag's ID.
+      const updated = guild.channels.cache.get(action.channelId) as ForumChannel | undefined;
+      const createdTag = updated?.availableTags?.find(
+        (t) => t.name.toLowerCase() === action.name.toLowerCase(),
+      );
+      const tagId = createdTag?.id ?? 'unknown';
+      return { ok: true, summary: `Created forum tag "${action.name}" (id:${tagId}) on #${channel.name}` };
+    }
+
+    case 'forumTagDelete': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (channel.type !== ChannelType.GuildForum) {
+        return { ok: false, error: `Channel #${channel.name} is not a forum channel` };
+      }
+      const forum = channel as ForumChannel;
+      const existingTags = forum.availableTags ?? [];
+      const tagToDelete = existingTags.find((t) => t.id === action.tagId);
+      if (!tagToDelete) {
+        return { ok: false, error: `Tag "${action.tagId}" not found on forum #${channel.name}` };
+      }
+      const filteredTags = existingTags
+        .filter((t) => t.id !== action.tagId)
+        .map((t) => ({ id: t.id, name: t.name, moderated: t.moderated, emoji: t.emoji }));
+      await forum.edit({ availableTags: filteredTags as any });
+      return { ok: true, summary: `Deleted forum tag "${tagToDelete.name}" (id:${action.tagId}) from #${channel.name}` };
+    }
+
+    case 'forumTagList': {
+      const channel = guild.channels.cache.get(action.channelId);
+      if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (channel.type !== ChannelType.GuildForum) {
+        return { ok: false, error: `Channel #${channel.name} is not a forum channel` };
+      }
+      const forum = channel as ForumChannel;
+      const tags = forum.availableTags ?? [];
+      if (tags.length === 0) {
+        return { ok: true, summary: `No tags on forum #${channel.name}` };
+      }
+      const lines = tags.map((t) => {
+        const emojiStr = t.emoji?.name ? ` ${t.emoji.name}` : t.emoji?.id ? ` (emoji:${t.emoji.id})` : '';
+        return `• ${t.name}${emojiStr} (id:${t.id})`;
+      });
+      return { ok: true, summary: `Tags on #${channel.name} (${tags.length}):\n${lines.join('\n')}` };
+    }
   }
 }
 
@@ -272,5 +343,26 @@ At least one of parent or position is required.
 <discord-action>{"type":"threadListArchived","channelId":"123","limit":25}</discord-action>
 \`\`\`
 - \`channelId\` (required): The forum or text channel ID.
-- \`limit\` (optional): Max threads to return (default 50).`;
+- \`limit\` (optional): Max threads to return (default 50).
+
+**forumTagCreate** — Create a tag on a forum channel:
+\`\`\`
+<discord-action>{"type":"forumTagCreate","channelId":"123","name":"open","emoji":{"name":"🟢"}}</discord-action>
+\`\`\`
+- \`channelId\` (required): The forum channel ID.
+- \`name\` (required): Tag name.
+- \`emoji\` (optional): Object with \`id\` (custom emoji) or \`name\` (unicode emoji).
+Returns the created tag's ID in the summary.
+
+**forumTagDelete** — Delete a tag from a forum channel (destructive — confirm with user first):
+\`\`\`
+<discord-action>{"type":"forumTagDelete","channelId":"123","tagId":"456"}</discord-action>
+\`\`\`
+- \`channelId\` (required): The forum channel ID.
+- \`tagId\` (required): The tag ID to delete.
+
+**forumTagList** — List all tags on a forum channel:
+\`\`\`
+<discord-action>{"type":"forumTagList","channelId":"123"}</discord-action>
+\`\`\``;
 }

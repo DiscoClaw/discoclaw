@@ -28,6 +28,11 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-poll.ts`
 - `src/discord/actions-beads.ts`
 
+Channel action types (in `src/discord/actions-channels.ts`):
+- `channelList`, `channelCreate`, `channelDelete`, `channelEdit`, `channelInfo`, `channelMove`
+- `threadListArchived`
+- `forumTagCreate`, `forumTagDelete`, `forumTagList`
+
 Query actions (read-only actions that can trigger an auto-follow-up loop):
 - `src/discord/action-categories.ts`
 

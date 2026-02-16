@@ -67,7 +67,7 @@ All actions are gated by category env flags (off by default except channels).
 | Category | Action types | File | Status |
 |----------|-------------|------|--------|
 | Core dispatcher + parser | — | `actions.ts` | **done** |
-| Channel management | create, edit, delete, list, info, categoryCreate | `actions-channels.ts` | **done** |
+| Channel management | create, edit, delete, list, info, categoryCreate, forumTagCreate, forumTagDelete, forumTagList | `actions-channels.ts` | **done** |
 | Messaging | send, edit, delete, react, pin, fetch | `actions-messaging.ts` | **done** |
 | Guild/server | roles, members | `actions-guild.ts` | **done** |
 | Moderation | kick, ban, timeout, warn | `actions-moderation.ts` | **done** |
