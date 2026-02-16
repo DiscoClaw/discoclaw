@@ -804,7 +804,7 @@ if (cronEnabled && effectiveCronForum) {
     const guild = client.guilds.cache.get(system.guildId);
     if (guild) {
       try {
-        await ensureForumTags(guild, effectiveCronForum, cronTagMapPath, log);
+        await ensureForumTags(guild, effectiveCronForum, cronTagMapPath, { log });
       } catch (err) {
         log.warn({ err }, 'cron:forum tag bootstrap failed');
       }
