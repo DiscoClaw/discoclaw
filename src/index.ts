@@ -26,6 +26,7 @@ import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
 import { checkBdAvailable, bdList } from './beads/bd-cli.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
 import { resolveBeadsForum, reloadTagMapInPlace } from './beads/discord-sync.js';
+import { initBeadsForumGuard } from './beads/forum-guard.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { probeWorkspacePermissions } from './workspace-permissions.js';
 import { loadRunStats } from './cron/run-stats.js';
@@ -647,19 +648,10 @@ if (beadCtx) {
       beadCtx.forumCountSync = beadForumCountSync;
     }
 
-    const wired = await wireBeadsSync({
-      beadCtx,
-      client,
-      guild,
-      guildId: resolvedGuildId,
-      beadsCwd,
-      sidebarMentionUserId,
-      log,
-      forumCountSync: beadForumCountSync,
-    });
-    beadSyncWatcher = wired.syncWatcher;
+    // Install forum guard before any async operations that touch the forum.
+    initBeadsForumGuard({ client, forumId: beadCtx.forumId, log });
 
-    // Tag bootstrap: create missing status/content tags on the beads forum.
+    // Tag bootstrap + reload BEFORE wireBeadsSync so the first sync has the correct tag map.
     if (beadForum) {
       try {
         await ensureForumTags(guild, beadForum.id, beadsTagMapPath, {
@@ -670,16 +662,25 @@ if (beadCtx) {
         log.warn({ err }, 'beads:tag bootstrap failed');
       }
       try {
-        // Reload in-memory tag map to pick up newly-created tag IDs.
         await reloadTagMapInPlace(beadsTagMapPath, beadCtx.tagMap);
       } catch (err) {
         log.warn({ err }, 'beads:tag map reload failed');
       }
-      // Post-bootstrap sync: re-tag existing threads with any newly-created tags.
-      beadCtx.syncCoordinator?.sync().catch((err) => {
-        log.warn({ err }, 'beads:post-tag-bootstrap sync failed');
-      });
     }
+
+    // Wire coordinator + watcher + startup sync (now uses correct tag map).
+    const wired = await wireBeadsSync({
+      beadCtx,
+      client,
+      guild,
+      guildId: resolvedGuildId,
+      beadsCwd,
+      sidebarMentionUserId,
+      log,
+      forumCountSync: beadForumCountSync,
+      skipForumGuard: true,
+    });
+    beadSyncWatcher = wired.syncWatcher;
   } else {
     log.warn({ resolvedGuildId }, 'beads:sync-watcher skipped; guild not in cache');
   }

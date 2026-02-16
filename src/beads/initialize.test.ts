@@ -241,6 +241,34 @@ describe('wireBeadsSync', () => {
     );
   });
 
+  it('skips forum guard when skipForumGuard is true', async () => {
+    const log = fakeLog();
+    const beadCtx = {
+      beadsCwd: '/tmp/beads',
+      forumId: 'forum-123',
+      tagMap: { bug: '111' },
+      tagMapPath: '/tmp/tag-map.json',
+      log,
+    } as any;
+
+    vi.mocked(initBeadsForumGuard).mockClear();
+
+    await wireBeadsSync({
+      beadCtx,
+      client: {} as any,
+      guild: {} as any,
+      guildId: 'guild-1',
+      beadsCwd: '/tmp/beads',
+      log,
+      skipForumGuard: true,
+    });
+
+    expect(initBeadsForumGuard).not.toHaveBeenCalled();
+    // Coordinator and watcher should still be wired
+    expect(BeadSyncCoordinator).toHaveBeenCalled();
+    expect(startBeadSyncWatcher).toHaveBeenCalled();
+  });
+
   it('propagates tagMapPath to CoordinatorOptions and watcher', async () => {
     const log = fakeLog();
     const tagMap = { bug: '111' };
