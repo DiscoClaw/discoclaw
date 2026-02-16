@@ -1,3 +1,5 @@
+import { resolveModel } from '../runtime/model-tiers.js';
+import type { ModelTier } from '../runtime/model-tiers.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { CadenceTag } from './run-stats.js';
 
@@ -42,7 +44,7 @@ export async function autoTagCron(
 
   for await (const evt of runtime.invoke({
     prompt: classifyPrompt,
-    model: opts?.model ?? 'haiku',
+    model: resolveModel(opts?.model ?? 'fast', runtime.id),
     cwd: opts?.cwd ?? '.',
     timeoutMs: opts?.timeoutMs ?? 15_000,
     tools: [],
@@ -79,11 +81,11 @@ export async function autoTagCron(
 // ---------------------------------------------------------------------------
 
 /**
- * Classify whether a cron job needs opus-tier or can run on haiku.
+ * Classify whether a cron job needs capable-tier or can run on fast.
  *
  * Two-step logic:
- * 1. Cadence default: frequent/hourly (>1x/day) → haiku immediately (cost optimization).
- * 2. AI classification for daily+ crons: ask Haiku to decide.
+ * 1. Cadence default: frequent/hourly (>1x/day) → fast immediately (cost optimization).
+ * 2. AI classification for daily+ crons: ask fast-tier model to decide.
  */
 export async function classifyCronModel(
   runtime: RuntimeAdapter,
@@ -91,17 +93,17 @@ export async function classifyCronModel(
   prompt: string,
   cadence: CadenceTag,
   opts?: AutoTagOptions,
-): Promise<'haiku' | 'opus'> {
-  // High-frequency crons default to haiku — skip AI call for cost.
+): Promise<ModelTier> {
+  // High-frequency crons default to fast — skip AI call for cost.
   if (cadence === 'frequent' || cadence === 'hourly') {
-    return 'haiku';
+    return 'fast';
   }
 
   const classifyPrompt =
     `Does this scheduled task require advanced reasoning (complex analysis, ` +
     `multi-step planning, nuanced writing) or can it be handled with basic ` +
     `capabilities (simple lookups, templated responses, data formatting)?\n\n` +
-    `Reply with ONLY one word: "opus" or "haiku"\n\n` +
+    `Reply with ONLY one word: "capable" or "fast"\n\n` +
     `Job name: ${name}\n` +
     `Instruction: ${prompt.slice(0, 500)}`;
 
@@ -110,7 +112,7 @@ export async function classifyCronModel(
 
   for await (const evt of runtime.invoke({
     prompt: classifyPrompt,
-    model: opts?.model ?? 'haiku',
+    model: resolveModel(opts?.model ?? 'fast', runtime.id),
     cwd: opts?.cwd ?? '.',
     timeoutMs: opts?.timeoutMs ?? 15_000,
     tools: [],
@@ -120,10 +122,10 @@ export async function classifyCronModel(
     } else if (evt.type === 'text_delta') {
       deltaText += evt.text;
     } else if (evt.type === 'error') {
-      return 'haiku';
+      return 'fast';
     }
   }
 
   const output = (finalText || deltaText).trim().toLowerCase();
-  return output === 'opus' ? 'opus' : 'haiku';
+  return output === 'capable' ? 'capable' : 'fast';
 }

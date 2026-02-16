@@ -1,3 +1,4 @@
+import { resolveModel } from '../runtime/model-tiers.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { ParsedCronDef } from './types.js';
 import { getDefaultTimezone } from './default-timezone.js';
@@ -34,7 +35,7 @@ export async function parseCronDefinition(
 
   for await (const evt of runtime.invoke({
     prompt,
-    model: opts?.model ?? 'haiku',
+    model: resolveModel(opts?.model ?? 'fast', runtime.id),
     cwd: opts?.cwd ?? process.cwd(),
     timeoutMs: opts?.timeoutMs ?? 30_000,
     tools: [],

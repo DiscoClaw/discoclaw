@@ -66,6 +66,7 @@ import { globalMetrics } from './observability/metrics.js';
 import { OnboardingFlow } from './onboarding/onboarding-flow.js';
 import { writeWorkspaceFiles } from './onboarding/onboarding-writer.js';
 import { isOnboardingComplete } from './workspace-bootstrap.js';
+import { resolveModel } from './runtime/model-tiers.js';
 
 export type BotParams = {
   token: string;
@@ -693,7 +694,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   const timeoutMs = params.planPhaseTimeoutMs ?? 5 * 60_000;
                   const phaseOpts = {
                     runtime: params.runtime,
-                    model: params.runtimeModel,
+                    model: resolveModel(params.runtimeModel, params.runtime.id),
                     projectCwd,
                     addDirs: [] as string[],
                     timeoutMs,
@@ -889,13 +890,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 });
 
                 const plansDir = path.join(params.workspaceCwd, 'plans');
-                const auditorModel = params.forgeAuditorModel ?? params.runtimeModel;
+                const rawAuditorModel = params.forgeAuditorModel ?? params.runtimeModel;
                 const timeoutMs = params.forgeTimeoutMs ?? 5 * 60_000;
                 const auditRt = params.auditorRuntime;
                 const isClaudeAudit = !auditRt || auditRt.id === 'claude_code';
                 const effectiveAuditModel = isClaudeAudit
-                  ? auditorModel
-                  : (params.forgeAuditorModel ? auditorModel : '');
+                  ? resolveModel(rawAuditorModel, 'claude_code')
+                  : (params.forgeAuditorModel ? resolveModel(rawAuditorModel, auditRt.id) : '');
 
                 handlePlanAudit({
                   planId: auditPlanId,
@@ -1076,7 +1077,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const resumeOrchestrator = new ForgeOrchestrator({
                   runtime: params.runtime,
                   auditorRuntime: params.auditorRuntime,
-                  model: params.runtimeModel,
+                  model: resolveModel(params.runtimeModel, params.runtime.id),
                   cwd: params.workspaceCwd,
                   workspaceCwd: params.workspaceCwd,
                   beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
@@ -1224,7 +1225,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const createOrchestrator = new ForgeOrchestrator({
                 runtime: params.runtime,
                 auditorRuntime: params.auditorRuntime,
-                model: params.runtimeModel,
+                model: resolveModel(params.runtimeModel, params.runtime.id),
                 cwd: params.workspaceCwd,
                 workspaceCwd: params.workspaceCwd,
                 beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
@@ -1663,7 +1664,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
             for await (const evt of params.runtime.invoke({
               prompt: currentPrompt,
-              model: params.runtimeModel,
+              model: resolveModel(params.runtimeModel, params.runtime.id),
               cwd,
               addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
               sessionId,
@@ -1910,14 +1911,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       });
 
       // Fire-and-forget: run summary generation outside the queue so it doesn't
-      // block the next message for this session key (Haiku can take several seconds).
+      // block the next message for this session key (fast-tier can take several seconds).
       if (pendingSummaryWork) {
         const work = pendingSummaryWork;
         // eslint-disable-next-line @typescript-eslint/no-floating-promises
         generateSummary(params.runtime, {
           previousSummary: work.existingSummary,
           recentExchange: work.exchange,
-          model: params.summaryModel,
+          model: resolveModel(params.summaryModel, params.runtime.id),
           cwd: params.workspaceCwd,
           maxChars: params.summaryMaxChars,
           timeoutMs: 30_000,
@@ -1936,7 +1937,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   userId: msg.author.id,
                   durableDataDir: params.durableDataDir,
                   durableMaxItems: params.durableMaxItems,
-                  model: params.summaryModel,
+                  model: resolveModel(params.summaryModel, params.runtime.id),
                   cwd: params.workspaceCwd,
                   channelId: msg.channelId,
                   messageId: msg.id,

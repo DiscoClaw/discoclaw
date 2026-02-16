@@ -17,7 +17,7 @@ describe('parseConfig', () => {
     const { config, warnings, infos } = parseConfig(env());
     expect(config.token).toBe('token');
     expect(config.allowUserIds.has('123')).toBe(true);
-    expect(config.runtimeModel).toBe('opus');
+    expect(config.runtimeModel).toBe('capable');
     expect(config.outputFormat).toBe('text');
     expect(warnings.some((w) => w.includes('category flags are ignored'))).toBe(false);
     expect(infos.some((i) => i.includes('category flags are ignored'))).toBe(false);
