@@ -697,6 +697,12 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | `parseTrimmedString` | Base URL for the OpenAI-compatible API. Override for proxies or alternative providers (e.g., Azure OpenAI, Ollama). |
 | `OPENAI_MODEL` | `gpt-4o` | `parseTrimmedString` | Default model for the OpenAI adapter. Used when `FORGE_AUDITOR_MODEL` is not set. |
 
+### Bead sync
+
+| Variable | Default | Parser | Description |
+|----------|---------|--------|-------------|
+| `BEAD_SYNC_SKIP_PHASE5` | `false` | `parseBoolean` | Disable Phase 5 (thread reconciliation) of the bead sync cycle. When `true`, the sync will not archive orphaned forum threads or reconcile thread state against beads. Recommended for shared-forum deployments where multiple bot instances or manual Discord activity may create threads that should not be auto-archived. The `skipPhase5` option is passed through to `BeadSyncOptions` in `src/beads/bead-sync.ts`. |
+
 ---
 
 ## 10. Project Context
