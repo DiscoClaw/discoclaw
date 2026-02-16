@@ -35,6 +35,25 @@ vi.mock('./plan-commands.js', () => ({
   handlePlanCommand: vi.fn(async (_cmd: any, _opts: any) => {
     return 'Plan created: **plan-003** (bead: `ws-003`)\nFile: `workspace/plans/plan-003-test.md`\nDescription: New feature';
   }),
+  preparePlanRun: vi.fn(async (_id: string, _opts: any) => ({
+    phasesFilePath: '/tmp/plans/plan-042-phases.md',
+    planFilePath: '/tmp/plans/plan-042-test.md',
+    planContent: '---\nproject: discoclaw\n---\n# Plan',
+    nextPhase: { id: 'phase-1', title: 'First phase', kind: 'implement', status: 'pending', deps: [], contextFiles: [] },
+  })),
+  NO_PHASES_SENTINEL: 'NO_PHASES',
+}));
+
+vi.mock('./plan-manager.js', () => ({
+  runNextPhase: vi.fn(async () => ({ result: 'nothing_to_run' })),
+  resolveProjectCwd: vi.fn((_content: string, workspaceCwd: string) => workspaceCwd),
+}));
+
+vi.mock('./forge-plan-registry.js', () => ({
+  acquireWriterLock: vi.fn(async () => vi.fn()),
+  addRunningPlan: vi.fn(),
+  removeRunningPlan: vi.fn(),
+  isPlanRunning: vi.fn(() => false),
 }));
 
 vi.mock('../beads/bd-cli.js', () => ({
@@ -76,6 +95,7 @@ describe('PLAN_ACTION_TYPES', () => {
     expect(PLAN_ACTION_TYPES.has('planApprove')).toBe(true);
     expect(PLAN_ACTION_TYPES.has('planClose')).toBe(true);
     expect(PLAN_ACTION_TYPES.has('planCreate')).toBe(true);
+    expect(PLAN_ACTION_TYPES.has('planRun')).toBe(true);
   });
 
   it('does not contain non-plan types', () => {
@@ -340,6 +360,64 @@ describe('executePlanAction', () => {
       if (!result.ok) expect(result.error).toContain('Failed');
     });
   });
+
+  describe('planRun', () => {
+    it('starts a plan run and returns summary', async () => {
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('Plan run started');
+        expect(result.summary).toContain('plan-042');
+      }
+    });
+
+    it('fails without planId', async () => {
+      const result = await executePlanAction(
+        { type: 'planRun', planId: '' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires a planId');
+    });
+
+    it('fails without runtime', async () => {
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires runtime');
+    });
+
+    it('blocks at recursion depth >= 1', async () => {
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus', depth: 1 }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('recursion depth');
+    });
+
+    it('rejects when plan is already running', async () => {
+      const { isPlanRunning } = await import('./forge-plan-registry.js');
+      (isPlanRunning as any).mockReturnValueOnce(true);
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('already in progress');
+    });
+  });
 });
 
 describe('planActionsPromptSection', () => {
@@ -350,6 +428,7 @@ describe('planActionsPromptSection', () => {
     expect(section).toContain('planApprove');
     expect(section).toContain('planClose');
     expect(section).toContain('planCreate');
+    expect(section).toContain('planRun');
   });
 
   it('includes plan guidelines', () => {

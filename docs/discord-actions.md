@@ -48,7 +48,7 @@ Forge action types (in `src/discord/actions-forge.ts`):
 - `forgeCreate`, `forgeResume`, `forgeStatus`, `forgeCancel`
 
 Plan action types (in `src/discord/actions-plan.ts`):
-- `planList`, `planShow`, `planApprove`, `planClose`, `planCreate`
+- `planList`, `planShow`, `planApprove`, `planClose`, `planCreate`, `planRun`
 
 Memory action types (in `src/discord/actions-memory.ts`):
 - `memoryRemember`, `memoryForget`, `memoryShow`
@@ -78,9 +78,9 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_BEADS` (also requires beads subsystem enabled/configured)
   - `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1; also requires cron subsystem enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 0)
-  - `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1; also requires forge commands enabled)
-  - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1; also requires plan commands enabled)
-  - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 0; also requires forge commands enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 0; also requires plan commands enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 0; also requires durable memory enabled)
 
 Those env vars get translated into an `ActionCategoryFlags` object (see `src/discord/actions.ts`) and passed down from `src/index.ts` into the Discord handler and cron executor.
 
@@ -130,9 +130,10 @@ Allow the model to start, monitor, and cancel forge runs (plan drafting + audit 
 | `forgeStatus` | Check if a forge is currently running | No (query) | No |
 | `forgeCancel` | Cancel the running forge | Yes | No (sets cancel flag) |
 
-Env: `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1, requires `DISCOCLAW_FORGE_COMMANDS_ENABLED`).
+Env: `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 0, requires `DISCOCLAW_FORGE_COMMANDS_ENABLED`).
 Context: Requires `ForgeContext` with an `orchestratorFactory`, plans directory, and progress callback.
 Concurrency: Only one forge at a time (module-level singleton via `forge-plan-registry.ts`). Acquires the workspace writer lock for the duration of the run.
+Recursion guard: `forgeCreate` and `forgeResume` are blocked at `depth >= 1` to prevent forge-initiated forges.
 
 ### Plan Actions (`actions-plan.ts`)
 
@@ -145,11 +146,13 @@ Allow the model to create, inspect, approve, and close plans without a human `!p
 | `planShow` | Show plan details (header, status, bead) | No (query) |
 | `planApprove` | Set plan status to APPROVED, update backing bead | Yes |
 | `planClose` | Set plan status to CLOSED, close backing bead | Yes |
+| `planRun` | Execute all remaining phases of a plan (fire-and-forget) | Yes |
 
-Env: `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1, requires `DISCOCLAW_PLAN_COMMANDS_ENABLED`).
-Context: Requires `PlanContext` with plans directory and bead CWD.
+Env: `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 0, requires `DISCOCLAW_PLAN_COMMANDS_ENABLED`).
+Context: Requires `PlanContext` with plans directory, bead CWD, runtime, and model.
 
 Note: `planApprove` and `planClose` are blocked while a plan is `IMPLEMENTING`.
+Recursion guard: `planRun` is blocked at `depth >= 1` to prevent plan runs from spawning nested plan runs.
 
 ### Memory Actions (`actions-memory.ts`)
 
@@ -161,7 +164,7 @@ Allow the model to read and mutate the user's durable memory (facts, preferences
 | `memoryForget` | Deprecate items matching a substring | Yes |
 | `memoryShow` | Show current durable memory items | No (query) |
 
-Env: `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1, requires durable memory enabled).
+Env: `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 0, requires durable memory enabled).
 Context: Requires `MemoryContext` with user ID, data directory, and capacity limits.
 Concurrency: Writes are serialized per-user via `durableWriteQueue`.
 
@@ -206,9 +209,12 @@ When actions are executed within a cron job (via `src/cron/executor.ts`), the fo
 
 - `crons` — prevents cron jobs from mutating cron state (self-modification loops)
 - `botProfile` — prevents rate-limit and abuse issues
-- `forge` — forge runs are long-lived; excluded to avoid resource contention
-- `plan` — plan mutations excluded from cron for now
-- `memory` — memory mutations excluded from cron for now
+- `memory` — no user context in cron flows
+
+The following categories are **enabled** in cron flows (gated by their respective env flags):
+
+- `forge` — enables cron → forge autonomous workflows (e.g., scheduled plan drafting)
+- `plan` — enables cron → plan autonomous workflows (e.g., check for approved plans and run them)
 
 ## Adding A New Action (Existing Category)
 

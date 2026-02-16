@@ -705,6 +705,72 @@ if (beadCtx) {
   );
 }
 
+// --- Forge / Plan / Memory action contexts ---
+// Initialized before cron so cron executor can reference these contexts.
+{
+  const plansDir = path.join(workspaceCwd, 'plans');
+  const effectiveBeadsCwd = beadCtx?.beadsCwd ?? workspaceCwd;
+
+  if (forgeCommandsEnabled && discordActionsForge) {
+    botParams.forgeCtx = {
+      orchestratorFactory: () =>
+        new ForgeOrchestrator({
+          runtime: limitedRuntime,
+          auditorRuntime,
+          model: runtimeModel,
+          cwd: workspaceCwd,
+          workspaceCwd,
+          beadsCwd: effectiveBeadsCwd,
+          plansDir,
+          maxAuditRounds: forgeMaxAuditRounds,
+          progressThrottleMs: forgeProgressThrottleMs,
+          timeoutMs: forgeTimeoutMs,
+          drafterModel: forgeDrafterModel,
+          auditorModel: forgeAuditorModel,
+          log,
+        }),
+      plansDir,
+      workspaceCwd,
+      beadsCwd: effectiveBeadsCwd,
+      onProgress: async (msg) => {
+        // Action-initiated forges log progress rather than posting to a channel.
+        log.info({ msg }, 'forge:action:progress');
+      },
+      log,
+    };
+    log.info('forge:action context initialized');
+  }
+
+  if (planCommandsEnabled && discordActionsPlan) {
+    botParams.planCtx = {
+      plansDir,
+      workspaceCwd,
+      beadsCwd: effectiveBeadsCwd,
+      log,
+      runtime: limitedRuntime,
+      model: runtimeModel,
+      phaseTimeoutMs: planPhaseTimeoutMs,
+      maxAuditFixAttempts: planPhaseMaxAuditFixAttempts,
+      onProgress: async (msg) => {
+        log.info({ msg }, 'plan:action:progress');
+      },
+    };
+    log.info('plan:action context initialized');
+  }
+
+  if (durableMemoryEnabled && discordActionsMemory) {
+    // Store a template memoryCtx — handlers override userId and Discord metadata per-message.
+    botParams.memoryCtx = {
+      userId: '',  // Placeholder — overridden per-message with msg.author.id.
+      durableDataDir,
+      durableMaxItems,
+      durableInjectMaxChars,
+      log,
+    };
+    log.info('memory:action context initialized');
+  }
+}
+
 // --- Cron subsystem ---
 const effectiveCronForum = system?.cronsForumId || cronForum || undefined;
 if (cronEnabled && effectiveCronForum) {
@@ -728,9 +794,9 @@ if (cronEnabled && effectiveCronForum) {
     // Prevent cron jobs from mutating cron state via emitted action blocks.
     crons: false,
     botProfile: false, // Intentionally excluded from cron flows to avoid rate-limit and abuse issues.
-    forge: false, // Forge runs are long-lived; exclude from cron to avoid resource contention.
-    plan: false, // Plan mutations excluded from cron for now.
-    memory: false, // Memory mutations excluded from cron for now.
+    forge: discordActionsForge && forgeCommandsEnabled, // Enables cron → forge autonomous workflows.
+    plan: discordActionsPlan && planCommandsEnabled, // Enables cron → plan autonomous workflows.
+    memory: false, // No user context in cron flows.
   };
   const cronRunControl = new CronRunControl();
 
@@ -772,6 +838,8 @@ if (cronEnabled && effectiveCronForum) {
     actionFlags: cronActionFlags,
     beadCtx,
     cronCtx,
+    forgeCtx: botParams.forgeCtx,
+    planCtx: botParams.planCtx,
     statsStore: cronStats,
     lockDir: cronLocksDir,
     runControl: cronRunControl,
@@ -864,63 +932,6 @@ if (cronEnabled && effectiveCronForum) {
   );
 } else if (cronEnabled && !effectiveCronForum) {
   log.warn('DISCOCLAW_CRON_ENABLED=1 but no cron forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_CRON_FORUM); cron subsystem disabled');
-}
-
-// --- Forge / Plan / Memory action contexts ---
-{
-  const plansDir = path.join(workspaceCwd, 'plans');
-  const effectiveBeadsCwd = beadCtx?.beadsCwd ?? workspaceCwd;
-
-  if (forgeCommandsEnabled && discordActionsForge) {
-    botParams.forgeCtx = {
-      orchestratorFactory: () =>
-        new ForgeOrchestrator({
-          runtime: limitedRuntime,
-          auditorRuntime,
-          model: runtimeModel,
-          cwd: workspaceCwd,
-          workspaceCwd,
-          beadsCwd: effectiveBeadsCwd,
-          plansDir,
-          maxAuditRounds: forgeMaxAuditRounds,
-          progressThrottleMs: forgeProgressThrottleMs,
-          timeoutMs: forgeTimeoutMs,
-          drafterModel: forgeDrafterModel,
-          auditorModel: forgeAuditorModel,
-          log,
-        }),
-      plansDir,
-      workspaceCwd,
-      beadsCwd: effectiveBeadsCwd,
-      onProgress: async (msg) => {
-        // Action-initiated forges log progress rather than posting to a channel.
-        log.info({ msg }, 'forge:action:progress');
-      },
-      log,
-    };
-    log.info('forge:action context initialized');
-  }
-
-  if (planCommandsEnabled && discordActionsPlan) {
-    botParams.planCtx = {
-      plansDir,
-      workspaceCwd,
-      beadsCwd: effectiveBeadsCwd,
-      log,
-    };
-    log.info('plan:action context initialized');
-  }
-
-  if (durableMemoryEnabled && discordActionsMemory) {
-    botParams.memoryCtx = {
-      userId: 'action',  // Action-initiated memory ops use a synthetic user ID.
-      durableDataDir,
-      durableMaxItems,
-      durableInjectMaxChars,
-      log,
-    };
-    log.info('memory:action context initialized');
-  }
 }
 
 if (reactionHandlerEnabled) {

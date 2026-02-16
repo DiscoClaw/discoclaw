@@ -37,6 +37,8 @@ export type ForgeContext = {
   /** Callback to send progress messages to the originating channel. */
   onProgress: (msg: string, opts?: { force?: boolean }) => Promise<void>;
   log?: LoggerLike;
+  /** Recursion depth — 0 for user/cron origins, 1+ for action-triggered sub-invocations. */
+  depth?: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -50,6 +52,10 @@ export async function executeForgeAction(
 ): Promise<DiscordActionResult> {
   switch (action.type) {
     case 'forgeCreate': {
+      if ((forgeCtx.depth ?? 0) >= 1) {
+        return { ok: false, error: 'forgeCreate blocked: recursion depth >= 1 (forge cannot spawn another forge)' };
+      }
+
       if (!action.description) {
         return { ok: false, error: 'forgeCreate requires a description' };
       }
@@ -82,6 +88,10 @@ export async function executeForgeAction(
     }
 
     case 'forgeResume': {
+      if ((forgeCtx.depth ?? 0) >= 1) {
+        return { ok: false, error: 'forgeResume blocked: recursion depth >= 1 (forge cannot spawn another forge)' };
+      }
+
       if (!action.planId) {
         return { ok: false, error: 'forgeResume requires a planId' };
       }

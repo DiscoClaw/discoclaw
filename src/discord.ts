@@ -30,6 +30,15 @@ import type { PreparePlanRunResult } from './discord/plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator } from './discord/forge-commands.js';
 import type { ForgeOrchestratorOpts } from './discord/forge-commands.js';
 import { runNextPhase, resolveProjectCwd } from './discord/plan-manager.js';
+import {
+  acquireWriterLock as registryAcquireWriterLock,
+  setActiveOrchestrator,
+  getActiveOrchestrator,
+  getActiveForgeId as registryGetActiveForgeId,
+  addRunningPlan,
+  removeRunningPlan,
+  isPlanRunning,
+} from './discord/forge-plan-registry.js';
 import { applyUserTurnToDurable } from './discord/user-turn-to-durable.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster } from './discord/status-channel.js';
@@ -162,27 +171,15 @@ type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 const turnCounters = new Map<string, number>();
 
 // ---------------------------------------------------------------------------
-// Global workspace writer lock — serializes forge creates and plan phase runs.
+// Shared forge/plan state — delegated to forge-plan-registry.ts
 // ---------------------------------------------------------------------------
 
-let workspaceWriterLock: Promise<void> = Promise.resolve();
-
-function acquireWriterLock(): Promise<() => void> {
-  let release!: () => void;
-  const prev = workspaceWriterLock;
-  workspaceWriterLock = new Promise<void>((resolve) => { release = resolve; });
-  return prev.then(() => release);
-}
-
+const acquireWriterLock = registryAcquireWriterLock;
 const MAX_PLAN_RUN_PHASES = 50;
-const runningPlanIds = new Set<string>();
-
-// Module-level forge reference — allows index.ts to query active forge at shutdown.
-let _activeForgeOrchestrator: ForgeOrchestrator | null = null;
 
 /** Returns the active forge plan ID if a forge is running, undefined otherwise. */
 export function getActiveForgeId(): string | undefined {
-  return _activeForgeOrchestrator?.activePlanId;
+  return registryGetActiveForgeId();
 }
 
 export function groupDirNameFromSessionKey(sessionKey: string): string {
@@ -218,9 +215,6 @@ export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail
 export type StatusRef = { current: StatusPoster | null };
 
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
-  // Global forge orchestrator — one forge at a time across all channels.
-  let forgeOrchestrator: ForgeOrchestrator | null = null;
-
   // --- Onboarding state ---
   let onboardingSession: OnboardingFlow | null = null;
   let activeOnboardingUserId: string | null = null;
@@ -364,7 +358,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           log: params.log,
           dataDir: params.dataDir,
           userId: msg.author.id,
-          activeForge: forgeOrchestrator?.activePlanId,
+          activeForge: getActiveOrchestrator()?.activePlanId,
         });
         await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
         // Deferred action (e.g., restart) runs after the reply is sent.
@@ -626,13 +620,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const planId = planCmd.args;
 
                 // Concurrency guard: reject if a multi-phase run is already active for this plan
-                if (runningPlanIds.has(planId)) {
+                if (isPlanRunning(planId)) {
                   await msg.reply({ content: `A multi-phase run is already in progress for ${planId}.`, allowedMentions: NO_MENTIONS });
                   return;
                 }
 
-                runningPlanIds.add(planId);
-                try { // outer try: guarantees runningPlanIds cleanup
+                addRunningPlan(planId);
+                try { // outer try: guarantees addRunningPlan cleanup
 
                   // Acquire lock for initial validation only
                   let phasesFilePath: string;
@@ -651,7 +645,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         : prepResult.error;
                       await msg.reply({ content, allowedMentions: NO_MENTIONS });
                       validationLock();
-                      runningPlanIds.delete(planId);
+                      removeRunningPlan(planId);
                       return;
                     }
 
@@ -666,7 +660,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         allowedMentions: NO_MENTIONS,
                       });
                       validationLock();
-                      runningPlanIds.delete(planId);
+                      removeRunningPlan(planId);
                       return;
                     }
 
@@ -676,7 +670,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     progressReply = await msg.reply({ content: startMsg, allowedMentions: NO_MENTIONS });
                   } catch (err) {
                     validationLock();
-                    throw err; // outer catch cleans up runningPlanIds
+                    throw err; // outer catch cleans up running plan tracking
                   }
                   validationLock(); // release validation lock before phase execution
 
@@ -853,11 +847,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   ).catch((err) => {
                     params.log?.error({ err }, 'plan-run: unhandled rejection in callback');
                   }).finally(() => {
-                    runningPlanIds.delete(planId);
+                    removeRunningPlan(planId);
                   });
 
                 } catch (err) {
-                  runningPlanIds.delete(planId);
+                  removeRunningPlan(planId);
                   throw err;
                 }
 
@@ -1036,7 +1030,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
 
               if (forgeCmd.action === 'status') {
-                const running = forgeOrchestrator?.isRunning ?? false;
+                const running = getActiveOrchestrator()?.isRunning ?? false;
                 await msg.reply({
                   content: running ? 'A forge is currently running.' : 'No forge running.',
                   allowedMentions: NO_MENTIONS,
@@ -1045,8 +1039,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
 
               if (forgeCmd.action === 'cancel') {
-                if (forgeOrchestrator?.isRunning) {
-                  forgeOrchestrator.requestCancel();
+                const orch = getActiveOrchestrator();
+                if (orch?.isRunning) {
+                  orch.requestCancel();
                   await msg.reply({ content: 'Forge cancel requested.', allowedMentions: NO_MENTIONS });
                 } else {
                   await msg.reply({ content: 'No forge running to cancel.', allowedMentions: NO_MENTIONS });
@@ -1055,7 +1050,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
 
               // action === 'create'
-              if (forgeOrchestrator?.isRunning) {
+              if (getActiveOrchestrator()?.isRunning) {
                 await msg.reply({
                   content: 'A forge is already running. Use `!forge cancel` to stop it first.',
                   allowedMentions: NO_MENTIONS,
@@ -1078,7 +1073,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // Resume path
                 const forgeReleaseLock = await acquireWriterLock();
 
-                forgeOrchestrator = new ForgeOrchestrator({
+                const resumeOrchestrator = new ForgeOrchestrator({
                   runtime: params.runtime,
                   auditorRuntime: params.auditorRuntime,
                   model: params.runtimeModel,
@@ -1093,7 +1088,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   auditorModel: params.forgeAuditorModel,
                   log: params.log,
                 });
-                _activeForgeOrchestrator = forgeOrchestrator;
+                setActiveOrchestrator(resumeOrchestrator);
 
                 const progressReply = await msg.reply({
                   content: `Re-auditing **${found.header.planId}**...`,
@@ -1119,8 +1114,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 };
 
                 // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                forgeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress).then(
+                resumeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress).then(
                   async (result) => {
+                    setActiveOrchestrator(null);
                     forgeReleaseLock();
                     if (progressMessageGone) {
                       try {
@@ -1151,6 +1147,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     }
                   },
                   async (err) => {
+                    setActiveOrchestrator(null);
                     forgeReleaseLock();
                     params.log?.error({ err }, 'forge:resume:unhandled error');
                     try {
@@ -1224,7 +1221,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const forgeReleaseLock = await acquireWriterLock();
 
               const plansDir = path.join(params.workspaceCwd, 'plans');
-              forgeOrchestrator = new ForgeOrchestrator({
+              const createOrchestrator = new ForgeOrchestrator({
                 runtime: params.runtime,
                 auditorRuntime: params.auditorRuntime,
                 model: params.runtimeModel,
@@ -1240,7 +1237,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 log: params.log,
                 existingBeadId: forgeExistingBeadId,
               });
-              _activeForgeOrchestrator = forgeOrchestrator;
+              setActiveOrchestrator(createOrchestrator);
 
               // Send initial progress message
               const progressReply = await msg.reply({
@@ -1269,8 +1266,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
               // Run forge in the background — don't block the queue
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              forgeOrchestrator.run(forgeCmd.args, onProgress, forgeContext).then(
+              createOrchestrator.run(forgeCmd.args, onProgress, forgeContext).then(
                 async (result) => {
+                  setActiveOrchestrator(null);
                   forgeReleaseLock();
                   if (progressMessageGone) {
                     try {
@@ -1303,6 +1301,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   }
                 },
                 async (err) => {
+                  setActiveOrchestrator(null);
                   forgeReleaseLock();
                   params.log?.error({ err }, 'forge:unhandled error');
                   try {
@@ -1755,12 +1754,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   messageId: msg.id,
                   threadParentId,
                 };
+                // Construct per-message memoryCtx with real user ID and Discord metadata.
+                const perMessageMemoryCtx = params.memoryCtx ? {
+                  ...params.memoryCtx,
+                  userId: msg.author.id,
+                  channelId: msg.channelId,
+                  messageId: msg.id,
+                  guildId: msg.guildId ?? undefined,
+                  channelName: (msg.channel as any)?.name ?? undefined,
+                } : undefined;
                 actionResults = await executeDiscordActions(parsed.actions, actCtx, params.log, {
                   beadCtx: params.beadCtx,
                   cronCtx: params.cronCtx,
                   forgeCtx: params.forgeCtx,
                   planCtx: params.planCtx,
-                  memoryCtx: params.memoryCtx,
+                  memoryCtx: perMessageMemoryCtx,
                 });
                 for (const result of actionResults) {
                   metrics.recordActionResult(result.ok);

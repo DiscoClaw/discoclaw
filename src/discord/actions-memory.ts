@@ -43,6 +43,10 @@ export type MemoryContext = {
 // Executor
 // ---------------------------------------------------------------------------
 
+const VALID_KINDS: ReadonlySet<string> = new Set<DurableItem['kind']>([
+  'fact', 'preference', 'project', 'constraint', 'person', 'tool', 'workflow',
+]);
+
 export async function executeMemoryAction(
   action: MemoryActionRequest,
   _ctx: ActionContext,
@@ -54,15 +58,21 @@ export async function executeMemoryAction(
         return { ok: false, error: 'memoryRemember requires text' };
       }
 
+      const kind = action.kind ?? 'fact';
+      if (!VALID_KINDS.has(kind)) {
+        return { ok: false, error: `Invalid memory kind: "${kind}". Must be one of: ${[...VALID_KINDS].join(', ')}` };
+      }
+
       return durableWriteQueue.run(memCtx.userId, async () => {
         const store = await loadOrCreate(memCtx.durableDataDir, memCtx.userId);
-        const source: DurableItem['source'] = { type: 'summary' };
+        const source: DurableItem['source'] = { type: 'discord' };
         if (memCtx.channelId) source.channelId = memCtx.channelId;
         if (memCtx.messageId) source.messageId = memCtx.messageId;
         if (memCtx.guildId) source.guildId = memCtx.guildId;
         if (memCtx.channelName) source.channelName = memCtx.channelName;
-        addItem(store, action.text, source, memCtx.durableMaxItems, action.kind ?? 'fact');
+        addItem(store, action.text, source, memCtx.durableMaxItems, kind as DurableItem['kind']);
         await saveDurableMemory(memCtx.durableDataDir, memCtx.userId, store);
+        memCtx.log?.info({ action: 'memoryRemember', userId: memCtx.userId, textLength: action.text.length }, 'memory:action:remember');
         return { ok: true as const, summary: `Remembered: "${action.text}"` };
       });
     }
@@ -77,6 +87,7 @@ export async function executeMemoryAction(
         const { deprecatedCount } = deprecateItems(store, action.substring);
         if (deprecatedCount > 0) {
           await saveDurableMemory(memCtx.durableDataDir, memCtx.userId, store);
+          memCtx.log?.info({ action: 'memoryForget', userId: memCtx.userId, textLength: action.substring.length, deprecatedCount }, 'memory:action:forget');
           return { ok: true as const, summary: `Forgot ${deprecatedCount} item(s) matching "${action.substring}"` };
         }
         return { ok: true as const, summary: `No matching items found for "${action.substring}"` };

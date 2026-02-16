@@ -160,7 +160,7 @@ describe('executeMemoryAction', () => {
       expect(addItem).toHaveBeenCalledWith(
         expect.any(Object),
         'Working on DiscoClaw',
-        expect.objectContaining({ type: 'summary' }),
+        expect.objectContaining({ type: 'discord' }),
         200,
         'project',
       );
@@ -184,7 +184,7 @@ describe('executeMemoryAction', () => {
       );
     });
 
-    it('sets source type to summary with Discord metadata', async () => {
+    it('sets source type to discord with Discord metadata', async () => {
       const { addItem } = await import('./durable-memory.js');
 
       await executeMemoryAction(
@@ -197,7 +197,7 @@ describe('executeMemoryAction', () => {
         expect.any(Object),
         'A fact',
         expect.objectContaining({
-          type: 'summary',
+          type: 'discord',
           channelId: 'ch-456',
           messageId: 'msg-789',
           guildId: 'guild-001',

@@ -448,12 +448,21 @@ function createReactionHandler(
                 messageId: msg.id,
                 threadParentId,
               };
+              // Construct per-event memoryCtx with the reacting user's ID and Discord metadata.
+              const perEventMemoryCtx = params.memoryCtx ? {
+                ...params.memoryCtx,
+                userId: user.id,
+                channelId: msg.channelId,
+                messageId: msg.id,
+                guildId: msg.guildId ?? undefined,
+                channelName: (msg.channel as any)?.name ?? undefined,
+              } : undefined;
               const results = await executeDiscordActions(parsed.actions, actCtx, params.log, {
                 beadCtx: params.beadCtx,
                 cronCtx: params.cronCtx,
                 forgeCtx: params.forgeCtx,
                 planCtx: params.planCtx,
-                memoryCtx: params.memoryCtx,
+                memoryCtx: perEventMemoryCtx,
               });
               for (const result of results) {
                 metrics.recordActionResult(result.ok);

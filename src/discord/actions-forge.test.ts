@@ -121,6 +121,16 @@ describe('executeForgeAction', () => {
       if (!result.ok) expect(result.error).toContain('requires a description');
     });
 
+    it('blocks at recursion depth >= 1', async () => {
+      const result = await executeForgeAction(
+        { type: 'forgeCreate', description: 'New thing' },
+        makeCtx(),
+        makeForgeCtx({ depth: 1 }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('recursion depth');
+    });
+
     it('rejects when a forge is already running', async () => {
       const runningOrch = makeMockOrchestrator({ isRunning: true, activePlanId: 'plan-001' });
       setActiveOrchestrator(runningOrch as any);
@@ -151,6 +161,16 @@ describe('executeForgeAction', () => {
         expect(result.summary).toContain('Forge resumed');
         expect(result.summary).toContain('plan-042');
       }
+    });
+
+    it('blocks at recursion depth >= 1', async () => {
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-042' },
+        makeCtx(),
+        makeForgeCtx({ depth: 1 }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('recursion depth');
     });
 
     it('fails without planId', async () => {
