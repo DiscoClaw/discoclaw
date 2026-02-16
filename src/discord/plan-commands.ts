@@ -12,6 +12,7 @@ import {
   writePhasesFile,
 } from './plan-manager.js';
 import type { PlanPhase, PlanPhases } from './plan-manager.js';
+import type { LoggerLike } from './action-types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -650,4 +651,84 @@ export async function preparePlanRun(
     planContent,
     nextPhase,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Auto-close plan when all phases are terminal
+// ---------------------------------------------------------------------------
+
+const CLOSEABLE_STATUSES = new Set(['APPROVED', 'IMPLEMENTING']);
+const TERMINAL_PHASE_STATUSES = new Set(['done', 'skipped']);
+
+export async function closePlanIfComplete(
+  phasesFilePath: string,
+  planFilePath: string,
+  beadsCwd: string,
+  acquireLock: () => Promise<() => void>,
+  log?: LoggerLike,
+): Promise<{ closed: boolean; reason: string }> {
+  let beadId: string | undefined;
+  const releaseLock = await acquireLock();
+  try {
+    // Read and deserialize phases
+    let phasesContent: string;
+    try {
+      phasesContent = await fs.readFile(phasesFilePath, 'utf-8');
+    } catch (err) {
+      log?.warn({ err, phasesFilePath }, 'closePlanIfComplete: failed to read phases file');
+      return { closed: false, reason: 'read_error' };
+    }
+
+    let phases: PlanPhases;
+    try {
+      phases = deserializePhases(phasesContent);
+    } catch (err) {
+      log?.warn({ err, phasesFilePath }, 'closePlanIfComplete: failed to deserialize phases');
+      return { closed: false, reason: 'read_error' };
+    }
+
+    // Check whether every phase has a terminal status (done or skipped)
+    const allComplete = phases.phases.every((p) => TERMINAL_PHASE_STATUSES.has(p.status));
+    if (!allComplete) {
+      return { closed: false, reason: 'not_all_complete' };
+    }
+
+    // Read plan file header
+    let planContent: string;
+    try {
+      planContent = await fs.readFile(planFilePath, 'utf-8');
+    } catch (err) {
+      log?.warn({ err, planFilePath }, 'closePlanIfComplete: failed to read plan file');
+      return { closed: false, reason: 'read_error' };
+    }
+
+    const header = parsePlanFileHeader(planContent);
+    if (!header) {
+      log?.warn({ planFilePath }, 'closePlanIfComplete: failed to parse plan file header');
+      return { closed: false, reason: 'read_error' };
+    }
+
+    // Plan-status gate: only auto-close plans that were approved for execution
+    if (!CLOSEABLE_STATUSES.has(header.status)) {
+      return { closed: false, reason: 'wrong_status' };
+    }
+
+    beadId = header.beadId || undefined;
+
+    // Close the plan (under lock, as updatePlanFileStatus requires)
+    await updatePlanFileStatus(planFilePath, 'CLOSED');
+  } finally {
+    releaseLock();
+  }
+
+  // Best-effort bead close (no lock needed for bd CLI calls)
+  if (beadId) {
+    try {
+      await bdClose(beadId, 'All phases complete', beadsCwd);
+    } catch (err) {
+      log?.warn({ err, beadId }, 'closePlanIfComplete: failed to close bead (best-effort)');
+    }
+  }
+
+  return { closed: true, reason: 'all_phases_complete' };
 }
