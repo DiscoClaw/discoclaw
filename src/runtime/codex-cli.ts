@@ -69,9 +69,10 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     const useStdin = Buffer.byteLength(params.prompt, 'utf-8') > STDIN_THRESHOLD;
 
     // When resuming, use `codex exec resume <thread_id> [PROMPT]`.
+    // The resume subcommand does NOT support -s/--sandbox (inherits from original session).
     // When starting a new session (or ephemeral), use `codex exec [PROMPT]`.
     const args: string[] = existingThreadId
-      ? ['exec', 'resume', existingThreadId, '-m', model, '--skip-git-repo-check', '-s', 'read-only']
+      ? ['exec', 'resume', existingThreadId, '-m', model, '--skip-git-repo-check']
       : ['exec', '-m', model, '--skip-git-repo-check', ...(wantSession ? [] : ['--ephemeral']), '-s', 'read-only'];
 
     // When session tracking is active, use --json so we can capture the thread_id
