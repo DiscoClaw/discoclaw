@@ -369,7 +369,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       allowChannelIds,
       restrictChannelIds,
 
-      runtimeModel: parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'opus',
+      runtimeModel: parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'capable',
       runtimeTools: parseRuntimeTools(env, warnings),
       runtimeTimeoutMs: parsePositiveNumber(env, 'RUNTIME_TIMEOUT_MS', 30 * 60_000),
       runtimeFallbackModel: parseTrimmedString(env, 'RUNTIME_FALLBACK_MODEL'),
@@ -413,7 +413,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
       messageHistoryBudget: parseNonNegativeInt(env, 'DISCOCLAW_MESSAGE_HISTORY_BUDGET', 3000),
       summaryEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_ENABLED', true),
-      summaryModel: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_MODEL') ?? 'haiku',
+      summaryModel: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_MODEL') ?? 'fast',
       summaryMaxChars: parseNonNegativeInt(env, 'DISCOCLAW_SUMMARY_MAX_CHARS', 2000),
       summaryEveryNTurns: parsePositiveInt(env, 'DISCOCLAW_SUMMARY_EVERY_N_TURNS', 5),
       summaryDataDirOverride: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_DATA_DIR'),
@@ -460,9 +460,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
       cronEnabled,
       cronForum,
-      cronModel: parseTrimmedString(env, 'DISCOCLAW_CRON_MODEL') ?? 'haiku',
+      cronModel: parseTrimmedString(env, 'DISCOCLAW_CRON_MODEL') ?? 'fast',
       cronAutoTag: parseBoolean(env, 'DISCOCLAW_CRON_AUTO_TAG', false),
-      cronAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_CRON_AUTO_TAG_MODEL') ?? 'haiku',
+      cronAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_CRON_AUTO_TAG_MODEL') ?? 'fast',
       cronStatsDirOverride: parseTrimmedString(env, 'DISCOCLAW_CRON_STATS_DIR'),
       cronTagMapPathOverride: parseTrimmedString(env, 'DISCOCLAW_CRON_TAG_MAP'),
 
@@ -477,7 +477,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       beadsMentionUser: parseTrimmedString(env, 'DISCOCLAW_BEADS_MENTION_USER'),
       beadsSidebar: parseBoolean(env, 'DISCOCLAW_BEADS_SIDEBAR', false),
       beadsAutoTag: parseBoolean(env, 'DISCOCLAW_BEADS_AUTO_TAG', true),
-      beadsAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_BEADS_AUTO_TAG_MODEL') ?? 'haiku',
+      beadsAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_BEADS_AUTO_TAG_MODEL') ?? 'fast',
 
       claudeBin: parseTrimmedString(env, 'CLAUDE_BIN') ?? 'claude',
       dangerouslySkipPermissions: parseBoolean(env, 'CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS', false),
