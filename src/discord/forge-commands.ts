@@ -800,7 +800,7 @@ export class ForgeOrchestrator {
         auditorHasFileTools ? readOnlyTools : [],
         auditorHasFileTools ? addDirs : [],
         this.opts.timeoutMs,
-        isClaudeAuditor ? { sessionKey: auditorSessionKey } : undefined,
+        auditorRt.capabilities.has('sessions') ? { sessionKey: auditorSessionKey } : undefined,
       );
 
       lastAuditNotes = auditOutput;

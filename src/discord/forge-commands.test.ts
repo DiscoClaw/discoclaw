@@ -1323,7 +1323,7 @@ function makeCaptureRuntime(responses: string[]): {
   const invocations: RuntimeInvokeParams[] = [];
   const runtime: RuntimeAdapter = {
     id: 'claude_code' as const,
-    capabilities: new Set(['streaming_text' as const]),
+    capabilities: new Set(['streaming_text' as const, 'sessions' as const]),
     invoke(params) {
       invocations.push(params);
       const text = responses[callIndex] ?? '(no response)';
