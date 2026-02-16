@@ -166,7 +166,7 @@ All actions are gated by category env flags (off by default except channels).
 ### Post-MVP
 
 - [x] **OpenAI-compatible runtime adapter** — `src/runtime/openai-compat.ts` with registry and forge auditor routing via `FORGE_AUDITOR_RUNTIME`.
-- [x] **Codex CLI runtime adapter** — `src/runtime/codex-cli.ts` shells out to `codex exec` for models that aren't available on the public completions API (e.g., `gpt-5.3-codex`). Selectable via `FORGE_AUDITOR_RUNTIME=codex`.
+- [x] **Codex CLI runtime adapter** — `src/runtime/codex-cli.ts` shells out to `codex exec` for models that aren't available on the public completions API (e.g., `gpt-5.3-codex`). Selectable via `FORGE_AUDITOR_RUNTIME=codex`. Supports session persistence (`sessions` capability) — maps session keys to Codex thread IDs in memory, using `codex exec resume` for multi-turn conversations within a forge run.
 - [ ] **Additional runtime adapters** — Gemini adapter so the project supports three model families.
 - [ ] **Full runtime selection for all roles** — currently only the forge auditor can be routed to a non-Claude runtime. The Codex CLI adapter now supports read-only tools (`tools_fs`), but extending to drafter/reviser would require write tool support. Cron executor and message handler still need evaluation.
 - [ ] Discord-native dashboard (status embeds, config commands, health checks in a dedicated channel)

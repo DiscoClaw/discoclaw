@@ -458,7 +458,7 @@ This enables cross-model auditing — the plan is drafted by one model family an
 
 When the auditor uses a non-Claude runtime:
 - Tool access depends on the adapter's capabilities. The Codex CLI adapter declares `tools_fs` and receives read-only tools (Read, Glob, Grep) just like Claude. The OpenAI HTTP adapter does not — it gets a text-only "no codebase access" prompt instead.
-- Session keys are not used (no multi-turn reuse)
+- Session persistence depends on the adapter's capabilities. Adapters that declare the `sessions` capability (Claude and Codex CLI) maintain conversation context across audit rounds — the auditor remembers previous concerns and the drafter remembers previous revisions. The Codex CLI adapter maps session keys to Codex thread IDs in memory, using `codex exec resume <thread_id>` for subsequent calls. Session state is in-memory only and resets on service restart. Adapters without `sessions` (e.g., the OpenAI HTTP adapter) start fresh each round.
 - If `FORGE_AUDITOR_MODEL` is not set, the model defaults to the adapter's `defaultModel`: for codex, `CODEX_MODEL` (default `gpt-5.3-codex`); for openai, `OPENAI_MODEL` (default `gpt-4o`)
 
 ---
@@ -868,7 +868,7 @@ All three steps should happen together — don't leave stale branches on either 
 | `src/discord.ts` | Discord message handler: command dispatch for both `!plan` and `!forge`, writer lock, forge lifecycle management |
 | `src/config.ts` | All plan/forge env var parsing |
 | `src/runtime/openai-compat.ts` | OpenAI-compatible runtime adapter (SSE streaming, text-only — no tool support) |
-| `src/runtime/codex-cli.ts` | Codex CLI runtime adapter (subprocess, supports read-only tools via `tools_fs` capability) |
+| `src/runtime/codex-cli.ts` | Codex CLI runtime adapter (subprocess, supports read-only tools via `tools_fs` and session persistence via `sessions` capability) |
 | `src/runtime/registry.ts` | Runtime adapter registry (name → adapter lookup) |
 | `src/runtime/types.ts` | `RuntimeAdapter` interface, `EngineEvent` types |
 
