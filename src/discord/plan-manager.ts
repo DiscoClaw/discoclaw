@@ -92,15 +92,22 @@ export function extractFilePaths(changesSection: string): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
 
-  // Match ` - `path/to/file` ` patterns (backtick-wrapped in list items)
-  const regex = /^[\s]*-\s+`([^`]+)`/gm;
-  let m: RegExpExecArray | null;
-  while ((m = regex.exec(changesSection)) !== null) {
-    const candidate = m[1]!;
-    if (!isLikelyFilePath(candidate)) continue;
-    if (seen.has(candidate)) continue;
-    seen.add(candidate);
-    paths.push(candidate);
+  // Match backtick-wrapped paths in list items: ` - `path/to/file` `
+  // and in headings: `#### `path/to/file` `
+  const regexes = [
+    /^[\s]*-\s+`([^`]+)`/gm,
+    /^#{1,6}\s+`([^`]+)`/gm,
+  ];
+
+  for (const regex of regexes) {
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(changesSection)) !== null) {
+      const candidate = m[1]!;
+      if (!isLikelyFilePath(candidate)) continue;
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      paths.push(candidate);
+    }
   }
 
   return paths;

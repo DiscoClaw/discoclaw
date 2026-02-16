@@ -197,6 +197,41 @@ describe('extractFilePaths', () => {
       'src/config.ts',
     ]);
   });
+
+  it('extracts paths from heading format (h4)', () => {
+    const section = '#### `src/discord/forge-commands.ts`\n\nSome changes here.\n\n#### `src/discord/audit-handler.ts`\n\nMore changes.';
+    expect(extractFilePaths(section)).toEqual([
+      'src/discord/forge-commands.ts',
+      'src/discord/audit-handler.ts',
+    ]);
+  });
+
+  it('extracts paths from mixed list and heading formats', () => {
+    const section = [
+      '#### `src/discord/forge-commands.ts`',
+      '',
+      '- `AuditVerdict` type: changes',
+      '- `parseAuditVerdict()` updates',
+      '',
+      '#### `src/discord/plan-manager.ts`',
+      '',
+      '- `buildPhasePrompt()` audit section',
+    ].join('\n');
+    expect(extractFilePaths(section)).toEqual([
+      'src/discord/forge-commands.ts',
+      'src/discord/plan-manager.ts',
+    ]);
+  });
+
+  it('rejects non-file-path headings', () => {
+    const section = '#### `PlanPhase` type\n\n#### `src/foo.ts`\n\n#### `PLAN_PHASES_ENABLED`';
+    expect(extractFilePaths(section)).toEqual(['src/foo.ts']);
+  });
+
+  it('deduplicates across list and heading formats', () => {
+    const section = '#### `src/foo.ts`\n\n- `src/foo.ts` — same file again';
+    expect(extractFilePaths(section)).toEqual(['src/foo.ts']);
+  });
 });
 
 // ---------------------------------------------------------------------------
