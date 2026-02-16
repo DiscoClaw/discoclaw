@@ -9,6 +9,7 @@ import {
   createBeadThread,
   closeBeadThread,
   isThreadArchived,
+  isBeadThreadAlreadyClosed,
   updateBeadThreadName,
   updateBeadStarterMessage,
   updateBeadThreadTags,
@@ -182,15 +183,14 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   for (const bead of closedBeads) {
     const threadId = getThreadIdFromBead(bead)!;
     try {
-      // Lightweight idempotency: skip if the thread is already archived.
-      // This avoids false negatives from name/tag mismatches triggering
-      // duplicate close messages on threads that were closed concurrently.
-      // Note: isThreadArchived never throws (fetchThreadChannel catches internally).
-      if (await isThreadArchived(client, threadId)) {
+      // Full idempotency check: skip only if the thread is archived AND has
+      // the correct closed name and tags. This lets sync recover threads that
+      // were archived with stale names (e.g., rename failed silently during close).
+      if (await isBeadThreadAlreadyClosed(client, threadId, bead, tagMap)) {
         await sleep(throttleMs);
         continue;
       }
-      await closeBeadThread(client, threadId, bead, tagMap);
+      await closeBeadThread(client, threadId, bead, tagMap, log);
       threadsArchived++;
       log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase4 archived');
     } catch (err) {
