@@ -464,6 +464,23 @@ describe('runBeadSync', () => {
     expect(result.warnings).toBe(1);
   });
 
+  it('accepts skipPhase5 option without error', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    (bdList as any).mockResolvedValueOnce([]);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+      skipPhase5: true,
+    } as any);
+
+    expect(result.warnings).toBe(0);
+  });
+
   it('calls statusPoster.beadSyncComplete in forum-not-found early return', async () => {
     const { resolveBeadsForum } = await import('./discord-sync.js');
     (resolveBeadsForum as any).mockResolvedValueOnce(null);

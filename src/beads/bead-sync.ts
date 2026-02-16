@@ -29,6 +29,8 @@ export type BeadSyncOptions = {
   archivedDedupeLimit?: number;
   statusPoster?: StatusPoster;
   mentionUserId?: string;
+  /** Disable Phase 5 (thread reconciliation). Useful for shared-forum deployments. */
+  skipPhase5?: boolean;
 };
 
 function hasLabel(bead: BeadData, label: string): boolean {
