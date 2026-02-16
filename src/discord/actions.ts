@@ -392,6 +392,7 @@ You can perform Discord server actions by including structured action blocks in 
 
   sections.push(`### Rules
 - Only the action types listed above are supported.
+- Never emit an action with empty, placeholder, or missing values for required parameters. If you don't have the value (e.g., no messageId for react), skip the action entirely.
 - Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
 - Action blocks are removed from the displayed message; results are appended automatically.
 - Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, beadList, beadShow, cronList, cronShow, planList, planShow, memoryShow, forgeStatus) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.

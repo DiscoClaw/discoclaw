@@ -384,6 +384,33 @@ describe('react', () => {
     expect(result).toEqual({ ok: true, summary: 'Reacted with 👍' });
     expect(msg.react).toHaveBeenCalledWith('👍');
   });
+
+  it('rejects empty channelId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'react', channelId: '', messageId: 'msg1', emoji: '👍' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'react requires a non-empty channelId' });
+  });
+
+  it('rejects empty messageId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'react', channelId: 'ch1', messageId: '', emoji: '👍' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'react requires a non-empty messageId' });
+  });
+
+  it('rejects empty emoji', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'react', channelId: 'ch1', messageId: 'msg1', emoji: '' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'react requires a non-empty emoji' });
+  });
 });
 
 describe('unreact', () => {
@@ -408,6 +435,33 @@ describe('unreact', () => {
     expect(result).toEqual({ ok: true, summary: 'Removed reaction 👍' });
     expect((msg as any).reactions.resolve).toHaveBeenCalledWith('👍');
     expect(removeFn).toHaveBeenCalledWith('bot-user-id');
+  });
+
+  it('rejects empty channelId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'unreact', channelId: '', messageId: 'msg1', emoji: '👍' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'unreact requires a non-empty channelId' });
+  });
+
+  it('rejects empty messageId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'unreact', channelId: 'ch1', messageId: '', emoji: '👍' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'unreact requires a non-empty messageId' });
+  });
+
+  it('rejects empty emoji', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'unreact', channelId: 'ch1', messageId: 'msg1', emoji: '' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'unreact requires a non-empty emoji' });
   });
 
   it('fails when reaction not found on message', async () => {
@@ -504,6 +558,24 @@ describe('fetchMessage', () => {
     expect((result as any).summary).toContain('[alice]: Fetched message');
     expect((result as any).summary).toContain('#general');
   });
+
+  it('rejects empty channelId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: '', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'fetchMessage requires a non-empty channelId' });
+  });
+
+  it('rejects empty messageId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: '' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'fetchMessage requires a non-empty messageId' });
+  });
 });
 
 describe('editMessage', () => {
@@ -531,6 +603,24 @@ describe('editMessage', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('2000 character limit');
   });
+
+  it('rejects empty channelId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'editMessage', channelId: '', messageId: 'msg1', content: 'Updated' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'editMessage requires a non-empty channelId' });
+  });
+
+  it('rejects empty messageId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'editMessage', channelId: 'ch1', messageId: '', content: 'Updated' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'editMessage requires a non-empty messageId' });
+  });
 });
 
 describe('deleteMessage', () => {
@@ -547,6 +637,24 @@ describe('deleteMessage', () => {
 
     expect(result).toEqual({ ok: true, summary: 'Deleted message in #general' });
     expect(msg.delete).toHaveBeenCalled();
+  });
+
+  it('rejects empty channelId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'deleteMessage', channelId: '', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'deleteMessage requires a non-empty channelId' });
+  });
+
+  it('rejects empty messageId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'deleteMessage', channelId: 'ch1', messageId: '' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'deleteMessage requires a non-empty messageId' });
   });
 });
 
@@ -641,6 +749,24 @@ describe('crosspost', () => {
     );
     expect(result).toEqual({ ok: false, error: 'Channel "nope" not found' });
   });
+
+  it('rejects empty channelId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'crosspost', channelId: '', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'crosspost requires a non-empty channelId' });
+  });
+
+  it('rejects empty messageId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'crosspost', channelId: 'ch1', messageId: '' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'crosspost requires a non-empty messageId' });
+  });
 });
 
 describe('threadCreate', () => {
@@ -704,6 +830,42 @@ describe('pinMessage / unpinMessage', () => {
 
     expect(result).toEqual({ ok: true, summary: 'Unpinned message in #general' });
     expect(msg.unpin).toHaveBeenCalled();
+  });
+
+  it('rejects empty channelId for pinMessage', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'pinMessage', channelId: '', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'pinMessage requires a non-empty channelId' });
+  });
+
+  it('rejects empty messageId for pinMessage', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'pinMessage', channelId: 'ch1', messageId: '' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'pinMessage requires a non-empty messageId' });
+  });
+
+  it('rejects empty channelId for unpinMessage', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'unpinMessage', channelId: '', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'unpinMessage requires a non-empty channelId' });
+  });
+
+  it('rejects empty messageId for unpinMessage', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'unpinMessage', channelId: 'ch1', messageId: '' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'unpinMessage requires a non-empty messageId' });
   });
 });
 
