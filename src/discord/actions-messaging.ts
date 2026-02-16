@@ -86,6 +86,9 @@ export async function executeMessagingAction(
     }
 
     case 'react': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'react requires a non-empty channelId' };
+      if (!action.messageId?.trim()) return { ok: false, error: 'react requires a non-empty messageId' };
+      if (!action.emoji?.trim()) return { ok: false, error: 'react requires a non-empty emoji' };
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
       const message = await (channel as any).messages.fetch(action.messageId);
@@ -94,6 +97,9 @@ export async function executeMessagingAction(
     }
 
     case 'unreact': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'unreact requires a non-empty channelId' };
+      if (!action.messageId?.trim()) return { ok: false, error: 'unreact requires a non-empty messageId' };
+      if (!action.emoji?.trim()) return { ok: false, error: 'unreact requires a non-empty emoji' };
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
       const message = await (channel as any).messages.fetch(action.messageId);
@@ -137,6 +143,8 @@ export async function executeMessagingAction(
     }
 
     case 'fetchMessage': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'fetchMessage requires a non-empty channelId' };
+      if (!action.messageId?.trim()) return { ok: false, error: 'fetchMessage requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
       const message = await (channel as any).messages.fetch(action.messageId);
@@ -147,6 +155,8 @@ export async function executeMessagingAction(
     }
 
     case 'editMessage': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'editMessage requires a non-empty channelId' };
+      if (!action.messageId?.trim()) return { ok: false, error: 'editMessage requires a non-empty messageId' };
       if (typeof action.content !== 'string' || !action.content.trim()) {
         return { ok: false, error: 'editMessage requires non-empty string content' };
       }
@@ -161,6 +171,8 @@ export async function executeMessagingAction(
     }
 
     case 'deleteMessage': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'deleteMessage requires a non-empty channelId' };
+      if (!action.messageId?.trim()) return { ok: false, error: 'deleteMessage requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
       const message = await (channel as any).messages.fetch(action.messageId);
@@ -182,6 +194,8 @@ export async function executeMessagingAction(
     }
 
     case 'crosspost': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'crosspost requires a non-empty channelId' };
+      if (!action.messageId?.trim()) return { ok: false, error: 'crosspost requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
       if ((channel as any).type !== ChannelType.GuildAnnouncement) {
@@ -217,6 +231,8 @@ export async function executeMessagingAction(
     }
 
     case 'pinMessage': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'pinMessage requires a non-empty channelId' };
+      if (!action.messageId?.trim()) return { ok: false, error: 'pinMessage requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
       const message = await (channel as any).messages.fetch(action.messageId);
@@ -225,6 +241,8 @@ export async function executeMessagingAction(
     }
 
     case 'unpinMessage': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'unpinMessage requires a non-empty channelId' };
+      if (!action.messageId?.trim()) return { ok: false, error: 'unpinMessage requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
       const message = await (channel as any).messages.fetch(action.messageId);
