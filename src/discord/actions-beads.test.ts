@@ -300,6 +300,7 @@ describe('executeBeadAction', () => {
       '111222333',
       expect.objectContaining({ id: 'ws-001' }),
       beadCtx.tagMap,
+      beadCtx.log,
     );
   });
 

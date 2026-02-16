@@ -249,6 +249,7 @@ export async function closeBeadThread(
   threadId: string,
   bead: BeadData,
   tagMap?: TagMap,
+  log?: { warn: (obj: Record<string, unknown>, msg: string) => void },
 ): Promise<void> {
   const thread = await fetchThreadChannel(client, threadId);
   if (!thread) return;
@@ -289,8 +290,8 @@ export async function closeBeadThread(
 
   try {
     await thread.setName(closedName);
-  } catch {
-    // Ignore rename failures.
+  } catch (err) {
+    log?.warn({ err, beadId: bead.id, threadId }, 'closeBeadThread: setName failed');
   }
 
   if (tagMap) {
@@ -300,7 +301,9 @@ export async function closeBeadThread(
       if (!tagsEqual(current, updated)) {
         await (thread as any).edit({ appliedTags: updated });
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      log?.warn({ err, beadId: bead.id, threadId }, 'closeBeadThread: tag update failed');
+    }
   }
 
   try {

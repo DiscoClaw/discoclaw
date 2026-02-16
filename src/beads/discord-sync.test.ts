@@ -757,11 +757,10 @@ describe('isThreadArchived', () => {
     expect(result).toBe(false);
   });
 
-  it('returns true for archived thread regardless of name/tag metadata (design tradeoff)', async () => {
-    // This test documents the intentional design tradeoff: isThreadArchived
-    // only checks archived state, not name or tags. A thread that was archived
-    // with the wrong name/tags will still be considered "archived". This avoids
-    // false negatives from name/tag mismatches that caused duplicate close messages.
+  it('returns true for archived thread regardless of name/tag metadata', async () => {
+    // isThreadArchived only checks archived state, not name or tags.
+    // Phase 4 of bead-sync uses isBeadThreadAlreadyClosed instead, which
+    // checks all three (archived + name + tags) for proper recovery.
     const thread = {
       isThread: () => true,
       archived: true,

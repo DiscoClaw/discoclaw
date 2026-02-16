@@ -230,7 +230,7 @@ export async function executeBeadAction(
           const threadId = getThreadIdFromBead(bead);
           if (threadId) {
             try {
-              await closeBeadThread(ctx.client, threadId, bead, beadCtx.tagMap);
+              await closeBeadThread(ctx.client, threadId, bead, beadCtx.tagMap, beadCtx.log);
             } catch (err) {
               beadCtx.log?.warn({ err, beadId: action.beadId, threadId }, 'beads:thread close failed');
             }
