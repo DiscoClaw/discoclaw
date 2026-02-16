@@ -8,6 +8,7 @@
 //   - `--skip-git-repo-check` allows running outside a git repo.
 //   - `--ephemeral` skips session persistence.
 //   - `-s read-only` forces read-only sandbox (no workspace writes).
+//   - `--add-dir DIR` adds additional directories (writable, but overridden by -s read-only).
 //   - Plain text stdout by default; `--json` for JSONL.
 //   - Diagnostic/progress output goes to stderr.
 //
@@ -16,6 +17,13 @@
 //   `--json` to capture the `thread.started` event containing the thread_id.
 //   Subsequent calls with the same sessionKey use `codex exec resume <thread_id>`
 //   to continue in the same session context.
+//
+//   IMPORTANT: `codex exec resume` has a reduced flag set compared to `codex exec`.
+//   Supported on resume: -m, --skip-git-repo-check, --json, --ephemeral, --full-auto,
+//     --dangerously-bypass-approvals-and-sandbox, -c/--config, --enable, --disable, -i/--image.
+//   NOT supported on resume (inherited from original session):
+//     -s/--sandbox, --add-dir, -C/--cd, -p/--profile, --oss, --local-provider,
+//     --output-schema, --color, -o/--output-last-message.
 
 import process from 'node:process';
 import { execa, type ResultPromise } from 'execa';
@@ -84,7 +92,8 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     // Pass --add-dir flags for additional directories (mirrors claude-code-cli.ts).
     // Note: Codex's --help describes --add-dir as "writable", but -s read-only overrides
     // that — verified empirically (Codex v0.101.0). The dirs become read-accessible only.
-    if (params.addDirs && params.addDirs.length > 0) {
+    // The resume subcommand does NOT support --add-dir (inherits from original session).
+    if (!existingThreadId && params.addDirs && params.addDirs.length > 0) {
       for (const dir of params.addDirs) {
         args.push('--add-dir', dir);
       }
