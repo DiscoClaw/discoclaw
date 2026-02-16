@@ -15,6 +15,7 @@ import {
   findPlanFile,
   normalizePlanId,
   looksLikePlanId,
+  closePlanIfComplete,
   NO_PHASES_SENTINEL,
 } from './plan-commands.js';
 import type { PlanCommand, HandlePlanCommandOpts } from './plan-commands.js';
@@ -1384,6 +1385,83 @@ describe('preparePlanRun', () => {
     }
   });
 
+  it('rejects DRAFT plans with status gate error', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+    );
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('DRAFT');
+      expect(result.error).toContain('APPROVED or IMPLEMENTING');
+    }
+  });
+
+  it('rejects REVIEW plans with status gate error', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+    );
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('REVIEW');
+    }
+  });
+
+  it('rejects CLOSED plans with status gate error', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** CLOSED\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+    );
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('CLOSED');
+    }
+  });
+
+  it('allows IMPLEMENTING plans through status gate', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** IMPLEMENTING',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(false);
+  });
+
   it('generates phases file if missing', async () => {
     const tmpDir = await makeTmpDir();
     const plansDir = path.join(tmpDir, 'plans');
@@ -1764,5 +1842,336 @@ describe('findPlanFile — bare-number resolution', () => {
 
     const result = await findPlanFile(plansDir, '999');
     expect(result).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// closePlanIfComplete
+// ---------------------------------------------------------------------------
+
+function makePhasesFile(statuses: string[]): string {
+  const lines: string[] = [];
+  lines.push('# Phases: plan-001 — workspace/plans/plan-001-test.md');
+  lines.push('Created: 2026-02-16T00:00:00.000Z');
+  lines.push('Updated: 2026-02-16T00:00:00.000Z');
+  lines.push('Plan hash: abc123');
+  lines.push('');
+  for (let i = 0; i < statuses.length; i++) {
+    lines.push(`## phase-${i + 1}: Phase ${i + 1}`);
+    lines.push(`**Kind:** implement`);
+    lines.push(`**Status:** ${statuses[i]}`);
+    lines.push(`**Context:** (none)`);
+    lines.push(`**Depends on:** (none)`);
+    lines.push('');
+    lines.push('Do the thing.');
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+function makePlanFile(opts: { status: string; beadId?: string }): string {
+  const lines = [
+    '# Plan: Test',
+    '',
+    '**ID:** plan-001',
+  ];
+  // Only include Bead line if beadId is provided (non-empty).
+  // parsePlanFileHeader's regex misbehaves on empty **Bead:** lines.
+  const beadId = opts.beadId ?? 'ws-001';
+  if (beadId) lines.push(`**Bead:** ${beadId}`);
+  lines.push(`**Status:** ${opts.status}`);
+  lines.push('**Project:** discoclaw');
+  lines.push('**Created:** 2026-02-12');
+  return lines.join('\n');
+}
+
+function makeAcquireLock(): { acquireLock: () => Promise<() => void>; lockCalls: number; unlockCalls: number } {
+  const state = { lockCalls: 0, unlockCalls: 0 };
+  const acquireLock = async () => {
+    state.lockCalls++;
+    return () => { state.unlockCalls++; };
+  };
+  return { acquireLock, ...state, get lockCalls() { return state.lockCalls; }, get unlockCalls() { return state.unlockCalls; } };
+}
+
+describe('closePlanIfComplete', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('closes plan and bead when all phases are done', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done', 'done']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
+
+    // Plan file should now be CLOSED
+    const content = await fs.readFile(planPath, 'utf-8');
+    expect(content).toContain('**Status:** CLOSED');
+
+    // Bead should be closed
+    expect(bdClose).toHaveBeenCalledWith('ws-001', 'All phases complete', '/tmp/beads');
+
+    // Lock acquired and released exactly once
+    expect(lock.lockCalls).toBe(1);
+    expect(lock.unlockCalls).toBe(1);
+  });
+
+  it('closes plan when all phases are skipped', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['skipped', 'skipped']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'IMPLEMENTING' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
+  });
+
+  it('closes plan with mix of done and skipped phases', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done', 'skipped', 'done']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
+  });
+
+  it('returns not_all_complete when some phases are pending', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done', 'pending']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: false, reason: 'not_all_complete' });
+
+    // Plan status should be unchanged
+    const content = await fs.readFile(planPath, 'utf-8');
+    expect(content).toContain('**Status:** APPROVED');
+
+    // Lock should still be released
+    expect(lock.unlockCalls).toBe(1);
+  });
+
+  it('returns not_all_complete when a phase is in-progress', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done', 'in-progress']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: false, reason: 'not_all_complete' });
+  });
+
+  it('returns not_all_complete when a phase is failed', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done', 'failed']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: false, reason: 'not_all_complete' });
+  });
+
+  it('returns wrong_status for DRAFT plans', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done', 'done']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'DRAFT' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: false, reason: 'wrong_status' });
+
+    // Plan should remain DRAFT
+    const content = await fs.readFile(planPath, 'utf-8');
+    expect(content).toContain('**Status:** DRAFT');
+  });
+
+  it('returns wrong_status for CLOSED plans', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'CLOSED' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: false, reason: 'wrong_status' });
+  });
+
+  it('returns read_error when phases file does not exist', async () => {
+    const tmpDir = await makeTmpDir();
+    const planPath = path.join(tmpDir, 'plan.md');
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
+
+    const lock = makeAcquireLock();
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const result = await closePlanIfComplete(
+      path.join(tmpDir, 'nonexistent-phases.md'),
+      planPath,
+      '/tmp/beads',
+      lock.acquireLock,
+      log,
+    );
+
+    expect(result).toEqual({ closed: false, reason: 'read_error' });
+    expect(log.warn).toHaveBeenCalled();
+    expect(lock.unlockCalls).toBe(1);
+  });
+
+  it('returns read_error when phases file is malformed', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, 'this is not a valid phases file');
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
+
+    const lock = makeAcquireLock();
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock, log);
+
+    expect(result).toEqual({ closed: false, reason: 'read_error' });
+    expect(log.warn).toHaveBeenCalled();
+    expect(lock.unlockCalls).toBe(1);
+  });
+
+  it('returns read_error when plan file does not exist', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done']));
+
+    const lock = makeAcquireLock();
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const result = await closePlanIfComplete(
+      phasesPath,
+      path.join(tmpDir, 'nonexistent-plan.md'),
+      '/tmp/beads',
+      lock.acquireLock,
+      log,
+    );
+
+    expect(result).toEqual({ closed: false, reason: 'read_error' });
+    expect(lock.unlockCalls).toBe(1);
+  });
+
+  it('skips bead close when beadId is empty', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED', beadId: '' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
+    expect(bdClose).not.toHaveBeenCalled();
+  });
+
+  it('still closes plan when bdClose fails (best-effort)', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
+
+    vi.mocked(bdClose).mockRejectedValueOnce(new Error('bead not found'));
+
+    const lock = makeAcquireLock();
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock, log);
+
+    expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
+
+    // Plan should still be CLOSED
+    const content = await fs.readFile(planPath, 'utf-8');
+    expect(content).toContain('**Status:** CLOSED');
+
+    // Warning should have been logged
+    expect(log.warn).toHaveBeenCalled();
+  });
+
+  it('releases lock even when updatePlanFileStatus throws', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    // Plan file path that exists for header parsing but will fail on write
+    // (updatePlanFileStatus reads then writes — make the path a directory to force write failure)
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
+
+    // Make plan file read-only to cause updatePlanFileStatus to fail on write
+    await fs.chmod(planPath, 0o444);
+
+    const lock = makeAcquireLock();
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    await expect(
+      closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock, log),
+    ).rejects.toThrow();
+
+    // Lock must still be released
+    expect(lock.unlockCalls).toBe(1);
+
+    // Restore permissions for cleanup
+    await fs.chmod(planPath, 0o644);
+  });
+
+  it('accepts IMPLEMENTING status for auto-close', async () => {
+    const tmpDir = await makeTmpDir();
+    const phasesPath = path.join(tmpDir, 'phases.md');
+    const planPath = path.join(tmpDir, 'plan.md');
+
+    await fs.writeFile(phasesPath, makePhasesFile(['done', 'done']));
+    await fs.writeFile(planPath, makePlanFile({ status: 'IMPLEMENTING' }));
+
+    const lock = makeAcquireLock();
+    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+
+    expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
+
+    const content = await fs.readFile(planPath, 'utf-8');
+    expect(content).toContain('**Status:** CLOSED');
   });
 });

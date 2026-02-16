@@ -70,6 +70,10 @@ export type BeadSyncResult = {
   statusesUpdated: number;
   tagsUpdated: number;
   warnings: number;
+  /** Threads archived because their bead was closed but the thread wasn't archived. */
+  threadsReconciled?: number;
+  /** Threads whose [NNN] token didn't match any local bead. */
+  orphanThreadsFound?: number;
 };
 
 /** Tag name → Discord forum tag ID. */

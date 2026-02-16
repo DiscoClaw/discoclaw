@@ -17,6 +17,7 @@ export type CoordinatorOptions = {
   log?: LoggerLike;
   mentionUserId?: string;
   forumCountSync?: ForumCountSync;
+  skipPhase5?: boolean;
 };
 
 export type SyncSource = 'watcher' | 'user';

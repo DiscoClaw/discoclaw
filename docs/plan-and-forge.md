@@ -151,7 +151,9 @@ Regenerate phases from the current plan content, overwriting the existing phases
 
 ### `!plan run <plan-id>`
 
-Execute all pending phases sequentially (up to 50, safety cap). Acquires the workspace writer lock per-phase, validates staleness, then fires in the background. Stops on failure, audit deviation, staleness, or shutdown — resume with another `!plan run`.
+Execute all pending phases sequentially (up to 50, safety cap). Requires the plan to be in `APPROVED` or `IMPLEMENTING` status. Acquires the workspace writer lock per-phase, validates staleness, then fires in the background. Stops on failure, audit deviation, staleness, or shutdown — resume with another `!plan run`.
+
+**Auto-close:** When all phases reach a terminal status (done or skipped), the plan is automatically set to `CLOSED` and its backing bead is closed. This happens in both the command path (`!plan run` in Discord) and the action path (`planRun` via Discord actions).
 
 ```
 !plan run plan-017
@@ -338,24 +340,28 @@ Forge cancel requested.
                 !plan approve
                        │
                   ┌────▼─────┐
-                  │ APPROVED │
-                  └────┬─────┘
-                       │
-                 !plan run (phase execution)
-                       │
-              ┌────────▼──────────┐
+                  │ APPROVED │──────────────────┐
+                  └────┬─────┘                  │
+                       │                  all phases complete
+                 !plan run (phase execution)    (auto-close)
+                       │                        │
+              ┌────────▼──────────┐             │
               │  IMPLEMENTING     │  (set by phase runner)
-              └────────┬──────────┘
-                       │
-              all phases complete
-                       │
-               ┌───────▼───────┐
+              └────────┬──────────┘             │
+                       │                        │
+              all phases complete                │
+                       │                        │
+               ┌───────▼───────┐                │
                │   AUDITING    │  (post-implementation audit phase)
-               └───────┬───────┘
-                       │
-                  ┌────▼────┐
-                  │  DONE   │
-                  └─────────┘
+               └───────┬───────┘                │
+                       │                        │
+                  ┌────▼────┐                   │
+                  │  DONE   │                   │
+                  └─────────┘                   │
+                                                │
+                  ┌────────┐                    │
+                  │ CLOSED │◄───────────────────┘
+                  └────────┘
 
   At any point (except IMPLEMENTING):
   !plan close ──► CLOSED
@@ -374,6 +380,7 @@ Forge cancel requested.
 | → REVIEW | Forge cap reached | `forge-commands.ts` (post-loop block) |
 | → APPROVED | `!plan approve` | `plan-commands.ts` |
 | → CLOSED | `!plan close` | `plan-commands.ts` |
+| → CLOSED | All phases complete (auto-close) | `plan-commands.ts` (`closePlanIfComplete`) |
 | → CANCELLED | Forge cancellation | `forge-commands.ts` (`cancelRequested` check) |
 
 ---
@@ -696,6 +703,12 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | `OPENAI_API_KEY` | *(empty)* | `parseTrimmedString` | API key for the OpenAI-compatible adapter. Required when `FORGE_AUDITOR_RUNTIME=openai`. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | `parseTrimmedString` | Base URL for the OpenAI-compatible API. Override for proxies or alternative providers (e.g., Azure OpenAI, Ollama). |
 | `OPENAI_MODEL` | `gpt-4o` | `parseTrimmedString` | Default model for the OpenAI adapter. Used when `FORGE_AUDITOR_MODEL` is not set. |
+
+### Bead sync
+
+| Variable | Default | Parser | Description |
+|----------|---------|--------|-------------|
+| `BEAD_SYNC_SKIP_PHASE5` | `false` | `parseBoolean` | Disable Phase 5 (thread reconciliation) of the bead sync cycle. When `true`, the sync will not archive orphaned forum threads or reconcile thread state against beads. Recommended for shared-forum deployments where multiple bot instances or manual Discord activity may create threads that should not be auto-archived. The `skipPhase5` option is passed through to `BeadSyncOptions` in `src/beads/bead-sync.ts`. |
 
 ---
 

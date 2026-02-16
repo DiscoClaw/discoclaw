@@ -661,6 +661,7 @@ if (beadCtx) {
         log,
       );
       beadCtx.forumCountSync = beadForumCountSync;
+      beadForumCountSync.requestUpdate();
     }
 
     // Install forum guard before any async operations that touch the forum.
@@ -694,6 +695,7 @@ if (beadCtx) {
       log,
       forumCountSync: beadForumCountSync,
       skipForumGuard: true,
+      skipPhase5: cfg.beadsSyncSkipPhase5,
     });
     beadSyncWatcher = wired.syncWatcher;
   } else {

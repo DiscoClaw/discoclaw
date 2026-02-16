@@ -42,6 +42,7 @@ vi.mock('./plan-commands.js', () => ({
     nextPhase: { id: 'phase-1', title: 'First phase', kind: 'implement', status: 'pending', deps: [], contextFiles: [] },
   })),
   NO_PHASES_SENTINEL: 'NO_PHASES',
+  closePlanIfComplete: vi.fn(async () => ({ closed: false, reason: 'not_all_complete' })),
 }));
 
 vi.mock('./plan-manager.js', () => ({
@@ -416,6 +417,72 @@ describe('executePlanAction', () => {
       );
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain('already in progress');
+    });
+
+    it('rejects plan with DRAFT status via preparePlanRun gate', async () => {
+      const { preparePlanRun } = await import('./plan-commands.js');
+      (preparePlanRun as any).mockResolvedValueOnce({ error: 'Plan plan-draft has status DRAFT — must be APPROVED or IMPLEMENTING to run.' });
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-draft' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('DRAFT');
+    });
+
+    it('rejects plan with REVIEW status via preparePlanRun gate', async () => {
+      const { preparePlanRun } = await import('./plan-commands.js');
+      (preparePlanRun as any).mockResolvedValueOnce({ error: 'Plan plan-review has status REVIEW — must be APPROVED or IMPLEMENTING to run.' });
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-review' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('REVIEW');
+    });
+
+    it('calls closePlanIfComplete after phase loop completes', async () => {
+      const { closePlanIfComplete } = await import('./plan-commands.js');
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(true);
+
+      // closePlanIfComplete is called in the fire-and-forget async block;
+      // yield to let it execute.
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(closePlanIfComplete).toHaveBeenCalledWith(
+        '/tmp/plans/plan-042-phases.md',
+        '/tmp/plans/plan-042-test.md',
+        '/tmp/beads',
+        expect.any(Function),
+        expect.anything(),
+      );
+    });
+
+    it('calls closePlanIfComplete even when some phases fail', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      const { closePlanIfComplete } = await import('./plan-commands.js');
+      (runNextPhase as any).mockResolvedValueOnce({ result: 'failed', phase: { id: 'phase-1', title: 'Fail' }, error: 'build error' });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // closePlanIfComplete should still be called — it checks internally
+      expect(closePlanIfComplete).toHaveBeenCalled();
     });
   });
 });

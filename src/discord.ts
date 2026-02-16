@@ -23,7 +23,7 @@ import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
-import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './discord/plan-commands.js';
+import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './discord/plan-commands.js';
 import { handlePlanAudit } from './discord/audit-handler.js';
 import type { PlanAuditResult } from './discord/audit-handler.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
@@ -828,6 +828,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     }
 
                     await editSummary(summaryMsg);
+
+                    // Auto-close plan if all phases are terminal
+                    const closeResult = await closePlanIfComplete(
+                      phasesFilePath,
+                      planFilePath,
+                      planOpts.beadsCwd,
+                      acquireWriterLock,
+                      params.log,
+                    );
+                    if (closeResult.closed) {
+                      await editSummary(summaryMsg + '\n\nPlan and backing bead auto-closed.');
+                    }
                   })().then(
                     () => { /* success — cleanup handled by outer finally */ },
                     (err) => {

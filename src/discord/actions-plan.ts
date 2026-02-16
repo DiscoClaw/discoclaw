@@ -7,6 +7,7 @@ import {
   updatePlanFileStatus,
   handlePlanCommand,
   preparePlanRun,
+  closePlanIfComplete,
   NO_PHASES_SENTINEL,
 } from './plan-commands.js';
 import type { HandlePlanCommandOpts, PlanFileHeader } from './plan-commands.js';
@@ -284,6 +285,15 @@ export async function executePlanAction(
           await new Promise(resolve => setImmediate(resolve));
         }
         planCtx.log?.info({ planId: action.planId, phasesRun }, 'plan:action:run complete');
+
+        // Auto-close plan if all phases are terminal
+        await closePlanIfComplete(
+          prepResult.phasesFilePath,
+          prepResult.planFilePath,
+          planCtx.beadsCwd,
+          acquireWriterLock,
+          planCtx.log,
+        );
       })().catch((err) => {
         planCtx.log?.error({ err, planId: action.planId }, 'plan:action:run failed');
       }).finally(() => {
@@ -339,7 +349,7 @@ export function planActionsPromptSection(): string {
 <discord-action>{"type":"planRun","planId":"plan-042"}</discord-action>
 \`\`\`
 - \`planId\` (required): The plan ID to execute.
-- The plan must be in APPROVED status. Phases run sequentially with the writer lock.
+- The plan must be in APPROVED or IMPLEMENTING status. Phases run sequentially with the writer lock. On successful completion of all phases, the plan is auto-closed and the backing bead is closed.
 
 #### Plan Guidelines
 - Use planList to check existing plans before creating duplicates.

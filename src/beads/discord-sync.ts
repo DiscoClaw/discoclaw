@@ -11,7 +11,7 @@ import { BEAD_STATUSES, STATUS_EMOJI } from './types.js';
 const THREAD_NAME_MAX = 100;
 
 /** Strip the project prefix from a bead ID: `ws-001` → `001`. */
-function shortBeadId(id: string): string {
+export function shortBeadId(id: string): string {
   const idx = id.indexOf('-');
   return idx >= 0 ? id.slice(idx + 1) : id;
 }
@@ -25,8 +25,25 @@ export function buildThreadName(beadId: string, title: string, status: string): 
   return `${prefix}${trimmedTitle}`;
 }
 
-function beadIdToken(beadId: string): string {
+export function beadIdToken(beadId: string): string {
   return `[${shortBeadId(beadId)}]`;
+}
+
+// ---------------------------------------------------------------------------
+// Thread name → short ID extraction
+// ---------------------------------------------------------------------------
+
+const emojiPrefix = Object.values(STATUS_EMOJI).map(e => e.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|');
+const BEAD_THREAD_PATTERN = new RegExp(`^(?:${emojiPrefix})\\s*\\[(\\d+)\\]`);
+
+/**
+ * Extract the short numeric ID from a thread name that starts with a
+ * recognised bead status emoji followed by `[NNN]`.
+ * Returns the numeric string, or null if the name doesn't match.
+ */
+export function extractShortIdFromThreadName(name: string): string | null {
+  const m = BEAD_THREAD_PATTERN.exec(name);
+  return m ? m[1] : null;
 }
 
 // ---------------------------------------------------------------------------

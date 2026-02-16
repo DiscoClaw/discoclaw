@@ -153,6 +153,8 @@ Context: Requires `PlanContext` with plans directory, bead CWD, runtime, and mod
 
 Note: `planApprove` and `planClose` are blocked while a plan is `IMPLEMENTING`.
 Recursion guard: `planRun` is blocked at `depth >= 1` to prevent plan runs from spawning nested plan runs.
+Status gate: `planRun` requires the plan to be in `APPROVED` or `IMPLEMENTING` status.
+Auto-close: When all phases complete (done or skipped), `planRun` automatically closes the plan and its backing bead via `closePlanIfComplete`.
 
 ### Memory Actions (`actions-memory.ts`)
 
