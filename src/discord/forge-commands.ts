@@ -697,16 +697,17 @@ export class ForgeOrchestrator {
     } = params;
     const t0 = params.t0 ?? Date.now();
 
-    const drafterModel = resolveModel(this.opts.drafterModel ?? this.opts.model, this.opts.runtime.id);
-    const auditorModel = this.opts.auditorModel ?? this.opts.model;
+    const rawDrafterModel = this.opts.drafterModel ?? this.opts.model;
+    const rawAuditorModel = this.opts.auditorModel ?? this.opts.model;
+    const drafterModel = resolveModel(rawDrafterModel, this.opts.runtime.id);
     const readOnlyTools = ['Read', 'Glob', 'Grep'];
     const addDirs = [this.opts.cwd];
 
     // Stable session keys — one per role — enable multi-turn reuse across
-    // the audit-revise loop.  Including the model prevents silent mismatch
-    // when drafter/auditor use different models.
-    const drafterSessionKey = `forge:${planId}:${drafterModel}:drafter`;
-    const auditorSessionKey = `forge:${planId}:${auditorModel}:auditor`;
+    // the audit-revise loop.  Keys use raw (pre-resolution) tier names so
+    // they remain stable if the tier→model mapping changes.
+    const drafterSessionKey = `forge:${planId}:${rawDrafterModel}:drafter`;
+    const auditorSessionKey = `forge:${planId}:${rawAuditorModel}:auditor`;
 
     let round = startRound - 1; // will be incremented at top of loop
     let planContent = await fs.readFile(filePath, 'utf-8');
@@ -784,8 +785,8 @@ export class ForgeOrchestrator {
       const auditorHasFileTools = auditorRt.capabilities.has('tools_fs');
       const hasExplicitAuditorModel = Boolean(this.opts.auditorModel);
       const effectiveAuditorModel = isClaudeAuditor
-        ? resolveModel(auditorModel, auditorRt.id)
-        : (hasExplicitAuditorModel ? resolveModel(auditorModel, auditorRt.id) : '');
+        ? resolveModel(rawAuditorModel, auditorRt.id)
+        : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditorRt.id) : '');
 
       const auditorPrompt = buildAuditorPrompt(
         planContent,
