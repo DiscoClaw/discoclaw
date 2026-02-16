@@ -50,7 +50,7 @@ export type PhaseExecutionOpts = {
   timeoutMs: number;
   workspaceCwd: string;
   log?: LoggerLike;
-  /** Max audit→fix→re-audit loops before giving up. Default: 2. */
+  /** Max audit→fix→re-audit loops before giving up. Default: 3. */
   maxAuditFixAttempts?: number;
 };
 
@@ -1149,7 +1149,7 @@ export async function runNextPhase(
   let result = await executePhase(currentPhase, planContent, allPhases, opts, injectedContext);
 
   // 9a. Audit fix loop: if audit failed and git is available, attempt fix→re-audit cycles
-  const maxFixAttempts = opts.maxAuditFixAttempts ?? 2;
+  const maxFixAttempts = opts.maxAuditFixAttempts ?? 3;
   let fixAttemptsUsed: number | undefined;
 
   if (result.status === 'audit_failed' && maxFixAttempts > 0) {
