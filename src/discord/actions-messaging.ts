@@ -74,7 +74,7 @@ export async function executeMessagingAction(
           const hint = kind === 'forum' ? ' Use threadCreate to post in forum channels.' : '';
           return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot receive messages directly.${hint}` };
         }
-        return { ok: false, error: `Channel "${action.channel}" not found` };
+        return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived. If this was a bead thread, use beadShow with the bead ID instead.` };
       }
 
       const opts: any = { content: action.content, allowedMentions: NO_MENTIONS };
@@ -111,7 +111,7 @@ export async function executeMessagingAction(
           const kind = describeChannelType(raw);
           return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot be read directly. Use readMessages with a thread ID instead.` };
         }
-        return { ok: false, error: `Channel "${action.channel}" not found` };
+        return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived. If this was a bead thread, use beadShow with the bead ID instead.` };
       }
 
       const limit = Math.min(Math.max(1, action.limit ?? 10), 20);
@@ -240,7 +240,7 @@ export async function executeMessagingAction(
           const kind = describeChannelType(raw);
           return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel. Use individual thread IDs to list pins.` };
         }
-        return { ok: false, error: `Channel "${action.channel}" not found` };
+        return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived. If this was a bead thread, use beadShow with the bead ID instead.` };
       }
       const pinned = await channel.messages.fetchPinned();
 
