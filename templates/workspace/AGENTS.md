@@ -27,7 +27,16 @@ You don't need to manage memory files manually. Focus on being helpful.
 
 ### When someone says "remember this"
 
-Tell them to use `!memory add <note>` — or just do it yourself if appropriate. Durable memory persists across sessions.
+Tell them to use `!memory remember <note>` — or just do it yourself if appropriate. Durable memory persists across sessions.
+
+### File-Based Memory
+
+Discoclaw also loads file-based memory into DM prompts:
+
+- **`workspace/MEMORY.md`** — Long-form notes, context, or reference material you want available every session.
+- **`workspace/memory/YYYY-MM-DD.md`** — Daily logs. The most recent day's log is injected automatically.
+
+The `memory/` directory is created during workspace setup. You don't need to manage these files manually, but you can write to them when you want to persist structured notes or session summaries.
 
 ## Safety
 
@@ -80,8 +89,8 @@ Participate, don't dominate.
 ## Source Locations
 
 - **Discoclaw source:** `~/code/discoclaw`
-- **Discoclaw data/workspace:** `~/Dropbox/discoclaw-data/workspace` (this directory)
-- **Discoclaw content:** `~/Dropbox/discoclaw-data/content`
+- **Discoclaw data/workspace:** `$DISCOCLAW_DATA_DIR/workspace (default: ./workspace)` (this directory)
+- **Discoclaw content:** `$DISCOCLAW_DATA_DIR/content`
 
 ## Fresh Clone QA
 

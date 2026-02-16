@@ -514,6 +514,12 @@ describe('template content — AGENTS.md', () => {
     expect(agents).toContain('Git Commits');
     expect(agents).toContain('short commit hash');
   });
+
+  it('uses correct !memory remember syntax (not !memory add)', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('!memory remember');
+    expect(agents).not.toContain('!memory add');
+  });
 });
 
 describe('template content — TOOLS.md', () => {
@@ -596,6 +602,20 @@ describe('template content — TOOLS.md', () => {
     expect(tools).toContain('Always ask before restart');
     expect(tools).toContain('Guardrails');
   });
+});
+
+describe('template content — no personalization leak', () => {
+  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  const FORBIDDEN_TOKENS = ['David', 'Escondido', 'Chelsea', 'marshmonkey'];
+
+  for (const file of ['AGENTS.md', 'TOOLS.md']) {
+    it(`${file} does not contain user-specific tokens`, async () => {
+      const content = await fs.readFile(path.join(templatesDir, file), 'utf-8');
+      for (const token of FORBIDDEN_TOKENS) {
+        expect(content).not.toContain(token);
+      }
+    });
+  }
 });
 
 describe('scaffolded workspace contains operational content', () => {

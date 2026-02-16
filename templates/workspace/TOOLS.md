@@ -79,6 +79,8 @@ google-chrome --headless=new --remote-debugging-port=9222 --remote-debugging-add
 Both use a dedicated persistent profile (`~/.config/agent-chrome`) so sessions
 survive reboots.
 
+Platform note: command is `google-chrome` on Fedora; differs on macOS/Windows.
+
 **Connect:** `agent-browser connect 9222`
 
 **Confirm it's up:** `agent-browser get url`
