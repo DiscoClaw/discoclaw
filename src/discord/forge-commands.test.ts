@@ -22,6 +22,7 @@ vi.mock('../beads/bd-cli.js', () => ({
   bdClose: vi.fn(async () => {}),
   bdUpdate: vi.fn(async () => {}),
   bdAddLabel: vi.fn(async () => {}),
+  bdList: vi.fn(async () => []),
 }));
 
 async function makeTmpDir(): Promise<string> {
