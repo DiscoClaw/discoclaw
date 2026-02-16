@@ -6,6 +6,9 @@ import type { LoggerLike } from '../discord/action-types.js';
 import type { ActionCategoryFlags } from '../discord/actions.js';
 import type { BeadContext } from '../discord/actions-beads.js';
 import type { CronContext } from '../discord/actions-crons.js';
+import type { ForgeContext } from '../discord/actions-forge.js';
+import type { PlanContext } from '../discord/actions-plan.js';
+import type { MemoryContext } from '../discord/actions-memory.js';
 import type { CronRunStats } from './run-stats.js';
 import type { CronRunControl } from './run-control.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
@@ -32,6 +35,9 @@ export type CronExecutorContext = {
   actionFlags: ActionCategoryFlags;
   beadCtx?: BeadContext;
   cronCtx?: CronContext;
+  forgeCtx?: ForgeContext;
+  planCtx?: PlanContext;
+  memoryCtx?: MemoryContext;
   statsStore?: CronRunStats;
   lockDir?: string;
   runControl?: CronRunControl;
@@ -254,7 +260,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           channelId: targetChannel.id,
           messageId: '',
         };
-        const results = await executeDiscordActions(actions, actCtx, ctx.log, ctx.beadCtx, ctx.cronCtx);
+        const results = await executeDiscordActions(actions, actCtx, ctx.log, {
+          beadCtx: ctx.beadCtx,
+          cronCtx: ctx.cronCtx,
+          forgeCtx: ctx.forgeCtx,
+          planCtx: ctx.planCtx,
+          memoryCtx: ctx.memoryCtx,
+        });
         for (const result of results) {
           metrics.recordActionResult(result.ok);
           ctx.log?.info({ flow: 'cron', jobId: job.id, ok: result.ok }, 'obs.action.result');
