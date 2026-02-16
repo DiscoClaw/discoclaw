@@ -118,7 +118,7 @@ describe('sendMessage', () => {
       { type: 'sendMessage', channel: '#nonexistent', content: 'Hi' },
       ctx,
     );
-    expect(result).toEqual({ ok: false, error: 'Channel "#nonexistent" not found' });
+    expect(result).toEqual({ ok: false, error: 'Channel "#nonexistent" not found — it may have been deleted or archived. If this was a bead thread, use beadShow with the bead ID instead.' });
   });
 
   it('rejects content exceeding 2000 chars', async () => {
@@ -278,7 +278,7 @@ describe('sendMessage', () => {
       ctx,
     );
 
-    expect(result).toEqual({ ok: false, error: 'Channel "nonexistent" not found' });
+    expect(result).toEqual({ ok: false, error: 'Channel "nonexistent" not found — it may have been deleted or archived. If this was a bead thread, use beadShow with the bead ID instead.' });
   });
 
   // Test 8: sendMessage with empty action.channel — returns channel validation error
