@@ -649,6 +649,7 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | `PLAN_PHASES_ENABLED` | `true` | `parseBoolean` | Enable/disable phase decomposition (`!plan phases`, `!plan run`, `!plan skip`) |
 | `PLAN_PHASE_MAX_CONTEXT_FILES` | `5` | `parsePositiveInt` | Max files per phase batch |
 | `PLAN_PHASE_TIMEOUT_MS` | `1800000` (30 min) | `parsePositiveNumber` | Per-phase execution timeout |
+| `PLAN_PHASE_AUDIT_FIX_MAX` | `2` | `parseNonNegativeInt` | Max audit-fix attempts per phase before marking failed |
 
 ### Forge commands
 
@@ -798,7 +799,45 @@ The forge checks the cancel flag at the start of each audit loop iteration. The 
 
 ---
 
-## 13. Architecture Notes
+## 13. Branch Workflow
+
+All non-trivial changes go through a feature branch → PR → merge cycle. No direct commits to `main`.
+
+### Branch naming
+
+Use descriptive prefixes:
+
+| Prefix | Use case | Example |
+|--------|----------|---------|
+| `fix/` | Bug fixes | `fix/wire-plan-phase-config` |
+| `feat/` | New features | `feat/webhook-support` |
+| `refactor/` | Code restructuring | `refactor/extract-phase-runner` |
+| `docs/` | Documentation only | `docs/update-timeout-reference` |
+| `plan-NNN/` | Plan implementation (auto or manual) | `plan-075/cron-retry-logic` |
+
+### Workflow
+
+1. **Create branch** from up-to-date `main`
+2. **Commit** changes with clear messages (plan phases auto-commit as `{planId} {phaseId}: {title}`)
+3. **Audit** the diff before pushing — either manually or via `!plan audit`
+4. **Push** the branch and open a PR via `gh pr create`
+5. **Review and merge** via GitHub
+
+### Post-merge cleanup
+
+After a PR is merged to `main`, always clean up both sides:
+
+1. **Pull main:** `git checkout main && git pull origin main`
+2. **Delete local branch:** `git branch -d <branch-name>`
+3. **Delete remote branch:** `git push origin --delete <branch-name>`
+
+All three steps should happen together — don't leave stale branches on either side.
+
+**Tip:** GitHub can auto-delete head branches on merge (Settings → General → "Automatically delete head branches"). When enabled, step 3 is handled automatically.
+
+---
+
+## 14. Architecture Notes
 
 ### Source file map
 
