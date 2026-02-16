@@ -16,6 +16,8 @@ import {
   getThreadIdFromBead,
   ensureUnarchived,
   findExistingThreadForBead,
+  extractShortIdFromThreadName,
+  shortBeadId,
 } from './discord-sync.js';
 
 export type BeadSyncOptions = {
@@ -44,12 +46,14 @@ async function sleep(ms: number | undefined): Promise<void> {
 }
 
 /**
- * 4-phase safety-net sync between beads DB and Discord forum threads.
+ * 5-phase safety-net sync between beads DB and Discord forum threads.
  *
  * Phase 1: Create threads for beads missing external_ref.
  * Phase 2: Fix label mismatches (e.g., blocked label on open beads).
  * Phase 3: Sync emoji/names/starter content for existing threads.
  * Phase 4: Archive threads for closed beads.
+ * Phase 5: Reconcile forum threads against beads — archive stale threads
+ *          for closed beads and detect orphan threads with no matching bead.
  */
 export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult> {
   const { client, guild, forumId, tagMap, beadsCwd, log } = opts;
@@ -202,8 +206,97 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     await sleep(throttleMs);
   }
 
-  log?.info({ threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, warnings }, 'bead-sync: complete');
-  const result: BeadSyncResult = { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, warnings };
+  // Phase 5: Reconcile forum threads against beads.
+  let threadsReconciled = 0;
+  let orphanThreadsFound = 0;
+
+  if (!opts.skipPhase5) {
+    // Build a map of short bead IDs → beads for quick lookup.
+    const beadsByShortId = new Map<string, BeadData[]>();
+    for (const bead of allBeads) {
+      const sid = shortBeadId(bead.id);
+      const arr = beadsByShortId.get(sid);
+      if (arr) arr.push(bead);
+      else beadsByShortId.set(sid, [bead]);
+    }
+
+    // Fetch active + archived forum threads.
+    try {
+      const activeThreads = await forum.threads.fetchActive();
+      let archivedThreads: Map<string, any> = new Map();
+      try {
+        const fetched = await forum.threads.fetchArchived();
+        archivedThreads = fetched.threads;
+      } catch (err) {
+        log?.warn({ err }, 'bead-sync:phase5 failed to fetch archived threads');
+        warnings++;
+      }
+
+      // Combine both sets — active threads take priority for duplicates.
+      const allThreads = new Map([...archivedThreads, ...activeThreads.threads]);
+      for (const thread of allThreads.values()) {
+        const sid = extractShortIdFromThreadName(thread.name);
+        if (!sid) continue; // not a bead thread
+
+        const beads = beadsByShortId.get(sid);
+        if (!beads || beads.length === 0) {
+          // Orphan thread — no local bead matches this short ID.
+          orphanThreadsFound++;
+          log?.info({ threadId: thread.id, threadName: thread.name, shortId: sid }, 'bead-sync:phase5 orphan thread detected');
+          await sleep(throttleMs);
+          continue;
+        }
+
+        // Skip ambiguous cases (multiple beads share the same short ID).
+        if (beads.length > 1) {
+          log?.info({ threadId: thread.id, shortId: sid, count: beads.length }, 'bead-sync:phase5 short-id collision, skipping');
+          await sleep(throttleMs);
+          continue;
+        }
+
+        const bead = beads[0]!;
+
+        // Layer 2 safety: if the bead already has an external_ref pointing to
+        // a different thread, this thread likely belongs to a foreign instance's
+        // bead with the same short ID — skip it.
+        const existingThreadId = getThreadIdFromBead(bead);
+        if (existingThreadId && existingThreadId !== thread.id) {
+          log?.info({ beadId: bead.id, threadId: thread.id, existingThreadId }, 'bead-sync:phase5 external_ref points to different thread, skipping');
+          await sleep(throttleMs);
+          continue;
+        }
+
+        // If bead is closed but thread is not archived, archive it.
+        if (bead.status === 'closed' && !thread.archived) {
+          // Backfill external_ref if missing so Phase 4 can track this thread.
+          if (!existingThreadId) {
+            try {
+              await bdUpdate(bead.id, { externalRef: `discord:${thread.id}` }, beadsCwd);
+              log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 external_ref backfilled');
+            } catch (err) {
+              log?.warn({ err, beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 external_ref backfill failed');
+              warnings++;
+            }
+          }
+          try {
+            await closeBeadThread(client, thread.id, bead, tagMap, log);
+            threadsReconciled++;
+            log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 reconciled (archived)');
+          } catch (err) {
+            log?.warn({ err, beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 archive failed');
+            warnings++;
+          }
+          await sleep(throttleMs);
+        }
+      }
+    } catch (err) {
+      log?.warn({ err }, 'bead-sync:phase5 failed to fetch active threads');
+      warnings++;
+    }
+  }
+
+  log?.info({ threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, threadsReconciled, orphanThreadsFound, warnings }, 'bead-sync: complete');
+  const result: BeadSyncResult = { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, warnings, threadsReconciled, orphanThreadsFound };
   await opts.statusPoster?.beadSyncComplete(result);
   return result;
 }

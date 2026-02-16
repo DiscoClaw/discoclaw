@@ -107,6 +107,7 @@ export type DiscoclawConfig = {
   beadsSidebar: boolean;
   beadsAutoTag: boolean;
   beadsAutoTagModel: string;
+  beadsSyncSkipPhase5: boolean;
 
   runtimeFallbackModel?: string;
   runtimeMaxBudgetUsd?: number;
@@ -478,6 +479,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       beadsSidebar: parseBoolean(env, 'DISCOCLAW_BEADS_SIDEBAR', false),
       beadsAutoTag: parseBoolean(env, 'DISCOCLAW_BEADS_AUTO_TAG', true),
       beadsAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_BEADS_AUTO_TAG_MODEL') ?? 'fast',
+      beadsSyncSkipPhase5: parseBoolean(env, 'BEAD_SYNC_SKIP_PHASE5', false),
 
       claudeBin: parseTrimmedString(env, 'CLAUDE_BIN') ?? 'claude',
       dangerouslySkipPermissions: parseBoolean(env, 'CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS', false),

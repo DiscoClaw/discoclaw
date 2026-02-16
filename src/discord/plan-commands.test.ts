@@ -1385,6 +1385,83 @@ describe('preparePlanRun', () => {
     }
   });
 
+  it('rejects DRAFT plans with status gate error', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+    );
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('DRAFT');
+      expect(result.error).toContain('APPROVED or IMPLEMENTING');
+    }
+  });
+
+  it('rejects REVIEW plans with status gate error', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+    );
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('REVIEW');
+    }
+  });
+
+  it('rejects CLOSED plans with status gate error', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** CLOSED\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+    );
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('CLOSED');
+    }
+  });
+
+  it('allows IMPLEMENTING plans through status gate', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Bead:** ws-001',
+      '**Status:** IMPLEMENTING',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(false);
+  });
+
   it('generates phases file if missing', async () => {
     const tmpDir = await makeTmpDir();
     const plansDir = path.join(tmpDir, 'plans');

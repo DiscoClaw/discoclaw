@@ -118,6 +118,8 @@ export type WireBeadsSyncOpts = {
   forumCountSync?: ForumCountSync;
   /** Skip forum guard installation (caller already installed it). */
   skipForumGuard?: boolean;
+  /** Disable Phase 5 (thread reconciliation) of the bead sync cycle. */
+  skipPhase5?: boolean;
 };
 
 export type WireBeadsSyncResult = {
@@ -142,6 +144,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     log: opts.log,
     mentionUserId: opts.sidebarMentionUserId,
     forumCountSync: opts.forumCountSync,
+    skipPhase5: opts.skipPhase5,
   });
   opts.beadCtx.syncCoordinator = syncCoordinator;
 

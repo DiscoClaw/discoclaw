@@ -605,6 +605,8 @@ export type PreparePlanRunResult =
   | { phasesFilePath: string; planFilePath: string; planContent: string; nextPhase: PlanPhase }
   | { error: string };
 
+const RUNNABLE_STATUSES = new Set(['APPROVED', 'IMPLEMENTING']);
+
 export async function preparePlanRun(
   planId: string,
   opts: HandlePlanCommandOpts,
@@ -612,6 +614,11 @@ export async function preparePlanRun(
   const plansDir = path.join(opts.workspaceCwd, 'plans');
   const found = await findPlanFile(plansDir, planId);
   if (!found) return { error: `Plan not found: ${planId}` };
+
+  // Status gate: only run phases on approved or implementing plans
+  if (!RUNNABLE_STATUSES.has(found.header.status)) {
+    return { error: `Plan ${found.header.planId} has status ${found.header.status} — must be APPROVED or IMPLEMENTING to run.` };
+  }
 
   const phasesFileName = `${found.header.planId}-phases.md`;
   const phasesFilePath = path.join(plansDir, phasesFileName);

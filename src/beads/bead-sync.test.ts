@@ -7,7 +7,7 @@ vi.mock('./bd-cli.js', () => ({
 }));
 
 vi.mock('./discord-sync.js', () => ({
-  resolveBeadsForum: vi.fn(async () => ({})),
+  resolveBeadsForum: vi.fn(async () => ({ threads: { fetchActive: vi.fn(async () => ({ threads: new Map() })) } })),
   createBeadThread: vi.fn(async () => 'thread-new'),
   closeBeadThread: vi.fn(async () => {}),
   isThreadArchived: vi.fn(async () => false),
@@ -24,6 +24,14 @@ vi.mock('./discord-sync.js', () => ({
   }),
   ensureUnarchived: vi.fn(async () => {}),
   findExistingThreadForBead: vi.fn(async () => null),
+  extractShortIdFromThreadName: vi.fn((name: string) => {
+    const m = name.match(/\[(\d+)\]/);
+    return m ? m[1] : null;
+  }),
+  shortBeadId: vi.fn((id: string) => {
+    const idx = id.indexOf('-');
+    return idx >= 0 ? id.slice(idx + 1) : id;
+  }),
 }));
 
 function makeClient(): any {
@@ -464,9 +472,11 @@ describe('runBeadSync', () => {
     expect(result.warnings).toBe(1);
   });
 
-  it('accepts skipPhase5 option without error', async () => {
+  it('accepts skipPhase5 option without error and skips phase 5', async () => {
     const { bdList } = await import('./bd-cli.js');
-    (bdList as any).mockResolvedValueOnce([]);
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'A', status: 'closed', labels: [], external_ref: '' },
+    ]);
 
     const result = await runBeadSync({
       client: makeClient(),
@@ -478,7 +488,320 @@ describe('runBeadSync', () => {
       skipPhase5: true,
     } as any);
 
-    expect(result.warnings).toBe(0);
+    expect(result.threadsReconciled).toBe(0);
+    expect(result.orphanThreadsFound).toBe(0);
+  });
+
+  it('phase 5 archives non-archived thread for closed bead and backfills external_ref', async () => {
+    const { bdList, bdUpdate } = await import('./bd-cli.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: '' },
+    ]);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-100', { id: 'thread-100', name: '\u{1F7E2} [001] Closed bead', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(result.threadsReconciled).toBe(1);
+    expect(bdUpdate).toHaveBeenCalledWith('ws-001', { externalRef: 'discord:thread-100' }, '/tmp');
+    expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {}, undefined);
+  });
+
+  it('phase 5 detects orphan threads with no matching bead', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { resolveBeadsForum } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([]);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-200', { id: 'thread-200', name: '\u{1F7E2} [999] Unknown bead', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(result.orphanThreadsFound).toBe(1);
+    expect(result.threadsReconciled).toBe(0);
+  });
+
+  it('phase 5 skips threads with short-id collision (multiple beads)', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'First', status: 'closed', labels: [], external_ref: '' },
+      { id: 'other-001', title: 'Second', status: 'open', labels: [], external_ref: '' },
+    ]);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-300', { id: 'thread-300', name: '\u{1F7E2} [001] First', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    // Collision: two beads with short ID "001" — should skip, not archive or count as orphan
+    expect(result.threadsReconciled).toBe(0);
+    expect(result.orphanThreadsFound).toBe(0);
+    // closeBeadThread should not be called from phase 5 (may be called from phase 4)
+  });
+
+  it('phase 5 skips thread when bead external_ref points to a different thread', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-OTHER' },
+    ]);
+    // Phase 4 will try to archive thread-OTHER — let it skip via already-closed check.
+    (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-100', { id: 'thread-100', name: '\u{1F7E2} [001] Closed bead', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    // Thread should be skipped by Phase 5 — external_ref points elsewhere.
+    expect(result.threadsReconciled).toBe(0);
+    // closeBeadThread should not have been called for thread-100 (Phase 5 skipped it).
+    expect(closeBeadThread).not.toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.anything(), expect.anything(), expect.anything());
+  });
+
+  it('phase 5 archives thread when bead external_ref matches this thread', async () => {
+    const { bdList, bdUpdate } = await import('./bd-cli.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
+    ]);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-100', { id: 'thread-100', name: '\u{1F7E2} [001] Closed bead', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(result.threadsReconciled).toBe(1);
+    // No backfill needed — external_ref already set.
+    expect(bdUpdate).not.toHaveBeenCalledWith('ws-001', { externalRef: expect.anything() }, expect.anything());
+    expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {}, undefined);
+  });
+
+  it('phase 5 still archives thread when external_ref backfill fails', async () => {
+    const { bdList, bdUpdate } = await import('./bd-cli.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: '' },
+    ]);
+    (bdUpdate as any).mockRejectedValueOnce(new Error('bd CLI failure'));
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-100', { id: 'thread-100', name: '\u{1F7E2} [001] Closed bead', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    // Backfill failed but archive should still proceed.
+    expect(result.warnings).toBeGreaterThanOrEqual(1);
+    expect(result.threadsReconciled).toBe(1);
+    expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {}, undefined);
+  });
+
+  it('phase 5 skips already-archived thread for closed bead', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
+    ]);
+    // Phase 4 will try to archive thread-100 — let it skip via already-closed check.
+    (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({ threads: new Map() })),
+        fetchArchived: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-100', { id: 'thread-100', name: '\u2705 [001] Closed bead', archived: true }],
+          ]),
+        })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    // Thread is already archived — no duplicate work from Phase 5.
+    expect(result.threadsReconciled).toBe(0);
+    // closeBeadThread should not be called (Phase 4 skipped via isBeadThreadAlreadyClosed, Phase 5 skipped via archived check).
+    expect(closeBeadThread).not.toHaveBeenCalled();
+  });
+
+  it('phase 5 no-ops gracefully when forum has 0 threads', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { resolveBeadsForum } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'Some bead', status: 'open', labels: [], external_ref: '' },
+    ]);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({ threads: new Map() })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(result.threadsReconciled).toBe(0);
+    expect(result.orphanThreadsFound).toBe(0);
+  });
+
+  it('phase 5 handles fetchActive API error gracefully', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { resolveBeadsForum } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([]);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => { throw new Error('Discord API failure'); }),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(result.warnings).toBeGreaterThanOrEqual(1);
+    expect(result.threadsReconciled).toBe(0);
+    expect(result.orphanThreadsFound).toBe(0);
   });
 
   it('calls statusPoster.beadSyncComplete in forum-not-found early return', async () => {

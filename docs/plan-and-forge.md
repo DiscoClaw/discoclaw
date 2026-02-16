@@ -151,7 +151,9 @@ Regenerate phases from the current plan content, overwriting the existing phases
 
 ### `!plan run <plan-id>`
 
-Execute all pending phases sequentially (up to 50, safety cap). Acquires the workspace writer lock per-phase, validates staleness, then fires in the background. Stops on failure, audit deviation, staleness, or shutdown — resume with another `!plan run`.
+Execute all pending phases sequentially (up to 50, safety cap). Requires the plan to be in `APPROVED` or `IMPLEMENTING` status. Acquires the workspace writer lock per-phase, validates staleness, then fires in the background. Stops on failure, audit deviation, staleness, or shutdown — resume with another `!plan run`.
+
+**Auto-close:** When all phases reach a terminal status (done or skipped), the plan is automatically set to `CLOSED` and its backing bead is closed. This happens in both the command path (`!plan run` in Discord) and the action path (`planRun` via Discord actions).
 
 ```
 !plan run plan-017
@@ -338,24 +340,28 @@ Forge cancel requested.
                 !plan approve
                        │
                   ┌────▼─────┐
-                  │ APPROVED │
-                  └────┬─────┘
-                       │
-                 !plan run (phase execution)
-                       │
-              ┌────────▼──────────┐
+                  │ APPROVED │──────────────────┐
+                  └────┬─────┘                  │
+                       │                  all phases complete
+                 !plan run (phase execution)    (auto-close)
+                       │                        │
+              ┌────────▼──────────┐             │
               │  IMPLEMENTING     │  (set by phase runner)
-              └────────┬──────────┘
-                       │
-              all phases complete
-                       │
-               ┌───────▼───────┐
+              └────────┬──────────┘             │
+                       │                        │
+              all phases complete                │
+                       │                        │
+               ┌───────▼───────┐                │
                │   AUDITING    │  (post-implementation audit phase)
-               └───────┬───────┘
-                       │
-                  ┌────▼────┐
-                  │  DONE   │
-                  └─────────┘
+               └───────┬───────┘                │
+                       │                        │
+                  ┌────▼────┐                   │
+                  │  DONE   │                   │
+                  └─────────┘                   │
+                                                │
+                  ┌────────┐                    │
+                  │ CLOSED │◄───────────────────┘
+                  └────────┘
 
   At any point (except IMPLEMENTING):
   !plan close ──► CLOSED
@@ -374,6 +380,7 @@ Forge cancel requested.
 | → REVIEW | Forge cap reached | `forge-commands.ts` (post-loop block) |
 | → APPROVED | `!plan approve` | `plan-commands.ts` |
 | → CLOSED | `!plan close` | `plan-commands.ts` |
+| → CLOSED | All phases complete (auto-close) | `plan-commands.ts` (`closePlanIfComplete`) |
 | → CANCELLED | Forge cancellation | `forge-commands.ts` (`cancelRequested` check) |
 
 ---
