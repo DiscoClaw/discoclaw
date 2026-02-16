@@ -216,6 +216,11 @@ export async function executeBeadAction(
         return { ok: false, error: 'beadClose requires beadId' };
       }
 
+      // Suppress watcher-triggered syncs during bead close to prevent
+      // a stale sync from unarchiving/renaming the thread mid-close.
+      const BEAD_CLOSE_SYNC_SUPPRESS_MS = 10_000;
+      beadCtx.syncCoordinator?.suppressSync(BEAD_CLOSE_SYNC_SUPPRESS_MS);
+
       await bdClose(action.beadId, action.reason, beadCtx.beadsCwd);
 
       // Close thread.
