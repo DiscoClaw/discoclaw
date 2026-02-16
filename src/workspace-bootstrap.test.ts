@@ -447,3 +447,211 @@ describe('ensureWorkspaceBootstrapFiles — unlink error handling', () => {
     );
   });
 });
+
+// --- Template content completeness tests ---
+// Ensures templates contain critical operational knowledge so a fresh install
+// produces a fully operational bot without manual additions.
+
+describe('template content — AGENTS.md', () => {
+  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  let agents: string;
+
+  // Read template once for all content checks.
+  it('template file exists and is non-empty', async () => {
+    agents = await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents.length).toBeGreaterThan(0);
+  });
+
+  it('contains Discord action batching rules', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('Discord Action Batching');
+    expect(agents).toContain('one action per type per response');
+  });
+
+  it('contains response economy guidance', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('Response Economy');
+  });
+
+  it('contains knowledge cutoff awareness section', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('Knowledge Cutoff Awareness');
+    expect(agents).toContain('use the web to verify');
+  });
+
+  it('contains session completion workflow', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('Landing the Plane');
+    expect(agents).toContain('git push');
+  });
+
+  it('contains plan-audit-implement workflow', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('Plan-Audit-Implement Workflow');
+    expect(agents).toContain('DRAFT');
+    expect(agents).toContain('APPROVED');
+  });
+
+  it('references TOOLS.md for forge/plan/memory action types', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('See TOOLS.md');
+    expect(agents).toContain('discord-action');
+  });
+
+  it('contains Discord formatting rules', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('Discord Formatting');
+    expect(agents).toContain('No markdown tables in Discord');
+  });
+
+  it('contains bead creation guidance', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('Bead Creation');
+  });
+
+  it('contains git commit hash guidance', async () => {
+    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
+    expect(agents).toContain('Git Commits');
+    expect(agents).toContain('short commit hash');
+  });
+});
+
+describe('template content — TOOLS.md', () => {
+  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  let tools: string;
+
+  it('template file exists and is non-empty', async () => {
+    tools = await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools.length).toBeGreaterThan(0);
+  });
+
+  it('contains browser automation section', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('Browser Automation');
+    expect(tools).toContain('agent-browser');
+  });
+
+  it('documents all 5 browser modes (WebFetch, Playwright headless/headed, CDP headless/headed)', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('WebFetch');
+    expect(tools).toContain('Playwright headless');
+    expect(tools).toContain('Playwright headed');
+    expect(tools).toContain('CDP headless');
+    expect(tools).toContain('CDP headed');
+  });
+
+  it('contains service operations section', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('Service Operations');
+    expect(tools).toContain('systemctl --user');
+  });
+
+  it('contains plan-audit-implement workflow', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('Plan-Audit-Implement Workflow');
+  });
+
+  // --- All 13 Discord action types ---
+
+  it('documents all 4 forge action types', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    for (const action of ['forgeCreate', 'forgeResume', 'forgeStatus', 'forgeCancel']) {
+      expect(tools).toContain(action);
+    }
+  });
+
+  it('documents all 6 plan action types', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    for (const action of ['planList', 'planShow', 'planApprove', 'planClose', 'planCreate', 'planRun']) {
+      expect(tools).toContain(action);
+    }
+  });
+
+  it('documents all 3 memory action types', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    for (const action of ['memoryRemember', 'memoryForget', 'memoryShow']) {
+      expect(tools).toContain(action);
+    }
+  });
+
+  it('contains discord-action block syntax examples', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('<discord-action>');
+    expect(tools).toContain('"type"');
+  });
+
+  it('warns against sending commands as text messages', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain("bot-sent messages don't trigger command handlers");
+  });
+
+  it('documents restart convenience commands', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('!restart');
+    expect(tools).toContain('Discord Convenience Commands');
+  });
+
+  it('contains service operation guardrails', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('Always ask before restart');
+    expect(tools).toContain('Guardrails');
+  });
+});
+
+describe('scaffolded workspace contains operational content', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const d of dirs) await fs.rm(d, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  it('fresh scaffold produces AGENTS.md with all critical sections', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
+    dirs.push(workspace);
+
+    await ensureWorkspaceBootstrapFiles(workspace);
+
+    const agents = await fs.readFile(path.join(workspace, 'AGENTS.md'), 'utf-8');
+    const requiredSections = [
+      'Discord Action Batching',
+      'Response Economy',
+      'Knowledge Cutoff Awareness',
+      'Landing the Plane',
+      'Plan-Audit-Implement Workflow',
+      'Discord Formatting',
+      'Bead Creation',
+    ];
+    for (const section of requiredSections) {
+      expect(agents).toContain(section);
+    }
+  });
+
+  it('fresh scaffold produces TOOLS.md with all 13 action types', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
+    dirs.push(workspace);
+
+    await ensureWorkspaceBootstrapFiles(workspace);
+
+    const tools = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
+    const allActionTypes = [
+      'forgeCreate', 'forgeResume', 'forgeStatus', 'forgeCancel',
+      'planList', 'planShow', 'planApprove', 'planClose', 'planCreate', 'planRun',
+      'memoryRemember', 'memoryForget', 'memoryShow',
+    ];
+    for (const action of allActionTypes) {
+      expect(tools).toContain(action);
+    }
+  });
+
+  it('fresh scaffold produces TOOLS.md with browser automation and service ops', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
+    dirs.push(workspace);
+
+    await ensureWorkspaceBootstrapFiles(workspace);
+
+    const tools = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('Browser Automation');
+    expect(tools).toContain('Service Operations');
+    expect(tools).toContain('Plan-Audit-Implement Workflow');
+  });
+});
