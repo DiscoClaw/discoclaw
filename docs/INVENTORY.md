@@ -73,6 +73,11 @@ All actions are gated by category env flags (off by default except channels).
 | Moderation | kick, ban, timeout, warn | `actions-moderation.ts` | **done** |
 | Polls | create, manage | `actions-poll.ts` | **done** |
 | Beads (task tracking) | create, update, close, show, list, sync | `actions-beads.ts` | **done** |
+| Crons (scheduled tasks) | create, update, list, show, pause, resume, delete, trigger, sync, tagMapReload | `actions-crons.ts` | **done** |
+| Bot profile | setStatus, setActivity, setNickname | `actions-bot-profile.ts` | **done** |
+| Forge (autonomous plan drafting) | create, resume, status, cancel | `actions-forge.ts` | **done** |
+| Plan management (autonomous) | list, show, approve, close, create | `actions-plan.ts` | **done** |
+| Memory (durable memory mutation) | remember, forget, show | `actions-memory.ts` | **done** |
 
 ## 7. Beads Subsystem (`src/beads/`)
 

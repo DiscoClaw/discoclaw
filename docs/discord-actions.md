@@ -27,11 +27,31 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-moderation.ts`
 - `src/discord/actions-poll.ts`
 - `src/discord/actions-beads.ts`
+- `src/discord/actions-crons.ts`
+- `src/discord/actions-bot-profile.ts`
+- `src/discord/actions-forge.ts`
+- `src/discord/actions-plan.ts`
+- `src/discord/actions-memory.ts`
 
 Channel action types (in `src/discord/actions-channels.ts`):
 - `channelList`, `channelCreate`, `channelDelete`, `channelEdit`, `channelInfo`, `channelMove`
 - `threadListArchived`
 - `forumTagCreate`, `forumTagDelete`, `forumTagList`
+
+Cron action types (in `src/discord/actions-crons.ts`):
+- `cronCreate`, `cronUpdate`, `cronList`, `cronShow`, `cronPause`, `cronResume`, `cronDelete`, `cronTrigger`, `cronSync`, `cronTagMapReload`
+
+Bot profile action types (in `src/discord/actions-bot-profile.ts`):
+- `botSetStatus`, `botSetActivity`, `botSetNickname`
+
+Forge action types (in `src/discord/actions-forge.ts`):
+- `forgeCreate`, `forgeResume`, `forgeStatus`, `forgeCancel`
+
+Plan action types (in `src/discord/actions-plan.ts`):
+- `planList`, `planShow`, `planApprove`, `planClose`, `planCreate`
+
+Memory action types (in `src/discord/actions-memory.ts`):
+- `memoryRemember`, `memoryForget`, `memoryShow`
 
 Query actions (read-only actions that can trigger an auto-follow-up loop):
 - `src/discord/action-categories.ts`
@@ -56,6 +76,11 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_MODERATION`
   - `DISCOCLAW_DISCORD_ACTIONS_POLLS`
   - `DISCOCLAW_DISCORD_ACTIONS_BEADS` (also requires beads subsystem enabled/configured)
+  - `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1; also requires cron subsystem enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 0)
+  - `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1; also requires forge commands enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1; also requires plan commands enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
 
 Those env vars get translated into an `ActionCategoryFlags` object (see `src/discord/actions.ts`) and passed down from `src/index.ts` into the Discord handler and cron executor.
 
@@ -79,7 +104,8 @@ Important behavioral notes:
   - It returns `{ cleanText, actions }` where `cleanText` has the blocks removed.
 
 4. Execute:
-  - `executeDiscordActions(actions, ctx, log, beadCtx)` in `src/discord/actions.ts` dispatches to the right category module based on `action.type`.
+  - `executeDiscordActions(actions, ctx, log, subsystemContexts)` in `src/discord/actions.ts` dispatches to the right category module based on `action.type`.
+  - Subsystem contexts (`beadCtx`, `cronCtx`, `forgeCtx`, `planCtx`, `memoryCtx`) are passed as a `SubsystemContexts` bag. Actions requiring a missing context return a "not configured" error.
   - Each action returns `{ ok: true, summary }` or `{ ok: false, error }`.
 
 5. Post-processing:
@@ -88,6 +114,101 @@ Important behavioral notes:
 6. Optional auto-follow-up:
   - If any action type is listed in `QUERY_ACTION_TYPES` (`src/discord/action-categories.ts`) and at least one of those query actions succeeded, `src/discord.ts` can automatically invoke the model again with the results.
   - This is intended for "read/list/info" actions where the model needs returned data to keep reasoning.
+
+## Autonomous Action Categories
+
+The forge, plan, and memory categories enable the AI runtime to self-initiate operations that previously required human `!` commands. Combined with cron jobs, these enable fully autonomous workflows: crons that check for approved plans and forge them, post-forge memory updates, bot-initiated planning from bead context, etc.
+
+### Forge Actions (`actions-forge.ts`)
+
+Allow the model to start, monitor, and cancel forge runs (plan drafting + audit loops) without a human `!forge` command.
+
+| Action | Description | Mutating? | Async? |
+|--------|-------------|-----------|--------|
+| `forgeCreate` | Start a new forge run from a description | Yes | Yes (fire-and-forget; progress posted to channel) |
+| `forgeResume` | Re-enter the audit/revise loop for an existing plan | Yes | Yes (fire-and-forget) |
+| `forgeStatus` | Check if a forge is currently running | No (query) | No |
+| `forgeCancel` | Cancel the running forge | Yes | No (sets cancel flag) |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1, requires `DISCOCLAW_FORGE_COMMANDS_ENABLED`).
+Context: Requires `ForgeContext` with an `orchestratorFactory`, plans directory, and progress callback.
+Concurrency: Only one forge at a time (module-level singleton via `forge-plan-registry.ts`). Acquires the workspace writer lock for the duration of the run.
+
+### Plan Actions (`actions-plan.ts`)
+
+Allow the model to create, inspect, approve, and close plans without a human `!plan` command.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `planCreate` | Create a new plan file + backing bead | Yes |
+| `planList` | List plans, optionally filtered by status | No (query) |
+| `planShow` | Show plan details (header, status, bead) | No (query) |
+| `planApprove` | Set plan status to APPROVED, update backing bead | Yes |
+| `planClose` | Set plan status to CLOSED, close backing bead | Yes |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1, requires `DISCOCLAW_PLAN_COMMANDS_ENABLED`).
+Context: Requires `PlanContext` with plans directory and bead CWD.
+
+Note: `planApprove` and `planClose` are blocked while a plan is `IMPLEMENTING`.
+
+### Memory Actions (`actions-memory.ts`)
+
+Allow the model to read and mutate the user's durable memory (facts, preferences, projects, constraints) without a human `!memory` command.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `memoryRemember` | Store a fact/preference/note | Yes |
+| `memoryForget` | Deprecate items matching a substring | Yes |
+| `memoryShow` | Show current durable memory items | No (query) |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1, requires durable memory enabled).
+Context: Requires `MemoryContext` with user ID, data directory, and capacity limits.
+Concurrency: Writes are serialized per-user via `durableWriteQueue`.
+
+### Cron Actions (`actions-crons.ts`)
+
+Allow the model to manage scheduled tasks: create, update, pause/resume, delete, trigger, and sync crons.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `cronCreate` | Create a new scheduled task (forum thread + scheduler registration) | Yes |
+| `cronUpdate` | Update a cron's schedule, prompt, model, or tags | Yes |
+| `cronList` | List all registered cron jobs with status | No (query) |
+| `cronShow` | Show full details for a specific cron | No (query) |
+| `cronPause` | Pause a cron (stops scheduling, cancels in-flight run) | Yes |
+| `cronResume` | Resume a paused cron | Yes |
+| `cronDelete` | Remove a cron and archive its forum thread | Yes |
+| `cronTrigger` | Manually fire a cron job immediately | Yes |
+| `cronSync` | Run full bidirectional sync (tags, names, status messages) | Yes |
+| `cronTagMapReload` | Reload the tag map from disk | Yes |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1, requires cron subsystem enabled).
+Context: Requires `CronContext` with scheduler, forum channel, tag map, stats store, and runtime.
+Cron-to-cron restriction: Cron jobs themselves cannot emit cron actions (the `crons` flag is forced to `false` in the cron executor's action flags to prevent self-modification loops).
+
+### Bot Profile Actions (`actions-bot-profile.ts`)
+
+Allow the model to change the bot's Discord presence and nickname.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `botSetStatus` | Change online status (online/idle/dnd/invisible) | Yes |
+| `botSetActivity` | Set activity text (Playing/Listening/Watching/Competing/Custom) | Yes |
+| `botSetNickname` | Change server nickname | Yes |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 0 — opt-in only).
+No subsystem context required (uses the Discord client directly).
+Excluded from cron flows to avoid rate-limit and abuse issues.
+
+### Cron Flow Restrictions
+
+When actions are executed within a cron job (via `src/cron/executor.ts`), the following categories are always disabled regardless of env flags:
+
+- `crons` — prevents cron jobs from mutating cron state (self-modification loops)
+- `botProfile` — prevents rate-limit and abuse issues
+- `forge` — forge runs are long-lived; excluded to avoid resource contention
+- `plan` — plan mutations excluded from cron for now
+- `memory` — memory mutations excluded from cron for now
 
 ## Adding A New Action (Existing Category)
 
