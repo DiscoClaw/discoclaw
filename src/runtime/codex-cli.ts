@@ -10,6 +10,12 @@
 //   - `-s read-only` forces read-only sandbox (no workspace writes).
 //   - Plain text stdout by default; `--json` for JSONL.
 //   - Diagnostic/progress output goes to stderr.
+//
+// Session persistence (codex exec resume):
+//   When a sessionKey is provided, the adapter omits `--ephemeral` and uses
+//   `--json` to capture the `thread.started` event containing the thread_id.
+//   Subsequent calls with the same sessionKey use `codex exec resume <thread_id>`
+//   to continue in the same session context.
 
 import process from 'node:process';
 import { execa, type ResultPromise } from 'execa';
@@ -50,14 +56,29 @@ export type CodexCliRuntimeOpts = {
 };
 
 export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter {
-  const capabilities = new Set(['streaming_text', 'tools_fs'] as const);
+  const capabilities = new Set(['streaming_text', 'tools_fs', 'sessions'] as const);
+
+  // Maps sessionKey → Codex thread_id (UUID) for session resume.
+  const sessionMap = new Map<string, string>();
 
   async function* invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent> {
     const model = params.model || opts.defaultModel;
+    const wantSession = Boolean(params.sessionKey);
+    const existingThreadId = params.sessionKey ? sessionMap.get(params.sessionKey) : undefined;
 
     const useStdin = Buffer.byteLength(params.prompt, 'utf-8') > STDIN_THRESHOLD;
 
-    const args: string[] = ['exec', '-m', model, '--skip-git-repo-check', '--ephemeral', '-s', 'read-only'];
+    // When resuming, use `codex exec resume <thread_id> [PROMPT]`.
+    // When starting a new session (or ephemeral), use `codex exec [PROMPT]`.
+    const args: string[] = existingThreadId
+      ? ['exec', 'resume', existingThreadId, '-m', model, '--skip-git-repo-check', '-s', 'read-only']
+      : ['exec', '-m', model, '--skip-git-repo-check', ...(wantSession ? [] : ['--ephemeral']), '-s', 'read-only'];
+
+    // When session tracking is active, use --json so we can capture the thread_id
+    // from the `thread.started` event.
+    if (wantSession) {
+      args.push('--json');
+    }
 
     // Pass --add-dir flags for additional directories (mirrors claude-code-cli.ts).
     // Note: Codex's --help describes --add-dir as "writable", but -s read-only overrides
@@ -132,15 +153,51 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
 
     let finished = false;
     let mergedStdout = '';
+    let mergedText = ''; // Extracted text content (from JSONL or raw stdout)
     let stderrForError = '';
     let stdoutEnded = false;
     let stderrEnded = subprocess.stderr == null;
     let procResult: any | null = null;
+    let stdoutBuffer = ''; // Line buffer for JSONL parsing
 
     subprocess.stdout.on('data', (chunk) => {
       const s = String(chunk);
       mergedStdout += s;
-      push({ type: 'text_delta', text: s });
+
+      if (!wantSession) {
+        // Plain text mode — pass through directly.
+        push({ type: 'text_delta', text: s });
+        return;
+      }
+
+      // JSONL mode — parse line by line and extract text + thread_id.
+      stdoutBuffer += s;
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const evt = JSON.parse(trimmed);
+
+          // Capture thread_id for session resume on subsequent calls.
+          if (evt.type === 'thread.started' && evt.thread_id && params.sessionKey) {
+            sessionMap.set(params.sessionKey, evt.thread_id);
+            if (opts.log) {
+              opts.log.debug({ sessionKey: params.sessionKey, threadId: evt.thread_id }, 'codex-cli: session mapped');
+            }
+          }
+
+          // Extract text from agent_message items.
+          if (evt.type === 'item.completed' && evt.item?.type === 'agent_message' && evt.item.text) {
+            mergedText += evt.item.text;
+            push({ type: 'text_delta', text: evt.item.text });
+          }
+        } catch {
+          // Non-JSON line in JSONL mode — treat as raw text.
+          push({ type: 'text_delta', text: trimmed });
+        }
+      }
     });
 
     subprocess.stderr?.on('data', (chunk) => {
@@ -191,6 +248,8 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       }
 
       if (procResult.exitCode !== 0) {
+        // Clear stale session mapping — the thread may be corrupt/incomplete.
+        if (params.sessionKey) sessionMap.delete(params.sessionKey);
         const raw = (stderrForError || procResult.stderr || procResult.stdout || `codex exit ${procResult.exitCode}`).trim();
         push({ type: 'error', message: sanitizeError(raw) });
         push({ type: 'done' });
@@ -199,8 +258,25 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
         return;
       }
 
+      // Flush any trailing JSONL buffer.
+      if (wantSession && stdoutBuffer.trim()) {
+        try {
+          const evt = JSON.parse(stdoutBuffer.trim());
+          if (evt.type === 'thread.started' && evt.thread_id && params.sessionKey) {
+            sessionMap.set(params.sessionKey, evt.thread_id);
+          }
+          if (evt.type === 'item.completed' && evt.item?.type === 'agent_message' && evt.item.text) {
+            mergedText += evt.item.text;
+            push({ type: 'text_delta', text: evt.item.text });
+          }
+        } catch {
+          // ignore
+        }
+        stdoutBuffer = '';
+      }
+
       // Success — emit final text.
-      const final = mergedStdout.trimEnd();
+      const final = wantSession ? mergedText.trimEnd() : mergedStdout.trimEnd();
       if (final) push({ type: 'text_final', text: final });
       push({ type: 'done' });
       finished = true;

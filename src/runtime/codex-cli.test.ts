@@ -317,6 +317,7 @@ describe('Codex CLI runtime adapter', () => {
     expect(rt.id).toBe('codex');
     expect(rt.capabilities.has('streaming_text')).toBe(true);
     expect(rt.capabilities.has('tools_fs')).toBe(true);
+    expect(rt.capabilities.has('sessions')).toBe(true);
   });
 
   it('empty stdout emits done without text_final', async () => {
@@ -572,5 +573,153 @@ describe('Codex CLI runtime adapter', () => {
     expect(mockExeca).toHaveBeenCalledTimes(1);
     const callArgs = mockExeca.mock.calls[0][1] as string[];
     expect(callArgs).not.toContain('--add-dir');
+  });
+
+  // --- Session persistence tests ---
+
+  it('sessionKey omits --ephemeral and adds --json', async () => {
+    const jsonlOutput = [
+      '{"type":"thread.started","thread_id":"abc-123"}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonlOutput,
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'test-session-1',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    // Should NOT have --ephemeral.
+    expect(callArgs).not.toContain('--ephemeral');
+    // Should have --json.
+    expect(callArgs).toContain('--json');
+    // Should start with 'exec' (not 'exec resume' on first call).
+    expect(callArgs[0]).toBe('exec');
+    expect(callArgs[1]).not.toBe('resume');
+
+    // Should extract text from JSONL.
+    const final = events.find((e) => e.type === 'text_final');
+    expect(final).toBeDefined();
+    expect((final as { text: string }).text).toBe('hello');
+  });
+
+  it('second call with same sessionKey uses codex exec resume', async () => {
+    const jsonlOutput1 = [
+      '{"type":"thread.started","thread_id":"thread-uuid-456"}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"first response"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+    const jsonlOutput2 = [
+      '{"type":"thread.started","thread_id":"thread-uuid-456"}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"second response"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    // First call — establishes the session.
+    mockExeca.mockReturnValue(createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
+    await collectEvents(rt.invoke({
+      prompt: 'Round 1',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'audit-session',
+    }));
+
+    // Second call — should resume.
+    mockExeca.mockReturnValue(createMockSubprocess({ stdout: jsonlOutput2, exitCode: 0 }));
+    const events2 = await collectEvents(rt.invoke({
+      prompt: 'Round 2',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'audit-session',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+    const callArgs2 = mockExeca.mock.calls[1][1] as string[];
+    // Should use 'exec resume <thread_id>'.
+    expect(callArgs2[0]).toBe('exec');
+    expect(callArgs2[1]).toBe('resume');
+    expect(callArgs2[2]).toBe('thread-uuid-456');
+
+    const final2 = events2.find((e) => e.type === 'text_final');
+    expect((final2 as { text: string }).text).toBe('second response');
+  });
+
+  it('without sessionKey still uses --ephemeral (backward compat)', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+      // no sessionKey
+    }));
+
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(callArgs).toContain('--ephemeral');
+    expect(callArgs).not.toContain('--json');
+  });
+
+  it('different sessionKeys get independent sessions', async () => {
+    const jsonlA = [
+      '{"type":"thread.started","thread_id":"thread-aaa"}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"a"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+    const jsonlB = [
+      '{"type":"thread.started","thread_id":"thread-bbb"}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"b"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+    const jsonlA2 = [
+      '{"type":"thread.started","thread_id":"thread-aaa"}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"a2"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    mockExeca.mockReturnValue(createMockSubprocess({ stdout: jsonlA, exitCode: 0 }));
+    await collectEvents(rt.invoke({ prompt: 'a1', model: '', cwd: '/tmp', sessionKey: 'session-a' }));
+
+    mockExeca.mockReturnValue(createMockSubprocess({ stdout: jsonlB, exitCode: 0 }));
+    await collectEvents(rt.invoke({ prompt: 'b1', model: '', cwd: '/tmp', sessionKey: 'session-b' }));
+
+    mockExeca.mockReturnValue(createMockSubprocess({ stdout: jsonlA2, exitCode: 0 }));
+    await collectEvents(rt.invoke({ prompt: 'a2', model: '', cwd: '/tmp', sessionKey: 'session-a' }));
+
+    // Third call should resume session-a's thread, not session-b's.
+    const callArgs3 = mockExeca.mock.calls[2][1] as string[];
+    expect(callArgs3[1]).toBe('resume');
+    expect(callArgs3[2]).toBe('thread-aaa');
   });
 });
