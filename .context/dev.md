@@ -64,13 +64,13 @@ Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for 
 ### Runtime Invocation
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RUNTIME_MODEL` | `opus` | Model name or alias passed to the CLI |
+| `RUNTIME_MODEL` | `capable` | Model tier (`fast`, `capable`) or concrete model name passed to the CLI |
 | `RUNTIME_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` | Comma-separated tool list |
 | `RUNTIME_TIMEOUT_MS` | `600000` | Per-invocation timeout in milliseconds |
 | `DISCOCLAW_RUNTIME_SESSIONS` | `1` | Persist Claude session IDs across messages |
 | `DISCOCLAW_MESSAGE_HISTORY_BUDGET` | `3000` | Char budget for recent conversation history in prompts (0 = disabled) |
-| `DISCOCLAW_SUMMARY_ENABLED` | `1` | Enable rolling conversation summaries (Haiku-generated) |
-| `DISCOCLAW_SUMMARY_MODEL` | `haiku` | Model used for summarization |
+| `DISCOCLAW_SUMMARY_ENABLED` | `1` | Enable rolling conversation summaries |
+| `DISCOCLAW_SUMMARY_MODEL` | `fast` | Model tier or concrete name for summarization |
 | `DISCOCLAW_SUMMARY_MAX_CHARS` | `2000` | Max chars for the rolling summary text |
 | `DISCOCLAW_SUMMARY_EVERY_N_TURNS` | `5` | Re-summarize every N messages per session |
 | `DISCOCLAW_DURABLE_MEMORY_ENABLED` | `1` | Enable durable per-user memory (persistent facts/preferences) |
@@ -83,7 +83,7 @@ Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for 
 | `CLAUDE_APPEND_SYSTEM_PROMPT` | *(unset)* | Append to system prompt (max 4000 chars); skips workspace PA file reads when set |
 | `DISCOCLAW_CRON_ENABLED` | `1` | Master switch for the cron subsystem (forum-based scheduled tasks) |
 | `DISCOCLAW_CRON_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for cron definitions |
-| `DISCOCLAW_CRON_MODEL` | `haiku` | Model used to parse natural-language cron definitions |
+| `DISCOCLAW_CRON_MODEL` | `fast` | Model tier or concrete name for parsing cron definitions |
 
 ### Browser Automation
 | Variable | Default | Description |
@@ -100,8 +100,8 @@ Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for 
 | `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/bead-hooks/tag-map.json` | Path to tag-map.json |
 | `DISCOCLAW_BEADS_MENTION_USER` | *(empty)* | User ID to @mention in new bead threads |
 | `DISCOCLAW_BEADS_SIDEBAR` | `0` | When `1` + `MENTION_USER` set, persists @mention in open bead starters for sidebar visibility |
-| `DISCOCLAW_BEADS_AUTO_TAG` | `1` | Enable Haiku auto-tagging |
-| `DISCOCLAW_BEADS_AUTO_TAG_MODEL` | `haiku` | Model for auto-tagging |
+| `DISCOCLAW_BEADS_AUTO_TAG` | `1` | Enable AI auto-tagging |
+| `DISCOCLAW_BEADS_AUTO_TAG_MODEL` | `fast` | Model tier or concrete name for auto-tagging |
 
 ## Debugging
 

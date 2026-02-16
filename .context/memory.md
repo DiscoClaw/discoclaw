@@ -8,7 +8,7 @@ Five runtime layers plus workspace files, wired together through prompt assembly
 
 `src/discord/summarizer.ts`
 
-Compresses conversation history into a running summary using Haiku. Updated every
+Compresses conversation history into a running summary using the `fast` tier. Updated every
 N turns (default 5). Keyed per session (user+channel pair). Automatic and invisible.
 
 **What the user sees:**
@@ -83,7 +83,7 @@ Bot:   Deprecated 1 item matching "Acme"
 
 `src/discord/user-turn-to-durable.ts`
 
-After each bot response, fires a separate Haiku call to extract up to 3 notable
+After each bot response, fires a separate `fast`-tier call to extract up to 3 notable
 facts from the user's message and writes them to durable memory. Off by default.
 
 **What the user sees:**
@@ -161,7 +161,7 @@ no separator). The three memory builders run in `Promise.all` so they add no lat
 | Layer | Default budget | Default state | How it stays within budget |
 |-------|---------------|---------------|---------------------------|
 | Durable memory | 2000 chars | on | Sorts active items by recency, adds one at a time, stops when next line would exceed budget. Older facts silently excluded. |
-| Rolling summary | 2000 chars | on | Haiku is prompted with `"Keep the summary under {maxChars} characters"`. Replaces itself each update rather than growing. |
+| Rolling summary | 2000 chars | on | The `fast`-tier model is prompted with `"Keep the summary under {maxChars} characters"`. Replaces itself each update rather than growing. |
 | Message history | 3000 chars | on | Fetches up to 10 messages, walks backward from newest. Bot messages truncated to fit; user messages that don't fit cause a hard stop. |
 | Short-term memory | 1000 chars | **off** | Filters by max age (default 6h), sorts newest-first, accumulates lines until budget hit. |
 | Auto-extraction | n/a | **off** | Write-side only — extracts facts for future prompts, adds nothing to the current turn. |
@@ -171,7 +171,7 @@ no separator). The three memory builders run in `Promise.all` so they add no lat
 
 With the three enabled layers at default settings, worst-case memory overhead is
 **~7000 chars (~1750 tokens)**. With all layers enabled, ~8000 chars (~2000 tokens).
-This is modest against Opus/Sonnet context windows.
+This is modest against typical `capable`-tier context windows.
 
 In practice most prompts use far less — a user with 5 durable items and a short summary
 might add ~500 chars total. Sections with no data produce zero overhead.
@@ -180,7 +180,7 @@ might add ~500 chars total. Sections with no data produce zero overhead.
 
 - **Durable**: `selectItemsForInjection()` in `durable-memory.ts:152`
 - **Short-term**: `selectEntriesForInjection()` in `shortterm-memory.ts:113`
-- **Summary**: Haiku prompt constraint in `summarizer.ts:63`
+- **Summary**: `fast`-tier prompt constraint in `summarizer.ts:63`
 - **History**: `fetchMessageHistory()` in `message-history.ts:38`
 
 All budgets are configurable via env vars (see Config Reference below).
@@ -239,7 +239,7 @@ Short-term entries also store `channelId` alongside the existing `channelName`.
 |----------|---------|-------|
 | `DISCOCLAW_MESSAGE_HISTORY_BUDGET` | `3000` | Message history |
 | `DISCOCLAW_SUMMARY_ENABLED` | `true` | Rolling summaries |
-| `DISCOCLAW_SUMMARY_MODEL` | `haiku` | Rolling summaries |
+| `DISCOCLAW_SUMMARY_MODEL` | `fast` | Rolling summaries |
 | `DISCOCLAW_SUMMARY_MAX_CHARS` | `2000` | Rolling summaries |
 | `DISCOCLAW_SUMMARY_EVERY_N_TURNS` | `5` | Rolling summaries |
 | `DISCOCLAW_DURABLE_MEMORY_ENABLED` | `true` | Durable memory |
