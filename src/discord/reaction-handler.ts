@@ -17,6 +17,7 @@ import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { downloadTextAttachments } from './file-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
+import { resolveModel } from '../runtime/model-tiers.js';
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 
@@ -386,7 +387,7 @@ function createReactionHandler(
           try {
             for await (const evt of params.runtime.invoke({
               prompt,
-              model: params.runtimeModel,
+              model: resolveModel(params.runtimeModel, params.runtime.id),
               cwd,
               addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
               sessionId,

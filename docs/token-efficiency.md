@@ -84,7 +84,7 @@ Anthropic's automatic prompt caching can reuse prompt prefixes that don't change
 
 **Durable memory churn.** Frequent `!memory add/forget` changes the inline durable memory section, which sits between the stable file list and the dynamic sections. This affects cacheability of everything after it.
 
-**Model tier matters.** Haiku calls are inexpensive enough that cache optimization has less impact. Opus calls are expensive enough that prefix stability is a meaningful cost lever.
+**Model tier matters.** Fast-tier calls are inexpensive enough that cache optimization has less impact. Capable-tier calls are expensive enough that prefix stability is a meaningful cost lever.
 
 **Stability over brevity.** A larger but stable prefix that caches well costs less over time than a smaller prefix that changes frequently.
 
@@ -102,10 +102,10 @@ Anthropic's automatic prompt caching can reuse prompt prefixes that don't change
 
 ### Hidden API calls (costs beyond the main prompt)
 
-- **Rolling summary generation** — Haiku call every N turns (default: 5, `DISCOCLAW_SUMMARY_EVERY_N_TURNS`)
-- **Cron execution** — each scheduled job fires its own API call (model per `DISCOCLAW_CRON_MODEL`, default: haiku)
-- **Cron auto-tagging** — Haiku call per new cron (when `DISCOCLAW_CRON_AUTO_TAG=1`)
-- **Bead auto-tagging** — Haiku call per new bead (when `DISCOCLAW_BEADS_AUTO_TAG=1`, model per `DISCOCLAW_BEADS_AUTO_TAG_MODEL`, default: haiku)
+- **Rolling summary generation** — fast-tier call every N turns (default: 5, `DISCOCLAW_SUMMARY_EVERY_N_TURNS`)
+- **Cron execution** — each scheduled job fires its own API call (tier per `DISCOCLAW_CRON_MODEL`, default: fast)
+- **Cron auto-tagging** — fast-tier call per new cron (when `DISCOCLAW_CRON_AUTO_TAG=1`)
+- **Bead auto-tagging** — fast-tier call per new bead (when `DISCOCLAW_BEADS_AUTO_TAG=1`, tier per `DISCOCLAW_BEADS_AUTO_TAG_MODEL`, default: fast)
 - **Forge auditor (OpenAI runtime)** — When `FORGE_AUDITOR_RUNTIME=openai`, each audit round in a forge run calls the OpenAI API instead of Claude. These calls are billed by OpenAI, not Anthropic. The forge drafter/reviser still uses Claude.
 
 ### Cache-breaking changes
@@ -132,7 +132,7 @@ Anthropic's automatic prompt caching can reuse prompt prefixes that don't change
 - Audit context files periodically for stale content.
 - Use per-channel context only for channel-specific rules, not general rules that belong in PA modules.
 - Keep PA context modules stable — batch edits rather than frequent small changes.
-- Background tasks (summaries, auto-tagging, frequent crons) default to Haiku — don't override to Opus without reason.
+- Background tasks (summaries, auto-tagging, frequent crons) default to fast tier — don't override to capable tier without reason.
 - Tune `DISCOCLAW_SUMMARY_EVERY_N_TURNS` based on conversation volume.
 - Consider `DISCOCLAW_MESSAGE_HISTORY_BUDGET` tuning — lower for terse channels, higher for context-heavy ones.
 

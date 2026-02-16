@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# auto-tag.sh — Use Haiku to classify bead content into tags.
+# auto-tag.sh — Use an AI model to classify bead content into tags.
 # Usage: auto-tag.sh <title> [description]
 # Output: comma-separated tag names (e.g., "feature,ops")
 # Returns empty string if classification fails.
+#
+# NOTE: This script calls the Anthropic API directly (outside the tier system).
+# It needs a concrete Anthropic model name, not an abstract tier like 'fast'.
+# Use DISCOCLAW_BEADS_AUTO_TAG_CONCRETE_MODEL to override the model.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-MODEL="${DISCOCLAW_BEADS_AUTO_TAG_MODEL:-claude-haiku-4-5-20251001}"
+MODEL="${DISCOCLAW_BEADS_AUTO_TAG_CONCRETE_MODEL:-claude-haiku-4-5-20251001}"
 
 title="${1:-}"
 description="${2:-}"

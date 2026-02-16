@@ -40,6 +40,7 @@ import { CronSyncCoordinator } from './cron/cron-sync-coordinator.js';
 import { startCronTagMapWatcher } from './cron/cron-tag-map-watcher.js';
 import { ensureForumTags, isSnowflake } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
+import { resolveModel } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
 import { setDataFilePath, drainInFlightReplies, cleanupOrphanedReplies } from './discord/inflight-replies.js';
@@ -70,7 +71,7 @@ const allowUserIds = cfg.allowUserIds;
 const allowChannelIds = cfg.allowChannelIds;
 const restrictChannelIds = cfg.restrictChannelIds;
 
-const runtimeModel = cfg.runtimeModel;
+const runtimeModel = resolveModel(cfg.runtimeModel, 'claude_code');
 const runtimeTools = cfg.runtimeTools;
 const runtimeTimeoutMs = cfg.runtimeTimeoutMs;
 
@@ -191,7 +192,7 @@ const discordActionsPlan = cfg.discordActionsPlan;
 const discordActionsMemory = cfg.discordActionsMemory;
 const messageHistoryBudget = cfg.messageHistoryBudget;
 const summaryEnabled = cfg.summaryEnabled;
-const summaryModel = cfg.summaryModel;
+const summaryModel = resolveModel(cfg.summaryModel, 'claude_code');
 const summaryMaxChars = cfg.summaryMaxChars;
 const summaryEveryNTurns = cfg.summaryEveryNTurns;
 const summaryDataDir = cfg.summaryDataDirOverride
@@ -231,10 +232,10 @@ const healthVerboseAllowlist = cfg.healthVerboseAllowlist;
 const statusChannel = cfg.statusChannel;
 const guildId = cfg.guildId;
 const cronEnabled = cfg.cronEnabled;
-const cronModel = cfg.cronModel;
+const cronModel = resolveModel(cfg.cronModel, 'claude_code');
 const discordActionsCrons = cfg.discordActionsCrons;
 const cronAutoTag = cfg.cronAutoTag;
-const cronAutoTagModel = cfg.cronAutoTagModel;
+const cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, 'claude_code');
 const cronStatsDir = cfg.cronStatsDirOverride
   || (dataDir ? path.join(dataDir, 'cron') : path.join(__dirname, '..', 'data', 'cron'));
 const cronTagMapPath = cfg.cronTagMapPathOverride
@@ -316,7 +317,7 @@ const beadsMentionUser = cfg.beadsMentionUser;
 const beadsSidebar = cfg.beadsSidebar;
 const sidebarMentionUserId = beadsSidebar ? beadsMentionUser : undefined;
 const beadsAutoTag = cfg.beadsAutoTag;
-const beadsAutoTagModel = cfg.beadsAutoTagModel;
+const beadsAutoTagModel = resolveModel(cfg.beadsAutoTagModel, 'claude_code');
 const discordActionsBeads = cfg.discordActionsBeads;
 
 const runtimeFallbackModel = cfg.runtimeFallbackModel;

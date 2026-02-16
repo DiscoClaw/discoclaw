@@ -20,8 +20,8 @@ import { getDefaultTimezone } from '../cron/default-timezone.js';
 // ---------------------------------------------------------------------------
 
 export type CronActionRequest =
-  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: 'haiku' | 'opus' }
-  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: 'haiku' | 'opus'; tags?: string }
+  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string }
+  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string }
   | { type: 'cronList'; status?: string }
   | { type: 'cronShow'; cronId: string }
   | { type: 'cronPause'; cronId: string }
@@ -120,7 +120,7 @@ export async function executeCronAction(
       const cadenceSet = new Set<string>(CADENCE_TAGS);
       const purposeTagNames = Object.keys(tagMap).filter((k) => !cadenceSet.has(k));
       let purposeTags: string[] = [];
-      let model: 'haiku' | 'opus' | null = null;
+      let model: string | null = null;
 
       if (action.tags) {
         purposeTags = action.tags.split(',').map((t) => t.trim()).filter(Boolean);
@@ -141,7 +141,7 @@ export async function executeCronAction(
         try {
           model = await classifyCronModel(cronCtx.runtime, action.name, action.prompt, cadence, { model: cronCtx.autoTagModel, cwd: cronCtx.cwd });
         } catch {
-          model = 'haiku';
+          model = 'fast';
         }
       }
 
@@ -488,7 +488,7 @@ export async function executeCronAction(
         const execCtx: CronExecutorContext = cronCtx.executorCtx ?? {
           client: cronCtx.client,
           runtime: cronCtx.runtime,
-          model: record.modelOverride ?? record.model ?? 'haiku',
+          model: record.modelOverride ?? record.model ?? 'fast',
           cwd: cronCtx.cwd,
           tools: [],
           timeoutMs: 600_000,
@@ -581,7 +581,7 @@ export function cronActionsPromptSection(): string {
 
 **cronCreate** — Create a new scheduled task:
 \`\`\`
-<discord-action>{"type":"cronCreate","name":"Morning Report","schedule":"0 7 * * 1-5","timezone":"America/Los_Angeles","channel":"general","prompt":"Generate a brief morning status update","model":"haiku"}</discord-action>
+<discord-action>{"type":"cronCreate","name":"Morning Report","schedule":"0 7 * * 1-5","timezone":"America/Los_Angeles","channel":"general","prompt":"Generate a brief morning status update","model":"fast"}</discord-action>
 \`\`\`
 - \`name\` (required): Human-readable name.
 - \`schedule\` (required): 5-field cron expression (e.g., "0 7 * * 1-5").
@@ -589,11 +589,11 @@ export function cronActionsPromptSection(): string {
 - \`prompt\` (required): The instruction text.
 - \`timezone\` (optional, default: system timezone, or DEFAULT_TIMEZONE env if set): IANA timezone.
 - \`tags\` (optional): Comma-separated purpose tags.
-- \`model\` (optional): "haiku" or "opus" (auto-classified if omitted).
+- \`model\` (optional): "fast" or "capable" (auto-classified if omitted).
 
 **cronUpdate** — Update a cron's settings:
 \`\`\`
-<discord-action>{"type":"cronUpdate","cronId":"cron-a1b2c3d4","schedule":"0 9 * * *","model":"opus"}</discord-action>
+<discord-action>{"type":"cronUpdate","cronId":"cron-a1b2c3d4","schedule":"0 9 * * *","model":"capable"}</discord-action>
 \`\`\`
 - \`cronId\` (required): The stable cron ID.
 - \`schedule\`, \`timezone\`, \`channel\`, \`prompt\`, \`model\`, \`tags\` (optional).

@@ -1,3 +1,4 @@
+import { resolveModel } from '../runtime/model-tiers.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 
 export type AutoTagOptions = {
@@ -32,7 +33,7 @@ export async function autoTagBead(
 
   for await (const evt of runtime.invoke({
     prompt,
-    model: opts?.model ?? 'haiku',
+    model: resolveModel(opts?.model ?? 'fast', runtime.id),
     cwd: opts?.cwd ?? '.',
     timeoutMs: opts?.timeoutMs ?? 15_000,
     tools: [],

@@ -19,6 +19,7 @@ import { loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from 
 import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
+import { resolveModel } from '../runtime/model-tiers.js';
 
 export type CronExecutorContext = {
   client: Client;
@@ -187,7 +188,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     try {
       runtimeIterator = ctx.runtime.invoke({
         prompt,
-        model: effectiveModel,
+        model: resolveModel(effectiveModel, ctx.runtime.id),
         cwd: ctx.cwd,
         addDirs: [ctx.cwd],
         timeoutMs: ctx.timeoutMs,

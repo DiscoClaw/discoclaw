@@ -67,7 +67,7 @@ Shell scripts in `scripts/beads/bead-hooks/` delegate to `bead-hooks-cli.ts`:
 | `on-update.sh` | bead updated | Unarchive, update thread name, post update message |
 | `on-status-change.sh` | status changed | Unarchive, update thread name emoji |
 | `on-close.sh` | bead closed | Post close summary, rename, archive thread |
-| `auto-tag.sh` | called by on-create | AI classify title+desc into 1-3 tags via Haiku |
+| `auto-tag.sh` | called by on-create | AI classify title+desc into 1-3 tags via `fast` tier |
 
 **`lib.sh`** — shared utils: `get_bead_json`, `build_thread_name`, `ensure_unarchived`, `truncate_message`.
 
@@ -75,7 +75,7 @@ Shell scripts in `scripts/beads/bead-hooks/` delegate to `bead-hooks-cli.ts`:
 
 ## Auto-Tagging
 
-`src/beads/auto-tag.ts` — on create, sends title + first 500 chars of description to Haiku (configurable via `DISCOCLAW_BEADS_AUTO_TAG_MODEL`). Returns 1-3 tags matched case-insensitively against `tag-map.json`. Silently returns `[]` on failure. Controlled by `DISCOCLAW_BEADS_AUTO_TAG`.
+`src/beads/auto-tag.ts` — on create, sends title + first 500 chars of description to the `fast` tier (configurable via `DISCOCLAW_BEADS_AUTO_TAG_MODEL`). Returns 1-3 tags matched case-insensitively against `tag-map.json`. Silently returns `[]` on failure. Controlled by `DISCOCLAW_BEADS_AUTO_TAG`.
 
 ## Config Reference
 

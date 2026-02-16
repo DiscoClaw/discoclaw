@@ -66,44 +66,44 @@ describe('autoTagCron', () => {
 });
 
 describe('classifyCronModel', () => {
-  it('returns haiku for frequent cadence without AI call', async () => {
-    // Even if runtime would say opus, frequent → haiku.
-    const runtime = makeMockRuntime('opus');
+  it('returns fast for frequent cadence without AI call', async () => {
+    // Even if runtime would say capable, frequent → fast.
+    const runtime = makeMockRuntime('capable');
     const result = await classifyCronModel(runtime, 'Check', 'Check health', 'frequent');
-    expect(result).toBe('haiku');
+    expect(result).toBe('fast');
   });
 
-  it('returns haiku for hourly cadence without AI call', async () => {
-    const runtime = makeMockRuntime('opus');
+  it('returns fast for hourly cadence without AI call', async () => {
+    const runtime = makeMockRuntime('capable');
     const result = await classifyCronModel(runtime, 'Check', 'Check health', 'hourly');
-    expect(result).toBe('haiku');
+    expect(result).toBe('fast');
   });
 
-  it('returns opus when AI says opus for daily cron', async () => {
-    const runtime = makeMockRuntime('opus');
+  it('returns capable when AI says capable for daily cron', async () => {
+    const runtime = makeMockRuntime('capable');
     const result = await classifyCronModel(runtime, 'Report', 'Write detailed analysis report', 'daily');
-    expect(result).toBe('opus');
+    expect(result).toBe('capable');
   });
 
-  it('returns haiku when AI says haiku for daily cron', async () => {
-    const runtime = makeMockRuntime('haiku');
+  it('returns fast when AI says fast for daily cron', async () => {
+    const runtime = makeMockRuntime('fast');
     const result = await classifyCronModel(runtime, 'Ping', 'Check if server is alive', 'daily');
-    expect(result).toBe('haiku');
+    expect(result).toBe('fast');
   });
 
-  it('defaults to haiku on unclear AI response', async () => {
+  it('defaults to fast on unclear AI response', async () => {
     const runtime = makeMockRuntime('maybe something');
     const result = await classifyCronModel(runtime, 'Test', 'Test', 'weekly');
-    expect(result).toBe('haiku');
+    expect(result).toBe('fast');
   });
 
-  it('defaults to haiku on error', async () => {
+  it('defaults to fast on error', async () => {
     const result = await classifyCronModel(makeMockErrorRuntime(), 'Test', 'Test', 'daily');
-    expect(result).toBe('haiku');
+    expect(result).toBe('fast');
   });
 
-  it('defaults to haiku on empty response', async () => {
+  it('defaults to fast on empty response', async () => {
     const result = await classifyCronModel(makeMockRuntime(''), 'Test', 'Test', 'monthly');
-    expect(result).toBe('haiku');
+    expect(result).toBe('fast');
   });
 });
