@@ -20,8 +20,8 @@ export type CronRunRecord = {
   cadence: CadenceTag | null;
   purposeTags: string[];
   disabled: boolean;
-  model: 'haiku' | 'opus' | null;
-  modelOverride?: 'haiku' | 'opus';
+  model: string | null;
+  modelOverride?: string;
 };
 
 export type CronRunStatsStore = {
