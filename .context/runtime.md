@@ -1,8 +1,9 @@
 # runtime.md — Runtimes & Adapters
 
 ## Runtime Adapter Interface
-- The Discord layer consumes a provider-agnostic event stream (`EngineEvent`).
+- The orchestrator consumes a provider-agnostic event stream (`EngineEvent`) from any adapter.
 - Each runtime adapter implements `RuntimeAdapter.invoke()` and declares capabilities.
+- The orchestrator routes to adapters based on context: message handling, forge drafting/auditing, cron execution.
 
 See: `src/runtime/types.ts`
 

@@ -10,7 +10,7 @@ Do **not** open a public issue for security vulnerabilities.
 ## Scope
 
 **In scope:**
-- The DiscoClaw bridge layer (message routing, Discord event handling, runtime spawning)
+- The DiscoClaw orchestration layer (context assembly, runtime routing, Discord event handling, task scheduling)
 - Configuration parsing and validation
 - Bead/cron subsystem logic
 

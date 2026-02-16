@@ -4,13 +4,15 @@
 
 # DiscoClaw
 
-A Discord-native AI workspace built on three pillars: **Memory**, **Beads**, and **Crons**.
+A personal AI orchestrator that turns Discord into a persistent workspace — built on three pillars: **Memory**, **Beads**, and **Crons**.
 
-DiscoClaw turns a private Discord server into a persistent AI workspace. Your assistant remembers you across sessions, tracks work in forum threads, and runs scheduled tasks autonomously — all through natural conversation.
+DiscoClaw is an orchestrator: it coordinates between a user interface (Discord), one or more AI runtimes (Claude Code, OpenAI, Codex), and local system resources — managing conversation state, task routing, scheduling, and tool access. The intelligence is rented; the coordination is owned.
+
+It turns a private Discord server into a persistent AI workspace. Your assistant remembers you across sessions, tracks work in forum threads, and runs scheduled tasks autonomously — all through natural conversation.
 
 It's designed for a single user on a fresh, private server — your own sandbox. Not a shared bot, not a multi-user platform. Just you and your assistant in a space you control.
 
-No gateways, no proxies, no web UI to deploy — Discord *is* the interface. Run the DiscoClaw service on a Linux or macOS machine (see [Platform support](#platform-support)) and talk to your assistant from anywhere Discord works: desktop, mobile, browser.
+No gateways, no proxies, no web UI to deploy — Discord *is* the interface. Run DiscoClaw on a Linux or macOS machine (see [Platform support](#platform-support)) and talk to your assistant from anywhere Discord works: desktop, mobile, browser.
 
 The codebase is intentionally small — small enough to read, audit, and modify directly. Customization means changing the code, not configuring a plugin system.
 
@@ -54,11 +56,11 @@ Recurring tasks defined as forum threads in plain language — no crontab, no se
 
 ## How it works
 
-DiscoClaw is a bridge between Discord and an AI runtime (Claude Code by default). When you send a message, it:
+DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with OpenAI and Codex adapters available). It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
-2. Loads per-channel context, conversation history, rolling summary, and durable memory
-3. Passes everything to the runtime (Claude CLI) running in your workspace directory
+2. Assembles context: per-channel rules, conversation history, rolling summary, and durable memory
+3. Routes to the appropriate runtime adapter, running in your workspace directory
 4. Streams the response back, chunked to fit Discord's message limits
 5. Parses and executes any Discord actions the assistant emitted
 
@@ -150,7 +152,7 @@ systemctl --user restart discoclaw.service
 
 ## Safety
 
-DiscoClaw can execute powerful local tooling via an agent runtime, often with elevated permissions. Treat it like a local automation system connected to Discord.
+DiscoClaw orchestrates powerful local tooling via AI runtimes, often with elevated permissions. Treat it like a local automation system connected to Discord.
 
 - Use a **private Discord server** — don't start in a shared or public server
 - Use **least-privilege** Discord permissions
@@ -161,7 +163,7 @@ DiscoClaw can execute powerful local tooling via an agent runtime, often with el
 
 ## Workspace layout
 
-DiscoClaw runs the AI runtime in a separate working directory (`WORKSPACE_CWD`), keeping the repo clean while giving your assistant a persistent workspace.
+The orchestrator runs AI runtimes in a separate working directory (`WORKSPACE_CWD`), keeping the repo clean while giving your assistant a persistent workspace.
 
 - Set `DISCOCLAW_DATA_DIR` to use `$DISCOCLAW_DATA_DIR/workspace` (good for Dropbox-backed setups)
 - Or leave it unset to use `./workspace` relative to the repo
