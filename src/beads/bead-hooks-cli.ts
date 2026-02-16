@@ -1,6 +1,6 @@
 import { Client, GatewayIntentBits } from 'discord.js';
 import { bdAddLabel, bdShow, bdUpdate } from './bd-cli.js';
-import { findExistingThreadForBead, createBeadThread, ensureUnarchived, getThreadIdFromBead, resolveBeadsForum, updateBeadThreadName, updateBeadThreadTags, closeBeadThread, isBeadThreadAlreadyClosed } from './discord-sync.js';
+import { findExistingThreadForBead, createBeadThread, ensureUnarchived, getThreadIdFromBead, resolveBeadsForum, updateBeadThreadName, updateBeadThreadTags, closeBeadThread, isThreadArchived } from './discord-sync.js';
 import type { BeadData } from './types.js';
 import { loadTagMap } from './discord-sync.js';
 
@@ -138,8 +138,9 @@ async function run(): Promise<void> {
     }
 
     if (sub === 'on-close') {
-      const alreadyClosed = await isBeadThreadAlreadyClosed(client, threadId, bead, tagMap);
-      if (alreadyClosed) return;
+      // Lightweight check: skip if thread is already archived to avoid
+      // duplicate close messages from concurrent close operations.
+      if (await isThreadArchived(client, threadId)) return;
       await closeBeadThread(client, threadId, bead, tagMap);
       return;
     }

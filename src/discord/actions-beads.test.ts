@@ -324,6 +324,27 @@ describe('executeBeadAction', () => {
     expect((result as any).summary).toContain('Done');
   });
 
+  it('beadClose calls suppressSync with 10_000 before bdClose', async () => {
+    const { bdClose } = await import('../beads/bd-cli.js');
+    (bdClose as any).mockClear();
+
+    const callOrder: string[] = [];
+    const mockCoordinator = {
+      suppressSync: vi.fn(() => { callOrder.push('suppressSync'); }),
+      sync: vi.fn(),
+    };
+    (bdClose as any).mockImplementation(async () => { callOrder.push('bdClose'); });
+
+    await executeBeadAction(
+      { type: 'beadClose', beadId: 'ws-001', reason: 'Done' },
+      makeCtx(),
+      makeBeadCtx({ syncCoordinator: mockCoordinator as any }),
+    );
+
+    expect(mockCoordinator.suppressSync).toHaveBeenCalledWith(10_000);
+    expect(callOrder.indexOf('suppressSync')).toBeLessThan(callOrder.indexOf('bdClose'));
+  });
+
   it('beadClose calls forumCountSync.requestUpdate', async () => {
     const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
     await executeBeadAction(

@@ -8,7 +8,7 @@ import {
   resolveBeadsForum,
   createBeadThread,
   closeBeadThread,
-  isBeadThreadAlreadyClosed,
+  isThreadArchived,
   updateBeadThreadName,
   updateBeadStarterMessage,
   updateBeadThreadTags,
@@ -131,6 +131,13 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   const withRef = allBeads.filter((b) => getThreadIdFromBead(b) && b.status !== 'closed');
   for (const bead of withRef) {
     const threadId = getThreadIdFromBead(bead)!;
+    // Skip threads that are already archived — a concurrent beadClose may have
+    // just archived this thread, and unarchiving it would undo that work.
+    // Note: isThreadArchived never throws (fetchThreadChannel catches internally).
+    if (await isThreadArchived(client, threadId)) {
+      await sleep(throttleMs);
+      continue;
+    }
     // If archived, unarchive and keep unarchived for active beads.
     try {
       await ensureUnarchived(client, threadId);
@@ -175,14 +182,11 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   for (const bead of closedBeads) {
     const threadId = getThreadIdFromBead(bead)!;
     try {
-      let alreadyClosed = false;
-      try {
-        alreadyClosed = await isBeadThreadAlreadyClosed(client, threadId, bead, tagMap);
-      } catch {
-        // Check failed (rate limit, network) — proceed with close attempt.
-        warnings++;
-      }
-      if (alreadyClosed) {
+      // Lightweight idempotency: skip if the thread is already archived.
+      // This avoids false negatives from name/tag mismatches triggering
+      // duplicate close messages on threads that were closed concurrently.
+      // Note: isThreadArchived never throws (fetchThreadChannel catches internally).
+      if (await isThreadArchived(client, threadId)) {
         await sleep(throttleMs);
         continue;
       }

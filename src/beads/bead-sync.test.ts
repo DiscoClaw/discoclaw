@@ -10,6 +10,7 @@ vi.mock('./discord-sync.js', () => ({
   resolveBeadsForum: vi.fn(async () => ({})),
   createBeadThread: vi.fn(async () => 'thread-new'),
   closeBeadThread: vi.fn(async () => {}),
+  isThreadArchived: vi.fn(async () => false),
   isBeadThreadAlreadyClosed: vi.fn(async () => false),
   updateBeadThreadName: vi.fn(async () => true),
   updateBeadStarterMessage: vi.fn(async () => true),
@@ -98,6 +99,55 @@ describe('runBeadSync', () => {
 
     expect(result.statusesUpdated).toBe(1);
     expect(bdUpdate).toHaveBeenCalledWith('ws-003', { status: 'blocked' }, '/tmp');
+  });
+
+  it('phase 3 skips beads whose thread is already archived', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { isThreadArchived, ensureUnarchived, updateBeadThreadName } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-030', title: 'Archived active', status: 'in_progress', labels: [], external_ref: 'discord:300' },
+    ]);
+    (isThreadArchived as any).mockResolvedValueOnce(true);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(isThreadArchived).toHaveBeenCalledWith(expect.anything(), '300');
+    expect(ensureUnarchived).not.toHaveBeenCalled();
+    expect(updateBeadThreadName).not.toHaveBeenCalled();
+    expect(result.emojisUpdated).toBe(0);
+  });
+
+  it('phase 3 processes non-archived beads through the guard', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { isThreadArchived, ensureUnarchived, updateBeadThreadName } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-031', title: 'Active bead', status: 'open', labels: [], external_ref: 'discord:301' },
+    ]);
+    (isThreadArchived as any).mockResolvedValueOnce(false);
+    (updateBeadThreadName as any).mockResolvedValueOnce(true);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(isThreadArchived).toHaveBeenCalledWith(expect.anything(), '301');
+    expect(ensureUnarchived).toHaveBeenCalledWith(expect.anything(), '301');
+    expect(updateBeadThreadName).toHaveBeenCalled();
+    expect(result.emojisUpdated).toBe(1);
   });
 
   it('renames threads for active beads in phase 3 and counts changes', async () => {
@@ -232,12 +282,12 @@ describe('runBeadSync', () => {
 
   it('skips already-archived closed bead threads in phase 4', async () => {
     const { bdList } = await import('./bd-cli.js');
-    const { closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
+    const { closeBeadThread, isThreadArchived } = await import('./discord-sync.js');
 
     (bdList as any).mockResolvedValueOnce([
       { id: 'ws-006', title: 'F', status: 'closed', labels: [], external_ref: 'discord:888' },
     ]);
-    (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true);
+    (isThreadArchived as any).mockResolvedValueOnce(true);
 
     const result = await runBeadSync({
       client: makeClient(),
@@ -248,9 +298,32 @@ describe('runBeadSync', () => {
       throttleMs: 0,
     } as any);
 
-    expect(isBeadThreadAlreadyClosed).toHaveBeenCalledWith(expect.anything(), '888', expect.objectContaining({ id: 'ws-006' }), expect.any(Object));
+    expect(isThreadArchived).toHaveBeenCalledWith(expect.anything(), '888');
     expect(closeBeadThread).not.toHaveBeenCalled();
     expect(result.threadsArchived).toBe(0);
+  });
+
+  it('phase 4 uses isThreadArchived, not isBeadThreadAlreadyClosed', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { isThreadArchived, isBeadThreadAlreadyClosed, closeBeadThread } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-040', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:400' },
+    ]);
+    (isThreadArchived as any).mockResolvedValueOnce(false);
+
+    await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(isThreadArchived).toHaveBeenCalledWith(expect.anything(), '400');
+    expect(isBeadThreadAlreadyClosed).not.toHaveBeenCalled();
+    expect(closeBeadThread).toHaveBeenCalled();
   });
 
   it('calls statusPoster.beadSyncComplete with the result when provided', async () => {

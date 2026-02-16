@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage, closeBeadThread, isBeadThreadAlreadyClosed, reloadTagMapInPlace, getStatusTagIds, buildAppliedTagsWithStatus, updateBeadThreadTags, createBeadThread } from './discord-sync.js';
+import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage, closeBeadThread, isBeadThreadAlreadyClosed, isThreadArchived, reloadTagMapInPlace, getStatusTagIds, buildAppliedTagsWithStatus, updateBeadThreadTags, createBeadThread } from './discord-sync.js';
 import type { BeadData, TagMap } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -724,6 +724,51 @@ describe('isBeadThreadAlreadyClosed with tagMap', () => {
       appliedTags: [],
     };
     const result = await isBeadThreadAlreadyClosed(makeClient(thread), '123', bead, tagMap);
+    expect(result).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isThreadArchived
+// ---------------------------------------------------------------------------
+
+describe('isThreadArchived', () => {
+  function makeClient(thread: any): any {
+    return {
+      channels: { cache: { get: () => thread } },
+    };
+  }
+
+  it('returns true when thread is archived', async () => {
+    const thread = { isThread: () => true, archived: true };
+    const result = await isThreadArchived(makeClient(thread), '123');
+    expect(result).toBe(true);
+  });
+
+  it('returns true when thread does not exist (missing)', async () => {
+    const client = { channels: { cache: { get: () => undefined } } } as any;
+    const result = await isThreadArchived(client, 'missing');
+    expect(result).toBe(true);
+  });
+
+  it('returns false when thread is not archived', async () => {
+    const thread = { isThread: () => true, archived: false };
+    const result = await isThreadArchived(makeClient(thread), '123');
+    expect(result).toBe(false);
+  });
+
+  it('returns true for archived thread regardless of name/tag metadata (design tradeoff)', async () => {
+    // This test documents the intentional design tradeoff: isThreadArchived
+    // only checks archived state, not name or tags. A thread that was archived
+    // with the wrong name/tags will still be considered "archived". This avoids
+    // false negatives from name/tag mismatches that caused duplicate close messages.
+    const thread = {
+      isThread: () => true,
+      archived: true,
+      name: 'wrong name',
+      appliedTags: ['wrong-tag'],
+    };
+    const result = await isThreadArchived(makeClient(thread), '123');
     expect(result).toBe(true);
   });
 });

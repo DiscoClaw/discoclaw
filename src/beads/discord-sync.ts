@@ -310,6 +310,13 @@ export async function closeBeadThread(
   }
 }
 
+/** Check if a thread is archived. Returns true if the thread is archived or doesn't exist. */
+export async function isThreadArchived(client: Client, threadId: string): Promise<boolean> {
+  const thread = await fetchThreadChannel(client, threadId);
+  if (!thread) return true; // Thread doesn't exist — treat as archived.
+  return thread.archived === true;
+}
+
 /** Check if a bead thread is already in its final closed state (archived + correct name + correct tags). */
 export async function isBeadThreadAlreadyClosed(
   client: Client,
