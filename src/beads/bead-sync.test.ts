@@ -7,7 +7,7 @@ vi.mock('./bd-cli.js', () => ({
 }));
 
 vi.mock('./discord-sync.js', () => ({
-  resolveBeadsForum: vi.fn(async () => ({ threads: { fetchActive: vi.fn(async () => ({ threads: new Map() })) } })),
+  resolveBeadsForum: vi.fn(async () => ({ threads: { fetchActive: vi.fn(async () => ({ threads: new Map() })), fetchArchived: vi.fn(async () => ({ threads: new Map() })) } })),
   createBeadThread: vi.fn(async () => 'thread-new'),
   closeBeadThread: vi.fn(async () => {}),
   isThreadArchived: vi.fn(async () => false),
