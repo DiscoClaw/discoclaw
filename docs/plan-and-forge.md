@@ -403,21 +403,40 @@ The forge runs a draft → audit → revise cycle:
    Append VERDICT: CAP_REACHED → REVIEW   ──► exit (cap reached)
 ```
 
+### Severity Model
+
+The audit system uses a four-tier severity model:
+
+| Level | Triggers loop? | Description |
+|-------|---------------|-------------|
+| `blocking` | **Yes** | Correctness bugs, security issues, architectural flaws, missing critical functionality. The plan cannot ship with this unresolved. |
+| `medium` | No | Substantive improvements that would make the plan better but aren't showstoppers. Missing edge case handling, incomplete error paths. |
+| `minor` | No | Small issues: naming, style, minor clarity gaps. Worth noting, not worth looping over. |
+| `suggestion` | No | Ideas for future improvement. Not problems with the current plan. |
+
+Only `blocking` findings trigger the revision loop. All other severities are noted in the audit log but auto-approved.
+
+**Backward compatibility:** Old `high` markers are treated as `blocking`, old `low` markers as `minor`. Case-insensitive matching is preserved (`HIGH`, `High`, `high` all work).
+
 ### Verdict parsing
 
 `parseAuditVerdict()` in `forge-commands.ts` determines whether to loop:
 
 | Severity detected | `maxSeverity` | `shouldLoop` |
 |-------------------|---------------|--------------|
-| `severity: high` | `high` | `true` — revise and re-audit |
-| `severity: medium` | `medium` | `true` — revise and re-audit |
-| `severity: low` | `low` | `false` — stop, ready for review |
-| "ready to approve" text | `low` | `false` — stop |
+| `severity: blocking` | `blocking` | `true` — revise and re-audit |
+| `severity: high` (backward compat) | `blocking` | `true` — revise and re-audit |
+| `severity: medium` | `medium` | `false` — stop, ready for review |
+| `severity: minor` | `minor` | `false` — stop, ready for review |
+| `severity: low` (backward compat) | `minor` | `false` — stop, ready for review |
+| `severity: suggestion` | `suggestion` | `false` — stop, ready for review |
+| "ready to approve" text | `minor` | `false` — stop |
+| "needs revision" text (no markers) | `blocking` | `true` — stop |
 | No severity markers | `none` | `false` — stop (malformed → human review) |
 
 ### Status transitions during forge
 
-- **Normal completion (audit passes):** Plan set to `REVIEW`. Happens when `shouldLoop` is false (low/none severity).
+- **Normal completion (audit passes):** Plan set to `REVIEW`. Happens when `shouldLoop` is false (any non-blocking severity).
 - **Cap reached:** `VERDICT: CAP_REACHED` appended to plan content, then status set to `REVIEW`. Concerns remain — manual review required.
 - **Cancellation:** Status set to `CANCELLED` inside the `cancelRequested` check at the top of the while loop.
 - **Error:** Status reset to `DRAFT` in the catch block (best-effort partial state save).

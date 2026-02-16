@@ -679,11 +679,17 @@ export function buildPhasePrompt(
     lines.push('');
     lines.push('**Concern N: [title]**');
     lines.push('Description of the deviation.');
-    lines.push('**Severity: high | medium | low**');
+    lines.push('**Severity: blocking | medium | minor | suggestion**');
+    lines.push('');
+    lines.push('Severity level definitions:');
+    lines.push('- **blocking** — Correctness bugs, security issues, architectural flaws, missing critical functionality. The plan cannot ship with this unresolved.');
+    lines.push('- **medium** — Substantive improvements that would make the plan better but aren\'t showstoppers. Missing edge case handling, incomplete error paths.');
+    lines.push('- **minor** — Small issues: naming, style, minor clarity gaps. Worth noting, not worth looping over.');
+    lines.push('- **suggestion** — Ideas for future improvement. Not problems with the current plan.');
     lines.push('');
     lines.push('IMPORTANT: Each concern MUST have its own **Severity: X** line. Do NOT use tables, summary grids, or any other format for severity ratings — the automated fix loop parses these markers to decide whether to trigger revisions.');
     lines.push('');
-    lines.push('End with a **Verdict:** line — either "Needs revision." (if any high/medium concerns) or "Ready to approve." (if only low or no concerns).');
+    lines.push('End with a **Verdict:** line — either "Needs revision." (if any blocking concerns) or "Ready to approve." (if no blocking concerns).');
     lines.push('');
     lines.push('Use Read, Glob, and Grep tools only.');
   }

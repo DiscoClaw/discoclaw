@@ -205,8 +205,8 @@ describe('handlePlanAudit', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.round).toBe(1);
-      // parseAuditVerdict returns 'low' for "ready to approve" with no severity markers
-      expect(result.verdict.maxSeverity).toBe('low');
+      // parseAuditVerdict returns 'minor' for "ready to approve" with no severity markers
+      expect(result.verdict.maxSeverity).toBe('minor');
       expect(result.verdict.shouldLoop).toBe(false);
     }
 
@@ -283,7 +283,7 @@ _Filled in during/after implementation._
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.verdict.maxSeverity).toBe('high');
+      expect(result.verdict.maxSeverity).toBe('blocking');
       expect(result.verdict.shouldLoop).toBe(true);
     }
     // AI agent should NOT have been called

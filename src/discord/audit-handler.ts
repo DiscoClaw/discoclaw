@@ -102,9 +102,9 @@ function deriveVerdict(concerns: AuditConcern[]): AuditVerdict {
   const hasHigh = concerns.some((c) => c.severity === 'high');
   const hasMedium = concerns.some((c) => c.severity === 'medium');
 
-  if (hasHigh) return { maxSeverity: 'high', shouldLoop: true };
+  if (hasHigh) return { maxSeverity: 'blocking', shouldLoop: true };
   if (hasMedium) return { maxSeverity: 'medium', shouldLoop: true };
-  if (concerns.length > 0) return { maxSeverity: 'low', shouldLoop: false };
+  if (concerns.length > 0) return { maxSeverity: 'minor', shouldLoop: false };
   return { maxSeverity: 'none', shouldLoop: false };
 }
 
