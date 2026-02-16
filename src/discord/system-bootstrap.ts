@@ -211,7 +211,7 @@ async function ensureChild(
 }
 
 export async function ensureSystemScaffold(
-  params: { guild: Guild; ensureBeads: boolean; botDisplayName?: string; existingCronsId?: string; existingBeadsId?: string },
+  params: { guild: Guild; ensureBeads: boolean; botDisplayName?: string; existingCronsId?: string; existingBeadsId?: string; beadsTagMapPath?: string },
   log?: LoggerLike,
 ): Promise<SystemScaffold | null> {
   const { guild, ensureBeads } = params;
@@ -252,6 +252,15 @@ export async function ensureSystemScaffold(
     );
     if (beads.created) created.push('beads');
     if (beads.moved) moved.push('beads');
+
+    // Bootstrap status tags on the beads forum.
+    if (beads.id && params.beadsTagMapPath) {
+      try {
+        await ensureForumTags(guild, beads.id, params.beadsTagMapPath, log);
+      } catch (err) {
+        log?.warn({ err, forumId: beads.id }, 'system-bootstrap: beads forum tag bootstrap failed');
+      }
+    }
   }
 
   if (created.length > 0 || moved.length > 0) {

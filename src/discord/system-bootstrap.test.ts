@@ -26,8 +26,21 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
       name: opts.name,
       type: opts.type,
       parentId: opts.parent ?? null,
+      availableTags: [],
       setParent: vi.fn(async function (this: any, pid: string) { this.parentId = pid; }),
-      edit: vi.fn(async function (this: any, o: any) { if ('parent' in o) this.parentId = o.parent; if ('name' in o) this.name = o.name; }),
+      edit: vi.fn(async function (this: any, o: any) {
+        if ('parent' in o) this.parentId = o.parent;
+        if ('name' in o) this.name = o.name;
+        if ('availableTags' in o) {
+          this.availableTags = o.availableTags.map((t: any, i: number) => ({
+            ...t,
+            id: t.id ?? `tag-${this.id}-${i}`,
+            name: t.name,
+            moderated: t.moderated ?? false,
+            emoji: t.emoji ?? null,
+          }));
+        }
+      }),
     };
     cache.set(id, ch);
     return ch;
@@ -92,6 +105,47 @@ describe('ensureSystemScaffold', () => {
     expect(res?.beadsForumId).toBeTruthy();
     // 4 creates: category + status + crons + beads
     expect(guild.__create).toHaveBeenCalledTimes(4);
+  });
+
+  it('bootstraps bead status tags when beadsTagMapPath is provided', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bead-tags-'));
+    try {
+      const tagMapPath = path.join(tmpDir, 'tag-map.json');
+      await fs.writeFile(tagMapPath, '{"open": "", "in_progress": "", "blocked": "", "closed": ""}', 'utf8');
+
+      const guild = makeMockGuild([]);
+      const res = await ensureSystemScaffold({ guild, ensureBeads: true, beadsTagMapPath: tagMapPath });
+      expect(res?.beadsForumId).toBeTruthy();
+
+      // The beads forum should have had edit() called with availableTags.
+      const beadsForum = (guild.__cache as Map<string, any>).get(res!.beadsForumId!);
+      expect(beadsForum).toBeDefined();
+      expect(beadsForum.edit).toHaveBeenCalledWith(
+        expect.objectContaining({ availableTags: expect.any(Array) }),
+      );
+
+      // The tag map file should have been updated with IDs.
+      const updatedRaw = await fs.readFile(tagMapPath, 'utf8');
+      const updatedMap = JSON.parse(updatedRaw);
+      expect(updatedMap.open).toBeTruthy();
+      expect(updatedMap.in_progress).toBeTruthy();
+      expect(updatedMap.blocked).toBeTruthy();
+      expect(updatedMap.closed).toBeTruthy();
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips bead tag bootstrap when beadsTagMapPath is not provided', async () => {
+    const guild = makeMockGuild([]);
+    const res = await ensureSystemScaffold({ guild, ensureBeads: true });
+    expect(res?.beadsForumId).toBeTruthy();
+
+    // The beads forum edit should NOT have been called with availableTags
+    // (only the create call happens, no subsequent tag bootstrap).
+    const beadsForum = (guild.__cache as Map<string, any>).get(res!.beadsForumId!);
+    // edit is called 0 times since there's no tag map path to bootstrap from.
+    expect(beadsForum.edit).not.toHaveBeenCalled();
   });
 
   it('finds renamed forum by existingId and does NOT create a duplicate', async () => {
