@@ -339,7 +339,7 @@ export function planActionsPromptSection(): string {
 <discord-action>{"type":"planRun","planId":"plan-042"}</discord-action>
 \`\`\`
 - \`planId\` (required): The plan ID to execute.
-- The plan must be in APPROVED status. Phases run sequentially with the writer lock.
+- The plan must be in APPROVED status. Phases run sequentially with the writer lock. On successful completion of all phases, the plan is auto-closed and the backing bead is closed.
 
 #### Plan Guidelines
 - Use planList to check existing plans before creating duplicates.
