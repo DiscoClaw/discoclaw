@@ -15,6 +15,9 @@ import type { ActionCategoryFlags, DiscordActionResult } from './discord/actions
 import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
+import type { ForgeContext } from './discord/actions-forge.js';
+import type { PlanContext } from './discord/actions-plan.js';
+import type { MemoryContext } from './discord/actions-memory.js';
 import type { LoggerLike } from './discord/action-types.js';
 import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { fetchMessageHistory } from './discord/message-history.js';
@@ -95,8 +98,14 @@ export type BotParams = {
   discordActionsBeads: boolean;
   discordActionsCrons?: boolean;
   discordActionsBotProfile?: boolean;
+  discordActionsForge?: boolean;
+  discordActionsPlan?: boolean;
+  discordActionsMemory?: boolean;
   beadCtx?: BeadContext;
   cronCtx?: CronContext;
+  forgeCtx?: ForgeContext;
+  planCtx?: PlanContext;
+  memoryCtx?: MemoryContext;
   messageHistoryBudget: number;
   summaryEnabled: boolean;
   summaryModel: string;
@@ -258,6 +267,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         beads: params.discordActionsBeads,
         crons: params.discordActionsCrons ?? false,
         botProfile: params.discordActionsBotProfile ?? false,
+        forge: params.discordActionsForge ?? false,
+        plan: params.discordActionsPlan ?? false,
+        memory: params.discordActionsMemory ?? false,
       };
 
       const isDm = msg.guildId == null;
@@ -1743,7 +1755,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   messageId: msg.id,
                   threadParentId,
                 };
-                actionResults = await executeDiscordActions(parsed.actions, actCtx, params.log, params.beadCtx, params.cronCtx);
+                actionResults = await executeDiscordActions(parsed.actions, actCtx, params.log, {
+                  beadCtx: params.beadCtx,
+                  cronCtx: params.cronCtx,
+                  forgeCtx: params.forgeCtx,
+                  planCtx: params.planCtx,
+                  memoryCtx: params.memoryCtx,
+                });
                 for (const result of actionResults) {
                   metrics.recordActionResult(result.ok);
                   params.log?.info(

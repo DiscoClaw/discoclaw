@@ -101,7 +101,7 @@ function makeCtx(overrides?: Partial<CronExecutorContext>): CronExecutorContext 
     status: null,
     log: mockLog(),
     discordActionsEnabled: false,
-    actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false },
+    actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false },
     ...overrides,
   };
 }
@@ -244,7 +244,7 @@ describe('executeCronJob', () => {
     const ctx = makeCtx({
       runtime,
       discordActionsEnabled: true,
-      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false },
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false },
     });
     const job = makeJob();
     await executeCronJob(job, ctx);
@@ -272,7 +272,7 @@ describe('executeCronJob', () => {
     const ctx = makeCtx({
       runtime,
       discordActionsEnabled: true,
-      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false },
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false },
     });
     const job = makeJob();
     await executeCronJob(job, ctx);

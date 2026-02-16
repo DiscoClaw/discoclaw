@@ -284,6 +284,9 @@ function createReactionHandler(
             beads: params.discordActionsBeads,
             crons: params.discordActionsCrons ?? false,
             botProfile: params.discordActionsBotProfile ?? false,
+            forge: params.discordActionsForge ?? false,
+            plan: params.discordActionsPlan ?? false,
+            memory: params.discordActionsMemory ?? false,
           };
 
           if (params.discordActionsEnabled) {
@@ -445,7 +448,13 @@ function createReactionHandler(
                 messageId: msg.id,
                 threadParentId,
               };
-              const results = await executeDiscordActions(parsed.actions, actCtx, params.log, params.beadCtx, params.cronCtx);
+              const results = await executeDiscordActions(parsed.actions, actCtx, params.log, {
+                beadCtx: params.beadCtx,
+                cronCtx: params.cronCtx,
+                forgeCtx: params.forgeCtx,
+                planCtx: params.planCtx,
+                memoryCtx: params.memoryCtx,
+              });
               for (const result of results) {
                 metrics.recordActionResult(result.ok);
                 params.log?.info({ flow: 'reaction', sessionKey, ok: result.ok }, 'obs.action.result');

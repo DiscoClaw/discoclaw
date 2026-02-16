@@ -714,6 +714,9 @@ if (cronEnabled && effectiveCronForum) {
     // Prevent cron jobs from mutating cron state via emitted action blocks.
     crons: false,
     botProfile: false, // Intentionally excluded from cron flows to avoid rate-limit and abuse issues.
+    forge: false, // Forge runs are long-lived; exclude from cron to avoid resource contention.
+    plan: false, // Plan mutations excluded from cron for now.
+    memory: false, // Memory mutations excluded from cron for now.
   };
   const cronRunControl = new CronRunControl();
 

@@ -12,6 +12,9 @@ const ALL_FLAGS: ActionCategoryFlags = {
   beads: false,
   crons: false,
   botProfile: false,
+  forge: false,
+  plan: false,
+  memory: false,
 };
 
 // ---------------------------------------------------------------------------
