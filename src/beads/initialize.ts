@@ -116,6 +116,8 @@ export type WireBeadsSyncOpts = {
   sidebarMentionUserId?: string;
   log: LoggerLike;
   forumCountSync?: ForumCountSync;
+  /** Skip forum guard installation (caller already installed it). */
+  skipForumGuard?: boolean;
 };
 
 export type WireBeadsSyncResult = {
@@ -123,7 +125,9 @@ export type WireBeadsSyncResult = {
 };
 
 export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsSyncResult> {
-  initBeadsForumGuard({ client: opts.client, forumId: opts.beadCtx.forumId, log: opts.log });
+  if (!opts.skipForumGuard) {
+    initBeadsForumGuard({ client: opts.client, forumId: opts.beadCtx.forumId, log: opts.log });
+  }
 
   const { BeadSyncCoordinator } = await import('./bead-sync-coordinator.js');
   const { startBeadSyncWatcher } = await import('./bead-sync-watcher.js');

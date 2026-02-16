@@ -94,9 +94,10 @@ export function extractFilePaths(changesSection: string): string[] {
 
   // Match backtick-wrapped paths in list items: ` - `path/to/file` `
   // and in headings: `#### `path/to/file` `
+  // Also handles bold/italic markdown around the backticks: ` - **`path`** `
   const regexes = [
-    /^[\s]*-\s+`([^`]+)`/gm,
-    /^#{1,6}\s+`([^`]+)`/gm,
+    /^[\s]*-\s+(?:\*{1,3})?`([^`]+)`(?:\*{1,3})?/gm,
+    /^#{1,6}\s+(?:\*{1,3})?`([^`]+)`(?:\*{1,3})?/gm,
   ];
 
   for (const regex of regexes) {
