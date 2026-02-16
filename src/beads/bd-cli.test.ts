@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
-import { parseBdJson, normalizeBeadData, bdShow, bdList, ensureBdDatabaseReady } from './bd-cli.js';
+import { parseBdJson, normalizeBeadData, bdShow, bdList, bdFindByTitle, ensureBdDatabaseReady } from './bd-cli.js';
 import type { BeadData } from './types.js';
 
 vi.mock('execa', () => ({
@@ -224,6 +224,106 @@ describe('runBd argument construction', () => {
     const listIdx = calledArgs.indexOf('list');
     expect(dbIdx).toBeLessThan(listIdx);
     expect(noDaemonIdx).toBeLessThan(listIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bdFindByTitle — title-match dedup
+// ---------------------------------------------------------------------------
+
+describe('bdFindByTitle', () => {
+  let mockExeca: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const mod = await import('execa');
+    mockExeca = mod.execa as unknown as ReturnType<typeof vi.fn>;
+    mockExeca.mockReset();
+  });
+
+  it('returns matching open bead (case-insensitive, trimmed)', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify([
+        { id: 'ws-001', title: '  Fix The Bug  ', status: 'open' },
+      ]),
+      stderr: '',
+    });
+
+    const result = await bdFindByTitle('fix the bug', '/tmp');
+    expect(result).toEqual({ id: 'ws-001', title: '  Fix The Bug  ', status: 'open' });
+  });
+
+  it('returns null when no title matches', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify([
+        { id: 'ws-001', title: 'Something else', status: 'open' },
+      ]),
+      stderr: '',
+    });
+
+    const result = await bdFindByTitle('Fix the bug', '/tmp');
+    expect(result).toBeNull();
+  });
+
+  it('skips closed beads with matching title', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify([
+        { id: 'ws-001', title: 'Fix the bug', status: 'closed' },
+      ]),
+      stderr: '',
+    });
+
+    const result = await bdFindByTitle('Fix the bug', '/tmp');
+    expect(result).toBeNull();
+  });
+
+  it('matches in_progress beads', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify([
+        { id: 'ws-002', title: 'Add auth', status: 'in_progress' },
+      ]),
+      stderr: '',
+    });
+
+    const result = await bdFindByTitle('Add auth', '/tmp');
+    expect(result).toEqual({ id: 'ws-002', title: 'Add auth', status: 'in_progress' });
+  });
+
+  it('returns null for empty/whitespace title without calling bd', async () => {
+    const result = await bdFindByTitle('   ', '/tmp');
+    expect(result).toBeNull();
+    expect(mockExeca).not.toHaveBeenCalled();
+  });
+
+  it('passes label filter to bdList when provided', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify([]),
+      stderr: '',
+    });
+
+    await bdFindByTitle('Some title', '/tmp', { label: 'plan' });
+
+    const calledArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(calledArgs).toContain('--label');
+    expect(calledArgs).toContain('plan');
+  });
+
+  it('returns first match when multiple beads match', async () => {
+    mockExeca.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify([
+        { id: 'ws-001', title: 'Fix the bug', status: 'open' },
+        { id: 'ws-002', title: 'Fix the bug', status: 'in_progress' },
+      ]),
+      stderr: '',
+    });
+
+    const result = await bdFindByTitle('Fix the bug', '/tmp');
+    expect(result?.id).toBe('ws-001');
   });
 });
 

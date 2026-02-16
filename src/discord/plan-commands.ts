@@ -1,7 +1,7 @@
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { bdCreate, bdClose, bdUpdate, bdAddLabel } from '../beads/bd-cli.js';
+import { bdCreate, bdClose, bdUpdate, bdAddLabel, bdList } from '../beads/bd-cli.js';
 import {
   decomposePlan,
   serializePhases,
@@ -314,16 +314,27 @@ export async function handlePlanCommand(
         }
       } else {
         try {
-          const trimmedContext = cmd.context?.trim();
-          const bead = await bdCreate(
-            {
-              title: cmd.args,
-              labels: ['plan'],
-              ...(trimmedContext ? { description: trimmedContext.slice(0, 1800) } : {}),
-            },
-            opts.beadsCwd,
+          // Dedup: if an open bead with a matching title already exists, reuse it
+          const normalizedTitle = cmd.args.trim().toLowerCase();
+          const existingBeads = await bdList({ label: 'plan' }, opts.beadsCwd);
+          const match = existingBeads.find(
+            (b) => b.status !== 'closed' && b.title.trim().toLowerCase() === normalizedTitle,
           );
-          beadId = bead.id;
+
+          if (match) {
+            beadId = match.id;
+          } else {
+            const trimmedContext = cmd.context?.trim();
+            const bead = await bdCreate(
+              {
+                title: cmd.args,
+                labels: ['plan'],
+                ...(trimmedContext ? { description: trimmedContext.slice(0, 1800) } : {}),
+              },
+              opts.beadsCwd,
+            );
+            beadId = bead.id;
+          }
         } catch (err) {
           return `Failed to create backing bead: ${String(err)}`;
         }

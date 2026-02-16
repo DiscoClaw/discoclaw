@@ -22,6 +22,7 @@ vi.mock('../beads/bd-cli.js', () => ({
   bdClose: vi.fn(async () => {}),
   bdUpdate: vi.fn(async () => {}),
   bdAddLabel: vi.fn(async () => {}),
+  bdList: vi.fn(async () => []),
 }));
 
 async function makeTmpDir(): Promise<string> {
@@ -982,6 +983,123 @@ describe('ForgeOrchestrator', () => {
     await orchestrator.run('Test feature', async () => {});
 
     expect(mockBdUpdate).not.toHaveBeenCalled();
+  });
+
+  it('reuses existing open bead with matching title instead of creating duplicate', async () => {
+    const { bdCreate, bdList } = await import('../beads/bd-cli.js');
+    const mockBdCreate = vi.mocked(bdCreate);
+    const mockBdList = vi.mocked(bdList);
+    mockBdCreate.mockClear();
+    mockBdList.mockClear();
+
+    // bdList returns an existing open bead whose title matches the description
+    mockBdList.mockResolvedValueOnce([
+      { id: 'ws-existing-099', title: 'Test feature', status: 'open' },
+    ]);
+
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    // bdCreate should NOT have been called — reusing existing bead
+    expect(mockBdCreate).not.toHaveBeenCalled();
+    // bdList should have been called with label filter
+    expect(mockBdList).toHaveBeenCalledWith({ label: 'plan' }, expect.any(String));
+
+    // The plan file should reference the existing bead ID
+    const plansDir = path.join(tmpDir, 'plans');
+    const entries = await fs.readdir(plansDir);
+    const planFile = entries.find((e) => e.startsWith('plan-001') && e.endsWith('.md') && !e.includes('template'));
+    expect(planFile).toBeTruthy();
+    const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+    expect(content).toContain('**Bead:** ws-existing-099');
+  });
+
+  it('dedup is case-insensitive and trims whitespace', async () => {
+    const { bdCreate, bdList } = await import('../beads/bd-cli.js');
+    const mockBdCreate = vi.mocked(bdCreate);
+    const mockBdList = vi.mocked(bdList);
+    mockBdCreate.mockClear();
+    mockBdList.mockClear();
+
+    // Title differs in case and has extra whitespace
+    mockBdList.mockResolvedValueOnce([
+      { id: 'ws-existing-100', title: '  TEST FEATURE  ', status: 'open' },
+    ]);
+
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(mockBdCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse closed beads with matching title', async () => {
+    const { bdCreate, bdList } = await import('../beads/bd-cli.js');
+    const mockBdCreate = vi.mocked(bdCreate);
+    const mockBdList = vi.mocked(bdList);
+    mockBdCreate.mockClear();
+    mockBdList.mockClear();
+
+    // Only closed bead matches — should NOT be reused
+    mockBdList.mockResolvedValueOnce([
+      { id: 'ws-closed-001', title: 'Test feature', status: 'closed' },
+    ]);
+
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    // bdCreate SHOULD have been called — closed bead not reused
+    expect(mockBdCreate).toHaveBeenCalled();
+  });
+
+  it('creates new bead when no title match exists', async () => {
+    const { bdCreate, bdList } = await import('../beads/bd-cli.js');
+    const mockBdCreate = vi.mocked(bdCreate);
+    const mockBdList = vi.mocked(bdList);
+    mockBdCreate.mockClear();
+    mockBdList.mockClear();
+
+    // No matching beads
+    mockBdList.mockResolvedValueOnce([
+      { id: 'ws-other-001', title: 'Something else entirely', status: 'open' },
+    ]);
+
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    // bdCreate SHOULD have been called — no matching bead found
+    expect(mockBdCreate).toHaveBeenCalled();
   });
 
   it('passes existingBeadId through to handlePlanCommand (skips bdCreate)', async () => {

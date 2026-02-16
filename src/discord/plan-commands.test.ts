@@ -25,9 +25,10 @@ vi.mock('../beads/bd-cli.js', () => ({
   bdClose: vi.fn(async () => {}),
   bdUpdate: vi.fn(async () => {}),
   bdAddLabel: vi.fn(async () => {}),
+  bdList: vi.fn(async () => []),
 }));
 
-import { bdCreate, bdClose, bdUpdate } from '../beads/bd-cli.js';
+import { bdCreate, bdClose, bdUpdate, bdList } from '../beads/bd-cli.js';
 
 async function makeTmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'plan-commands-test-'));
@@ -515,6 +516,93 @@ describe('handlePlanCommand', () => {
     const planFile = files.find((f) => f.startsWith('plan-001'));
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
     expect(content).toContain('**Bead:** bead-fail');
+  });
+
+  it('create — reuses existing open bead with matching title instead of creating duplicate', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    vi.mocked(bdList).mockResolvedValueOnce([
+      { id: 'ws-existing-001', title: 'Add user authentication', status: 'open' },
+    ]);
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'Add user authentication' },
+      opts,
+    );
+
+    expect(result).toContain('plan-001');
+    expect(result).toContain('ws-existing-001');
+    expect(bdCreate).not.toHaveBeenCalled();
+    expect(bdList).toHaveBeenCalledWith({ label: 'plan' }, opts.beadsCwd);
+  });
+
+  it('create — dedup is case-insensitive and trims whitespace', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    vi.mocked(bdList).mockResolvedValueOnce([
+      { id: 'ws-existing-002', title: '  Fix The Bug  ', status: 'open' },
+    ]);
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'fix the bug' },
+      opts,
+    );
+
+    expect(result).toContain('ws-existing-002');
+    expect(bdCreate).not.toHaveBeenCalled();
+  });
+
+  it('create — does not reuse closed beads with matching title', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    vi.mocked(bdList).mockResolvedValueOnce([
+      { id: 'ws-closed-001', title: 'Add user authentication', status: 'closed' },
+    ]);
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'Add user authentication' },
+      opts,
+    );
+
+    expect(result).toContain('ws-test-001');
+    expect(bdCreate).toHaveBeenCalled();
+  });
+
+  it('create — creates new bead when no title match exists', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    vi.mocked(bdList).mockResolvedValueOnce([
+      { id: 'ws-other-001', title: 'Something else entirely', status: 'open' },
+    ]);
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'Add user authentication' },
+      opts,
+    );
+
+    expect(result).toContain('ws-test-001');
+    expect(bdCreate).toHaveBeenCalled();
+  });
+
+  it('create — dedup reuses in_progress bead with matching title', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    vi.mocked(bdList).mockResolvedValueOnce([
+      { id: 'ws-inprog-001', title: 'Add user authentication', status: 'in_progress' },
+    ]);
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'Add user authentication' },
+      opts,
+    );
+
+    expect(result).toContain('ws-inprog-001');
+    expect(bdCreate).not.toHaveBeenCalled();
   });
 
   it('list — shows active plans as bullet list', async () => {

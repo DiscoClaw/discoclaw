@@ -17,16 +17,18 @@ vi.mock('./beads/bd-cli.js', () => ({
   bdClose: vi.fn(async () => {}),
   bdUpdate: vi.fn(async () => {}),
   bdAddLabel: vi.fn(async () => {}),
+  bdList: vi.fn(async () => []),
 }));
 
 import { beadThreadCache } from './beads/bead-thread-cache.js';
-import { bdCreate } from './beads/bd-cli.js';
+import { bdCreate, bdList } from './beads/bd-cli.js';
 import { createMessageCreateHandler } from './discord.js';
 import { loadDurableMemory, saveDurableMemory, addItem } from './discord/durable-memory.js';
 import { inlineContextFiles } from './discord/prompt-common.js';
 import type { DurableMemoryStore } from './discord/durable-memory.js';
 
 const mockedBdCreate = vi.mocked(bdCreate);
+const mockedBdList = vi.mocked(bdList);
 
 const mockedCacheGet = vi.mocked(beadThreadCache.get);
 
@@ -1016,6 +1018,7 @@ describe('bead resolution dispatch wiring', () => {
       title: 'test',
       status: 'open',
     });
+    mockedBdList.mockReset().mockResolvedValue([]);
   });
 
   function makePlanForgeParams(overrides?: Partial<any>) {
@@ -1385,6 +1388,147 @@ describe('bead resolution dispatch wiring', () => {
       expect(planFile).toBeTruthy();
       const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
       expect(content).not.toContain('## Context');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Title-match dedup for !plan and !forge in non-bead channels
+  // -------------------------------------------------------------------------
+
+  describe('title-match dedup in non-bead channels', () => {
+    beforeEach(() => {
+      mockedBdList.mockReset().mockResolvedValue([]);
+    });
+
+    it('!plan create reuses existing open bead with matching title — skips bdCreate', async () => {
+      mockedBdList.mockResolvedValueOnce([
+        { id: 'ws-dedup-001', title: 'fix the layout bug', status: 'open' } as any,
+      ]);
+
+      const { queue, params, workspaceCwd } = makePlanForgeParams();
+      const handler = createMessageCreateHandler(params, queue);
+
+      await handler(makeMsg({
+        content: '!plan fix the layout bug',
+        channelId: 'regular-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'regular-chan',
+        },
+      }));
+
+      expect(mockedBdList).toHaveBeenCalled();
+      expect(mockedBdCreate).not.toHaveBeenCalled();
+
+      // Verify the plan file uses the deduped bead ID
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      expect(planFile).toBeTruthy();
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).toContain('**Bead:** ws-dedup-001');
+    });
+
+    it('!plan create dedup is case-insensitive and trims whitespace', async () => {
+      mockedBdList.mockResolvedValueOnce([
+        { id: 'ws-dedup-002', title: '  Fix The Bug  ', status: 'open' } as any,
+      ]);
+
+      const { queue, params, workspaceCwd } = makePlanForgeParams();
+      const handler = createMessageCreateHandler(params, queue);
+
+      await handler(makeMsg({
+        content: '!plan fix the bug',
+        channelId: 'regular-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'regular-chan',
+        },
+      }));
+
+      expect(mockedBdCreate).not.toHaveBeenCalled();
+
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).toContain('**Bead:** ws-dedup-002');
+    });
+
+    it('!plan create does not reuse closed beads with matching title', async () => {
+      mockedBdList.mockResolvedValueOnce([
+        { id: 'ws-closed-001', title: 'fix the bug', status: 'closed' } as any,
+      ]);
+
+      const { queue, params } = makePlanForgeParams();
+      const handler = createMessageCreateHandler(params, queue);
+
+      await handler(makeMsg({
+        content: '!plan fix the bug',
+        channelId: 'regular-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'regular-chan',
+        },
+      }));
+
+      expect(mockedBdCreate).toHaveBeenCalled();
+    });
+
+    it('!plan create calls bdCreate when no title match exists', async () => {
+      mockedBdList.mockResolvedValueOnce([
+        { id: 'ws-other-001', title: 'something unrelated', status: 'open' } as any,
+      ]);
+
+      const { queue, params } = makePlanForgeParams();
+      const handler = createMessageCreateHandler(params, queue);
+
+      await handler(makeMsg({
+        content: '!plan fix the bug',
+        channelId: 'regular-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'regular-chan',
+        },
+      }));
+
+      expect(mockedBdCreate).toHaveBeenCalled();
+    });
+
+    it('!plan create dedup reuses in_progress bead with matching title', async () => {
+      mockedBdList.mockResolvedValueOnce([
+        { id: 'ws-inprog-001', title: 'fix the bug', status: 'in_progress' } as any,
+      ]);
+
+      const { queue, params, workspaceCwd } = makePlanForgeParams();
+      const handler = createMessageCreateHandler(params, queue);
+
+      await handler(makeMsg({
+        content: '!plan fix the bug',
+        channelId: 'regular-chan',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => false,
+          name: 'general',
+          id: 'regular-chan',
+        },
+      }));
+
+      expect(mockedBdCreate).not.toHaveBeenCalled();
+
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).toContain('**Bead:** ws-inprog-001');
     });
   });
 });
