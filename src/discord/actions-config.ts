@@ -140,11 +140,16 @@ export function executeConfigAction(
         rows.push(['beads-auto-tag', bp.beadCtx.autoTagModel, 'Beads auto-tagging']);
       }
 
+      const adapterDefault = configCtx.runtime.defaultModel;
       const lines = rows.map(([role, model, desc]) => {
-        const display = model || '(adapter default)';
         const resolved = resolveModel(model, rid);
-        const resolvedNote = resolved && resolved !== model ? ` → ${resolved}` : '';
-        return `**${role}**: \`${display}\`${resolvedNote} — ${desc}`;
+        let display: string;
+        if (model) {
+          display = resolved && resolved !== model ? `${model} → ${resolved}` : model;
+        } else {
+          display = adapterDefault || '(adapter default)';
+        }
+        return `**${role}**: \`${display}\` — ${desc}`;
       });
 
       return { ok: true, summary: lines.join('\n') };

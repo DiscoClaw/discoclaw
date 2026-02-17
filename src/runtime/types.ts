@@ -44,5 +44,7 @@ export type RuntimeInvokeParams = {
 export interface RuntimeAdapter {
   id: RuntimeId;
   capabilities: ReadonlySet<RuntimeCapability>;
+  /** The model used when params.model is empty (adapter-default sentinel). */
+  defaultModel?: string;
   invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent>;
 }

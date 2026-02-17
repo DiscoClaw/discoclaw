@@ -525,6 +525,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
   return {
     id: strategy.id,
     capabilities,
+    defaultModel: strategy.defaultModel,
     invoke,
   };
 }
