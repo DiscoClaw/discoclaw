@@ -109,6 +109,8 @@ export function extractFilePaths(changesSection: string): string[] {
   const regexes = [
     /^[\s]*-\s+(?:\*{1,3})?`([^`]+)`(?:\*{1,3})?/gm,
     /^#{1,6}\s+(?:\*{1,3})?`([^`]+)`(?:\*{1,3})?/gm,
+    // Standalone bolded entries like "**`src/foo.ts`**" used in the file-by-file breakdown.
+    /^\s*\*{2,3}`([^`]+)`\*{2,3}(?:\s*[—–:-].*)?$/gm,
   ];
 
   for (const regex of regexes) {
@@ -295,6 +297,15 @@ export function decomposePlan(planContent: string, planId: string, planFile: str
       description: 'Execute the plan objectives.',
       status: 'pending',
       dependsOn: ['phase-1'],
+      contextFiles: [planFile],
+    });
+    phases.push({
+      id: 'phase-3',
+      title: 'Post-implementation audit',
+      kind: 'audit',
+      description: 'Audit the implementation against the plan specification.',
+      status: 'pending',
+      dependsOn: ['phase-2'],
       contextFiles: [planFile],
     });
   } else {

@@ -250,6 +250,19 @@ describe('extractFilePaths', () => {
     const section = '- *`src/foo.ts`* — italic wrapped';
     expect(extractFilePaths(section)).toEqual(['src/foo.ts']);
   });
+
+  it('extracts standalone bold entries used in file-by-file breakdowns', () => {
+    const section = [
+      '### File-by-file breakdown',
+      '',
+      '**`src/foo/bar.ts`** — Reorder exports',
+      '  - Update imports',
+      '',
+      '**`src/config/settings.ts`**',
+      '  - Align with new site theming',
+    ].join('\n');
+    expect(extractFilePaths(section)).toEqual(['src/foo/bar.ts', 'src/config/settings.ts']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -361,11 +374,16 @@ describe('decomposePlan', () => {
     }
   });
 
-  it('plan with no file paths → 2-phase minimal set', () => {
-    const phases = decomposePlan(SAMPLE_PLAN_NO_CHANGES, 'plan-010', 'workspace/plans/plan-010.md');
-    expect(phases.phases).toHaveLength(2);
+  it('plan with no file paths → read, implement, audit phases', () => {
+    const planPath = 'workspace/plans/plan-010.md';
+    const phases = decomposePlan(SAMPLE_PLAN_NO_CHANGES, 'plan-010', planPath);
+    expect(phases.phases).toHaveLength(3);
     expect(phases.phases[0]!.kind).toBe('read');
     expect(phases.phases[1]!.kind).toBe('implement');
+    const auditPhase = phases.phases[2]!;
+    expect(auditPhase.kind).toBe('audit');
+    expect(auditPhase.dependsOn).toEqual(['phase-2']);
+    expect(auditPhase.contextFiles).toEqual([planPath]);
   });
 
   it('contextFiles limited to per-batch files', () => {
