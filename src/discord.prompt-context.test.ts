@@ -1389,6 +1389,77 @@ describe('bead resolution dispatch wiring', () => {
       const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
       expect(content).not.toContain('## Context');
     });
+
+    it('!plan create inside a thread with reply and pinned context includes both sections', async () => {
+      const { queue, params, workspaceCwd } = makePlanForgeParams({ messageHistoryBudget: 3000 });
+      const handler = createMessageCreateHandler(params, queue);
+
+      const replyMessage = {
+        id: 'ref-thread-1',
+        content: 'The issue is that the dashboard hides metrics',
+        author: { username: 'Alice', displayName: 'Alice', bot: false },
+      };
+
+      const threadStarter = {
+        id: 'starter-thread-1',
+        content: 'Opening the debugging thread',
+        author: { username: 'Bob', displayName: 'Bob', bot: false },
+      };
+
+      const threadReply = {
+        id: 'thread-msg-1',
+        content: 'Following up on the debugging thread',
+        author: { username: 'Charlie', displayName: 'Charlie', bot: false },
+      };
+
+      const pinnedMessage = {
+        id: 'pinned-1',
+        content: 'Pinned note: keep the UX consistent',
+        author: { username: 'Discoclaw', displayName: 'Discoclaw', bot: true },
+      };
+
+      const messagesFetch = vi.fn(async (opts: any) => {
+        if (typeof opts === 'string') return replyMessage;
+        const map = new Map<string, any>();
+        map.set(threadReply.id, threadReply);
+        return map;
+      });
+
+      const handlerMsg = makeMsg({
+        content: '!plan fix the thread bug',
+        channelId: 'thread-plan-context',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => true,
+          parentId: 'parent-thread',
+          name: 'thread-name',
+          id: 'thread-plan-context',
+          fetchStarterMessage: vi.fn(async () => threadStarter),
+          messages: {
+            fetch: messagesFetch,
+            fetchPinned: vi.fn(async () => {
+              const map = new Map<string, any>();
+              map.set(pinnedMessage.id, pinnedMessage);
+              return map;
+            }),
+          },
+        },
+        reference: { messageId: replyMessage.id },
+      });
+
+      await handler(handlerMsg);
+
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      expect(planFile).toBeTruthy();
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).toContain('Context (replied-to message):');
+      expect(content).toContain('[Alice]: The issue is that the dashboard hides metrics');
+      expect(content).toContain('Thread: "thread-name"');
+      expect(content).toContain('Pinned message:');
+      expect(content).toContain('[TestBot]: Pinned note: keep the UX consistent (pinned id:pinned-1)');
+    });
   });
 
   // -------------------------------------------------------------------------

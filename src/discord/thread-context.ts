@@ -17,6 +17,7 @@ export type ThreadLikeChannel = {
   fetchStarterMessage?(): Promise<ThreadMessage | null>;
   messages: {
     fetch(opts: { before?: string; limit?: number }): Promise<Map<string, ThreadMessage>>;
+    fetchPinned?(): Promise<Map<string, ThreadMessage>>;
   };
 };
 
@@ -35,6 +36,8 @@ export type ThreadContextOpts = {
   recentMessageLimit?: number;
   /** Bot display name for formatting. */
   botDisplayName?: string;
+  /** Include pinned-thread posts in the context output. */
+  includePinned?: boolean;
   log?: LoggerLike;
 };
 
@@ -91,7 +94,7 @@ export async function resolveThreadContext(
 
   const sections: string[] = [];
   let remaining = budget;
-  let starterId: string | undefined;
+  const seenMessageIds = new Set<string>();
 
   // 1. Thread name
   const threadName = channel.name?.trim();
@@ -100,19 +103,20 @@ export async function resolveThreadContext(
   }
 
   // 2. Starter message (the original post that started the thread)
-  if (typeof channel.fetchStarterMessage === 'function') {
-    try {
-      const starter = await channel.fetchStarterMessage();
-      if (starter) {
-        starterId = starter.id;
-        const line = formatMessageLine(starter, botName, 'thread starter');
-        if (line) {
+    if (typeof channel.fetchStarterMessage === 'function') {
+      try {
+        const starter = await channel.fetchStarterMessage();
+        if (starter) {
+          const line = formatMessageLine(starter, botName, 'thread starter');
+          if (line) {
           if (line.length <= remaining) {
             sections.push(line);
             remaining -= line.length + 1;
+            seenMessageIds.add(starter.id);
           } else if (remaining > 50) {
             sections.push(line.slice(0, remaining - 3) + '...');
             remaining = 0;
+            seenMessageIds.add(starter.id);
           }
         }
       }
@@ -121,7 +125,52 @@ export async function resolveThreadContext(
     }
   }
 
-  // 3. Recent thread messages (before the current command message)
+  // 3. Pinned thread messages (optional)
+  if (opts.includePinned && remaining > 50) {
+    const fetchPinned = channel.messages.fetchPinned;
+    if (typeof fetchPinned === 'function') {
+      try {
+        const pinned = await fetchPinned.call(channel.messages);
+        if (pinned && pinned.size > 0) {
+          const sorted = Array.from(pinned.values())
+            .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+          const pinnedLines: string[] = [];
+          const maxPinnedLines = 3;
+          for (const m of sorted) {
+            if (pinnedLines.length >= maxPinnedLines) break;
+            if (remaining <= 0) break;
+            if (m.id && seenMessageIds.has(m.id)) continue;
+
+            const line = formatMessageLine(m, botName, 'pinned');
+            if (!line) continue;
+
+            if (line.length <= remaining) {
+              pinnedLines.push(line);
+              remaining -= line.length + 1;
+              if (m.id) seenMessageIds.add(m.id);
+            } else if (remaining > 50) {
+              pinnedLines.push(line.slice(0, remaining - 3) + '...');
+              remaining = 0;
+              if (m.id) seenMessageIds.add(m.id);
+              break;
+            } else {
+              break;
+            }
+          }
+
+          if (pinnedLines.length > 0) {
+            sections.push('Pinned thread messages:');
+            sections.push(...pinnedLines);
+          }
+        }
+      } catch (err) {
+        opts.log?.warn({ err }, 'thread-context: failed to fetch pinned messages');
+      }
+    }
+  }
+
+  // 4. Recent thread messages (before the current command message)
   if (remaining > 50 && recentLimit > 0) {
     try {
       const messages = await channel.messages.fetch({
@@ -137,7 +186,7 @@ export async function resolveThreadContext(
         const lines: string[] = [];
         for (const m of sorted) {
           // Deduplicate: skip the starter message if it appears in recent messages
-          if (starterId && m.id === starterId) continue;
+          if (m.id && seenMessageIds.has(m.id)) continue;
 
           const line = formatMessageLine(m, botName);
           if (!line) continue;
@@ -145,6 +194,7 @@ export async function resolveThreadContext(
           if (line.length <= remaining) {
             lines.push(line);
             remaining -= line.length + 1;
+            if (m.id) seenMessageIds.add(m.id);
           } else if (remaining > 50 && m.author.bot) {
             lines.push(line.slice(0, remaining - 3) + '...');
             remaining = 0;

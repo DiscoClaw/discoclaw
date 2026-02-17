@@ -163,6 +163,45 @@ export async function bdShow(id: string, cwd: string): Promise<BeadData | null> 
   }
 }
 
+type ContextLogger = { warn?: (meta: unknown, message: string) => void };
+
+type BeadContextSummary = {
+  summary: string;
+  description?: string;
+};
+
+function truncateText(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+export async function buildBeadContextSummary(
+  beadId: string | undefined,
+  cwd: string,
+  log?: ContextLogger,
+): Promise<BeadContextSummary | undefined> {
+  if (!beadId) return undefined;
+  try {
+    const bead = await bdShow(beadId, cwd);
+    if (!bead) return undefined;
+    const lines = ['Bead context for this thread:'];
+    if (bead.title) lines.push(`Title: ${bead.title}`);
+    let description: string | undefined;
+    if (bead.description) {
+      const desc = bead.description.trim().replace(/\s+/g, ' ');
+      const truncated = truncateText(desc, 400);
+      lines.push(`Description: ${truncated}`);
+      description = truncated;
+    }
+    return {
+      summary: lines.join('\n'),
+      description,
+    };
+  } catch (err) {
+    log?.warn?.({ err, beadId }, 'beads:context summary fetch failed');
+    return undefined;
+  }
+}
+
 /** List beads matching the given filters. */
 export async function bdList(params: BeadListParams, cwd: string): Promise<BeadData[]> {
   const args = ['list', '--json'];

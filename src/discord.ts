@@ -51,6 +51,7 @@ import { createReactionAddHandler, createReactionRemoveHandler } from './discord
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { beadThreadCache } from './beads/bead-thread-cache.js';
+import { buildBeadContextSummary } from './beads/bd-cli.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/shortterm-memory.js';
 import { editThenSendChunks } from './discord/output-common.js';
 import { downloadMessageImages, resolveMediaType } from './discord/image-download.js';
@@ -170,6 +171,128 @@ export type BotParams = {
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 
 const turnCounters = new Map<string, number>();
+
+type ConversationContextOptions = {
+  msg: any;
+  params: Omit<BotParams, 'token'>;
+  isThread: boolean;
+  threadId: string | null;
+  threadParentId: string | null;
+};
+
+type ConversationContextResult = {
+  context?: string;
+  pinnedSummary?: string;
+  existingBeadId?: string;
+};
+
+async function gatherConversationContext(opts: ConversationContextOptions): Promise<ConversationContextResult> {
+  const { msg, params, isThread, threadId, threadParentId } = opts;
+
+  let existingBeadId: string | undefined;
+  if (isThread && threadId && threadParentId && params.beadCtx) {
+    if (threadParentId === params.beadCtx.forumId) {
+      try {
+        const bead = await beadThreadCache.get(threadId, params.beadCtx.beadsCwd);
+        if (bead) existingBeadId = bead.id;
+      } catch {
+        // best-effort — fall through to create a new bead
+      }
+    }
+  }
+
+  const contextParts: string[] = [];
+
+  const replyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
+  if (replyRef?.section) {
+    contextParts.push(`Context (replied-to message):\n${replyRef.section}`);
+  }
+
+  const threadCtx = await resolveThreadContext(
+    msg.channel as any,
+    msg.id,
+    { botDisplayName: params.botDisplayName, log: params.log },
+  );
+  if (threadCtx?.section) {
+    contextParts.push(threadCtx.section);
+  }
+
+  if (contextParts.length === 0 && params.messageHistoryBudget > 0) {
+    try {
+      const history = await fetchMessageHistory(
+        msg.channel,
+        msg.id,
+        { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
+      );
+      if (history) {
+        contextParts.push(`Context (recent channel messages):\n${history}`);
+      }
+    } catch (err) {
+      params.log?.warn({ err }, 'discord:context history fallback failed');
+    }
+  }
+
+  const pinnedSummary = await resolvePinnedMessagesSummary(
+    msg.channel,
+    params.botDisplayName,
+    params.log,
+  );
+
+  const context = contextParts.length > 0 ? contextParts.join('\n\n') : undefined;
+  return { context, pinnedSummary, existingBeadId };
+}
+
+async function resolvePinnedMessagesSummary(
+  channel: any,
+  botDisplayName?: string,
+  log?: LoggerLike,
+  maxChars = 600,
+): Promise<string | undefined> {
+  const fetchPinned = channel?.messages?.fetchPinned;
+  if (typeof fetchPinned !== 'function') return undefined;
+
+  try {
+    const pinned = await channel.messages.fetchPinned();
+    if (!pinned || pinned.size === 0) return undefined;
+
+    const lines: string[] = [];
+    let remaining = maxChars;
+    const maxMessages = 3;
+
+    for (const pinnedMsg of pinned.values()) {
+      if (lines.length >= maxMessages) break;
+      let content = String(pinnedMsg.content ?? '').replace(/\s+/g, ' ').trim();
+      if (!content) {
+        if (pinnedMsg.attachments?.size) {
+          content = '[attachment]';
+        } else if (Array.isArray(pinnedMsg.embeds) && pinnedMsg.embeds.length > 0) {
+          content = '[embed]';
+        } else {
+          continue;
+        }
+      }
+      if (content.length > 200) {
+        content = content.slice(0, 200) + '…';
+      }
+
+      const author = pinnedMsg.author?.bot
+        ? (botDisplayName ?? 'Discoclaw')
+        : (pinnedMsg.author?.displayName || pinnedMsg.author?.username || 'Unknown');
+      const line = `[${author}]: ${content} (pinned id:${pinnedMsg.id})`;
+      if (remaining - line.length <= 0 && lines.length > 0) break;
+      lines.push(line);
+      remaining -= line.length + 1;
+    }
+
+    if (lines.length === 0) return undefined;
+
+    const header = pinned.size === 1 ? 'Pinned message:' : `Pinned messages (${pinned.size} total):`;
+    return [header, ...lines].join('\n');
+  } catch (err) {
+    log?.warn({ err }, 'discord:context pinned fetch failed');
+    return undefined;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Shared forge/plan state — delegated to forge-plan-registry.ts
@@ -971,54 +1094,29 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // Context travels separately so slug/bead/title stay clean.
               let effectivePlanCmd = planCmd;
               if (planCmd.action === 'create' && planCmd.args) {
-                // Resolve existing bead from thread context to avoid orphan beads
-                let existingBeadId: string | undefined;
-                if (isThread && threadId && threadParentId && params.beadCtx) {
-                  if (threadParentId === params.beadCtx.forumId) {
-                    try {
-                      const bead = await beadThreadCache.get(threadId, params.beadCtx.beadsCwd);
-                      if (bead) existingBeadId = bead.id;
-                    } catch {
-                      // best-effort — fall through to create a new bead
-                    }
-                  }
+                const ctxResult = await gatherConversationContext({
+                  msg,
+                  params,
+                  isThread,
+                  threadId,
+                  threadParentId,
+                });
+
+                let planContext = ctxResult.context;
+                if (ctxResult.pinnedSummary) {
+                  planContext = planContext
+                    ? `${planContext}\n\n${ctxResult.pinnedSummary}`
+                    : ctxResult.pinnedSummary;
                 }
 
-                const replyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
-                const threadCtx = await resolveThreadContext(
-                  msg.channel as any,
-                  msg.id,
-                  { botDisplayName: params.botDisplayName, log: params.log },
-                );
-
-                const contextParts: string[] = [];
-                if (replyRef?.section) {
-                  contextParts.push(`Context (replied-to message):\n${replyRef.section}`);
-                }
-                if (threadCtx?.section) {
-                  contextParts.push(threadCtx.section);
-                }
-
-                // Fallback: grab recent channel history when no reply or thread context exists
-                if (contextParts.length === 0 && params.messageHistoryBudget > 0) {
-                  try {
-                    const history = await fetchMessageHistory(
-                      msg.channel,
-                      msg.id,
-                      { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
-                    );
-                    if (history) {
-                      contextParts.push(`Context (recent channel messages):\n${history}`);
-                    }
-                  } catch (err) {
-                    params.log?.warn({ err }, 'discord:plan-create history fallback failed');
-                  }
-                }
-
-                if (contextParts.length > 0) {
-                  effectivePlanCmd = { ...planCmd, context: contextParts.join('\n\n'), existingBeadId };
-                } else if (existingBeadId) {
-                  effectivePlanCmd = { ...planCmd, existingBeadId };
+                if (planContext) {
+                  effectivePlanCmd = {
+                    ...planCmd,
+                    context: planContext,
+                    existingBeadId: ctxResult.existingBeadId,
+                  };
+                } else if (ctxResult.existingBeadId) {
+                  effectivePlanCmd = { ...planCmd, existingBeadId: ctxResult.existingBeadId };
                 }
               }
               const response = await handlePlanCommand(effectivePlanCmd, planOpts);
@@ -1183,51 +1281,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
-              // Resolve existing bead from thread context to avoid orphan beads
-              let forgeExistingBeadId: string | undefined;
-              if (isThread && threadId && threadParentId && params.beadCtx) {
-                if (threadParentId === params.beadCtx.forumId) {
-                  try {
-                    const bead = await beadThreadCache.get(threadId, params.beadCtx.beadsCwd);
-                    if (bead) forgeExistingBeadId = bead.id;
-                  } catch {
-                    // best-effort
-                  }
-                }
-              }
+              const ctxResult = await gatherConversationContext({
+                msg,
+                params,
+                isThread,
+                threadId,
+                threadParentId,
+              });
 
-              // Resolve reply + thread context separately — don't concatenate into args
-              // (args drives the bead title and slug; context goes in the plan body).
-              const forgeReplyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
-              const forgeThreadCtx = await resolveThreadContext(
-                msg.channel as any,
-                msg.id,
-                { botDisplayName: params.botDisplayName, log: params.log },
-              );
+              const beadBasePath = params.beadCtx?.beadsCwd ?? params.workspaceCwd;
+              const beadSummary = await buildBeadContextSummary(ctxResult.existingBeadId, beadBasePath, params.log);
 
               const forgeContextParts: string[] = [];
-              if (forgeReplyRef?.section) {
-                forgeContextParts.push(`Context (replied-to message):\n${forgeReplyRef.section}`);
-              }
-              if (forgeThreadCtx?.section) {
-                forgeContextParts.push(forgeThreadCtx.section);
-              }
-
-              // Fallback: grab recent channel history when no reply or thread context exists
-              if (forgeContextParts.length === 0 && params.messageHistoryBudget > 0) {
-                try {
-                  const history = await fetchMessageHistory(
-                    msg.channel,
-                    msg.id,
-                    { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
-                  );
-                  if (history) {
-                    forgeContextParts.push(`Context (recent channel messages):\n${history}`);
-                  }
-                } catch (err) {
-                  params.log?.warn({ err }, 'discord:forge-create history fallback failed');
-                }
-              }
+              if (ctxResult.context) forgeContextParts.push(ctxResult.context);
+              if (beadSummary?.summary) forgeContextParts.push(beadSummary.summary);
+              if (ctxResult.pinnedSummary) forgeContextParts.push(ctxResult.pinnedSummary);
 
               const forgeContext = forgeContextParts.length > 0
                 ? forgeContextParts.join('\n\n')
@@ -1250,7 +1318,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 drafterModel: params.forgeDrafterModel,
                 auditorModel: params.forgeAuditorModel,
                 log: params.log,
-                existingBeadId: forgeExistingBeadId,
+                existingBeadId: ctxResult.existingBeadId,
+                beadDescription: beadSummary?.description,
+                pinnedThreadSummary: ctxResult.pinnedSummary,
               });
               setActiveOrchestrator(createOrchestrator);
 
