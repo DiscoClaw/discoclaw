@@ -67,6 +67,7 @@ import { downloadTextAttachments } from './discord/file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
 import { parseRestartCommand, handleRestartCommand } from './discord/restart-command.js';
+import { parseModelsCommand, handleModelsCommand } from './discord/models-command.js';
 import type { HealthConfigSnapshot } from './discord/health-command.js';
 import type { MetricsRegistry } from './observability/metrics.js';
 import { globalMetrics } from './observability/metrics.js';
@@ -488,6 +489,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           botDisplayName: params.botDisplayName,
         });
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
+        return;
+      }
+
+      // Handle !models commands — fast, synchronous, no queue needed.
+      const modelsCmd = parseModelsCommand(String(msg.content ?? ''));
+      if (modelsCmd) {
+        const response = handleModelsCommand(modelsCmd, params.configCtx);
+        await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
         return;
       }
 
