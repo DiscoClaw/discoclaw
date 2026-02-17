@@ -13,7 +13,7 @@ import type { CronRunStats } from './run-stats.js';
 import type { CronRunControl } from './run-control.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
-import { parseDiscordActions, executeDiscordActions, buildDisplayResultLines } from '../discord/actions.js';
+import * as discordActions from '../discord/actions.js';
 import { sendChunks } from '../discord/output-common.js';
 import { loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
@@ -260,7 +260,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     // Handle Discord actions if enabled.
     if (ctx.discordActionsEnabled) {
       const safeActionFlags = { ...ctx.actionFlags, defer: false };
-      const { cleanText, actions } = parseDiscordActions(processedText, safeActionFlags);
+      const { cleanText, actions } = discordActions.parseDiscordActions(processedText, safeActionFlags);
       if (actions.length > 0) {
         const actCtx = {
           guild,
@@ -268,7 +268,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           channelId: targetChannel.id,
           messageId: '',
         };
-        const results = await executeDiscordActions(actions, actCtx, ctx.log, {
+        const results = await discordActions.executeDiscordActions(actions, actCtx, ctx.log, {
           beadCtx: ctx.beadCtx,
           cronCtx: ctx.cronCtx,
           forgeCtx: ctx.forgeCtx,
@@ -279,7 +279,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           metrics.recordActionResult(result.ok);
           ctx.log?.info({ flow: 'cron', jobId: job.id, ok: result.ok }, 'obs.action.result');
         }
-        const displayLines = buildDisplayResultLines(actions, results);
+        const displayLines = discordActions.buildDisplayResultLines(actions, results);
         const anyActionSucceeded = results.some((r) => r.ok);
         processedText = displayLines.length > 0
           ? cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
