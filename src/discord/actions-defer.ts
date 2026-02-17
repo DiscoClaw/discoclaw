@@ -96,10 +96,12 @@ export async function executeDeferAction(
     return { ok: false, error: 'Deferred actions are not configured for this bot' };
   }
 
-  if (!action.channel || !action.channel.trim()) {
+  const channel = action.channel?.trim();
+  if (!channel) {
     return { ok: false, error: 'Deferred actions require a target channel' };
   }
-  if (!action.prompt || !action.prompt.trim()) {
+  const prompt = action.prompt?.trim();
+  if (!prompt) {
     return { ok: false, error: 'Deferred actions require a prompt to re-run' };
   }
 
@@ -108,14 +110,23 @@ export async function executeDeferAction(
     return { ok: false, error: 'delaySeconds must be a valid number' };
   }
 
-  const result = scheduler.schedule({ action, context: ctx });
-  if (!result.ok) return { ok: false, error: result.error };
+  const normalizedAction: DeferActionRequest = {
+    ...action,
+    channel,
+    prompt,
+    delaySeconds,
+  };
+
+  const result = scheduler.schedule({ action: normalizedAction, context: ctx });
+  if (!result.ok) {
+    return { ok: false, error: buildDeferRejection(channel, result.error) };
+  }
 
   const delayLabel = formatDuration(result.delaySeconds);
   const when = fmtTime(result.runsAt);
   return {
     ok: true,
-    summary: `Deferred follow-up scheduled for ${action.channel} in ${delayLabel} (runs at ${when})`,
+    summary: `Deferred follow-up scheduled for ${channel} in ${delayLabel} (runs at ${when})`,
   };
 }
 
@@ -137,4 +148,9 @@ function formatDuration(seconds: number): string {
     parts.push(`${secs}s`);
   }
   return parts.join(' ');
+}
+
+function buildDeferRejection(channel: string, reason: string): string {
+  const target = channel || 'requested channel';
+  return `Deferred follow-up for ${target} rejected: ${reason}`;
 }

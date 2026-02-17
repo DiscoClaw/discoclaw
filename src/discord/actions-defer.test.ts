@@ -74,7 +74,27 @@ describe('executeDeferAction', () => {
     vi.advanceTimersByTime(5000);
     await Promise.resolve();
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith(expect.objectContaining<Partial<DeferredRun>>({ action, context: ctx }));
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining<Partial<DeferredRun>>({
+        action: expect.objectContaining({
+          channel: 'general',
+          prompt: 'report',
+          delaySeconds: 5,
+        }),
+        context: ctx,
+      }),
+    );
+  });
+
+  it('returns rejection summaries when scheduler denies a job', async () => {
+    const { scheduler } = makeScheduler({ maxDelaySeconds: 5 });
+    const ctx = { ...createContext(), deferScheduler: scheduler } as ActionContext & { deferScheduler?: DeferScheduler };
+    const action: DeferActionRequest = { type: 'defer', channel: 'general', prompt: 'check back', delaySeconds: 10 };
+
+    const result = await executeDeferAction(action, ctx);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('defer action unexpectedly succeeded despite exceeding max delay');
+    expect(result.error).toBe('Deferred follow-up for general rejected: delaySeconds cannot exceed 5 seconds');
   });
 });
 
