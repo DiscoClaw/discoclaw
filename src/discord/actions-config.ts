@@ -6,7 +6,7 @@ import { resolveModel } from '../runtime/model-tiers.js';
 // Types
 // ---------------------------------------------------------------------------
 
-export type ModelRole = 'chat' | 'fast' | 'forge-drafter' | 'forge-auditor' | 'summary' | 'cron';
+export type ModelRole = 'chat' | 'fast' | 'forge-drafter' | 'forge-auditor' | 'summary' | 'cron' | 'cron-exec';
 
 export type ConfigActionRequest =
   | { type: 'modelSet'; role: ModelRole; model: string }
@@ -34,7 +34,7 @@ export type ConfigMutableParams = {
   cronCtx?: {
     autoTagModel: string;
     syncCoordinator?: { setAutoTagModel(model: string): void };
-    executorCtx?: { model: string };
+    executorCtx?: { model: string; cronExecModel?: string };
   };
   beadCtx?: { autoTagModel: string };
   planCtx?: { model?: string };
@@ -51,6 +51,7 @@ const ROLE_DESCRIPTIONS: Record<ModelRole, string> = {
   'forge-auditor': 'Forge plan auditing',
   summary: 'Rolling summaries only',
   cron: 'Cron auto-tagging and model classification',
+  'cron-exec': 'Default model for cron job execution (overridden by per-job settings)',
 };
 
 // ---------------------------------------------------------------------------
@@ -122,6 +123,19 @@ export function executeConfigAction(
             return { ok: false, error: 'Cron subsystem not configured' };
           }
           break;
+        case 'cron-exec':
+          if (bp.cronCtx?.executorCtx) {
+            if (model === 'default') {
+              bp.cronCtx.executorCtx.cronExecModel = undefined;
+              changes.push(`cron-exec → (follows chat)`);
+            } else {
+              bp.cronCtx.executorCtx.cronExecModel = model;
+              changes.push(`cron-exec → ${model}`);
+            }
+          } else {
+            return { ok: false, error: 'Cron subsystem not configured' };
+          }
+          break;
         default:
           return { ok: false, error: `Unknown role: ${(action as any).role}` };
       }
@@ -143,6 +157,8 @@ export function executeConfigAction(
       ];
 
       if (bp.cronCtx) {
+        const cronExecModel = bp.cronCtx.executorCtx?.cronExecModel;
+        rows.push(['cron-exec', cronExecModel || `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['cron-exec']]);
         rows.push(['cron-auto-tag', bp.cronCtx.autoTagModel, ROLE_DESCRIPTIONS.cron]);
       }
       if (bp.beadCtx) {
@@ -183,8 +199,8 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"chat","model":"sonnet"}</discord-action>
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
-- \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`) or concrete model name (\`haiku\`, \`sonnet\`, \`opus\`).
+- \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`.
+- \`model\` (required): Model tier (\`fast\`, \`capable\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), or \`default\` (for cron-exec only, to revert to following chat).
 
 **Roles:**
 | Role | What it controls |
@@ -195,8 +211,10 @@ export function configActionsPromptSection(): string {
 | \`forge-auditor\` | Forge plan auditing |
 | \`summary\` | Rolling summaries only (overrides fast) |
 | \`cron\` | Cron auto-tagging and model classification (overrides fast) |
+| \`cron-exec\` | Default model for cron job execution; per-job overrides (via \`cronUpdate\`) take priority |
 
 Changes are **ephemeral** — they take effect immediately but revert on restart. Use env vars for persistent configuration.
 
-Note: Individual cron execution models are per-job (set via \`cronUpdate\`). The \`cron\` role here controls auto-tagging only. The cron execution fallback follows the \`chat\` model.`;
+**Cron model priority:** per-job override (cronUpdate) > AI-classified model > cron-exec default > chat fallback.
+Set \`cron-exec\` to \`default\` to clear the override and fall back to the chat model.`;
 }

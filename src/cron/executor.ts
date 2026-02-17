@@ -27,6 +27,7 @@ export type CronExecutorContext = {
   client: Client;
   runtime: RuntimeAdapter;
   model: string;
+  cronExecModel?: string;
   cwd: string;
   tools: string[];
   timeoutMs: number;
@@ -166,11 +167,12 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       prompt += `\n\n---\n${noteLines.join('\n')}\n`;
     }
 
-    // Per-cron model selection: override > AI-classified > global default.
-    let effectiveModel = ctx.model;
+    // Per-cron model selection: per-job override > AI-classified > cron-exec default > chat fallback.
+    const cronDefault = ctx.cronExecModel || ctx.model;
+    let effectiveModel = cronDefault;
     const preRunRecord = ctx.statsStore && job.cronId ? ctx.statsStore.getRecord(job.cronId) : undefined;
     if (preRunRecord) {
-      effectiveModel = preRunRecord.modelOverride ?? preRunRecord.model ?? ctx.model;
+      effectiveModel = preRunRecord.modelOverride ?? preRunRecord.model ?? cronDefault;
     }
 
     ctx.log?.info(
