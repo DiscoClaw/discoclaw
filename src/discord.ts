@@ -154,6 +154,7 @@ export type BotParams = {
   forgeTimeoutMs?: number;
   forgeProgressThrottleMs?: number;
   forgeAutoImplement?: boolean;
+  drafterRuntime?: RuntimeAdapter;
   auditorRuntime?: RuntimeAdapter;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
@@ -1365,6 +1366,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                 const resumeOrchestrator = new ForgeOrchestrator({
                   runtime: params.runtime,
+                  drafterRuntime: params.drafterRuntime,
                   auditorRuntime: params.auditorRuntime,
                   model: resolveModel(params.runtimeModel, params.runtime.id),
                   cwd: resumeProjectCwd,
@@ -1474,6 +1476,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const plansDir = path.join(params.workspaceCwd, 'plans');
               const createOrchestrator = new ForgeOrchestrator({
                 runtime: params.runtime,
+                drafterRuntime: params.drafterRuntime,
                 auditorRuntime: params.auditorRuntime,
                 model: resolveModel(params.runtimeModel, params.runtime.id),
                 cwd: params.projectCwd,

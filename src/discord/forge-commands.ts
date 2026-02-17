@@ -29,6 +29,7 @@ export type ForgeResult = {
 
 export type ForgeOrchestratorOpts = {
   runtime: RuntimeAdapter;
+  drafterRuntime?: RuntimeAdapter;
   auditorRuntime?: RuntimeAdapter;
   model: string;
   cwd: string;
@@ -706,7 +707,8 @@ export class ForgeOrchestrator {
 
     const rawDrafterModel = this.opts.drafterModel ?? this.opts.model;
     const rawAuditorModel = this.opts.auditorModel ?? this.opts.model;
-    const drafterModel = resolveModel(rawDrafterModel, this.opts.runtime.id);
+    const drafterRt = this.opts.drafterRuntime ?? this.opts.runtime;
+    const drafterModel = resolveModel(rawDrafterModel, drafterRt.id);
     const readOnlyTools = ['Read', 'Glob', 'Grep'];
     const addDirs = [this.opts.cwd];
 
@@ -749,14 +751,14 @@ export class ForgeOrchestrator {
         );
 
         const draftOutput = await collectRuntimeText(
-          this.opts.runtime,
+          drafterRt,
           drafterPrompt,
           drafterModel,
           this.opts.cwd,
           readOnlyTools,
           addDirs,
           this.opts.timeoutMs,
-          { sessionKey: drafterSessionKey },
+          drafterRt.capabilities.has('sessions') ? { sessionKey: drafterSessionKey } : undefined,
         );
 
         // Write the draft — preserve the header (planId, beadId) from the created file
@@ -858,14 +860,14 @@ export class ForgeOrchestrator {
       );
 
       const revisionOutput = await collectRuntimeText(
-        this.opts.runtime,
+        drafterRt,
         revisionPrompt,
         drafterModel,
         this.opts.cwd,
         readOnlyTools,
         addDirs,
         this.opts.timeoutMs,
-        { sessionKey: drafterSessionKey },
+        drafterRt.capabilities.has('sessions') ? { sessionKey: drafterSessionKey } : undefined,
       );
 
       planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
