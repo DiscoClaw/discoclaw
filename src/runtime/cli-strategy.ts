@@ -33,6 +33,8 @@ export type CliInvokeContext = {
   params: RuntimeInvokeParams;
   useStdin: boolean;
   hasImages: boolean;
+  /** Session-resume map (sessionKey → external thread/session ID). Available for session-resume strategies. */
+  sessionMap?: Map<string, string>;
 };
 
 // ---------------------------------------------------------------------------

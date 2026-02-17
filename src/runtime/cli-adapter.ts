@@ -126,7 +126,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     const promptTooLarge = Buffer.byteLength(params.prompt, 'utf-8') > STDIN_THRESHOLD;
     const useStdin = hasImages || promptTooLarge;
 
-    const ctx: CliInvokeContext = { params: { ...params, model }, useStdin, hasImages };
+    const ctx: CliInvokeContext = { params: { ...params, model }, useStdin, hasImages, sessionMap: sessionMap ?? undefined };
     const args = strategy.buildArgs(ctx, opts);
 
     const outputMode = strategy.getOutputMode(ctx, opts);
@@ -440,6 +440,9 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
       // Non-zero exit.
       if (exitCode !== 0) {
+        // Clear stale session on error (session-resume mode).
+        if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
+
         const exitMsg = strategy.handleExitError?.(exitCode, stderrForError || stderr, stdout);
         if (exitMsg) {
           push({ type: 'error', message: exitMsg });
