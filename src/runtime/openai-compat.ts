@@ -35,6 +35,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
   return {
     id: 'openai',
     capabilities,
+    defaultModel: opts.defaultModel,
     invoke(params) {
       return (async function* (): AsyncGenerator<EngineEvent> {
         const model = params.model || opts.defaultModel;

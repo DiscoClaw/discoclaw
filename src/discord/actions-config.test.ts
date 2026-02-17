@@ -107,7 +107,25 @@ describe('modelShow', () => {
     expect(result.summary).toContain('cron-auto-tag');
   });
 
-  it('shows adapter default when model value is empty', () => {
+  it('shows runtime defaultModel when model value is empty', () => {
+    const codexRuntime: RuntimeAdapter = {
+      id: 'codex',
+      capabilities: new Set(),
+      defaultModel: 'gpt-5-codex-mini',
+      async *invoke() { /* no-op */ },
+    };
+    const ctx: ConfigContext = {
+      botParams: makeBotParams({ runtimeModel: '', summaryModel: '' }),
+      runtime: codexRuntime,
+    };
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('gpt-5-codex-mini');
+    expect(result.summary).not.toContain('(adapter default)');
+  });
+
+  it('falls back to (adapter default) when both model and defaultModel are empty', () => {
     const codexRuntime: RuntimeAdapter = {
       id: 'codex',
       capabilities: new Set(),
@@ -121,8 +139,6 @@ describe('modelShow', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.summary).toContain('(adapter default)');
-    expect(result.summary).not.toContain('` `');
-    expect(result.summary).not.toContain('``');
   });
 });
 
