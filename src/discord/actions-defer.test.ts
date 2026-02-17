@@ -40,6 +40,7 @@ describe('executeDeferAction', () => {
   it('requires scheduler configuration', async () => {
     const result = await executeDeferAction({ type: 'defer', channel: 'general', prompt: 'check', delaySeconds: 10 }, baseContext);
     expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('defer action unexpectedly succeeded without a scheduler');
     expect(result.error).toContain('not configured');
   });
 
@@ -65,6 +66,7 @@ describe('executeDeferAction', () => {
 
     const result = await executeDeferAction(action, ctx);
     expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('defer action failed when it should have succeeded');
     expect(result.summary).toContain('general');
     expect(result.summary).toContain('in 5s');
     expect(result.summary).toContain('runs at 2025-01-01');
@@ -87,6 +89,7 @@ describe('DeferScheduler', () => {
     const action: DeferActionRequest = { type: 'defer', channel: 'a', prompt: 'x', delaySeconds: 10 };
     const result = scheduler.schedule({ action, context: ctx });
     expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('schedule unexpectedly succeeded despite exceeding max delay');
     expect(result.error).toMatch(/delaySeconds cannot exceed 5/);
   });
 
@@ -98,6 +101,7 @@ describe('DeferScheduler', () => {
     expect(first.ok).toBe(true);
     const second = scheduler.schedule({ action: { ...action, channel: 'b' }, context: ctx });
     expect(second.ok).toBe(false);
+    if (second.ok) throw new Error('schedule unexpectedly succeeded despite concurrency cap');
     expect(second.error).toMatch(/Maximum of 1 deferred actions/);
 
     vi.advanceTimersByTime(2000);

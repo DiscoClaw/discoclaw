@@ -9,6 +9,9 @@ export type DeferActionRequest = {
   delaySeconds: number;
 };
 
+const DEFER_TYPES: ReadonlyArray<DeferActionRequest['type']> = ['defer'];
+export const DEFER_ACTION_TYPES = new Set<string>(DEFER_TYPES);
+
 interface DeferActionContext extends ActionContext {
   deferScheduler?: DeferScheduler;
 }
