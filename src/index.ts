@@ -417,7 +417,7 @@ if (cfg.openaiApiKey) {
   const openaiRuntimeRaw = createOpenAICompatRuntime({
     baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
     apiKey: cfg.openaiApiKey,
-    defaultModel: cfg.openaiModel ?? 'gpt-4o',
+    defaultModel: cfg.openaiModel,
     log,
   });
   const openaiRuntime = withConcurrencyLimit(openaiRuntimeRaw, {

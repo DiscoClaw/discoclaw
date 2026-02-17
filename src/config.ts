@@ -73,7 +73,7 @@ export type DiscoclawConfig = {
   // OpenAI-compat adapter config
   openaiApiKey?: string;
   openaiBaseUrl?: string;
-  openaiModel?: string;
+  openaiModel: string;
   forgeAuditorRuntime?: string;
 
   // Codex CLI adapter config
@@ -395,7 +395,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const forgeAuditorRuntime = parseRuntimeName(env, 'FORGE_AUDITOR_RUNTIME');
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
   const openaiBaseUrl = parseTrimmedString(env, 'OPENAI_BASE_URL');
-  const openaiModel = parseTrimmedString(env, 'OPENAI_MODEL');
+  const openaiModel = parseTrimmedString(env, 'OPENAI_MODEL') ?? 'gpt-4o';
   if (primaryRuntime === 'openai' && !openaiApiKey) {
     warnings.push('PRIMARY_RUNTIME=openai but OPENAI_API_KEY is not set; startup will fail unless another runtime is selected.');
   }
