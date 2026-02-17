@@ -87,7 +87,7 @@ describe('parseModelsCommand', () => {
   });
 
   it('parses all valid roles', () => {
-    for (const role of ['chat', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron']) {
+    for (const role of ['chat', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec']) {
       expect(parseModelsCommand(`!models set ${role} haiku`)).toEqual({
         action: 'set',
         role,
