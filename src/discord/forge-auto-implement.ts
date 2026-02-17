@@ -35,6 +35,8 @@ export async function autoImplementForgePlan(
   const { planId, result } = opts;
   const { planApprove, planRun, isPlanRunning, log } = deps;
   const verdict = result.finalVerdict;
+  const normalizedVerdict = typeof verdict === 'string' ? verdict.toLowerCase() : '';
+  const severity = normalizedVerdict && normalizedVerdict !== 'none' ? normalizedVerdict : undefined;
 
   if (!planId) {
     return manualOutcome('', 'Plan ID missing from the forge output.');
@@ -52,8 +54,8 @@ export async function autoImplementForgePlan(
     return manualOutcome(planId, 'Forge did not emit a ready verdict. Please inspect the plan before proceeding.');
   }
 
-  if (verdict !== 'none') {
-    return manualOutcome(planId, 'Review the flagged concerns before implementing.', verdict);
+  if (normalizedVerdict === 'blocking') {
+    return manualOutcome(planId, 'Review the flagged concerns before implementing.', normalizedVerdict);
   }
 
   if (isPlanRunning(planId)) {
@@ -79,7 +81,13 @@ export async function autoImplementForgePlan(
     return manualOutcome(planId, reason);
   }
 
-  return { status: 'auto', planId, summary: runSummary };
+  const warningMessage = severity ? `Forge reported ${severityLabel(severity)} concerns.` : undefined;
+  const summaryParts: string[] = [];
+  if (warningMessage) summaryParts.push(warningMessage);
+  if (runSummary) summaryParts.push(runSummary);
+  const summary = summaryParts.join('\n\n');
+
+  return { status: 'auto', planId, summary };
 }
 
 function manualOutcome(planId: string, reason?: string, severity?: string): ForgeAutoImplementOutcome {

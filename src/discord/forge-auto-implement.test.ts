@@ -52,18 +52,18 @@ describe('autoImplementForgePlan', () => {
     expect(deps.log?.info).toHaveBeenCalled();
   });
 
-  it('bails out when severity markers exist', async () => {
+  it('auto approves and runs a plan with non-blocking severity warnings', async () => {
     const result = buildResult({ finalVerdict: 'medium' });
     const deps = createDeps();
 
     const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
 
-    expect(outcome.status).toBe('manual');
-    expect(outcome.message).toContain('medium severity concerns');
-    expect(outcome.message).toContain('Review the flagged concerns before implementing.');
-    expect(outcome.message).toContain('!plan approve');
-    expect(deps.planApprove).not.toHaveBeenCalled();
-    expect(deps.planRun).not.toHaveBeenCalled();
+    expect(outcome.status).toBe('auto');
+    expect(outcome.planId).toBe(result.planId);
+    expect(outcome.summary).toBe('Forge reported medium severity concerns.\n\nPlan run started');
+    expect(deps.planApprove).toHaveBeenCalledWith(result.planId);
+    expect(deps.planRun).toHaveBeenCalledWith(result.planId);
+    expect(deps.log?.info).toHaveBeenCalled();
   });
 
   it('warns when a plan run is already in progress', async () => {
