@@ -629,3 +629,191 @@ describe('categoryCreate', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// threadEdit
+// ---------------------------------------------------------------------------
+
+describe('threadEdit', () => {
+  function makeThreadCtx(opts: {
+    threadId: string;
+    threadName: string;
+    guildId: string;
+    parentType: ChannelType;
+    appliedTags?: string[];
+    inCache?: boolean;
+  }) {
+    const thread = {
+      id: opts.threadId,
+      name: opts.threadName,
+      guildId: opts.guildId,
+      isThread: () => true,
+      parent: { type: opts.parentType },
+      appliedTags: opts.appliedTags ?? [],
+      edit: vi.fn(async () => {}),
+    };
+
+    const channelsCache = new Map<string, any>();
+
+    const client = {
+      channels: {
+        cache: {
+          get: (id: string) => (opts.inCache !== false && id === opts.threadId ? thread : undefined),
+        },
+        fetch: vi.fn(async (id: string) => {
+          if (id === opts.threadId) return thread;
+          throw new Error('Unknown channel');
+        }),
+      },
+    } as any;
+
+    const guild = makeMockGuild([]);
+    (guild as any).id = opts.guildId;
+
+    return {
+      thread,
+      ctx: { ...makeCtx(guild), client } as any,
+    };
+  }
+
+  it('edits appliedTags on a forum thread (cache hit)', async () => {
+    const { thread, ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'My Thread', guildId: 'g1',
+      parentType: ChannelType.GuildForum, inCache: true,
+    });
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', appliedTags: ['tag1', 'tag2'] },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('appliedTags → [tag1, tag2]');
+    expect(thread.edit).toHaveBeenCalledWith({ appliedTags: ['tag1', 'tag2'] });
+  });
+
+  it('edits thread name only', async () => {
+    const { thread, ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'Old Name', guildId: 'g1',
+      parentType: ChannelType.GuildForum, inCache: true,
+    });
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', name: 'New Name' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('name → New Name');
+    expect(thread.edit).toHaveBeenCalledWith({ name: 'New Name' });
+  });
+
+  it('edits both appliedTags and name', async () => {
+    const { thread, ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'Old Name', guildId: 'g1',
+      parentType: ChannelType.GuildForum, inCache: true,
+    });
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', appliedTags: ['tag1'], name: 'New Name' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(thread.edit).toHaveBeenCalledWith({ appliedTags: ['tag1'], name: 'New Name' });
+  });
+
+  it('fetches thread from API when not in cache', async () => {
+    const { thread, ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'My Thread', guildId: 'g1',
+      parentType: ChannelType.GuildForum, inCache: false,
+    });
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', appliedTags: ['tag1'] },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(ctx.client.channels.fetch).toHaveBeenCalledWith('t1');
+    expect(thread.edit).toHaveBeenCalled();
+  });
+
+  it('fails when thread not found', async () => {
+    const guild = makeMockGuild([]);
+    (guild as any).id = 'g1';
+    const client = {
+      channels: {
+        cache: { get: () => undefined },
+        fetch: vi.fn(async () => { throw new Error('Unknown'); }),
+      },
+    } as any;
+    const ctx = { ...makeCtx(guild), client } as any;
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 'missing', appliedTags: ['tag1'] },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Thread "missing" not found' });
+  });
+
+  it('fails when thread belongs to a different guild', async () => {
+    const { ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'My Thread', guildId: 'other-guild',
+      parentType: ChannelType.GuildForum, inCache: true,
+    });
+    // ctx.guild.id is set by makeCtx which uses makeMockGuild — override it
+    (ctx.guild as any).id = 'this-guild';
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', appliedTags: ['tag1'] },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Thread "t1" does not belong to this guild' });
+  });
+
+  it('rejects appliedTags when parent is not a forum channel', async () => {
+    const { ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'My Thread', guildId: 'g1',
+      parentType: ChannelType.GuildText, inCache: true,
+    });
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', appliedTags: ['tag1'] },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'Thread "t1" is not in a forum channel — appliedTags only applies to forum threads',
+    });
+  });
+
+  it('rejects appliedTags exceeding 5', async () => {
+    const { ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'My Thread', guildId: 'g1',
+      parentType: ChannelType.GuildForum, inCache: true,
+    });
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', appliedTags: ['a', 'b', 'c', 'd', 'e', 'f'] },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'appliedTags exceeds Discord maximum of 5 (got 6)' });
+  });
+
+  it('fails when neither appliedTags nor name provided', async () => {
+    const guild = makeMockGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'threadEdit requires at least one of appliedTags or name' });
+  });
+});
