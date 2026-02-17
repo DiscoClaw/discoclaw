@@ -21,8 +21,6 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   // Crons
   'cronList',
   'cronShow',
-  // Forge
-  'forgeStatus',
   // Plans
   'planList',
   'planShow',
