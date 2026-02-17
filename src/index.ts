@@ -9,7 +9,7 @@ import { createClaudeCliRuntime, killActiveSubprocesses } from './runtime/claude
 import { RuntimeRegistry } from './runtime/registry.js';
 import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
 import { createCodexCliRuntime, killActiveCodexSubprocesses } from './runtime/codex-cli.js';
-import { withConcurrencyLimit } from './runtime/concurrency-limit.js';
+import { createConcurrencyLimiter, withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
@@ -71,7 +71,8 @@ const allowUserIds = cfg.allowUserIds;
 const allowChannelIds = cfg.allowChannelIds;
 const restrictChannelIds = cfg.restrictChannelIds;
 
-const runtimeModel = resolveModel(cfg.runtimeModel, 'claude_code');
+const primaryRuntimeName = cfg.primaryRuntime;
+let runtimeModel = cfg.runtimeModel;
 const runtimeTools = cfg.runtimeTools;
 const runtimeTimeoutMs = cfg.runtimeTimeoutMs;
 
@@ -192,7 +193,7 @@ const discordActionsPlan = cfg.discordActionsPlan;
 const discordActionsMemory = cfg.discordActionsMemory;
 const messageHistoryBudget = cfg.messageHistoryBudget;
 const summaryEnabled = cfg.summaryEnabled;
-const summaryModel = resolveModel(cfg.summaryModel, 'claude_code');
+let summaryModel = cfg.summaryModel;
 const summaryMaxChars = cfg.summaryMaxChars;
 const summaryEveryNTurns = cfg.summaryEveryNTurns;
 const summaryDataDir = cfg.summaryDataDirOverride
@@ -232,10 +233,10 @@ const healthVerboseAllowlist = cfg.healthVerboseAllowlist;
 const statusChannel = cfg.statusChannel;
 const guildId = cfg.guildId;
 const cronEnabled = cfg.cronEnabled;
-const cronModel = resolveModel(cfg.cronModel, 'claude_code');
+let cronModel = cfg.cronModel;
 const discordActionsCrons = cfg.discordActionsCrons;
 const cronAutoTag = cfg.cronAutoTag;
-const cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, 'claude_code');
+let cronAutoTagModel = cfg.cronAutoTagModel;
 const cronStatsDir = cfg.cronStatsDirOverride
   || (dataDir ? path.join(dataDir, 'cron') : path.join(__dirname, '..', 'data', 'cron'));
 const cronTagMapPath = cfg.cronTagMapPathOverride
@@ -317,7 +318,7 @@ const beadsMentionUser = cfg.beadsMentionUser;
 const beadsSidebar = cfg.beadsSidebar;
 const sidebarMentionUserId = beadsSidebar ? beadsMentionUser : undefined;
 const beadsAutoTag = cfg.beadsAutoTag;
-const beadsAutoTagModel = resolveModel(cfg.beadsAutoTagModel, 'claude_code');
+let beadsAutoTagModel = cfg.beadsAutoTagModel;
 const discordActionsBeads = cfg.discordActionsBeads;
 
 const runtimeFallbackModel = cfg.runtimeFallbackModel;
@@ -340,35 +341,137 @@ const multiTurnMaxProcesses = cfg.multiTurnMaxProcesses;
 const streamStallTimeoutMs = cfg.streamStallTimeoutMs;
 const streamStallWarningMs = cfg.streamStallWarningMs;
 const maxConcurrentInvocations = cfg.maxConcurrentInvocations;
+const sharedConcurrencyLimiter = createConcurrencyLimiter(maxConcurrentInvocations);
 
-// --- CLI version check: require >= 2.1.0 for new tools/flags ---
+// Build runtime registry
+const runtimeRegistry = new RuntimeRegistry();
+
 const MIN_CLAUDE_CLI_VERSION = '2.1.0';
-try {
-  const versionOutput = execFileSync(claudeBin, ['--version'], { encoding: 'utf8', timeout: 10_000 }).trim();
-  const match = versionOutput.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (match) {
-    const current = [Number(match[1]), Number(match[2]), Number(match[3])] as const;
-    const minimum = MIN_CLAUDE_CLI_VERSION.split('.').map(Number) as [number, number, number];
-    let belowMinimum = false;
-    for (let i = 0; i < 3; i++) {
-      if (current[i] > minimum[i]) break;
-      if (current[i] < minimum[i]) { belowMinimum = true; break; }
+const ensureClaudeCliVersion = () => {
+  try {
+    const versionOutput = execFileSync(claudeBin, ['--version'], { encoding: 'utf8', timeout: 10_000 }).trim();
+    const match = versionOutput.match(/(\d+)\.(\d+)\.(\d+)/);
+    if (match) {
+      const current = [Number(match[1]), Number(match[2]), Number(match[3])] as const;
+      const minimum = MIN_CLAUDE_CLI_VERSION.split('.').map(Number) as [number, number, number];
+      let belowMinimum = false;
+      for (let i = 0; i < 3; i++) {
+        if (current[i] > minimum[i]) break;
+        if (current[i] < minimum[i]) { belowMinimum = true; break; }
+      }
+      if (belowMinimum) {
+        log.error(
+          { version: current.join('.'), minimum: MIN_CLAUDE_CLI_VERSION },
+          `Claude CLI >= ${MIN_CLAUDE_CLI_VERSION} required for Glob/Grep/Write tools and --fallback-model/--max-budget-usd/--append-system-prompt flags. Run: claude update`,
+        );
+        process.exit(1);
+      }
+      log.info({ claudeCliVersion: current.join('.') }, 'Claude CLI version check passed');
+      return;
     }
-    if (belowMinimum) {
-      log.error(
-        { version: current.join('.'), minimum: MIN_CLAUDE_CLI_VERSION },
-        `Claude CLI >= ${MIN_CLAUDE_CLI_VERSION} required for Glob/Grep/Write tools and --fallback-model/--max-budget-usd/--append-system-prompt flags. Run: claude update`,
-      );
-      process.exit(1);
-    }
-    log.info({ claudeCliVersion: current.join('.') }, 'Claude CLI version check passed');
-  } else {
     log.warn({ raw: versionOutput.slice(0, 100) }, 'Could not parse Claude CLI version (continuing)');
+  } catch (err) {
+    log.error({ err, claudeBin }, 'Failed to check Claude CLI version — is the CLI installed?');
+    process.exit(1);
   }
-} catch (err) {
-  log.error({ err, claudeBin }, 'Failed to check Claude CLI version — is the CLI installed?');
+};
+
+const registerClaudeRuntime = () => {
+  ensureClaudeCliVersion();
+  const claudeRuntime = createClaudeCliRuntime({
+    claudeBin,
+    dangerouslySkipPermissions,
+    outputFormat,
+    echoStdio,
+    verbose,
+    debugFile: claudeDebugFile,
+    strictMcpConfig,
+    fallbackModel: runtimeFallbackModel,
+    maxBudgetUsd: runtimeMaxBudgetUsd,
+    appendSystemPrompt,
+    sessionScanning,
+    log,
+    multiTurn,
+    multiTurnHangTimeoutMs,
+    multiTurnIdleTimeoutMs,
+    multiTurnMaxProcesses,
+    streamStallTimeoutMs,
+  });
+  const limitedClaudeRuntime = withConcurrencyLimit(claudeRuntime, {
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+  });
+  runtimeRegistry.register('claude', limitedClaudeRuntime);
+  return limitedClaudeRuntime;
+};
+
+if (cfg.openaiApiKey) {
+  const openaiRuntimeRaw = createOpenAICompatRuntime({
+    baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
+    apiKey: cfg.openaiApiKey,
+    defaultModel: cfg.openaiModel ?? 'gpt-4o',
+    log,
+  });
+  const openaiRuntime = withConcurrencyLimit(openaiRuntimeRaw, {
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+  });
+  runtimeRegistry.register('openai', openaiRuntime);
+}
+
+// Register Codex CLI runtime.
+const codexRuntimeRaw = createCodexCliRuntime({
+  codexBin: cfg.codexBin,
+  defaultModel: cfg.codexModel,
+  dangerouslyBypassApprovalsAndSandbox: cfg.codexDangerouslyBypassApprovalsAndSandbox,
+  disableSessions: cfg.codexDisableSessions,
+  log,
+});
+const codexRuntime = withConcurrencyLimit(codexRuntimeRaw, {
+  maxConcurrentInvocations,
+  limiter: sharedConcurrencyLimiter,
+  log,
+});
+runtimeRegistry.register('codex', codexRuntime);
+log.info(
+  {
+    codexBin: cfg.codexBin,
+    model: cfg.codexModel,
+    dangerouslyBypassApprovalsAndSandbox: cfg.codexDangerouslyBypassApprovalsAndSandbox,
+    disableSessions: cfg.codexDisableSessions,
+  },
+  'runtime:codex registered',
+);
+
+const claudeRequested = primaryRuntimeName === 'claude' || cfg.forgeAuditorRuntime === 'claude';
+if (claudeRequested) {
+  registerClaudeRuntime();
+}
+
+const runtime = runtimeRegistry.get(primaryRuntimeName);
+if (!runtime) {
+  log.error(
+    {
+      primaryRuntime: primaryRuntimeName,
+      availableRuntimes: runtimeRegistry.list(),
+    },
+    'PRIMARY_RUNTIME is not available. Check configuration (OPENAI_API_KEY, Claude CLI, runtime name).',
+  );
   process.exit(1);
 }
+const limitedRuntime = runtime;
+
+runtimeModel = resolveModel(cfg.runtimeModel, runtime.id);
+summaryModel = resolveModel(cfg.summaryModel, runtime.id);
+cronModel = resolveModel(cfg.cronModel, runtime.id);
+cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, runtime.id);
+beadsAutoTagModel = resolveModel(cfg.beadsAutoTagModel, runtime.id);
+log.info(
+  { primaryRuntime: primaryRuntimeName, runtimeId: runtime.id, model: runtimeModel },
+  'runtime:primary selected',
+);
 
 // Debug: surface common "works in terminal but not in systemd" issues without logging secrets.
 if (cfg.debugRuntime) {
@@ -391,6 +494,8 @@ if (cfg.debugRuntime) {
         dangerouslySkipPermissions,
       },
       runtime: {
+        selected: primaryRuntimeName,
+        runtimeId: runtime.id,
         model: runtimeModel,
         toolsCount: runtimeTools.length,
         timeoutMs: runtimeTimeoutMs,
@@ -404,57 +509,15 @@ if (cfg.debugRuntime) {
   );
 }
 
-const runtime = createClaudeCliRuntime({
-  claudeBin,
-  dangerouslySkipPermissions,
-  outputFormat,
-  echoStdio,
-  verbose,
-  debugFile: claudeDebugFile,
-  strictMcpConfig,
-  fallbackModel: runtimeFallbackModel,
-  maxBudgetUsd: runtimeMaxBudgetUsd,
-  appendSystemPrompt,
-  sessionScanning,
-  log,
-  multiTurn,
-  multiTurnHangTimeoutMs,
-  multiTurnIdleTimeoutMs,
-  multiTurnMaxProcesses,
-  streamStallTimeoutMs,
-});
-const limitedRuntime = withConcurrencyLimit(runtime, { maxConcurrentInvocations, log });
-
-// Build runtime registry
-const runtimeRegistry = new RuntimeRegistry();
-runtimeRegistry.register('claude', limitedRuntime);
-
-if (cfg.openaiApiKey) {
-  const openaiRuntime = createOpenAICompatRuntime({
-    baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
-    apiKey: cfg.openaiApiKey,
-    defaultModel: cfg.openaiModel ?? 'gpt-4o',
-    log,
-  });
-  runtimeRegistry.register('openai', openaiRuntime);
-}
-
-// Register Codex CLI runtime
-const codexRuntime = createCodexCliRuntime({
-  codexBin: cfg.codexBin,
-  defaultModel: cfg.codexModel,
-  log,
-});
-runtimeRegistry.register('codex', codexRuntime);
-log.info({ codexBin: cfg.codexBin, model: cfg.codexModel }, 'runtime:codex registered');
-
 // Resolve the auditor runtime (if configured)
 let auditorRuntime: import('./runtime/types.js').RuntimeAdapter | undefined;
 if (cfg.forgeAuditorRuntime) {
-  auditorRuntime = runtimeRegistry.get(cfg.forgeAuditorRuntime);
+  auditorRuntime = cfg.forgeAuditorRuntime === primaryRuntimeName
+    ? limitedRuntime
+    : runtimeRegistry.get(cfg.forgeAuditorRuntime);
   if (!auditorRuntime) {
     log.warn(
-      `FORGE_AUDITOR_RUNTIME='${cfg.forgeAuditorRuntime}' but no adapter registered with that name. Available: ${runtimeRegistry.list().join(', ')}. Falling back to Claude.`,
+      `FORGE_AUDITOR_RUNTIME='${cfg.forgeAuditorRuntime}' but no adapter registered with that name. Available: ${runtimeRegistry.list().join(', ')}. Falling back to PRIMARY_RUNTIME='${primaryRuntimeName}'.`,
     );
   }
 }

@@ -221,6 +221,29 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs[modelIdx + 1]).toBe('gpt-4o');
   });
 
+  it('inserts -- argument terminator before prompt to prevent flag parsing', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: '--- SOUL.md ---\ntext',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    const dashdashIdx = callArgs.indexOf('--');
+    expect(dashdashIdx).toBeGreaterThan(-1);
+    expect(callArgs[dashdashIdx + 1]).toBe('--- SOUL.md ---\ntext');
+  });
+
   it('empty model fallback: params.model="" resolves to defaultModel', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stdout: 'ok',
@@ -264,6 +287,7 @@ describe('Codex CLI runtime adapter', () => {
 
     expect(mockExeca).toHaveBeenCalledTimes(1);
     const callArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(callArgs).toContain('--');
     // Should end with `-` (stdin flag) instead of the large prompt text.
     expect(callArgs[callArgs.length - 1]).toBe('-');
     // Should NOT contain the large prompt as a positional arg.
@@ -317,7 +341,36 @@ describe('Codex CLI runtime adapter', () => {
     expect(rt.id).toBe('codex');
     expect(rt.capabilities.has('streaming_text')).toBe(true);
     expect(rt.capabilities.has('tools_fs')).toBe(true);
+    expect(rt.capabilities.has('tools_exec')).toBe(true);
+    expect(rt.capabilities.has('tools_web')).toBe(true);
     expect(rt.capabilities.has('sessions')).toBe(true);
+  });
+
+  it('disableSessions removes sessions capability and forces ephemeral mode', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      disableSessions: true,
+    });
+
+    expect(rt.capabilities.has('sessions')).toBe(false);
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'should-be-ignored',
+    }));
+
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(callArgs).toContain('--ephemeral');
+    expect(callArgs).not.toContain('--json');
+    expect(callArgs).not.toContain('resume');
   });
 
   it('empty stdout emits done without text_final', async () => {
@@ -368,6 +421,66 @@ describe('Codex CLI runtime adapter', () => {
     // Should NOT contain prompt or session content from subsequent lines.
     expect(msg).not.toContain('full prompt');
     expect(msg).not.toContain('session:');
+  });
+
+  it('error sanitization skips Codex banner/chatter and surfaces actionable error line', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: '',
+      stderr: [
+        'OpenAI Codex v0.101.0 (research preview)',
+        '--------',
+        'workdir: /tmp',
+        'model: gpt-5-mini',
+        'user',
+        'TOP SECRET PROMPT DATA',
+        'Reconnecting... 5/5 (stream disconnected before completion)',
+        'ERROR: stream disconnected before completion: error sending request for url (https://api.openai.com/v1/responses)',
+      ].join('\n'),
+      exitCode: 1,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'TOP SECRET PROMPT DATA',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    const msg = (errorEvt as { message: string }).message;
+    expect(msg).toContain('stream disconnected before completion');
+    expect(msg).not.toContain('OpenAI Codex');
+    expect(msg).not.toContain('TOP SECRET');
+  });
+
+  it('error sanitization maps rollout path corruption to a clear remediation message', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: '',
+      stderr: '2026-02-16T23:36:26.244364Z ERROR codex_core::rollout::list: state db missing rollout path for thread 019c5957-beea-7e92-aca4-42b5c15af63d',
+      exitCode: 1,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Say hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    const msg = (errorEvt as { message: string }).message;
+    expect(msg).toContain('codex session state appears corrupted');
+    expect(msg).toContain('CODEX_HOME');
   });
 
   it('ENOENT via tryFinalize: uses fixed message, never leaks prompt', async () => {
@@ -498,6 +611,31 @@ describe('Codex CLI runtime adapter', () => {
     const sandboxIdx = callArgs.indexOf('-s');
     expect(sandboxIdx).toBeGreaterThan(-1);
     expect(callArgs[sandboxIdx + 1]).toBe('read-only');
+  });
+
+  it('dangerous bypass flag replaces read-only sandbox on exec', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      dangerouslyBypassApprovalsAndSandbox: true,
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(callArgs).toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(callArgs).not.toContain('-s');
+    expect(callArgs).not.toContain('read-only');
   });
 
   it('passes --add-dir flags from params.addDirs', async () => {
@@ -661,6 +799,47 @@ describe('Codex CLI runtime adapter', () => {
 
     const final2 = events2.find((e) => e.type === 'text_final');
     expect((final2 as { text: string }).text).toBe('second response');
+  });
+
+  it('dangerous bypass flag is passed on resume calls', async () => {
+    const jsonlOutput1 = [
+      '{"type":"thread.started","thread_id":"thread-danger-1"}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+    const jsonlOutput2 = [
+      '{"type":"thread.started","thread_id":"thread-danger-1"}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"second"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      dangerouslyBypassApprovalsAndSandbox: true,
+    });
+
+    mockExeca.mockReturnValue(createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
+    await collectEvents(rt.invoke({
+      prompt: 'Round 1',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'danger-session',
+    }));
+
+    mockExeca.mockReturnValue(createMockSubprocess({ stdout: jsonlOutput2, exitCode: 0 }));
+    await collectEvents(rt.invoke({
+      prompt: 'Round 2',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'danger-session',
+    }));
+
+    const callArgs2 = mockExeca.mock.calls[1][1] as string[];
+    expect(callArgs2[0]).toBe('exec');
+    expect(callArgs2[1]).toBe('resume');
+    expect(callArgs2).toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(callArgs2).not.toContain('-s');
   });
 
   it('without sessionKey still uses --ephemeral (backward compat)', async () => {

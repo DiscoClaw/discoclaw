@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { withConcurrencyLimit } from './concurrency-limit.js';
+import { createConcurrencyLimiter, withConcurrencyLimit } from './concurrency-limit.js';
 import type { EngineEvent, RuntimeAdapter } from './types.js';
 
 function makeDeferred<T>() {
@@ -101,5 +101,60 @@ describe('withConcurrencyLimit', () => {
     finishB.resolve();
     await Promise.all([pA, pB]);
   });
-});
 
+  it('shares one limiter across multiple runtime wrappers', async () => {
+    const started: string[] = [];
+    const finishA = makeDeferred<void>();
+    const finishB = makeDeferred<void>();
+
+    const runtimeA: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        started.push('A');
+        await finishA.promise;
+        yield { type: 'done' };
+      },
+    };
+    const runtimeB: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        started.push('B');
+        await finishB.promise;
+        yield { type: 'done' };
+      },
+    };
+
+    const limiter = createConcurrencyLimiter(1);
+    const limitedA = withConcurrencyLimit(runtimeA, { maxConcurrentInvocations: 1, limiter });
+    const limitedB = withConcurrencyLimit(runtimeB, { maxConcurrentInvocations: 1, limiter });
+
+    const pA = (async () => {
+      for await (const _ of limitedA.invoke({ prompt: 'x', model: 'm', cwd: '/tmp' })) {
+        // ignore
+      }
+    })();
+
+    await vi.waitFor(() => {
+      expect(started).toEqual(['A']);
+    });
+
+    const pB = (async () => {
+      for await (const _ of limitedB.invoke({ prompt: 'x', model: 'm', cwd: '/tmp' })) {
+        // ignore
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 25));
+    expect(started).toEqual(['A']);
+
+    finishA.resolve();
+    await vi.waitFor(() => {
+      expect(started).toEqual(['A', 'B']);
+    });
+
+    finishB.resolve();
+    await Promise.all([pA, pB]);
+  });
+});

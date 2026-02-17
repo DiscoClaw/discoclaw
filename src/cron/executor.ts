@@ -150,11 +150,17 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     const tools = await resolveEffectiveTools({
       workspaceCwd: ctx.cwd,
       runtimeTools: ctx.tools,
+      runtimeCapabilities: ctx.runtime.capabilities,
+      runtimeId: ctx.runtime.id,
       log: ctx.log,
     });
     const effectiveTools = tools.effectiveTools;
-    if (tools.permissionNote) {
-      prompt += `\n\n---\nPermission note: ${tools.permissionNote}\n`;
+    if (tools.permissionNote || tools.runtimeCapabilityNote) {
+      const noteLines = [
+        tools.permissionNote ? `Permission note: ${tools.permissionNote}` : null,
+        tools.runtimeCapabilityNote ? `Runtime capability note: ${tools.runtimeCapabilityNote}` : null,
+      ].filter((line): line is string => Boolean(line));
+      prompt += `\n\n---\n${noteLines.join('\n')}\n`;
     }
 
     // Per-cron model selection: override > AI-classified > global default.

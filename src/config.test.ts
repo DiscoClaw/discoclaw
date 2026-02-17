@@ -17,6 +17,7 @@ describe('parseConfig', () => {
     const { config, warnings, infos } = parseConfig(env());
     expect(config.token).toBe('token');
     expect(config.allowUserIds.has('123')).toBe(true);
+    expect(config.primaryRuntime).toBe('claude');
     expect(config.runtimeModel).toBe('capable');
     expect(config.summaryModel).toBe('fast');
     expect(config.cronModel).toBe('fast');
@@ -52,6 +53,16 @@ describe('parseConfig', () => {
   it('warns when DISCORD_CHANNEL_IDS has no valid IDs', () => {
     const { warnings } = parseConfig(env({ DISCORD_CHANNEL_IDS: 'abc def' }));
     expect(warnings.some((w) => w.includes('DISCORD_CHANNEL_IDS was set but no valid IDs'))).toBe(true);
+  });
+
+  it('parses PRIMARY_RUNTIME and normalizes claude_code alias', () => {
+    const { config } = parseConfig(env({ PRIMARY_RUNTIME: 'claude_code' }));
+    expect(config.primaryRuntime).toBe('claude');
+  });
+
+  it('warns when PRIMARY_RUNTIME=openai without OPENAI_API_KEY', () => {
+    const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'openai', OPENAI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('PRIMARY_RUNTIME=openai'))).toBe(true);
   });
 
   it('does not warn about action category flags when master actions are enabled', () => {
@@ -306,6 +317,27 @@ describe('parseConfig', () => {
   it('parses DISCOCLAW_REACTION_REMOVE_HANDLER=1 as true', () => {
     const { config } = parseConfig(env({ DISCOCLAW_REACTION_REMOVE_HANDLER: '1' }));
     expect(config.reactionRemoveHandlerEnabled).toBe(true);
+  });
+
+  // --- Codex dangerous bypass ---
+  it('defaults codexDangerouslyBypassApprovalsAndSandbox to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.codexDangerouslyBypassApprovalsAndSandbox).toBe(false);
+  });
+
+  it('parses CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=1 as true', () => {
+    const { config } = parseConfig(env({ CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX: '1' }));
+    expect(config.codexDangerouslyBypassApprovalsAndSandbox).toBe(true);
+  });
+
+  it('defaults codexDisableSessions to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.codexDisableSessions).toBe(false);
+  });
+
+  it('parses CODEX_DISABLE_SESSIONS=1 as true', () => {
+    const { config } = parseConfig(env({ CODEX_DISABLE_SESSIONS: '1' }));
+    expect(config.codexDisableSessions).toBe(true);
   });
 
   // --- Forum ID validation (auto-create when missing, warn on invalid) ---

@@ -443,4 +443,29 @@ describe('resolveEffectiveTools audit logging', () => {
     // Neither should warn — they're different workspaces.
     expect(log.warn).not.toHaveBeenCalled();
   });
+
+  it('drops tools unsupported by runtime capabilities', async () => {
+    const workspace = await tmpDir();
+    await fs.writeFile(path.join(workspace, 'PERMISSIONS.json'), '{"tier":"full"}');
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const result = await resolveEffectiveTools({
+      workspaceCwd: workspace,
+      runtimeTools: ['Bash', 'Read', 'WebSearch'],
+      runtimeCapabilities: new Set(['tools_fs']),
+      runtimeId: 'codex',
+      log,
+    });
+
+    expect(result.effectiveTools).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep']);
+    expect(result.runtimeCapabilityNote).toContain('Bash');
+    expect(result.runtimeCapabilityNote).toContain('WebSearch');
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeId: 'codex',
+        droppedTools: expect.arrayContaining(['Bash', 'WebSearch']),
+      }),
+      expect.stringContaining('dropped unsupported tools'),
+    );
+  });
 });

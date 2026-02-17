@@ -27,7 +27,7 @@
 
 import process from 'node:process';
 import { execa, type ResultPromise } from 'execa';
-import type { EngineEvent, RuntimeAdapter, RuntimeInvokeParams } from './types.js';
+import type { EngineEvent, RuntimeAdapter, RuntimeCapability, RuntimeInvokeParams } from './types.js';
 
 /** Byte threshold above which prompts are piped via stdin instead of positional arg. */
 const STDIN_THRESHOLD = 100_000;
@@ -35,15 +35,47 @@ const STDIN_THRESHOLD = 100_000;
 /** Max chars for error messages exposed outside the adapter. Prevents prompt/session leaks. */
 const MAX_ERROR_LENGTH = 200;
 
+const CODEX_NOISY_LINE_PATTERNS = [
+  /^warning:/i,
+  /^openai codex v/i,
+  /^-+$/,
+  /^(workdir|model|provider|approval|sandbox|reasoning effort|reasoning summaries|session id):/i,
+  /^user$/i,
+  /^mcp startup:/i,
+  /^reconnecting\.\.\./i,
+];
+
+const CODEX_DIAGNOSTIC_LINE_PATTERN =
+  /\berror\b|\bfailed\b|timed out|timeout|not found|permission denied|invalid|denied|unauthorized|forbidden|expired|rate limit|disconnected/i;
+
+function isNoisyCodexLine(line: string): boolean {
+  return CODEX_NOISY_LINE_PATTERNS.some((re) => re.test(line));
+}
+
 /**
  * Strip prompt content and internal details from error messages.
  * Codex CLI can include the full prompt, session paths, and auth details in stderr on failure.
  */
 function sanitizeError(raw: string): string {
   if (!raw) return 'codex failed (no details)';
-  // Take only the first line — subsequent lines often contain prompt/session content.
-  const firstLine = raw.split('\n')[0]!.trim();
-  return (firstLine || 'codex failed').slice(0, MAX_ERROR_LENGTH);
+  const lines = raw
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return 'codex failed';
+
+  // Known Codex state DB corruption mode: stale/missing rollout paths in session index.
+  if (lines.some((l) => /state db (missing|returned stale) rollout path/i.test(l))) {
+    return 'codex session state appears corrupted (rollout path missing). Set CODEX_HOME to a clean directory and retry.'
+      .slice(0, MAX_ERROR_LENGTH);
+  }
+
+  const meaningful = lines.filter((l) => !isNoisyCodexLine(l));
+  const diagnostic = [...meaningful].reverse().find((l) => CODEX_DIAGNOSTIC_LINE_PATTERN.test(l));
+  if (diagnostic) return diagnostic.slice(0, MAX_ERROR_LENGTH);
+
+  // Avoid leaking prompt content when stderr only contains non-diagnostic chatter.
+  return 'codex failed (no details)';
 }
 
 // Track active Codex subprocesses so we can kill them on shutdown.
@@ -60,19 +92,23 @@ export function killActiveCodexSubprocesses(): void {
 export type CodexCliRuntimeOpts = {
   codexBin: string;
   defaultModel: string;
+  dangerouslyBypassApprovalsAndSandbox?: boolean;
+  disableSessions?: boolean;
   log?: { debug(...args: unknown[]): void; info?(...args: unknown[]): void };
 };
 
 export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter {
-  const capabilities = new Set(['streaming_text', 'tools_fs', 'sessions'] as const);
+  const capabilities = new Set<RuntimeCapability>(['streaming_text', 'tools_fs', 'tools_exec', 'tools_web']);
+  if (!opts.disableSessions) capabilities.add('sessions');
 
   // Maps sessionKey → Codex thread_id (UUID) for session resume.
   const sessionMap = new Map<string, string>();
 
   async function* invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent> {
     const model = params.model || opts.defaultModel;
-    const wantSession = Boolean(params.sessionKey);
+    const wantSession = !opts.disableSessions && Boolean(params.sessionKey);
     const existingThreadId = params.sessionKey ? sessionMap.get(params.sessionKey) : undefined;
+    const dangerousBypass = Boolean(opts.dangerouslyBypassApprovalsAndSandbox);
 
     const useStdin = Buffer.byteLength(params.prompt, 'utf-8') > STDIN_THRESHOLD;
 
@@ -81,7 +117,13 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     // When starting a new session (or ephemeral), use `codex exec [PROMPT]`.
     const args: string[] = existingThreadId
       ? ['exec', 'resume', existingThreadId, '-m', model, '--skip-git-repo-check']
-      : ['exec', '-m', model, '--skip-git-repo-check', ...(wantSession ? [] : ['--ephemeral']), '-s', 'read-only'];
+      : ['exec', '-m', model, '--skip-git-repo-check', ...(wantSession ? [] : ['--ephemeral'])];
+
+    if (dangerousBypass) {
+      args.push('--dangerously-bypass-approvals-and-sandbox');
+    } else if (!existingThreadId) {
+      args.push('-s', 'read-only');
+    }
 
     // When session tracking is active, use --json so we can capture the thread_id
     // from the `thread.started` event.
@@ -99,6 +141,9 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       }
     }
 
+    // `--` terminates option parsing so prompts like "--- SOUL.md ---" are
+    // always treated as positional input rather than CLI flags.
+    args.push('--');
     if (useStdin) {
       // Use `-` to signal stdin reading.
       args.push('-');
