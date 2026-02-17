@@ -54,6 +54,10 @@ async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string):
   }
 }
 
+export function disableCronDeferActionFlags(flags: ActionCategoryFlags): ActionCategoryFlags {
+  return { ...flags, defer: false };
+}
+
 export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Promise<void> {
   const metrics = globalMetrics;
   let cancelRequested = false;
@@ -259,7 +263,8 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     // Handle Discord actions if enabled.
     if (ctx.discordActionsEnabled) {
-      const safeActionFlags = { ...ctx.actionFlags, defer: false };
+      // Cron-driven outputs are not allowed to schedule additional defers (no chaining).
+      const safeActionFlags = disableCronDeferActionFlags(ctx.actionFlags);
       const { cleanText, actions } = discordActions.parseDiscordActions(processedText, safeActionFlags);
       if (actions.length > 0) {
         const actCtx = {

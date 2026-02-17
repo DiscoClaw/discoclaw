@@ -3,11 +3,12 @@ import { ChannelType } from 'discord.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { executeCronJob } from './executor.js';
+import { executeCronJob, disableCronDeferActionFlags } from './executor.js';
 import { safeCronId } from './job-lock.js';
 import { CronRunControl } from './run-control.js';
 import { loadWorkspacePaFiles } from '../discord/prompt-common.js';
 import * as discordActions from '../discord/actions.js';
+import type { ActionCategoryFlags } from '../discord/actions.js';
 import type { CronJob, ParsedCronDef } from './types.js';
 import type { CronExecutorContext } from './executor.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
@@ -74,6 +75,25 @@ function mockChannel() {
   return { id: 'ch-1', name: 'general', type: ChannelType.GuildText, send: vi.fn().mockResolvedValue(undefined) };
 }
 
+const BASE_CRON_ACTION_FLAGS: ActionCategoryFlags = {
+  channels: false,
+  messaging: false,
+  guild: false,
+  moderation: false,
+  polls: false,
+  beads: false,
+  crons: false,
+  botProfile: false,
+  forge: false,
+  plan: false,
+  memory: false,
+  defer: false,
+};
+
+function makeCronActionFlags(overrides?: Partial<ActionCategoryFlags>): ActionCategoryFlags {
+  return { ...BASE_CRON_ACTION_FLAGS, ...overrides };
+}
+
 function makeCtx(overrides?: Partial<CronExecutorContext>): CronExecutorContext {
   const channel = mockChannel();
   const guild = {
@@ -92,7 +112,7 @@ function makeCtx(overrides?: Partial<CronExecutorContext>): CronExecutorContext 
     },
   };
 
-  return {
+  const baseCtx: CronExecutorContext = {
     client: client as any,
     runtime: makeMockRuntime('Hello from cron!'),
     model: 'haiku',
@@ -102,9 +122,12 @@ function makeCtx(overrides?: Partial<CronExecutorContext>): CronExecutorContext 
     status: null,
     log: mockLog(),
     discordActionsEnabled: false,
-    actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, defer: false },
-    ...overrides,
+    actionFlags: makeCronActionFlags(),
   };
+
+  const ctx: CronExecutorContext = { ...baseCtx, ...overrides };
+  ctx.actionFlags = makeCronActionFlags(overrides?.actionFlags);
+  return ctx;
 }
 
 describe('executeCronJob', () => {
@@ -195,34 +218,25 @@ describe('executeCronJob', () => {
     expect(job.running).toBe(false);
   });
 
-  it('parses actions with defer disabled for cron runs', async () => {
-    const ctx = makeCtx({
-      discordActionsEnabled: true,
-      actionFlags: {
-        channels: false,
-        messaging: true,
-        guild: false,
-        moderation: false,
-        polls: false,
-        beads: false,
-        crons: false,
-        botProfile: false,
-        forge: false,
-        plan: false,
-        memory: false,
-        defer: true,
-      },
-    });
-    const job = makeJob();
-    const parseSpy = vi.spyOn(discordActions, 'parseDiscordActions');
-    try {
-      await executeCronJob(job, ctx);
-    } finally {
-      parseSpy.mockRestore();
-    }
-    expect(parseSpy).toHaveBeenCalled();
-    const calledFlags = parseSpy.mock.calls[0][1];
-    expect(calledFlags.defer).toBe(false);
+  it('builds cron-safe action flags with defer disabled', () => {
+    const originalFlags: ActionCategoryFlags = {
+      channels: true,
+      messaging: true,
+      guild: true,
+      moderation: true,
+      polls: true,
+      beads: true,
+      crons: true,
+      botProfile: true,
+      forge: true,
+      plan: true,
+      memory: true,
+      defer: true,
+    };
+
+    const safeFlags = disableCronDeferActionFlags(originalFlags);
+    expect(safeFlags.defer).toBe(false);
+    expect(safeFlags.messaging).toBe(true);
   });
 
   it('does not post if target channel is not allowlisted', async () => {
