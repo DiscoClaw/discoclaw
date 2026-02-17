@@ -68,6 +68,7 @@ import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discor
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
 import { parseRestartCommand, handleRestartCommand } from './discord/restart-command.js';
 import { parseModelsCommand, handleModelsCommand } from './discord/models-command.js';
+import { parseUpdateCommand, handleUpdateCommand } from './discord/update-command.js';
 import type { HealthConfigSnapshot } from './discord/health-command.js';
 import type { MetricsRegistry } from './observability/metrics.js';
 import { globalMetrics } from './observability/metrics.js';
@@ -517,6 +518,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
         // Deferred action (e.g., restart) runs after the reply is sent.
         // The process will likely die during this call.
+        result.deferred?.();
+        return;
+      }
+
+      // Handle !update commands before queue/session — this is a system command.
+      const updateCmd = parseUpdateCommand(String(msg.content ?? ''));
+      if (updateCmd) {
+        const result = await handleUpdateCommand(updateCmd, {
+          log: params.log,
+          projectCwd: params.projectCwd,
+          dataDir: params.dataDir,
+          restartCmd: process.env.DC_RESTART_CMD,
+          activeForge: getActiveOrchestrator()?.activePlanId,
+          activePlan: getActiveOrchestrator()?.activePlanId,
+        });
+        await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
+        // Deferred action (e.g., restart after apply) runs after the reply is sent.
         result.deferred?.();
         return;
       }
