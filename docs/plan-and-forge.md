@@ -49,6 +49,8 @@ Create a new plan from a description. Generates a plan ID (`plan-NNN`), fills th
 
 When invoked inside a bead forum thread, the thread's bead is reused directly (no dedup check needed).
 
+**Context injection:** `!plan <description>` now auto-injects the replied-to message, thread starter/recent posts, and fallback history when nothing else is available. This is powered by the shared `gatherConversationContext()` helper, which `!forge` also uses, so `!plan fix this` and other plan commands tap the same replied-to/thread context that the forge prompt receives.
+
 ```
 !plan Add webhook support for external notifications
 ```
@@ -265,6 +267,8 @@ Show available forge commands.
 ```
 
 > **Architecture note:** The `!forge help` text is defined inline in `discord.ts` (inside the `forgeCmd.action === 'help'` branch), not in `forge-commands.ts`. All `!forge` command dispatch happens in `discord.ts` rather than in the commands module — this is a known architectural quirk, not a recommended pattern.
+
+**Context alignment:** When a `!forge` is started, the drafter prompt is fed the bead description and any pinned thread posts via the same shared `gatherConversationContext()` helper that `!plan` uses. That helper also captures replied-to messages, starter/recent thread posts, and fallback history, so both commands always reference the same conversation context even inside an existing bead thread.
 
 ### `!forge <description>`
 
