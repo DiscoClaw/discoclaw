@@ -20,6 +20,7 @@ export type PlanAuditResult =
 export type PlanAuditOpts = {
   planId: string;
   plansDir: string;
+  cwd: string;
   workspaceCwd: string;
   runtime: RuntimeAdapter;
   auditorRuntime?: RuntimeAdapter;
@@ -199,7 +200,7 @@ export async function handlePlanAudit(opts: PlanAuditOpts): Promise<PlanAuditRes
   }
 
   // 4. Load project context for the auditor
-  const projectContext = await loadProjectContext(opts.workspaceCwd);
+  const projectContext = await loadProjectContext(opts.cwd);
 
   // 5. Determine preliminary round number (for the auditor prompt)
   const preliminaryRound = maxReviewNumber(planContent) + 1;
@@ -220,9 +221,9 @@ export async function handlePlanAudit(opts: PlanAuditOpts): Promise<PlanAuditRes
       rt,
       auditorPrompt,
       opts.auditorModel,
-      opts.workspaceCwd,
+      opts.cwd,
       auditorHasFileTools ? readOnlyTools : [],
-      auditorHasFileTools ? [opts.workspaceCwd] : [],
+      auditorHasFileTools ? [opts.cwd] : [],
       opts.timeoutMs,
     );
   } catch (err) {

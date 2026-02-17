@@ -58,6 +58,7 @@ const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
 
 let parsedConfig;
 try {
@@ -564,6 +565,7 @@ const botParams = {
   runtime: limitedRuntime,
   sessionManager,
   workspaceCwd,
+  projectCwd: projectRoot,
   groupsDir,
   useGroupDirCwd,
   runtimeModel,
@@ -976,7 +978,7 @@ if (beadCtx) {
           runtime: limitedRuntime,
           auditorRuntime,
           model: botParams.runtimeModel,
-          cwd: workspaceCwd,
+          cwd: projectRoot,
           workspaceCwd,
           beadsCwd: effectiveBeadsCwd,
           plansDir,

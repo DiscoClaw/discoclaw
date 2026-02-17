@@ -91,6 +91,7 @@ const PROJECT_DIRS: Record<string, string> = {
   discoclaw: path.join(os.homedir(), 'code/discoclaw'),
 };
 
+
 // ---------------------------------------------------------------------------
 // Pure functions (no I/O)
 // ---------------------------------------------------------------------------

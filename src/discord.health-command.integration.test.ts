@@ -28,6 +28,7 @@ function baseParams(metrics: MetricsRegistry, overrides: Partial<any> = {}) {
     runtime: { invoke: vi.fn(async function* () { yield { type: 'text_final', text: 'ok' } as any; }) } as any,
     sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
     workspaceCwd: '/tmp',
+    projectCwd: '/tmp',
     groupsDir: '/tmp',
     useGroupDirCwd: false,
     runtimeModel: 'opus',

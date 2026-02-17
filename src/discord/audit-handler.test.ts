@@ -115,10 +115,11 @@ async function writeTestPlan(plansDir: string, content: string = MINIMAL_PLAN): 
   return filePath;
 }
 
-function baseOpts(plansDir: string, runtime: RuntimeAdapter, lock: { fn: () => Promise<() => void> }, workspaceCwd: string): PlanAuditOpts {
+function baseOpts(plansDir: string, runtime: RuntimeAdapter, lock: { fn: () => Promise<() => void> }, workspaceCwd: string, cwd?: string): PlanAuditOpts {
   return {
     planId: 'plan-099',
     plansDir,
+    cwd: cwd ?? workspaceCwd,
     workspaceCwd,
     runtime,
     auditorModel: 'test-model',
@@ -344,7 +345,7 @@ _Filled in during/after implementation._
     expect(content).not.toContain('### Review');
   });
 
-  it('tools_fs runtime receives tools and addDirs', async () => {
+  it('tools_fs runtime receives tools and addDirs pointing to project cwd', async () => {
     await writeTestPlan(plansDir);
     const invokeSpy = vi.fn();
     const runtime: RuntimeAdapter = {
@@ -358,15 +359,17 @@ _Filled in during/after implementation._
       },
     };
     const lock = makeLockFn();
-    const result = await handlePlanAudit(baseOpts(plansDir, runtime, lock, tmpDir));
+    const projectCwd = path.join(tmpDir, 'project-root');
+    await fs.mkdir(projectCwd, { recursive: true });
+    const result = await handlePlanAudit(baseOpts(plansDir, runtime, lock, tmpDir, projectCwd));
 
     expect(result.ok).toBe(true);
     expect(invokeSpy).toHaveBeenCalledTimes(1);
     const params = invokeSpy.mock.calls[0][0];
     // Should receive the read-only tool list
     expect(params.tools).toEqual(['Read', 'Glob', 'Grep']);
-    // Should receive addDirs containing the workspace cwd
-    expect(params.addDirs).toEqual([tmpDir]);
+    // addDirs should point to the project cwd, not workspaceCwd
+    expect(params.addDirs).toEqual([projectCwd]);
   });
 
   it('non-tools_fs runtime receives no tools or addDirs', async () => {
