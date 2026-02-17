@@ -72,7 +72,7 @@ function makeCtx(channels: any[]): ActionContext {
       },
     } as any,
     client: {} as any,
-    channelId: 'ch1',
+    channelId: 'origin-ch',
     messageId: 'msg1',
   };
 }
@@ -366,6 +366,67 @@ describe('sendMessage', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('voice channel');
     expect((result as any).error).not.toContain('not found');
+  });
+
+  it('suppresses sendMessage targeting the same channel as the incoming message', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+    ctx.channelId = 'ch1'; // Same as target channel
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: '#general', content: 'Hello!' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('Suppressed');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('suppresses sendMessage targeting the same channel by ID', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+    ctx.channelId = 'ch1';
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'ch1', content: 'Hello!' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('Suppressed');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('allows sendMessage to same channel when messageId is empty (cron path)', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+    ctx.channelId = 'ch1';
+    ctx.messageId = ''; // Cron executor sets empty messageId
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: '#general', content: 'Hello!' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toBe('Sent message to #general');
+    expect(ch.send).toHaveBeenCalled();
+  });
+
+  it('allows sendMessage to a different channel', async () => {
+    const ch = makeMockChannel({ id: 'ch2', name: 'other' });
+    const ctx = makeCtx([ch]);
+    ctx.channelId = 'ch1'; // Different from target
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: '#other', content: 'Hello!' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toBe('Sent message to #other');
+    expect(ch.send).toHaveBeenCalled();
   });
 });
 
