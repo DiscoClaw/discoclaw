@@ -50,13 +50,18 @@ export async function executeMessagingAction(
       if (typeof action.channel !== 'string' || !action.channel.trim()) {
         return { ok: false, error: 'sendMessage requires a non-empty channel name or ID' };
       }
-      // Silent suppression: if the AI targets its own parent forum from
-      // within a bead thread, the response is already being posted to the
-      // thread — just swallow the spurious action instead of surfacing an
-      // error to the user.
-      if (ctx.threadParentId) {
+      // Silent suppression: if the AI targets the same channel the user
+      // message came from, the response is already being posted as a reply —
+      // swallow the spurious action to avoid duplicating the response.
+      // Only applies to message-handler contexts (messageId is set); cron
+      // executions intentionally send to their target channel.
+      if (ctx.messageId) {
         const raw = findChannelRaw(guild, action.channel);
-        if (raw && raw.id === ctx.threadParentId && raw.type === ChannelType.GuildForum) {
+        if (raw && raw.id === ctx.channelId) {
+          return { ok: true, summary: 'Suppressed: response is already posted as a reply to this channel' };
+        }
+        // Also suppress when targeting the parent forum from within a bead thread.
+        if (ctx.threadParentId && raw && raw.id === ctx.threadParentId && raw.type === ChannelType.GuildForum) {
           return { ok: true, summary: 'Suppressed: response is already posted to this thread' };
         }
       }
@@ -290,7 +295,8 @@ export function messagingActionsPromptSection(): string {
 - \`channel\` (required): Channel name (with or without #) or channel ID.
 - \`content\` (required): Message text.
 - \`replyTo\` (optional): Message ID to reply to.
-- **Important:** Forum channels do NOT support sendMessage. To post in a forum, use \`threadCreate\` instead.
+- **Important:** Do NOT use sendMessage to reply to the current conversation — your response text is automatically posted as a reply. Only use sendMessage to post in a *different* channel.
+- Forum channels do NOT support sendMessage. To post in a forum, use \`threadCreate\` instead.
 
 **react** — Add a reaction to a message:
 \`\`\`
