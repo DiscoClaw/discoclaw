@@ -25,12 +25,15 @@
 //     -s/--sandbox, --add-dir, -C/--cd, -p/--profile, --oss, --local-provider,
 //     --output-schema, --color, -o/--output-last-message.
 
-import process from 'node:process';
 import { execa, type ResultPromise } from 'execa';
 import type { EngineEvent, RuntimeAdapter, RuntimeCapability, RuntimeInvokeParams } from './types.js';
-
-/** Byte threshold above which prompts are piped via stdin instead of positional arg. */
-const STDIN_THRESHOLD = 100_000;
+import {
+  STDIN_THRESHOLD,
+  createEventQueue,
+  SubprocessTracker,
+  cliExecaEnv,
+  LineBuffer,
+} from './cli-shared.js';
 
 /** Max chars for error messages exposed outside the adapter. Prevents prompt/session leaks. */
 const MAX_ERROR_LENGTH = 200;
@@ -78,15 +81,12 @@ function sanitizeError(raw: string): string {
   return 'codex failed (no details)';
 }
 
-// Track active Codex subprocesses so we can kill them on shutdown.
-const activeSubprocesses = new Set<ResultPromise>();
+// Shared subprocess tracker for Codex processes.
+const tracker = new SubprocessTracker();
 
 /** SIGKILL all tracked Codex subprocesses (e.g. on SIGTERM). */
 export function killActiveCodexSubprocesses(): void {
-  for (const p of activeSubprocesses) {
-    p.kill('SIGKILL');
-  }
-  activeSubprocesses.clear();
+  tracker.killAll();
 }
 
 export type CodexCliRuntimeOpts = {
@@ -163,12 +163,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       stdin: useStdin ? 'pipe' : 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
-      env: {
-        ...process.env,
-        NO_COLOR: '1',
-        FORCE_COLOR: '0',
-        TERM: 'dumb',
-      },
+      env: cliExecaEnv(),
     });
 
     // When using stdin, pipe the prompt and close.
@@ -181,9 +176,9 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       }
     }
 
-    activeSubprocesses.add(subprocess);
-    subprocess.then(() => activeSubprocesses.delete(subprocess))
-      .catch(() => activeSubprocesses.delete(subprocess));
+    tracker.add(subprocess);
+    subprocess.then(() => tracker.delete(subprocess))
+      .catch(() => tracker.delete(subprocess));
 
     if (!subprocess.stdout) {
       yield { type: 'error', message: 'codex: missing stdout stream' };
@@ -191,20 +186,8 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       return;
     }
 
-    // Async event queue — mirrors claude-code-cli.ts streaming pattern.
-    const q: EngineEvent[] = [];
-    let notify: (() => void) | null = null;
-    const wake = () => {
-      if (!notify) return;
-      const n = notify;
-      notify = null;
-      n();
-    };
-    const push = (evt: EngineEvent) => {
-      q.push(evt);
-      wake();
-    };
-    const wait = () => new Promise<void>((r) => { notify = r; });
+    // Async event queue — shared pattern from cli-shared.
+    const { q, push, wait, wake } = createEventQueue();
 
     let finished = false;
     let mergedStdout = '';
@@ -213,7 +196,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     let stdoutEnded = false;
     let stderrEnded = subprocess.stderr == null;
     let procResult: any | null = null;
-    let stdoutBuffer = ''; // Line buffer for JSONL parsing
+    const stdoutLineBuf = new LineBuffer();
 
     subprocess.stdout.on('data', (chunk) => {
       const s = String(chunk);
@@ -226,9 +209,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       }
 
       // JSONL mode — parse line by line and extract text + thread_id.
-      stdoutBuffer += s;
-      const lines = stdoutBuffer.split('\n');
-      stdoutBuffer = lines.pop() ?? '';
+      const lines = stdoutLineBuf.feed(s);
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
@@ -314,9 +295,10 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       }
 
       // Flush any trailing JSONL buffer.
-      if (wantSession && stdoutBuffer.trim()) {
+      const trailingBuf = stdoutLineBuf.flush();
+      if (wantSession && trailingBuf.trim()) {
         try {
-          const evt = JSON.parse(stdoutBuffer.trim());
+          const evt = JSON.parse(trailingBuf.trim());
           if (evt.type === 'thread.started' && evt.thread_id && params.sessionKey) {
             sessionMap.set(params.sessionKey, evt.thread_id);
           }
@@ -327,7 +309,6 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
         } catch {
           // ignore
         }
-        stdoutBuffer = '';
       }
 
       // Success — emit final text.
@@ -371,7 +352,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       }
     } finally {
       if (!finished) subprocess.kill('SIGKILL');
-      activeSubprocesses.delete(subprocess);
+      tracker.delete(subprocess);
     }
   }
 

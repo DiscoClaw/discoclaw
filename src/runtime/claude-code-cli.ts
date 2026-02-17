@@ -1,143 +1,42 @@
-import process from 'node:process';
 import { execa, type ResultPromise } from 'execa';
 import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData, type RuntimeAdapter, type RuntimeInvokeParams } from './types.js';
 import { SessionFileScanner } from './session-scanner.js';
 import { ProcessPool } from './process-pool.js';
+import {
+  STDIN_THRESHOLD,
+  tryParseJsonLine as _tryParseJsonLine,
+  createEventQueue,
+  SubprocessTracker,
+  cliExecaEnv,
+  LineBuffer,
+} from './cli-shared.js';
+import {
+  extractTextFromUnknownEvent as _extractTextFromUnknownEvent,
+  extractResultText as _extractResultText,
+  extractImageFromUnknownEvent as _extractImageFromUnknownEvent,
+  extractResultContentBlocks as _extractResultContentBlocks,
+  imageDedupeKey as _imageDedupeKey,
+  stripToolUseBlocks as _stripToolUseBlocks,
+} from './cli-output-parsers.js';
 
-// Track active Claude subprocesses so we can kill them on shutdown.
-const activeSubprocesses = new Set<ResultPromise>();
-
-// Track process pools so killActiveSubprocesses() can clean them up.
-const activePools = new Set<ProcessPool>();
-
-/** SIGKILL all tracked Claude subprocesses (e.g. on SIGTERM). */
-export function killActiveSubprocesses(): void {
-  for (const pool of activePools) {
-    pool.killAll();
-  }
-  for (const p of activeSubprocesses) {
-    p.kill('SIGKILL');
-  }
-  activeSubprocesses.clear();
-}
-
-export function extractTextFromUnknownEvent(evt: unknown): string | null {
-  if (!evt || typeof evt !== 'object') return null;
-  const anyEvt = evt as Record<string, unknown>;
-
-  // Claude CLI stream-json emits nested structures; check common shapes.
-  const candidates: unknown[] = [
-    anyEvt.text,
-    anyEvt.delta,
-    anyEvt.content,
-    // Sometimes nested under .data.
-    (anyEvt.data && typeof anyEvt.data === 'object') ? (anyEvt.data as any).text : undefined,
-    // Claude CLI stream-json: event.delta.text (content_block_delta events)
-    (anyEvt.event && typeof anyEvt.event === 'object' &&
-     (anyEvt.event as any).delta && typeof (anyEvt.event as any).delta === 'object')
-      ? (anyEvt.event as any).delta.text
-      : undefined,
-  ];
-
-  for (const c of candidates) {
-    if (typeof c === 'string' && c.length > 0) return c;
-  }
-  return null;
-}
-
-/** Extract the final result text from a Claude CLI stream-json "result" event. */
-export function extractResultText(evt: unknown): string | null {
-  if (!evt || typeof evt !== 'object') return null;
-  const anyEvt = evt as Record<string, unknown>;
-  if (anyEvt.type === 'result' && typeof anyEvt.result === 'string' && anyEvt.result.length > 0) {
-    return anyEvt.result;
-  }
-  return null;
-}
-
-/** Max base64 string length (~25 MB encoded, ~18.75 MB decoded). */
-const MAX_IMAGE_BASE64_LEN = 25 * 1024 * 1024;
+// Re-export output parsers for backward compatibility (tests import from here).
+export const extractTextFromUnknownEvent = _extractTextFromUnknownEvent;
+export const extractResultText = _extractResultText;
+export const extractImageFromUnknownEvent = _extractImageFromUnknownEvent;
+export const extractResultContentBlocks = _extractResultContentBlocks;
+export const imageDedupeKey = _imageDedupeKey;
+export const stripToolUseBlocks = _stripToolUseBlocks;
+export const tryParseJsonLine = _tryParseJsonLine;
 
 // Re-export for backward compatibility (now defined in types.ts).
 export { MAX_IMAGES_PER_INVOCATION } from './types.js';
 
-/** Extract an image content block from a Claude CLI stream-json event. */
-export function extractImageFromUnknownEvent(evt: unknown): ImageData | null {
-  if (!evt || typeof evt !== 'object') return null;
-  const anyEvt = evt as Record<string, unknown>;
+// Shared subprocess tracker for Claude processes.
+const tracker = new SubprocessTracker();
 
-  // Direct image content block: { type: 'image', source: { type: 'base64', media_type, data } }
-  if (anyEvt.type === 'image' && anyEvt.source && typeof anyEvt.source === 'object') {
-    const src = anyEvt.source as Record<string, unknown>;
-    if (src.type === 'base64' && typeof src.media_type === 'string' && typeof src.data === 'string') {
-      if (src.data.length > MAX_IMAGE_BASE64_LEN) return null;
-      return { base64: src.data, mediaType: src.media_type };
-    }
-  }
-
-  // Wrapped in content_block_start: { content_block: { type: 'image', source: { ... } } }
-  if (anyEvt.content_block && typeof anyEvt.content_block === 'object') {
-    return extractImageFromUnknownEvent(anyEvt.content_block);
-  }
-
-  return null;
-}
-
-/** Extract text and images from a result event with content block arrays. */
-export function extractResultContentBlocks(evt: unknown): { text: string; images: ImageData[] } | null {
-  if (!evt || typeof evt !== 'object') return null;
-  const anyEvt = evt as Record<string, unknown>;
-  if (anyEvt.type !== 'result' || !Array.isArray(anyEvt.result)) return null;
-
-  let text = '';
-  const images: ImageData[] = [];
-
-  for (const block of anyEvt.result) {
-    if (!block || typeof block !== 'object') continue;
-    const b = block as Record<string, unknown>;
-    if (b.type === 'text' && typeof b.text === 'string') {
-      text += b.text;
-    } else if (b.type === 'image') {
-      const img = extractImageFromUnknownEvent(b);
-      if (img) images.push(img);
-    }
-  }
-
-  return { text, images };
-}
-
-/** Create a dedupe key for an image using a prefix + length to avoid storing full base64 in memory. */
-export function imageDedupeKey(img: ImageData): string {
-  return img.mediaType + ':' + img.base64.length + ':' + img.base64.slice(0, 64);
-}
-
-/**
- * Strip tool-call XML blocks and keep only the final answer.
- * When tool blocks are present, the text before/between them is narration
- * ("Let me read the files...") — we only want the text *after* the last block.
- */
-export function stripToolUseBlocks(text: string): string {
-  const toolPattern = /<tool_use>[\s\S]*?<\/tool_use>|<tool_calls>[\s\S]*?<\/tool_calls>|<tool_results>[\s\S]*?<\/tool_results>|<tool_call>[\s\S]*?<\/tool_call>|<tool_result>[\s\S]*?<\/tool_result>/g;
-  const segments = text.split(toolPattern);
-  // If tool blocks exist, keep only the last segment (the final answer).
-  const result = segments.length > 1
-    ? segments[segments.length - 1] ?? ''
-    : text;
-  return result.replace(/\n{3,}/g, '\n\n').trim();
-}
-
-function* textAsChunks(text: string): Generator<EngineEvent> {
-  if (!text) return;
-  yield { type: 'text_final', text };
-  yield { type: 'done' };
-}
-
-export function tryParseJsonLine(line: string): unknown | null {
-  try {
-    return JSON.parse(line);
-  } catch {
-    return null;
-  }
+/** SIGKILL all tracked Claude subprocesses (e.g. on SIGTERM). */
+export function killActiveSubprocesses(): void {
+  tracker.killAll();
 }
 
 export type ClaudeCliRuntimeOpts = {
@@ -194,7 +93,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       maxProcesses: opts.multiTurnMaxProcesses ?? 5,
       log: logForPool,
     });
-    activePools.add(pool);
+    tracker.addPool(pool);
   }
 
   async function* invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent> {
@@ -222,7 +121,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
         if (proc?.isAlive) {
           // Track the subprocess for shutdown cleanup.
           const sub = proc.getSubprocess();
-          if (sub) activeSubprocesses.add(sub);
+          if (sub) tracker.add(sub);
 
           let fallback = false;
           for await (const evt of proc.sendTurn(params.prompt, params.images)) {
@@ -235,7 +134,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
             yield evt;
           }
 
-          if (sub) activeSubprocesses.delete(sub);
+          if (sub) tracker.delete(sub);
           if (!fallback) return; // success via long-running process
           (opts.log as any)?.info?.('multi-turn: process failed, falling back to one-shot');
           // Fall through to one-shot...
@@ -289,7 +188,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     // Use stdin-based input when images are present OR when the prompt is too
     // large for a CLI positional argument (Linux E2BIG limit ~128 KB).
     const hasImages = params.images && params.images.length > 0;
-    const promptTooLarge = Buffer.byteLength(params.prompt, 'utf-8') > 100_000;
+    const promptTooLarge = Buffer.byteLength(params.prompt, 'utf-8') > STDIN_THRESHOLD;
     const useStdin = hasImages || promptTooLarge;
     // Images require stream-json for content block parsing; compute once before arg construction.
     const effectiveOutputFormat = useStdin ? 'stream-json' as const : opts.outputFormat;
@@ -337,13 +236,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       forceKillAfterDelay: 5000,
       // When using stdin (images or large prompts) we pipe; otherwise ignore to prevent auth hangs.
       stdin: useStdin ? 'pipe' : 'ignore',
-      env: {
-        ...process.env,
-        // Prefer plain output: Discord doesn't render ANSI well.
-        NO_COLOR: process.env.NO_COLOR ?? '1',
-        FORCE_COLOR: process.env.FORCE_COLOR ?? '0',
-        TERM: process.env.TERM ?? 'dumb',
-      },
+      env: cliExecaEnv(),
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -371,9 +264,9 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       }
     }
 
-    activeSubprocesses.add(subprocess);
-    subprocess.then(() => activeSubprocesses.delete(subprocess))
-      .catch(() => activeSubprocesses.delete(subprocess));
+    tracker.add(subprocess);
+    subprocess.then(() => tracker.delete(subprocess))
+      .catch(() => tracker.delete(subprocess));
 
     if (!subprocess.stdout) {
       yield { type: 'error', message: 'claude: missing stdout stream' };
@@ -383,19 +276,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
 
     // Emit stdout/stderr as they arrive via a small async queue so we can
     // yield events from both streams without risking pipe backpressure deadlocks.
-    const q: EngineEvent[] = [];
-    let notify: (() => void) | null = null;
-    const wake = () => {
-      if (!notify) return;
-      const n = notify;
-      notify = null;
-      n();
-    };
-    const push = (evt: EngineEvent) => {
-      q.push(evt);
-      wake();
-    };
-    const wait = () => new Promise<void>((r) => { notify = r; });
+    const { q, push, wait, wake } = createEventQueue();
 
     // One-shot stream stall detection: kill process if no stdout/stderr for too long.
     let finished = false;
@@ -431,7 +312,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     let merged = '';
     let resultText = '';  // fallback from "result" event if no deltas were extracted
     let inToolUse = false;  // track whether we're inside a <tool_use> block
-    let stdoutBuffered = '';
+    const stdoutLineBuf = new LineBuffer();
     let stderrBuffered = '';
     let stderrForError = '';
     let stdoutEnded = false;
@@ -450,9 +331,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       }
 
       // stream-json: parse line-delimited JSON events.
-      stdoutBuffered += s;
-      const lines = stdoutBuffered.split(/\r?\n/);
-      stdoutBuffered = lines.pop() ?? '';
+      const lines = stdoutLineBuf.feed(s);
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
@@ -572,7 +451,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
 
       if (effectiveOutputFormat === 'stream-json') {
         // Flush trailing stdout.
-        const tail = stdoutBuffered.trim();
+        const tail = stdoutLineBuf.flush().trim();
         if (tail) {
           const evt = tryParseJsonLine(tail);
           const text = extractTextFromUnknownEvent(evt ?? tail);
@@ -656,7 +535,7 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       clearStallTimer();
       scanner?.stop();
       if (!finished) subprocess.kill('SIGKILL');
-      activeSubprocesses.delete(subprocess);
+      tracker.delete(subprocess);
     }
   }
 

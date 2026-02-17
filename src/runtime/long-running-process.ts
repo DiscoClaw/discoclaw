@@ -1,6 +1,6 @@
-import process from 'node:process';
 import { execa, type ResultPromise } from 'execa';
 import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData } from './types.js';
+import { tryParseJsonLine, cliExecaEnv } from './cli-shared.js';
 import {
   extractTextFromUnknownEvent,
   extractResultText,
@@ -8,8 +8,7 @@ import {
   extractResultContentBlocks,
   imageDedupeKey,
   stripToolUseBlocks,
-  tryParseJsonLine,
-} from './claude-code-cli.js';
+} from './cli-output-parsers.js';
 
 export type LongRunningProcessState = 'starting' | 'idle' | 'busy' | 'dead';
 
@@ -133,12 +132,7 @@ export class LongRunningProcess {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
-        env: {
-          ...process.env,
-          NO_COLOR: process.env.NO_COLOR ?? '1',
-          FORCE_COLOR: process.env.FORCE_COLOR ?? '0',
-          TERM: process.env.TERM ?? 'dumb',
-        },
+        env: cliExecaEnv(),
       });
     } catch (err) {
       this.opts.log?.info({ err }, 'long-running: spawn failed');
