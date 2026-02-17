@@ -404,6 +404,27 @@ describe('handlePlanCommand', () => {
     expect(content).toContain('The login handler crashes on empty passwords');
   });
 
+  it('create — trims whitespace around context before writing section and bead description', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const rawContext = '\n  Trimmed context line\n  Another line  \n';
+    const expectedContext = rawContext.trim();
+
+    await handlePlanCommand(
+      { action: 'create', args: 'trim context plan', context: rawContext },
+      opts,
+    );
+
+    const plansDir = path.join(tmpDir, 'plans');
+    const files = await fs.readdir(plansDir);
+    const planFile = files.find((f) => f.startsWith('plan-001'))!;
+    const content = await fs.readFile(path.join(plansDir, planFile), 'utf-8');
+    expect(content).toContain(`## Context\n\n${expectedContext}\n`);
+
+    const createCall = (bdCreate as any).mock.calls[0][0];
+    expect(createCall.description).toBe(expectedContext);
+  });
+
   it('create — does not pass description when context is absent', async () => {
     const tmpDir = await makeTmpDir();
     const opts = baseOpts({ workspaceCwd: tmpDir });

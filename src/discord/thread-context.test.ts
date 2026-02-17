@@ -115,6 +115,31 @@ describe('resolveThreadContext', () => {
     expect(charlieIdx).toBeLessThan(bobIdx);
   });
 
+  it('includes pinned thread messages when includePinned is true', async () => {
+    const pinned = fakeMsg('pinned-1', 'Important pinned note', 'PinnedUser');
+    const ch = fakeThread({
+      name: 'pinned-thread',
+      starter: {
+        id: '1',
+        author: { username: 'Bob', displayName: 'Bob', bot: false },
+        content: 'Starter content',
+      },
+      messages: [
+        fakeMsg('2', 'First reply', 'Alice'),
+      ],
+    });
+    ch.messages.fetchPinned = async () => {
+      const map = new Map<string, ThreadMessage>();
+      map.set(pinned.id, pinned);
+      return map;
+    };
+
+    const result = await resolveThreadContext(ch, 'current', { includePinned: true });
+    expect(result).not.toBeNull();
+    expect(result!.section).toContain('Pinned thread messages:');
+    expect(result!.section).toContain('[PinnedUser (pinned)]: Important pinned note');
+  });
+
   it('deduplicates starter message from recent messages', async () => {
     const starter: ThreadMessage = {
       id: '1',

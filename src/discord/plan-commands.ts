@@ -302,6 +302,7 @@ export async function handlePlanCommand(
       const fileName = `${planId}-${slug}.md`;
       const filePath = path.join(plansDir, fileName);
       const date = new Date().toISOString().split('T')[0]!;
+      const trimmedContext = cmd.context?.trim();
 
       // Create backing bead — or reuse existing one from bead thread context
       let beadId: string;
@@ -325,7 +326,6 @@ export async function handlePlanCommand(
           if (match) {
             beadId = match.id;
           } else {
-            const trimmedContext = cmd.context?.trim();
             const bead = await bdCreate(
               {
                 title: cmd.args,
@@ -364,9 +364,8 @@ export async function handlePlanCommand(
         );
 
       // Append reply context below the template body (keeps slug/bead/title clean)
-      const finalContent = cmd.context
-        ? content + `\n## Context\n\n${cmd.context}\n`
-        : content;
+      const contextSection = trimmedContext ? `\n## Context\n\n${trimmedContext}\n` : '';
+      const finalContent = content + contextSection;
 
       await fs.writeFile(filePath, finalContent, 'utf-8');
 
