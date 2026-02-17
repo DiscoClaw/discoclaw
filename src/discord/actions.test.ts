@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
-import { parseDiscordActions, executeDiscordActions, buildDisplayResultLines, buildAllResultLines } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionResult } from './actions.js';
 
 const ALL_FLAGS: ActionCategoryFlags = {
@@ -368,5 +368,53 @@ describe('buildAllResultLines', () => {
       'Done: Created #status',
       'Failed: Missing Permissions',
     ]);
+  });
+});
+
+describe('discordActionsPromptSection', () => {
+  it('always includes the standard guidance when actions are enabled', () => {
+    const flags: ActionCategoryFlags = {
+      channels: false,
+      messaging: false,
+      guild: false,
+      moderation: false,
+      polls: false,
+      beads: false,
+      crons: false,
+      botProfile: false,
+      forge: false,
+      plan: false,
+      memory: false,
+      defer: false,
+    };
+
+    const prompt = discordActionsPromptSection(flags, 'ClawBot');
+    expect(prompt).toContain('Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance');
+    expect(prompt).toContain('### Rules');
+  });
+
+  it('documents deferred self-invocation when defer actions are enabled', () => {
+    const flags: ActionCategoryFlags = {
+      channels: false,
+      messaging: false,
+      guild: false,
+      moderation: false,
+      polls: false,
+      beads: false,
+      crons: false,
+      botProfile: false,
+      forge: false,
+      plan: false,
+      memory: false,
+      defer: true,
+    };
+
+    const prompt = discordActionsPromptSection(flags);
+    expect(prompt).toContain('### Deferred self-invocation');
+    expect(prompt).toContain('{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}');
+    expect(prompt).toContain('without another user prompt');
+    expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS');
+    expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT');
+    expect(prompt).toContain('forces `defer` off');
   });
 });

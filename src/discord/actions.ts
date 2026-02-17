@@ -351,7 +351,7 @@ export function discordActionsPromptSection(flags: ActionCategoryFlags, botDispl
 
   sections.push(`## Discord Actions
 
-You can perform Discord server actions by including structured action blocks in your response.`);
+Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if only a subset of sub-categories are available). You can perform Discord server actions by including structured action blocks in your response.`);
 
   if (flags.messaging) {
     sections.push(messagingActionsPromptSection());
