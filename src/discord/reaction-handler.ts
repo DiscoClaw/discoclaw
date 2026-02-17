@@ -276,6 +276,7 @@ function createReactionHandler(
 
           prompt += `\n\n${promptText.guidanceLine}`;
 
+          const isDm = reaction.message.guildId == null;
           const actionFlags: ActionCategoryFlags = {
             channels: params.discordActionsChannels,
             messaging: params.discordActionsMessaging,
@@ -288,10 +289,10 @@ function createReactionHandler(
             forge: params.discordActionsForge ?? false,
             plan: params.discordActionsPlan ?? false,
             memory: params.discordActionsMemory ?? false,
-            defer: params.discordActionsDefer ?? false,
+            defer: !isDm && (params.discordActionsDefer ?? false),
           };
 
-          if (params.discordActionsEnabled) {
+          if (params.discordActionsEnabled && !isDm) {
             prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags, params.botDisplayName);
           }
 

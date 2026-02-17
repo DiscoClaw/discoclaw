@@ -3,7 +3,7 @@ import { ChannelType } from 'discord.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { executeCronJob, disableCronDeferActionFlags } from './executor.js';
+import { executeCronJob } from './executor.js';
 import { safeCronId } from './job-lock.js';
 import { CronRunControl } from './run-control.js';
 import { loadWorkspacePaFiles } from '../discord/prompt-common.js';
@@ -216,27 +216,6 @@ describe('executeCronJob', () => {
 
     expect(status.runtimeError).toHaveBeenCalledOnce();
     expect(job.running).toBe(false);
-  });
-
-  it('builds cron-safe action flags with defer disabled', () => {
-    const originalFlags: ActionCategoryFlags = {
-      channels: true,
-      messaging: true,
-      guild: true,
-      moderation: true,
-      polls: true,
-      beads: true,
-      crons: true,
-      botProfile: true,
-      forge: true,
-      plan: true,
-      memory: true,
-      defer: true,
-    };
-
-    const safeFlags = disableCronDeferActionFlags(originalFlags);
-    expect(safeFlags.defer).toBe(false);
-    expect(safeFlags.messaging).toBe(true);
   });
 
   it('does not post if target channel is not allowlisted', async () => {

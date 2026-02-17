@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionContext } from './actions.js';
-import { DeferScheduler, executeDeferAction, type DeferActionRequest, type DeferredRun, type DeferSchedulerOptions } from './actions-defer.js';
+import { DeferScheduler, type DeferSchedulerOptions } from './defer-scheduler.js';
+import { executeDeferAction, type DeferActionRequest, type DeferredRun } from './actions-defer.js';
 import type { Client, Guild } from 'discord.js';
 
 const baseContext: ActionContext = {

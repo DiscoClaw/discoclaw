@@ -1,5 +1,6 @@
 import type { ActionContext, DiscordActionResult } from './actions.js';
 import { fmtTime } from './action-utils.js';
+import type { DeferScheduler, DeferSchedulerRun } from './defer-scheduler.js';
 
 export type DeferActionRequest = {
   type: 'defer';
@@ -16,76 +17,7 @@ interface DeferActionContext extends ActionContext {
   deferScheduler?: DeferScheduler;
 }
 
-export type DeferredRun = {
-  action: DeferActionRequest;
-  context: ActionContext;
-  runsAt: Date;
-};
-
-export type DeferSchedulerOptions = {
-  maxDelaySeconds: number;
-  maxConcurrent: number;
-  jobHandler: (run: DeferredRun) => Promise<void> | void;
-};
-
-type DeferSchedulerJob = {
-  action: DeferActionRequest;
-  context: ActionContext;
-};
-
-type ScheduleResult =
-  | { ok: true; runsAt: Date; delaySeconds: number; channel: string }
-  | { ok: false; error: string };
-
-export class DeferScheduler {
-  private activeCount = 0;
-  private readonly maxDelaySeconds: number;
-  private readonly maxConcurrent: number;
-  private readonly jobHandler: DeferSchedulerOptions['jobHandler'];
-
-  constructor(opts: DeferSchedulerOptions) {
-    this.maxDelaySeconds = opts.maxDelaySeconds;
-    this.maxConcurrent = opts.maxConcurrent;
-    this.jobHandler = opts.jobHandler;
-  }
-
-  schedule(job: DeferSchedulerJob): ScheduleResult {
-    if (!Number.isFinite(job.action.delaySeconds)) {
-      return { ok: false, error: 'delaySeconds must be a number' };
-    }
-    if (job.action.delaySeconds <= 0) {
-      return { ok: false, error: 'delaySeconds must be greater than zero' };
-    }
-    if (job.action.delaySeconds > this.maxDelaySeconds) {
-      return {
-        ok: false,
-        error: `delaySeconds cannot exceed ${this.maxDelaySeconds} seconds`,
-      };
-    }
-    if (this.activeCount >= this.maxConcurrent) {
-      return {
-        ok: false,
-        error: `Maximum of ${this.maxConcurrent} deferred actions are already scheduled`,
-      };
-    }
-
-    this.activeCount++;
-    const runsAt = new Date(Date.now() + job.action.delaySeconds * 1000);
-    const delayMs = job.action.delaySeconds * 1000;
-
-    const invokeHandler = async () => {
-      try {
-        await Promise.resolve(this.jobHandler({ action: job.action, context: job.context, runsAt }));
-      } finally {
-        this.activeCount = Math.max(0, this.activeCount - 1);
-      }
-    };
-
-    setTimeout(invokeHandler, delayMs);
-
-    return { ok: true, runsAt, delaySeconds: job.action.delaySeconds, channel: job.action.channel };
-  }
-}
+export type DeferredRun = DeferSchedulerRun<DeferActionRequest, ActionContext>;
 
 export async function executeDeferAction(
   action: DeferActionRequest,

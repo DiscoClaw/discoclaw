@@ -5,6 +5,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { CronRunStats } from '../cron/run-stats.js';
 import type { CronScheduler } from '../cron/scheduler.js';
 import type { CronExecutorContext } from '../cron/executor.js';
+import type { DeferScheduler } from './defer-scheduler.js';
 import { CADENCE_TAGS, generateCronId } from '../cron/run-stats.js';
 import { detectCadence } from '../cron/cadence.js';
 import type { ForumCountSync } from './forum-count-sync.js';
@@ -64,6 +65,7 @@ export type CronContext = {
   // Thread IDs currently being created by cronCreate. The threadCreate listener
   // checks this to avoid double-handling before scheduler.register() completes.
   pendingThreadIds: Set<string>;
+  deferScheduler?: DeferScheduler;
   forumCountSync?: ForumCountSync;
   syncCoordinator?: CronSyncCoordinator;
 };
@@ -496,6 +498,7 @@ export async function executeCronAction(
           log: cronCtx.log,
           discordActionsEnabled: false,
           actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, defer: false },
+          deferScheduler: cronCtx.deferScheduler,
           statsStore: cronCtx.statsStore,
         };
         void executeCronJob(job, execCtx);

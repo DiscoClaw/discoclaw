@@ -9,6 +9,7 @@ import type { CronContext } from '../discord/actions-crons.js';
 import type { ForgeContext } from '../discord/actions-forge.js';
 import type { PlanContext } from '../discord/actions-plan.js';
 import type { MemoryContext } from '../discord/actions-memory.js';
+import type { DeferScheduler } from '../discord/defer-scheduler.js';
 import type { CronRunStats } from './run-stats.js';
 import type { CronRunControl } from './run-control.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
@@ -34,6 +35,7 @@ export type CronExecutorContext = {
   allowChannelIds?: Set<string>;
   discordActionsEnabled: boolean;
   actionFlags: ActionCategoryFlags;
+  deferScheduler?: DeferScheduler;
   beadCtx?: BeadContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -52,10 +54,6 @@ async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string):
       // Best-effort.
     }
   }
-}
-
-export function disableCronDeferActionFlags(flags: ActionCategoryFlags): ActionCategoryFlags {
-  return { ...flags, defer: false };
 }
 
 export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Promise<void> {
@@ -263,15 +261,14 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     // Handle Discord actions if enabled.
     if (ctx.discordActionsEnabled) {
-      // Cron-driven outputs are not allowed to schedule additional defers (no chaining).
-      const safeActionFlags = disableCronDeferActionFlags(ctx.actionFlags);
-      const { cleanText, actions } = discordActions.parseDiscordActions(processedText, safeActionFlags);
+      const { cleanText, actions } = discordActions.parseDiscordActions(processedText, ctx.actionFlags);
       if (actions.length > 0) {
         const actCtx = {
           guild,
           client: ctx.client,
           channelId: targetChannel.id,
           messageId: '',
+          deferScheduler: ctx.deferScheduler,
         };
         const results = await discordActions.executeDiscordActions(actions, actCtx, ctx.log, {
           beadCtx: ctx.beadCtx,
