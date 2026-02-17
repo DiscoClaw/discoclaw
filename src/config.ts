@@ -2,6 +2,8 @@ import path from 'node:path';
 import { parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 
 export const KNOWN_TOOLS = new Set(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch']);
+export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS = 1800;
+export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT = 5;
 
 type ParseResult = {
   config: DiscoclawConfig;
@@ -340,8 +342,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsPlan = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_PLAN', false);
   const discordActionsMemory = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', false);
   const discordActionsDefer = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER', false);
-  const deferMaxDelaySeconds = parsePositiveNumber(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS', 1800);
-  const deferMaxConcurrent = parsePositiveInt(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT', 5);
+  const deferMaxDelaySeconds = parsePositiveNumber(
+    env,
+    'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS',
+    DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS,
+  );
+  const deferMaxConcurrent = parsePositiveInt(
+    env,
+    'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT',
+    DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT,
+  );
 
   if (!discordActionsEnabled) {
     const enabledCategories = [

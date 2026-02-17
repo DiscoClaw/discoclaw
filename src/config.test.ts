@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseConfig } from './config.js';
+import {
+  parseConfig,
+  DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT,
+  DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS,
+} from './config.js';
 
 function env(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   return {
@@ -74,8 +78,8 @@ describe('parseConfig', () => {
   it('defaults discordActionsDefer settings', () => {
     const { config } = parseConfig(env());
     expect(config.discordActionsDefer).toBe(false);
-    expect(config.deferMaxDelaySeconds).toBe(1800);
-    expect(config.deferMaxConcurrent).toBe(5);
+    expect(config.deferMaxDelaySeconds).toBe(DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS);
+    expect(config.deferMaxConcurrent).toBe(DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT);
   });
 
   it('parses defer config overrides', () => {
