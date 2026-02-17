@@ -127,7 +127,7 @@ Allow the model to start, monitor, and cancel forge runs (plan drafting + audit 
 |--------|-------------|-----------|--------|
 | `forgeCreate` | Start a new forge run from a description | Yes | Yes (fire-and-forget; progress posted to channel) |
 | `forgeResume` | Re-enter the audit/revise loop for an existing plan | Yes | Yes (fire-and-forget) |
-| `forgeStatus` | Check if a forge is currently running | No (query) | No |
+| `forgeStatus` | Check if a forge is currently running | No | No |
 | `forgeCancel` | Cancel the running forge | Yes | No (sets cancel flag) |
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 0, requires `DISCOCLAW_FORGE_COMMANDS_ENABLED`).
