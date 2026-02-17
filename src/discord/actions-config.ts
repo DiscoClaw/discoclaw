@@ -141,9 +141,10 @@ export function executeConfigAction(
       }
 
       const lines = rows.map(([role, model, desc]) => {
+        const display = model || '(adapter default)';
         const resolved = resolveModel(model, rid);
         const resolvedNote = resolved && resolved !== model ? ` → ${resolved}` : '';
-        return `**${role}**: \`${model}\`${resolvedNote} — ${desc}`;
+        return `**${role}**: \`${display}\`${resolvedNote} — ${desc}`;
       });
 
       return { ok: true, summary: lines.join('\n') };

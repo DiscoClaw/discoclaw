@@ -106,6 +106,24 @@ describe('modelShow', () => {
     if (!result.ok) return;
     expect(result.summary).toContain('cron-auto-tag');
   });
+
+  it('shows adapter default when model value is empty', () => {
+    const codexRuntime: RuntimeAdapter = {
+      id: 'codex',
+      capabilities: new Set(),
+      async *invoke() { /* no-op */ },
+    };
+    const ctx: ConfigContext = {
+      botParams: makeBotParams({ runtimeModel: '', summaryModel: '' }),
+      runtime: codexRuntime,
+    };
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('(adapter default)');
+    expect(result.summary).not.toContain('` `');
+    expect(result.summary).not.toContain('``');
+  });
 });
 
 // ---------------------------------------------------------------------------
