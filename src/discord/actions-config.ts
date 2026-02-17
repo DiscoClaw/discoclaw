@@ -31,8 +31,13 @@ export type ConfigMutableParams = {
   summaryModel: string;
   forgeDrafterModel?: string;
   forgeAuditorModel?: string;
-  cronCtx?: { autoTagModel: string };
+  cronCtx?: {
+    autoTagModel: string;
+    syncCoordinator?: { setAutoTagModel(model: string): void };
+    executorCtx?: { model: string };
+  };
   beadCtx?: { autoTagModel: string };
+  planCtx?: { model?: string };
 };
 
 // ---------------------------------------------------------------------------
@@ -79,6 +84,8 @@ export function executeConfigAction(
       switch (action.role) {
         case 'chat':
           bp.runtimeModel = model;
+          if (bp.planCtx) bp.planCtx.model = model;
+          if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = model;
           changes.push(`chat → ${model}`);
           break;
         case 'fast':
@@ -86,6 +93,7 @@ export function executeConfigAction(
           changes.push(`summary → ${model}`);
           if (bp.cronCtx) {
             bp.cronCtx.autoTagModel = model;
+            bp.cronCtx.syncCoordinator?.setAutoTagModel(model);
             changes.push(`cron-auto-tag → ${model}`);
           }
           if (bp.beadCtx) {
@@ -108,6 +116,7 @@ export function executeConfigAction(
         case 'cron':
           if (bp.cronCtx) {
             bp.cronCtx.autoTagModel = model;
+            bp.cronCtx.syncCoordinator?.setAutoTagModel(model);
             changes.push(`cron → ${model}`);
           } else {
             return { ok: false, error: 'Cron subsystem not configured' };
