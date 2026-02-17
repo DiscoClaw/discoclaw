@@ -287,6 +287,22 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
             warnings++;
           }
           await sleep(throttleMs);
+        } else if (bead.status === 'closed' && thread.archived) {
+          // Thread is already archived — check if it's fully reconciled (correct name + tags).
+          // If stale (e.g., name or tags wrong), unarchive→edit→re-archive via closeBeadThread.
+          try {
+            const alreadyClosed = await isBeadThreadAlreadyClosed(client, thread.id, bead, tagMap);
+            if (!alreadyClosed) {
+              log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 archived thread is stale, unarchiving to reconcile');
+              await closeBeadThread(client, thread.id, bead, tagMap, log);
+              threadsReconciled++;
+              log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 reconciled (re-archived)');
+            }
+          } catch (err) {
+            log?.warn({ err, beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 archived reconcile failed');
+            warnings++;
+          }
+          await sleep(throttleMs);
         }
       }
     } catch (err) {

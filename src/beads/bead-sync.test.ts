@@ -707,15 +707,16 @@ describe('runBeadSync', () => {
     expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {}, undefined);
   });
 
-  it('phase 5 skips already-archived thread for closed bead', async () => {
+  it('phase 5 skips already-archived thread for closed bead when fully reconciled', async () => {
     const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
 
     (bdList as any).mockResolvedValueOnce([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
-    // Phase 4 will try to archive thread-100 — let it skip via already-closed check.
-    (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true);
+    // Phase 4 checks isBeadThreadAlreadyClosed → true (skip).
+    // Phase 5 also checks isBeadThreadAlreadyClosed for the archived thread → true (skip).
+    (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
 
     const mockForum = {
       threads: {
@@ -739,10 +740,49 @@ describe('runBeadSync', () => {
       throttleMs: 0,
     } as any);
 
-    // Thread is already archived — no duplicate work from Phase 5.
+    // Thread is already fully reconciled — no work from Phase 5.
     expect(result.threadsReconciled).toBe(0);
-    // closeBeadThread should not be called (Phase 4 skipped via isBeadThreadAlreadyClosed, Phase 5 skipped via archived check).
+    // closeBeadThread should not be called (Phase 4 skipped, Phase 5 skipped via isBeadThreadAlreadyClosed).
     expect(closeBeadThread).not.toHaveBeenCalled();
+  });
+
+  it('phase 5 reconciles stale archived thread for closed bead via unarchive→edit→re-archive', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
+    ]);
+    // Phase 4 checks isBeadThreadAlreadyClosed → true (skip Phase 4 archive).
+    // Phase 5 checks isBeadThreadAlreadyClosed → false (thread is stale, needs reconcile).
+    (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({ threads: new Map() })),
+        fetchArchived: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-100', { id: 'thread-100', name: '\u{1F7E0} [001] Old stale name', archived: true }],
+          ]),
+        })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    // Phase 5 should have reconciled the stale archived thread.
+    expect(result.threadsReconciled).toBe(1);
+    expect(isBeadThreadAlreadyClosed).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {});
+    expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {}, undefined);
   });
 
   it('phase 5 no-ops gracefully when forum has 0 threads', async () => {
