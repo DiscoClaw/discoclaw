@@ -3,7 +3,6 @@
 
 import type { RuntimeCapability } from '../types.js';
 import type { CliAdapterStrategy, CliInvokeContext, UniversalCliOpts } from '../cli-strategy.js';
-import { STDIN_THRESHOLD } from '../cli-shared.js';
 
 export const claudeStrategy: CliAdapterStrategy = {
   id: 'claude_code',

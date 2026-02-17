@@ -360,10 +360,11 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       const stderr = procResult.stderr ?? '';
 
       if (procResult.timedOut) {
-        const msg = (procResult.originalMessage || procResult.shortMessage || procResult.message || '').trim();
+        // Use a fixed message — execa's originalMessage/shortMessage can contain the
+        // full command line (including prompt text), so we never expose raw error strings.
         push({
           type: 'error',
-          message: `${strategy.id === 'claude_code' ? 'claude' : strategy.id} timed out after ${params.timeoutMs ?? 0}ms${msg ? `: ${msg}` : ''}`,
+          message: `${strategy.id === 'claude_code' ? 'claude' : strategy.id} timed out after ${params.timeoutMs ?? 0}ms`,
         });
         push({ type: 'done' });
         finished = true;
@@ -480,20 +481,25 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       clearStallTimer();
       if (finished) return;
 
-      const spawnMsg = strategy.handleSpawnError?.(err, binary);
-      if (spawnMsg) {
-        push({ type: 'error', message: spawnMsg });
-      } else {
-        const timedOut = Boolean(err?.timedOut);
-        const msg = String(
-          (err?.originalMessage || err?.shortMessage || err?.message || err || '')
-        ).trim();
+      // Check timeout first — use fixed message to avoid leaking prompt/command line.
+      if (err?.timedOut) {
         push({
           type: 'error',
-          message: timedOut
-            ? `${strategy.id === 'claude_code' ? 'claude' : strategy.id} timed out after ${params.timeoutMs ?? 0}ms${msg ? `: ${msg}` : ''}`
-            : (msg || `${strategy.id} failed`),
+          message: `${strategy.id === 'claude_code' ? 'claude' : strategy.id} timed out after ${params.timeoutMs ?? 0}ms`,
         });
+      } else {
+        const spawnMsg = strategy.handleSpawnError?.(err, binary);
+        if (spawnMsg) {
+          push({ type: 'error', message: spawnMsg });
+        } else {
+          const msg = String(
+            (err?.originalMessage || err?.shortMessage || err?.message || err || '')
+          ).trim();
+          push({
+            type: 'error',
+            message: msg || `${strategy.id} failed`,
+          });
+        }
       }
       push({ type: 'done' });
       finished = true;
