@@ -14,11 +14,21 @@ Canonical reference for DiscoClaw's `!plan` and `!forge` command systems.
 
 - `!plan <desc>` — you want to write or fill in the plan yourself
 - `!forge <desc>` — you want the system to draft, audit, and refine the plan automatically
-- After either, use `!plan approve` + `!plan run` to execute
+- With auto implementation enabled, review-ready plans jump straight into execution; otherwise, use `!plan approve` + `!plan run` to execute.
+
+When `FORGE_AUTO_IMPLEMENT=1` (default) the forge still marches every plan through DRAFT → REVIEW, but any REVIEW that meets the gating criteria (no blocking findings, no `CAP_REACHED`, and the context is clean) immediately transitions to APPROVED and kicks off `!plan run`. Severity warnings continue to surface in the completion message and the audit log, and the channel post notes the auto-approval so the team can trace what happened. If the review isn’t pristine — blocking issues, cap errors, stale context, or if you opt out by setting `FORGE_AUTO_IMPLEMENT=0` — the bot falls back to the manual CTA described below.
 
 ---
 
 ## 2. `!plan` Command Reference
+
+### Auto implementation (default)
+
+With `FORGE_AUTO_IMPLEMENT=1` (the default), `!forge` still walks every plan through the DRAFT → REVIEW lifecycle, but once REVIEW finishes without blocking findings, a `CAP_REACHED` verdict, or stale workspace context, the bot auto-approves the plan and immediately fires `!plan run`. The completion post still surfaces any medium/minor/suggestion severity warnings in the channel message and audit log so the team can trace remaining concerns even though the plan is now executing. If the gating check fails (blocking findings, cap, stale context, etc.) or you explicitly opt out, the manual CTA described below is used instead.
+
+#### Manual implementation (opt-out)
+
+Set `FORGE_AUTO_IMPLEMENT=0` (see the configuration entry below) to keep the manual CTA. In this mode the forge stops after posting the plan summary, lists any severity warnings that forced the manual path, and explicitly tells you to run `!plan approve <id>` and `!plan run <id>`.
 
 ### `!plan` / `!plan help`
 
@@ -367,6 +377,8 @@ Forge cancel requested.
                   │ CLOSED │◄───────────────────┘
                   └────────┘
 
+With `FORGE_AUTO_IMPLEMENT=1`, the review still happens, but any REVIEW that meets the gating criteria (no blocking findings, no `CAP_REACHED`, and a pristine workspace context) now auto-transitions to APPROVED and immediately begins `!plan run`. The completion message still calls out any severity warnings so the channel log records lingering concerns even while implementation runs; if the criteria fail or auto implementation is disabled, the manual CTA described earlier under *Manual implementation (opt-out)* takes over instead.
+
   At any point (except IMPLEMENTING):
   !plan close ──► CLOSED
 
@@ -695,7 +707,7 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | `FORGE_TIMEOUT_MS` | `1800000` (30 min) | `parsePositiveNumber` | Per-agent-invocation timeout within forge |
 | `FORGE_DRAFTER_MODEL` | *(empty)* | `parseTrimmedString` | Model override for drafter/reviser; falls back to main `RUNTIME_MODEL` |
 | `FORGE_AUDITOR_MODEL` | *(empty)* | `parseTrimmedString` | Model override for auditor; falls back to main `RUNTIME_MODEL` |
-| `FORGE_AUTO_IMPLEMENT` | `true` | `parseBoolean` | When true, sends a CTA prompt after successful forge completion suggesting `!plan approve` and `!plan run`. When false, the forge completes silently (plan summary is still posted). Does **not** auto-implement — the name is aspirational. |
+| `FORGE_AUTO_IMPLEMENT` | `true` | `parseBoolean` | When true, reviews that pass the gating criteria (no blocking verdict, no `CAP_REACHED`, pristine context) are auto-approved and `!plan run` starts immediately; the completion message still highlights any severity warnings so they stay visible. When false, the manual CTA described above is retained and explicitly guides the team to `!plan approve` + `!plan run` (severity warnings are still listed). |
 
 ### Multi-provider auditor
 

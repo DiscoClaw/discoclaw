@@ -18,8 +18,11 @@ import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
 import type { ForgeContext } from './discord/actions-forge.js';
+import { executePlanAction } from './discord/actions-plan.js';
 import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
+import { autoImplementForgePlan } from './discord/forge-auto-implement.js';
+import type { ForgeAutoImplementDeps } from './discord/forge-auto-implement.js';
 import type { LoggerLike } from './discord/action-types.js';
 import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { fetchMessageHistory } from './discord/message-history.js';
@@ -29,8 +32,8 @@ import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, cl
 import { handlePlanAudit } from './discord/audit-handler.js';
 import type { PlanAuditResult } from './discord/audit-handler.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
-import { parseForgeCommand, ForgeOrchestrator } from './discord/forge-commands.js';
-import type { ForgeOrchestratorOpts } from './discord/forge-commands.js';
+import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './discord/forge-commands.js';
+import type { ForgeOrchestratorOpts, ForgeResult } from './discord/forge-commands.js';
 import { runNextPhase, resolveProjectCwd } from './discord/plan-manager.js';
 import {
   acquireWriterLock as registryAcquireWriterLock,
@@ -680,6 +683,129 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       const isThread = typeof (msg.channel as any)?.isThread === 'function' ? (msg.channel as any).isThread() : false;
       const threadId = isThread ? String((msg.channel as any).id ?? '') : null;
       const threadParentId = isThread ? String((msg.channel as any).parentId ?? '') : null;
+      const shouldSendManualPlanCta = (result: ForgeResult) =>
+        !result.error && !!result.planId && !result.reachedMaxRounds && result.finalVerdict !== 'CANCELLED';
+
+      type AutoImplementAttemptResult = {
+        autoStarted: boolean;
+        skipReason?: string;
+      };
+
+      async function sendForgeImplementationFollowup(result: ForgeResult) {
+        const planId = result.planId;
+        const manualEligible = shouldSendManualPlanCta(result);
+        let attemptResult: AutoImplementAttemptResult | undefined;
+
+        if (params.forgeAutoImplement && manualEligible && planId) {
+          attemptResult = await sendAutoImplementOutcome(result);
+          if (attemptResult.autoStarted) {
+            return;
+          }
+        }
+
+        if (!manualEligible || !planId) return;
+
+        const skipReason = attemptResult?.skipReason;
+        if (skipReason) {
+          params.log?.info({ planId, skipReason }, 'forge:auto-implement:skipped');
+        }
+
+        const manualMessage = buildPlanImplementationMessage(skipReason, planId);
+
+        try {
+          await msg.channel.send({ content: manualMessage, allowedMentions: NO_MENTIONS });
+        } catch (err) {
+          params.log?.warn({ err, planId }, 'forge:auto-implement: manual CTA send failed');
+        }
+      }
+
+      async function sendAutoImplementOutcome(result: ForgeResult): Promise<AutoImplementAttemptResult> {
+        const planId = result.planId;
+        const plansDir = path.join(params.workspaceCwd, 'plans');
+        const planCtx: PlanContext = {
+          plansDir,
+          workspaceCwd: params.workspaceCwd,
+          beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+          log: params.log,
+          depth: 0,
+          runtime: params.runtime,
+          model: resolveModel(params.runtimeModel, params.runtime.id),
+          phaseTimeoutMs: params.planPhaseTimeoutMs ?? 5 * 60_000,
+          maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
+          maxPlanRunPhases: MAX_PLAN_RUN_PHASES,
+          onProgress: async (progressMsg: string) => {
+            params.log?.info(
+              { planId: result.planId, progress: progressMsg },
+              'plan:auto-implement:progress',
+            );
+          },
+        };
+
+        const actionCtx: ActionContext = {
+          guild: msg.guild ?? ({} as Guild),
+          client: msg.client,
+          channelId: msg.channelId,
+          messageId: msg.id,
+          threadParentId,
+          deferScheduler: params.deferScheduler,
+        };
+
+        const deps: ForgeAutoImplementDeps = {
+          planApprove: async (planId: string) => {
+            const approveResult = await executePlanAction(
+              { type: 'planApprove', planId },
+              actionCtx,
+              planCtx,
+            );
+            if (!approveResult.ok) {
+              throw new Error(approveResult.error ?? 'plan approval failed');
+            }
+          },
+          planRun: async (planId: string) => {
+            const runResult = await executePlanAction(
+              { type: 'planRun', planId },
+              actionCtx,
+              planCtx,
+            );
+            if (!runResult.ok) {
+              throw new Error(runResult.error ?? 'plan run failed');
+            }
+            return { summary: runResult.summary ?? '' };
+          },
+          isPlanRunning,
+          log: params.log,
+        };
+
+        let content: string;
+        let autoStarted = false;
+        let skipReason: string | undefined;
+
+        try {
+          const outcome = await autoImplementForgePlan({ planId, result }, deps);
+          if (outcome.status === 'auto') {
+            content = outcome.summary;
+            autoStarted = true;
+          } else {
+            content = outcome.message;
+            skipReason = outcome.message;
+          }
+        } catch (err) {
+          params.log?.error({ err, planId }, 'forge:auto-implement: handler failed');
+          const fallbackMessage = planId
+            ? buildPlanImplementationMessage(undefined, planId)
+            : 'Review the plan manually, then use `!plan approve <id>` and `!plan run <id>` to continue.';
+          content = fallbackMessage;
+          skipReason = content;
+        }
+
+        try {
+          await msg.channel.send({ content, allowedMentions: NO_MENTIONS });
+        } catch (err) {
+          params.log?.warn({ err, planId }, 'forge:auto-implement: follow-up send failed');
+        }
+
+        return { autoStarted, skipReason };
+      }
       const sessionKey = discordSessionKey({
         channelId: msg.channelId,
         authorId: msg.author.id,
@@ -1255,16 +1381,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         // best-effort
                       }
                     }
-                    if (!result.error && result.planId && params.forgeAutoImplement && !result.reachedMaxRounds && result.finalVerdict !== 'CANCELLED') {
-                      try {
-                        await msg.channel.send({
-                          content: `Reply \`!plan approve ${result.planId}\` to approve, then \`!plan run ${result.planId}\` to start implementation. Or \`!plan show ${result.planId}\` to review first.`,
-                          allowedMentions: NO_MENTIONS,
-                        });
-                      } catch {
-                        // best-effort
-                      }
-                    }
+                    await sendForgeImplementationFollowup(result);
                   },
                   async (err) => {
                     setActiveOrchestrator(null);
@@ -1380,17 +1497,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       // best-effort
                     }
                   }
-                  // Send CTA prompt for approval + implementation
-                  if (!result.error && result.planId && params.forgeAutoImplement && !result.reachedMaxRounds && result.finalVerdict !== 'CANCELLED') {
-                    try {
-                      await msg.channel.send({
-                        content: `Reply \`!plan approve ${result.planId}\` to approve, then \`!plan run ${result.planId}\` to start implementation. Or \`!plan show ${result.planId}\` to review first.`,
-                        allowedMentions: NO_MENTIONS,
-                      });
-                    } catch {
-                      // best-effort
-                    }
-                  }
+                  await sendForgeImplementationFollowup(result);
                 },
                 async (err) => {
                   setActiveOrchestrator(null);

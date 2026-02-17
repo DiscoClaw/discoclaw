@@ -5,10 +5,11 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 
-import { createClaudeCliRuntime, killActiveSubprocesses } from './runtime/claude-code-cli.js';
+import { createClaudeCliRuntime } from './runtime/claude-code-cli.js';
+import { killAllSubprocesses } from './runtime/cli-adapter.js';
 import { RuntimeRegistry } from './runtime/registry.js';
 import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
-import { createCodexCliRuntime, killActiveCodexSubprocesses } from './runtime/codex-cli.js';
+import { createCodexCliRuntime } from './runtime/codex-cli.js';
 import { createConcurrencyLimiter, withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, resolveDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
@@ -148,9 +149,8 @@ const shutdown = async () => {
 
   // Edit all in-progress Discord replies before killing subprocesses.
   await drainInFlightReplies({ timeoutMs: 3000, log });
-  // Kill Claude subprocesses so they release session locks before the new instance starts.
-  killActiveSubprocesses();
-  killActiveCodexSubprocesses();
+  // Kill all CLI subprocesses so they release session locks before the new instance starts.
+  killAllSubprocesses();
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
   beadForumCountSync?.stop();
   cronForumCountSync?.stop();

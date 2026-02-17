@@ -7,8 +7,29 @@
 
 See: `src/runtime/types.ts`
 
+## Strategy Pattern (CLI Adapters)
+
+All CLI-based runtime adapters share a universal factory (`src/runtime/cli-adapter.ts`) parameterized by a thin strategy object. New models only need ~40-80 lines of model-specific logic.
+
+```
+createCliRuntime(strategy, opts) → RuntimeAdapter
+```
+
+The strategy provides: arg building, stdin formatting, output parsing, error handling.
+The factory provides: subprocess tracking, process pool, stall detection, session scanning, JSONL parsing, image dedup, event queue.
+
+| Strategy | File | Multi-turn | Notes |
+|----------|------|------------|-------|
+| Claude Code | `strategies/claude-strategy.ts` | process-pool | Default JSONL parsing, image support |
+| Codex CLI | `strategies/codex-strategy.ts` | session-resume | Custom JSONL (thread.started, item.completed), error sanitization |
+| Template | `strategies/template-strategy.ts` | — | Commented starting point for new models |
+
+Thin wrappers (`claude-code-cli.ts`, `codex-cli.ts`) map legacy opts and re-export for backward compatibility. Shared utilities live in `cli-shared.ts` and `cli-output-parsers.ts`. Strategy types are in `cli-strategy.ts`.
+
+Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subprocesses across all adapters.
+
 ## Claude Code CLI Runtime (Current)
-- Adapter: `src/runtime/claude-code-cli.ts`
+- Adapter: `src/runtime/claude-code-cli.ts` (thin wrapper around `cli-adapter.ts` + `strategies/claude-strategy.ts`)
 - Invocation shape (full):
   ```
   claude -p --model <id|alias>
@@ -79,7 +100,7 @@ Two-layer protection against hung Claude Code processes:
 | `DISCOCLAW_STREAM_STALL_TIMEOUT_MS` | `120000` | Kill one-shot process if no stdout/stderr for this long. `0` disables. |
 | `DISCOCLAW_STREAM_STALL_WARNING_MS` | `60000` | Show user-visible warning in Discord after this many ms of no events. `0` disables. |
 
-**Runtime layer** (`src/runtime/claude-code-cli.ts`): resets a timer on every stdout/stderr `data` event. On timeout, emits a `stream stall: no output for ${ms}ms` error and kills the process. Applies to both `text` and `stream-json` output formats.
+**Runtime layer** (`src/runtime/cli-adapter.ts`): resets a timer on every stdout/stderr `data` event. On timeout, emits a `stream stall: no output for ${ms}ms` error and kills the process. Applies to both `text` and `stream-json` output formats.
 
 **Discord layer** (`src/discord.ts`, `src/discord/reaction-handler.ts`): both message and reaction handlers track `lastEventAt` and `activeToolCount` in their streaming loops. When stall threshold is exceeded and no tools are active, appends a warning to `deltaText`. Enable `DISCOCLAW_SESSION_SCANNING=1` for tool-aware stall suppression (warnings suppressed during tool execution).
 
@@ -128,7 +149,7 @@ Key files:
 Behavior:
 - When enabled, `invoke()` tries the long-running process first for any call with a `sessionKey`.
 - On hang detection or process crash, automatically falls back to the existing one-shot mode (unchanged).
-- On shutdown, `killActiveSubprocesses()` cleans up the pool.
+- On shutdown, `killAllSubprocesses()` cleans up the pool.
 
 Known limitations:
 - GitHub issue #3187 reports that multi-turn stdin can hang after the first message. Mitigated by automatic hang detection + fallback.
@@ -186,7 +207,8 @@ Any `image` content block in Claude Code's stream-json output is automatically c
 | File | Role |
 |------|------|
 | `src/runtime/types.ts` | `ImageData` type, `image_data` EngineEvent variant |
-| `src/runtime/claude-code-cli.ts` | Extraction, dedup key, per-invocation image counting |
+| `src/runtime/cli-output-parsers.ts` | Extraction, dedup key functions |
+| `src/runtime/cli-adapter.ts` | Per-invocation image counting, dedup via strategy |
 | `src/runtime/long-running-process.ts` | Multi-turn mirror: dedup + emit for long-running sessions |
 | `src/discord/output-common.ts` | `buildAttachments()`, attachment slicing across message chunks |
 | `src/discord.ts` | Message path consumer |
