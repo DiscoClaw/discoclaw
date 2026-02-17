@@ -487,14 +487,14 @@ The phase manager decomposes an approved plan into executable phases, manages de
 `decomposePlan()` in `plan-manager.ts`:
 
 1. Extract the `## Changes` section from the plan
-2. Parse file paths from backtick-wrapped list items
+2. Parse file paths from the section by looking for backtick-wrapped entries in list items, headings, and the bolded file headers used in the file-by-file breakdowns
 3. Group files into batches (respecting `PLAN_PHASE_MAX_CONTEXT_FILES`)
    - Module + test file pairs are kept together
    - Remaining files grouped by directory
 4. Generate one `implement` phase per batch
-5. Append one `audit` phase that depends on all implement phases
+5. Append one `audit` phase that depends on all implement phases (the post-implementation audit is always generated, even when the phase list falls back to the read/implement flow)
 
-If no file paths are found, a minimal 2-phase set is generated: `read` → `implement`.
+When `extractFilePaths()` yields nothing, the fallback phases are now `read` → `implement` → `audit`, so the plan manager always includes a post-implementation audit even for plans that don't enumerate specific files.
 
 ### Phase kinds
 
