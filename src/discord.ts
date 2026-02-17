@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ActivityType, Client, GatewayIntentBits, Partials } from 'discord.js';
-import type { PresenceData } from 'discord.js';
+import type { Guild, PresenceData } from 'discord.js';
 import type { RuntimeAdapter, ImageData } from './runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from './runtime/types.js';
 import type { SessionManager } from './sessions.js';
@@ -11,7 +11,8 @@ import type { DiscordChannelContext } from './discord/channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { discordSessionKey } from './discord/session-key.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './discord/actions.js';
-import type { ActionCategoryFlags, DiscordActionResult } from './discord/actions.js';
+import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './discord/actions.js';
+import type { DeferScheduler } from './discord/actions-defer.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
@@ -113,6 +114,9 @@ export type BotParams = {
   discordActionsPlan?: boolean;
   discordActionsMemory?: boolean;
   discordActionsDefer?: boolean;
+  deferMaxDelaySeconds?: number;
+  deferMaxConcurrent?: number;
+  deferScheduler?: DeferScheduler;
   beadCtx?: BeadContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;

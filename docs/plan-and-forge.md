@@ -881,6 +881,18 @@ All three steps should happen together — don't leave stale branches on either 
 
 **Tip:** GitHub can auto-delete head branches on merge (Settings → General → "Automatically delete head branches"). When enabled, step 3 is handled automatically.
 
+### Local cleanup & verification
+
+Documented rebuild/checks keep your workspace aligned with `main`. After the branch is merged, run the following before starting the next plan work:
+
+1. **Refresh refs:** `git fetch --prune origin` so stale remotes are discarded.
+2. **Rebase main:** `git checkout main && git pull --rebase origin main` to match the merged state exactly.
+3. **Verify dependencies:** `pnpm install` (a no-op when nothing changed, but safe after merges that touch lockfiles).
+4. **Confirm the build/tests:** `pnpm build` (and `pnpm test` if you normally run it) on the refreshed `main` to prove the workspace is stable.
+5. **Status check:** `git status` should report a clean tree before you start on the next plan; fix any leftover artifacts before branching again.
+
+These steps mirror the rebuild workflow in `AGENTS.md`/`TOOLS.md` and ensure we catch integration issues early, rather than carrying them into the next feature branch.
+
 ---
 
 ## 14. Architecture Notes
