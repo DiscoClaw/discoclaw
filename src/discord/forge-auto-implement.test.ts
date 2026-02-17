@@ -59,6 +59,7 @@ describe('autoImplementForgePlan', () => {
     const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
 
     expect(outcome.status).toBe('auto');
+    if (outcome.status !== 'auto') throw new Error('expected auto');
     expect(outcome.planId).toBe(result.planId);
     expect(outcome.summary).toBe('Forge reported medium severity concerns.\n\nPlan run started');
     expect(deps.planApprove).toHaveBeenCalledWith(result.planId);
@@ -73,6 +74,7 @@ describe('autoImplementForgePlan', () => {
     const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
 
     expect(outcome.status).toBe('manual');
+    if (outcome.status !== 'manual') throw new Error('expected manual');
     expect(outcome.message).toContain('A plan run is already in progress for this plan.');
   });
 
@@ -83,6 +85,7 @@ describe('autoImplementForgePlan', () => {
     const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
 
     expect(outcome.status).toBe('manual');
+    if (outcome.status !== 'manual') throw new Error('expected manual');
     expect(outcome.message).toContain('CAP_REACHED');
   });
 
@@ -92,6 +95,8 @@ describe('autoImplementForgePlan', () => {
 
     const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
 
+    expect(outcome.status).toBe('manual');
+    if (outcome.status !== 'manual') throw new Error('expected manual');
     expect(outcome.message).toContain('Forge failed: timeout');
   });
 
@@ -103,6 +108,7 @@ describe('autoImplementForgePlan', () => {
     const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
 
     expect(outcome.status).toBe('manual');
+    if (outcome.status !== 'manual') throw new Error('expected manual');
     expect(outcome.message).toContain('Auto-approval failed: Error: boom');
     expect(deps.planRun).not.toHaveBeenCalled();
     expect(deps.log?.error).toHaveBeenCalled();
@@ -116,6 +122,7 @@ describe('autoImplementForgePlan', () => {
     const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
 
     expect(outcome.status).toBe('manual');
+    if (outcome.status !== 'manual') throw new Error('expected manual');
     expect(outcome.message).toContain('Auto-run failed: Error: run fail');
     expect(deps.log?.error).toHaveBeenCalled();
   });
@@ -126,6 +133,8 @@ describe('autoImplementForgePlan', () => {
 
     const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
 
+    expect(outcome.status).toBe('manual');
+    if (outcome.status !== 'manual') throw new Error('expected manual');
     expect(outcome.message).toContain('blocking severity concerns');
   });
 });
