@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="discoclaw_splash.jpg" alt="DiscoClaw" width="700" />
+  <img src="discoclaw_splash.png" alt="DiscoClaw" width="700" />
 </p>
 
 # DiscoClaw
