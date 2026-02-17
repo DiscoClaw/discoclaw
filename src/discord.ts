@@ -51,7 +51,7 @@ import { createReactionAddHandler, createReactionRemoveHandler } from './discord
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { beadThreadCache } from './beads/bead-thread-cache.js';
-import { bdShow } from './beads/bd-cli.js';
+import { buildBeadContextSummary } from './beads/bd-cli.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/shortterm-memory.js';
 import { editThenSendChunks } from './discord/output-common.js';
 import { downloadMessageImages, resolveMediaType } from './discord/image-download.js';
@@ -290,43 +290,6 @@ async function resolvePinnedMessagesSummary(
     return [header, ...lines].join('\n');
   } catch (err) {
     log?.warn({ err }, 'discord:context pinned fetch failed');
-    return undefined;
-  }
-}
-
-function truncateText(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
-}
-
-type BeadContextSummary = {
-  summary: string;
-  description?: string;
-};
-
-async function buildBeadContextSummary(
-  beadId: string | undefined,
-  beadsCwd: string,
-  log?: LoggerLike,
-): Promise<BeadContextSummary | undefined> {
-  if (!beadId) return undefined;
-  try {
-    const bead = await bdShow(beadId, beadsCwd);
-    if (!bead) return undefined;
-    const lines = ['Bead context for this thread:'];
-    if (bead.title) lines.push(`Title: ${bead.title}`);
-    let description: string | undefined;
-    if (bead.description) {
-      const desc = bead.description.trim().replace(/\s+/g, ' ');
-      const truncated = truncateText(desc, 400);
-      lines.push(`Description: ${truncated}`);
-      description = truncated;
-    }
-    return {
-      summary: lines.join('\n'),
-      description,
-    };
-  } catch (err) {
-    log?.warn({ err, beadId }, 'discord:bead summary fetch failed');
     return undefined;
   }
 }
