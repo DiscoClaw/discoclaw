@@ -495,7 +495,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       // Handle !models commands — fast, synchronous, no queue needed.
       const modelsCmd = parseModelsCommand(String(msg.content ?? ''));
       if (modelsCmd) {
-        const response = handleModelsCommand(modelsCmd, params.configCtx);
+        const response = handleModelsCommand(modelsCmd, {
+          configCtx: params.configCtx,
+          configEnabled: params.discordActionsEnabled && (params.discordActionsConfig ?? false),
+        });
         await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
         return;
       }

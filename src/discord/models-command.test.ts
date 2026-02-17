@@ -48,13 +48,26 @@ describe('parseModelsCommand', () => {
     expect(parseModelsCommand('!modelsxyz')).toBeNull();
   });
 
-  it('is case-insensitive', () => {
+  it('is case-insensitive for command and role', () => {
     expect(parseModelsCommand('!MODELS')).toEqual({ action: 'show' });
     expect(parseModelsCommand('!Models Show')).toEqual({ action: 'show' });
-    expect(parseModelsCommand('!MODELS SET CHAT SONNET')).toEqual({
+    expect(parseModelsCommand('!MODELS SET CHAT sonnet')).toEqual({
       action: 'set',
       role: 'chat',
       model: 'sonnet',
+    });
+  });
+
+  it('preserves original case for model token', () => {
+    expect(parseModelsCommand('!models set chat Claude-3-Opus')).toEqual({
+      action: 'set',
+      role: 'chat',
+      model: 'Claude-3-Opus',
+    });
+    expect(parseModelsCommand('!MODELS SET CHAT Sonnet')).toEqual({
+      action: 'set',
+      role: 'chat',
+      model: 'Sonnet',
     });
   });
 
@@ -102,10 +115,18 @@ describe('handleModelsCommand', () => {
     } as any,
   };
 
-  it('returns startup error when configCtx is undefined', () => {
-    const result = handleModelsCommand({ action: 'show' }, undefined);
+  const enabled = { configCtx: mockConfigCtx, configEnabled: true };
+
+  it('returns startup message when configCtx is undefined but feature is enabled', () => {
+    const result = handleModelsCommand({ action: 'show' }, { configCtx: undefined, configEnabled: true });
     expect(result).toContain('not yet available');
     expect(result).toContain('starting up');
+  });
+
+  it('returns disabled message when configCtx is undefined and feature is disabled', () => {
+    const result = handleModelsCommand({ action: 'show' }, { configCtx: undefined, configEnabled: false });
+    expect(result).toContain('disabled');
+    expect(result).not.toContain('starting up');
   });
 
   it('show delegates to executeConfigAction modelShow', () => {
@@ -113,7 +134,7 @@ describe('handleModelsCommand', () => {
       ok: true,
       summary: '**chat**: `sonnet`\n**summary**: `haiku`',
     });
-    const result = handleModelsCommand({ action: 'show' }, mockConfigCtx);
+    const result = handleModelsCommand({ action: 'show' }, enabled);
     expect(spy).toHaveBeenCalledWith({ type: 'modelShow' }, mockConfigCtx);
     expect(result).toContain('sonnet');
     spy.mockRestore();
@@ -126,7 +147,7 @@ describe('handleModelsCommand', () => {
     });
     const result = handleModelsCommand(
       { action: 'set', role: 'chat', model: 'opus' },
-      mockConfigCtx,
+      enabled,
     );
     expect(spy).toHaveBeenCalledWith(
       { type: 'modelSet', role: 'chat', model: 'opus' },
@@ -143,14 +164,14 @@ describe('handleModelsCommand', () => {
     });
     const result = handleModelsCommand(
       { action: 'set', role: 'cron', model: 'haiku' },
-      mockConfigCtx,
+      enabled,
     );
     expect(result).toContain('Error: Cron subsystem not configured');
     spy.mockRestore();
   });
 
   it('help returns usage text with roles and examples', () => {
-    const result = handleModelsCommand({ action: 'help' }, mockConfigCtx);
+    const result = handleModelsCommand({ action: 'help' }, enabled);
     expect(result).toContain('!models commands');
     expect(result).toContain('chat');
     expect(result).toContain('forge-drafter');

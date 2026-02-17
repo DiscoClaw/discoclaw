@@ -17,15 +17,18 @@ export type ModelsCommand =
 const VALID_ROLES = new Set<string>(['chat', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron']);
 
 export function parseModelsCommand(content: string): ModelsCommand | null {
-  const normalized = String(content ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const raw = String(content ?? '').trim().replace(/\s+/g, ' ');
+  const normalized = raw.toLowerCase();
   if (normalized === '!models' || normalized === '!models show') return { action: 'show' };
   if (normalized === '!models help') return { action: 'help' };
 
-  const setMatch = normalized.match(/^!models set (\S+) (\S+)$/);
+  const setMatch = normalized.match(/^!models set (\S+) \S+$/);
   if (setMatch) {
     const role = setMatch[1];
     if (!VALID_ROLES.has(role)) return null;
-    return { action: 'set', role: role as ModelRole, model: setMatch[2] };
+    // Preserve original case for the model token — model IDs may be case-sensitive.
+    const originalModel = raw.split(/\s+/)[3];
+    return { action: 'set', role: role as ModelRole, model: originalModel };
   }
 
   // Unknown subcommand (e.g. "!models bogus") or unrelated message ("!modelsxyz")
@@ -36,9 +39,17 @@ export function parseModelsCommand(content: string): ModelsCommand | null {
 // Handler
 // ---------------------------------------------------------------------------
 
-export function handleModelsCommand(cmd: ModelsCommand, configCtx: ConfigContext | undefined): string {
+export type ModelsCommandOpts = {
+  configCtx: ConfigContext | undefined;
+  configEnabled: boolean;
+};
+
+export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts): string {
+  const { configCtx, configEnabled } = opts;
   if (!configCtx) {
-    return 'Model configuration is not yet available — the bot is still starting up. Try again in a moment.';
+    return configEnabled
+      ? 'Model configuration is not yet available — the bot is still starting up. Try again in a moment.'
+      : 'Model configuration is disabled.';
   }
 
   if (cmd.action === 'help') {
