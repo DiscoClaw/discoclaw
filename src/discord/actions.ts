@@ -34,6 +34,7 @@ export type ActionContext = {
   channelId: string;
   messageId: string;
   threadParentId?: string | null;
+  deferScheduler?: DeferScheduler;
 };
 
 export type ActionCategoryFlags = {
