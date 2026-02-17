@@ -43,6 +43,10 @@ export type ForgeOrchestratorOpts = {
   log?: LoggerLike;
   /** When set, reuse this bead instead of creating a new one (e.g. when issued in a bead forum thread). */
   existingBeadId?: string;
+  /** Optional summary of the bead description to expose to the drafter. */
+  beadDescription?: string;
+  /** Optional pinned-thread summary to expose to the drafter. */
+  pinnedThreadSummary?: string;
 };
 
 type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
@@ -537,8 +541,11 @@ export class ForgeOrchestrator {
       // Load project context once — used by drafter (via context summary), auditor, and reviser
       const projectContext = await this.loadProjectContext();
 
-      // Build context summary from workspace files (includes project context)
-      const contextSummary = await this.buildContextSummary(projectContext);
+      // Build context summary from workspace files (includes project context and additional thread info)
+      const contextSummary = await this.buildContextSummary(projectContext, {
+        beadDescription: this.opts.beadDescription,
+        pinnedThreadSummary: this.opts.pinnedThreadSummary,
+      });
 
       return await this.auditLoop({
         planId,
@@ -892,7 +899,10 @@ export class ForgeOrchestrator {
     };
   }
 
-  private async buildContextSummary(projectContext?: string): Promise<string> {
+  private async buildContextSummary(
+    projectContext?: string,
+    opts?: { beadDescription?: string; pinnedThreadSummary?: string },
+  ): Promise<string> {
     const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
     const sections: string[] = [];
     for (const name of contextFiles) {
@@ -917,6 +927,14 @@ export class ForgeOrchestrator {
       sections.push(`--- tools.md (repo) ---\n${toolsContent.trimEnd()}`);
     } catch {
       // skip if missing
+    }
+
+    if (opts?.beadDescription) {
+      sections.push(`--- bead-description (thread) ---\n${opts.beadDescription.trim()}`);
+    }
+
+    if (opts?.pinnedThreadSummary) {
+      sections.push(`--- pinned-thread summary ---\n${opts.pinnedThreadSummary.trim()}`);
     }
 
     if (sections.length === 0) {

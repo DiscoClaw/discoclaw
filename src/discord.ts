@@ -298,22 +298,33 @@ function truncateText(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
+type BeadContextSummary = {
+  summary: string;
+  description?: string;
+};
+
 async function buildBeadContextSummary(
   beadId: string | undefined,
   beadsCwd: string,
   log?: LoggerLike,
-): Promise<string | undefined> {
+): Promise<BeadContextSummary | undefined> {
   if (!beadId) return undefined;
   try {
     const bead = await bdShow(beadId, beadsCwd);
     if (!bead) return undefined;
     const lines = ['Bead context for this thread:'];
     if (bead.title) lines.push(`Title: ${bead.title}`);
+    let description: string | undefined;
     if (bead.description) {
       const desc = bead.description.trim().replace(/\s+/g, ' ');
-      lines.push(`Description: ${truncateText(desc, 400)}`);
+      const truncated = truncateText(desc, 400);
+      lines.push(`Description: ${truncated}`);
+      description = truncated;
     }
-    return lines.join('\n');
+    return {
+      summary: lines.join('\n'),
+      description,
+    };
   } catch (err) {
     log?.warn({ err, beadId }, 'discord:bead summary fetch failed');
     return undefined;
@@ -1320,7 +1331,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
               const forgeContextParts: string[] = [];
               if (ctxResult.context) forgeContextParts.push(ctxResult.context);
-              if (beadSummary) forgeContextParts.push(beadSummary);
+              if (beadSummary?.summary) forgeContextParts.push(beadSummary.summary);
               if (ctxResult.pinnedSummary) forgeContextParts.push(ctxResult.pinnedSummary);
 
               const forgeContext = forgeContextParts.length > 0
@@ -1345,6 +1356,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 auditorModel: params.forgeAuditorModel,
                 log: params.log,
                 existingBeadId: ctxResult.existingBeadId,
+                beadDescription: beadSummary?.description,
+                pinnedThreadSummary: ctxResult.pinnedSummary,
               });
               setActiveOrchestrator(createOrchestrator);
 
