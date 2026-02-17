@@ -76,7 +76,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     // ---------------------------------------------------------------
     // Multi-turn: process pool path (Claude-style)
     // ---------------------------------------------------------------
-    if (pool && params.sessionKey && strategy.buildLongRunningArgs) {
+    if (pool && params.sessionKey) {
       try {
         const proc = pool.getOrSpawn(params.sessionKey, {
           claudeBin: binary,
