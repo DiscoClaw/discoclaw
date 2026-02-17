@@ -112,6 +112,7 @@ export type BotParams = {
   discordActionsForge?: boolean;
   discordActionsPlan?: boolean;
   discordActionsMemory?: boolean;
+  discordActionsDefer?: boolean;
   beadCtx?: BeadContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -376,6 +377,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
       if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
+      const isDm = msg.guildId == null;
       const actionFlags: ActionCategoryFlags = {
         channels: params.discordActionsChannels,
         messaging: params.discordActionsMessaging,
@@ -388,9 +390,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         forge: params.discordActionsForge ?? false,
         plan: params.discordActionsPlan ?? false,
         memory: params.discordActionsMemory ?? false,
+        defer: !isDm && (params.discordActionsDefer ?? false),
       };
 
-      const isDm = msg.guildId == null;
       if (!isDm && params.allowChannelIds) {
         const ch: any = msg.channel as any;
         const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;

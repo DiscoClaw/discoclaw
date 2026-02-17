@@ -7,6 +7,7 @@ import { executeCronJob } from './executor.js';
 import { safeCronId } from './job-lock.js';
 import { CronRunControl } from './run-control.js';
 import { loadWorkspacePaFiles } from '../discord/prompt-common.js';
+import * as discordActions from '../discord/actions.js';
 import type { CronJob, ParsedCronDef } from './types.js';
 import type { CronExecutorContext } from './executor.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
@@ -101,7 +102,7 @@ function makeCtx(overrides?: Partial<CronExecutorContext>): CronExecutorContext 
     status: null,
     log: mockLog(),
     discordActionsEnabled: false,
-    actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false },
+    actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, defer: false },
     ...overrides,
   };
 }
@@ -194,6 +195,36 @@ describe('executeCronJob', () => {
     expect(job.running).toBe(false);
   });
 
+  it('parses actions with defer disabled for cron runs', async () => {
+    const ctx = makeCtx({
+      discordActionsEnabled: true,
+      actionFlags: {
+        channels: false,
+        messaging: true,
+        guild: false,
+        moderation: false,
+        polls: false,
+        beads: false,
+        crons: false,
+        botProfile: false,
+        forge: false,
+        plan: false,
+        memory: false,
+        defer: true,
+      },
+    });
+    const job = makeJob();
+    const parseSpy = vi.spyOn(discordActions, 'parseDiscordActions');
+    try {
+      await executeCronJob(job, ctx);
+    } finally {
+      parseSpy.mockRestore();
+    }
+    expect(parseSpy).toHaveBeenCalled();
+    const calledFlags = parseSpy.mock.calls[0][1];
+    expect(calledFlags.defer).toBe(false);
+  });
+
   it('does not post if target channel is not allowlisted', async () => {
     const status = {
       online: vi.fn(),
@@ -244,7 +275,7 @@ describe('executeCronJob', () => {
     const ctx = makeCtx({
       runtime,
       discordActionsEnabled: true,
-      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false },
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, defer: false },
     });
     const job = makeJob();
     await executeCronJob(job, ctx);
@@ -272,7 +303,7 @@ describe('executeCronJob', () => {
     const ctx = makeCtx({
       runtime,
       discordActionsEnabled: true,
-      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false },
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, defer: false },
     });
     const job = makeJob();
     await executeCronJob(job, ctx);

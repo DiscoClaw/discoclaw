@@ -15,6 +15,7 @@ const ALL_FLAGS: ActionCategoryFlags = {
   forge: false,
   plan: false,
   memory: false,
+  defer: false,
 };
 
 // ---------------------------------------------------------------------------

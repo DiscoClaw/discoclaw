@@ -46,6 +46,7 @@ export type ActionCategoryFlags = {
   forge: boolean;
   plan: boolean;
   memory: boolean;
+  defer: boolean;
 };
 
 export type DiscordActionRequest =

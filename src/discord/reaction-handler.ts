@@ -288,6 +288,7 @@ function createReactionHandler(
             forge: params.discordActionsForge ?? false,
             plan: params.discordActionsPlan ?? false,
             memory: params.discordActionsMemory ?? false,
+            defer: params.discordActionsDefer ?? false,
           };
 
           if (params.discordActionsEnabled) {

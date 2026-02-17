@@ -576,6 +576,7 @@ const botParams = {
   discordActionsForge: discordActionsForge && forgeCommandsEnabled,
   discordActionsPlan: discordActionsPlan && planCommandsEnabled,
   discordActionsMemory: discordActionsMemory && durableMemoryEnabled,
+  discordActionsDefer: cfg.discordActionsDefer,
   beadCtx: undefined as BeadContext | undefined,
   cronCtx: undefined as CronContext | undefined,
   forgeCtx: undefined as ForgeContext | undefined,
@@ -863,6 +864,7 @@ if (cronEnabled && effectiveCronForum) {
     forge: discordActionsForge && forgeCommandsEnabled, // Enables cron → forge autonomous workflows.
     plan: discordActionsPlan && planCommandsEnabled, // Enables cron → plan autonomous workflows.
     memory: false, // No user context in cron flows.
+    defer: false,
   };
   const cronRunControl = new CronRunControl();
 

@@ -259,7 +259,8 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     // Handle Discord actions if enabled.
     if (ctx.discordActionsEnabled) {
-      const { cleanText, actions } = parseDiscordActions(processedText, ctx.actionFlags);
+      const safeActionFlags = { ...ctx.actionFlags, defer: false };
+      const { cleanText, actions } = parseDiscordActions(processedText, safeActionFlags);
       if (actions.length > 0) {
         const actCtx = {
           guild,
