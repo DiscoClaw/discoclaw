@@ -708,7 +708,11 @@ export class ForgeOrchestrator {
     const rawDrafterModel = this.opts.drafterModel ?? this.opts.model;
     const rawAuditorModel = this.opts.auditorModel ?? this.opts.model;
     const drafterRt = this.opts.drafterRuntime ?? this.opts.runtime;
-    const drafterModel = resolveModel(rawDrafterModel, drafterRt.id);
+    const isClaudeDrafter = drafterRt.id === 'claude_code';
+    const hasExplicitDrafterModel = Boolean(this.opts.drafterModel);
+    const drafterModel = isClaudeDrafter
+      ? resolveModel(rawDrafterModel, drafterRt.id)
+      : (hasExplicitDrafterModel ? resolveModel(rawDrafterModel, drafterRt.id) : '');
     const readOnlyTools = ['Read', 'Glob', 'Grep'];
     const addDirs = [this.opts.cwd];
 
