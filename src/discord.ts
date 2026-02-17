@@ -530,8 +530,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           projectCwd: params.projectCwd,
           dataDir: params.dataDir,
           restartCmd: process.env.DC_RESTART_CMD,
-          activeForge: getActiveOrchestrator()?.activePlanId,
-          activePlan: getActiveOrchestrator()?.activePlanId,
         });
         await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
         // Deferred action (e.g., restart after apply) runs after the reply is sent.
