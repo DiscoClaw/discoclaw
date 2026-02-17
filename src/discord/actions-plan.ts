@@ -20,6 +20,8 @@ import {
   isPlanRunning,
 } from './forge-plan-registry.js';
 
+const DEFAULT_PLAN_PHASE_TIMEOUT_MS = 1_800_000;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -243,7 +245,7 @@ export async function executePlanAction(
       }
 
       const maxPhases = planCtx.maxPlanRunPhases ?? 50;
-      const timeoutMs = planCtx.phaseTimeoutMs ?? 30 * 60_000;
+      const timeoutMs = planCtx.phaseTimeoutMs ?? DEFAULT_PLAN_PHASE_TIMEOUT_MS;
       const onProgress = planCtx.onProgress ?? (async () => {});
 
       addRunningPlan(action.planId);

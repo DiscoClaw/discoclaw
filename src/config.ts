@@ -191,6 +191,8 @@ function parsePositiveNumber(
   return n;
 }
 
+const DEFAULT_THIRTY_MINUTES_MS = 1_800_000;
+
 function parseNonNegativeInt(
   env: NodeJS.ProcessEnv,
   name: string,
@@ -411,7 +413,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
       runtimeModel: parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'capable',
       runtimeTools: parseRuntimeTools(env, warnings),
-      runtimeTimeoutMs: parsePositiveNumber(env, 'RUNTIME_TIMEOUT_MS', 30 * 60_000),
+      runtimeTimeoutMs: parsePositiveNumber(env, 'RUNTIME_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       runtimeFallbackModel: parseTrimmedString(env, 'RUNTIME_FALLBACK_MODEL'),
       runtimeMaxBudgetUsd: (() => {
         const raw = parseTrimmedString(env, 'RUNTIME_MAX_BUDGET_USD');
@@ -469,13 +471,13 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       planCommandsEnabled: parseBoolean(env, 'DISCOCLAW_PLAN_COMMANDS_ENABLED', true),
       planPhasesEnabled: parseBoolean(env, 'PLAN_PHASES_ENABLED', true),
       planPhaseMaxContextFiles: parsePositiveInt(env, 'PLAN_PHASE_MAX_CONTEXT_FILES', 5),
-      planPhaseTimeoutMs: parsePositiveNumber(env, 'PLAN_PHASE_TIMEOUT_MS', 30 * 60_000),
+      planPhaseTimeoutMs: parsePositiveNumber(env, 'PLAN_PHASE_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       planPhaseMaxAuditFixAttempts: parseNonNegativeInt(env, 'PLAN_PHASE_AUDIT_FIX_MAX', 3),
       forgeCommandsEnabled: parseBoolean(env, 'DISCOCLAW_FORGE_COMMANDS_ENABLED', true),
       forgeMaxAuditRounds: parsePositiveInt(env, 'FORGE_MAX_AUDIT_ROUNDS', 5),
       forgeDrafterModel: parseTrimmedString(env, 'FORGE_DRAFTER_MODEL'),
       forgeAuditorModel: parseTrimmedString(env, 'FORGE_AUDITOR_MODEL'),
-      forgeTimeoutMs: parsePositiveNumber(env, 'FORGE_TIMEOUT_MS', 30 * 60_000),
+      forgeTimeoutMs: parsePositiveNumber(env, 'FORGE_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       forgeProgressThrottleMs: parseNonNegativeInt(env, 'FORGE_PROGRESS_THROTTLE_MS', 3000),
       forgeAutoImplement: parseBoolean(env, 'FORGE_AUTO_IMPLEMENT', true),
 
