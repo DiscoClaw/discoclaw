@@ -21,6 +21,8 @@ import { PLAN_ACTION_TYPES, executePlanAction, planActionsPromptSection } from '
 import type { PlanActionRequest, PlanContext } from './actions-plan.js';
 import { MEMORY_ACTION_TYPES, executeMemoryAction, memoryActionsPromptSection } from './actions-memory.js';
 import type { MemoryActionRequest, MemoryContext } from './actions-memory.js';
+import { DEFER_ACTION_TYPES, executeDeferAction } from './actions-defer.js';
+import type { DeferActionRequest } from './actions-defer.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,7 +62,8 @@ export type DiscordActionRequest =
   | BotProfileActionRequest
   | ForgeActionRequest
   | PlanActionRequest
-  | MemoryActionRequest;
+  | MemoryActionRequest
+  | DeferActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -93,6 +96,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.forge) for (const t of FORGE_ACTION_TYPES) types.add(t);
   if (flags.plan) for (const t of PLAN_ACTION_TYPES) types.add(t);
   if (flags.memory) for (const t of MEMORY_ACTION_TYPES) types.add(t);
+  if (flags.defer) for (const t of DEFER_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -285,6 +289,8 @@ export async function executeDiscordActions(
         } else {
           result = await executeMemoryAction(action as MemoryActionRequest, ctx, subs.memoryCtx);
         }
+      } else if (DEFER_ACTION_TYPES.has(action.type)) {
+        result = await executeDeferAction(action as DeferActionRequest, ctx);
       } else {
         result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
       }
@@ -407,6 +413,12 @@ If an action fails with a "Missing Permissions" or "Missing Access" error, tell 
 2. Find the ${displayName} bot's role (usually named after the bot).
 3. Enable the required permission under the role's permissions.
 4. The bot may need to be re-invited with the "moderator" permission profile if the role wasn't granted at invite time.`);
+
+  if (flags.defer) {
+    sections.push(`### Deferred self-invocation
+Use a <discord-action>{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}</discord-action> block to schedule a follow-up run inside the requested channel without another user prompt. You must specify the channel by name or ID; delaySeconds is how long to wait (capped by DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS) and prompt becomes the user message when the deferred invocation runs. The scheduler enforces DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT pending jobs, respects the same channel permissions as this response, automatically posts the follow-up output, and forces \`defer\` off during that run so no chains can form. If a guard rail rejects the request (too long, too many active defers, missing permissions, or the channel becomes invalid) the action fails with an explanatory message.`);
+
+  }
 
   return sections.join('\n\n');
 }

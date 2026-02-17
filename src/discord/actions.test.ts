@@ -15,7 +15,7 @@ const ALL_FLAGS: ActionCategoryFlags = {
   forge: false,
   plan: false,
   memory: false,
-  defer: false,
+  defer: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -40,6 +40,12 @@ describe('parseDiscordActions', () => {
     expect(actions[1]).toEqual({ type: 'channelList' });
   });
 
+  it('extracts defer actions when defer flag enabled', () => {
+    const input = '<discord-action>{"type":"defer","channel":"general","delaySeconds":300,"prompt":"check the forge"}</discord-action>';
+    const { actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'defer', channel: 'general', delaySeconds: 300, prompt: 'check the forge' }]);
+  });
+
   it('skips malformed JSON gracefully', () => {
     const input = '<discord-action>{bad json}</discord-action>Some text';
     const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
@@ -56,6 +62,12 @@ describe('parseDiscordActions', () => {
   it('skips disabled category action types', () => {
     const input = '<discord-action>{"type":"channelCreate","name":"test"}</discord-action>';
     const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, channels: false });
+    expect(actions).toHaveLength(0);
+  });
+
+  it('skips defer actions when defer flag disabled', () => {
+    const input = '<discord-action>{"type":"defer","channel":"general","delaySeconds":60}</discord-action>';
+    const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, defer: false });
     expect(actions).toHaveLength(0);
   });
 
