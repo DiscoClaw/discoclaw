@@ -688,23 +688,44 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       const shouldSendManualPlanCta = (result: ForgeResult) =>
         !result.error && !!result.planId && !result.reachedMaxRounds && result.finalVerdict !== 'CANCELLED';
 
+      type AutoImplementAttemptResult = {
+        autoStarted: boolean;
+        skipReason?: string;
+      };
+
       async function sendForgeImplementationFollowup(result: ForgeResult) {
-        if (params.forgeAutoImplement) {
-          await sendAutoImplementOutcome(result);
-          return;
+        const planId = result.planId;
+        const manualEligible = shouldSendManualPlanCta(result);
+        let attemptResult: AutoImplementAttemptResult | undefined;
+
+        if (params.forgeAutoImplement && manualEligible && planId) {
+          attemptResult = await sendAutoImplementOutcome(result);
+          if (attemptResult.autoStarted) {
+            return;
+          }
         }
-        if (!shouldSendManualPlanCta(result)) return;
+
+        if (!manualEligible || !planId) return;
+
+        const skipReason = attemptResult?.skipReason;
+        if (skipReason) {
+          params.log?.info({ planId, skipReason }, 'forge:auto-implement:skipped');
+        }
+
+        const manualCta = manualPlanImplementationCta(planId);
+        const manualMessage = skipReason
+          ? (skipReason.includes(manualCta) ? skipReason : `${skipReason}\n\n${manualCta}`)
+          : manualCta;
+
         try {
-          await msg.channel.send({
-            content: manualPlanImplementationCta(result.planId!),
-            allowedMentions: NO_MENTIONS,
-          });
+          await msg.channel.send({ content: manualMessage, allowedMentions: NO_MENTIONS });
         } catch (err) {
-          params.log?.warn({ err, planId: result.planId }, 'forge:auto-implement: manual CTA send failed');
+          params.log?.warn({ err, planId }, 'forge:auto-implement: manual CTA send failed');
         }
       }
 
-      async function sendAutoImplementOutcome(result: ForgeResult) {
+      async function sendAutoImplementOutcome(result: ForgeResult): Promise<AutoImplementAttemptResult> {
+        const planId = result.planId;
         const plansDir = path.join(params.workspaceCwd, 'plans');
         const planCtx: PlanContext = {
           plansDir,
@@ -761,21 +782,33 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         };
 
         let content: string;
+        let autoStarted = false;
+        let skipReason: string | undefined;
+
         try {
-          const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
-          content = outcome.status === 'auto' ? outcome.summary : outcome.message;
+          const outcome = await autoImplementForgePlan({ planId, result }, deps);
+          if (outcome.status === 'auto') {
+            content = outcome.summary;
+            autoStarted = true;
+          } else {
+            content = outcome.message;
+            skipReason = outcome.message;
+          }
         } catch (err) {
-          params.log?.error({ err, planId: result.planId }, 'forge:auto-implement: handler failed');
-          content = result.planId
-            ? manualPlanImplementationCta(result.planId)
+          params.log?.error({ err, planId }, 'forge:auto-implement: handler failed');
+          content = planId
+            ? manualPlanImplementationCta(planId)
             : 'Review the plan manually, then use `!plan approve <id>` and `!plan run <id>` to continue.';
+          skipReason = content;
         }
 
         try {
           await msg.channel.send({ content, allowedMentions: NO_MENTIONS });
         } catch (err) {
-          params.log?.warn({ err, planId: result.planId }, 'forge:auto-implement: follow-up send failed');
+          params.log?.warn({ err, planId }, 'forge:auto-implement: follow-up send failed');
         }
+
+        return { autoStarted, skipReason };
       }
       const sessionKey = discordSessionKey({
         channelId: msg.channelId,
