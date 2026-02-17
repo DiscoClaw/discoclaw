@@ -35,7 +35,7 @@ Action categories (each module defines types, an executor, and prompt examples):
 
 Channel action types (in `src/discord/actions-channels.ts`):
 - `channelList`, `channelCreate`, `channelDelete`, `channelEdit`, `channelInfo`, `channelMove`
-- `threadListArchived`
+- `threadListArchived`, `threadEdit`
 - `forumTagCreate`, `forumTagDelete`, `forumTagList`
 
 Cron action types (in `src/discord/actions-crons.ts`):

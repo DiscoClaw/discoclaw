@@ -1,5 +1,5 @@
 import { ChannelType } from 'discord.js';
-import type { ForumChannel, GuildChannel } from 'discord.js';
+import type { ForumChannel, GuildChannel, ThreadChannel } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 
 // ---------------------------------------------------------------------------
@@ -17,7 +17,8 @@ export type ChannelActionRequest =
   | { type: 'threadListArchived'; channelId: string; limit?: number }
   | { type: 'forumTagCreate'; channelId: string; name: string; emoji?: { id?: string; name?: string } }
   | { type: 'forumTagDelete'; channelId: string; tagId: string }
-  | { type: 'forumTagList'; channelId: string };
+  | { type: 'forumTagList'; channelId: string }
+  | { type: 'threadEdit'; threadId: string; appliedTags?: string[]; name?: string };
 
 // Record ensures every union member is listed; TS errors if a new type is added to the union but not here.
 const CHANNEL_TYPE_MAP: Record<ChannelActionRequest['type'], true> = {
@@ -25,6 +26,7 @@ const CHANNEL_TYPE_MAP: Record<ChannelActionRequest['type'], true> = {
   channelList: true, channelInfo: true, categoryCreate: true,
   channelMove: true, threadListArchived: true,
   forumTagCreate: true, forumTagDelete: true, forumTagList: true,
+  threadEdit: true,
 };
 export const CHANNEL_ACTION_TYPES = new Set<string>(Object.keys(CHANNEL_TYPE_MAP));
 
@@ -282,6 +284,53 @@ export async function executeChannelAction(
       });
       return { ok: true, summary: `Tags on #${channel.name} (${tags.length}):\n${lines.join('\n')}` };
     }
+
+    case 'threadEdit': {
+      if (action.appliedTags == null && action.name == null) {
+        return { ok: false, error: 'threadEdit requires at least one of appliedTags or name' };
+      }
+
+      // Cache-first fetch, same pattern as fetchThreadChannel in bead sync.
+      let thread: ThreadChannel | null = null;
+      const cached = ctx.client.channels.cache.get(action.threadId);
+      if (cached && cached.isThread()) {
+        thread = cached as ThreadChannel;
+      } else {
+        try {
+          const fetched = await ctx.client.channels.fetch(action.threadId);
+          if (fetched && fetched.isThread()) thread = fetched as ThreadChannel;
+        } catch {
+          // fall through to null check below
+        }
+      }
+
+      if (!thread) return { ok: false, error: `Thread "${action.threadId}" not found` };
+
+      if ((thread as any).guildId !== guild.id) {
+        return { ok: false, error: `Thread "${action.threadId}" does not belong to this guild` };
+      }
+
+      if (action.appliedTags != null) {
+        const parentType = (thread as any).parent?.type;
+        if (parentType !== ChannelType.GuildForum) {
+          return { ok: false, error: `Thread "${action.threadId}" is not in a forum channel — appliedTags only applies to forum threads` };
+        }
+        if (action.appliedTags.length > 5) {
+          return { ok: false, error: `appliedTags exceeds Discord maximum of 5 (got ${action.appliedTags.length})` };
+        }
+      }
+
+      const edits: { appliedTags?: string[]; name?: string } = {};
+      if (action.appliedTags != null) edits.appliedTags = action.appliedTags;
+      if (action.name != null) edits.name = action.name;
+
+      await (thread as any).edit(edits);
+
+      const parts: string[] = [];
+      if (action.name != null) parts.push(`name → ${action.name}`);
+      if (action.appliedTags != null) parts.push(`appliedTags → [${action.appliedTags.join(', ')}]`);
+      return { ok: true, summary: `Edited thread "${thread.name}" (id:${thread.id}): ${parts.join(', ')}` };
+    }
   }
 }
 
@@ -364,5 +413,15 @@ Returns the created tag's ID in the summary.
 **forumTagList** — List all tags on a forum channel:
 \`\`\`
 <discord-action>{"type":"forumTagList","channelId":"123"}</discord-action>
-\`\`\``;
+\`\`\`
+
+**threadEdit** — Edit a forum thread's applied tags and/or name:
+\`\`\`
+<discord-action>{"type":"threadEdit","threadId":"789","appliedTags":["tag-id-1","tag-id-2"],"name":"New thread name"}</discord-action>
+\`\`\`
+- \`threadId\` (required): The thread ID (resolved via cache then fetch).
+- \`appliedTags\` (optional): Array of tag IDs to apply. Max 5. Only valid for threads in forum channels.
+- \`name\` (optional): New thread title.
+At least one of appliedTags or name is required.
+Use \`forumTagList\` to get tag IDs, then pass them here to swap status tags on orphan threads.`;
 }
