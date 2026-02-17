@@ -289,6 +289,7 @@ function createReactionHandler(
             forge: params.discordActionsForge ?? false,
             plan: params.discordActionsPlan ?? false,
             memory: params.discordActionsMemory ?? false,
+            config: params.discordActionsConfig ?? false,
             defer: !isDm && (params.discordActionsDefer ?? false),
           };
 
@@ -473,6 +474,7 @@ function createReactionHandler(
                 forgeCtx: params.forgeCtx,
                 planCtx: params.planCtx,
                 memoryCtx: perEventMemoryCtx,
+                configCtx: params.configCtx,
               });
               for (const result of results) {
                 metrics.recordActionResult(result.ok);
