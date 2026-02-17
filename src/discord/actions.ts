@@ -420,7 +420,7 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
 - Never emit an action with empty, placeholder, or missing values for required parameters. If you don't have the value (e.g., no messageId for react), skip the action entirely.
 - Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
 - Action blocks are removed from the displayed message; results are appended automatically.
-- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, beadList, beadShow, cronList, cronShow, planList, planShow, memoryShow, forgeStatus, modelShow) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
+- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, beadList, beadShow, cronList, cronShow, planList, planShow, memoryShow, modelShow) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
 - Include all needed actions in a single response when possible (e.g., a channelList and multiple channelDelete blocks together).
 
 ### Permissions

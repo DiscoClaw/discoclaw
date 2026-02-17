@@ -151,6 +151,10 @@ describe('QUERY_ACTION_TYPES', () => {
       expect(QUERY_ACTION_TYPES.has(t)).toBe(false);
     }
   });
+
+  it('does not contain forgeStatus (regression: forgeStatus result is self-explanatory and must not trigger follow-up)', () => {
+    expect(QUERY_ACTION_TYPES.has('forgeStatus')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
