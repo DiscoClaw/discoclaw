@@ -96,7 +96,15 @@ describe('modelShow', () => {
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.summary).not.toContain('cron');
+    expect(result.summary).not.toContain('cron-auto-tag');
+  });
+
+  it('labels cron row as cron-auto-tag', () => {
+    const ctx = makeCtx();
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('cron-auto-tag');
   });
 });
 
@@ -118,7 +126,7 @@ describe('modelSet', () => {
     expect(result.ok).toBe(true);
     expect(ctx.botParams.summaryModel).toBe('haiku');
     expect(ctx.botParams.cronCtx!.autoTagModel).toBe('haiku');
-    expect((ctx.botParams.beadCtx as any).autoTagModel).toBe('haiku');
+    expect(ctx.botParams.beadCtx!.autoTagModel).toBe('haiku');
   });
 
   it('sets forge-drafter model', () => {
@@ -187,6 +195,18 @@ describe('modelSet', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.summary).toContain('resolves to opus');
+  });
+
+  it('fast role succeeds when cronCtx and beadCtx are missing', () => {
+    const ctx = makeCtx({ cronCtx: undefined, beadCtx: undefined });
+    const result = executeConfigAction({ type: 'modelSet', role: 'fast', model: 'haiku' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.summaryModel).toBe('haiku');
+    if (!result.ok) return;
+    // Only summary changed, cron/beads skipped silently
+    expect(result.summary).toContain('summary');
+    expect(result.summary).not.toContain('cron');
+    expect(result.summary).not.toContain('beads');
   });
 
   it('accepts concrete model names as passthrough', () => {

@@ -19,7 +19,6 @@ export type DiscoclawConfig = {
   primaryRuntime: string;
 
   runtimeModel: string;
-  fastModel: string;
   runtimeTools: string[];
   runtimeTimeoutMs: number;
 
@@ -415,7 +414,6 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       primaryRuntime,
 
       runtimeModel: parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'capable',
-      fastModel,
       runtimeTools: parseRuntimeTools(env, warnings),
       runtimeTimeoutMs: parsePositiveNumber(env, 'RUNTIME_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       runtimeFallbackModel: parseTrimmedString(env, 'RUNTIME_FALLBACK_MODEL'),

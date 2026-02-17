@@ -32,7 +32,7 @@ export type ConfigMutableParams = {
   forgeDrafterModel?: string;
   forgeAuditorModel?: string;
   cronCtx?: { autoTagModel: string };
-  beadCtx?: { autoTagModel?: string };
+  beadCtx?: { autoTagModel: string };
 };
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ const ROLE_DESCRIPTIONS: Record<ModelRole, string> = {
   'forge-drafter': 'Forge plan drafting/revision',
   'forge-auditor': 'Forge plan auditing',
   summary: 'Rolling summaries only',
-  cron: 'Cron execution only',
+  cron: 'Cron auto-tagging and model classification',
 };
 
 // ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ export function executeConfigAction(
             changes.push(`cron-auto-tag → ${model}`);
           }
           if (bp.beadCtx) {
-            (bp.beadCtx as any).autoTagModel = model;
+            bp.beadCtx.autoTagModel = model;
             changes.push(`beads-auto-tag → ${model}`);
           }
           break;
@@ -134,10 +134,10 @@ export function executeConfigAction(
       ];
 
       if (bp.cronCtx) {
-        rows.push(['cron', bp.cronCtx.autoTagModel, ROLE_DESCRIPTIONS.cron]);
+        rows.push(['cron-auto-tag', bp.cronCtx.autoTagModel, ROLE_DESCRIPTIONS.cron]);
       }
       if (bp.beadCtx) {
-        rows.push(['beads-auto-tag', (bp.beadCtx as any).autoTagModel ?? bp.summaryModel, 'Beads auto-tagging']);
+        rows.push(['beads-auto-tag', bp.beadCtx.autoTagModel, 'Beads auto-tagging']);
       }
 
       const lines = rows.map(([role, model, desc]) => {
@@ -179,7 +179,9 @@ export function configActionsPromptSection(): string {
 | \`forge-drafter\` | Forge plan drafting/revision |
 | \`forge-auditor\` | Forge plan auditing |
 | \`summary\` | Rolling summaries only (overrides fast) |
-| \`cron\` | Cron execution only (overrides fast) |
+| \`cron\` | Cron auto-tagging and model classification (overrides fast) |
 
-Changes are **ephemeral** — they take effect immediately but revert on restart. Use env vars for persistent configuration.`;
+Changes are **ephemeral** — they take effect immediately but revert on restart. Use env vars for persistent configuration.
+
+Note: Individual cron execution models are per-job (set via \`cronUpdate\`). The \`cron\` role here controls auto-tagging only. The cron execution fallback follows the \`chat\` model.`;
 }
