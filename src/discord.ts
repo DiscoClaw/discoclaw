@@ -35,7 +35,7 @@ import type { PlanAuditResult } from './discord/audit-handler.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './discord/forge-commands.js';
 import type { ForgeOrchestratorOpts, ForgeResult } from './discord/forge-commands.js';
-import { runNextPhase, resolveProjectCwd } from './discord/plan-manager.js';
+import { runNextPhase, resolveProjectCwd, DEFAULT_PROJECT_CWD } from './discord/plan-manager.js';
 import {
   acquireWriterLock as registryAcquireWriterLock,
   setActiveOrchestrator,
@@ -1184,9 +1184,25 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   ? resolveModel(rawAuditorModel, auditRt.id)
                   : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditRt.id) : '');
 
+                // Resolve project root so the auditor can read source code
+                let auditProjectCwd: string;
+                try {
+                  const auditFound = await findPlanFile(plansDir, auditPlanId);
+                  if (!auditFound) {
+                    await progressReply.edit({ content: `Audit failed: plan not found: ${auditPlanId}`, allowedMentions: NO_MENTIONS });
+                    return;
+                  }
+                  const auditPlanContent = await fs.readFile(auditFound.filePath, 'utf-8');
+                  auditProjectCwd = resolveProjectCwd(auditPlanContent, params.workspaceCwd);
+                } catch (err) {
+                  await progressReply.edit({ content: `Audit failed: ${String(err instanceof Error ? err.message : err)}`, allowedMentions: NO_MENTIONS });
+                  return;
+                }
+
                 handlePlanAudit({
                   planId: auditPlanId,
                   plansDir,
+                  cwd: auditProjectCwd,
                   workspaceCwd: params.workspaceCwd,
                   runtime: params.runtime,
                   auditorRuntime: params.auditorRuntime,
@@ -1332,14 +1348,25 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   return;
                 }
 
-                // Resume path
+                // Resume path — resolve project root from existing plan content
+                let resumeProjectCwd: string;
+                try {
+                  const resumePlanContent = await fs.readFile(found.filePath, 'utf-8');
+                  resumeProjectCwd = resolveProjectCwd(resumePlanContent, params.workspaceCwd);
+                } catch (err) {
+                  await msg.reply({
+                    content: `Failed to resolve project directory: ${String(err instanceof Error ? err.message : err)}`,
+                    allowedMentions: NO_MENTIONS,
+                  });
+                  return;
+                }
                 const forgeReleaseLock = await acquireWriterLock();
 
                 const resumeOrchestrator = new ForgeOrchestrator({
                   runtime: params.runtime,
                   auditorRuntime: params.auditorRuntime,
                   model: resolveModel(params.runtimeModel, params.runtime.id),
-                  cwd: params.workspaceCwd,
+                  cwd: resumeProjectCwd,
                   workspaceCwd: params.workspaceCwd,
                   beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
                   plansDir,
@@ -1448,7 +1475,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 runtime: params.runtime,
                 auditorRuntime: params.auditorRuntime,
                 model: resolveModel(params.runtimeModel, params.runtime.id),
-                cwd: params.workspaceCwd,
+                cwd: DEFAULT_PROJECT_CWD,
                 workspaceCwd: params.workspaceCwd,
                 beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
                 plansDir,

@@ -31,6 +31,7 @@ import type { ForgeContext } from './discord/actions-forge.js';
 import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
+import { DEFAULT_PROJECT_CWD } from './discord/plan-manager.js';
 import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
 import { checkBdAvailable, bdList } from './beads/bd-cli.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
@@ -976,7 +977,7 @@ if (beadCtx) {
           runtime: limitedRuntime,
           auditorRuntime,
           model: botParams.runtimeModel,
-          cwd: workspaceCwd,
+          cwd: DEFAULT_PROJECT_CWD,
           workspaceCwd,
           beadsCwd: effectiveBeadsCwd,
           plansDir,
