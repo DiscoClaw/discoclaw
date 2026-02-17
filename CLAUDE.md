@@ -48,6 +48,7 @@ exists, that's your first run — read it, follow it, then delete it.
 - Commit regularly — don't batch an entire session into one commit.
 - Keep the git tree clean. After every task, follow the dev workflow below.
 - **Never push directly to `main`.** Branch protection is enforced — all changes go through PRs.
+- **Always research official docs** for model names, IDs, and API parameters — never guess from training data. See `.context/runtime.md` for sources.
 
 ## Dev Workflow
 

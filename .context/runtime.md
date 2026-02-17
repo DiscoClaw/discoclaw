@@ -1,5 +1,24 @@
 # runtime.md — Runtimes & Adapters
 
+## Model Names & IDs
+
+**Always research official documentation** when referencing model names, IDs, or parameters — never guess or rely on training data alone. Model names change frequently across providers.
+
+Sources to check:
+- **Anthropic:** https://platform.claude.com/docs/en/about-claude/models/overview
+- **OpenAI/Codex:** https://developers.openai.com/codex/models/
+- **Claude Code CLI shorthand:** `sonnet`, `opus`, `haiku` resolve to the latest version of each model family
+
+Current model IDs (as of 2026-02-17):
+| Provider | Model | API/CLI ID |
+|----------|-------|-----------|
+| Anthropic | Claude Opus 4.6 | `claude-opus-4-6` (CLI shorthand: `opus`) |
+| Anthropic | Claude Sonnet 4.6 | `claude-sonnet-4-6` (CLI shorthand: `sonnet`) |
+| Anthropic | Claude Haiku 4.5 | `claude-haiku-4-5-20251001` (CLI shorthand: `haiku`) |
+| OpenAI | GPT-5.3-Codex | `gpt-5.3-codex` |
+| OpenAI | GPT-5.3-Codex-Spark | `gpt-5.3-codex-spark` |
+| OpenAI | GPT-5-Codex-Mini | `gpt-5-codex-mini` |
+
 ## Runtime Adapter Interface
 - The orchestrator consumes a provider-agnostic event stream (`EngineEvent`) from any adapter.
 - Each runtime adapter implements `RuntimeAdapter.invoke()` and declares capabilities.
