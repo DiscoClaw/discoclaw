@@ -67,6 +67,7 @@ function baseParams(runtimeOverride: any, overrides: Partial<any> = {}) {
     runtime: runtimeOverride,
     sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
     workspaceCwd: '/tmp',
+    projectCwd: '/tmp',
     groupsDir: '/tmp',
     useGroupDirCwd: false,
     runtimeModel: 'opus',

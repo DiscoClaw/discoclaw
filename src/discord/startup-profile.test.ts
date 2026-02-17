@@ -87,6 +87,7 @@ function baseParams(overrides: Partial<BotParams> = {}): BotParams {
     runtime: { invoke: vi.fn() } as any,
     sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
     workspaceCwd: '/tmp/workspace',
+    projectCwd: '/tmp',
     groupsDir: '/tmp/groups',
     useGroupDirCwd: false,
     runtimeModel: 'opus',

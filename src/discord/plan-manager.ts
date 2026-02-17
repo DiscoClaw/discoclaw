@@ -91,8 +91,6 @@ const PROJECT_DIRS: Record<string, string> = {
   discoclaw: path.join(os.homedir(), 'code/discoclaw'),
 };
 
-/** Default project root for callers that don't yet have plan content (e.g. forge create). */
-export const DEFAULT_PROJECT_CWD = PROJECT_DIRS.discoclaw;
 
 // ---------------------------------------------------------------------------
 // Pure functions (no I/O)

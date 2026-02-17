@@ -112,6 +112,7 @@ function makeParams(overrides?: Partial<Omit<BotParams, 'token'>>): Omit<BotPara
     runtime: makeMockRuntime('Reaction response!'),
     sessionManager: { getOrCreate: vi.fn().mockResolvedValue('session-1') } as any,
     workspaceCwd: '/tmp/workspace',
+    projectCwd: '/tmp',
     groupsDir: '/tmp/groups',
     useGroupDirCwd: false,
     runtimeModel: 'opus',

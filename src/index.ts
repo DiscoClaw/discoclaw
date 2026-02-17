@@ -31,7 +31,6 @@ import type { ForgeContext } from './discord/actions-forge.js';
 import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
-import { DEFAULT_PROJECT_CWD } from './discord/plan-manager.js';
 import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
 import { checkBdAvailable, bdList } from './beads/bd-cli.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
@@ -59,6 +58,7 @@ const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
 
 let parsedConfig;
 try {
@@ -565,6 +565,7 @@ const botParams = {
   runtime: limitedRuntime,
   sessionManager,
   workspaceCwd,
+  projectCwd: projectRoot,
   groupsDir,
   useGroupDirCwd,
   runtimeModel,
@@ -977,7 +978,7 @@ if (beadCtx) {
           runtime: limitedRuntime,
           auditorRuntime,
           model: botParams.runtimeModel,
-          cwd: DEFAULT_PROJECT_CWD,
+          cwd: projectRoot,
           workspaceCwd,
           beadsCwd: effectiveBeadsCwd,
           plansDir,

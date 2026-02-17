@@ -35,7 +35,7 @@ import type { PlanAuditResult } from './discord/audit-handler.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './discord/forge-commands.js';
 import type { ForgeOrchestratorOpts, ForgeResult } from './discord/forge-commands.js';
-import { runNextPhase, resolveProjectCwd, DEFAULT_PROJECT_CWD } from './discord/plan-manager.js';
+import { runNextPhase, resolveProjectCwd } from './discord/plan-manager.js';
 import {
   acquireWriterLock as registryAcquireWriterLock,
   setActiveOrchestrator,
@@ -102,6 +102,7 @@ export type BotParams = {
   runtime: RuntimeAdapter;
   sessionManager: SessionManager;
   workspaceCwd: string;
+  projectCwd: string;
   groupsDir: string;
   useGroupDirCwd: boolean;
   runtimeModel: string;
@@ -1475,7 +1476,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 runtime: params.runtime,
                 auditorRuntime: params.auditorRuntime,
                 model: resolveModel(params.runtimeModel, params.runtime.id),
-                cwd: DEFAULT_PROJECT_CWD,
+                cwd: params.projectCwd,
                 workspaceCwd: params.workspaceCwd,
                 beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
                 plansDir,
