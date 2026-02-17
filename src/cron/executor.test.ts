@@ -657,4 +657,36 @@ describe('executeCronJob workspace PA context', () => {
       'cron:exec PA file loading failed, continuing without context',
     );
   });
+
+  it('uses cronExecModel over ctx.model when set', async () => {
+    let invokedModel = '';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        invokedModel = params.model;
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const ctx = makeCtx({ runtime, model: 'sonnet', cronExecModel: 'haiku' });
+    await executeCronJob(makeJob(), ctx);
+    expect(invokedModel).toBe('haiku');
+  });
+
+  it('falls back to ctx.model when cronExecModel is not set', async () => {
+    let invokedModel = '';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        invokedModel = params.model;
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const ctx = makeCtx({ runtime, model: 'sonnet' });
+    await executeCronJob(makeJob(), ctx);
+    expect(invokedModel).toBe('sonnet');
+  });
 });

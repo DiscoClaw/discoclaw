@@ -14,7 +14,7 @@ export type ModelsCommand =
 // Parser
 // ---------------------------------------------------------------------------
 
-const VALID_ROLES = new Set<string>(['chat', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron']);
+const VALID_ROLES = new Set<string>(['chat', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec']);
 
 export function parseModelsCommand(content: string): ModelsCommand | null {
   const raw = String(content ?? '').trim().replace(/\s+/g, ' ');
@@ -60,12 +60,14 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models set <role> <model>` — change the model for a role at runtime',
       '- `!models help` — this message',
       '',
-      '**Roles:** `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`',
+      '**Roles:** `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`',
       '',
       '**Examples:**',
       '- `!models set chat sonnet`',
       '- `!models set fast haiku`',
       '- `!models set forge-drafter opus`',
+      '- `!models set cron-exec haiku` — run crons on a cheaper model',
+      '- `!models set cron-exec default` — revert to following chat model',
     ].join('\n');
   }
 

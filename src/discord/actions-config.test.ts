@@ -13,7 +13,7 @@ function makeBotParams(overrides?: Partial<ConfigMutableParams>): ConfigMutableP
     summaryModel: 'fast',
     forgeDrafterModel: undefined,
     forgeAuditorModel: undefined,
-    cronCtx: { autoTagModel: 'fast' },
+    cronCtx: { autoTagModel: 'fast', executorCtx: { model: 'capable' } },
     beadCtx: { autoTagModel: 'fast' },
     ...overrides,
   };
@@ -105,6 +105,26 @@ describe('modelShow', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.summary).toContain('cron-auto-tag');
+  });
+
+  it('shows cron-exec following chat when no override set', () => {
+    const ctx = makeCtx();
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('cron-exec');
+    expect(result.summary).toContain('follows chat');
+  });
+
+  it('shows explicit cron-exec model when set', () => {
+    const ctx = makeCtx();
+    ctx.botParams.cronCtx!.executorCtx!.cronExecModel = 'haiku';
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('cron-exec');
+    expect(result.summary).toContain('haiku');
+    expect(result.summary).not.toContain('follows chat');
   });
 
   it('shows runtime defaultModel when model value is empty', () => {
@@ -287,6 +307,29 @@ describe('modelSet', () => {
     const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'sonnet' }, ctx);
     expect(result.ok).toBe(true);
     expect(ctx.botParams.runtimeModel).toBe('sonnet');
+  });
+
+  it('sets cron-exec model', () => {
+    const ctx = makeCtx();
+    const result = executeConfigAction({ type: 'modelSet', role: 'cron-exec', model: 'haiku' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.cronCtx!.executorCtx!.cronExecModel).toBe('haiku');
+  });
+
+  it('cron-exec "default" clears the override', () => {
+    const ctx = makeCtx();
+    ctx.botParams.cronCtx!.executorCtx!.cronExecModel = 'haiku';
+    const result = executeConfigAction({ type: 'modelSet', role: 'cron-exec', model: 'default' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.cronCtx!.executorCtx!.cronExecModel).toBeUndefined();
+    if (!result.ok) return;
+    expect(result.summary).toContain('follows chat');
+  });
+
+  it('cron-exec fails when cron subsystem not configured', () => {
+    const ctx = makeCtx({ cronCtx: undefined });
+    const result = executeConfigAction({ type: 'modelSet', role: 'cron-exec', model: 'haiku' }, ctx);
+    expect(result.ok).toBe(false);
   });
 });
 

@@ -1102,6 +1102,7 @@ if (cronEnabled && effectiveCronForum) {
     client,
     runtime,
     model: runtimeModel,
+    cronExecModel: undefined as string | undefined,
     cwd: workspaceCwd,
     tools: runtimeTools,
     timeoutMs: runtimeTimeoutMs,
