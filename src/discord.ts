@@ -32,7 +32,7 @@ import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, cl
 import { handlePlanAudit } from './discord/audit-handler.js';
 import type { PlanAuditResult } from './discord/audit-handler.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
-import { parseForgeCommand, ForgeOrchestrator } from './discord/forge-commands.js';
+import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './discord/forge-commands.js';
 import type { ForgeOrchestratorOpts, ForgeResult } from './discord/forge-commands.js';
 import { runNextPhase, resolveProjectCwd } from './discord/plan-manager.js';
 import {
@@ -683,8 +683,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       const isThread = typeof (msg.channel as any)?.isThread === 'function' ? (msg.channel as any).isThread() : false;
       const threadId = isThread ? String((msg.channel as any).id ?? '') : null;
       const threadParentId = isThread ? String((msg.channel as any).parentId ?? '') : null;
-      const manualPlanImplementationCta = (planId: string) =>
-        `Reply \`!plan approve ${planId}\` to approve, then \`!plan run ${planId}\` to start implementation. Or \`!plan show ${planId}\` to review first.`;
       const shouldSendManualPlanCta = (result: ForgeResult) =>
         !result.error && !!result.planId && !result.reachedMaxRounds && result.finalVerdict !== 'CANCELLED';
 
@@ -712,10 +710,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           params.log?.info({ planId, skipReason }, 'forge:auto-implement:skipped');
         }
 
-        const manualCta = manualPlanImplementationCta(planId);
-        const manualMessage = skipReason
-          ? (skipReason.includes(manualCta) ? skipReason : `${skipReason}\n\n${manualCta}`)
-          : manualCta;
+        const manualMessage = buildPlanImplementationMessage(skipReason, planId);
 
         try {
           await msg.channel.send({ content: manualMessage, allowedMentions: NO_MENTIONS });
@@ -796,9 +791,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
         } catch (err) {
           params.log?.error({ err, planId }, 'forge:auto-implement: handler failed');
-          content = planId
-            ? manualPlanImplementationCta(planId)
+          const fallbackMessage = planId
+            ? buildPlanImplementationMessage(undefined, planId)
             : 'Review the plan manually, then use `!plan approve <id>` and `!plan run <id>` to continue.';
+          content = fallbackMessage;
           skipReason = content;
         }
 

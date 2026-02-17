@@ -999,3 +999,16 @@ export class ForgeOrchestrator {
     await this.atomicWrite(filePath, updated);
   }
 }
+
+export const legacyPlanImplementationCta = (planId: string): string =>
+  `Reply \`!plan approve ${planId}\` to approve, then \`!plan run ${planId}\` to start implementation. Or \`!plan show ${planId}\` to review first.`;
+
+export function buildPlanImplementationMessage(
+  skipReason: string | undefined,
+  planId: string,
+): string {
+  const cta = legacyPlanImplementationCta(planId);
+  if (!skipReason) return cta;
+  if (skipReason.includes(cta)) return skipReason;
+  return `${skipReason}\n\n${cta}`;
+}
