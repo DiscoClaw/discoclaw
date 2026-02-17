@@ -583,6 +583,7 @@ const botParams = {
   discordActionsForge: discordActionsForge && forgeCommandsEnabled,
   discordActionsPlan: discordActionsPlan && planCommandsEnabled,
   discordActionsMemory: discordActionsMemory && durableMemoryEnabled,
+  discordActionsConfig: discordActionsEnabled, // Always enabled when actions are on — model switching is a core capability.
   discordActionsDefer: cfg.discordActionsDefer,
   deferMaxDelaySeconds: cfg.deferMaxDelaySeconds,
   deferMaxConcurrent: cfg.deferMaxConcurrent,
@@ -592,6 +593,7 @@ const botParams = {
   forgeCtx: undefined as ForgeContext | undefined,
   planCtx: undefined as PlanContext | undefined,
   memoryCtx: undefined as MemoryContext | undefined,
+  configCtx: undefined as import('./discord/actions-config.js').ConfigContext | undefined,
   messageHistoryBudget,
   summaryEnabled,
   summaryModel,
@@ -725,6 +727,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
       forge: Boolean(botParams.discordActionsForge),
       plan: Boolean(botParams.discordActionsPlan),
       memory: Boolean(botParams.discordActionsMemory),
+      config: Boolean(botParams.discordActionsConfig),
       defer: false,
     };
 
@@ -809,6 +812,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
         forgeCtx: botParams.forgeCtx,
         planCtx: botParams.planCtx,
         memoryCtx: botParams.memoryCtx,
+        configCtx: botParams.configCtx,
       });
     }
 
@@ -1023,6 +1027,16 @@ if (beadCtx) {
     };
     log.info('memory:action context initialized');
   }
+
+  if (discordActionsEnabled) {
+    // Config actions are always available when actions are enabled.
+    // botParams is read by reference, so mutations here take effect on next invocation.
+    botParams.configCtx = {
+      botParams,
+      runtime: limitedRuntime,
+    };
+    log.info('config:action context initialized');
+  }
 }
 
 // --- Cron subsystem ---
@@ -1051,6 +1065,7 @@ if (cronEnabled && effectiveCronForum) {
     forge: discordActionsForge && forgeCommandsEnabled, // Enables cron → forge autonomous workflows.
     plan: discordActionsPlan && planCommandsEnabled, // Enables cron → plan autonomous workflows.
     memory: false, // No user context in cron flows.
+    config: false, // No model switching from cron flows.
     defer: false,
   };
   const cronRunControl = new CronRunControl();

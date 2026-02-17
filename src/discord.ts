@@ -21,6 +21,7 @@ import type { ForgeContext } from './discord/actions-forge.js';
 import { executePlanAction } from './discord/actions-plan.js';
 import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
+import type { ConfigContext } from './discord/actions-config.js';
 import { autoImplementForgePlan } from './discord/forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './discord/forge-auto-implement.js';
 import type { LoggerLike } from './discord/action-types.js';
@@ -117,6 +118,7 @@ export type BotParams = {
   discordActionsForge?: boolean;
   discordActionsPlan?: boolean;
   discordActionsMemory?: boolean;
+  discordActionsConfig?: boolean;
   discordActionsDefer?: boolean;
   deferMaxDelaySeconds?: number;
   deferMaxConcurrent?: number;
@@ -126,6 +128,7 @@ export type BotParams = {
   forgeCtx?: ForgeContext;
   planCtx?: PlanContext;
   memoryCtx?: MemoryContext;
+  configCtx?: ConfigContext;
   messageHistoryBudget: number;
   summaryEnabled: boolean;
   summaryModel: string;
@@ -398,6 +401,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         forge: params.discordActionsForge ?? false,
         plan: params.discordActionsPlan ?? false,
         memory: params.discordActionsMemory ?? false,
+        config: params.discordActionsConfig ?? false,
         defer: !isDm && (params.discordActionsDefer ?? false),
       };
 
@@ -1975,6 +1979,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   forgeCtx: params.forgeCtx,
                   planCtx: params.planCtx,
                   memoryCtx: perMessageMemoryCtx,
+                  configCtx: params.configCtx,
                 });
                 for (const result of actionResults) {
                   metrics.recordActionResult(result.ok);

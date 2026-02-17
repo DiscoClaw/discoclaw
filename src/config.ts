@@ -19,6 +19,7 @@ export type DiscoclawConfig = {
   primaryRuntime: string;
 
   runtimeModel: string;
+  fastModel: string;
   runtimeTools: string[];
   runtimeTimeoutMs: number;
 
@@ -403,6 +404,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to the primary runtime.');
   }
 
+  const fastModel = parseTrimmedString(env, 'DISCOCLAW_FAST_MODEL') ?? 'fast';
+
   return {
     config: {
       token,
@@ -412,6 +415,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       primaryRuntime,
 
       runtimeModel: parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'capable',
+      fastModel,
       runtimeTools: parseRuntimeTools(env, warnings),
       runtimeTimeoutMs: parsePositiveNumber(env, 'RUNTIME_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       runtimeFallbackModel: parseTrimmedString(env, 'RUNTIME_FALLBACK_MODEL'),
@@ -459,7 +463,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
       messageHistoryBudget: parseNonNegativeInt(env, 'DISCOCLAW_MESSAGE_HISTORY_BUDGET', 3000),
       summaryEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_ENABLED', true),
-      summaryModel: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_MODEL') ?? 'fast',
+      summaryModel: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_MODEL') ?? fastModel,
       summaryMaxChars: parseNonNegativeInt(env, 'DISCOCLAW_SUMMARY_MAX_CHARS', 2000),
       summaryEveryNTurns: parsePositiveInt(env, 'DISCOCLAW_SUMMARY_EVERY_N_TURNS', 5),
       summaryDataDirOverride: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_DATA_DIR'),
@@ -508,9 +512,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
       cronEnabled,
       cronForum,
-      cronModel: parseTrimmedString(env, 'DISCOCLAW_CRON_MODEL') ?? 'fast',
+      cronModel: parseTrimmedString(env, 'DISCOCLAW_CRON_MODEL') ?? fastModel,
       cronAutoTag: parseBoolean(env, 'DISCOCLAW_CRON_AUTO_TAG', false),
-      cronAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_CRON_AUTO_TAG_MODEL') ?? 'fast',
+      cronAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_CRON_AUTO_TAG_MODEL') ?? fastModel,
       cronStatsDirOverride: parseTrimmedString(env, 'DISCOCLAW_CRON_STATS_DIR'),
       cronTagMapPathOverride: parseTrimmedString(env, 'DISCOCLAW_CRON_TAG_MAP'),
 
@@ -525,7 +529,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       beadsMentionUser: parseTrimmedString(env, 'DISCOCLAW_BEADS_MENTION_USER'),
       beadsSidebar: parseBoolean(env, 'DISCOCLAW_BEADS_SIDEBAR', false),
       beadsAutoTag: parseBoolean(env, 'DISCOCLAW_BEADS_AUTO_TAG', true),
-      beadsAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_BEADS_AUTO_TAG_MODEL') ?? 'fast',
+      beadsAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_BEADS_AUTO_TAG_MODEL') ?? fastModel,
       beadsSyncSkipPhase5: parseBoolean(env, 'BEAD_SYNC_SKIP_PHASE5', false),
 
       claudeBin: parseTrimmedString(env, 'CLAUDE_BIN') ?? 'claude',

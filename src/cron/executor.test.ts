@@ -87,6 +87,7 @@ const BASE_CRON_ACTION_FLAGS: ActionCategoryFlags = {
   forge: false,
   plan: false,
   memory: false,
+  config: false,
   defer: false,
 };
 
@@ -268,7 +269,7 @@ describe('executeCronJob', () => {
     const ctx = makeCtx({
       runtime,
       discordActionsEnabled: true,
-      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, defer: false },
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
     });
     const job = makeJob();
     await executeCronJob(job, ctx);
@@ -296,7 +297,7 @@ describe('executeCronJob', () => {
     const ctx = makeCtx({
       runtime,
       discordActionsEnabled: true,
-      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, defer: false },
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
     });
     const job = makeJob();
     await executeCronJob(job, ctx);

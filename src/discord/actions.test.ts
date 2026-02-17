@@ -15,6 +15,7 @@ const ALL_FLAGS: ActionCategoryFlags = {
   forge: false,
   plan: false,
   memory: false,
+  config: false,
   defer: true,
 };
 
@@ -385,6 +386,7 @@ describe('discordActionsPromptSection', () => {
       forge: false,
       plan: false,
       memory: false,
+      config: false,
       defer: false,
     };
 
@@ -406,6 +408,7 @@ describe('discordActionsPromptSection', () => {
       forge: false,
       plan: false,
       memory: false,
+      config: false,
       defer: true,
     };
 

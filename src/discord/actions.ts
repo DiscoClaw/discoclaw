@@ -24,6 +24,8 @@ import type { MemoryActionRequest, MemoryContext } from './actions-memory.js';
 import { DEFER_ACTION_TYPES, executeDeferAction } from './actions-defer.js';
 import type { DeferActionRequest } from './actions-defer.js';
 import type { DeferScheduler } from './defer-scheduler.js';
+import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } from './actions-config.js';
+import type { ConfigActionRequest, ConfigContext } from './actions-config.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,6 +53,7 @@ export type ActionCategoryFlags = {
   plan: boolean;
   memory: boolean;
   defer: boolean;
+  config: boolean;
 };
 
 export type DiscordActionRequest =
@@ -65,7 +68,8 @@ export type DiscordActionRequest =
   | ForgeActionRequest
   | PlanActionRequest
   | MemoryActionRequest
-  | DeferActionRequest;
+  | DeferActionRequest
+  | ConfigActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -79,6 +83,7 @@ export type SubsystemContexts = {
   forgeCtx?: ForgeContext;
   planCtx?: PlanContext;
   memoryCtx?: MemoryContext;
+  configCtx?: ConfigContext;
 };
 
 // ---------------------------------------------------------------------------
@@ -99,6 +104,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.plan) for (const t of PLAN_ACTION_TYPES) types.add(t);
   if (flags.memory) for (const t of MEMORY_ACTION_TYPES) types.add(t);
   if (flags.defer) for (const t of DEFER_ACTION_TYPES) types.add(t);
+  if (flags.config) for (const t of CONFIG_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -293,6 +299,12 @@ export async function executeDiscordActions(
         }
       } else if (DEFER_ACTION_TYPES.has(action.type)) {
         result = await executeDeferAction(action as DeferActionRequest, ctx);
+      } else if (CONFIG_ACTION_TYPES.has(action.type)) {
+        if (!subs.configCtx) {
+          result = { ok: false, error: 'Config subsystem not configured' };
+        } else {
+          result = executeConfigAction(action as ConfigActionRequest, subs.configCtx);
+        }
       } else {
         result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
       }
@@ -397,6 +409,10 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
 
   if (flags.memory) {
     sections.push(memoryActionsPromptSection());
+  }
+
+  if (flags.config) {
+    sections.push(configActionsPromptSection());
   }
 
   sections.push(`### Rules
