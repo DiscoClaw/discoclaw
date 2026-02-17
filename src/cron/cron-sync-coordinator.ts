@@ -32,7 +32,12 @@ export class CronSyncCoordinator {
   private syncing = false;
   private pendingSync = false;
 
-  constructor(private readonly opts: CronSyncCoordinatorOptions) {}
+  constructor(private opts: CronSyncCoordinatorOptions) {}
+
+  /** Update the auto-tag model at runtime (called by modelSet propagation). */
+  setAutoTagModel(model: string): void {
+    this.opts = { ...this.opts, autoTagModel: model };
+  }
 
   /**
    * Run sync with concurrency guard.

@@ -124,4 +124,12 @@ describe('CronSyncCoordinator', () => {
     await coordinator.sync();
     expect(forumCountSync.requestUpdate).toHaveBeenCalled();
   });
+
+  it('setAutoTagModel updates the model used by subsequent syncs', async () => {
+    const coordinator = new CronSyncCoordinator(makeOpts({ autoTagModel: 'haiku' }));
+    coordinator.setAutoTagModel('opus');
+    await coordinator.sync();
+    const callArgs = mockRunCronSync.mock.calls[0][0];
+    expect(callArgs.autoTagModel).toBe('opus');
+  });
 });

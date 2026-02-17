@@ -249,6 +249,45 @@ describe('modelSet', () => {
     expect(result.ok).toBe(true);
     expect(ctx.botParams.runtimeModel).toBe('claude-sonnet-4-5-20250929');
   });
+
+  it('chat propagates to planCtx.model', () => {
+    const ctx = makeCtx();
+    ctx.botParams.planCtx = { model: 'old' };
+    executeConfigAction({ type: 'modelSet', role: 'chat', model: 'sonnet' }, ctx);
+    expect(ctx.botParams.planCtx!.model).toBe('sonnet');
+  });
+
+  it('chat propagates to cronCtx.executorCtx.model', () => {
+    const ctx = makeCtx();
+    ctx.botParams.cronCtx!.executorCtx = { model: 'old' };
+    executeConfigAction({ type: 'modelSet', role: 'chat', model: 'sonnet' }, ctx);
+    expect(ctx.botParams.cronCtx!.executorCtx!.model).toBe('sonnet');
+  });
+
+  it('fast propagates to cronCtx.syncCoordinator', () => {
+    let updated = '';
+    const ctx = makeCtx();
+    ctx.botParams.cronCtx!.syncCoordinator = { setAutoTagModel: (m: string) => { updated = m; } };
+    executeConfigAction({ type: 'modelSet', role: 'fast', model: 'haiku' }, ctx);
+    expect(updated).toBe('haiku');
+  });
+
+  it('cron propagates to cronCtx.syncCoordinator', () => {
+    let updated = '';
+    const ctx = makeCtx();
+    ctx.botParams.cronCtx!.syncCoordinator = { setAutoTagModel: (m: string) => { updated = m; } };
+    executeConfigAction({ type: 'modelSet', role: 'cron', model: 'capable' }, ctx);
+    expect(updated).toBe('capable');
+  });
+
+  it('chat skips planCtx/cronExecCtx propagation when not configured', () => {
+    const ctx = makeCtx();
+    // No planCtx or cronCtx.executorCtx — should not throw
+    ctx.botParams.planCtx = undefined;
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'sonnet' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.runtimeModel).toBe('sonnet');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -772,7 +772,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
     try {
       for await (const evt of runtime.invoke({
         prompt,
-        model: resolveModel(runtimeModel, runtime.id),
+        model: resolveModel(botParams.runtimeModel, runtime.id),
         cwd: workspaceCwd,
         addDirs: uniqueAddDirs,
         tools: effectiveTools,
@@ -975,7 +975,7 @@ if (beadCtx) {
         new ForgeOrchestrator({
           runtime: limitedRuntime,
           auditorRuntime,
-          model: runtimeModel,
+          model: botParams.runtimeModel,
           cwd: workspaceCwd,
           workspaceCwd,
           beadsCwd: effectiveBeadsCwd,
@@ -983,8 +983,8 @@ if (beadCtx) {
           maxAuditRounds: forgeMaxAuditRounds,
           progressThrottleMs: forgeProgressThrottleMs,
           timeoutMs: forgeTimeoutMs,
-          drafterModel: forgeDrafterModel,
-          auditorModel: forgeAuditorModel,
+          drafterModel: botParams.forgeDrafterModel,
+          auditorModel: botParams.forgeAuditorModel,
           log,
         }),
       plansDir,
