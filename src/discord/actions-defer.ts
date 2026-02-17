@@ -13,17 +13,13 @@ export type DeferActionRequest = {
 const DEFER_TYPES: ReadonlyArray<DeferActionRequest['type']> = ['defer'];
 export const DEFER_ACTION_TYPES = new Set<string>(DEFER_TYPES);
 
-interface DeferActionContext extends ActionContext {
-  deferScheduler?: DeferScheduler;
-}
-
 export type DeferredRun = DeferSchedulerRun<DeferActionRequest, ActionContext>;
 
 export async function executeDeferAction(
   action: DeferActionRequest,
   ctx: ActionContext,
 ): Promise<DiscordActionResult> {
-  const scheduler = (ctx as DeferActionContext).deferScheduler;
+  const scheduler = ctx.deferScheduler;
   if (!scheduler) {
     return { ok: false, error: 'Deferred actions are not configured for this bot' };
   }

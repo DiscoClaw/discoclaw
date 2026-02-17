@@ -1185,6 +1185,20 @@ describe('runNextPhase', () => {
     }
   });
 
+  it('rollout corruption bypasses retry guard', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    phases.phases[0]!.status = 'failed';
+    phases.phases[0]!.error = 'Codex: state db missing rollout path for thread abc';
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    expect(result.result).toBe('done');
+  });
+
   it('git commit skipped when no files modified', async () => {
     const planPath = path.join(plansDir, 'plan-011-test.md');
     await fs.writeFile(planPath, SAMPLE_PLAN);

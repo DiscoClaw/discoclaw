@@ -22,9 +22,10 @@ function createContext(overrides?: Partial<ActionContext>): ActionContext {
   };
 }
 
-function makeScheduler(opts?: Partial<DeferSchedulerOptions>) {
-  const handler = opts?.jobHandler ?? vi.fn(async () => {});
-  const scheduler = new DeferScheduler({
+function makeScheduler(opts?: Partial<DeferSchedulerOptions<DeferActionRequest, ActionContext>>) {
+  const handler: DeferSchedulerOptions<DeferActionRequest, ActionContext>['jobHandler'] =
+    opts?.jobHandler ?? vi.fn(async () => {});
+  const scheduler = new DeferScheduler<DeferActionRequest, ActionContext>({
     maxDelaySeconds: opts?.maxDelaySeconds ?? 60,
     maxConcurrent: opts?.maxConcurrent ?? 2,
     jobHandler: handler,
@@ -47,7 +48,10 @@ describe('executeDeferAction', () => {
 
   it('validates input fields', async () => {
     const { scheduler } = makeScheduler();
-    const ctx = { ...createContext(), deferScheduler: scheduler } as ActionContext & { deferScheduler?: DeferScheduler };
+    const ctx: ActionContext = {
+      ...createContext(),
+      deferScheduler: scheduler,
+    };
 
     await expect(executeDeferAction({ type: 'defer', channel: '', prompt: 'check', delaySeconds: 1 }, ctx)).resolves.toEqual(
       expect.objectContaining({ ok: false, error: expect.stringContaining('target channel') }),
@@ -62,7 +66,10 @@ describe('executeDeferAction', () => {
 
   it('schedules deferred run when valid', async () => {
     const { scheduler, handler } = makeScheduler();
-    const ctx = { ...createContext(), deferScheduler: scheduler } as ActionContext & { deferScheduler?: DeferScheduler };
+    const ctx: ActionContext = {
+      ...createContext(),
+      deferScheduler: scheduler,
+    };
     const action: DeferActionRequest = { type: 'defer', channel: 'general', prompt: 'report', delaySeconds: 5 };
 
     const result = await executeDeferAction(action, ctx);
@@ -89,7 +96,10 @@ describe('executeDeferAction', () => {
 
   it('returns rejection summaries when scheduler denies a job', async () => {
     const { scheduler } = makeScheduler({ maxDelaySeconds: 5 });
-    const ctx = { ...createContext(), deferScheduler: scheduler } as ActionContext & { deferScheduler?: DeferScheduler };
+    const ctx: ActionContext = {
+      ...createContext(),
+      deferScheduler: scheduler,
+    };
     const action: DeferActionRequest = { type: 'defer', channel: 'general', prompt: 'check back', delaySeconds: 10 };
 
     const result = await executeDeferAction(action, ctx);
@@ -116,7 +126,10 @@ describe('DeferScheduler', () => {
 
   it('enforces concurrency cap', () => {
     const { scheduler } = makeScheduler({ maxConcurrent: 1 });
-    const ctx = createContext();
+    const ctx: ActionContext = {
+      ...createContext(),
+      deferScheduler: scheduler,
+    };
     const action: DeferActionRequest = { type: 'defer', channel: 'a', prompt: 'x', delaySeconds: 2 };
     const first = scheduler.schedule({ action, context: ctx });
     expect(first.ok).toBe(true);
@@ -130,7 +143,10 @@ describe('DeferScheduler', () => {
 
   it('releases slot after run completes', async () => {
     const { scheduler } = makeScheduler({ maxConcurrent: 1 });
-    const ctx = createContext();
+    const ctx: ActionContext = {
+      ...createContext(),
+      deferScheduler: scheduler,
+    };
     const action: DeferActionRequest = { type: 'defer', channel: 'a', prompt: 'x', delaySeconds: 1 };
     const first = scheduler.schedule({ action, context: ctx });
     expect(first.ok).toBe(true);

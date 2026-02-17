@@ -63,6 +63,17 @@ export type RunPhaseResult =
   | { result: 'corrupt'; message: string }
   | { result: 'retry_blocked'; phase: PlanPhase; message: string };
 
+const ROLLOUT_ERROR_PATTERNS = [
+  /rollout path missing/i,
+  /session state appears corrupted/i,
+  /state db.*rollout/i,
+];
+
+function isRolloutPathMissingError(error?: string): boolean {
+  if (!error) return false;
+  return ROLLOUT_ERROR_PATTERNS.some((pattern) => pattern.test(error));
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -1034,7 +1045,8 @@ export async function runNextPhase(
   // 4. Retry safety check
   const isGitAvailable = gitAvailable(opts.projectCwd);
 
-  if (phase.status === 'failed' && phase.kind !== 'audit') {
+  const allowRetryDespiteFailure = isRolloutPathMissingError(phase.error);
+  if (phase.status === 'failed' && phase.kind !== 'audit' && !allowRetryDespiteFailure) {
     if (isGitAvailable) {
       if (!phase.modifiedFiles || phase.modifiedFiles.length === 0) {
         return {

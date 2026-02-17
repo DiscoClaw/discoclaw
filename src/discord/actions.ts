@@ -23,6 +23,7 @@ import { MEMORY_ACTION_TYPES, executeMemoryAction, memoryActionsPromptSection } 
 import type { MemoryActionRequest, MemoryContext } from './actions-memory.js';
 import { DEFER_ACTION_TYPES, executeDeferAction } from './actions-defer.js';
 import type { DeferActionRequest } from './actions-defer.js';
+import type { DeferScheduler } from './defer-scheduler.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,7 +35,7 @@ export type ActionContext = {
   channelId: string;
   messageId: string;
   threadParentId?: string | null;
-  deferScheduler?: DeferScheduler;
+  deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
 };
 
 export type ActionCategoryFlags = {

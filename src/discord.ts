@@ -12,7 +12,8 @@ import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from
 import { discordSessionKey } from './discord/session-key.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './discord/actions.js';
 import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './discord/actions.js';
-import type { DeferScheduler } from './discord/actions-defer.js';
+import type { DeferScheduler } from './discord/defer-scheduler.js';
+import type { DeferActionRequest } from './discord/actions-defer.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
@@ -116,7 +117,7 @@ export type BotParams = {
   discordActionsDefer?: boolean;
   deferMaxDelaySeconds?: number;
   deferMaxConcurrent?: number;
-  deferScheduler?: DeferScheduler;
+  deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
   beadCtx?: BeadContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -1850,6 +1851,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   channelId: msg.channelId,
                   messageId: msg.id,
                   threadParentId,
+                  deferScheduler: params.deferScheduler,
                 };
                 // Construct per-message memoryCtx with real user ID and Discord metadata.
                 const perMessageMemoryCtx = params.memoryCtx ? {
