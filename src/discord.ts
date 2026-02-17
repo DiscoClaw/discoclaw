@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ActivityType, Client, GatewayIntentBits, Partials } from 'discord.js';
-import type { PresenceData } from 'discord.js';
+import type { Guild, PresenceData } from 'discord.js';
 import type { RuntimeAdapter, ImageData } from './runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from './runtime/types.js';
 import type { SessionManager } from './sessions.js';
@@ -11,7 +11,9 @@ import type { DiscordChannelContext } from './discord/channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { discordSessionKey } from './discord/session-key.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './discord/actions.js';
-import type { ActionCategoryFlags, DiscordActionResult } from './discord/actions.js';
+import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './discord/actions.js';
+import type { DeferScheduler } from './discord/defer-scheduler.js';
+import type { DeferActionRequest } from './discord/actions-defer.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
@@ -112,6 +114,10 @@ export type BotParams = {
   discordActionsForge?: boolean;
   discordActionsPlan?: boolean;
   discordActionsMemory?: boolean;
+  discordActionsDefer?: boolean;
+  deferMaxDelaySeconds?: number;
+  deferMaxConcurrent?: number;
+  deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
   beadCtx?: BeadContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -376,6 +382,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
       if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
+      const isDm = msg.guildId == null;
       const actionFlags: ActionCategoryFlags = {
         channels: params.discordActionsChannels,
         messaging: params.discordActionsMessaging,
@@ -388,9 +395,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         forge: params.discordActionsForge ?? false,
         plan: params.discordActionsPlan ?? false,
         memory: params.discordActionsMemory ?? false,
+        defer: !isDm && (params.discordActionsDefer ?? false),
       };
 
-      const isDm = msg.guildId == null;
       if (!isDm && params.allowChannelIds) {
         const ch: any = msg.channel as any;
         const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
@@ -1844,6 +1851,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   channelId: msg.channelId,
                   messageId: msg.id,
                   threadParentId,
+                  deferScheduler: params.deferScheduler,
                 };
                 // Construct per-message memoryCtx with real user ID and Discord metadata.
                 const perMessageMemoryCtx = params.memoryCtx ? {

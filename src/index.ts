@@ -11,7 +11,12 @@ import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
 import { createCodexCliRuntime, killActiveCodexSubprocesses } from './runtime/codex-cli.js';
 import { createConcurrencyLimiter, withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
-import { loadDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
+import { loadDiscordChannelContext, resolveDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
+import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines } from './discord/actions.js';
+import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './discord/actions.js';
+import { resolveChannel, fmtTime } from './discord/action-utils.js';
+import { DeferScheduler } from './discord/defer-scheduler.js';
+import type { DeferActionRequest, DeferredRun } from './discord/actions-defer.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
@@ -19,7 +24,6 @@ import { CronScheduler } from './cron/scheduler.js';
 import { executeCronJob } from './cron/executor.js';
 import { initCronForum } from './cron/forum-sync.js';
 import { CronRunControl } from './cron/run-control.js';
-import type { ActionCategoryFlags } from './discord/actions.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
 import type { ForgeContext } from './discord/actions-forge.js';
@@ -45,6 +49,9 @@ import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
 import { setDataFilePath, drainInFlightReplies, cleanupOrphanedReplies } from './discord/inflight-replies.js';
 import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
+import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
+import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
+import { NO_MENTIONS } from './discord/allowed-mentions.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -576,6 +583,10 @@ const botParams = {
   discordActionsForge: discordActionsForge && forgeCommandsEnabled,
   discordActionsPlan: discordActionsPlan && planCommandsEnabled,
   discordActionsMemory: discordActionsMemory && durableMemoryEnabled,
+  discordActionsDefer: cfg.discordActionsDefer,
+  deferMaxDelaySeconds: cfg.deferMaxDelaySeconds,
+  deferMaxConcurrent: cfg.deferMaxConcurrent,
+  deferScheduler: undefined as DeferScheduler<DeferActionRequest, ActionContext> | undefined,
   beadCtx: undefined as BeadContext | undefined,
   cronCtx: undefined as CronContext | undefined,
   forgeCtx: undefined as ForgeContext | undefined,
@@ -650,6 +661,183 @@ const botParams = {
   appendSystemPrompt,
   startupInjection,
 };
+
+if (discordActionsEnabled && cfg.discordActionsDefer) {
+  const handleDeferredRun = async (run: DeferredRun): Promise<void> => {
+    const { action, context } = run;
+    const guild = context.guild;
+    if (!guild) {
+      log?.warn({ run, action }, 'defer:missing-guild');
+      return;
+    }
+
+    const channel = resolveChannel(guild, action.channel);
+    if (!channel) {
+      log?.warn({ run, channel: action.channel }, 'defer:target channel not found');
+      return;
+    }
+
+    if (botParams.allowChannelIds?.size) {
+      const ch: any = channel;
+      const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
+      const parentId = isThread ? String(ch.parentId ?? '') : '';
+      const allowed =
+        botParams.allowChannelIds.has(channel.id) ||
+        (parentId && botParams.allowChannelIds.has(parentId));
+      if (!allowed) {
+        log?.warn({ channelId: channel.id }, 'defer:target channel not allowlisted');
+        return;
+      }
+    }
+
+    const isThread = typeof (channel as any)?.isThread === 'function' ? (channel as any).isThread() : false;
+    const threadParentId = isThread ? String((channel as any).parentId ?? '') : null;
+
+    const channelCtx = resolveDiscordChannelContext({
+      ctx: discordChannelContext,
+      isDm: false,
+      channelId: channel.id,
+      threadParentId,
+    });
+
+    const paFiles = await loadWorkspacePaFiles(workspaceCwd, { skip: !!appendSystemPrompt });
+    const contextFiles = buildContextFiles(paFiles, discordChannelContext, channelCtx.contextPath);
+    let inlinedContext = '';
+    if (contextFiles.length > 0) {
+      try {
+        inlinedContext = await inlineContextFiles(contextFiles, {
+          required: new Set(discordChannelContext?.paContextFiles ?? []),
+        });
+      } catch (err) {
+        log?.warn({ err, channelId: channel.id }, 'defer:context inline failed');
+      }
+    }
+
+    const deferredActionFlags: ActionCategoryFlags = {
+      channels: botParams.discordActionsChannels,
+      messaging: botParams.discordActionsMessaging,
+      guild: botParams.discordActionsGuild,
+      moderation: botParams.discordActionsModeration,
+      polls: botParams.discordActionsPolls,
+      beads: Boolean(botParams.discordActionsBeads),
+      crons: Boolean(botParams.discordActionsCrons),
+      botProfile: Boolean(botParams.discordActionsBotProfile),
+      forge: Boolean(botParams.discordActionsForge),
+      plan: Boolean(botParams.discordActionsPlan),
+      memory: Boolean(botParams.discordActionsMemory),
+      defer: false,
+    };
+
+    let prompt =
+      (inlinedContext ? `${inlinedContext}\n\n` : '') +
+      `---\nDeferred follow-up scheduled for <#${channel.id}> (runs at ${fmtTime(run.runsAt)}).\n---\n` +
+      `User message:\n${action.prompt}`;
+
+    if (botParams.discordActionsEnabled) {
+      prompt += '\n\n---\n' + discordActionsPromptSection(deferredActionFlags, botDisplayName);
+    }
+
+    const noteLines: string[] = [];
+    let effectiveTools = runtimeTools;
+    try {
+      const toolsInfo = await resolveEffectiveTools({
+        workspaceCwd,
+        runtimeTools,
+        runtimeCapabilities: runtime.capabilities,
+        runtimeId: runtime.id,
+        log,
+      });
+      effectiveTools = toolsInfo.effectiveTools;
+      if (toolsInfo.permissionNote) noteLines.push(`Permission note: ${toolsInfo.permissionNote}`);
+      if (toolsInfo.runtimeCapabilityNote) noteLines.push(`Runtime capability note: ${toolsInfo.runtimeCapabilityNote}`);
+    } catch (err) {
+      log?.warn({ err }, 'defer:resolve effective tools failed');
+    }
+
+    if (noteLines.length > 0) {
+      prompt += `\n\n---\n${noteLines.join('\n')}\n`;
+    }
+
+    const addDirs: string[] = [];
+    if (useGroupDirCwd) addDirs.push(workspaceCwd);
+    if (discordChannelContext) addDirs.push(discordChannelContext.contentDir);
+    const uniqueAddDirs = addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined;
+
+    let finalText = '';
+    let deltaText = '';
+    let runtimeError: string | undefined;
+    try {
+      for await (const evt of runtime.invoke({
+        prompt,
+        model: resolveModel(runtimeModel, runtime.id),
+        cwd: workspaceCwd,
+        addDirs: uniqueAddDirs,
+        tools: effectiveTools,
+        timeoutMs: runtimeTimeoutMs,
+      })) {
+        if (evt.type === 'text_final') {
+          finalText = evt.text;
+        } else if (evt.type === 'text_delta') {
+          deltaText += evt.text;
+        } else if (evt.type === 'error') {
+          runtimeError = evt.message;
+          finalText = mapRuntimeErrorToUserMessage(evt.message);
+          break;
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      runtimeError ??= msg;
+      finalText = mapRuntimeErrorToUserMessage(msg);
+      log?.warn({ err }, 'defer:runtime invocation failed');
+    }
+
+    const processedText = finalText || deltaText || '';
+    const parsed = parseDiscordActions(processedText, deferredActionFlags);
+    const actCtx: ActionContext = {
+      guild,
+      client: context.client,
+      channelId: channel.id,
+      messageId: `defer-${Date.now()}`,
+      threadParentId,
+    };
+    let actionResults: DiscordActionResult[] = [];
+    if (parsed.actions.length > 0) {
+      actionResults = await executeDiscordActions(parsed.actions, actCtx, log, {
+        beadCtx: botParams.beadCtx,
+        cronCtx: botParams.cronCtx,
+        forgeCtx: botParams.forgeCtx,
+        planCtx: botParams.planCtx,
+        memoryCtx: botParams.memoryCtx,
+      });
+    }
+
+    const displayLines = buildDisplayResultLines(parsed.actions, actionResults);
+    let outgoingText = parsed.cleanText.trim();
+    if (displayLines.length > 0) {
+      outgoingText = outgoingText ? `${outgoingText}\n\n${displayLines.join('\n')}` : displayLines.join('\n');
+    }
+    if (!outgoingText && runtimeError) {
+      outgoingText = runtimeError;
+    }
+
+    if (outgoingText) {
+      try {
+        await channel.send({ content: outgoingText, allowedMentions: NO_MENTIONS });
+      } catch (err) {
+        log?.warn({ err, channelId: channel.id }, 'defer:failed to post follow-up');
+      }
+    }
+  };
+
+  const deferScheduler = new DeferScheduler({
+    maxDelaySeconds: cfg.deferMaxDelaySeconds,
+    maxConcurrent: cfg.deferMaxConcurrent,
+    jobHandler: handleDeferredRun,
+  });
+  botParams.deferScheduler = deferScheduler;
+  log.info({ maxDelaySeconds: cfg.deferMaxDelaySeconds, maxConcurrent: cfg.deferMaxConcurrent }, 'defer:scheduler configured');
+}
 
 const { client, status, system } = await startDiscordBot(botParams);
 botStatus = status;
@@ -863,6 +1051,7 @@ if (cronEnabled && effectiveCronForum) {
     forge: discordActionsForge && forgeCommandsEnabled, // Enables cron → forge autonomous workflows.
     plan: discordActionsPlan && planCommandsEnabled, // Enables cron → plan autonomous workflows.
     memory: false, // No user context in cron flows.
+    defer: false,
   };
   const cronRunControl = new CronRunControl();
 
@@ -890,6 +1079,10 @@ if (cronEnabled && effectiveCronForum) {
     pendingThreadIds: cronPendingThreadIds,
   };
 
+  if (botParams.deferScheduler) {
+    cronCtx.deferScheduler = botParams.deferScheduler;
+  }
+
   const cronExecCtx = {
     client,
     runtime,
@@ -902,6 +1095,7 @@ if (cronEnabled && effectiveCronForum) {
     allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
     discordActionsEnabled,
     actionFlags: cronActionFlags,
+    deferScheduler: botParams.deferScheduler,
     beadCtx,
     cronCtx,
     forgeCtx: botParams.forgeCtx,

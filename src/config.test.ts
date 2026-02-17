@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseConfig } from './config.js';
+import {
+  parseConfig,
+  DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT,
+  DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS,
+} from './config.js';
 
 function env(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   return {
@@ -71,6 +75,24 @@ describe('parseConfig', () => {
     expect(infos.some((i) => i.includes('category flags are ignored'))).toBe(false);
   });
 
+  it('defaults discordActionsDefer settings', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsDefer).toBe(false);
+    expect(config.deferMaxDelaySeconds).toBe(DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS);
+    expect(config.deferMaxConcurrent).toBe(DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT);
+  });
+
+  it('parses defer config overrides', () => {
+    const { config } = parseConfig(env({
+      DISCOCLAW_DISCORD_ACTIONS_DEFER: '1',
+      DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS: '900',
+      DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT: '2',
+    }));
+    expect(config.discordActionsDefer).toBe(true);
+    expect(config.deferMaxDelaySeconds).toBe(900);
+    expect(config.deferMaxConcurrent).toBe(2);
+  });
+
   it('reports ignored action category flags as info-level advisories', () => {
     const { warnings, infos } = parseConfig(env({
       DISCOCLAW_DISCORD_ACTIONS: '0',
@@ -78,6 +100,14 @@ describe('parseConfig', () => {
     }));
     expect(warnings.some((w) => w.includes('category flags are ignored'))).toBe(false);
     expect(infos.some((i) => i.includes('category flags are ignored'))).toBe(true);
+  });
+
+  it('reports ignored defer category flag when master actions off', () => {
+    const { infos } = parseConfig(env({
+      DISCOCLAW_DISCORD_ACTIONS: '0',
+      DISCOCLAW_DISCORD_ACTIONS_DEFER: '1',
+    }));
+    expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_DEFER'))).toBe(true);
   });
 
   it('parses DISCOCLAW_BOT_NAME when set', () => {

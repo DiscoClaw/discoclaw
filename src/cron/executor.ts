@@ -3,17 +3,19 @@ import type { RuntimeAdapter, ImageData, EngineEvent } from '../runtime/types.js
 import type { CronJob } from './types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { LoggerLike } from '../discord/action-types.js';
-import type { ActionCategoryFlags } from '../discord/actions.js';
+import type { ActionCategoryFlags, ActionContext } from '../discord/actions.js';
 import type { BeadContext } from '../discord/actions-beads.js';
 import type { CronContext } from '../discord/actions-crons.js';
 import type { ForgeContext } from '../discord/actions-forge.js';
 import type { PlanContext } from '../discord/actions-plan.js';
 import type { MemoryContext } from '../discord/actions-memory.js';
+import type { DeferScheduler } from '../discord/defer-scheduler.js';
+import type { DeferActionRequest } from '../discord/actions-defer.js';
 import type { CronRunStats } from './run-stats.js';
 import type { CronRunControl } from './run-control.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
-import { parseDiscordActions, executeDiscordActions, buildDisplayResultLines } from '../discord/actions.js';
+import * as discordActions from '../discord/actions.js';
 import { sendChunks } from '../discord/output-common.js';
 import { loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
@@ -34,6 +36,7 @@ export type CronExecutorContext = {
   allowChannelIds?: Set<string>;
   discordActionsEnabled: boolean;
   actionFlags: ActionCategoryFlags;
+  deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
   beadCtx?: BeadContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -259,15 +262,16 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     // Handle Discord actions if enabled.
     if (ctx.discordActionsEnabled) {
-      const { cleanText, actions } = parseDiscordActions(processedText, ctx.actionFlags);
+      const { cleanText, actions } = discordActions.parseDiscordActions(processedText, ctx.actionFlags);
       if (actions.length > 0) {
         const actCtx = {
           guild,
           client: ctx.client,
           channelId: targetChannel.id,
           messageId: '',
+          deferScheduler: ctx.deferScheduler,
         };
-        const results = await executeDiscordActions(actions, actCtx, ctx.log, {
+        const results = await discordActions.executeDiscordActions(actions, actCtx, ctx.log, {
           beadCtx: ctx.beadCtx,
           cronCtx: ctx.cronCtx,
           forgeCtx: ctx.forgeCtx,
@@ -278,7 +282,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           metrics.recordActionResult(result.ok);
           ctx.log?.info({ flow: 'cron', jobId: job.id, ok: result.ok }, 'obs.action.result');
         }
-        const displayLines = buildDisplayResultLines(actions, results);
+        const displayLines = discordActions.buildDisplayResultLines(actions, results);
         const anyActionSucceeded = results.some((r) => r.ok);
         processedText = displayLines.length > 0
           ? cleanText.trimEnd() + '\n\n' + displayLines.join('\n')

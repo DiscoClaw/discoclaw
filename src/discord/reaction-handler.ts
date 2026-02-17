@@ -276,6 +276,7 @@ function createReactionHandler(
 
           prompt += `\n\n${promptText.guidanceLine}`;
 
+          const isDm = reaction.message.guildId == null;
           const actionFlags: ActionCategoryFlags = {
             channels: params.discordActionsChannels,
             messaging: params.discordActionsMessaging,
@@ -288,9 +289,10 @@ function createReactionHandler(
             forge: params.discordActionsForge ?? false,
             plan: params.discordActionsPlan ?? false,
             memory: params.discordActionsMemory ?? false,
+            defer: !isDm && (params.discordActionsDefer ?? false),
           };
 
-          if (params.discordActionsEnabled) {
+          if (params.discordActionsEnabled && !isDm) {
             prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags, params.botDisplayName);
           }
 
@@ -454,6 +456,7 @@ function createReactionHandler(
                 channelId: msg.channelId,
                 messageId: msg.id,
                 threadParentId,
+                deferScheduler: params.deferScheduler,
               };
               // Construct per-event memoryCtx with the reacting user's ID and Discord metadata.
               const perEventMemoryCtx = params.memoryCtx ? {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
-import { parseDiscordActions, executeDiscordActions, buildDisplayResultLines, buildAllResultLines } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionResult } from './actions.js';
 
 const ALL_FLAGS: ActionCategoryFlags = {
@@ -15,6 +15,7 @@ const ALL_FLAGS: ActionCategoryFlags = {
   forge: false,
   plan: false,
   memory: false,
+  defer: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,12 @@ describe('parseDiscordActions', () => {
     expect(actions[1]).toEqual({ type: 'channelList' });
   });
 
+  it('extracts defer actions when defer flag enabled', () => {
+    const input = '<discord-action>{"type":"defer","channel":"general","delaySeconds":300,"prompt":"check the forge"}</discord-action>';
+    const { actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'defer', channel: 'general', delaySeconds: 300, prompt: 'check the forge' }]);
+  });
+
   it('skips malformed JSON gracefully', () => {
     const input = '<discord-action>{bad json}</discord-action>Some text';
     const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
@@ -55,6 +62,12 @@ describe('parseDiscordActions', () => {
   it('skips disabled category action types', () => {
     const input = '<discord-action>{"type":"channelCreate","name":"test"}</discord-action>';
     const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, channels: false });
+    expect(actions).toHaveLength(0);
+  });
+
+  it('skips defer actions when defer flag disabled', () => {
+    const input = '<discord-action>{"type":"defer","channel":"general","delaySeconds":60}</discord-action>';
+    const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, defer: false });
     expect(actions).toHaveLength(0);
   });
 
@@ -355,5 +368,53 @@ describe('buildAllResultLines', () => {
       'Done: Created #status',
       'Failed: Missing Permissions',
     ]);
+  });
+});
+
+describe('discordActionsPromptSection', () => {
+  it('always includes the standard guidance when actions are enabled', () => {
+    const flags: ActionCategoryFlags = {
+      channels: false,
+      messaging: false,
+      guild: false,
+      moderation: false,
+      polls: false,
+      beads: false,
+      crons: false,
+      botProfile: false,
+      forge: false,
+      plan: false,
+      memory: false,
+      defer: false,
+    };
+
+    const prompt = discordActionsPromptSection(flags, 'ClawBot');
+    expect(prompt).toContain('Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance');
+    expect(prompt).toContain('### Rules');
+  });
+
+  it('documents deferred self-invocation when defer actions are enabled', () => {
+    const flags: ActionCategoryFlags = {
+      channels: false,
+      messaging: false,
+      guild: false,
+      moderation: false,
+      polls: false,
+      beads: false,
+      crons: false,
+      botProfile: false,
+      forge: false,
+      plan: false,
+      memory: false,
+      defer: true,
+    };
+
+    const prompt = discordActionsPromptSection(flags);
+    expect(prompt).toContain('### Deferred self-invocation');
+    expect(prompt).toContain('{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}');
+    expect(prompt).toContain('without another user prompt');
+    expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS');
+    expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT');
+    expect(prompt).toContain('forces `defer` off');
   });
 });
