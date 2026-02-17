@@ -74,6 +74,7 @@ export type DiscoclawConfig = {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   openaiModel: string;
+  forgeDrafterRuntime?: string;
   forgeAuditorRuntime?: string;
 
   // Codex CLI adapter config
@@ -392,12 +393,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
 
   const primaryRuntime = parseRuntimeName(env, 'PRIMARY_RUNTIME') ?? 'claude';
+  const forgeDrafterRuntime = parseRuntimeName(env, 'FORGE_DRAFTER_RUNTIME');
   const forgeAuditorRuntime = parseRuntimeName(env, 'FORGE_AUDITOR_RUNTIME');
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
   const openaiBaseUrl = parseTrimmedString(env, 'OPENAI_BASE_URL');
   const openaiModel = parseTrimmedString(env, 'OPENAI_MODEL') ?? 'gpt-4o';
   if (primaryRuntime === 'openai' && !openaiApiKey) {
     warnings.push('PRIMARY_RUNTIME=openai but OPENAI_API_KEY is not set; startup will fail unless another runtime is selected.');
+  }
+  if (forgeDrafterRuntime === 'openai' && !openaiApiKey) {
+    warnings.push('FORGE_DRAFTER_RUNTIME=openai but OPENAI_API_KEY is not set; drafter will fall back to the primary runtime.');
   }
   if (forgeAuditorRuntime === 'openai' && !openaiApiKey) {
     warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to the primary runtime.');
@@ -486,6 +491,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiApiKey,
       openaiBaseUrl,
       openaiModel,
+      forgeDrafterRuntime,
       forgeAuditorRuntime,
 
       codexBin: parseTrimmedString(env, 'CODEX_BIN') ?? 'codex',

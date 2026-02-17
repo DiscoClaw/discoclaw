@@ -204,6 +204,27 @@ describe('parseConfig', () => {
     expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE'))).toBe(true);
   });
 
+  // --- FORGE_DRAFTER_RUNTIME ---
+  it('returns undefined for forgeDrafterRuntime when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.forgeDrafterRuntime).toBeUndefined();
+  });
+
+  it('parses FORGE_DRAFTER_RUNTIME=openai', () => {
+    const { config } = parseConfig(env({ FORGE_DRAFTER_RUNTIME: 'openai', OPENAI_API_KEY: 'sk-test' }));
+    expect(config.forgeDrafterRuntime).toBe('openai');
+  });
+
+  it('normalizes FORGE_DRAFTER_RUNTIME claude_code to claude', () => {
+    const { config } = parseConfig(env({ FORGE_DRAFTER_RUNTIME: 'claude_code' }));
+    expect(config.forgeDrafterRuntime).toBe('claude');
+  });
+
+  it('warns when FORGE_DRAFTER_RUNTIME=openai without OPENAI_API_KEY', () => {
+    const { warnings } = parseConfig(env({ FORGE_DRAFTER_RUNTIME: 'openai', OPENAI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('FORGE_DRAFTER_RUNTIME=openai'))).toBe(true);
+  });
+
   // --- Forge auto-implement ---
   it('defaults forgeAutoImplement to true', () => {
     const { config } = parseConfig(env());

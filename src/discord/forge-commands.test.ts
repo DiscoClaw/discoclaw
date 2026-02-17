@@ -1683,3 +1683,128 @@ describe('buildAuditorPrompt hasTools option', () => {
     expect(prompt).not.toContain('You do not have access to the codebase');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Drafter runtime tests
+// ---------------------------------------------------------------------------
+
+const MINIMAL_DRAFT_PLAN = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+
+describe('drafterRuntime support', () => {
+  it('drafterRuntime is used for draft calls when set', async () => {
+    const tmpDir = await makeTmpDir();
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const drafterInvocations: RuntimeInvokeParams[] = [];
+    const drafterRuntime: RuntimeAdapter = {
+      id: 'openai' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        drafterInvocations.push(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: MINIMAL_DRAFT_PLAN };
+        })();
+      },
+    };
+
+    const auditorRuntime = makeMockRuntime([auditClean]);
+    const opts = await baseOpts(tmpDir, auditorRuntime, { drafterRuntime });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(drafterInvocations).toHaveLength(1);
+  });
+
+  it('drafterRuntime is used for revision calls when set', async () => {
+    const tmpDir = await makeTmpDir();
+    const auditBlocking = '**Concern 1: Missing details**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const drafterInvocations: RuntimeInvokeParams[] = [];
+    const drafterRuntime: RuntimeAdapter = {
+      id: 'openai' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        drafterInvocations.push(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: MINIMAL_DRAFT_PLAN };
+        })();
+      },
+    };
+
+    const auditorRuntime = makeMockRuntime([auditBlocking, auditClean]);
+    const opts = await baseOpts(tmpDir, auditorRuntime, { drafterRuntime });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    // call 0: draft, call 1: revision
+    expect(drafterInvocations).toHaveLength(2);
+  });
+
+  it('falls back to default runtime when drafterRuntime is undefined', async () => {
+    const tmpDir = await makeTmpDir();
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const { runtime, invocations } = makeCaptureRuntime([MINIMAL_DRAFT_PLAN, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime, { drafterRuntime: undefined });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    // Both drafter and auditor calls go to the same runtime
+    expect(invocations).toHaveLength(2);
+  });
+
+  it('non-Claude drafter runtime receives empty model string when drafterModel not set', async () => {
+    const tmpDir = await makeTmpDir();
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const drafterInvocations: RuntimeInvokeParams[] = [];
+    const drafterRuntime: RuntimeAdapter = {
+      id: 'openai' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        drafterInvocations.push(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: MINIMAL_DRAFT_PLAN };
+        })();
+      },
+    };
+
+    // drafterModel is not set — non-Claude runtime should receive empty model string
+    const opts = await baseOpts(tmpDir, makeMockRuntime([auditClean]), { drafterRuntime });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    expect(drafterInvocations[0]!.model).toBe('');
+  });
+
+  it('non-Claude drafter runtime receives no sessionKey', async () => {
+    const tmpDir = await makeTmpDir();
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const drafterInvocations: RuntimeInvokeParams[] = [];
+    const drafterRuntime: RuntimeAdapter = {
+      id: 'openai' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        drafterInvocations.push(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: MINIMAL_DRAFT_PLAN };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, makeMockRuntime([auditClean]), { drafterRuntime });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    expect(drafterInvocations[0]!.sessionKey).toBeUndefined();
+  });
+});

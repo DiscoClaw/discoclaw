@@ -453,7 +453,7 @@ log.info(
   'runtime:codex registered',
 );
 
-const claudeRequested = primaryRuntimeName === 'claude' || cfg.forgeAuditorRuntime === 'claude';
+const claudeRequested = primaryRuntimeName === 'claude' || cfg.forgeDrafterRuntime === 'claude' || cfg.forgeAuditorRuntime === 'claude';
 if (claudeRequested) {
   registerClaudeRuntime();
 }
@@ -515,6 +515,19 @@ if (cfg.debugRuntime) {
     },
     'debug:runtime config',
   );
+}
+
+// Resolve the drafter runtime (if configured)
+let drafterRuntime: import('./runtime/types.js').RuntimeAdapter | undefined;
+if (cfg.forgeDrafterRuntime) {
+  drafterRuntime = cfg.forgeDrafterRuntime === primaryRuntimeName
+    ? limitedRuntime
+    : runtimeRegistry.get(cfg.forgeDrafterRuntime);
+  if (!drafterRuntime) {
+    log.warn(
+      `FORGE_DRAFTER_RUNTIME='${cfg.forgeDrafterRuntime}' but no adapter registered with that name. Available: ${runtimeRegistry.list().join(', ')}. Falling back to PRIMARY_RUNTIME='${primaryRuntimeName}'.`,
+    );
+  }
 }
 
 // Resolve the auditor runtime (if configured)
@@ -619,6 +632,7 @@ const botParams = {
   forgeTimeoutMs,
   forgeProgressThrottleMs,
   forgeAutoImplement,
+  drafterRuntime,
   auditorRuntime,
   summaryToDurableEnabled,
   shortTermMemoryEnabled,
@@ -976,6 +990,7 @@ if (beadCtx) {
       orchestratorFactory: () =>
         new ForgeOrchestrator({
           runtime: limitedRuntime,
+          drafterRuntime,
           auditorRuntime,
           model: botParams.runtimeModel,
           cwd: projectRoot,
