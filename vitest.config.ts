@@ -12,6 +12,15 @@ export default defineConfig({
       'content/**',
       'var/**',
     ],
+    // Cap parallelism to prevent OOM when tests run under discoclaw.service.
+    // 11 uncapped workers hit ~44GB RAM. 4 workers keeps peak usage reasonable.
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        minForks: 1,
+        maxForks: 4,
+      },
+    },
   },
 });
 

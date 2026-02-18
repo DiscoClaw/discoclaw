@@ -128,7 +128,13 @@ export type WireBeadsSyncResult = {
 
 export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsSyncResult> {
   if (!opts.skipForumGuard) {
-    initBeadsForumGuard({ client: opts.client, forumId: opts.beadCtx.forumId, log: opts.log });
+    initBeadsForumGuard({
+      client: opts.client,
+      forumId: opts.beadCtx.forumId,
+      log: opts.log,
+      beadsCwd: opts.beadCtx.beadsCwd,
+      tagMap: opts.beadCtx.tagMap,
+    });
   }
 
   const { BeadSyncCoordinator } = await import('./bead-sync-coordinator.js');
