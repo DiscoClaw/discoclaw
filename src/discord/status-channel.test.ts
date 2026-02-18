@@ -209,29 +209,30 @@ describe('sanitizeErrorMessage', () => {
 describe('sanitizePhaseError', () => {
   it('formats timeout using ms from error string when no timeoutMs provided', () => {
     const raw = 'Process timed out after 120000ms';
-    expect(sanitizePhaseError('3', raw)).toBe('Phase 3 timed out after 2 minutes');
+    expect(sanitizePhaseError('3', raw)).toBe('Phase **3** timed out after 2 minutes');
   });
 
   it('uses provided timeoutMs over value in error string', () => {
     const raw = 'Process timed out after 60000ms';
-    expect(sanitizePhaseError('2', raw, 300000)).toBe('Phase 2 timed out after 5 minutes');
+    expect(sanitizePhaseError('2', raw, 300000)).toBe('Phase **2** timed out after 5 minutes');
   });
 
   it('uses singular "minute" when timeout is exactly 1 minute', () => {
     const raw = 'timed out after 60000ms';
-    expect(sanitizePhaseError('1', raw)).toBe('Phase 1 timed out after 1 minute');
+    expect(sanitizePhaseError('1', raw)).toBe('Phase **1** timed out after 1 minute');
   });
 
   it('falls back to seconds when timeout is under 1 minute', () => {
     const raw = 'timed out after 30000ms';
-    expect(sanitizePhaseError('1', raw)).toBe('Phase 1 timed out after 30s');
+    expect(sanitizePhaseError('1', raw)).toBe('Phase **1** timed out after 30 seconds');
   });
 
-  it('delegates non-timeout errors to sanitizeErrorMessage', () => {
+  it('wraps non-timeout errors with "Phase X failed:" prefix', () => {
     const raw = 'Command was killed with SIGKILL (Forced termination): claude -p "You are..."';
     const result = sanitizePhaseError('4', raw);
     expect(result).not.toContain('claude -p');
     expect(result).toContain('SIGKILL');
+    expect(result).toMatch(/^Phase \*\*4\*\* failed:/);
   });
 
   it('truncates output to 500 chars', () => {
@@ -241,6 +242,6 @@ describe('sanitizePhaseError', () => {
 
   it('handles case-insensitive timeout pattern', () => {
     const raw = 'Timed Out After 90000ms';
-    expect(sanitizePhaseError('5', raw)).toBe('Phase 5 timed out after 2 minutes');
+    expect(sanitizePhaseError('5', raw)).toBe('Phase **5** timed out after 2 minutes');
   });
 });
