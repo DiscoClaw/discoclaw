@@ -1,10 +1,13 @@
-import type { RuntimeAdapter } from '../runtime/types.js';
+import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 
 /**
  * Collect the final text from a runtime invocation, streaming through all events.
  *
  * When `opts.requireFinalEvent` is true, throws if the stream ends without
  * a `text_final` event (distinguishes a complete response from a truncated one).
+ *
+ * When `opts.onEvent` is provided, each event is forwarded to it before
+ * processing — used to drive live streaming preview in Discord progress messages.
  */
 export async function collectRuntimeText(
   runtime: RuntimeAdapter,
@@ -14,7 +17,7 @@ export async function collectRuntimeText(
   tools: string[],
   addDirs: string[],
   timeoutMs: number,
-  opts?: { requireFinalEvent?: boolean; sessionKey?: string },
+  opts?: { requireFinalEvent?: boolean; sessionKey?: string; onEvent?: (evt: EngineEvent) => void },
 ): Promise<string> {
   let text = '';
   let sawFinal = false;
@@ -27,6 +30,7 @@ export async function collectRuntimeText(
     timeoutMs,
     ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
   })) {
+    opts?.onEvent?.(evt);
     if (evt.type === 'text_final') {
       text = evt.text;
       sawFinal = true;

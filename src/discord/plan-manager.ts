@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { collectRuntimeText } from './runtime-utils.js';
-import type { RuntimeAdapter } from '../runtime/types.js';
+import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
 import { parseAuditVerdict } from './forge-commands.js';
 import type { AuditVerdict } from './forge-commands.js';
@@ -52,6 +52,8 @@ export type PhaseExecutionOpts = {
   log?: LoggerLike;
   /** Max audit→fix→re-audit loops before giving up. Default: 3. */
   maxAuditFixAttempts?: number;
+  /** Optional streaming event callback for live Discord progress previews. */
+  onEvent?: (evt: EngineEvent) => void;
 };
 
 export type RunPhaseResult =
@@ -1051,7 +1053,7 @@ export async function executePhase(
       tools,
       addDirs,
       opts.timeoutMs,
-      { requireFinalEvent: true },
+      { requireFinalEvent: true, onEvent: opts.onEvent },
     );
 
     if (phase.kind === 'audit') {
@@ -1321,7 +1323,7 @@ export async function runNextPhase(
             ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
             fixAddDirs,
             opts.timeoutMs,
-            { requireFinalEvent: true },
+            { requireFinalEvent: true, onEvent: opts.onEvent },
           );
         } catch (err) {
           opts.log?.warn({ err, phase: phase.id, attempt }, 'plan-manager: audit fix agent failed');

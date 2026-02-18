@@ -51,6 +51,7 @@ export type ForgeOrchestratorOpts = {
 };
 
 type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
+type EventFn = (evt: import('../runtime/types.js').EngineEvent) => void;
 
 // ---------------------------------------------------------------------------
 // Parsing
@@ -489,6 +490,7 @@ export class ForgeOrchestrator {
     description: string,
     onProgress: ProgressFn,
     context?: string,
+    onEvent?: EventFn,
   ): Promise<ForgeResult> {
     if (this.running) {
       throw new Error('A forge is already running');
@@ -554,6 +556,7 @@ export class ForgeOrchestrator {
         description: context ? `${description}\n\n${context}` : description,
         startRound: 1,
         onProgress,
+        onEvent,
         projectContext,
         // Draft-phase specifics (only used when startRound === 1)
         templateContent,
@@ -597,6 +600,7 @@ export class ForgeOrchestrator {
     filePath: string,
     planTitle: string,
     onProgress: ProgressFn,
+    onEvent?: EventFn,
   ): Promise<ForgeResult> {
     if (this.running) {
       throw new Error('A forge is already running');
@@ -642,6 +646,7 @@ export class ForgeOrchestrator {
         description: planTitle,
         startRound,
         onProgress,
+        onEvent,
         projectContext,
         t0,
       });
@@ -687,6 +692,7 @@ export class ForgeOrchestrator {
     description: string;
     startRound: number;
     onProgress: ProgressFn;
+    onEvent?: EventFn;
     projectContext?: string;
     // Draft-phase specifics (only present when startRound === 1, i.e. from run())
     templateContent?: string;
@@ -699,6 +705,7 @@ export class ForgeOrchestrator {
       description,
       startRound,
       onProgress,
+      onEvent,
       projectContext,
       templateContent,
       contextSummary,
@@ -762,7 +769,7 @@ export class ForgeOrchestrator {
           readOnlyTools,
           addDirs,
           this.opts.timeoutMs,
-          drafterRt.capabilities.has('sessions') ? { sessionKey: drafterSessionKey } : undefined,
+          { ...(drafterRt.capabilities.has('sessions') ? { sessionKey: drafterSessionKey } : {}), onEvent },
         );
 
         // Write the draft — preserve the header (planId, beadId) from the created file
@@ -815,7 +822,7 @@ export class ForgeOrchestrator {
         auditorHasFileTools ? readOnlyTools : [],
         auditorHasFileTools ? addDirs : [],
         this.opts.timeoutMs,
-        auditorRt.capabilities.has('sessions') ? { sessionKey: auditorSessionKey } : undefined,
+        { ...(auditorRt.capabilities.has('sessions') ? { sessionKey: auditorSessionKey } : {}), onEvent },
       );
 
       lastAuditNotes = auditOutput;
@@ -871,7 +878,7 @@ export class ForgeOrchestrator {
         readOnlyTools,
         addDirs,
         this.opts.timeoutMs,
-        drafterRt.capabilities.has('sessions') ? { sessionKey: drafterSessionKey } : undefined,
+        { ...(drafterRt.capabilities.has('sessions') ? { sessionKey: drafterSessionKey } : {}), onEvent },
       );
 
       planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
