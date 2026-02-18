@@ -2318,6 +2318,30 @@ describe('buildPostRunSummary', () => {
     expect(buildPostRunSummary(phases)).toContain('[-]');
   });
 
+  it('shows [~] indicator for in-progress phase', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'in-progress',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+      ],
+    });
+    expect(buildPostRunSummary(phases)).toContain('[~]');
+  });
+
+  it('shows [ ] indicator for pending phase', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'pending',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+      ],
+    });
+    expect(buildPostRunSummary(phases)).toContain('[ ]');
+  });
+
   it('includes git commit hash when present', () => {
     const phases = makePhasesForSummary({
       phases: [

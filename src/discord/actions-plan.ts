@@ -286,7 +286,7 @@ export async function executePlanAction(
           } else {
             // Any error/stale/corrupt/audit_failed/retry_blocked stops the loop.
             stopReason = phaseResult.result;
-            stopMessage = (phaseResult as any).error ?? phaseResult.result;
+            stopMessage = (phaseResult as any).error ?? (phaseResult as any).message ?? phaseResult.result;
             planCtx.log?.warn({ planId: action.planId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
             break;
           }
@@ -332,7 +332,7 @@ export async function executePlanAction(
             try {
               const phasesContent = await fs.readFile(prepResult.phasesFilePath, 'utf-8');
               const phases = deserializePhases(phasesContent);
-              const budget = 2000 - lines.join('\n').length - 50;
+              const budget = Math.max(0, 2000 - lines.join('\n').length - 50);
               const summary = buildPostRunSummary(phases, budget);
               if (summary) {
                 lines.push(summary);

@@ -793,7 +793,7 @@ export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): stri
 
   // Build files section with budget enforcement
   const headerLine = `\n\n**Files changed (${allFiles.length}):**`;
-  const budgetForFiles = budgetChars - phaseSection.length - headerLine.length - 5; // 5 chars margin
+  const budgetForFiles = Math.max(0, budgetChars - phaseSection.length - headerLine.length - 5); // 5 chars margin
 
   const fileLines: string[] = [];
   let usedChars = 0;

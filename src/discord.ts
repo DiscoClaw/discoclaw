@@ -1120,7 +1120,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       if (phaseList) summaryMsg += `\n${phaseList}`;
                     }
 
-                    if (!isRunOne && phasesRun > 0) {
+                    if (!isRunOne && (phasesRun > 0 || stopReason === null)) {
                       try {
                         const phasesContent = await fs.readFile(phasesFilePath, 'utf-8');
                         const phases = deserializePhases(phasesContent);
