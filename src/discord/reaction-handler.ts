@@ -78,24 +78,31 @@ function createReactionHandler(
         return;
       }
 
-      // 3. Reaction prompt interception — if this reaction resolves a pending prompt, skip AI.
-      if (mode === 'add') {
-        const emoji = reaction.emoji.name ?? '';
-        if (emoji && tryResolveReactionPrompt(reaction.message.id, emoji)) return;
-      }
-
-      // 4. Guild-only — skip DM reactions.
+      // 3. Guild-only — skip DM reactions.
       if (reaction.message.guildId == null) return;
 
-      // 5. Staleness guard.
+      // 4. Allowlist check.
+      if (!isAllowlisted(params.allowUserIds, user.id)) return;
+
+      // 5. Reaction prompt interception — if this reaction resolves a pending prompt, skip AI.
+      // IMPORTANT: This check intentionally precedes the staleness guard (step 6) so that
+      // reactionPrompt resolution works even when reactionMaxAgeMs is configured short.
+      // The allowlist check above ensures only authorized users can resolve pending prompts.
+      if (mode === 'add') {
+        // For custom emojis, build the full <:name:id> identifier so it matches the choice
+        // strings stored in the pending prompt. Unicode emojis use name directly.
+        const emojiForPrompt = reaction.emoji.id
+          ? `<:${reaction.emoji.name ?? ''}:${reaction.emoji.id}>`
+          : (reaction.emoji.name ?? '');
+        if (emojiForPrompt && tryResolveReactionPrompt(reaction.message.id, emojiForPrompt)) return;
+      }
+
+      // 6. Staleness guard.
       const msgTimestamp = reaction.message.createdTimestamp;
       if (msgTimestamp && params.reactionMaxAgeMs > 0) {
         const age = Date.now() - msgTimestamp;
         if (age > params.reactionMaxAgeMs) return;
       }
-
-      // 6. Allowlist check.
-      if (!isAllowlisted(params.allowUserIds, user.id)) return;
 
       // Resolve channel/thread info once, used by guards and the queue callback.
       const ch: any = reaction.message.channel as any;
