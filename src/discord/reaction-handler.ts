@@ -342,6 +342,10 @@ function createReactionHandler(
 
           // Track this reply for graceful shutdown cleanup.
           const dispose = registerInFlightReply(reply!, reaction.message.channelId, (reply as any).id, `${logPrefix}:${reaction.message.channelId}`);
+          // Tracks whether the reply was successfully replaced with real content (or deleted).
+          // If false when the finally block runs, the reply still shows thinking-format content
+          // and must be deleted to prevent a stale "Thinking..." message from persisting.
+          let replyFinalized = false;
           try {
 
           // Streaming pattern (matches discord.ts flat mode).
@@ -489,6 +493,7 @@ function createReactionHandler(
               // no prose, delete the placeholder instead of posting "(no output)".
               if (!processedText.trim() && anyActionSucceeded && collectedImages.length === 0) {
                 try { await (reply as any)?.delete(); } catch { /* ignore */ }
+                replyFinalized = true;
                 params.log?.info({ sessionKey }, `${logPrefix}:reply suppressed (actions-only, no display text)`);
                 return;
               }
@@ -513,6 +518,7 @@ function createReactionHandler(
             params.log?.info({ sessionKey, chars: strippedText.length }, `${logPrefix}:trivial response suppressed`);
             try {
               await (reply as any)?.delete();
+              replyFinalized = true;
             } catch (delErr) {
               params.log?.warn({ sessionKey, err: delErr }, `${logPrefix}:placeholder delete failed`);
             }
@@ -522,9 +528,12 @@ function createReactionHandler(
           if (!isShuttingDown()) {
             try {
               await editThenSendChunks(reply!, (msg as any).channel, processedText, collectedImages);
+              replyFinalized = true;
             } catch (editErr: any) {
               if (editErr?.code === 50083) {
                 params.log?.info({ sessionKey }, `${logPrefix}:reply skipped (thread archived by action)`);
+                try { await (reply as any)?.delete(); } catch { /* best-effort cleanup */ }
+                replyFinalized = true;
               } else {
                 throw editErr;
               }
@@ -533,6 +542,12 @@ function createReactionHandler(
 
           } finally {
             dispose();
+            // Safety net: if the reply was never finalized (e.g. finalization threw,
+            // or a suppression-delete failed silently), delete it now to prevent a
+            // stale "Thinking..." message from persisting in the channel.
+            if (!replyFinalized && reply && !isShuttingDown()) {
+              try { await (reply as any).delete(); } catch { /* best-effort */ }
+            }
           }
         } catch (err) {
           metrics.increment(handlerErrorMetric);
