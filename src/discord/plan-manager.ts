@@ -728,6 +728,95 @@ export function buildPhasePrompt(
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Post-run summary
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a concise human-readable rollup of all phases after a plan run completes.
+ * Returns an empty string when there are no phases.
+ * The `budgetChars` parameter (default 800) caps total output length — if the
+ * files list exceeds budget, it is truncated with an overflow count.
+ */
+export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): string {
+  if (phases.phases.length === 0) return '';
+
+  const statusIndicator: Record<string, string> = {
+    'done': '[x]',
+    'failed': '[!]',
+    'skipped': '[-]',
+    'in-progress': '[~]',
+    'pending': '[ ]',
+  };
+
+  const lines: string[] = [];
+
+  // Per-phase lines
+  for (const phase of phases.phases) {
+    const indicator = statusIndicator[phase.status] ?? '[ ]';
+    const commit = phase.gitCommit ? ` (${phase.gitCommit})` : '';
+    const fileCount = phase.modifiedFiles && phase.modifiedFiles.length > 0
+      ? ` · ${phase.modifiedFiles.length} file${phase.modifiedFiles.length === 1 ? '' : 's'}`
+      : '';
+
+    let line = `${indicator} **${phase.id}:** ${phase.title}${commit}${fileCount}`;
+
+    // For audit phases, append a one-line verdict extracted from output
+    if (phase.kind === 'audit' && phase.output) {
+      const verdictMatch = phase.output.match(/\*\*Verdict:\*\*\s*(.+)/);
+      if (verdictMatch) {
+        line += ` — ${verdictMatch[1]!.trim()}`;
+      }
+    }
+
+    lines.push(line);
+  }
+
+  // Collect all unique modified files across phases
+  const allFiles: string[] = [];
+  const seen = new Set<string>();
+  for (const phase of phases.phases) {
+    for (const f of phase.modifiedFiles ?? []) {
+      if (!seen.has(f)) {
+        seen.add(f);
+        allFiles.push(f);
+      }
+    }
+  }
+
+  // Build phase section
+  const phaseSection = lines.join('\n');
+
+  if (allFiles.length === 0) {
+    return phaseSection;
+  }
+
+  // Build files section with budget enforcement
+  const headerLine = `\n\n**Files changed (${allFiles.length}):**`;
+  const budgetForFiles = budgetChars - phaseSection.length - headerLine.length - 5; // 5 chars margin
+
+  const fileLines: string[] = [];
+  let usedChars = 0;
+  let overflow = 0;
+
+  for (const f of allFiles) {
+    const entry = `\`${f}\``;
+    if (usedChars + entry.length + 2 > budgetForFiles) {
+      overflow = allFiles.length - fileLines.length;
+      break;
+    }
+    fileLines.push(entry);
+    usedChars += entry.length + 2; // +2 for ", " separator
+  }
+
+  let filesSection = headerLine + '\n' + fileLines.join(', ');
+  if (overflow > 0) {
+    filesSection += ` (+${overflow} more)`;
+  }
+
+  return phaseSection + filesSection;
+}
+
 export function buildAuditFixPrompt(
   planContent: string,
   auditOutput: string,
