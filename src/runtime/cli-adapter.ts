@@ -100,14 +100,29 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const sub = proc.getSubprocess();
           if (sub) globalTracker.add(sub);
 
+          // Abort the pool turn if the caller's signal fires.
+          if (params.signal?.aborted) {
+            pool.remove(params.sessionKey);
+            if (sub) globalTracker.delete(sub);
+            yield { type: 'error', message: 'aborted' };
+            yield { type: 'done' };
+            return;
+          }
+          const onPoolAbort = () => { proc.kill?.(); };
+          params.signal?.addEventListener('abort', onPoolAbort, { once: true });
+
           let fallback = false;
-          for await (const evt of proc.sendTurn(params.prompt, params.images)) {
-            if (evt.type === 'error' && (evt.message.startsWith('long-running:') || evt.message.includes('hang detected'))) {
-              pool.remove(params.sessionKey);
-              fallback = true;
-              break;
+          try {
+            for await (const evt of proc.sendTurn(params.prompt, params.images)) {
+              if (evt.type === 'error' && (evt.message.startsWith('long-running:') || evt.message.includes('hang detected'))) {
+                pool.remove(params.sessionKey);
+                fallback = true;
+                break;
+              }
+              yield evt;
             }
-            yield evt;
+          } finally {
+            params.signal?.removeEventListener('abort', onPoolAbort);
           }
 
           if (sub) globalTracker.delete(sub);
@@ -122,6 +137,12 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     // ---------------------------------------------------------------
     // One-shot path
     // ---------------------------------------------------------------
+    if (params.signal?.aborted) {
+      yield { type: 'error', message: 'aborted' };
+      yield { type: 'done' };
+      return;
+    }
+
     const hasImages = Boolean(params.images && params.images.length > 0);
     const promptTooLarge = Buffer.byteLength(params.prompt, 'utf-8') > STDIN_THRESHOLD;
     const useStdin = hasImages || promptTooLarge;
@@ -162,6 +183,12 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     globalTracker.add(subprocess);
     subprocess.then(() => globalTracker.delete(subprocess))
       .catch(() => globalTracker.delete(subprocess));
+
+    // Wire caller's AbortSignal to kill the subprocess.
+    const onAbort = () => {
+      subprocess.kill('SIGTERM');
+    };
+    params.signal?.addEventListener('abort', onAbort, { once: true });
 
     if (!subprocess.stdout) {
       yield { type: 'error', message: `${strategy.id}: missing stdout stream` };
@@ -359,6 +386,14 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       const stdout = procResult.stdout ?? '';
       const stderr = procResult.stderr ?? '';
 
+      if (params.signal?.aborted) {
+        push({ type: 'error', message: 'aborted' });
+        push({ type: 'done' });
+        finished = true;
+        wake();
+        return;
+      }
+
       if (procResult.timedOut) {
         // Use a fixed message — execa's originalMessage/shortMessage can contain the
         // full command line (including prompt text), so we never expose raw error strings.
@@ -517,6 +552,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     } finally {
       clearStallTimer();
       scanner?.stop();
+      params.signal?.removeEventListener('abort', onAbort);
       if (!finished) subprocess.kill('SIGKILL');
       globalTracker.delete(subprocess);
     }

@@ -54,6 +54,12 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
           timer = setTimeout(() => controller.abort(), params.timeoutMs);
         }
 
+        // Forward caller's AbortSignal into the controller.
+        const onCallerAbort = () => controller.abort();
+        params.signal?.addEventListener('abort', onCallerAbort, { once: true });
+
+        if (params.signal?.aborted) controller.abort();
+
         let accumulated = '';
 
         try {
@@ -169,7 +175,11 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
           if (timer) clearTimeout(timer);
 
           if (controller.signal.aborted) {
-            yield { type: 'error', message: `openai-compat timed out after ${params.timeoutMs}ms` };
+            if (params.signal?.aborted) {
+              yield { type: 'error', message: 'aborted' };
+            } else {
+              yield { type: 'error', message: `openai-compat timed out after ${params.timeoutMs}ms` };
+            }
             yield { type: 'done' };
             return;
           }
@@ -178,6 +188,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
           yield { type: 'done' };
         } finally {
           if (timer) clearTimeout(timer);
+          params.signal?.removeEventListener('abort', onCallerAbort);
         }
       })();
     },
