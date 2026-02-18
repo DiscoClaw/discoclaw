@@ -165,6 +165,10 @@ function createReactionHandler(
 
           if (params.requireChannelContext && !channelCtx.contextPath) {
             params.log?.warn({ channelId: channelCtx.channelId }, `${logPrefix}:missing required channel context`);
+            await reply.edit({
+              content: mapRuntimeErrorToUserMessage('Configuration error: missing required channel context file for this channel ID.'),
+              allowedMentions: NO_MENTIONS,
+            });
             return;
           }
 
@@ -346,6 +350,8 @@ function createReactionHandler(
           // If false when the finally block runs, the reply still shows thinking-format content
           // and must be deleted to prevent a stale "Thinking..." message from persisting.
           let replyFinalized = false;
+          // Tracks whether a text_final event was received, used to gate action execution.
+          let hadTextFinal = false;
           try {
 
           // Streaming pattern (matches discord.ts flat mode).
@@ -416,6 +422,7 @@ function createReactionHandler(
               else if (evt.type === 'tool_end') activeToolCount = Math.max(0, activeToolCount - 1);
 
               if (evt.type === 'text_final') {
+                hadTextFinal = true;
                 finalText = evt.text;
                 await maybeEdit(true);
               } else if (evt.type === 'text_delta') {
@@ -436,6 +443,7 @@ function createReactionHandler(
                 statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
                 finalText = mapRuntimeErrorToUserMessage(evt.message);
                 await maybeEdit(true);
+                replyFinalized = true;
                 return;
               }
             }
@@ -451,7 +459,7 @@ function createReactionHandler(
 
           // Parse and execute Discord actions.
           let parsedActionCount = 0;
-          if (params.discordActionsEnabled && msg.guild) {
+          if (params.discordActionsEnabled && msg.guild && hadTextFinal && !invokeError) {
             const parsed = parseDiscordActions(processedText, actionFlags);
             parsedActionCount = parsed.actions.length;
             if (parsed.actions.length > 0) {
@@ -538,16 +546,33 @@ function createReactionHandler(
                 throw editErr;
               }
             }
+          } else {
+            replyFinalized = true;
           }
 
+          } catch (innerErr) {
+            // Inner catch: attempt to show the error in the reply before the finally
+            // block runs dispose(). Setting replyFinalized = true on success prevents
+            // the finally's safety-net delete from removing the error message.
+            try {
+              if (reply && !isShuttingDown()) {
+                await reply.edit({
+                  content: mapRuntimeErrorToUserMessage(String(innerErr)),
+                  allowedMentions: NO_MENTIONS,
+                });
+                replyFinalized = true;
+              }
+            } catch {
+              // Ignore secondary errors; outer catch will handle logging.
+            }
+            throw innerErr;
           } finally {
-            dispose();
-            // Safety net: if the reply was never finalized (e.g. finalization threw,
-            // or a suppression-delete failed silently), delete it now to prevent a
-            // stale "Thinking..." message from persisting in the channel.
+            // Safety net runs before dispose() so cold-start recovery can still see
+            // the in-flight entry if the delete fails.
             if (!replyFinalized && reply && !isShuttingDown()) {
               try { await (reply as any).delete(); } catch { /* best-effort */ }
             }
+            dispose();
           }
         } catch (err) {
           metrics.increment(handlerErrorMetric);

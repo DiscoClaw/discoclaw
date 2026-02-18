@@ -1862,6 +1862,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           // If false when the finally block runs, the reply still shows thinking-format content
           // and must be deleted to prevent a stale "Thinking..." message from persisting.
           let replyFinalized = false;
+          // Tracks whether a text_final event was received, used to gate action execution.
+          let hadTextFinal = false;
 
           // Track this reply for graceful shutdown cleanup.
           let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
@@ -1884,12 +1886,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let invokeErrorMessage = '';
             let lastEditAt = 0;
             const minEditIntervalMs = 1250;
+            hadTextFinal = false;
 
             // On follow-up iterations, send a new placeholder message.
             if (followUpDepth > 0) {
               dispose();
               reply = await msg.channel.send({ content: formatBoldLabel('(following up...)'), allowedMentions: NO_MENTIONS });
               dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}:followup-${followUpDepth}`);
+              replyFinalized = false;
               params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
             }
 
@@ -1936,6 +1940,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     // eslint-disable-next-line @typescript-eslint/no-floating-promises
                     maybeEdit(false);
                   } else if (action.type === 'set_final') {
+                    hadTextFinal = true;
                     finalText = action.text;
                     // eslint-disable-next-line @typescript-eslint/no-floating-promises
                     maybeEdit(true);
@@ -1992,6 +1997,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               } else {
                 // Flat mode: existing behavior unchanged.
                 if (evt.type === 'text_final') {
+                  hadTextFinal = true;
                   finalText = evt.text;
                   await maybeEdit(true);
                 } else if (evt.type === 'error') {
@@ -2033,7 +2039,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             // Gate action execution on successful stream completion — do not execute
             // actions against partial or error output, which could cause side effects
             // based on incomplete model responses.
-            if (params.discordActionsEnabled && msg.guild && !invokeHadError) {
+            if (params.discordActionsEnabled && msg.guild && hadTextFinal && !invokeHadError) {
               const parsed = parseDiscordActions(processedText, actionFlags);
               if (parsed.actions.length > 0) {
                 actions = parsed.actions;
@@ -2125,6 +2131,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   throw editErr;
                 }
               }
+            } else {
+              replyFinalized = true;
             }
 
             // -- auto-follow-up check --
@@ -2147,14 +2155,29 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             followUpDepth++;
           }
 
+          } catch (innerErr) {
+            // Inner catch: attempt to show the error in the reply before the finally
+            // block runs dispose(). Setting replyFinalized = true on success prevents
+            // the finally's safety-net delete from removing the error message.
+            try {
+              if (reply && !isShuttingDown()) {
+                await reply.edit({
+                  content: mapRuntimeErrorToUserMessage(String(innerErr)),
+                  allowedMentions: NO_MENTIONS,
+                });
+                replyFinalized = true;
+              }
+            } catch {
+              // Ignore secondary errors; outer catch will handle logging.
+            }
+            throw innerErr;
           } finally {
-            dispose();
-            // Safety net: if the reply was never finalized (e.g. finalization threw,
-            // or a suppression-delete failed silently), delete it now to prevent a
-            // stale "Thinking..." message from persisting in the channel.
+            // Safety net runs before dispose() so cold-start recovery can still see
+            // the in-flight entry if the delete fails.
             if (!replyFinalized && reply && !isShuttingDown()) {
               try { await reply.delete(); } catch { /* best-effort */ }
             }
+            dispose();
           }
 
           if (params.summaryEnabled) {
