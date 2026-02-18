@@ -40,7 +40,7 @@ The factory provides: subprocess tracking, process pool, stall detection, sessio
 | Strategy | File | Multi-turn | Notes |
 |----------|------|------------|-------|
 | Claude Code | `strategies/claude-strategy.ts` | process-pool | Default JSONL parsing, image support |
-| Codex CLI | `strategies/codex-strategy.ts` | session-resume | Custom JSONL (thread.started, item.completed), error sanitization |
+| Codex CLI | `strategies/codex-strategy.ts` | session-resume | Custom JSONL (thread.started, item.completed), error sanitization; reasoning items surface in the Discord preview during streaming but are excluded from the final reply |
 | Template | `strategies/template-strategy.ts` | — | Commented starting point for new models |
 
 Thin wrappers (`claude-code-cli.ts`, `codex-cli.ts`) map legacy opts and re-export for backward compatibility. Shared utilities live in `cli-shared.ts` and `cli-output-parsers.ts`. Strategy types are in `cli-strategy.ts`.
