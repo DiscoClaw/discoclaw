@@ -1456,9 +1456,8 @@ describe('reaction prompt interception', () => {
     }
   });
 
-  it('reactionPrompt action → executor returns immediately → follow-up prompt contains "Prompt sent"', async () => {
+  it('reactionPrompt action → executor returns immediately → no auto-follow-up (not a query action)', async () => {
     const invokeCalls: any[] = [];
-    let invokeCount = 0;
 
     const promptMsgId = 'prompt-integration-1';
     const reactFn = vi.fn().mockResolvedValue(undefined);
@@ -1469,14 +1468,8 @@ describe('reaction prompt interception', () => {
       capabilities: new Set(['streaming_text']),
       async *invoke(p): AsyncIterable<EngineEvent> {
         invokeCalls.push(p);
-        invokeCount++;
-        if (invokeCount === 1) {
-          // First invocation: emit a reactionPrompt action (no prose).
-          yield { type: 'text_final', text: '<discord-action>{"type":"reactionPrompt","question":"Proceed?","choices":["✅","❌"]}</discord-action>' };
-        } else {
-          // Second invocation (follow-up): plain response.
-          yield { type: 'text_final', text: 'Prompt registered, waiting for user.' };
-        }
+        // Emit a reactionPrompt action — fire-and-forget, not a query action.
+        yield { type: 'text_final', text: '<discord-action>{"type":"reactionPrompt","question":"Proceed?","choices":["✅","❌"]}</discord-action>' };
         yield { type: 'done' };
       },
     };
@@ -1506,13 +1499,13 @@ describe('reaction prompt interception', () => {
     const handler = createReactionAddHandler(params, queue);
     await handler(reaction as any, mockUser() as any);
 
-    // Two AI invocations: first emits reactionPrompt, second is the immediate follow-up.
-    expect(invokeCalls).toHaveLength(2);
+    // reactionPrompt is not in QUERY_ACTION_TYPES, so the auto-follow-up loop does not fire.
+    // The second invocation (acting on the user's choice) happens in a separate handler call
+    // triggered when the user actually reacts to the prompt message.
+    expect(invokeCalls).toHaveLength(1);
 
-    // The follow-up prompt reflects the fire-and-forget result — the user's choice
-    // will arrive via a separate reaction handler invocation when they react.
-    const followUpPrompt: string = invokeCalls[1].prompt;
-    expect(followUpPrompt).toContain('Prompt sent');
+    // The prompt was registered — the reaction handler will intercept the user's reaction.
+    expect(reactionPrompts.pendingPromptCount()).toBe(1);
   });
 });
 

@@ -8,6 +8,7 @@ import {
 } from './reaction-prompts.js';
 import type { ReactionPromptRequest } from './reaction-prompts.js';
 import type { ActionContext } from './actions.js';
+import { QUERY_ACTION_TYPES } from './action-categories.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -152,6 +153,25 @@ describe('executeReactionPromptAction — happy path', () => {
     expect(resolved).toEqual({ question: 'Should I proceed?', chosenEmoji: '👎' });
   });
 
+  it('registry is populated before react() calls — ordering invariant', async () => {
+    let countDuringReact = -1;
+    const reactFn = vi.fn().mockImplementation(async () => {
+      // Capture pendingPromptCount at the moment react() is first called.
+      if (countDuringReact === -1) {
+        countDuringReact = pendingPromptCount();
+      }
+    });
+    const promptMsg = { id: 'prompt-order', react: reactFn };
+    const sendFn = vi.fn().mockResolvedValue(promptMsg);
+    const ctx = makeCtx();
+    (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
+
+    await executeReactionPromptAction(makeAction({ choices: ['✅', '❌'] }), ctx);
+
+    // Registration must have occurred before the first react() call.
+    expect(countDuringReact).toBe(1);
+  });
+
   it('accepts timeoutSeconds without error (field is ignored)', async () => {
     const reactFn = vi.fn().mockResolvedValue(undefined);
     const promptMsg = { id: 'prompt-clamp', react: reactFn };
@@ -285,5 +305,15 @@ describe('reactionPromptSection', () => {
 
   it('mentions choice count limits', () => {
     expect(reactionPromptSection()).toContain('2–9');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QUERY_ACTION_TYPES regression guard
+// ---------------------------------------------------------------------------
+
+describe('QUERY_ACTION_TYPES exclusion', () => {
+  it('reactionPrompt is not in QUERY_ACTION_TYPES (fire-and-forget, not a query)', () => {
+    expect(QUERY_ACTION_TYPES.has('reactionPrompt')).toBe(false);
   });
 });
