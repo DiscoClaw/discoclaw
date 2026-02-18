@@ -605,6 +605,8 @@ describe('beadActionsPromptSection', () => {
     expect(section).toContain('beadShow');
     expect(section).toContain('beadUpdate');
     expect(section).toContain('sendMessage');
+    expect(section).toContain('readMessages');
+    expect(section).toContain('listPins');
     expect(section).toContain('stale');
   });
 });
