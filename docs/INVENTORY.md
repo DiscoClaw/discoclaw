@@ -152,6 +152,16 @@ All actions are gated by category env flags (off by default except channels).
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
 
+## 14. Transport Abstraction
+
+Platform-agnostic message normalization layer (Phase 1 of transport portability). Downstream consumers can be migrated off discord.js types incrementally.
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| `PlatformMessage` type (normalized chat message shape) | `src/transport/types.ts` | **done** |
+| discord.js `Message` → `PlatformMessage` mapper | `src/discord/platform-message.ts` | **done** |
+| Mapper unit tests | `src/discord/platform-message.test.ts` | **done** |
+
 ---
 
 ## MVP Gaps (what's left)
