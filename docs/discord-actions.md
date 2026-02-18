@@ -151,7 +151,7 @@ Allow the model to create, inspect, approve, and close plans without a human `!p
 | `planShow` | Show plan details (header, status, bead) | No (query) |
 | `planApprove` | Set plan status to APPROVED, update backing bead | Yes |
 | `planClose` | Set plan status to CLOSED, close backing bead | Yes |
-| `planRun` | Execute all remaining phases of a plan (fire-and-forget) | Yes |
+| `planRun` | Execute all remaining phases of a plan (fire-and-forget); posts a live-updating status message to the channel reflecting the current phase and final outcome (unless `skipCompletionNotify` is set) | Yes |
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 0, requires `DISCOCLAW_PLAN_COMMANDS_ENABLED`).
 Context: Requires `PlanContext` with plans directory, bead CWD, runtime, and model.
