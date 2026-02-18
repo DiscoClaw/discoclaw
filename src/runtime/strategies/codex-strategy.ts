@@ -135,11 +135,29 @@ export function createCodexStrategy(defaultModel: string): CliAdapterStrategy {
         return {}; // Handled — no text to emit.
       }
 
-      // Extract text from agent_message items.
+      // Extract text from completed items.
       if (anyEvt.type === 'item.completed') {
         const item = anyEvt.item as Record<string, unknown> | undefined;
-        if (item?.type === 'agent_message' && typeof item.text === 'string') {
-          return { text: item.text };
+        if (!item) return null;
+
+        // Reasoning items: stream as text_delta for the preview, but do not set
+        // resultText so the final reply remains answer-only.
+        if (item.type === 'reasoning') {
+          const summary = item.summary;
+          const text = item.text;
+          const reasoningText =
+            typeof summary === 'string' ? summary :
+            typeof text === 'string' ? text :
+            null;
+          if (reasoningText) return { text: reasoningText };
+          return {};
+        }
+
+        // Agent message: stream as text_delta and lock in resultText so that
+        // text_final uses the answer only and never falls back to merged
+        // (which now includes reasoning text).
+        if (item.type === 'agent_message' && typeof item.text === 'string') {
+          return { text: item.text, resultText: item.text };
         }
       }
 
