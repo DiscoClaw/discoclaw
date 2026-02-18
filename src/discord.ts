@@ -47,7 +47,7 @@ import {
 } from './discord/forge-plan-registry.js';
 import { applyUserTurnToDurable } from './discord/user-turn-to-durable.js';
 import type { StatusPoster } from './discord/status-channel.js';
-import { createStatusPoster } from './discord/status-channel.js';
+import { createStatusPoster, sanitizeErrorMessage, sanitizePhaseError } from './discord/status-channel.js';
 import { ToolAwareQueue } from './discord/tool-aware-queue.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
 import type { SystemScaffold } from './discord/system-bootstrap.js';
@@ -1052,7 +1052,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           break;
                         } else if (phaseResult.result === 'failed') {
                           stopReason = 'error';
-                          stopMessage = `Phase **${phaseResult.phase.id}** failed: ${phaseResult.error}`;
+                          stopMessage = sanitizePhaseError(phaseResult.phase.id, phaseResult.error, timeoutMs);
                           break;
                         } else if (phaseResult.result === 'audit_failed') {
                           stopReason = 'error';
@@ -1083,7 +1083,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       if (i >= maxPhases && !stopReason) stopReason = 'limit';
                     } catch (loopErr) {
                       stopReason = 'error';
-                      stopMessage = `Unexpected error: ${String(loopErr)}`;
+                      stopMessage = `Unexpected error: ${sanitizeErrorMessage(String(loopErr))}`;
                       params.log?.error({ err: loopErr, phasesRun, planId }, 'plan-run: crash in phase loop');
                     }
 
@@ -1138,7 +1138,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       params.log?.error({ err }, 'plan-run:unhandled error');
                       (async () => {
                         try {
-                          const errMsg = `Plan run crashed: ${String(err)}`;
+                          const errMsg = `Plan run crashed: ${sanitizeErrorMessage(String(err))}`;
                           if (progressMessageGone) {
                             await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
                           } else {
@@ -1429,7 +1429,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     if (progressMessageGone) {
                       try {
                         const statusMsg = result.error
-                          ? `Forge resume failed: ${result.error}`
+                          ? `Forge resume failed: ${sanitizeErrorMessage(result.error)}`
                           : `Forge complete. Plan **${result.planId}** ready for review (${result.rounds} round${result.rounds > 1 ? 's' : ''}).`;
                         await msg.channel.send({ content: statusMsg, allowedMentions: NO_MENTIONS });
                       } catch {
@@ -1450,7 +1450,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     forgeReleaseLock();
                     params.log?.error({ err }, 'forge:resume:unhandled error');
                     try {
-                      const errMsg = `Forge resume crashed: ${String(err)}`;
+                      const errMsg = `Forge resume crashed: ${sanitizeErrorMessage(String(err))}`;
                       if (progressMessageGone) {
                         await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
                       } else {
@@ -1545,7 +1545,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   if (progressMessageGone) {
                     try {
                       const statusMsg = result.error
-                        ? `Forge failed: ${result.error}`
+                        ? `Forge failed: ${sanitizeErrorMessage(result.error)}`
                         : `Forge complete. Plan **${result.planId}** ready for review (${result.rounds} round${result.rounds > 1 ? 's' : ''}).`;
                       await msg.channel.send({ content: statusMsg, allowedMentions: NO_MENTIONS });
                     } catch {
@@ -1567,7 +1567,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   forgeReleaseLock();
                   params.log?.error({ err }, 'forge:unhandled error');
                   try {
-                    const errMsg = `Forge crashed: ${String(err)}`;
+                    const errMsg = `Forge crashed: ${sanitizeErrorMessage(String(err))}`;
                     if (progressMessageGone) {
                       await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
                     } else {

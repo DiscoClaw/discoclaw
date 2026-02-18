@@ -187,7 +187,7 @@ Plan run complete for **plan-017**: 3 phases executed (87s)
 
 **On failure (stops at the failed phase):**
 ```
-Plan run stopped: Phase **phase-2** failed: Build error. 1/2 phases completed.
+Plan run stopped: Phase **phase-2** timed out after 30 minutes. 1/2 phases completed.
 Use `!plan run plan-017` to retry or `!plan skip plan-017` to skip.
 ```
 
@@ -807,7 +807,7 @@ The lock is module-level in `discord.ts` — it covers all sessions within a sin
 ```
 Phase fails →
 ```
-Phase **phase-2** failed: Build error in webhook.test.ts.
+Plan run stopped: Phase **phase-2** failed: Build error in webhook.test.ts. 1/2 phases completed.
 Use `!plan run plan-017` to retry or `!plan skip plan-017` to skip.
 ```
 
