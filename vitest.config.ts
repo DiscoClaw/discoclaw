@@ -2,6 +2,7 @@ import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    setupFiles: ['./src/test-setup.ts'],
     // Keep tests independent of local-only symlinks (legacy workspace, content/workspace exports, etc).
     // Vitest can hit ELOOP when scanning symlinked trees.
     exclude: [
