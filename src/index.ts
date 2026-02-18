@@ -45,6 +45,8 @@ import { CronSyncCoordinator } from './cron/cron-sync-coordinator.js';
 import { startCronTagMapWatcher } from './cron/cron-tag-map-watcher.js';
 import { ensureForumTags, isSnowflake } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
+import { startWebhookServer } from './webhook/server.js';
+import type { WebhookServer } from './webhook/server.js';
 import { resolveModel } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
@@ -134,6 +136,8 @@ let beadSyncWatcher: { stop(): void } | null = null;
 let cronTagMapWatcher: { stop(): void } | null = null;
 let beadForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
+let webhookServer: WebhookServer | null = null;
+let savedCronExecCtx: import('./cron/executor.js').CronExecutorContext | null = null;
 const shutdown = async () => {
   // Write default shutdown context (skip if !restart already wrote a richer one).
   try {
@@ -160,6 +164,9 @@ const shutdown = async () => {
   beadSyncWatcher?.stop();
   cronTagMapWatcher?.stop();
   cronScheduler?.stopAll();
+  if (webhookServer) {
+    await webhookServer.close().catch((err) => log.warn({ err }, 'webhook:close error'));
+  }
   await botStatus?.offline();
   await releasePidLock(pidLockPath);
   process.exit(0);
@@ -1140,6 +1147,7 @@ if (cronEnabled && effectiveCronForum) {
     runControl: cronRunControl,
   };
 
+  savedCronExecCtx = cronExecCtx;
   cronScheduler = new CronScheduler((job) => executeCronJob(job, cronExecCtx), log);
   cronCtx.scheduler = cronScheduler;
   cronCtx.executorCtx = cronExecCtx;
@@ -1227,6 +1235,41 @@ if (cronEnabled && effectiveCronForum) {
   );
 } else if (cronEnabled && !effectiveCronForum) {
   log.warn('DISCOCLAW_CRON_ENABLED=1 but no cron forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_CRON_FORUM); cron subsystem disabled');
+}
+
+// --- Webhook subsystem ---
+if (cfg.webhookEnabled && savedCronExecCtx) {
+  if (!cfg.webhookConfigPath) {
+    log.warn('DISCOCLAW_WEBHOOK_ENABLED=1 but DISCOCLAW_WEBHOOK_CONFIG is not set; webhook server disabled');
+  } else {
+    const resolvedGuildId = guildId || system?.guildId || '';
+    if (!resolvedGuildId) {
+      log.warn('DISCOCLAW_WEBHOOK_ENABLED=1 but no guild ID resolved; webhook server disabled');
+    } else {
+      // Build a webhook-specific executor context with security overrides:
+      // no Discord actions, no tools.
+      const webhookExecCtx = {
+        ...savedCronExecCtx,
+        discordActionsEnabled: false,
+        tools: [],
+      };
+
+      try {
+        webhookServer = await startWebhookServer({
+          configPath: cfg.webhookConfigPath,
+          port: cfg.webhookPort,
+          guildId: resolvedGuildId,
+          executorCtx: webhookExecCtx,
+          log,
+        });
+        log.info({ port: cfg.webhookPort, configPath: cfg.webhookConfigPath }, 'webhook:server started');
+      } catch (err) {
+        log.error({ err }, 'webhook:server failed to start');
+      }
+    }
+  }
+} else if (cfg.webhookEnabled && !savedCronExecCtx) {
+  log.warn('DISCOCLAW_WEBHOOK_ENABLED=1 but cron executor context is not available; webhook server disabled');
 }
 
 if (reactionHandlerEnabled) {

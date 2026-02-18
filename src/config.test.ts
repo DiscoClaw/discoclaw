@@ -504,4 +504,50 @@ describe('parseConfig', () => {
     const { config } = parseConfig(env({ DISCOCLAW_STREAM_STALL_WARNING_MS: '0' }));
     expect(config.streamStallWarningMs).toBe(0);
   });
+
+  // --- Webhook ---
+  it('defaults webhookEnabled to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.webhookEnabled).toBe(false);
+  });
+
+  it('parses DISCOCLAW_WEBHOOK_ENABLED=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_WEBHOOK_ENABLED: '1' }));
+    expect(config.webhookEnabled).toBe(true);
+  });
+
+  it('defaults webhookPort to 9400', () => {
+    const { config } = parseConfig(env());
+    expect(config.webhookPort).toBe(9400);
+  });
+
+  it('parses DISCOCLAW_WEBHOOK_PORT when set', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_WEBHOOK_PORT: '8765' }));
+    expect(config.webhookPort).toBe(8765);
+  });
+
+  it('throws on DISCOCLAW_WEBHOOK_PORT=0 (non-positive)', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_WEBHOOK_PORT: '0' })))
+      .toThrow(/DISCOCLAW_WEBHOOK_PORT must be a positive number/);
+  });
+
+  it('throws on DISCOCLAW_WEBHOOK_PORT=-1 (negative)', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_WEBHOOK_PORT: '-1' })))
+      .toThrow(/DISCOCLAW_WEBHOOK_PORT must be a positive number/);
+  });
+
+  it('throws on DISCOCLAW_WEBHOOK_PORT=3000.5 (non-integer)', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_WEBHOOK_PORT: '3000.5' })))
+      .toThrow(/DISCOCLAW_WEBHOOK_PORT must be an integer/);
+  });
+
+  it('returns undefined for webhookConfigPath when DISCOCLAW_WEBHOOK_CONFIG is unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.webhookConfigPath).toBeUndefined();
+  });
+
+  it('parses DISCOCLAW_WEBHOOK_CONFIG when set', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_WEBHOOK_CONFIG: '/etc/discoclaw/webhooks.json' }));
+    expect(config.webhookConfigPath).toBe('/etc/discoclaw/webhooks.json');
+  });
 });

@@ -83,7 +83,7 @@ function verifySignature(body: Buffer, secret: string, signatureHeader: string):
 // Config loader
 // ---------------------------------------------------------------------------
 
-async function loadConfig(configPath: string): Promise<WebhookConfig> {
+export async function loadWebhookConfig(configPath: string): Promise<WebhookConfig> {
   const raw = await fs.readFile(configPath, 'utf8');
   const parsed: unknown = JSON.parse(raw);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -104,7 +104,7 @@ function buildWebhookJob(source: string, src: WebhookSourceConfig, bodyText: str
   const prompt = src.prompt ?? `A webhook event was received from source "${source}".\n\nPayload:\n${bodyText}`;
   return {
     id,
-    cronId: id,
+    cronId: '',
     threadId: '',
     guildId,
     name: `webhook:${source}`,
@@ -123,7 +123,7 @@ function buildWebhookJob(source: string, src: WebhookSourceConfig, bodyText: str
 // Request body reader
 // ---------------------------------------------------------------------------
 
-const MAX_BODY_BYTES = 1024 * 1024; // 1 MiB
+const MAX_BODY_BYTES = 256 * 1024; // 256 KB
 
 function readBody(req: http.IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -179,15 +179,19 @@ export async function startWebhookServer(opts: WebhookServerOptions): Promise<We
   } = opts;
 
   // Load config eagerly so startup fails fast on bad JSON.
-  let config = await loadConfig(configPath);
+  let config = await loadWebhookConfig(configPath);
   log?.info({ configPath, sources: Object.keys(config) }, 'webhook:config loaded');
 
   const server = http.createServer(async (req, res) => {
     // Only handle POST /webhook/:source
     const url = req.url ?? '';
     const match = url.match(/^\/webhook\/([^/?#]+)$/);
-    if (!match || req.method !== 'POST') {
+    if (!match) {
       respond(res, 404, 'Not found');
+      return;
+    }
+    if (req.method !== 'POST') {
+      respond(res, 405, 'Method Not Allowed');
       return;
     }
 
@@ -205,6 +209,12 @@ export async function startWebhookServer(opts: WebhookServerOptions): Promise<We
     try {
       body = await readBody(req);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === 'Request body too large') {
+        log?.warn({ source }, 'webhook:body too large');
+        respond(res, 413, 'Payload Too Large');
+        return;
+      }
       log?.warn({ source, err }, 'webhook:body read error');
       respond(res, 400, 'Bad request');
       return;
