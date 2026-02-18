@@ -49,6 +49,7 @@ import { applyUserTurnToDurable } from './discord/user-turn-to-durable.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster, sanitizeErrorMessage, sanitizePhaseError } from './discord/status-channel.js';
 import { ToolAwareQueue } from './discord/tool-aware-queue.js';
+import { createStreamingProgress } from './discord/streaming-progress.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
 import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
@@ -968,72 +969,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   }
                   validationLock(); // release validation lock before phase execution
 
-                  let lastEditAt = 0;
-                  const throttleMs = params.forgeProgressThrottleMs ?? 3000;
-                  let progressMessageGone = false;
+                  const planRunStreaming = createStreamingProgress(
+                    progressReply,
+                    params.forgeProgressThrottleMs ?? 3000,
+                  );
 
-                  // Streaming preview state for plan-run phases
-                  let planRunActivityLabel = '';
-                  let planRunDeltaText = '';
-                  let planRunFinalText = '';
-                  let planRunStatusTick = 0;
-                  let planRunProgressLabel = '';
-
-                  const planRunMaybeEdit = async (force = false) => {
-                    if (progressMessageGone) return;
-                    const now = Date.now();
-                    if (!force && now - lastEditAt < throttleMs) return;
-                    lastEditAt = now;
-                    const streaming = selectStreamingOutput({
-                      deltaText: planRunDeltaText,
-                      activityLabel: planRunActivityLabel,
-                      finalText: planRunFinalText,
-                      statusTick: planRunStatusTick++,
-                      showPreview: params.toolAwareStreaming,
-                    });
-                    const out = planRunProgressLabel
-                      ? `${planRunProgressLabel}\n${streaming}`
-                      : streaming;
-                    try {
-                      await progressReply.edit({ content: out, allowedMentions: NO_MENTIONS });
-                    } catch (editErr: any) {
-                      if (editErr?.code === 10008) progressMessageGone = true;
-                    }
+                  const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
+                    // Always force so phase-start/boundary messages are never throttled away
+                    await planRunStreaming.onProgress(progressMsg, { force: opts?.force ?? true });
                   };
 
-                  const planRunTaq = params.toolAwareStreaming
-                    ? new ToolAwareQueue((action) => {
-                        if (action.type === 'stream_text') {
-                          planRunDeltaText += action.text;
-                          // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                          planRunMaybeEdit(false);
-                        } else if (action.type === 'set_final') {
-                          planRunFinalText = action.text;
-                          // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                          planRunMaybeEdit(true);
-                        } else if (action.type === 'show_activity') {
-                          planRunActivityLabel = action.label;
-                          planRunDeltaText = '';
-                          planRunFinalText = '';
-                          // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                          planRunMaybeEdit(true);
-                        }
-                      }, { flushDelayMs: 2000, postToolDelayMs: 500 })
-                    : null;
-
-                  const onProgress = async (progressMsg: string) => {
-                    if (progressMessageGone) return;
-                    // Reset streaming state on each new progress label
-                    planRunProgressLabel = progressMsg;
-                    planRunActivityLabel = '';
-                    planRunDeltaText = '';
-                    planRunFinalText = '';
-                    planRunStatusTick = 0;
-                    await planRunMaybeEdit(true);
-                  };
-
-                  const onPlanRunEvent = planRunTaq
-                    ? (evt: import('./runtime/types.js').EngineEvent) => { planRunTaq.handleEvent(evt); }
+                  const onPlanRunEvent = params.toolAwareStreaming
+                    ? planRunStreaming.onEvent
                     : undefined;
 
                   const timeoutMs = params.planPhaseTimeoutMs ?? 5 * 60_000;
@@ -1051,13 +998,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                   const editSummary = async (content: string) => {
                     try {
-                      if (progressMessageGone) {
-                        await msg.channel.send({ content, allowedMentions: NO_MENTIONS });
-                      } else {
-                        await progressReply.edit({ content, allowedMentions: NO_MENTIONS });
+                      await progressReply.edit({ content, allowedMentions: NO_MENTIONS });
+                    } catch (editErr: any) {
+                      if (editErr?.code === 10008) {
+                        try { await msg.channel.send({ content, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                       }
-                    } catch {
-                      // best-effort
                     }
                   };
 
@@ -1077,11 +1022,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           break;
                         }
 
-                        // Reset throttle so the phase-start message from runNextPhase
-                        // (onProgress at plan-manager.ts line 1041) is displayed immediately
-                        // rather than being suppressed by the previous phase's final edit.
-                        if (i > 0) lastEditAt = 0;
-
                         const releaseLock = await acquireWriterLock();
                         let phaseResult;
                         const phaseStart = Date.now();
@@ -1095,7 +1035,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           phasesRun++;
                           phaseResults.push({ id: phaseResult.phase.id, title: phaseResult.phase.title, elapsedMs: Date.now() - phaseStart });
                           // Between-phase progress update (bypass throttle)
-                          lastEditAt = 0;
                           try {
                             const nextNote = phaseResult.nextPhase
                               ? ` Next: ${phaseResult.nextPhase.id}: ${phaseResult.nextPhase.title}...`
@@ -1141,7 +1080,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       params.log?.error({ err: loopErr, phasesRun, planId }, 'plan-run: crash in phase loop');
                     }
 
-                    planRunTaq?.dispose();
+                    planRunStreaming.dispose();
 
                     // Build summary — always runs regardless of how the loop terminated
                     const fmtElapsed = (ms: number) => ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`;
@@ -1209,13 +1148,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       (async () => {
                         try {
                           const errMsg = `Plan run crashed: ${sanitizeErrorMessage(String(err))}`;
-                          if (progressMessageGone) {
-                            await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
-                          } else {
-                            await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                          await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                        } catch (editErr: any) {
+                          if (editErr?.code === 10008) {
+                            try { await msg.channel.send({ content: `Plan run crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                           }
-                        } catch {
-                          // best-effort
                         }
                       })().catch(() => {});
                     },
@@ -1473,90 +1410,27 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   allowedMentions: NO_MENTIONS,
                 });
 
-                let lastEditAt = 0;
-                const throttleMs = params.forgeProgressThrottleMs ?? 3000;
-                let progressMessageGone = false;
-
-                // Streaming preview state for forge resume
-                let forgeResumeActivityLabel = '';
-                let forgeResumeDeltaText = '';
-                let forgeResumeFinalText = '';
-                let forgeResumeStatusTick = 0;
-                let forgeResumeProgressLabel = '';
-
-                const forgeResumeMaybeEdit = async (force = false) => {
-                  if (progressMessageGone) return;
-                  const now = Date.now();
-                  if (!force && now - lastEditAt < throttleMs) return;
-                  lastEditAt = now;
-                  const streaming = selectStreamingOutput({
-                    deltaText: forgeResumeDeltaText,
-                    activityLabel: forgeResumeActivityLabel,
-                    finalText: forgeResumeFinalText,
-                    statusTick: forgeResumeStatusTick++,
-                    showPreview: params.toolAwareStreaming,
-                  });
-                  const out = forgeResumeProgressLabel
-                    ? `${forgeResumeProgressLabel}\n${streaming}`
-                    : streaming;
-                  try {
-                    await progressReply.edit({ content: out, allowedMentions: NO_MENTIONS });
-                  } catch (editErr: any) {
-                    if (editErr?.code === 10008) progressMessageGone = true;
-                  }
-                };
-
-                const forgeResumeTaq = params.toolAwareStreaming
-                  ? new ToolAwareQueue((action) => {
-                      if (action.type === 'stream_text') {
-                        forgeResumeDeltaText += action.text;
-                        // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                        forgeResumeMaybeEdit(false);
-                      } else if (action.type === 'set_final') {
-                        forgeResumeFinalText = action.text;
-                        // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                        forgeResumeMaybeEdit(true);
-                      } else if (action.type === 'show_activity') {
-                        forgeResumeActivityLabel = action.label;
-                        forgeResumeDeltaText = '';
-                        forgeResumeFinalText = '';
-                        // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                        forgeResumeMaybeEdit(true);
-                      }
-                    }, { flushDelayMs: 2000, postToolDelayMs: 500 })
-                  : null;
+                const forgeResumeStreaming = createStreamingProgress(
+                  progressReply,
+                  params.forgeProgressThrottleMs ?? 3000,
+                );
 
                 const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
-                  if (progressMessageGone) return;
-                  // Reset streaming state on each new phase label
-                  forgeResumeProgressLabel = progressMsg;
-                  forgeResumeActivityLabel = '';
-                  forgeResumeDeltaText = '';
-                  forgeResumeFinalText = '';
-                  forgeResumeStatusTick = 0;
-                  await forgeResumeMaybeEdit(opts?.force ?? false);
+                  await forgeResumeStreaming.onProgress(progressMsg, opts);
                 };
 
-                const forgeResumeOnEvent = forgeResumeTaq
-                  ? (evt: import('./runtime/types.js').EngineEvent) => { forgeResumeTaq.handleEvent(evt); }
+                const forgeResumeOnEvent = params.toolAwareStreaming
+                  ? forgeResumeStreaming.onEvent
                   : undefined;
 
                 // eslint-disable-next-line @typescript-eslint/no-floating-promises
                 resumeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress, forgeResumeOnEvent).then(
                   async (result) => {
-                    forgeResumeTaq?.dispose();
+                    forgeResumeStreaming.dispose();
                     setActiveOrchestrator(null);
                     forgeReleaseLock();
-                    if (progressMessageGone) {
-                      try {
-                        const statusMsg = result.error
-                          ? `Forge resume failed: ${sanitizeErrorMessage(result.error)}`
-                          : `Forge complete. Plan **${result.planId}** ready for review (${result.rounds} round${result.rounds > 1 ? 's' : ''}).`;
-                        await msg.channel.send({ content: statusMsg, allowedMentions: NO_MENTIONS });
-                      } catch {
-                        // best-effort
-                      }
-                    }
+                    // On message-gone (10008), onProgress already handled the channel.send fallback;
+                    // if result has an error, the orchestrator's error path already called onProgress.
                     if (result.planSummary && !result.error) {
                       try {
                         await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
@@ -1567,19 +1441,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     await sendForgeImplementationFollowup(result);
                   },
                   async (err) => {
-                    forgeResumeTaq?.dispose();
+                    forgeResumeStreaming.dispose();
                     setActiveOrchestrator(null);
                     forgeReleaseLock();
                     params.log?.error({ err }, 'forge:resume:unhandled error');
                     try {
                       const errMsg = `Forge resume crashed: ${sanitizeErrorMessage(String(err))}`;
-                      if (progressMessageGone) {
-                        await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
-                      } else {
-                        await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                      await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                    } catch (editErr: any) {
+                      if (editErr?.code === 10008) {
+                        try { await msg.channel.send({ content: `Forge resume crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                       }
-                    } catch {
-                      // best-effort
                     }
                   },
                 ).catch((err) => {
@@ -1639,92 +1511,26 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 allowedMentions: NO_MENTIONS,
               });
 
-              // Throttle state for progress edits
-              let lastEditAt = 0;
-              const throttleMs = params.forgeProgressThrottleMs ?? 3000;
-              let progressMessageGone = false;
-
-              // Streaming preview state for forge create
-              let forgeCreateActivityLabel = '';
-              let forgeCreateDeltaText = '';
-              let forgeCreateFinalText = '';
-              let forgeCreateStatusTick = 0;
-              let forgeCreateProgressLabel = '';
-
-              const forgeCreateMaybeEdit = async (force = false) => {
-                if (progressMessageGone) return;
-                const now = Date.now();
-                if (!force && now - lastEditAt < throttleMs) return;
-                lastEditAt = now;
-                const streaming = selectStreamingOutput({
-                  deltaText: forgeCreateDeltaText,
-                  activityLabel: forgeCreateActivityLabel,
-                  finalText: forgeCreateFinalText,
-                  statusTick: forgeCreateStatusTick++,
-                  showPreview: params.toolAwareStreaming,
-                });
-                const out = forgeCreateProgressLabel
-                  ? `${forgeCreateProgressLabel}\n${streaming}`
-                  : streaming;
-                try {
-                  await progressReply.edit({ content: out, allowedMentions: NO_MENTIONS });
-                } catch (editErr: any) {
-                  if (editErr?.code === 10008) progressMessageGone = true;
-                }
-              };
-
-              const forgeCreateTaq = params.toolAwareStreaming
-                ? new ToolAwareQueue((action) => {
-                    if (action.type === 'stream_text') {
-                      forgeCreateDeltaText += action.text;
-                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                      forgeCreateMaybeEdit(false);
-                    } else if (action.type === 'set_final') {
-                      forgeCreateFinalText = action.text;
-                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                      forgeCreateMaybeEdit(true);
-                    } else if (action.type === 'show_activity') {
-                      forgeCreateActivityLabel = action.label;
-                      forgeCreateDeltaText = '';
-                      forgeCreateFinalText = '';
-                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                      forgeCreateMaybeEdit(true);
-                    }
-                  }, { flushDelayMs: 2000, postToolDelayMs: 500 })
-                : null;
+              const forgeCreateStreaming = createStreamingProgress(
+                progressReply,
+                params.forgeProgressThrottleMs ?? 3000,
+              );
 
               const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
-                if (progressMessageGone) return;
-                // Reset streaming state on each new phase label
-                forgeCreateProgressLabel = progressMsg;
-                forgeCreateActivityLabel = '';
-                forgeCreateDeltaText = '';
-                forgeCreateFinalText = '';
-                forgeCreateStatusTick = 0;
-                await forgeCreateMaybeEdit(opts?.force ?? false);
+                await forgeCreateStreaming.onProgress(progressMsg, opts);
               };
 
-              const forgeCreateOnEvent = forgeCreateTaq
-                ? (evt: import('./runtime/types.js').EngineEvent) => { forgeCreateTaq.handleEvent(evt); }
+              const forgeCreateOnEvent = params.toolAwareStreaming
+                ? forgeCreateStreaming.onEvent
                 : undefined;
 
               // Run forge in the background — don't block the queue
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
               createOrchestrator.run(forgeCmd.args, onProgress, forgeContext, forgeCreateOnEvent).then(
                 async (result) => {
-                  forgeCreateTaq?.dispose();
+                  forgeCreateStreaming.dispose();
                   setActiveOrchestrator(null);
                   forgeReleaseLock();
-                  if (progressMessageGone) {
-                    try {
-                      const statusMsg = result.error
-                        ? `Forge failed: ${sanitizeErrorMessage(result.error)}`
-                        : `Forge complete. Plan **${result.planId}** ready for review (${result.rounds} round${result.rounds > 1 ? 's' : ''}).`;
-                      await msg.channel.send({ content: statusMsg, allowedMentions: NO_MENTIONS });
-                    } catch {
-                      // best-effort
-                    }
-                  }
                   // Send plan summary as a follow-up message
                   if (result.planSummary && !result.error) {
                     try {
@@ -1736,19 +1542,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   await sendForgeImplementationFollowup(result);
                 },
                 async (err) => {
-                  forgeCreateTaq?.dispose();
+                  forgeCreateStreaming.dispose();
                   setActiveOrchestrator(null);
                   forgeReleaseLock();
                   params.log?.error({ err }, 'forge:unhandled error');
                   try {
                     const errMsg = `Forge crashed: ${sanitizeErrorMessage(String(err))}`;
-                    if (progressMessageGone) {
-                      await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
-                    } else {
-                      await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                    await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                  } catch (editErr: any) {
+                    if (editErr?.code === 10008) {
+                      try { await msg.channel.send({ content: `Forge crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                     }
-                  } catch {
-                    // best-effort
                   }
                 },
               ).catch((err) => {

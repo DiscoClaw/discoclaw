@@ -1808,3 +1808,82 @@ describe('drafterRuntime support', () => {
     expect(drafterInvocations[0]!.sessionKey).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// ForgeOrchestrator onEvent threading
+// ---------------------------------------------------------------------------
+
+function makeMockRuntimeWithEvents(responseMap: Array<{ text: string; events?: EngineEvent[] }>): RuntimeAdapter {
+  let callIndex = 0;
+  return {
+    id: 'claude_code' as const,
+    capabilities: new Set(['streaming_text' as const]),
+    invoke(_params) {
+      const entry = responseMap[callIndex] ?? { text: '(no response)' };
+      callIndex++;
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        for (const evt of entry.events ?? []) yield evt;
+        yield { type: 'text_final', text: entry.text };
+      })();
+    },
+  };
+}
+
+describe('ForgeOrchestrator onEvent threading', () => {
+  it('onEvent spy receives events during draft phase', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntimeWithEvents([
+      { text: draftPlan, events: [{ type: 'text_delta', text: 'drafting...' }] },
+      { text: auditClean },
+    ]);
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const received: EngineEvent[] = [];
+    await orchestrator.run('Test feature', async () => {}, undefined, (evt) => received.push(evt));
+
+    expect(received.some((e) => e.type === 'text_delta')).toBe(true);
+    expect(received.some((e) => e.type === 'text_final')).toBe(true);
+  });
+
+  it('onEvent spy receives events during audit phase', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntimeWithEvents([
+      { text: draftPlan },
+      { text: auditClean, events: [{ type: 'text_delta', text: 'auditing...' }] },
+    ]);
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const received: EngineEvent[] = [];
+    await orchestrator.run('Test feature', async () => {}, undefined, (evt) => received.push(evt));
+
+    expect(received.some((e) => e.type === 'text_delta')).toBe(true);
+  });
+
+  it('throwing onEvent does not abort forge execution', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {}, undefined, () => {
+      throw new Error('callback exploded');
+    });
+
+    // Forge should complete successfully despite throwing onEvent
+    expect(result.error).toBeUndefined();
+    expect(result.rounds).toBe(1);
+  });
+});

@@ -30,7 +30,7 @@ export async function collectRuntimeText(
     timeoutMs,
     ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
   })) {
-    opts?.onEvent?.(evt);
+    try { opts?.onEvent?.(evt); } catch { /* UI callback errors must not abort execution */ }
     if (evt.type === 'text_final') {
       text = evt.text;
       sawFinal = true;
