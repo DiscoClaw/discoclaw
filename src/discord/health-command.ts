@@ -1,4 +1,5 @@
 import type { MetricsRegistry } from '../observability/metrics.js';
+import { renderMemoryLine } from '../observability/memory-sampler.js';
 
 export type HealthCommandMode = 'basic' | 'verbose' | 'tools';
 
@@ -74,6 +75,10 @@ export function renderHealthReport(opts: {
     lines.push(`historyBudget=${opts.config.messageHistoryBudget} requireChannelContext=${opts.config.requireChannelContext} autoIndexContext=${opts.config.autoIndexChannelContext}`);
     const beadsState = opts.config.beadsActive ? 'active' : opts.config.beadsEnabled ? 'degraded' : 'off';
     lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} cron=${opts.config.cronEnabled} beads=${beadsState}`);
+
+    if (snap.memory) {
+      lines.push(renderMemoryLine(snap.memory));
+    }
 
     const errorClasses = Object.keys(counters)
       .filter((k) => k.includes('.error_class.'))

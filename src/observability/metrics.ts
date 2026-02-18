@@ -1,9 +1,12 @@
+import type { MemoryStats, MemorySampler } from './memory-sampler.js';
+
 export type InvokeFlow = 'message' | 'reaction' | 'cron';
 
 export type MetricsSnapshot = {
   startedAt: number;
   counters: Record<string, number>;
   latencies: Record<InvokeFlow, { count: number; p50Ms: number; p95Ms: number; maxMs: number }>;
+  memory?: MemoryStats;
 };
 
 function percentile(values: number[], p: number): number {
@@ -32,6 +35,11 @@ export class MetricsRegistry {
     cron: [],
   };
   private readonly maxLatencySamples = 400;
+  private memorySampler?: MemorySampler;
+
+  setMemorySampler(sampler: MemorySampler): void {
+    this.memorySampler = sampler;
+  }
 
   increment(name: string, value = 1): void {
     const next = (this.counters.get(name) ?? 0) + value;
@@ -58,7 +66,7 @@ export class MetricsRegistry {
     const counters: Record<string, number> = {};
     for (const [k, v] of this.counters.entries()) counters[k] = v;
 
-    return {
+    const snap: MetricsSnapshot = {
       startedAt: this.startedAtMs,
       counters,
       latencies: {
@@ -67,6 +75,10 @@ export class MetricsRegistry {
         cron: this.latencySummary('cron'),
       },
     };
+    if (this.memorySampler) {
+      snap.memory = this.memorySampler.peek();
+    }
+    return snap;
   }
 
   private pushLatency(flow: InvokeFlow, ms: number): void {
