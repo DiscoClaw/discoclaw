@@ -252,6 +252,8 @@ export async function executePlanAction(
       const timeoutMs = planCtx.phaseTimeoutMs ?? DEFAULT_PLAN_PHASE_TIMEOUT_MS;
       const onProgress = planCtx.onProgress ?? (async () => {});
 
+      const PROGRESS_THROTTLE_MS = 3_000;
+
       addRunningPlan(action.planId);
 
       // Fire and forget — plan run executes asynchronously.
@@ -267,28 +269,76 @@ export async function executePlanAction(
           maxAuditFixAttempts: planCtx.maxAuditFixAttempts,
         };
 
+        // Send initial status message and set up live edits (best-effort).
+        let statusMsg: { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> } | undefined;
+        let lastStatusEditAt = 0;
+
+        if (!planCtx.skipCompletionNotify) {
+          try {
+            const channel = await ctx.client.channels.fetch(ctx.channelId);
+            if (channel && 'send' in channel) {
+              statusMsg = await (channel as any).send({
+                content: `**Plan run started:** \`${action.planId}\` — starting phase ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}`,
+                allowedMentions: NO_MENTIONS,
+              });
+            }
+          } catch {
+            // best-effort — missing status message is non-fatal
+          }
+        }
+
+        // Edit the status message, honouring throttle. Pass force=true to bypass throttle.
+        async function editStatus(content: string, force = false): Promise<void> {
+          if (!statusMsg) return;
+          const now = Date.now();
+          if (!force && now - lastStatusEditAt < PROGRESS_THROTTLE_MS) return;
+          lastStatusEditAt = now;
+          try {
+            await statusMsg.edit({ content, allowedMentions: NO_MENTIONS });
+          } catch {
+            // best-effort
+          }
+        }
+
+        // Compose onProgress with status message edits.
+        const wrappedOnProgress = async (msg: string): Promise<void> => {
+          await onProgress(msg);
+          await editStatus(msg);
+        };
+
         let phasesRun = 0;
         let stopReason: string | undefined;
         let stopMessage: string | undefined;
+        let hitMaxPhases = false;
         for (let i = 0; i < maxPhases; i++) {
           const release = await acquireWriterLock();
           let phaseResult;
           try {
-            phaseResult = await runNextPhase(prepResult.phasesFilePath, prepResult.planFilePath, phaseOpts, onProgress);
+            phaseResult = await runNextPhase(prepResult.phasesFilePath, prepResult.planFilePath, phaseOpts, wrappedOnProgress);
           } finally {
             release();
           }
 
           if (phaseResult.result === 'done') {
             phasesRun++;
+            // Force-edit on phase completion boundary.
+            await editStatus(`**Plan run in progress:** \`${action.planId}\` — phase complete (${phasesRun} done so far)`, true);
           } else if (phaseResult.result === 'nothing_to_run') {
+            // Force-edit to reflect no more phases.
+            await editStatus(`**Plan run finishing:** \`${action.planId}\` — no more phases to run`, true);
             break;
           } else {
             // Any error/stale/corrupt/audit_failed/retry_blocked stops the loop.
             stopReason = phaseResult.result;
             stopMessage = (phaseResult as any).error ?? (phaseResult as any).message ?? phaseResult.result;
             planCtx.log?.warn({ planId: action.planId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
+            // Force-edit to reflect stop.
+            await editStatus(`**Plan run stopped:** \`${action.planId}\` — ${stopMessage ?? stopReason}`, true);
             break;
+          }
+
+          if (i === maxPhases - 1) {
+            hitMaxPhases = true;
           }
 
           // Yield between phases.
@@ -313,13 +363,16 @@ export async function executePlanAction(
           planCtx.log?.error({ err, planId: action.planId }, 'plan:action:run failed');
         }
 
-        // Send completion notification to the originating channel (best-effort).
+        // Edit status message to show final outcome, or send a new message if no statusMsg.
         if (!planCtx.skipCompletionNotify) {
           try {
             const lines: string[] = [
               `**Plan run complete:** \`${action.planId}\``,
               `Phases run: ${phasesRun}`,
             ];
+            if (hitMaxPhases && !stopReason) {
+              lines.push(`Stopped: reached max-phase limit (${maxPhases})`);
+            }
             if (stopReason) {
               lines.push(`Stopped: ${stopMessage ?? stopReason}`);
             }
@@ -340,9 +393,20 @@ export async function executePlanAction(
             } catch (summaryErr) {
               planCtx.log?.error({ err: summaryErr, planId: action.planId }, 'plan:action:run summary failed');
             }
-            const channel = await ctx.client.channels.fetch(ctx.channelId);
-            if (channel && 'send' in channel) {
-              await (channel as any).send({ content: lines.join('\n'), allowedMentions: NO_MENTIONS });
+            const finalContent = lines.join('\n');
+            if (statusMsg) {
+              // Edit the existing status message in place.
+              try {
+                await statusMsg.edit({ content: finalContent, allowedMentions: NO_MENTIONS });
+              } catch {
+                // best-effort
+              }
+            } else {
+              // Fall back to sending a new message if we never got a statusMsg.
+              const channel = await ctx.client.channels.fetch(ctx.channelId);
+              if (channel && 'send' in channel) {
+                await (channel as any).send({ content: finalContent, allowedMentions: NO_MENTIONS });
+              }
             }
           } catch {
             // best-effort — do not rethrow
