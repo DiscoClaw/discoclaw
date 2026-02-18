@@ -62,14 +62,27 @@ vi.mock('../beads/bd-cli.js', () => ({
   bdClose: vi.fn(async () => {}),
 }));
 
+vi.mock('./allowed-mentions.js', () => ({
+  NO_MENTIONS: { parse: [] },
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeCtx(): ActionContext {
+function makeSendFn() {
+  return vi.fn(async (_msg: { content: string; allowedMentions: unknown }) => {});
+}
+
+function makeCtx(channelSend?: ReturnType<typeof makeSendFn>): ActionContext {
+  const send = channelSend ?? makeSendFn();
   return {
     guild: {} as any,
-    client: {} as any,
+    client: {
+      channels: {
+        fetch: vi.fn(async () => ({ send })),
+      },
+    } as any,
     channelId: 'test-channel',
     messageId: 'test-message',
   };
@@ -483,6 +496,80 @@ describe('executePlanAction', () => {
 
       // closePlanIfComplete should still be called — it checks internally
       expect(closePlanIfComplete).toHaveBeenCalled();
+    });
+
+    it('sends completion notification to channel after run finishes', async () => {
+      const send = makeSendFn();
+      const ctx = makeCtx(send);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(send).toHaveBeenCalledOnce();
+      const firstCall = send.mock.calls[0]!;
+      expect(firstCall[0]!.content).toContain('plan-042');
+      expect(firstCall[0]!.content).toContain('Phases run:');
+      expect(firstCall[0]!.allowedMentions).toEqual({ parse: [] });
+    });
+
+    it('skips completion notification when skipCompletionNotify is true', async () => {
+      const send = makeSendFn();
+      const ctx = makeCtx(send);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus', skipCompletionNotify: true }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('includes stop reason in completion notification when a phase fails', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      (runNextPhase as any).mockResolvedValueOnce({ result: 'audit_failed', error: 'lint errors' });
+
+      const send = makeSendFn();
+      const ctx = makeCtx(send);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(send).toHaveBeenCalledOnce();
+      const content: string = send.mock.calls[0]![0]!.content;
+      expect(content).toContain('Stopped:');
+    });
+
+    it('includes auto-close note in completion notification when plan is closed', async () => {
+      const { closePlanIfComplete } = await import('./plan-commands.js');
+      (closePlanIfComplete as any).mockResolvedValueOnce({ closed: true, reason: 'all_phases_complete' });
+
+      const send = makeSendFn();
+      const ctx = makeCtx(send);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(send).toHaveBeenCalledOnce();
+      const content: string = send.mock.calls[0]![0]!.content;
+      expect(content).toContain('auto-closed');
     });
   });
 });
