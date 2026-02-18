@@ -38,6 +38,25 @@ export function sanitizeErrorMessage(raw: string): string {
   return raw.slice(0, 500);
 }
 
+/**
+ * Format a phase failure error for human-readable Discord display.
+ * Detects timeout patterns and emits "Phase X timed out after Y minutes".
+ * Non-timeout errors are delegated to sanitizeErrorMessage.
+ * Output is always truncated to 500 chars.
+ */
+export function sanitizePhaseError(phaseId: string, raw: string, timeoutMs?: number): string {
+  // Detect execa/AbortSignal timeout patterns: "timed out after Nms"
+  const timeoutMatch = raw.match(/timed out after (\d+)ms/i);
+  if (timeoutMatch) {
+    const ms = timeoutMs ?? parseInt(timeoutMatch[1], 10);
+    const minutes = Math.round(ms / 60000);
+    const humanTime = ms >= 60000 ? `${minutes} minute${minutes !== 1 ? 's' : ''}` : `${Math.round(ms / 1000)}s`;
+    return `Phase ${phaseId} timed out after ${humanTime}`.slice(0, 500);
+  }
+
+  return sanitizeErrorMessage(raw).slice(0, 500);
+}
+
 export type StatusPoster = {
   online(): Promise<void>;
   offline(): Promise<void>;

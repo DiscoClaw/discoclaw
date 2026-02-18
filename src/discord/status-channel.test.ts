@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createStatusPoster, sanitizeErrorMessage } from './status-channel.js';
+import { createStatusPoster, sanitizeErrorMessage, sanitizePhaseError } from './status-channel.js';
 
 function mockChannel() {
   return { send: vi.fn().mockResolvedValue(undefined) } as any;
@@ -203,5 +203,44 @@ describe('sanitizeErrorMessage', () => {
   it('truncates long messages to 500 chars', () => {
     const long = 'x'.repeat(1000);
     expect(sanitizeErrorMessage(long).length).toBe(500);
+  });
+});
+
+describe('sanitizePhaseError', () => {
+  it('formats timeout using ms from error string when no timeoutMs provided', () => {
+    const raw = 'Process timed out after 120000ms';
+    expect(sanitizePhaseError('3', raw)).toBe('Phase 3 timed out after 2 minutes');
+  });
+
+  it('uses provided timeoutMs over value in error string', () => {
+    const raw = 'Process timed out after 60000ms';
+    expect(sanitizePhaseError('2', raw, 300000)).toBe('Phase 2 timed out after 5 minutes');
+  });
+
+  it('uses singular "minute" when timeout is exactly 1 minute', () => {
+    const raw = 'timed out after 60000ms';
+    expect(sanitizePhaseError('1', raw)).toBe('Phase 1 timed out after 1 minute');
+  });
+
+  it('falls back to seconds when timeout is under 1 minute', () => {
+    const raw = 'timed out after 30000ms';
+    expect(sanitizePhaseError('1', raw)).toBe('Phase 1 timed out after 30s');
+  });
+
+  it('delegates non-timeout errors to sanitizeErrorMessage', () => {
+    const raw = 'Command was killed with SIGKILL (Forced termination): claude -p "You are..."';
+    const result = sanitizePhaseError('4', raw);
+    expect(result).not.toContain('claude -p');
+    expect(result).toContain('SIGKILL');
+  });
+
+  it('truncates output to 500 chars', () => {
+    const raw = 'x'.repeat(1000);
+    expect(sanitizePhaseError('1', raw).length).toBe(500);
+  });
+
+  it('handles case-insensitive timeout pattern', () => {
+    const raw = 'Timed Out After 90000ms';
+    expect(sanitizePhaseError('5', raw)).toBe('Phase 5 timed out after 2 minutes');
   });
 });
