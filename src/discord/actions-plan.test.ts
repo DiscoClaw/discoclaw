@@ -70,21 +70,27 @@ vi.mock('./allowed-mentions.js', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeSendFn() {
-  return vi.fn(async (_msg: { content: string; allowedMentions: unknown }) => {});
+function makeStatusMessage() {
+  return { edit: vi.fn(async (_opts: { content: string; allowedMentions: unknown }) => {}) };
 }
 
-function makeCtx(channelSend?: ReturnType<typeof makeSendFn>): ActionContext {
-  const send = channelSend ?? makeSendFn();
+function makeSendFn(statusMsg?: ReturnType<typeof makeStatusMessage>) {
+  const msg = statusMsg ?? makeStatusMessage();
+  return { fn: vi.fn(async (_payload: { content: string; allowedMentions: unknown }) => msg), msg };
+}
+
+function makeCtx(sendSetup?: ReturnType<typeof makeSendFn>): ActionContext & { statusMsg: ReturnType<typeof makeStatusMessage> } {
+  const setup = sendSetup ?? makeSendFn();
   return {
     guild: {} as any,
     client: {
       channels: {
-        fetch: vi.fn(async () => ({ send })),
+        fetch: vi.fn(async () => ({ send: setup.fn })),
       },
     } as any,
     channelId: 'test-channel',
     messageId: 'test-message',
+    statusMsg: setup.msg,
   };
 }
 
@@ -498,9 +504,9 @@ describe('executePlanAction', () => {
       expect(closePlanIfComplete).toHaveBeenCalled();
     });
 
-    it('sends completion notification to channel after run finishes', async () => {
-      const send = makeSendFn();
-      const ctx = makeCtx(send);
+    it('sends initial status message and edits it with final outcome after run finishes', async () => {
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
 
       await executePlanAction(
         { type: 'planRun', planId: 'plan-042' },
@@ -510,16 +516,23 @@ describe('executePlanAction', () => {
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(send).toHaveBeenCalledOnce();
-      const firstCall = send.mock.calls[0]!;
-      expect(firstCall[0]!.content).toContain('plan-042');
-      expect(firstCall[0]!.content).toContain('Phases run:');
-      expect(firstCall[0]!.allowedMentions).toEqual({ parse: [] });
+      // Initial send: status message posted at start
+      expect(setup.fn).toHaveBeenCalledOnce();
+      const sendContent: string = setup.fn.mock.calls[0]![0]!.content;
+      expect(sendContent).toContain('plan-042');
+      expect(sendContent).toContain('Plan run started');
+
+      // Final edit: status message updated with completion summary
+      expect(setup.msg.edit).toHaveBeenCalled();
+      const lastEdit = setup.msg.edit.mock.calls.at(-1)![0]!;
+      expect(lastEdit.content).toContain('plan-042');
+      expect(lastEdit.content).toContain('Phases run:');
+      expect(lastEdit.allowedMentions).toEqual({ parse: [] });
     });
 
     it('skips completion notification when skipCompletionNotify is true', async () => {
-      const send = makeSendFn();
-      const ctx = makeCtx(send);
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
 
       await executePlanAction(
         { type: 'planRun', planId: 'plan-042' },
@@ -529,15 +542,16 @@ describe('executePlanAction', () => {
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(send).not.toHaveBeenCalled();
+      expect(setup.fn).not.toHaveBeenCalled();
+      expect(setup.msg.edit).not.toHaveBeenCalled();
     });
 
     it('includes stop reason in completion notification when a phase fails', async () => {
       const { runNextPhase } = await import('./plan-manager.js');
       (runNextPhase as any).mockResolvedValueOnce({ result: 'audit_failed', error: 'lint errors' });
 
-      const send = makeSendFn();
-      const ctx = makeCtx(send);
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
 
       await executePlanAction(
         { type: 'planRun', planId: 'plan-042' },
@@ -547,17 +561,17 @@ describe('executePlanAction', () => {
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(send).toHaveBeenCalledOnce();
-      const content: string = send.mock.calls[0]![0]!.content;
-      expect(content).toContain('Stopped:');
+      expect(setup.fn).toHaveBeenCalledOnce();
+      const lastEdit = setup.msg.edit.mock.calls.at(-1)![0]!;
+      expect(lastEdit.content).toContain('Stopped:');
     });
 
     it('includes auto-close note in completion notification when plan is closed', async () => {
       const { closePlanIfComplete } = await import('./plan-commands.js');
       (closePlanIfComplete as any).mockResolvedValueOnce({ closed: true, reason: 'all_phases_complete' });
 
-      const send = makeSendFn();
-      const ctx = makeCtx(send);
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
 
       await executePlanAction(
         { type: 'planRun', planId: 'plan-042' },
@@ -567,9 +581,9 @@ describe('executePlanAction', () => {
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(send).toHaveBeenCalledOnce();
-      const content: string = send.mock.calls[0]![0]!.content;
-      expect(content).toContain('auto-closed');
+      expect(setup.fn).toHaveBeenCalledOnce();
+      const lastEdit = setup.msg.edit.mock.calls.at(-1)![0]!;
+      expect(lastEdit.content).toContain('auto-closed');
     });
   });
 });
