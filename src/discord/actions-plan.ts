@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from './action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
@@ -11,7 +12,7 @@ import {
   NO_PHASES_SENTINEL,
 } from './plan-commands.js';
 import type { HandlePlanCommandOpts, PlanFileHeader } from './plan-commands.js';
-import { runNextPhase, resolveProjectCwd } from './plan-manager.js';
+import { runNextPhase, resolveProjectCwd, deserializePhases, buildPostRunSummary } from './plan-manager.js';
 import { bdUpdate, bdClose } from '../beads/bd-cli.js';
 import {
   acquireWriterLock,
@@ -327,6 +328,17 @@ export async function executePlanAction(
             }
             if (autoClosed) {
               lines.push('Plan auto-closed — all phases terminal.');
+            }
+            try {
+              const phasesContent = await fs.readFile(prepResult.phasesFilePath, 'utf-8');
+              const phases = deserializePhases(phasesContent);
+              const budget = 2000 - lines.join('\n').length - 50;
+              const summary = buildPostRunSummary(phases, budget);
+              if (summary) {
+                lines.push(summary);
+              }
+            } catch (summaryErr) {
+              planCtx.log?.error({ err: summaryErr, planId: action.planId }, 'plan:action:run summary failed');
             }
             const channel = await ctx.client.channels.fetch(ctx.channelId);
             if (channel && 'send' in channel) {
