@@ -767,6 +767,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           phaseTimeoutMs: params.planPhaseTimeoutMs ?? 5 * 60_000,
           maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
           maxPlanRunPhases: MAX_PLAN_RUN_PHASES,
+          skipCompletionNotify: true,
           onProgress: async (progressMsg: string) => {
             params.log?.info(
               { planId: result.planId, progress: progressMsg },
