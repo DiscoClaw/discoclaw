@@ -49,6 +49,7 @@ import { applyUserTurnToDurable } from './discord/user-turn-to-durable.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster, sanitizeErrorMessage, sanitizePhaseError } from './discord/status-channel.js';
 import { ToolAwareQueue } from './discord/tool-aware-queue.js';
+import { createStreamingProgress } from './discord/streaming-progress.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
 import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
@@ -968,21 +969,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   }
                   validationLock(); // release validation lock before phase execution
 
-                  let lastEditAt = 0;
-                  const throttleMs = params.forgeProgressThrottleMs ?? 3000;
-                  let progressMessageGone = false;
+                  const planRunStreaming = createStreamingProgress(
+                    progressReply,
+                    params.forgeProgressThrottleMs ?? 3000,
+                  );
 
-                  const onProgress = async (progressMsg: string) => {
-                    if (progressMessageGone) return;
-                    const now = Date.now();
-                    if (now - lastEditAt < throttleMs) return;
-                    lastEditAt = now;
-                    try {
-                      await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
-                    } catch (editErr: any) {
-                      if (editErr?.code === 10008) progressMessageGone = true;
-                    }
+                  const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
+                    // Always force so phase-start/boundary messages are never throttled away
+                    await planRunStreaming.onProgress(progressMsg, { force: opts?.force ?? true });
                   };
+
+                  const onPlanRunEvent = params.toolAwareStreaming
+                    ? planRunStreaming.onEvent
+                    : undefined;
 
                   const timeoutMs = params.planPhaseTimeoutMs ?? 5 * 60_000;
                   const phaseOpts = {
@@ -994,17 +993,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     workspaceCwd: params.workspaceCwd,
                     log: params.log,
                     maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
+                    onEvent: onPlanRunEvent,
                   };
 
                   const editSummary = async (content: string) => {
                     try {
-                      if (progressMessageGone) {
-                        await msg.channel.send({ content, allowedMentions: NO_MENTIONS });
-                      } else {
-                        await progressReply.edit({ content, allowedMentions: NO_MENTIONS });
+                      await progressReply.edit({ content, allowedMentions: NO_MENTIONS });
+                    } catch (editErr: any) {
+                      if (editErr?.code === 10008) {
+                        try { await msg.channel.send({ content, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                       }
-                    } catch {
-                      // best-effort
                     }
                   };
 
@@ -1024,11 +1022,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           break;
                         }
 
-                        // Reset throttle so the phase-start message from runNextPhase
-                        // (onProgress at plan-manager.ts line 1041) is displayed immediately
-                        // rather than being suppressed by the previous phase's final edit.
-                        if (i > 0) lastEditAt = 0;
-
                         const releaseLock = await acquireWriterLock();
                         let phaseResult;
                         const phaseStart = Date.now();
@@ -1042,7 +1035,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           phasesRun++;
                           phaseResults.push({ id: phaseResult.phase.id, title: phaseResult.phase.title, elapsedMs: Date.now() - phaseStart });
                           // Between-phase progress update (bypass throttle)
-                          lastEditAt = 0;
                           try {
                             const nextNote = phaseResult.nextPhase
                               ? ` Next: ${phaseResult.nextPhase.id}: ${phaseResult.nextPhase.title}...`
@@ -1087,6 +1079,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       stopMessage = `Unexpected error: ${sanitizeErrorMessage(String(loopErr))}`;
                       params.log?.error({ err: loopErr, phasesRun, planId }, 'plan-run: crash in phase loop');
                     }
+
+                    planRunStreaming.dispose();
 
                     // Build summary — always runs regardless of how the loop terminated
                     const fmtElapsed = (ms: number) => ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`;
@@ -1154,13 +1148,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       (async () => {
                         try {
                           const errMsg = `Plan run crashed: ${sanitizeErrorMessage(String(err))}`;
-                          if (progressMessageGone) {
-                            await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
-                          } else {
-                            await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                          await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                        } catch (editErr: any) {
+                          if (editErr?.code === 10008) {
+                            try { await msg.channel.send({ content: `Plan run crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                           }
-                        } catch {
-                          // best-effort
                         }
                       })().catch(() => {});
                     },
@@ -1418,39 +1410,27 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   allowedMentions: NO_MENTIONS,
                 });
 
-                let lastEditAt = 0;
-                const throttleMs = params.forgeProgressThrottleMs ?? 3000;
-                let progressMessageGone = false;
+                const forgeResumeStreaming = createStreamingProgress(
+                  progressReply,
+                  params.forgeProgressThrottleMs ?? 3000,
+                );
 
                 const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
-                  if (progressMessageGone) return;
-                  const now = Date.now();
-                  if (!opts?.force && now - lastEditAt < throttleMs) return;
-                  lastEditAt = now;
-                  try {
-                    await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
-                  } catch (editErr: any) {
-                    if (editErr?.code === 10008) {
-                      progressMessageGone = true;
-                    }
-                  }
+                  await forgeResumeStreaming.onProgress(progressMsg, opts);
                 };
 
+                const forgeResumeOnEvent = params.toolAwareStreaming
+                  ? forgeResumeStreaming.onEvent
+                  : undefined;
+
                 // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                resumeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress).then(
+                resumeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress, forgeResumeOnEvent).then(
                   async (result) => {
+                    forgeResumeStreaming.dispose();
                     setActiveOrchestrator(null);
                     forgeReleaseLock();
-                    if (progressMessageGone) {
-                      try {
-                        const statusMsg = result.error
-                          ? `Forge resume failed: ${sanitizeErrorMessage(result.error)}`
-                          : `Forge complete. Plan **${result.planId}** ready for review (${result.rounds} round${result.rounds > 1 ? 's' : ''}).`;
-                        await msg.channel.send({ content: statusMsg, allowedMentions: NO_MENTIONS });
-                      } catch {
-                        // best-effort
-                      }
-                    }
+                    // On message-gone (10008), onProgress already handled the channel.send fallback;
+                    // if result has an error, the orchestrator's error path already called onProgress.
                     if (result.planSummary && !result.error) {
                       try {
                         await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
@@ -1461,18 +1441,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     await sendForgeImplementationFollowup(result);
                   },
                   async (err) => {
+                    forgeResumeStreaming.dispose();
                     setActiveOrchestrator(null);
                     forgeReleaseLock();
                     params.log?.error({ err }, 'forge:resume:unhandled error');
                     try {
                       const errMsg = `Forge resume crashed: ${sanitizeErrorMessage(String(err))}`;
-                      if (progressMessageGone) {
-                        await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
-                      } else {
-                        await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                      await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                    } catch (editErr: any) {
+                      if (editErr?.code === 10008) {
+                        try { await msg.channel.send({ content: `Forge resume crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                       }
-                    } catch {
-                      // best-effort
                     }
                   },
                 ).catch((err) => {
@@ -1532,41 +1511,26 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 allowedMentions: NO_MENTIONS,
               });
 
-              // Throttle state for progress edits
-              let lastEditAt = 0;
-              const throttleMs = params.forgeProgressThrottleMs ?? 3000;
-              let progressMessageGone = false;
+              const forgeCreateStreaming = createStreamingProgress(
+                progressReply,
+                params.forgeProgressThrottleMs ?? 3000,
+              );
 
               const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
-                if (progressMessageGone) return;
-                const now = Date.now();
-                if (!opts?.force && now - lastEditAt < throttleMs) return;
-                lastEditAt = now;
-                try {
-                  await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
-                } catch (editErr: any) {
-                  if (editErr?.code === 10008) {
-                    progressMessageGone = true;
-                  }
-                }
+                await forgeCreateStreaming.onProgress(progressMsg, opts);
               };
+
+              const forgeCreateOnEvent = params.toolAwareStreaming
+                ? forgeCreateStreaming.onEvent
+                : undefined;
 
               // Run forge in the background — don't block the queue
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              createOrchestrator.run(forgeCmd.args, onProgress, forgeContext).then(
+              createOrchestrator.run(forgeCmd.args, onProgress, forgeContext, forgeCreateOnEvent).then(
                 async (result) => {
+                  forgeCreateStreaming.dispose();
                   setActiveOrchestrator(null);
                   forgeReleaseLock();
-                  if (progressMessageGone) {
-                    try {
-                      const statusMsg = result.error
-                        ? `Forge failed: ${sanitizeErrorMessage(result.error)}`
-                        : `Forge complete. Plan **${result.planId}** ready for review (${result.rounds} round${result.rounds > 1 ? 's' : ''}).`;
-                      await msg.channel.send({ content: statusMsg, allowedMentions: NO_MENTIONS });
-                    } catch {
-                      // best-effort
-                    }
-                  }
                   // Send plan summary as a follow-up message
                   if (result.planSummary && !result.error) {
                     try {
@@ -1578,18 +1542,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   await sendForgeImplementationFollowup(result);
                 },
                 async (err) => {
+                  forgeCreateStreaming.dispose();
                   setActiveOrchestrator(null);
                   forgeReleaseLock();
                   params.log?.error({ err }, 'forge:unhandled error');
                   try {
                     const errMsg = `Forge crashed: ${sanitizeErrorMessage(String(err))}`;
-                    if (progressMessageGone) {
-                      await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
-                    } else {
-                      await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                    await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                  } catch (editErr: any) {
+                    if (editErr?.code === 10008) {
+                      try { await msg.channel.send({ content: `Forge crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                     }
-                  } catch {
-                    // best-effort
                   }
                 },
               ).catch((err) => {

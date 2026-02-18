@@ -1034,6 +1034,51 @@ describe('executePhase', () => {
     // Note: it only appears if addDirs has items
     expect(capturedAddDirs).toEqual(['/some/other/dir']);
   });
+
+  it('forwards events to opts.onEvent via PhaseExecutionOpts', async () => {
+    const events: EngineEvent[] = [
+      { type: 'text_delta', text: 'working...' },
+      { type: 'text_final', text: 'Done!' },
+    ];
+    const runtime = makeRuntime(events);
+    const received: EngineEvent[] = [];
+
+    const opts = makeOpts(runtime);
+    opts.onEvent = (evt) => received.push(evt);
+
+    await executePhase(phase, SAMPLE_PLAN, basePhases, opts);
+
+    expect(received).toEqual(events);
+  });
+
+  it('onEvent spy receives events in order across multiple events', async () => {
+    const events: EngineEvent[] = [
+      { type: 'text_delta', text: 'a' },
+      { type: 'text_delta', text: 'b' },
+      { type: 'text_final', text: 'ab' },
+    ];
+    const runtime = makeRuntime(events);
+    const received: EngineEvent[] = [];
+
+    const opts = makeOpts(runtime);
+    opts.onEvent = (evt) => received.push(evt);
+
+    const result = await executePhase(phase, SAMPLE_PLAN, basePhases, opts);
+
+    expect(result.status).toBe('done');
+    expect(received.map((e) => e.type)).toEqual(['text_delta', 'text_delta', 'text_final']);
+  });
+
+  it('throwing onEvent does not abort phase execution', async () => {
+    const runtime = makeSuccessRuntime('Done!');
+    const opts = makeOpts(runtime);
+    opts.onEvent = () => { throw new Error('callback error'); };
+
+    const result = await executePhase(phase, SAMPLE_PLAN, basePhases, opts);
+
+    expect(result.status).toBe('done');
+    expect(result.output).toBe('Done!');
+  });
 });
 
 // ---------------------------------------------------------------------------

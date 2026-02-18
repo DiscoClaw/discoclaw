@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { collectRuntimeText } from './runtime-utils.js';
 import type { RuntimeAdapter, EngineEvent, RuntimeInvokeParams } from '../runtime/types.js';
 
@@ -15,6 +15,18 @@ function makeCaptureRuntime(): { runtime: RuntimeAdapter; calls: RuntimeInvokePa
     },
   };
   return { runtime, calls };
+}
+
+function makeMultiEventRuntime(events: EngineEvent[]): RuntimeAdapter {
+  return {
+    id: 'claude_code' as const,
+    capabilities: new Set(['streaming_text' as const]),
+    invoke() {
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        for (const evt of events) yield evt;
+      })();
+    },
+  };
 }
 
 describe('collectRuntimeText', () => {
@@ -69,5 +81,59 @@ describe('collectRuntimeText', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.sessionKey).toBeUndefined();
+  });
+});
+
+describe('collectRuntimeText onEvent', () => {
+  it('forwards events to onEvent in order', async () => {
+    const events: EngineEvent[] = [
+      { type: 'text_delta', text: 'hello' },
+      { type: 'text_delta', text: ' world' },
+      { type: 'text_final', text: 'hello world' },
+    ];
+    const runtime = makeMultiEventRuntime(events);
+    const received: EngineEvent[] = [];
+
+    await collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, {
+      onEvent: (evt) => received.push(evt),
+    });
+
+    expect(received).toEqual(events);
+  });
+
+  it('return value is unchanged when onEvent is provided', async () => {
+    const runtime = makeMultiEventRuntime([{ type: 'text_final', text: 'result text' }]);
+
+    const result = await collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, {
+      onEvent: () => { /* discard */ },
+    });
+
+    expect(result).toBe('result text');
+  });
+
+  it('does not propagate a throwing onEvent', async () => {
+    const runtime = makeMultiEventRuntime([{ type: 'text_final', text: 'ok' }]);
+
+    await expect(
+      collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, {
+        onEvent: () => { throw new Error('callback error'); },
+      }),
+    ).resolves.toBe('ok');
+  });
+
+  it('still processes all events even when onEvent throws', async () => {
+    const events: EngineEvent[] = [
+      { type: 'text_delta', text: 'a' },
+      { type: 'text_final', text: 'final' },
+    ];
+    const runtime = makeMultiEventRuntime(events);
+    const callCount = { n: 0 };
+
+    const result = await collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, {
+      onEvent: () => { callCount.n++; throw new Error('oops'); },
+    });
+
+    expect(callCount.n).toBe(2);
+    expect(result).toBe('final');
   });
 });

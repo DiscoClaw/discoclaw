@@ -703,7 +703,7 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 |----------|---------|--------|-------------|
 | `DISCOCLAW_FORGE_COMMANDS_ENABLED` | `true` | `parseBoolean` | Enable/disable `!forge` commands |
 | `FORGE_MAX_AUDIT_ROUNDS` | `5` | `parsePositiveInt` | Max draft-audit-revise loops before CAP_REACHED |
-| `FORGE_PROGRESS_THROTTLE_MS` | `3000` | `parseNonNegativeInt` | Min interval between Discord progress message edits |
+| `FORGE_PROGRESS_THROTTLE_MS` | `3000` | `parseNonNegativeInt` | Min interval between static phase-transition progress edits. Streaming preview edits during active tool/text output use a separate faster interval (1250ms) independent of this setting. |
 | `FORGE_TIMEOUT_MS` | `1800000` (30 min) | `parsePositiveNumber` | Per-agent-invocation timeout within forge |
 | `FORGE_DRAFTER_MODEL` | *(empty)* | `parseTrimmedString` | Model override for drafter/reviser; falls back to main `RUNTIME_MODEL` |
 | `FORGE_AUDITOR_MODEL` | *(empty)* | `parseTrimmedString` | Model override for auditor; falls back to main `RUNTIME_MODEL` |
@@ -916,6 +916,7 @@ These steps mirror the rebuild workflow in `AGENTS.md`/`TOOLS.md` and ensure we 
 | `src/discord/plan-commands.ts` | Plan command parsing, plan file CRUD, phase CLI wrappers, `preparePlanRun()` |
 | `src/discord/forge-commands.ts` | Forge command parsing, `ForgeOrchestrator` class, audit verdict parsing, prompt builders |
 | `src/discord/plan-manager.ts` | Phase decomposition, serialization, staleness detection, phase execution, git integration |
+| `src/discord/streaming-progress.ts` | `createStreamingProgress()` — reusable controller that wires a `ToolAwareQueue` to a Discord progress message; drives live tool-activity labels and streaming text preview via `selectStreamingOutput` at 1250ms; used by forge create, forge resume, and plan-run paths in `discord.ts` |
 | `src/discord.ts` | Discord message handler: command dispatch for both `!plan` and `!forge`, writer lock, forge lifecycle management |
 | `src/config.ts` | All plan/forge env var parsing |
 | `src/runtime/openai-compat.ts` | OpenAI-compatible runtime adapter (SSE streaming, text-only — no tool support) |
