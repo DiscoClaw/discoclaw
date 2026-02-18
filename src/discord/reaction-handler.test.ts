@@ -1352,17 +1352,32 @@ describe('reaction prompt interception', () => {
     reactionPrompts._resetForTest();
   });
 
-  it('skips queue and AI when reaction resolves a pending prompt', async () => {
-    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'test prompt', chosenEmoji: '✅' });
+  it('continues into AI invocation with resolved-prompt text when reaction matches a pending prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'Proceed?', chosenEmoji: '✅' });
     try {
-      const params = makeParams();
+      const params = makeParams({ runtime });
       const queue = mockQueue();
       const handler = createReactionAddHandler(params, queue);
 
       await handler(mockReaction() as any, mockUser() as any);
 
       expect(spy).toHaveBeenCalledWith('msg-1', expect.any(String));
-      expect(queue.run).not.toHaveBeenCalled();
+      expect(queue.run).toHaveBeenCalledOnce();
+      expect(invokeSpy).toHaveBeenCalledOnce();
+      const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+      expect(prompt).toContain('✅');
+      expect(prompt).toContain('Proceed?');
+      expect(prompt).toContain('Act on the user\'s choice. Do not re-ask the question.');
     } finally {
       spy.mockRestore();
     }
@@ -1383,7 +1398,8 @@ describe('reaction prompt interception', () => {
 
       // spy was called, proving interception ran before the staleness guard could short-circuit.
       expect(spy).toHaveBeenCalled();
-      expect(queue.run).not.toHaveBeenCalled();
+      // Staleness guard is bypassed for resolved prompts, so the queue IS called.
+      expect(queue.run).toHaveBeenCalledOnce();
     } finally {
       spy.mockRestore();
     }
@@ -1402,7 +1418,6 @@ describe('reaction prompt interception', () => {
       await handler(reaction as any, mockUser() as any);
 
       expect(spy).toHaveBeenCalledWith('msg-1', '<:yes:123456789>');
-      expect(queue.run).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();
     }
@@ -1419,6 +1434,8 @@ describe('reaction prompt interception', () => {
       await handler(reaction as any, mockUser() as any);
 
       expect(spy).toHaveBeenCalledWith('msg-1', '✅');
+      // Resolved prompt continues into AI invocation.
+      expect(queue.run).toHaveBeenCalledOnce();
     } finally {
       spy.mockRestore();
     }
