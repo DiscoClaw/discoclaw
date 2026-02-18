@@ -165,7 +165,7 @@ function createReactionHandler(
 
           if (params.requireChannelContext && !channelCtx.contextPath) {
             params.log?.warn({ channelId: channelCtx.channelId }, `${logPrefix}:missing required channel context`);
-            await reply.edit({
+            await reply!.edit({
               content: mapRuntimeErrorToUserMessage('Configuration error: missing required channel context file for this channel ID.'),
               allowedMentions: NO_MENTIONS,
             });
