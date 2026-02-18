@@ -19,6 +19,7 @@ import {
   removeRunningPlan,
   isPlanRunning,
 } from './forge-plan-registry.js';
+import { NO_MENTIONS } from './allowed-mentions.js';
 
 const DEFAULT_PLAN_PHASE_TIMEOUT_MS = 1_800_000;
 
@@ -63,6 +64,8 @@ export type PlanContext = {
   maxPlanRunPhases?: number;
   /** Callback for progress messages. */
   onProgress?: (msg: string) => Promise<void>;
+  /** When true, suppresses the post-run completion message to the originating channel. Used by forge auto-implement. */
+  skipCompletionNotify?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -71,7 +74,7 @@ export type PlanContext = {
 
 export async function executePlanAction(
   action: PlanActionRequest,
-  _ctx: ActionContext,
+  ctx: ActionContext,
   planCtx: PlanContext,
 ): Promise<DiscordActionResult> {
   switch (action.type) {
@@ -264,6 +267,8 @@ export async function executePlanAction(
         };
 
         let phasesRun = 0;
+        let stopReason: string | undefined;
+        let stopMessage: string | undefined;
         for (let i = 0; i < maxPhases; i++) {
           const release = await acquireWriterLock();
           let phaseResult;
@@ -279,6 +284,8 @@ export async function executePlanAction(
             break;
           } else {
             // Any error/stale/corrupt/audit_failed/retry_blocked stops the loop.
+            stopReason = phaseResult.result;
+            stopMessage = (phaseResult as any).error ?? phaseResult.result;
             planCtx.log?.warn({ planId: action.planId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
             break;
           }
@@ -289,13 +296,46 @@ export async function executePlanAction(
         planCtx.log?.info({ planId: action.planId, phasesRun }, 'plan:action:run complete');
 
         // Auto-close plan if all phases are terminal
-        await closePlanIfComplete(
-          prepResult.phasesFilePath,
-          prepResult.planFilePath,
-          planCtx.beadsCwd,
-          acquireWriterLock,
-          planCtx.log,
-        );
+        let autoClosed = false;
+        let runError: unknown;
+        try {
+          const closeResult = await closePlanIfComplete(
+            prepResult.phasesFilePath,
+            prepResult.planFilePath,
+            planCtx.beadsCwd,
+            acquireWriterLock,
+            planCtx.log,
+          );
+          autoClosed = closeResult.closed;
+        } catch (err) {
+          runError = err;
+          planCtx.log?.error({ err, planId: action.planId }, 'plan:action:run failed');
+        }
+
+        // Send completion notification to the originating channel (best-effort).
+        if (!planCtx.skipCompletionNotify) {
+          try {
+            const lines: string[] = [
+              `**Plan run complete:** \`${action.planId}\``,
+              `Phases run: ${phasesRun}`,
+            ];
+            if (stopReason) {
+              lines.push(`Stopped: ${stopMessage ?? stopReason}`);
+            }
+            if (runError) {
+              lines.push(`Error: ${runError instanceof Error ? runError.message : String(runError)}`);
+            }
+            if (autoClosed) {
+              lines.push('Plan auto-closed — all phases terminal.');
+            }
+            const channel = await ctx.client.channels.fetch(ctx.channelId);
+            if (channel && 'send' in channel) {
+              await (channel as any).send({ content: lines.join('\n'), allowedMentions: NO_MENTIONS });
+            }
+          } catch {
+            // best-effort — do not rethrow
+          }
+        }
       })().catch((err) => {
         planCtx.log?.error({ err, planId: action.planId }, 'plan:action:run failed');
       }).finally(() => {
