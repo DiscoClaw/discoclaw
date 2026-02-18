@@ -114,7 +114,7 @@ All actions are gated by category env flags (off by default except channels).
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| Status channel embeds (online/offline/error) | `src/discord/status-channel.ts` | **done** |
+| Status channel embeds (boot-report/offline/error) | `src/discord/status-channel.ts` | **done** |
 | Pino structured logging | throughout | **done** |
 | Metrics / dashboard | — | *stub — not started* |
 
