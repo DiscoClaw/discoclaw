@@ -53,6 +53,11 @@ Plan action types (in `src/discord/actions-plan.ts`):
 Memory action types (in `src/discord/actions-memory.ts`):
 - `memoryRemember`, `memoryForget`, `memoryShow`
 
+Bead action types (in `src/discord/actions-beads.ts`):
+- `beadCreate`, `beadUpdate`, `beadClose`, `beadShow`, `beadList`, `beadSync`, `tagMapReload`
+
+> **Bead References:** Bead IDs are the stable identifier for cross-bead interaction. When interacting with another bead (e.g. reading its content, posting an update, or pinning a message), always use `beadShow`/`beadUpdate`/etc. with the bead's ID — do not use `sendMessage`/`readMessages`/`listPins` with a thread channel name. Thread channel names can become stale (renamed, archived, or recreated), while bead IDs remain valid across those changes.
+
 Query actions (read-only actions that can trigger an auto-follow-up loop):
 - `src/discord/action-categories.ts`
 
