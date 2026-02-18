@@ -6,8 +6,9 @@ import type { KeyedQueue } from '../group-queue.js';
 import { isAllowlisted } from './allowlist.js';
 import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines } from './actions.js';
-import type { ActionCategoryFlags } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './actions.js';
+import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
+import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
 import { editThenSendChunks } from './output-common.js';
@@ -352,19 +353,32 @@ function createReactionHandler(
           );
 
           // Track this reply for graceful shutdown cleanup.
-          const dispose = registerInFlightReply(reply!, reaction.message.channelId, (reply as any).id, `${logPrefix}:${reaction.message.channelId}`);
+          let dispose = registerInFlightReply(reply!, reaction.message.channelId, (reply as any).id, `${logPrefix}:${reaction.message.channelId}`);
           // Tracks whether the reply was successfully replaced with real content (or deleted).
           // If false when the finally block runs, the reply still shows thinking-format content
           // and must be deleted to prevent a stale "Thinking..." message from persisting.
           let replyFinalized = false;
-          // Tracks whether a text_final event was received, used to gate action execution.
-          let hadTextFinal = false;
+          let followUpDepth = 0;
+          let currentPrompt = prompt;
           try {
+
+          // -- auto-follow-up loop --
+          while (true) {
+          if (followUpDepth > 0) {
+            dispose();
+            reply = await (msg as any).reply({
+              content: formatBoldLabel('(following up...)'),
+              allowedMentions: NO_MENTIONS,
+            });
+            dispose = registerInFlightReply(reply!, reaction.message.channelId, (reply as any).id, `${logPrefix}:${reaction.message.channelId}:followup-${followUpDepth}`);
+            replyFinalized = false;
+          }
 
           // Streaming pattern (matches discord.ts flat mode).
           // Both add and remove handlers record under the 'reaction' invoke flow so
           // latency lands in MetricsRegistry.latencies.reaction (avoids InvokeFlow
           // type change). Volume is split by the separate received/error counters.
+          let hadTextFinal = false;
           let finalText = '';
           let deltaText = '';
           const collectedImages: ImageData[] = [];
@@ -412,7 +426,7 @@ function createReactionHandler(
 
           try {
             for await (const evt of params.runtime.invoke({
-              prompt,
+              prompt: currentPrompt,
               model: resolveModel(params.runtimeModel, params.runtime.id),
               cwd,
               addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
@@ -466,9 +480,12 @@ function createReactionHandler(
 
           // Parse and execute Discord actions.
           let parsedActionCount = 0;
+          let parsedActions: DiscordActionRequest[] = [];
+          let actionResults: DiscordActionResult[] = [];
           if (params.discordActionsEnabled && msg.guild && hadTextFinal && !invokeError) {
             const parsed = parseDiscordActions(processedText, actionFlags);
             parsedActionCount = parsed.actions.length;
+            parsedActions = parsed.actions;
             if (parsed.actions.length > 0) {
               const actCtx = {
                 guild: msg.guild,
@@ -495,6 +512,7 @@ function createReactionHandler(
                 memoryCtx: perEventMemoryCtx,
                 configCtx: params.configCtx,
               });
+              actionResults = results;
               for (const result of results) {
                 metrics.recordActionResult(result.ok);
                 params.log?.info({ flow: 'reaction', sessionKey, ok: result.ok }, 'obs.action.result');
@@ -557,6 +575,24 @@ function createReactionHandler(
             replyFinalized = true;
           }
 
+          // -- auto-follow-up check --
+          if (followUpDepth >= params.actionFollowupDepth) break;
+          if (parsedActions.length === 0) break;
+          if (!hasQueryAction(parsedActions.map((a) => a.type))) break;
+          const anyQuerySucceeded = parsedActions.some(
+            (a, i) => QUERY_ACTION_TYPES.has(a.type) && actionResults[i]?.ok,
+          );
+          if (!anyQuerySucceeded) break;
+
+          // Build follow-up prompt with action results.
+          const followUpLines = buildAllResultLines(actionResults);
+          currentPrompt =
+            `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
+            followUpLines.join('\n') +
+            `\n\nContinue your analysis based on these results. If you need additional information, you may emit further query actions.`;
+          followUpDepth++;
+
+          } // end while (true)
           } catch (innerErr) {
             // Inner catch: attempt to show the error in the reply before the finally
             // block runs dispose(). Setting replyFinalized = true on success prevents
