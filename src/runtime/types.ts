@@ -39,6 +39,7 @@ export type RuntimeInvokeParams = {
   addDirs?: string[];
   timeoutMs?: number;
   images?: ImageData[];
+  signal?: AbortSignal;
 };
 
 export interface RuntimeAdapter {
