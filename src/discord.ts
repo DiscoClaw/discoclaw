@@ -35,7 +35,7 @@ import type { PlanAuditResult } from './discord/audit-handler.js';
 import type { PreparePlanRunResult } from './discord/plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './discord/forge-commands.js';
 import type { ForgeOrchestratorOpts, ForgeResult } from './discord/forge-commands.js';
-import { runNextPhase, resolveProjectCwd } from './discord/plan-manager.js';
+import { runNextPhase, resolveProjectCwd, deserializePhases, buildPostRunSummary } from './discord/plan-manager.js';
 import {
   acquireWriterLock as registryAcquireWriterLock,
   setActiveOrchestrator,
@@ -1118,6 +1118,20 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       // shutdown
                       summaryMsg = `Plan run interrupted (bot shutting down). ${phasesRun} phase${phasesRun !== 1 ? 's' : ''} completed.`;
                       if (phaseList) summaryMsg += `\n${phaseList}`;
+                    }
+
+                    if (!isRunOne && (phasesRun > 0 || stopReason === null)) {
+                      try {
+                        const phasesContent = await fs.readFile(phasesFilePath, 'utf-8');
+                        const phases = deserializePhases(phasesContent);
+                        const budget = 2000 - summaryMsg.length - 50;
+                        const postRunSummary = buildPostRunSummary(phases, budget);
+                        if (postRunSummary) {
+                          summaryMsg += `\n${postRunSummary}`;
+                        }
+                      } catch (summaryErr) {
+                        params.log?.error({ err: summaryErr }, 'plan-run: failed to build post-run summary');
+                      }
                     }
 
                     await editSummary(summaryMsg);

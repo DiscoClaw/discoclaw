@@ -20,6 +20,7 @@ import {
   checkStaleness,
   buildPhasePrompt,
   buildAuditFixPrompt,
+  buildPostRunSummary,
   extractObjective,
   resolveProjectCwd,
   resolveContextFilePath,
@@ -2253,5 +2254,239 @@ describe('extractObjective', () => {
   it('returns fallback for empty string', () => {
     const result = extractObjective('');
     expect(result).toBe('(no objective found in plan)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPostRunSummary
+// ---------------------------------------------------------------------------
+
+function makePhasesForSummary(overrides: Partial<PlanPhases> = {}): PlanPhases {
+  return {
+    planId: 'plan-011',
+    planFile: 'plans/plan-011.md',
+    planContentHash: 'abc123',
+    createdAt: '2026-02-17',
+    updatedAt: '2026-02-17',
+    phases: [],
+    ...overrides,
+  };
+}
+
+describe('buildPostRunSummary', () => {
+  it('returns empty string when there are no phases', () => {
+    const phases = makePhasesForSummary({ phases: [] });
+    expect(buildPostRunSummary(phases)).toBe('');
+  });
+
+  it('shows [x] indicator for done phase', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).toContain('[x]');
+    expect(summary).toContain('phase-1');
+    expect(summary).toContain('Implement foo');
+  });
+
+  it('shows [!] indicator for failed phase', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'failed',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+      ],
+    });
+    expect(buildPostRunSummary(phases)).toContain('[!]');
+  });
+
+  it('shows [-] indicator for skipped phase', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Read plan', kind: 'read', status: 'skipped',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+      ],
+    });
+    expect(buildPostRunSummary(phases)).toContain('[-]');
+  });
+
+  it('shows [~] indicator for in-progress phase', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'in-progress',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+      ],
+    });
+    expect(buildPostRunSummary(phases)).toContain('[~]');
+  });
+
+  it('shows [ ] indicator for pending phase', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'pending',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+      ],
+    });
+    expect(buildPostRunSummary(phases)).toContain('[ ]');
+  });
+
+  it('includes git commit hash when present', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          gitCommit: 'a1b2c3d',
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).toContain('a1b2c3d');
+  });
+
+  it('includes modified file count when present', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          modifiedFiles: ['src/foo.ts', 'src/bar.ts'],
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).toContain('2 files');
+  });
+
+  it('uses singular "file" for 1 modified file', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          modifiedFiles: ['src/foo.ts'],
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).toContain('1 file');
+    expect(summary).not.toContain('1 files');
+  });
+
+  it('includes audit verdict from output', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-2', title: 'Post-implementation audit', kind: 'audit', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          output: 'No concerns found.\n\n**Verdict:** Ready to approve.',
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).toContain('Ready to approve.');
+  });
+
+  it('does not add verdict line if audit output has no Verdict marker', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-2', title: 'Post-implementation audit', kind: 'audit', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          output: 'Looks good.',
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).not.toContain(' — ');
+  });
+
+  it('includes Files changed rollup with unique files across phases', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          modifiedFiles: ['src/foo.ts', 'src/bar.ts'],
+        },
+        {
+          id: 'phase-2', title: 'Implement baz', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          modifiedFiles: ['src/baz.ts', 'src/bar.ts'], // bar.ts is a duplicate
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).toContain('Files changed (3)');
+    expect(summary).toContain('`src/foo.ts`');
+    expect(summary).toContain('`src/bar.ts`');
+    expect(summary).toContain('`src/baz.ts`');
+    // bar.ts should appear only once
+    expect(summary.split('`src/bar.ts`').length - 1).toBe(1);
+  });
+
+  it('omits Files changed section when no phases have modifiedFiles', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Read plan', kind: 'read', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).not.toContain('Files changed');
+  });
+
+  it('truncates files list with overflow count when budget is exceeded', () => {
+    const manyFiles = Array.from({ length: 30 }, (_, i) => `src/module-${i}/long-filename-${i}.ts`);
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Big impl', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          modifiedFiles: manyFiles,
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases, 200);
+    expect(summary).toContain('more)');
+  });
+
+  it('handles multiple phases with mixed statuses', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          gitCommit: 'abc1234', modifiedFiles: ['src/foo.ts'],
+        },
+        {
+          id: 'phase-2', title: 'Implement bar', kind: 'implement', status: 'failed',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+        {
+          id: 'phase-3', title: 'Post-implementation audit', kind: 'audit', status: 'skipped',
+          description: '', dependsOn: [], contextFiles: [],
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).toContain('[x]');
+    expect(summary).toContain('[!]');
+    expect(summary).toContain('[-]');
+    expect(summary).toContain('abc1234');
   });
 });
