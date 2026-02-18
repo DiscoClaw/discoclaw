@@ -55,6 +55,7 @@ import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
+const bootStartMs = Date.now();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -116,8 +117,9 @@ setDataFilePath(path.join(pidLockDir, 'inflight.json'));
 
 // --- Read shutdown context from previous run (before bot connects to avoid race) ---
 let startupInjection: string | null = null;
+let startupCtx: Awaited<ReturnType<typeof readAndClearShutdownContext>>;
 {
-  const startupCtx = await readAndClearShutdownContext(pidLockDir, { firstBoot });
+  startupCtx = await readAndClearShutdownContext(pidLockDir, { firstBoot });
   startupInjection = formatStartupInjection(startupCtx);
   if (startupInjection) {
     log.info({ type: startupCtx.type, activeForge: startupCtx.shutdown?.activeForge }, 'startup:context loaded');
@@ -1235,3 +1237,40 @@ if (reactionRemoveHandlerEnabled) {
 }
 
 log.info('Discord bot started');
+
+// --- Boot report embed (replaces the bare online() call in startDiscordBot) ---
+if (botStatus?.bootReport) {
+  const actionCategoriesEnabled: string[] = [];
+  if (discordActionsChannels) actionCategoriesEnabled.push('channels');
+  if (discordActionsMessaging) actionCategoriesEnabled.push('messaging');
+  if (discordActionsGuild) actionCategoriesEnabled.push('guild');
+  if (discordActionsModeration) actionCategoriesEnabled.push('moderation');
+  if (discordActionsPolls) actionCategoriesEnabled.push('polls');
+  if (discordActionsBeads && beadsEnabled) actionCategoriesEnabled.push('beads');
+  if (discordActionsCrons && cronEnabled) actionCategoriesEnabled.push('crons');
+  if (discordActionsBotProfile) actionCategoriesEnabled.push('bot-profile');
+  if (discordActionsForge && forgeCommandsEnabled) actionCategoriesEnabled.push('forge');
+  if (discordActionsPlan && planCommandsEnabled) actionCategoriesEnabled.push('plan');
+  if (discordActionsMemory && durableMemoryEnabled) actionCategoriesEnabled.push('memory');
+
+  botStatus.bootReport({
+    startupType: startupCtx.type,
+    shutdownReason: startupCtx.shutdown?.reason,
+    shutdownMessage: startupCtx.shutdown?.message,
+    shutdownRequestedBy: startupCtx.shutdown?.requestedBy,
+    activeForge: startupCtx.shutdown?.activeForge,
+    beadsEnabled: beadsEnabled && bdAvailable,
+    beadDbVersion: bdVersion,
+    forumResolved: Boolean(beadCtx?.forumId),
+    cronsEnabled: Boolean(cronEnabled && botParams.cronCtx),
+    cronJobCount: cronScheduler?.listJobs().length,
+    memoryEpisodicOn: summaryEnabled,
+    memorySemanticOn: durableMemoryEnabled,
+    memoryWorkingOn: shortTermMemoryEnabled,
+    actionCategoriesEnabled,
+    configWarnings: parsedConfig.warnings.length,
+    permissionsTier: permProbe.status === 'valid' ? permProbe.permissions.tier : undefined,
+    runtimeModel,
+    bootDurationMs: Date.now() - bootStartMs,
+  }).catch((err) => log.warn({ err }, 'status-channel: boot report failed'));
+}
