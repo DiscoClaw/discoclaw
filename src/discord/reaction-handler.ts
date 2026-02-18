@@ -8,6 +8,7 @@ import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines } from './actions.js';
 import type { ActionCategoryFlags } from './actions.js';
+import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
 import { editThenSendChunks } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
@@ -76,17 +77,23 @@ function createReactionHandler(
         return;
       }
 
-      // 3. Guild-only — skip DM reactions.
+      // 3. Reaction prompt interception — if this reaction resolves a pending prompt, skip AI.
+      if (mode === 'add') {
+        const emoji = reaction.emoji.name ?? '';
+        if (emoji && tryResolveReactionPrompt(reaction.message.id, emoji)) return;
+      }
+
+      // 4. Guild-only — skip DM reactions.
       if (reaction.message.guildId == null) return;
 
-      // 4. Staleness guard.
+      // 5. Staleness guard.
       const msgTimestamp = reaction.message.createdTimestamp;
       if (msgTimestamp && params.reactionMaxAgeMs > 0) {
         const age = Date.now() - msgTimestamp;
         if (age > params.reactionMaxAgeMs) return;
       }
 
-      // 5. Allowlist check.
+      // 6. Allowlist check.
       if (!isAllowlisted(params.allowUserIds, user.id)) return;
 
       // Resolve channel/thread info once, used by guards and the queue callback.
@@ -95,7 +102,7 @@ function createReactionHandler(
       const threadId = isThread ? String(ch.id ?? '') : null;
       const threadParentId = isThread ? String(ch.parentId ?? '') : null;
 
-      // 6. Channel restriction.
+      // 7. Channel restriction.
       if (params.allowChannelIds) {
         const parentId = isThread ? String(ch.parentId ?? '') : '';
         const allowed =
@@ -104,7 +111,7 @@ function createReactionHandler(
         if (!allowed) return;
       }
 
-      // 7. Session key.
+      // 8. Session key.
       const sessionKey = discordSessionKey({
         channelId: reaction.message.channelId,
         authorId: user.id,
@@ -112,7 +119,7 @@ function createReactionHandler(
         threadId: threadId || null,
       });
 
-      // 8. Queue.
+      // 9. Queue.
       await queue.run(sessionKey, async () => {
         const msg = reaction.message;
         let reply: { edit: (opts: any) => Promise<unknown> } | null = null;
