@@ -1,4 +1,5 @@
 import type { Message } from 'discord.js';
+import type { AttachmentLike } from './image-download.js';
 
 /**
  * Transport-agnostic representation of an incoming chat message.
@@ -10,32 +11,36 @@ export type PlatformMessage = {
   id: string;
   /** Text body of the message. Empty string when not present. */
   content: string;
-  /** The user/account that sent the message. */
-  author: {
-    id: string;
-    username: string;
-    displayName: string;
-    /** True when the sender is an automated bot account. */
-    bot: boolean;
-  };
+  /** ID of the user/account that sent the message. */
+  authorId: string;
+  /** Username (login handle) of the sender. */
+  authorName: string;
+  /** Display name of the sender (may differ from authorName). */
+  authorDisplayName: string;
+  /** True when the sender is an automated bot account. */
+  isBot: boolean;
   /** Channel the message was sent in. */
   channelId: string;
-  /** Guild (server) ID, or null for direct messages. */
-  guildId: string | null;
+  /** Guild (server) ID. Absent for direct messages. */
+  guildId?: string;
   /** Whether the message was sent in a DM (no guild). */
   isDm: boolean;
   /**
    * If the message was sent inside a thread, the thread's channel ID.
-   * Null otherwise.
+   * Absent otherwise.
    */
-  threadId: string | null;
+  threadId?: string;
   /**
    * If the message was sent inside a thread, the parent channel ID.
-   * Null otherwise.
+   * Absent otherwise.
    */
-  threadParentId: string | null;
+  threadParentId?: string;
   /** discord.js numeric message type (0 = Default, 19 = Reply). */
   type: number;
+  /** File/media attachments on the message. Empty array when none. */
+  attachments: AttachmentLike[];
+  /** Rich embeds on the message. Empty array when none. */
+  embeds: { title?: string; url?: string; description?: string }[];
 };
 
 /**
@@ -50,25 +55,41 @@ export function toPlatformMessage(msg: Message): PlatformMessage {
       ? (msg.channel as any).isThread()
       : false;
 
-  const threadId = isThread ? String((msg.channel as any).id ?? '') : null;
-  const threadParentId = isThread
-    ? String((msg.channel as any).parentId ?? '')
-    : null;
+  const threadId = isThread ? String((msg.channel as any).id ?? '') : undefined;
+  const rawParentId = isThread ? ((msg.channel as any).parentId ?? null) : null;
+  const threadParentId = rawParentId != null ? String(rawParentId) : undefined;
+
+  const attachments: AttachmentLike[] = msg.attachments
+    ? [...msg.attachments.values()].map((a: any) => ({
+        url: a.url,
+        name: a.name ?? null,
+        contentType: a.contentType ?? null,
+        size: a.size ?? null,
+      }))
+    : [];
+
+  const embeds: { title?: string; url?: string; description?: string }[] = msg.embeds
+    ? msg.embeds.map((e: any) => ({
+        title: e.title ?? undefined,
+        url: e.url ?? undefined,
+        description: e.description ?? undefined,
+      }))
+    : [];
 
   return {
     id: msg.id,
     content: String(msg.content ?? ''),
-    author: {
-      id: msg.author.id,
-      username: msg.author.username,
-      displayName: msg.author.displayName ?? msg.author.username,
-      bot: msg.author.bot,
-    },
+    authorId: msg.author.id,
+    authorName: msg.author.username,
+    authorDisplayName: msg.author.displayName ?? msg.author.username,
+    isBot: msg.author.bot,
     channelId: msg.channelId,
-    guildId: msg.guildId ?? null,
+    guildId: msg.guildId ?? undefined,
     isDm: msg.guildId == null,
     threadId,
     threadParentId,
     type: msg.type as number,
+    attachments,
+    embeds,
   };
 }

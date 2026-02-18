@@ -160,6 +160,7 @@ Platform-agnostic message normalization layer (Phase 1 of transport portability)
 |-----------|---------|--------|
 | `PlatformMessage` type (normalized chat message shape) | `src/transport/types.ts` | **done** |
 | discord.js `Message` → `PlatformMessage` mapper | `src/discord/platform-message.ts` | **done** |
+| Mapper unit tests | `src/discord/platform-message.test.ts` | **done** |
 
 ---
 

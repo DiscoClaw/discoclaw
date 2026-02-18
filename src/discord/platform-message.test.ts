@@ -16,6 +16,8 @@ function makeMsg(opts: {
   threadId?: string;
   threadParentId?: string;
   type?: number;
+  attachments?: Map<string, any>;
+  embeds?: any[];
 }): any {
   const isThread = opts.isThread ?? false;
 
@@ -38,6 +40,8 @@ function makeMsg(opts: {
     guildId: opts.guildId !== undefined ? opts.guildId : 'guild-1',
     channel,
     type: opts.type ?? 0,
+    attachments: opts.attachments ?? new Map(),
+    embeds: opts.embeds ?? [],
   };
 }
 
@@ -52,20 +56,20 @@ describe('toPlatformMessage', () => {
     expect(result.type).toBe(0);
   });
 
-  it('maps author fields', () => {
+  it('maps author fields to flat properties', () => {
     const result = toPlatformMessage(
       makeMsg({ authorId: 'u-99', authorUsername: 'dave', authorDisplayName: 'Dave', authorBot: false }),
     );
 
-    expect(result.author.id).toBe('u-99');
-    expect(result.author.username).toBe('dave');
-    expect(result.author.displayName).toBe('Dave');
-    expect(result.author.bot).toBe(false);
+    expect(result.authorId).toBe('u-99');
+    expect(result.authorName).toBe('dave');
+    expect(result.authorDisplayName).toBe('Dave');
+    expect(result.isBot).toBe(false);
   });
 
   it('marks bot authors correctly', () => {
     const result = toPlatformMessage(makeMsg({ authorBot: true }));
-    expect(result.author.bot).toBe(true);
+    expect(result.isBot).toBe(true);
   });
 
   it('isDm is false for guild messages', () => {
@@ -77,13 +81,13 @@ describe('toPlatformMessage', () => {
   it('isDm is true when guildId is null', () => {
     const result = toPlatformMessage(makeMsg({ guildId: null }));
     expect(result.isDm).toBe(true);
-    expect(result.guildId).toBeNull();
+    expect(result.guildId).toBeUndefined();
   });
 
-  it('threadId and threadParentId are null for non-thread channels', () => {
+  it('threadId and threadParentId are undefined for non-thread channels', () => {
     const result = toPlatformMessage(makeMsg({ isThread: false }));
-    expect(result.threadId).toBeNull();
-    expect(result.threadParentId).toBeNull();
+    expect(result.threadId).toBeUndefined();
+    expect(result.threadParentId).toBeUndefined();
   });
 
   it('populates threadId and threadParentId for thread channels', () => {
@@ -111,6 +115,39 @@ describe('toPlatformMessage', () => {
     const msg = makeMsg({ authorUsername: 'dave123' });
     msg.author.displayName = undefined;
     const result = toPlatformMessage(msg);
-    expect(result.author.displayName).toBe('dave123');
+    expect(result.authorDisplayName).toBe('dave123');
+  });
+
+  it('maps attachments to AttachmentLike objects', () => {
+    const att = { url: 'https://cdn.example.com/img.png', name: 'img.png', contentType: 'image/png', size: 1024 };
+    const attachments = new Map([['att-1', att]]);
+    const result = toPlatformMessage(makeMsg({ attachments }));
+
+    expect(result.attachments).toHaveLength(1);
+    expect(result.attachments[0]).toEqual({ url: att.url, name: att.name, contentType: att.contentType, size: att.size });
+  });
+
+  it('maps embeds extracting title, url, and description', () => {
+    const embeds = [{ title: 'My Title', url: 'https://example.com', description: 'Some text' }];
+    const result = toPlatformMessage(makeMsg({ embeds }));
+
+    expect(result.embeds).toHaveLength(1);
+    expect(result.embeds[0]).toEqual({ title: 'My Title', url: 'https://example.com', description: 'Some text' });
+  });
+
+  it('returns empty arrays when attachments and embeds are empty', () => {
+    const result = toPlatformMessage(makeMsg({ attachments: new Map(), embeds: [] }));
+    expect(result.attachments).toEqual([]);
+    expect(result.embeds).toEqual([]);
+  });
+
+  it('handles embed with all-nullish fields', () => {
+    const embeds = [{ title: null, url: null, description: null }];
+    const result = toPlatformMessage(makeMsg({ embeds }));
+
+    expect(result.embeds).toHaveLength(1);
+    expect(result.embeds[0].title).toBeUndefined();
+    expect(result.embeds[0].url).toBeUndefined();
+    expect(result.embeds[0].description).toBeUndefined();
   });
 });
