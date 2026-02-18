@@ -865,6 +865,122 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs).not.toContain('--json');
   });
 
+  it('reasoning items emit text_delta but text_final contains only agent_message', async () => {
+    const jsonlOutput = [
+      '{"type":"thread.started","thread_id":"reason-thread-1"}',
+      '{"type":"item.completed","item":{"type":"reasoning","summary":"Let me think step by step..."}}',
+      '{"type":"item.completed","item":{"type":"reasoning","text":"Considering the options..."}}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"The answer is 42."}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonlOutput,
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'What is the answer?',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'reason-session',
+    }));
+
+    // text_delta events should include reasoning text.
+    const deltas = events.filter((e) => e.type === 'text_delta');
+    const deltaTexts = deltas.map((d) => (d as { text: string }).text);
+    expect(deltaTexts).toContain('Let me think step by step...');
+    expect(deltaTexts).toContain('Considering the options...');
+    expect(deltaTexts).toContain('The answer is 42.');
+
+    // text_final should contain only the agent_message, not reasoning text.
+    const final = events.find((e) => e.type === 'text_final');
+    expect(final).toBeDefined();
+    expect((final as { text: string }).text).toBe('The answer is 42.');
+    expect((final as { text: string }).text).not.toContain('Let me think');
+    expect((final as { text: string }).text).not.toContain('Considering the options');
+  });
+
+  it('reasoning item with empty or missing text is silently skipped', async () => {
+    const jsonlOutput = [
+      '{"type":"thread.started","thread_id":"reason-thread-2"}',
+      '{"type":"item.completed","item":{"type":"reasoning","summary":""}}',
+      '{"type":"item.completed","item":{"type":"reasoning"}}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonlOutput,
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Do something',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'reason-session-2',
+    }));
+
+    // Should not emit empty text_delta events.
+    const deltas = events.filter((e) => e.type === 'text_delta');
+    const emptyDeltas = deltas.filter((d) => !(d as { text: string }).text);
+    expect(emptyDeltas).toHaveLength(0);
+
+    // Only the agent_message delta should be present.
+    const deltaTexts = deltas.map((d) => (d as { text: string }).text);
+    expect(deltaTexts).toEqual(['Done.']);
+
+    // Streaming continues to completion.
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
+  it('reasoning item with non-string text field is silently skipped and streaming continues', async () => {
+    const jsonlOutput = [
+      '{"type":"thread.started","thread_id":"reason-thread-3"}',
+      '{"type":"item.completed","item":{"type":"reasoning","text":42}}',
+      '{"type":"item.completed","item":{"type":"reasoning","text":{"nested":"object"}}}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"Still works."}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonlOutput,
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Do something',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'reason-session-3',
+    }));
+
+    // Non-string text fields should produce no text_delta.
+    const deltas = events.filter((e) => e.type === 'text_delta');
+    const deltaTexts = deltas.map((d) => (d as { text: string }).text);
+    expect(deltaTexts).toEqual(['Still works.']);
+
+    // No error events — streaming continues without error.
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
   it('different sessionKeys get independent sessions', async () => {
     const jsonlA = [
       '{"type":"thread.started","thread_id":"thread-aaa"}',
