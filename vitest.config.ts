@@ -13,6 +13,8 @@ export default defineConfig({
       'content/**',
       'var/**',
     ],
+    clearMocks: true,
+    unstubEnvs: true,
     // Cap parallelism to prevent OOM when tests run under discoclaw.service.
     // 11 uncapped workers hit ~44GB RAM. 4 workers keeps peak usage reasonable.
     pool: 'forks',
