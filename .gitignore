@@ -30,3 +30,4 @@ plans/community/*
 # User's own recipes (not shipped)
 recipes/community/*
 !recipes/community/.gitkeep
+.beads/
