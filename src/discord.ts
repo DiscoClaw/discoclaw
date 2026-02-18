@@ -1858,6 +1858,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let currentPrompt = prompt;
           let followUpDepth = 0;
           let processedText = '';
+          // Tracks whether the reply was successfully replaced with real content (or deleted).
+          // If false when the finally block runs, the reply still shows thinking-format content
+          // and must be deleted to prevent a stale "Thinking..." message from persisting.
+          let replyFinalized = false;
 
           // Track this reply for graceful shutdown cleanup.
           let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
@@ -2026,7 +2030,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             processedText = finalText || deltaText || (collectedImages.length > 0 ? '' : '(no output)');
             let actions: { type: string }[] = [];
             let actionResults: DiscordActionResult[] = [];
-            if (params.discordActionsEnabled && msg.guild) {
+            // Gate action execution on successful stream completion — do not execute
+            // actions against partial or error output, which could cause side effects
+            // based on incomplete model responses.
+            if (params.discordActionsEnabled && msg.guild && !invokeHadError) {
               const parsed = parseDiscordActions(processedText, actionFlags);
               if (parsed.actions.length > 0) {
                 actions = parsed.actions;
@@ -2071,6 +2078,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // no prose, delete the placeholder instead of posting "(no output)".
                 if (!processedText.trim() && anyActionSucceeded && collectedImages.length === 0) {
                   try { await reply.delete(); } catch { /* ignore */ }
+                  replyFinalized = true;
                   params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
                   break;
                 }
@@ -2095,6 +2103,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const stripped = processedText.replace(/\s+/g, ' ').trim();
               if (stripped.length < 50) {
                 try { await reply.delete(); } catch { /* ignore */ }
+                replyFinalized = true;
                 params.log?.info({ sessionKey, followUpDepth, chars: stripped.length }, 'followup:suppressed');
                 break;
               }
@@ -2103,6 +2112,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (!isShuttingDown()) {
               try {
                 await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
+                replyFinalized = true;
               } catch (editErr: any) {
                 // Thread archived by a beadClose action — the close summary was already
                 // posted inside closeBeadThread, so the only thing lost is Claude's
@@ -2110,6 +2120,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 if (editErr?.code === 50083) {
                   params.log?.info({ sessionKey }, 'discord:reply skipped (thread archived by action)');
                   try { await reply.delete(); } catch { /* best-effort cleanup */ }
+                  replyFinalized = true;
                 } else {
                   throw editErr;
                 }
@@ -2138,6 +2149,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           } finally {
             dispose();
+            // Safety net: if the reply was never finalized (e.g. finalization threw,
+            // or a suppression-delete failed silently), delete it now to prevent a
+            // stale "Thinking..." message from persisting in the channel.
+            if (!replyFinalized && reply && !isShuttingDown()) {
+              try { await reply.delete(); } catch { /* best-effort */ }
+            }
           }
 
           if (params.summaryEnabled) {
