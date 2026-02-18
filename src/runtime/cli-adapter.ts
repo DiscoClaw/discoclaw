@@ -186,7 +186,13 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
     // Wire caller's AbortSignal to kill the subprocess.
     const onAbort = () => {
-      subprocess.kill('SIGTERM');
+      subprocess.kill('SIGKILL');
+      if (!finished) {
+        push({ type: 'error', message: 'aborted' });
+        push({ type: 'done' });
+        finished = true;
+        wake();
+      }
     };
     params.signal?.addEventListener('abort', onAbort, { once: true });
 
