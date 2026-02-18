@@ -1353,7 +1353,7 @@ describe('reaction prompt interception', () => {
   });
 
   it('skips queue and AI when reaction resolves a pending prompt', async () => {
-    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue(true);
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'test prompt', chosenEmoji: '✅' });
     try {
       const params = makeParams();
       const queue = mockQueue();
@@ -1369,7 +1369,7 @@ describe('reaction prompt interception', () => {
   });
 
   it('prompt interception fires before staleness guard — resolves even when message is stale', async () => {
-    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue(true);
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'test prompt', chosenEmoji: '✅' });
     try {
       const params = makeParams({ reactionMaxAgeMs: 1 }); // extremely short — would normally reject
       const queue = mockQueue();
@@ -1390,7 +1390,7 @@ describe('reaction prompt interception', () => {
   });
 
   it('passes full <:name:id> identifier for custom emoji to tryResolveReactionPrompt', async () => {
-    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue(true);
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'test prompt', chosenEmoji: '✅' });
     try {
       const params = makeParams();
       const queue = mockQueue();
@@ -1409,7 +1409,7 @@ describe('reaction prompt interception', () => {
   });
 
   it('unicode emoji passes name directly to tryResolveReactionPrompt', async () => {
-    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue(true);
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'test prompt', chosenEmoji: '✅' });
     try {
       const params = makeParams();
       const queue = mockQueue();
@@ -1439,22 +1439,12 @@ describe('reaction prompt interception', () => {
     }
   });
 
-  it('reactionPrompt action → user reacts → follow-up invocation receives "User chose: ✅"', async () => {
+  it('reactionPrompt action → executor returns immediately → follow-up prompt contains "Prompt sent"', async () => {
     const invokeCalls: any[] = [];
     let invokeCount = 0;
 
     const promptMsgId = 'prompt-integration-1';
-    const choices = ['✅', '❌'];
-    let reactCount = 0;
-    const reactFn = vi.fn().mockImplementation(async () => {
-      reactCount++;
-      if (reactCount === choices.length) {
-        // All choices have been added as reactions. Resolve the pending prompt on the
-        // next microtask so the executor's `await waitForReaction` sees it resolved.
-        await Promise.resolve();
-        reactionPrompts.tryResolveReactionPrompt(promptMsgId, '✅');
-      }
-    });
+    const reactFn = vi.fn().mockResolvedValue(undefined);
     const sendFn = vi.fn().mockResolvedValue({ id: promptMsgId, react: reactFn });
 
     const runtime: RuntimeAdapter = {
@@ -1468,7 +1458,7 @@ describe('reaction prompt interception', () => {
           yield { type: 'text_final', text: '<discord-action>{"type":"reactionPrompt","question":"Proceed?","choices":["✅","❌"]}</discord-action>' };
         } else {
           // Second invocation (follow-up): plain response.
-          yield { type: 'text_final', text: 'Proceeding as confirmed.' };
+          yield { type: 'text_final', text: 'Prompt registered, waiting for user.' };
         }
         yield { type: 'done' };
       },
@@ -1499,12 +1489,13 @@ describe('reaction prompt interception', () => {
     const handler = createReactionAddHandler(params, queue);
     await handler(reaction as any, mockUser() as any);
 
-    // Two AI invocations: first emits reactionPrompt, second is the follow-up.
+    // Two AI invocations: first emits reactionPrompt, second is the immediate follow-up.
     expect(invokeCalls).toHaveLength(2);
 
-    // The follow-up prompt must relay the chosen emoji back to the AI.
+    // The follow-up prompt reflects the fire-and-forget result — the user's choice
+    // will arrive via a separate reaction handler invocation when they react.
     const followUpPrompt: string = invokeCalls[1].prompt;
-    expect(followUpPrompt).toContain('User chose: ✅');
+    expect(followUpPrompt).toContain('Prompt sent');
   });
 });
 
