@@ -26,29 +26,8 @@ import type { DeferActionRequest } from './actions-defer.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } from './actions-config.js';
 import type { ConfigActionRequest, ConfigContext } from './actions-config.js';
-import { executeReactionPromptAction as executeReactionPrompt, tryResolveReactionPrompt } from './reaction-prompts.js';
-
-// ---------------------------------------------------------------------------
-// Reaction prompt — inline constants (no extra imports from reaction-prompts)
-// ---------------------------------------------------------------------------
-
-const REACTION_PROMPT_TYPES = new Set<string>(['reactionPrompt']);
-
-const REACTION_PROMPT_SECTION = `### Reaction Prompts
-
-**reactionPrompt** — Present a yes/no or multiple-choice question to the user via emoji reactions instead of requiring a typed reply. The bot sends a dedicated message with the question, adds each choice as a reaction, and waits for the user to react before continuing.
-
-\`\`\`
-<discord-action>{"type":"reactionPrompt","question":"Should I proceed?","choices":["✅","❌"],"timeoutSeconds":120}</discord-action>
-\`\`\`
-
-- \`question\` (required): The question text displayed to the user.
-- \`choices\` (required): 2–9 emoji strings. Each will be added as a reaction to the prompt message.
-- \`timeoutSeconds\` (optional): How long to wait for a response (1–300, default 120). If the user doesn't react in time, the action fails with a timeout error.
-
-The action result contains the emoji the user chose (e.g. \`User chose: ✅\`), which is automatically sent back to you in the follow-up so you can act on the decision.
-
-Use this for binary confirmations (✅/❌) or short option lists — not for open-ended text input.`;
+import { executeReactionPromptAction as executeReactionPrompt, REACTION_PROMPT_ACTION_TYPES, reactionPromptSection } from './reaction-prompts.js';
+import type { ReactionPromptRequest } from './reaction-prompts.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -93,7 +72,7 @@ export type DiscordActionRequest =
   | MemoryActionRequest
   | DeferActionRequest
   | ConfigActionRequest
-  | Parameters<typeof executeReactionPrompt>[0];
+  | ReactionPromptRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -118,7 +97,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   const types = new Set<string>();
   if (flags.channels) for (const t of CHANNEL_ACTION_TYPES) types.add(t);
   if (flags.messaging) for (const t of MESSAGING_ACTION_TYPES) types.add(t);
-  if (flags.messaging) for (const t of REACTION_PROMPT_TYPES) types.add(t);
+  if (flags.messaging) for (const t of REACTION_PROMPT_ACTION_TYPES) types.add(t);
   if (flags.guild) for (const t of GUILD_ACTION_TYPES) types.add(t);
   if (flags.moderation) for (const t of MODERATION_ACTION_TYPES) types.add(t);
   if (flags.polls) for (const t of POLL_ACTION_TYPES) types.add(t);
@@ -284,8 +263,8 @@ export async function executeDiscordActions(
         result = await executeChannelAction(action as ChannelActionRequest, ctx);
       } else if (MESSAGING_ACTION_TYPES.has(action.type)) {
         result = await executeMessagingAction(action as MessagingActionRequest, ctx);
-      } else if (REACTION_PROMPT_TYPES.has(action.type)) {
-        result = await executeReactionPrompt(action as Parameters<typeof executeReactionPrompt>[0], ctx);
+      } else if (REACTION_PROMPT_ACTION_TYPES.has(action.type)) {
+        result = await executeReactionPrompt(action as ReactionPromptRequest, ctx);
       } else if (GUILD_ACTION_TYPES.has(action.type)) {
         result = await executeGuildAction(action as GuildActionRequest, ctx);
       } else if (MODERATION_ACTION_TYPES.has(action.type)) {
@@ -396,7 +375,7 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
 
   if (flags.messaging) {
     sections.push(messagingActionsPromptSection());
-    sections.push(REACTION_PROMPT_SECTION);
+    sections.push(reactionPromptSection());
   }
 
   if (flags.channels) {
