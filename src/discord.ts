@@ -972,17 +972,69 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   const throttleMs = params.forgeProgressThrottleMs ?? 3000;
                   let progressMessageGone = false;
 
-                  const onProgress = async (progressMsg: string) => {
+                  // Streaming preview state for plan-run phases
+                  let planRunActivityLabel = '';
+                  let planRunDeltaText = '';
+                  let planRunFinalText = '';
+                  let planRunStatusTick = 0;
+                  let planRunProgressLabel = '';
+
+                  const planRunMaybeEdit = async (force = false) => {
                     if (progressMessageGone) return;
                     const now = Date.now();
-                    if (now - lastEditAt < throttleMs) return;
+                    if (!force && now - lastEditAt < throttleMs) return;
                     lastEditAt = now;
+                    const streaming = selectStreamingOutput({
+                      deltaText: planRunDeltaText,
+                      activityLabel: planRunActivityLabel,
+                      finalText: planRunFinalText,
+                      statusTick: planRunStatusTick++,
+                      showPreview: params.toolAwareStreaming,
+                    });
+                    const out = planRunProgressLabel
+                      ? `${planRunProgressLabel}\n${streaming}`
+                      : streaming;
                     try {
-                      await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
+                      await progressReply.edit({ content: out, allowedMentions: NO_MENTIONS });
                     } catch (editErr: any) {
                       if (editErr?.code === 10008) progressMessageGone = true;
                     }
                   };
+
+                  const planRunTaq = params.toolAwareStreaming
+                    ? new ToolAwareQueue((action) => {
+                        if (action.type === 'stream_text') {
+                          planRunDeltaText += action.text;
+                          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                          planRunMaybeEdit(false);
+                        } else if (action.type === 'set_final') {
+                          planRunFinalText = action.text;
+                          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                          planRunMaybeEdit(true);
+                        } else if (action.type === 'show_activity') {
+                          planRunActivityLabel = action.label;
+                          planRunDeltaText = '';
+                          planRunFinalText = '';
+                          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                          planRunMaybeEdit(true);
+                        }
+                      }, { flushDelayMs: 2000, postToolDelayMs: 500 })
+                    : null;
+
+                  const onProgress = async (progressMsg: string) => {
+                    if (progressMessageGone) return;
+                    // Reset streaming state on each new progress label
+                    planRunProgressLabel = progressMsg;
+                    planRunActivityLabel = '';
+                    planRunDeltaText = '';
+                    planRunFinalText = '';
+                    planRunStatusTick = 0;
+                    await planRunMaybeEdit(true);
+                  };
+
+                  const onPlanRunEvent = planRunTaq
+                    ? (evt: import('./runtime/types.js').EngineEvent) => { planRunTaq.handleEvent(evt); }
+                    : undefined;
 
                   const timeoutMs = params.planPhaseTimeoutMs ?? 5 * 60_000;
                   const phaseOpts = {
@@ -994,6 +1046,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     workspaceCwd: params.workspaceCwd,
                     log: params.log,
                     maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
+                    onEvent: onPlanRunEvent,
                   };
 
                   const editSummary = async (content: string) => {
@@ -1087,6 +1140,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       stopMessage = `Unexpected error: ${sanitizeErrorMessage(String(loopErr))}`;
                       params.log?.error({ err: loopErr, phasesRun, planId }, 'plan-run: crash in phase loop');
                     }
+
+                    planRunTaq?.dispose();
 
                     // Build summary — always runs regardless of how the loop terminated
                     const fmtElapsed = (ms: number) => ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`;
@@ -1422,23 +1477,74 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const throttleMs = params.forgeProgressThrottleMs ?? 3000;
                 let progressMessageGone = false;
 
-                const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
+                // Streaming preview state for forge resume
+                let forgeResumeActivityLabel = '';
+                let forgeResumeDeltaText = '';
+                let forgeResumeFinalText = '';
+                let forgeResumeStatusTick = 0;
+                let forgeResumeProgressLabel = '';
+
+                const forgeResumeMaybeEdit = async (force = false) => {
                   if (progressMessageGone) return;
                   const now = Date.now();
-                  if (!opts?.force && now - lastEditAt < throttleMs) return;
+                  if (!force && now - lastEditAt < throttleMs) return;
                   lastEditAt = now;
+                  const streaming = selectStreamingOutput({
+                    deltaText: forgeResumeDeltaText,
+                    activityLabel: forgeResumeActivityLabel,
+                    finalText: forgeResumeFinalText,
+                    statusTick: forgeResumeStatusTick++,
+                    showPreview: params.toolAwareStreaming,
+                  });
+                  const out = forgeResumeProgressLabel
+                    ? `${forgeResumeProgressLabel}\n${streaming}`
+                    : streaming;
                   try {
-                    await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
+                    await progressReply.edit({ content: out, allowedMentions: NO_MENTIONS });
                   } catch (editErr: any) {
-                    if (editErr?.code === 10008) {
-                      progressMessageGone = true;
-                    }
+                    if (editErr?.code === 10008) progressMessageGone = true;
                   }
                 };
 
+                const forgeResumeTaq = params.toolAwareStreaming
+                  ? new ToolAwareQueue((action) => {
+                      if (action.type === 'stream_text') {
+                        forgeResumeDeltaText += action.text;
+                        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                        forgeResumeMaybeEdit(false);
+                      } else if (action.type === 'set_final') {
+                        forgeResumeFinalText = action.text;
+                        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                        forgeResumeMaybeEdit(true);
+                      } else if (action.type === 'show_activity') {
+                        forgeResumeActivityLabel = action.label;
+                        forgeResumeDeltaText = '';
+                        forgeResumeFinalText = '';
+                        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                        forgeResumeMaybeEdit(true);
+                      }
+                    }, { flushDelayMs: 2000, postToolDelayMs: 500 })
+                  : null;
+
+                const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
+                  if (progressMessageGone) return;
+                  // Reset streaming state on each new phase label
+                  forgeResumeProgressLabel = progressMsg;
+                  forgeResumeActivityLabel = '';
+                  forgeResumeDeltaText = '';
+                  forgeResumeFinalText = '';
+                  forgeResumeStatusTick = 0;
+                  await forgeResumeMaybeEdit(opts?.force ?? false);
+                };
+
+                const forgeResumeOnEvent = forgeResumeTaq
+                  ? (evt: import('./runtime/types.js').EngineEvent) => { forgeResumeTaq.handleEvent(evt); }
+                  : undefined;
+
                 // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                resumeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress).then(
+                resumeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress, forgeResumeOnEvent).then(
                   async (result) => {
+                    forgeResumeTaq?.dispose();
                     setActiveOrchestrator(null);
                     forgeReleaseLock();
                     if (progressMessageGone) {
@@ -1461,6 +1567,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     await sendForgeImplementationFollowup(result);
                   },
                   async (err) => {
+                    forgeResumeTaq?.dispose();
                     setActiveOrchestrator(null);
                     forgeReleaseLock();
                     params.log?.error({ err }, 'forge:resume:unhandled error');
@@ -1537,24 +1644,75 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const throttleMs = params.forgeProgressThrottleMs ?? 3000;
               let progressMessageGone = false;
 
-              const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
+              // Streaming preview state for forge create
+              let forgeCreateActivityLabel = '';
+              let forgeCreateDeltaText = '';
+              let forgeCreateFinalText = '';
+              let forgeCreateStatusTick = 0;
+              let forgeCreateProgressLabel = '';
+
+              const forgeCreateMaybeEdit = async (force = false) => {
                 if (progressMessageGone) return;
                 const now = Date.now();
-                if (!opts?.force && now - lastEditAt < throttleMs) return;
+                if (!force && now - lastEditAt < throttleMs) return;
                 lastEditAt = now;
+                const streaming = selectStreamingOutput({
+                  deltaText: forgeCreateDeltaText,
+                  activityLabel: forgeCreateActivityLabel,
+                  finalText: forgeCreateFinalText,
+                  statusTick: forgeCreateStatusTick++,
+                  showPreview: params.toolAwareStreaming,
+                });
+                const out = forgeCreateProgressLabel
+                  ? `${forgeCreateProgressLabel}\n${streaming}`
+                  : streaming;
                 try {
-                  await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
+                  await progressReply.edit({ content: out, allowedMentions: NO_MENTIONS });
                 } catch (editErr: any) {
-                  if (editErr?.code === 10008) {
-                    progressMessageGone = true;
-                  }
+                  if (editErr?.code === 10008) progressMessageGone = true;
                 }
               };
 
+              const forgeCreateTaq = params.toolAwareStreaming
+                ? new ToolAwareQueue((action) => {
+                    if (action.type === 'stream_text') {
+                      forgeCreateDeltaText += action.text;
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      forgeCreateMaybeEdit(false);
+                    } else if (action.type === 'set_final') {
+                      forgeCreateFinalText = action.text;
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      forgeCreateMaybeEdit(true);
+                    } else if (action.type === 'show_activity') {
+                      forgeCreateActivityLabel = action.label;
+                      forgeCreateDeltaText = '';
+                      forgeCreateFinalText = '';
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      forgeCreateMaybeEdit(true);
+                    }
+                  }, { flushDelayMs: 2000, postToolDelayMs: 500 })
+                : null;
+
+              const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
+                if (progressMessageGone) return;
+                // Reset streaming state on each new phase label
+                forgeCreateProgressLabel = progressMsg;
+                forgeCreateActivityLabel = '';
+                forgeCreateDeltaText = '';
+                forgeCreateFinalText = '';
+                forgeCreateStatusTick = 0;
+                await forgeCreateMaybeEdit(opts?.force ?? false);
+              };
+
+              const forgeCreateOnEvent = forgeCreateTaq
+                ? (evt: import('./runtime/types.js').EngineEvent) => { forgeCreateTaq.handleEvent(evt); }
+                : undefined;
+
               // Run forge in the background — don't block the queue
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              createOrchestrator.run(forgeCmd.args, onProgress, forgeContext).then(
+              createOrchestrator.run(forgeCmd.args, onProgress, forgeContext, forgeCreateOnEvent).then(
                 async (result) => {
+                  forgeCreateTaq?.dispose();
                   setActiveOrchestrator(null);
                   forgeReleaseLock();
                   if (progressMessageGone) {
@@ -1578,6 +1736,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   await sendForgeImplementationFollowup(result);
                 },
                 async (err) => {
+                  forgeCreateTaq?.dispose();
                   setActiveOrchestrator(null);
                   forgeReleaseLock();
                   params.log?.error({ err }, 'forge:unhandled error');
