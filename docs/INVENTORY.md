@@ -11,12 +11,12 @@ Legend: **done** | *stub* | ~~cut~~
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | Entry point & env loading | `src/index.ts` | **done** |
-| Discord message handler | `src/discord.ts` | **done** |
+| Discord message handler | `src/discord.ts` (wire-up), `src/discord/message-coordinator.ts` (handler logic) | **done** |
 | Session key routing (DM/channel/thread) | `src/sessions.ts`, `src/discord/session-key.ts` | **done** |
 | Per-session queue (serial execution) | `src/group-queue.ts` | **done** |
 | PID lock (single instance) | `src/pidlock.ts` | **done** |
 | Graceful shutdown | `src/index.ts` | **done** |
-| Streaming + fence-safe chunking (2 000 char) | `src/discord.ts` | **done** |
+| Streaming + fence-safe chunking (2 000 char) | `src/discord.ts` (wire-up), `src/discord/message-coordinator.ts` (handler logic) | **done** |
 | Image input (Discord attachments → Claude) | `src/discord/image-download.ts` | **done** |
 
 ## 2. Security
