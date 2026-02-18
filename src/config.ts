@@ -109,6 +109,10 @@ export type DiscoclawConfig = {
   groupsDirOverride?: string;
   useGroupDirCwd: boolean;
 
+  webhookEnabled: boolean;
+  webhookPort: number;
+  webhookConfigPath?: string;
+
   beadsEnabled: boolean;
   beadsCwdOverride?: string;
   beadsForum?: string;
@@ -385,6 +389,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     cronForum = undefined;
   }
 
+  const webhookEnabled = parseBoolean(env, 'DISCOCLAW_WEBHOOK_ENABLED', false);
+  const webhookPort = parsePositiveInt(env, 'DISCOCLAW_WEBHOOK_PORT', 9400);
+  const webhookConfigPath = parseTrimmedString(env, 'DISCOCLAW_WEBHOOK_CONFIG');
+
   const beadsEnabled = parseBoolean(env, 'DISCOCLAW_BEADS_ENABLED', true);
   let beadsForum = parseTrimmedString(env, 'DISCOCLAW_BEADS_FORUM');
   if (beadsForum && !/^\d{8,}$/.test(beadsForum)) {
@@ -525,6 +533,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       workspaceCwdOverride: parseTrimmedString(env, 'WORKSPACE_CWD'),
       groupsDirOverride: parseTrimmedString(env, 'GROUPS_DIR'),
       useGroupDirCwd: parseBoolean(env, 'USE_GROUP_DIR_CWD', false),
+
+      webhookEnabled,
+      webhookPort,
+      webhookConfigPath,
 
       beadsEnabled,
       beadsCwdOverride: parseTrimmedString(env, 'DISCOCLAW_BEADS_CWD'),
