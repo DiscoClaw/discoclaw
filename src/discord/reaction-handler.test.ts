@@ -4,6 +4,7 @@ import { createReactionAddHandler, createReactionRemoveHandler } from './reactio
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
 import { inFlightReplyCount, _resetForTest as resetInFlight } from './inflight-replies.js';
+import * as reactionPrompts from './reaction-prompts.js';
 
 function makeMockRuntime(response: string): RuntimeAdapter {
   return {
@@ -1343,6 +1344,167 @@ describe('streaming behavior', () => {
     expect(replyObj.edit).toHaveBeenCalled();
     const lastCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
     expect(lastCall[0].content).toMatch(/error|unexpected/i);
+  });
+});
+
+describe('reaction prompt interception', () => {
+  afterEach(() => {
+    reactionPrompts._resetForTest();
+  });
+
+  it('skips queue and AI when reaction resolves a pending prompt', async () => {
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue(true);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      await handler(mockReaction() as any, mockUser() as any);
+
+      expect(spy).toHaveBeenCalledWith('msg-1', expect.any(String));
+      expect(queue.run).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('prompt interception fires before staleness guard — resolves even when message is stale', async () => {
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue(true);
+    try {
+      const params = makeParams({ reactionMaxAgeMs: 1 }); // extremely short — would normally reject
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      // Message is "old" and would be rejected by the staleness guard if it fired first.
+      const reaction = mockReaction({
+        message: mockMessage({ createdTimestamp: Date.now() - 5000 }),
+      });
+      await handler(reaction as any, mockUser() as any);
+
+      // spy was called, proving interception ran before the staleness guard could short-circuit.
+      expect(spy).toHaveBeenCalled();
+      expect(queue.run).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('passes full <:name:id> identifier for custom emoji to tryResolveReactionPrompt', async () => {
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue(true);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      const reaction = mockReaction({
+        emoji: { name: 'yes', id: '123456789' },
+      });
+      await handler(reaction as any, mockUser() as any);
+
+      expect(spy).toHaveBeenCalledWith('msg-1', '<:yes:123456789>');
+      expect(queue.run).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('unicode emoji passes name directly to tryResolveReactionPrompt', async () => {
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue(true);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      const reaction = mockReaction({ emoji: { name: '✅' } });
+      await handler(reaction as any, mockUser() as any);
+
+      expect(spy).toHaveBeenCalledWith('msg-1', '✅');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('remove handler does not call tryResolveReactionPrompt', async () => {
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt');
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionRemoveHandler(params, queue);
+
+      await handler(mockReaction() as any, mockUser() as any);
+
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('reactionPrompt action → user reacts → follow-up invocation receives "User chose: ✅"', async () => {
+    const invokeCalls: any[] = [];
+    let invokeCount = 0;
+
+    const promptMsgId = 'prompt-integration-1';
+    const choices = ['✅', '❌'];
+    let reactCount = 0;
+    const reactFn = vi.fn().mockImplementation(async () => {
+      reactCount++;
+      if (reactCount === choices.length) {
+        // All choices have been added as reactions. Resolve the pending prompt on the
+        // next microtask so the executor's `await waitForReaction` sees it resolved.
+        await Promise.resolve();
+        reactionPrompts.tryResolveReactionPrompt(promptMsgId, '✅');
+      }
+    });
+    const sendFn = vi.fn().mockResolvedValue({ id: promptMsgId, react: reactFn });
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeCalls.push(p);
+        invokeCount++;
+        if (invokeCount === 1) {
+          // First invocation: emit a reactionPrompt action (no prose).
+          yield { type: 'text_final', text: '<discord-action>{"type":"reactionPrompt","question":"Proceed?","choices":["✅","❌"]}</discord-action>' };
+        } else {
+          // Second invocation (follow-up): plain response.
+          yield { type: 'text_final', text: 'Proceeding as confirmed.' };
+        }
+        yield { type: 'done' };
+      },
+    };
+
+    const textCh = { id: 'ch-1', name: 'general', send: sendFn };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+      actionFollowupDepth: 1,
+    });
+
+    const reaction = mockReaction({
+      message: mockMessage({
+        guild: {
+          channels: {
+            cache: {
+              get: (id: string) => id === 'ch-1' ? textCh : undefined,
+              find: vi.fn(),
+            },
+          },
+        },
+      }),
+    });
+
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    await handler(reaction as any, mockUser() as any);
+
+    // Two AI invocations: first emits reactionPrompt, second is the follow-up.
+    expect(invokeCalls).toHaveLength(2);
+
+    // The follow-up prompt must relay the chosen emoji back to the AI.
+    const followUpPrompt: string = invokeCalls[1].prompt;
+    expect(followUpPrompt).toContain('User chose: ✅');
   });
 });
 

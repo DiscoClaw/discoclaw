@@ -26,6 +26,8 @@ import type { DeferActionRequest } from './actions-defer.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } from './actions-config.js';
 import type { ConfigActionRequest, ConfigContext } from './actions-config.js';
+import { executeReactionPromptAction as executeReactionPrompt, REACTION_PROMPT_ACTION_TYPES, reactionPromptSection } from './reaction-prompts.js';
+import type { ReactionPromptRequest } from './reaction-prompts.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,7 +71,8 @@ export type DiscordActionRequest =
   | PlanActionRequest
   | MemoryActionRequest
   | DeferActionRequest
-  | ConfigActionRequest;
+  | ConfigActionRequest
+  | ReactionPromptRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -94,6 +97,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   const types = new Set<string>();
   if (flags.channels) for (const t of CHANNEL_ACTION_TYPES) types.add(t);
   if (flags.messaging) for (const t of MESSAGING_ACTION_TYPES) types.add(t);
+  if (flags.messaging) for (const t of REACTION_PROMPT_ACTION_TYPES) types.add(t);
   if (flags.guild) for (const t of GUILD_ACTION_TYPES) types.add(t);
   if (flags.moderation) for (const t of MODERATION_ACTION_TYPES) types.add(t);
   if (flags.polls) for (const t of POLL_ACTION_TYPES) types.add(t);
@@ -259,6 +263,8 @@ export async function executeDiscordActions(
         result = await executeChannelAction(action as ChannelActionRequest, ctx);
       } else if (MESSAGING_ACTION_TYPES.has(action.type)) {
         result = await executeMessagingAction(action as MessagingActionRequest, ctx);
+      } else if (REACTION_PROMPT_ACTION_TYPES.has(action.type)) {
+        result = await executeReactionPrompt(action as ReactionPromptRequest, ctx);
       } else if (GUILD_ACTION_TYPES.has(action.type)) {
         result = await executeGuildAction(action as GuildActionRequest, ctx);
       } else if (MODERATION_ACTION_TYPES.has(action.type)) {
@@ -369,6 +375,7 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
 
   if (flags.messaging) {
     sections.push(messagingActionsPromptSection());
+    sections.push(reactionPromptSection());
   }
 
   if (flags.channels) {
