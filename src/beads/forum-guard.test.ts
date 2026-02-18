@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { initBeadsForumGuard } from './forum-guard.js';
 
+vi.mock('./bead-thread-cache.js', () => ({
+  findBeadByThreadId: vi.fn(),
+}));
+vi.mock('./discord-sync.js', () => ({
+  buildAppliedTagsWithStatus: vi.fn(() => ['tag-closed']),
+  buildThreadName: vi.fn(() => '✅ [001] My Bead'),
+}));
+
+import { findBeadByThreadId } from './bead-thread-cache.js';
+
 function makeClient(botUserId = 'bot-user-1') {
   const listeners: Record<string, Function[]> = {};
   return {
@@ -18,12 +28,17 @@ function makeThread(overrides?: Partial<any>) {
     name: 'Bead 1',
     parentId: 'beads-forum-1',
     ownerId: 'bot-user-1',
+    appliedTags: [],
     send: vi.fn().mockResolvedValue(undefined),
     setArchived: vi.fn().mockResolvedValue(undefined),
+    setName: vi.fn().mockResolvedValue(undefined),
+    edit: vi.fn().mockResolvedValue(undefined),
     client: { user: { id: 'bot-user-1' } },
     ...overrides,
   };
 }
+
+const MOCK_BEAD = { id: 'ws-001', title: 'My Bead', status: 'closed' };
 
 describe('initBeadsForumGuard', () => {
   function setup(botUserId = 'bot-user-1') {
@@ -109,5 +124,113 @@ describe('initBeadsForumGuard threadUpdate', () => {
     await listener(oldThread, newThread);
 
     expect(newThread.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('initBeadsForumGuard bead-aware re-archive (threadCreate)', () => {
+  function setup() {
+    const client = makeClient();
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    initBeadsForumGuard({
+      client: client as any,
+      forumId: 'beads-forum-1',
+      log,
+      beadsCwd: '/some/cwd',
+      tagMap: { closed: 'tag-closed' },
+    });
+    const listener = (client._listeners['threadCreate'] ?? [])[0];
+    return { listener, log };
+  }
+
+  it('re-archives known bead thread without sending rejection message', async () => {
+    vi.mocked(findBeadByThreadId).mockResolvedValue(MOCK_BEAD as any);
+    const { listener } = setup();
+    const thread = makeThread({ ownerId: 'some-user' });
+    await listener(thread);
+
+    expect(thread.send).not.toHaveBeenCalled();
+    expect(thread.edit).toHaveBeenCalled();
+    expect(thread.setName).toHaveBeenCalledWith('✅ [001] My Bead');
+    expect(thread.setArchived).toHaveBeenCalledWith(true);
+  });
+
+  it('falls through to rejection when bead lookup returns null', async () => {
+    vi.mocked(findBeadByThreadId).mockResolvedValue(null);
+    const { listener } = setup();
+    const thread = makeThread({ ownerId: 'some-user' });
+    await listener(thread);
+
+    expect(thread.send).toHaveBeenCalledWith(expect.stringContaining('bd create'));
+    expect(thread.setArchived).toHaveBeenCalledWith(true);
+  });
+
+  it('falls through to rejection when bead lookup throws', async () => {
+    vi.mocked(findBeadByThreadId).mockRejectedValue(new Error('fs error'));
+    const { listener } = setup();
+    const thread = makeThread({ ownerId: 'some-user' });
+    await listener(thread);
+
+    expect(thread.send).toHaveBeenCalledWith(expect.stringContaining('bd create'));
+    expect(thread.setArchived).toHaveBeenCalledWith(true);
+  });
+
+  it('still archives even when edit throws', async () => {
+    vi.mocked(findBeadByThreadId).mockResolvedValue(MOCK_BEAD as any);
+    const { listener } = setup();
+    const thread = makeThread({ ownerId: 'some-user' });
+    thread.edit.mockRejectedValue(new Error('edit failed'));
+    await listener(thread);
+
+    expect(thread.setArchived).toHaveBeenCalledWith(true);
+  });
+
+  it('still archives even when setName throws', async () => {
+    vi.mocked(findBeadByThreadId).mockResolvedValue(MOCK_BEAD as any);
+    const { listener } = setup();
+    const thread = makeThread({ ownerId: 'some-user' });
+    thread.setName.mockRejectedValue(new Error('setName failed'));
+    await listener(thread);
+
+    expect(thread.setArchived).toHaveBeenCalledWith(true);
+  });
+});
+
+describe('initBeadsForumGuard bead-aware re-archive (threadUpdate)', () => {
+  function setup() {
+    const client = makeClient();
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    initBeadsForumGuard({
+      client: client as any,
+      forumId: 'beads-forum-1',
+      log,
+      beadsCwd: '/some/cwd',
+      tagMap: { closed: 'tag-closed' },
+    });
+    const listener = (client._listeners['threadUpdate'] ?? [])[0];
+    return { listener, log };
+  }
+
+  it('re-archives known bead thread on unarchive without rejection message', async () => {
+    vi.mocked(findBeadByThreadId).mockResolvedValue(MOCK_BEAD as any);
+    const { listener } = setup();
+    const oldThread = makeThread({ ownerId: 'some-user', archived: true });
+    const newThread = makeThread({ ownerId: 'some-user', archived: false });
+    await listener(oldThread, newThread);
+
+    expect(newThread.send).not.toHaveBeenCalled();
+    expect(newThread.edit).toHaveBeenCalled();
+    expect(newThread.setName).toHaveBeenCalledWith('✅ [001] My Bead');
+    expect(newThread.setArchived).toHaveBeenCalledWith(true);
+  });
+
+  it('falls through to rejection when bead not found on threadUpdate', async () => {
+    vi.mocked(findBeadByThreadId).mockResolvedValue(null);
+    const { listener } = setup();
+    const oldThread = makeThread({ ownerId: 'some-user', archived: true });
+    const newThread = makeThread({ ownerId: 'some-user', archived: false });
+    await listener(oldThread, newThread);
+
+    expect(newThread.send).toHaveBeenCalledWith(expect.stringContaining('bd create'));
+    expect(newThread.setArchived).toHaveBeenCalledWith(true);
   });
 });

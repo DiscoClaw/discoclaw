@@ -1,10 +1,15 @@
 import type { Client, AnyThreadChannel } from 'discord.js';
 import type { LoggerLike } from '../discord/action-types.js';
+import type { TagMap } from './types.js';
+import { findBeadByThreadId } from './bead-thread-cache.js';
+import { buildAppliedTagsWithStatus, buildThreadName } from './discord-sync.js';
 
 export type BeadsForumGuardOptions = {
   client: Client;
   forumId: string;
   log?: LoggerLike;
+  beadsCwd?: string;
+  tagMap?: TagMap;
 };
 
 function isBotOwned(thread: AnyThreadChannel): boolean {
@@ -29,13 +34,50 @@ async function rejectManualThread(
   } catch { /* ignore */ }
 }
 
+async function reArchiveBeadThread(
+  thread: AnyThreadChannel,
+  beadsCwd: string,
+  tagMap: TagMap,
+  log?: LoggerLike,
+): Promise<boolean> {
+  let bead;
+  try {
+    bead = await findBeadByThreadId(thread.id, beadsCwd);
+  } catch {
+    return false;
+  }
+  if (!bead) return false;
+
+  log?.info({ threadId: thread.id, beadId: bead.id }, 'beads:forum re-archiving known bead thread');
+
+  try {
+    const current: string[] = (thread as any).appliedTags ?? [];
+    const updated = buildAppliedTagsWithStatus(current, bead.status, tagMap);
+    await (thread as any).edit({ appliedTags: updated });
+  } catch { /* ignore — proceed to setName */ }
+
+  try {
+    const name = buildThreadName(bead.id, bead.title, bead.status);
+    await thread.setName(name);
+  } catch { /* ignore — proceed to archive */ }
+
+  try {
+    await thread.setArchived(true);
+  } catch { /* ignore */ }
+
+  return true;
+}
+
 export function initBeadsForumGuard(opts: BeadsForumGuardOptions): void {
-  const { client, forumId, log } = opts;
+  const { client, forumId, log, beadsCwd, tagMap } = opts;
 
   client.on('threadCreate', async (thread: AnyThreadChannel) => {
     try {
       if (thread.parentId !== forumId) return;
       if (isBotOwned(thread)) return;
+      if (beadsCwd && tagMap) {
+        if (await reArchiveBeadThread(thread, beadsCwd, tagMap, log)) return;
+      }
       await rejectManualThread(thread, log);
     } catch (err) {
       log?.error({ err, threadId: thread.id }, 'beads:forum threadCreate guard failed');
@@ -48,6 +90,9 @@ export function initBeadsForumGuard(opts: BeadsForumGuardOptions): void {
       // Only act on unarchive transitions.
       if (newThread.archived) return;
       if (isBotOwned(newThread)) return;
+      if (beadsCwd && tagMap) {
+        if (await reArchiveBeadThread(newThread, beadsCwd, tagMap, log)) return;
+      }
       await rejectManualThread(newThread, log);
     } catch (err) {
       log?.error({ err, threadId: newThread.id }, 'beads:forum threadUpdate guard failed');
