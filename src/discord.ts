@@ -2430,18 +2430,12 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
 
   if (params.statusChannel) {
     statusRef.current = resolveStatusChannel(client, params.statusChannel, { botDisplayName: params.botDisplayName, log: params.log });
-    if (statusRef.current) {
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      statusRef.current.online();
-    } else {
+    if (!statusRef.current) {
       params.log?.warn({ statusChannel: params.statusChannel }, 'status-channel: channel not found, status posting disabled');
     }
   } else if (system?.statusChannelId) {
     statusRef.current = await resolveStatusChannelById(client, system.statusChannelId, { botDisplayName: params.botDisplayName, log: params.log });
-    if (statusRef.current) {
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      statusRef.current.online();
-    } else {
+    if (!statusRef.current) {
       params.log?.warn({ statusChannelId: system.statusChannelId }, 'status-channel: bootstrapped channel not found, status posting disabled');
     }
   }

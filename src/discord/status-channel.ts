@@ -1,6 +1,7 @@
 import { EmbedBuilder } from 'discord.js';
 import type { LoggerLike } from './action-types.js';
 import type { BeadSyncResult } from '../beads/types.js';
+import type { StartupContext } from './shutdown-context.js';
 
 type Sendable = { send(opts: { embeds: EmbedBuilder[] }): Promise<unknown> };
 
@@ -57,6 +58,34 @@ export function sanitizePhaseError(phaseId: string, raw: string, timeoutMs?: num
   return `Phase **${phaseId}** failed: ${sanitizeErrorMessage(raw)}`.slice(0, 500);
 }
 
+export type BootReportData = {
+  startupType: StartupContext['type'];
+  // Shutdown context fields (present on intentional/graceful-unknown)
+  shutdownReason?: string;
+  shutdownMessage?: string;
+  shutdownRequestedBy?: string;
+  activeForge?: string;
+  // Beads subsystem
+  beadsEnabled: boolean;
+  beadDbVersion?: string;
+  forumResolved: boolean;
+  // Crons subsystem
+  cronsEnabled: boolean;
+  cronJobCount?: number;
+  // Memory layers
+  memoryEpisodicOn: boolean;
+  memorySemanticOn: boolean;
+  memoryWorkingOn: boolean;
+  // Action categories
+  actionCategoriesEnabled: string[];
+  // Config / permissions
+  configWarnings?: number;
+  permissionsTier?: string;
+  // Runtime
+  runtimeModel?: string;
+  bootDurationMs?: number;
+};
+
 export type StatusPoster = {
   online(): Promise<void>;
   offline(): Promise<void>;
@@ -64,6 +93,7 @@ export type StatusPoster = {
   handlerError(context: { sessionKey: string }, err: unknown): Promise<void>;
   actionFailed(actionType: string, error: string): Promise<void>;
   beadSyncComplete(result: BeadSyncResult): Promise<void>;
+  bootReport?(data: BootReportData): Promise<void>;
 };
 
 const Colors = {
@@ -71,6 +101,7 @@ const Colors = {
   gray: 0x95a5a6,
   red: 0xed4245,
   orange: 0xfee75c,
+  blue: 0x5865f2,
 } as const;
 
 export type StatusPosterOpts = {
@@ -164,6 +195,86 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       if (threadsReconciled && threadsReconciled > 0) embed.addFields({ name: 'Reconciled', value: String(threadsReconciled), inline: true });
       if (orphanThreadsFound && orphanThreadsFound > 0) embed.addFields({ name: 'Orphans Found', value: String(orphanThreadsFound), inline: true });
       if (warnings > 0) embed.addFields({ name: 'Warnings', value: String(warnings), inline: true });
+
+      await send(embed);
+    },
+
+    async bootReport(data) {
+      const colorMap: Record<StartupContext['type'], number> = {
+        crash: Colors.red,
+        intentional: Colors.green,
+        'graceful-unknown': Colors.orange,
+        'first-boot': Colors.blue,
+      };
+
+      const embed = new EmbedBuilder()
+        .setColor(colorMap[data.startupType])
+        .setTitle('Boot Report')
+        .setTimestamp();
+
+      // Startup type
+      const typeLabel: Record<StartupContext['type'], string> = {
+        crash: 'Crash',
+        intentional: 'Intentional',
+        'graceful-unknown': 'Graceful (unknown)',
+        'first-boot': 'First Boot',
+      };
+      embed.addFields({ name: 'Startup', value: typeLabel[data.startupType], inline: true });
+
+      // Boot duration
+      if (data.bootDurationMs !== undefined) {
+        embed.addFields({ name: 'Boot Time', value: `${data.bootDurationMs}ms`, inline: true });
+      }
+
+      // Runtime model
+      embed.addFields({ name: 'Model', value: data.runtimeModel || '(default)', inline: true });
+
+      // Permissions tier
+      embed.addFields({ name: 'Permissions', value: data.permissionsTier || '(unset)', inline: true });
+
+      // Conditional: shutdown reason
+      if (data.shutdownReason) {
+        const reasonParts = [data.shutdownReason];
+        if (data.shutdownRequestedBy) reasonParts.push(`by <@${data.shutdownRequestedBy}>`);
+        if (data.shutdownMessage) reasonParts.push(`— ${data.shutdownMessage}`);
+        embed.addFields({ name: 'Last Shutdown', value: reasonParts.join(' '), inline: true });
+      }
+
+      // Conditional: active forge at shutdown
+      if (data.activeForge) {
+        embed.addFields({ name: 'Forge at Shutdown', value: data.activeForge.slice(0, 1024), inline: true });
+      }
+
+      // Beads subsystem
+      const beadsStatus = data.beadsEnabled
+        ? `on${data.beadDbVersion ? ` · v${data.beadDbVersion}` : ''}${data.forumResolved ? ' · forum ok' : ' · forum unresolved'}`
+        : 'off';
+      embed.addFields({ name: 'Beads', value: beadsStatus, inline: true });
+
+      // Crons subsystem
+      const cronsStatus = data.cronsEnabled
+        ? `on${data.cronJobCount !== undefined ? ` · ${data.cronJobCount} job${data.cronJobCount !== 1 ? 's' : ''}` : ''}`
+        : 'off';
+      embed.addFields({ name: 'Crons', value: cronsStatus, inline: true });
+
+      // Memory layers
+      const memoryParts: string[] = [];
+      if (data.memoryEpisodicOn) memoryParts.push('episodic');
+      if (data.memorySemanticOn) memoryParts.push('semantic');
+      if (data.memoryWorkingOn) memoryParts.push('working');
+      embed.addFields({ name: 'Memory', value: memoryParts.length > 0 ? memoryParts.join(', ') : 'off', inline: true });
+
+      // Action categories
+      embed.addFields({
+        name: 'Actions',
+        value: data.actionCategoriesEnabled.length > 0 ? data.actionCategoriesEnabled.join(', ') : '(none)',
+        inline: true,
+      });
+
+      // Conditional: config warnings
+      if (data.configWarnings && data.configWarnings > 0) {
+        embed.addFields({ name: 'Config Warnings', value: String(data.configWarnings), inline: true });
+      }
 
       await send(embed);
     },
