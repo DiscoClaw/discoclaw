@@ -1858,6 +1858,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let currentPrompt = prompt;
           let followUpDepth = 0;
           let processedText = '';
+          // Tracks whether the reply was successfully replaced with real content (or deleted).
+          // If false when the finally block runs, the reply still shows thinking-format content
+          // and must be deleted to prevent a stale "Thinking..." message from persisting.
+          let replyFinalized = false;
+          // Tracks whether a text_final event was received, used to gate action execution.
+          let hadTextFinal = false;
 
           // Track this reply for graceful shutdown cleanup.
           let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
@@ -1880,12 +1886,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let invokeErrorMessage = '';
             let lastEditAt = 0;
             const minEditIntervalMs = 1250;
+            hadTextFinal = false;
 
             // On follow-up iterations, send a new placeholder message.
             if (followUpDepth > 0) {
               dispose();
               reply = await msg.channel.send({ content: formatBoldLabel('(following up...)'), allowedMentions: NO_MENTIONS });
               dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}:followup-${followUpDepth}`);
+              replyFinalized = false;
               params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
             }
 
@@ -1932,6 +1940,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     // eslint-disable-next-line @typescript-eslint/no-floating-promises
                     maybeEdit(false);
                   } else if (action.type === 'set_final') {
+                    hadTextFinal = true;
                     finalText = action.text;
                     // eslint-disable-next-line @typescript-eslint/no-floating-promises
                     maybeEdit(true);
@@ -1988,6 +1997,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               } else {
                 // Flat mode: existing behavior unchanged.
                 if (evt.type === 'text_final') {
+                  hadTextFinal = true;
                   finalText = evt.text;
                   await maybeEdit(true);
                 } else if (evt.type === 'error') {
@@ -2026,7 +2036,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             processedText = finalText || deltaText || (collectedImages.length > 0 ? '' : '(no output)');
             let actions: { type: string }[] = [];
             let actionResults: DiscordActionResult[] = [];
-            if (params.discordActionsEnabled && msg.guild) {
+            // Gate action execution on successful stream completion — do not execute
+            // actions against partial or error output, which could cause side effects
+            // based on incomplete model responses.
+            if (params.discordActionsEnabled && msg.guild && hadTextFinal && !invokeHadError) {
               const parsed = parseDiscordActions(processedText, actionFlags);
               if (parsed.actions.length > 0) {
                 actions = parsed.actions;
@@ -2071,6 +2084,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // no prose, delete the placeholder instead of posting "(no output)".
                 if (!processedText.trim() && anyActionSucceeded && collectedImages.length === 0) {
                   try { await reply.delete(); } catch { /* ignore */ }
+                  replyFinalized = true;
                   params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
                   break;
                 }
@@ -2095,6 +2109,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const stripped = processedText.replace(/\s+/g, ' ').trim();
               if (stripped.length < 50) {
                 try { await reply.delete(); } catch { /* ignore */ }
+                replyFinalized = true;
                 params.log?.info({ sessionKey, followUpDepth, chars: stripped.length }, 'followup:suppressed');
                 break;
               }
@@ -2103,6 +2118,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (!isShuttingDown()) {
               try {
                 await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
+                replyFinalized = true;
               } catch (editErr: any) {
                 // Thread archived by a beadClose action — the close summary was already
                 // posted inside closeBeadThread, so the only thing lost is Claude's
@@ -2110,10 +2126,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 if (editErr?.code === 50083) {
                   params.log?.info({ sessionKey }, 'discord:reply skipped (thread archived by action)');
                   try { await reply.delete(); } catch { /* best-effort cleanup */ }
+                  replyFinalized = true;
                 } else {
                   throw editErr;
                 }
               }
+            } else {
+              replyFinalized = true;
             }
 
             // -- auto-follow-up check --
@@ -2136,7 +2155,28 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             followUpDepth++;
           }
 
+          } catch (innerErr) {
+            // Inner catch: attempt to show the error in the reply before the finally
+            // block runs dispose(). Setting replyFinalized = true on success prevents
+            // the finally's safety-net delete from removing the error message.
+            try {
+              if (reply && !isShuttingDown()) {
+                await reply.edit({
+                  content: mapRuntimeErrorToUserMessage(String(innerErr)),
+                  allowedMentions: NO_MENTIONS,
+                });
+                replyFinalized = true;
+              }
+            } catch {
+              // Ignore secondary errors; outer catch will handle logging.
+            }
+            throw innerErr;
           } finally {
+            // Safety net runs before dispose() so cold-start recovery can still see
+            // the in-flight entry if the delete fails.
+            if (!replyFinalized && reply && !isShuttingDown()) {
+              try { await reply.delete(); } catch { /* best-effort */ }
+            }
             dispose();
           }
 
