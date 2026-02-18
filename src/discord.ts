@@ -47,7 +47,7 @@ import {
 } from './discord/forge-plan-registry.js';
 import { applyUserTurnToDurable } from './discord/user-turn-to-durable.js';
 import type { StatusPoster } from './discord/status-channel.js';
-import { createStatusPoster } from './discord/status-channel.js';
+import { createStatusPoster, sanitizePhaseError } from './discord/status-channel.js';
 import { ToolAwareQueue } from './discord/tool-aware-queue.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
 import type { SystemScaffold } from './discord/system-bootstrap.js';
@@ -1052,7 +1052,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           break;
                         } else if (phaseResult.result === 'failed') {
                           stopReason = 'error';
-                          stopMessage = `Phase **${phaseResult.phase.id}** failed: ${phaseResult.error}`;
+                          stopMessage = `Phase **${phaseResult.phase.id}** failed: ${sanitizePhaseError(phaseResult.phase.id, phaseResult.error)}`;
                           break;
                         } else if (phaseResult.result === 'audit_failed') {
                           stopReason = 'error';
