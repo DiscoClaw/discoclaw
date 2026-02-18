@@ -589,9 +589,22 @@ describe('beadActionsPromptSection', () => {
   it('keeps guidelines block under 600 chars', () => {
     const section = beadActionsPromptSection();
     const marker = '#### Bead Quality Guidelines';
+    const crossRefMarker = '#### Cross-Bead References';
     const idx = section.indexOf(marker);
     expect(idx).toBeGreaterThanOrEqual(0);
-    const guidelinesBlock = section.slice(idx);
+    const crossRefIdx = section.indexOf(crossRefMarker);
+    // Slice up to the cross-bead section (or end of string if not found)
+    const end = crossRefIdx > idx ? crossRefIdx : section.length;
+    const guidelinesBlock = section.slice(idx, end);
     expect(guidelinesBlock.length).toBeLessThanOrEqual(600);
+  });
+
+  it('includes cross-bead references guideline', () => {
+    const section = beadActionsPromptSection();
+    expect(section).toContain('#### Cross-Bead References');
+    expect(section).toContain('beadShow');
+    expect(section).toContain('beadUpdate');
+    expect(section).toContain('sendMessage');
+    expect(section).toContain('stale');
   });
 });

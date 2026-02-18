@@ -407,5 +407,8 @@ export function beadActionsPromptSection(): string {
 - **Description** should answer what/why/scope. Use markdown for structure. Include what "done" looks like for larger tasks.
 - **Priority**: P0=urgent, P1=important, P2=normal (default), P3=nice-to-have, P4=someday.
 - If the user explicitly asks to create a bead, always create it — don't second-guess.
-- Apply the same description quality standards when using beadUpdate to backfill details.`;
+- Apply the same description quality standards when using beadUpdate to backfill details.
+
+#### Cross-Bead References
+When reading or updating another bead, use bead actions with its bead ID — not \`sendMessage\`, \`readMessages\`, or \`listPins\` against a thread channel name. Thread names can go stale when threads are deleted or archived, causing those actions to fail or target the wrong channel. Use \`beadShow <id>\` to inspect a bead, \`beadUpdate <id>\` to modify it.`;
 }
