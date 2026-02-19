@@ -137,6 +137,7 @@ All actions are gated by category env flags (off by default except channels).
 | Beads subsystem | 6 tests | **done** |
 | Cron subsystem | 3 tests | **done** |
 | Integration (fail-closed, prompt-context, status, channel-context) | 4 tests | **done** |
+| Pipeline engine | 11 tests | **done** |
 
 ## 13. Documentation
 
@@ -152,7 +153,23 @@ All actions are gated by category env flags (off by default except channels).
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
 
-## 14. Transport Abstraction
+## 14. Pipeline Engine (`src/pipeline/`)
+
+General-purpose step-chaining primitive. Each step sends a prompt to a runtime adapter; its text output is injected as context for the next step. Foundational building block for composable action chaining.
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| `StepContext` / `PromptStep` / `PipelineStep` types | `src/pipeline/engine.ts` | **done** |
+| `PipelineParams` / `PipelineResult` types | `src/pipeline/engine.ts` | **done** |
+| `runPipeline` — sequential step executor | `src/pipeline/engine.ts` | **done** |
+| `collectText` — event-stream drainer (`text_final` \| `text_delta`) | `src/pipeline/engine.ts` | **done** |
+| Per-step model override | `src/pipeline/engine.ts` | **done** |
+| Dynamic prompt via `(ctx: StepContext) => string` | `src/pipeline/engine.ts` | **done** |
+| `AbortSignal` support (pre-check + mid-stream) | `src/pipeline/engine.ts` | **done** |
+| Shell step kind | — | *stub — future plan* |
+| Discord-action step kind | — | *stub — future plan* |
+
+## 15. Transport Abstraction
 
 Platform-agnostic message normalization layer (Phase 1 of transport portability). Downstream consumers can be migrated off discord.js types incrementally.
 
