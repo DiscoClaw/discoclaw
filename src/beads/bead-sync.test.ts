@@ -941,9 +941,9 @@ describe('runBeadSync', () => {
     (bdList as any).mockResolvedValueOnce([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
-    // Phase 4: already closed → skip. Phase 5: not already closed (stale) → in-flight → defer.
+    // Phase 4: already closed → skip (no hasInFlightForChannel call). Phase 5: stale → in-flight → defer.
     (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-    (hasInFlightForChannel as any).mockReturnValueOnce(false).mockReturnValueOnce(true);
+    (hasInFlightForChannel as any).mockReturnValueOnce(true);
 
     const mockForum = {
       threads: {
