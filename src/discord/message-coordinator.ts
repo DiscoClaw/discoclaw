@@ -763,6 +763,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       async function sendAutoImplementOutcome(result: ForgeResult): Promise<AutoImplementAttemptResult> {
         const planId = result.planId;
         const plansDir = path.join(params.workspaceCwd, 'plans');
+
+        // Deferred promise: onRunComplete waits for the outcome message to exist before editing it,
+        // eliminating the race where "Plan run complete" could appear before "Plan run started".
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let resolveOutcomeMsg!: (m: any) => void;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const outcomeMsgPromise = new Promise<any>((resolve) => { resolveOutcomeMsg = resolve; });
+
         const planCtx: PlanContext = {
           plansDir,
           workspaceCwd: params.workspaceCwd,
@@ -774,11 +782,28 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           phaseTimeoutMs: params.planPhaseTimeoutMs ?? 5 * 60_000,
           maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
           maxPlanRunPhases: MAX_PLAN_RUN_PHASES,
+          skipCompletionNotify: true,
           onProgress: async (progressMsg: string) => {
             params.log?.info(
               { planId: result.planId, progress: progressMsg },
               'plan:auto-implement:progress',
             );
+          },
+          onRunComplete: async (finalContent: string) => {
+            const sentMsg = await outcomeMsgPromise;
+            if (sentMsg) {
+              try {
+                await sentMsg.edit({ content: finalContent, allowedMentions: NO_MENTIONS });
+              } catch {
+                // best-effort
+              }
+            } else {
+              try {
+                await msg.channel.send({ content: finalContent, allowedMentions: NO_MENTIONS });
+              } catch {
+                // best-effort
+              }
+            }
           },
         };
 
@@ -840,9 +865,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         }
 
         try {
-          await msg.channel.send({ content, allowedMentions: NO_MENTIONS });
+          const sentMsg = await msg.channel.send({ content, allowedMentions: NO_MENTIONS });
+          resolveOutcomeMsg(sentMsg);
         } catch (err) {
           params.log?.warn({ err, planId }, 'forge:auto-implement: follow-up send failed');
+          resolveOutcomeMsg(null);
         }
 
         return { autoStarted, skipReason };
