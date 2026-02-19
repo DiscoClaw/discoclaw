@@ -212,6 +212,34 @@ When `bd close` is run from a Claude Code session, a PostToolUse hook syncs the 
 
 The hook is idempotent — if the thread is already closed (e.g. bot already synced it), it's a no-op.
 
+## Smoke Tests
+
+The smoke-test suite validates each configured model tier end-to-end — verifying API keys, tier mappings, system prompts, and binary availability — before real users encounter a broken model path.
+
+It exercises `RuntimeAdapter.invoke()` → `EngineEvent` pipeline with a curated set of prompt categories (basic Q&A, tool use, streaming). Tests are **opt-in** and skipped by default in CI unless `SMOKE_TEST_TIERS` is set.
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SMOKE_TEST_TIERS` | *(unset — skips smoke tests)* | Comma-separated list of tier names (`fast`, `capable`) or literal model IDs to test (e.g. `fast,capable` or `claude-haiku-4-5-20251001`) |
+| `SMOKE_TEST_TIMEOUT_MS` | `60000` | Per-invocation timeout for each smoke-test prompt, in milliseconds |
+
+### Usage
+
+```bash
+# Run smoke tests against the fast and capable tiers
+SMOKE_TEST_TIERS=fast,capable pnpm test
+
+# Run against a specific model ID
+SMOKE_TEST_TIERS=claude-sonnet-4-6 pnpm test
+
+# Adjust timeout (e.g. slower network)
+SMOKE_TEST_TIERS=fast SMOKE_TEST_TIMEOUT_MS=120000 pnpm test
+```
+
+The suite uses your real `.env` — the same config that runs the bot is sufficient. No separate test credentials are needed.
+
 ## Notes
 - Runtime invocation defaults are configurable via env (`RUNTIME_MODEL`, `RUNTIME_TOOLS`, `RUNTIME_TIMEOUT_MS`).
 - If `pnpm dev` fails with "Missing DISCORD_TOKEN", your `.env` isn't loaded or the var is unset.
