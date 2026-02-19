@@ -1612,6 +1612,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               content: mapRuntimeErrorToUserMessage('Configuration error: missing required channel context file for this channel ID.'),
               allowedMentions: NO_MENTIONS,
             });
+            replyFinalized = true;
             return;
           }
 

@@ -555,7 +555,8 @@ describe('in-flight reply registry cleanup', () => {
     expect(inFlightReplyCount()).toBe(0);
   });
 
-  it('no leaked registry entries on requireChannelContext early return', async () => {
+  it('requireChannelContext early return: edits reply with error, does not delete', async () => {
+    const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
     const runtime = {
       invoke: vi.fn(async function* () {
         yield { type: 'text_final', text: 'should not reach' } as any;
@@ -566,10 +567,47 @@ describe('in-flight reply registry cleanup', () => {
       baseParams(runtime, { requireChannelContext: true }),
       makeQueue(),
     );
-    await handler(makeMsg());
+    await handler(makeMsg({ reply: vi.fn(async () => replyObj) }));
 
     // Runtime should not have been invoked (early return before invoke).
     expect(runtime.invoke).not.toHaveBeenCalled();
+    // The reply should be edited with an error message, not deleted.
+    expect(replyObj.edit).toHaveBeenCalled();
+    expect(replyObj.delete).not.toHaveBeenCalled();
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('context-gathering failure: edits reply with error, does not delete', async () => {
+    const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: 'should not reach' } as any;
+      }),
+    } as any;
+
+    // A discordChannelContext whose paContextFiles lists a non-existent required file.
+    // inlineContextFiles throws for required files that cannot be read, triggering the
+    // inner try-catch before runtime.invoke is ever called.
+    const discordChannelContext = {
+      contentDir: '/tmp',
+      indexPath: '/tmp/index.md',
+      paContextFiles: ['/nonexistent-path/required-pa-context.md'],
+      channelsDir: '/tmp/channels',
+      byChannelId: new Map(),
+      dmContextPath: '/tmp/dm.md',
+    };
+
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { discordChannelContext }),
+      makeQueue(),
+    );
+    await handler(makeMsg({ reply: vi.fn(async () => replyObj) }));
+
+    // Runtime should not have been invoked (error occurred before invoke).
+    expect(runtime.invoke).not.toHaveBeenCalled();
+    // The reply should be edited with an error message, not deleted.
+    expect(replyObj.edit).toHaveBeenCalled();
+    expect(replyObj.delete).not.toHaveBeenCalled();
     expect(inFlightReplyCount()).toBe(0);
   });
 });
