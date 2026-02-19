@@ -1,7 +1,7 @@
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { bdCreate, bdClose, bdUpdate, bdAddLabel, bdList } from '../beads/bd-cli.js';
+import type { TaskStore } from '../tasks/store.js';
 import {
   decomposePlan,
   serializePhases,
@@ -264,7 +264,7 @@ _Filled in during/after implementation._
 
 export type HandlePlanCommandOpts = {
   workspaceCwd: string;
-  beadsCwd: string;
+  taskStore: TaskStore;
   maxContextFiles?: number;
 };
 
@@ -310,7 +310,7 @@ export async function handlePlanCommand(
         beadId = cmd.existingBeadId;
         // Ensure the reused bead has the 'plan' label for label-based filtering
         try {
-          await bdAddLabel(beadId, 'plan', opts.beadsCwd);
+          opts.taskStore.addLabel(beadId, 'plan');
         } catch {
           // best-effort — label addition failure shouldn't block plan creation
         }
@@ -318,7 +318,7 @@ export async function handlePlanCommand(
         try {
           // Dedup: if an open bead with a matching title already exists, reuse it
           const normalizedTitle = cmd.args.trim().toLowerCase();
-          const existingBeads = await bdList({ label: 'plan' }, opts.beadsCwd);
+          const existingBeads = opts.taskStore.list({ label: 'plan' });
           const match = existingBeads.find(
             (b) => b.status !== 'closed' && b.title.trim().toLowerCase() === normalizedTitle,
           );
@@ -326,13 +326,12 @@ export async function handlePlanCommand(
           if (match) {
             beadId = match.id;
           } else {
-            const bead = await bdCreate(
+            const bead = opts.taskStore.create(
               {
                 title: cmd.args,
                 labels: ['plan'],
                 ...(trimmedContext ? { description: trimmedContext.slice(0, 1800) } : {}),
               },
-              opts.beadsCwd,
             );
             beadId = bead.id;
           }
@@ -461,7 +460,7 @@ export async function handlePlanCommand(
       // Update backing bead to in_progress
       if (found.header.beadId) {
         try {
-          await bdUpdate(found.header.beadId, { status: 'in_progress' }, opts.beadsCwd);
+          opts.taskStore.update(found.header.beadId, { status: 'in_progress' });
         } catch {
           // best-effort — bead update failure shouldn't block approval
         }
@@ -483,7 +482,7 @@ export async function handlePlanCommand(
       // Close backing bead
       if (found.header.beadId) {
         try {
-          await bdClose(found.header.beadId, 'Plan closed', opts.beadsCwd);
+          opts.taskStore.close(found.header.beadId, 'Plan closed');
         } catch {
           // best-effort
         }
@@ -669,7 +668,7 @@ const TERMINAL_PHASE_STATUSES = new Set(['done', 'skipped']);
 export async function closePlanIfComplete(
   phasesFilePath: string,
   planFilePath: string,
-  beadsCwd: string,
+  taskStore: TaskStore,
   acquireLock: () => Promise<() => void>,
   log?: LoggerLike,
 ): Promise<{ closed: boolean; reason: string }> {
@@ -727,10 +726,10 @@ export async function closePlanIfComplete(
     releaseLock();
   }
 
-  // Best-effort bead close (no lock needed for bd CLI calls)
+  // Best-effort bead close (no lock needed)
   if (beadId) {
     try {
-      await bdClose(beadId, 'All phases complete', beadsCwd);
+      taskStore.close(beadId, 'All phases complete');
     } catch (err) {
       log?.warn({ err, beadId }, 'closePlanIfComplete: failed to close bead (best-effort)');
     }
