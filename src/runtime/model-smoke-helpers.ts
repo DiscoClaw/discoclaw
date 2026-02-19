@@ -6,6 +6,7 @@
 
 import type { EngineEvent, RuntimeAdapter } from './types.js';
 import { createClaudeCliRuntime } from './claude-code-cli.js';
+import { createGeminiCliRuntime } from './gemini-cli.js';
 
 // ---------------------------------------------------------------------------
 // Prompt definitions
@@ -135,6 +136,12 @@ export type SmokeRuntime = {
   claudeBin: string;
 };
 
+export type GeminiSmokeRuntime = {
+  runtime: RuntimeAdapter;
+  /** Resolved binary path/name, for beforeAll availability checks. */
+  geminiBin: string;
+};
+
 /**
  * Build a RuntimeAdapter from env vars, applying the same normalization rules
  * as `parseConfig` in src/config.ts:
@@ -181,4 +188,17 @@ export function buildSmokeRuntime(env: NodeJS.ProcessEnv = process.env): SmokeRu
   });
 
   return { runtime, claudeBin };
+}
+
+/**
+ * Build a Gemini RuntimeAdapter from env vars.
+ * Reads `GEMINI_BIN` (default: `gemini`) and `GEMINI_MODEL` (default: `gemini-2.5-flash`).
+ */
+export function buildGeminiSmokeRuntime(env: NodeJS.ProcessEnv = process.env): GeminiSmokeRuntime {
+  const geminiBin = env.GEMINI_BIN?.trim() || 'gemini';
+  const defaultModel = env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
+
+  const runtime = createGeminiCliRuntime({ geminiBin, defaultModel });
+
+  return { runtime, geminiBin };
 }
