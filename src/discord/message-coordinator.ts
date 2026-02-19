@@ -848,6 +848,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
       await queue.run(sessionKey, async () => {
         let reply: any = null;
+        let abortSignal: AbortSignal | undefined;
         try {
           // Handle !memory commands before session creation or the "..." placeholder.
           if (params.memoryCommandsEnabled) {
@@ -1580,7 +1581,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let replyFinalized = false;
           let hadTextFinal = false;
           let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
-          const { signal: abortSignal, dispose: abortDispose } = registerAbort(reply.id);
+          const { signal, dispose: abortDispose } = registerAbort(reply.id);
+          abortSignal = signal;
           // Best-effort: add 🛑 so the user can tap it to kill the running stream.
           (reply as any).react?.('🛑')?.catch(() => { /* best-effort */ });
           // Declared before try so they remain accessible after the finally block closes.
