@@ -41,6 +41,7 @@ describe('handleHelpCommand', () => {
     expect(result).toContain('!health');
     expect(result).toContain('!update');
     expect(result).toContain('!restart');
+    expect(result).toContain('!stop');
     expect(result).toContain('!help');
   });
 
