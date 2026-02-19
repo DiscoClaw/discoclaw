@@ -50,7 +50,28 @@ export type ShellStep = {
   confirm?: boolean;
 };
 
-export type PipelineStep = PromptStep | ShellStep;
+export type DiscordActionStep = {
+  kind: 'discord-action';
+  /** Optional identifier for named template references (`{{steps.<id>.output}}`). */
+  id?: string;
+  /**
+   * Actions to dispatch. Static arrays may contain objects with string values that
+   * support the same template variables as prompt steps. A function form is also
+   * accepted; it receives full step context and must return the actions array.
+   */
+  actions: unknown[] | ((ctx: StepContext) => unknown[]);
+  /** How to handle a failure for this step. Default: 'fail' (throws). */
+  onError?: 'fail' | 'skip';
+  /**
+   * Executor provided by the caller. Receives the interpolated actions array and
+   * returns a result entry for each action. The caller binds its own Discord
+   * context at pipeline construction time, keeping the engine decoupled from
+   * Discord imports.
+   */
+  execute: (actions: unknown[]) => Promise<Array<{ ok: boolean; summary?: string; error?: string }>>;
+};
+
+export type PipelineStep = PromptStep | ShellStep | DiscordActionStep;
 
 export type PipelineDef = {
   steps: PipelineStep[];
@@ -94,6 +115,32 @@ function interpolateTemplate(
     }
     return match; // unrecognized pattern — leave as literal
   });
+}
+
+/**
+ * Recursively walk a JSON-like value and apply `interpolateTemplate` to every
+ * string leaf. Non-string primitives and `null` are returned as-is.
+ */
+function interpolateDeep(
+  value: unknown,
+  stepIndex: number,
+  steps: readonly PipelineStep[],
+  outputs: string[],
+): unknown {
+  if (typeof value === 'string') {
+    return interpolateTemplate(value, stepIndex, steps, outputs);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => interpolateDeep(item, stepIndex, steps, outputs));
+  }
+  if (value !== null && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      result[k] = interpolateDeep(v, stepIndex, steps, outputs);
+    }
+    return result;
+  }
+  return value;
 }
 
 /** Drain a runtime event stream, collecting final text. Throws on error events. */
@@ -200,6 +247,36 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
       }
 
       outputs.push(text);
+      onProgress?.(`step ${stepId}: done`);
+      continue;
+    }
+
+    // --- Discord action step ---
+    if (step.kind === 'discord-action') {
+      const resolvedActions =
+        typeof step.actions === 'function' ? step.actions(ctx) : step.actions;
+
+      const interpolatedActions = interpolateDeep(resolvedActions, i, steps, outputs) as unknown[];
+
+      let results: Array<{ ok: boolean; summary?: string; error?: string }>;
+      try {
+        results = await step.execute(interpolatedActions);
+        const failed = results.filter((r) => !r.ok);
+        if (failed.length > 0) {
+          const errorMsg = failed.map((r) => r.error ?? 'action failed').join('; ');
+          throw new Error(errorMsg);
+        }
+      } catch (err) {
+        if (step.onError === 'skip') {
+          outputs.push('');
+          onProgress?.(`step ${stepId}: skipped`);
+          continue;
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`Pipeline step ${i} failed: ${message}`);
+      }
+
+      outputs.push(JSON.stringify(results));
       onProgress?.(`step ${stepId}: done`);
       continue;
     }

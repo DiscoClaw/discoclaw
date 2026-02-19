@@ -137,7 +137,7 @@ All actions are gated by category env flags (off by default except channels).
 | Beads subsystem | 6 tests | **done** |
 | Cron subsystem | 3 tests | **done** |
 | Integration (fail-closed, prompt-context, status, channel-context) | 4 tests | **done** |
-| Pipeline engine | 21 tests | **done** |
+| Pipeline engine | 51 tests | **done** |
 
 ## 13. Documentation
 
@@ -174,7 +174,7 @@ General-purpose step-chaining primitive. Each step sends a prompt to a runtime a
 | Shell step kind (`kind: "shell"`) | `src/pipeline/engine.ts` | **done** |
 | `ShellStep` type | `src/pipeline/engine.ts` | **done** |
 | `confirmAllowed` gate (blocks destructive commands without explicit opt-in) | `src/pipeline/engine.ts` | **done** |
-| Discord-action step kind | — | *stub — future plan* |
+| Discord-action step kind | `src/pipeline/engine.ts` | **done** |
 
 ## 15. Transport Abstraction
 

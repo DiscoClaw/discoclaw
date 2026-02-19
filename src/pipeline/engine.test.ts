@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { runPipeline } from './engine.js';
-import type { PipelineDef, PromptStep, ShellStep, StepContext } from './engine.js';
+import type { PipelineDef, PromptStep, ShellStep, DiscordActionStep, StepContext } from './engine.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
 
 vi.mock('execa', () => ({
@@ -844,6 +844,201 @@ describe('runPipeline', () => {
           }),
         ),
       ).rejects.toThrow('Pipeline step 1 failed:');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Discord action step tests
+  // ---------------------------------------------------------------------------
+
+  describe('discord-action steps', () => {
+    function discordStep(
+      actions: DiscordActionStep['actions'],
+      overrides?: Partial<Omit<DiscordActionStep, 'kind' | 'actions'>>,
+    ): DiscordActionStep {
+      return {
+        kind: 'discord-action',
+        actions,
+        execute: vi.fn().mockResolvedValue([{ ok: true, summary: 'done' }]),
+        ...overrides,
+      };
+    }
+
+    it('runs execute and stores JSON-serialized results as output', async () => {
+      const execute = vi.fn().mockResolvedValue([{ ok: true, summary: 'sent' }]);
+
+      const result = await runPipeline(
+        baseParams({
+          steps: [discordStep([{ type: 'sendMessage', content: 'hello' }], { execute })],
+        }),
+      );
+
+      expect(execute).toHaveBeenCalledWith([{ type: 'sendMessage', content: 'hello' }]);
+      expect(result.outputs).toEqual([JSON.stringify([{ ok: true, summary: 'sent' }])]);
+    });
+
+    it('resolves actions callback with step context', async () => {
+      let capturedCtx: StepContext | undefined;
+      const execute = vi.fn().mockResolvedValue([{ ok: true }]);
+
+      await runPipeline(
+        baseParams({
+          steps: [
+            step('first'),
+            discordStep(
+              (ctx: StepContext) => {
+                capturedCtx = ctx;
+                return [{ type: 'sendMessage', content: ctx.previousOutput }];
+              },
+              { execute },
+            ),
+          ],
+          runtime: makeRuntime([{ type: 'text_final', text: 'hello' }, { type: 'done' }]),
+        }),
+      );
+
+      expect(capturedCtx?.stepIndex).toBe(1);
+      expect(capturedCtx?.previousOutput).toBe('hello');
+      expect(execute).toHaveBeenCalledWith([{ type: 'sendMessage', content: 'hello' }]);
+    });
+
+    it('interpolates {{prev.output}} in action string values', async () => {
+      const execute = vi.fn().mockResolvedValue([{ ok: true }]);
+
+      await runPipeline(
+        baseParams({
+          steps: [
+            step('world'),
+            discordStep([{ type: 'sendMessage', content: 'hello {{prev.output}}' }], { execute }),
+          ],
+          runtime: makeRuntime([{ type: 'text_final', text: 'world' }, { type: 'done' }]),
+        }),
+      );
+
+      expect(execute).toHaveBeenCalledWith([{ type: 'sendMessage', content: 'hello world' }]);
+    });
+
+    it('interpolates {{steps.<id>.output}} in action string values', async () => {
+      const execute = vi.fn().mockResolvedValue([{ ok: true }]);
+
+      await runPipeline(
+        baseParams({
+          steps: [
+            step('ref-value', { id: 'src' }),
+            step('ignored'),
+            discordStep([{ type: 'beadUpdate', note: '{{steps.src.output}}' }], { execute }),
+          ],
+          runtime: makeRuntime([{ type: 'text_final', text: 'ref-value' }, { type: 'done' }]),
+        }),
+      );
+
+      expect(execute).toHaveBeenCalledWith([{ type: 'beadUpdate', note: 'ref-value' }]);
+    });
+
+    it('interpolates string values inside nested objects and arrays', async () => {
+      const execute = vi.fn().mockResolvedValue([{ ok: true }]);
+
+      await runPipeline(
+        baseParams({
+          steps: [
+            step('v'),
+            discordStep(
+              [{ type: 'beadUpdate', nested: { key: '{{prev.output}}' }, tags: ['tag-{{prev.output}}'] }],
+              { execute },
+            ),
+          ],
+          runtime: makeRuntime([{ type: 'text_final', text: 'v' }, { type: 'done' }]),
+        }),
+      );
+
+      expect(execute).toHaveBeenCalledWith([
+        { type: 'beadUpdate', nested: { key: 'v' }, tags: ['tag-v'] },
+      ]);
+    });
+
+    it('throws when any result entry has ok: false', async () => {
+      const execute = vi.fn().mockResolvedValue([
+        { ok: true },
+        { ok: false, error: 'channel not found' },
+      ]);
+
+      await expect(
+        runPipeline(
+          baseParams({
+            steps: [discordStep([{ type: 'react' }, { type: 'sendMessage' }], { execute })],
+          }),
+        ),
+      ).rejects.toThrow('channel not found');
+    });
+
+    it('wraps failure with Pipeline step index', async () => {
+      const execute = vi.fn().mockResolvedValue([{ ok: false, error: 'boom' }]);
+
+      await expect(
+        runPipeline(
+          baseParams({
+            steps: [discordStep([], { execute })],
+          }),
+        ),
+      ).rejects.toThrow('Pipeline step 0 failed: boom');
+    });
+
+    it('onError skip: failed discord-action step is skipped and pipeline continues', async () => {
+      const execute = vi.fn().mockResolvedValue([{ ok: false, error: 'boom' }]);
+
+      const result = await runPipeline(
+        baseParams({
+          steps: [
+            discordStep([], { execute, onError: 'skip' }),
+            step('next'),
+          ],
+          runtime: makeRuntime([{ type: 'text_final', text: 'ok' }, { type: 'done' }]),
+        }),
+      );
+
+      expect(result.outputs).toEqual(['', 'ok']);
+    });
+
+    it('calls onProgress after successful discord-action step', async () => {
+      const messages: string[] = [];
+      const execute = vi.fn().mockResolvedValue([{ ok: true }]);
+
+      await runPipeline(
+        baseParams({
+          steps: [discordStep([], { id: 'notify', execute })],
+          onProgress: (msg) => messages.push(msg),
+        }),
+      );
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('notify');
+    });
+
+    it('calls onProgress for skipped discord-action step', async () => {
+      const messages: string[] = [];
+      const execute = vi.fn().mockResolvedValue([{ ok: false, error: 'err' }]);
+
+      await runPipeline(
+        baseParams({
+          steps: [discordStep([], { id: 'skipped-step', execute, onError: 'skip' })],
+          onProgress: (msg) => messages.push(msg),
+        }),
+      );
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('skipped-step');
+    });
+
+    it('non-string leaves in action objects are passed through unchanged', async () => {
+      const execute = vi.fn().mockResolvedValue([{ ok: true }]);
+
+      await runPipeline(
+        baseParams({
+          steps: [discordStep([{ type: 'react', count: 42, active: true, data: null }], { execute })],
+        }),
+      );
+
+      expect(execute).toHaveBeenCalledWith([{ type: 'react', count: 42, active: true, data: null }]);
     });
   });
 });
