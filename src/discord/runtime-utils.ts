@@ -17,7 +17,7 @@ export async function collectRuntimeText(
   tools: string[],
   addDirs: string[],
   timeoutMs: number,
-  opts?: { requireFinalEvent?: boolean; sessionKey?: string; onEvent?: (evt: EngineEvent) => void },
+  opts?: { requireFinalEvent?: boolean; sessionKey?: string; signal?: AbortSignal; onEvent?: (evt: EngineEvent) => void },
 ): Promise<string> {
   let text = '';
   let sawFinal = false;
@@ -29,6 +29,7 @@ export async function collectRuntimeText(
     addDirs: addDirs.length > 0 ? addDirs : undefined,
     timeoutMs,
     ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
+    ...(opts?.signal ? { signal: opts.signal } : {}),
   })) {
     try { opts?.onEvent?.(evt); } catch { /* UI callback errors must not abort execution */ }
     if (evt.type === 'text_final') {

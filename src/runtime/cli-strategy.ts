@@ -57,6 +57,7 @@ export type UniversalCliOpts = {
   multiTurnIdleTimeoutMs?: number;
   multiTurnMaxProcesses?: number;
   streamStallTimeoutMs?: number;
+  progressStallTimeoutMs?: number;
   sessionScanning?: boolean;
   echoStdio?: boolean;
   verbose?: boolean;

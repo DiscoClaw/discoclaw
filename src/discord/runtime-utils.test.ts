@@ -84,6 +84,57 @@ describe('collectRuntimeText', () => {
   });
 });
 
+describe('collectRuntimeText signal', () => {
+  it('passes signal through to runtime.invoke() when provided', async () => {
+    const { runtime, calls } = makeCaptureRuntime();
+    const ac = new AbortController();
+
+    await collectRuntimeText(
+      runtime,
+      'hello',
+      'test-model',
+      '/tmp',
+      ['Read'],
+      [],
+      30000,
+      { signal: ac.signal },
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.signal).toBe(ac.signal);
+  });
+
+  it('does not include signal when opts has no signal', async () => {
+    const { runtime, calls } = makeCaptureRuntime();
+
+    await collectRuntimeText(
+      runtime,
+      'hello',
+      'test-model',
+      '/tmp',
+      ['Read'],
+      [],
+      30000,
+      { requireFinalEvent: true },
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.signal).toBeUndefined();
+  });
+
+  it('throws when runtime emits error due to pre-aborted signal', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const runtime = makeMultiEventRuntime([
+      { type: 'error', message: 'aborted' },
+    ]);
+
+    await expect(
+      collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, { signal: ac.signal }),
+    ).rejects.toThrow('aborted');
+  });
+});
+
 describe('collectRuntimeText onEvent', () => {
   it('forwards events to onEvent in order', async () => {
     const events: EngineEvent[] = [

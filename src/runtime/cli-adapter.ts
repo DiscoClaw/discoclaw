@@ -223,6 +223,28 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     };
     resetStallTimer();
 
+    // --- Progress stall detection (thinking spiral guard) ---
+    // Unlike stallTimer which resets on any raw data chunk, progressTimer
+    // resets only when a text_delta event is pushed — catching scenarios
+    // where thinking tokens flow through stdout but no useful content appears.
+    let progressTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearProgressTimer = () => { if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; } };
+    const resetProgressTimer = () => {
+      if (!opts.progressStallTimeoutMs) return;
+      clearProgressTimer();
+      progressTimer = setTimeout(() => {
+        if (finished) return;
+        const ms = opts.progressStallTimeoutMs!;
+        opts.log?.info?.(`one-shot: progress stall detected (no text_delta for ${ms}ms), killing process`);
+        push({ type: 'error', message: `progress stall: no text output for ${ms}ms (possible thinking spiral)` });
+        push({ type: 'done' });
+        finished = true;
+        subprocess.kill('SIGTERM');
+        wake();
+      }, opts.progressStallTimeoutMs);
+    };
+    resetProgressTimer();
+
     // --- Session file scanner (Claude-specific, but controlled by opts) ---
     let scanner: SessionFileScanner | null = null;
     if (opts.sessionScanning && params.sessionId) {
@@ -255,6 +277,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
       if (outputMode === 'text') {
         push({ type: 'text_delta', text: s });
+        resetProgressTimer();
         return;
       }
 
@@ -285,7 +308,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
               if (parsed.inToolUse !== undefined) {
                 if (parsed.inToolUse) inToolUse = true;
               }
-              if (!inToolUse) push({ type: 'text_delta', text: parsed.text });
+              if (!inToolUse) {
+                push({ type: 'text_delta', text: parsed.text });
+                resetProgressTimer();
+              }
               if (parsed.inToolUse === false) inToolUse = false;
             }
 
@@ -324,7 +350,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const hasToolOpen = text.includes('<tool_use>') || text.includes('<tool_calls>') || text.includes('<tool_call>') || text.includes('<tool_results>') || text.includes('<tool_result>');
           const hasToolClose = text.includes('</tool_use>') || text.includes('</tool_calls>') || text.includes('</tool_call>') || text.includes('</tool_results>') || text.includes('</tool_result>');
           if (hasToolOpen) inToolUse = true;
-          if (!inToolUse) push({ type: 'text_delta', text });
+          if (!inToolUse) {
+            push({ type: 'text_delta', text });
+            resetProgressTimer();
+          }
           if (hasToolClose) inToolUse = false;
         } else if (evt) {
           const rt = extractResultText(evt);
@@ -387,6 +416,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       if (!stdoutEnded) return;
       if (!stderrEnded) return;
       clearStallTimer();
+      clearProgressTimer();
 
       const exitCode = procResult.exitCode;
       const stdout = procResult.stdout ?? '';
@@ -557,6 +587,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       }
     } finally {
       clearStallTimer();
+      clearProgressTimer();
       scanner?.stop();
       params.signal?.removeEventListener('abort', onAbort);
       if (!finished) subprocess.kill('SIGKILL');

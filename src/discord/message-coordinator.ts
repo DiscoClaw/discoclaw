@@ -1017,6 +1017,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     : undefined;
 
                   const timeoutMs = params.planPhaseTimeoutMs ?? 5 * 60_000;
+                  // Register plan run with abort registry so !stop can kill it.
+                  const planAbort = registerAbort(msg.id);
+
                   const phaseOpts = {
                     runtime: params.runtime,
                     model: resolveModel(params.runtimeModel, params.runtime.id),
@@ -1027,6 +1030,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     log: params.log,
                     maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
                     onEvent: onPlanRunEvent,
+                    signal: planAbort.signal,
                   };
 
                   const editSummary = async (content: string) => {
@@ -1192,6 +1196,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   ).catch((err) => {
                     params.log?.error({ err }, 'plan-run: unhandled rejection in callback');
                   }).finally(() => {
+                    planAbort.dispose();
                     removeRunningPlan(planId);
                   });
 

@@ -367,6 +367,7 @@ const multiTurnHangTimeoutMs = cfg.multiTurnHangTimeoutMs;
 const multiTurnIdleTimeoutMs = cfg.multiTurnIdleTimeoutMs;
 const multiTurnMaxProcesses = cfg.multiTurnMaxProcesses;
 const streamStallTimeoutMs = cfg.streamStallTimeoutMs;
+const progressStallTimeoutMs = cfg.progressStallTimeoutMs;
 const streamStallWarningMs = cfg.streamStallWarningMs;
 const maxConcurrentInvocations = cfg.maxConcurrentInvocations;
 const sharedConcurrencyLimiter = createConcurrencyLimiter(maxConcurrentInvocations);
@@ -424,6 +425,7 @@ const registerClaudeRuntime = () => {
     multiTurnIdleTimeoutMs,
     multiTurnMaxProcesses,
     streamStallTimeoutMs,
+    progressStallTimeoutMs,
   });
   const limitedClaudeRuntime = withConcurrencyLimit(claudeRuntime, {
     maxConcurrentInvocations,

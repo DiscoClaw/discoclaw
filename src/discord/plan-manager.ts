@@ -54,6 +54,8 @@ export type PhaseExecutionOpts = {
   maxAuditFixAttempts?: number;
   /** Optional streaming event callback for live Discord progress previews. */
   onEvent?: (evt: EngineEvent) => void;
+  /** AbortSignal — when fired, kills the runtime subprocess and breaks the phase loop. */
+  signal?: AbortSignal;
 };
 
 export type RunPhaseResult =
@@ -1053,7 +1055,7 @@ export async function executePhase(
       tools,
       addDirs,
       opts.timeoutMs,
-      { requireFinalEvent: true, onEvent: opts.onEvent },
+      { requireFinalEvent: true, onEvent: opts.onEvent, signal: opts.signal },
     );
 
     if (phase.kind === 'audit') {
@@ -1323,7 +1325,7 @@ export async function runNextPhase(
             ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
             fixAddDirs,
             opts.timeoutMs,
-            { requireFinalEvent: true, onEvent: opts.onEvent },
+            { requireFinalEvent: true, onEvent: opts.onEvent, signal: opts.signal },
           );
         } catch (err) {
           opts.log?.warn({ err, phase: phase.id, attempt }, 'plan-manager: audit fix agent failed');
