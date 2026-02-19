@@ -10,7 +10,8 @@ import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
-import { tryAbort, isActivelyStreaming } from './abort-registry.js';
+import { tryAbortAll } from './abort-registry.js';
+import { getActiveOrchestrator } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
 import { editThenSendChunks } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
@@ -102,22 +103,24 @@ function createReactionHandler(
         }
       }
 
-      // 4a. Abort intercept — 🛑 on a bot reply kills the running stream.
+      // 4a. Abort intercept — 🛑 on a bot reply kills all active streams and any running forge.
       // Placed after reaction prompt resolution (step 5) so pending prompts using 🛑 as a
-      // choice are resolved normally before this check. Applies to both add and remove modes:
-      // on add it fires the abort; on remove it silently consumes the event so that removing
-      // a 🛑 reaction from a bot message never triggers an AI invocation.
+      // choice are resolved normally before this check. When resolvedPrompt is non-null, the
+      // entire block is skipped so the resolved choice flows through to AI invocation.
+      // On remove mode it silently consumes the event; on add mode with no resolved prompt
+      // it fires forge-aware cancellation and always consumes the event.
       if (
         reaction.emoji.name === '🛑' &&
-        reaction.message.author?.id === reaction.message.client.user?.id
+        reaction.message.author?.id === reaction.message.client.user?.id &&
+        !resolvedPrompt
       ) {
         if (mode === 'remove') return;
-        // add mode: fire abort if actively streaming; also consume cooldown entries silently.
-        const wasActive = isActivelyStreaming(reaction.message.id);
-        if (tryAbort(reaction.message.id)) {
-          if (wasActive) metrics.increment('discord.reaction.abort');
-          return;
-        }
+        // add mode: abort all active streams and cancel any running forge.
+        const abortedCount = tryAbortAll();
+        if (abortedCount > 0) metrics.increment('discord.reaction.abort');
+        const orch = getActiveOrchestrator();
+        if (orch?.isRunning) orch.requestCancel();
+        return;
       }
 
       // 6. Staleness guard — skipped when a pending prompt was resolved (the prompt message

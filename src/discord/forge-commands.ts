@@ -494,6 +494,7 @@ function wrapWithEventForwarding(
 export class ForgeOrchestrator {
   private running = false;
   private cancelRequested = false;
+  private abortController = new AbortController();
   private currentPlanId: string | undefined;
   private opts: ForgeOrchestratorOpts;
 
@@ -511,6 +512,7 @@ export class ForgeOrchestrator {
 
   requestCancel(): void {
     this.cancelRequested = true;
+    this.abortController.abort();
   }
 
   async run(
@@ -524,6 +526,7 @@ export class ForgeOrchestrator {
     }
     this.running = true;
     this.cancelRequested = false;
+    this.abortController = new AbortController();
     this.currentPlanId = undefined;
     const t0 = Date.now();
 
@@ -634,6 +637,7 @@ export class ForgeOrchestrator {
     }
     this.running = true;
     this.cancelRequested = false;
+    this.abortController = new AbortController();
     this.currentPlanId = planId;
     const t0 = Date.now();
 
@@ -791,7 +795,7 @@ export class ForgeOrchestrator {
           contextSummary,
         );
 
-        const { outputs: draftOutputs } = await runPipeline({
+        const draftPipelineResult = await this.runCancellable({
           steps: [{
             kind: 'prompt',
             prompt: drafterPrompt,
@@ -805,8 +809,19 @@ export class ForgeOrchestrator {
           runtime: this.opts.runtime,
           cwd: this.opts.cwd,
           model: this.opts.model,
+          signal: this.abortController.signal,
         });
-        const draftOutput = draftOutputs[0] ?? '';
+        if (!draftPipelineResult) {
+          await this.updatePlanStatus(filePath, 'CANCELLED');
+          return {
+            planId,
+            filePath,
+            finalVerdict: 'CANCELLED',
+            rounds: round - startRound + 1,
+            reachedMaxRounds: false,
+          };
+        }
+        const draftOutput = draftPipelineResult.outputs[0] ?? '';
 
         // Write the draft — preserve the header (planId, beadId) from the created file
         planContent = this.mergeDraftWithHeader(planContent, draftOutput);
@@ -851,7 +866,7 @@ export class ForgeOrchestrator {
         { hasTools: auditorHasFileTools },
       );
       const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(auditorRt, onEvent) : auditorRt;
-      const { outputs: auditOutputs } = await runPipeline({
+      const auditPipelineResult = await this.runCancellable({
         steps: [{
           kind: 'prompt',
           prompt: auditorPrompt,
@@ -865,8 +880,19 @@ export class ForgeOrchestrator {
         runtime: this.opts.runtime,
         cwd: this.opts.cwd,
         model: this.opts.model,
+        signal: this.abortController.signal,
       });
-      const auditOutput = auditOutputs[0] ?? '';
+      if (!auditPipelineResult) {
+        await this.updatePlanStatus(filePath, 'CANCELLED');
+        return {
+          planId,
+          filePath,
+          finalVerdict: 'CANCELLED',
+          rounds: round - startRound + 1,
+          reachedMaxRounds: false,
+        };
+      }
+      const auditOutput = auditPipelineResult.outputs[0] ?? '';
 
       lastAuditNotes = auditOutput;
       lastVerdict = parseAuditVerdict(auditOutput);
@@ -913,7 +939,7 @@ export class ForgeOrchestrator {
         projectContext,
       );
 
-      const { outputs: revisionOutputs } = await runPipeline({
+      const revisionPipelineResult = await this.runCancellable({
         steps: [{
           kind: 'prompt',
           prompt: revisionPrompt,
@@ -927,8 +953,19 @@ export class ForgeOrchestrator {
         runtime: this.opts.runtime,
         cwd: this.opts.cwd,
         model: this.opts.model,
+        signal: this.abortController.signal,
       });
-      const revisionOutput = revisionOutputs[0] ?? '';
+      if (!revisionPipelineResult) {
+        await this.updatePlanStatus(filePath, 'CANCELLED');
+        return {
+          planId,
+          filePath,
+          finalVerdict: 'CANCELLED',
+          rounds: round - startRound + 1,
+          reachedMaxRounds: false,
+        };
+      }
+      const revisionOutput = revisionPipelineResult.outputs[0] ?? '';
 
       planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
       await this.atomicWrite(filePath, planContent);
@@ -1044,6 +1081,24 @@ export class ForgeOrchestrator {
     }
 
     return header + draftBody;
+  }
+
+  /**
+   * Runs `runPipeline` with the abort signal attached. Returns null if the run
+   * was cancelled (either the pipeline threw while `cancelRequested` was set, or
+   * it returned normally but `cancelRequested` was set before outputs are used).
+   */
+  private async runCancellable(
+    def: Parameters<typeof runPipeline>[0],
+  ): Promise<{ outputs: string[] } | null> {
+    try {
+      const result = await runPipeline(def);
+      if (this.cancelRequested) return null;
+      return result;
+    } catch (err) {
+      if (this.cancelRequested) return null;
+      throw err;
+    }
   }
 
   private async atomicWrite(filePath: string, content: string): Promise<void> {

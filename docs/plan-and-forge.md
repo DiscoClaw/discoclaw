@@ -325,7 +325,9 @@ No forge running.
 
 ### `!forge cancel`
 
-Request cancellation of the running forge. The forge checks this flag at the top of each audit loop iteration.
+Request cancellation of the running forge. Cancellation interrupts the active AI invocation immediately via `AbortSignal` — the forge does not wait until the next audit loop boundary. The plan status is set to `CANCELLED`.
+
+The same cancellation signal is also raised by the 🛑 reaction on the forge progress message and by the `!stop` command, so all three methods produce the same clean halt.
 
 ```
 !forge cancel
@@ -397,7 +399,7 @@ With `FORGE_AUTO_IMPLEMENT=1`, the review still happens, but any REVIEW that mee
 | → APPROVED | `!plan approve` | `plan-commands.ts` |
 | → CLOSED | `!plan close` | `plan-commands.ts` |
 | → CLOSED | All phases complete (auto-close) | `plan-commands.ts` (`closePlanIfComplete`) |
-| → CANCELLED | Forge cancellation | `forge-commands.ts` (`cancelRequested` check) |
+| → CANCELLED | Forge cancellation (`!forge cancel`, 🛑 reaction, `!stop`) | `forge-commands.ts` (AbortSignal raised, interrupts active invocation) |
 
 ---
 
@@ -465,7 +467,7 @@ Only `blocking` findings trigger the revision loop. All other severities are not
 
 - **Normal completion (audit passes):** Plan set to `REVIEW`. Happens when `shouldLoop` is false (any non-blocking severity).
 - **Cap reached:** `VERDICT: CAP_REACHED` appended to plan content, then status set to `REVIEW`. Concerns remain — manual review required.
-- **Cancellation:** Status set to `CANCELLED` inside the `cancelRequested` check at the top of the while loop.
+- **Cancellation:** Status set to `CANCELLED` when the forge's `AbortSignal` is raised. The signal interrupts the active AI invocation immediately — the forge does not finish the current audit/draft/revise call before stopping. Triggered by `!forge cancel`, the 🛑 reaction on the progress message, or `!stop`.
 - **Error:** Status reset to `DRAFT` in the catch block (best-effort partial state save).
 
 ### Concurrent session constraint
@@ -834,7 +836,9 @@ Use `!plan run plan-017` to retry or `!plan skip plan-017` to skip.
 ```
 → `Forge cancel requested.`
 
-The forge checks the cancel flag at the start of each audit loop iteration. The plan status is set to `CANCELLED`.
+Cancellation raises an `AbortSignal` that interrupts the active AI invocation immediately — the forge does not wait until the next audit loop boundary. The plan status is set to `CANCELLED`.
+
+The 🛑 reaction on the forge progress message and the `!stop` command trigger the same signal, so all three methods produce the same clean halt.
 
 ### Attempting a second forge while one is running
 
