@@ -273,6 +273,7 @@ function makeBeadCtx(overrides: Partial<{ beadsCwd: string; forumId: string }> =
     beadsCwd: '/tmp/beads',
     forumId: SNOWFLAKE_FORUM_ID,
     tagMap: {},
+    store: {} as any,
     runtime: {} as any,
     autoTag: false,
     autoTagModel: 'haiku',

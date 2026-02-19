@@ -4,6 +4,7 @@ import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
+import type { TaskStore } from '../tasks/store.js';
 import { loadTagMap } from './discord-sync.js';
 import { checkBdAvailable, ensureBdDatabaseReady } from './bd-cli.js';
 import { initBeadsForumGuard } from './forum-guard.js';
@@ -22,6 +23,8 @@ export type InitializeBeadsOpts = {
   log: LoggerLike;
   /** Resolved from system bootstrap or config. */
   systemBeadsForumId?: string;
+  /** In-process task store. If not provided, an in-memory store is created. */
+  store?: TaskStore;
 };
 
 export type InitializeBeadsResult = {
@@ -86,11 +89,18 @@ export async function initializeBeadsContext(
     opts.log.warn('beads:sidebar enabled but DISCOCLAW_BEADS_MENTION_USER not set; sidebar mentions will be inactive');
   }
 
+  let store = opts.store;
+  if (!store) {
+    const { TaskStore } = await import('../tasks/store.js');
+    store = new TaskStore();
+  }
+
   const beadCtx: BeadContext = {
     beadsCwd: opts.beadsCwd,
     forumId: effectiveForum,
     tagMap,
     tagMapPath: opts.beadsTagMapPath,
+    store,
     runtime: opts.runtime,
     autoTag: opts.beadsAutoTag,
     autoTagModel: opts.beadsAutoTagModel,
