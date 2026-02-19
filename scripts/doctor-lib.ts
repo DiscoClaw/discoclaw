@@ -32,10 +32,11 @@ function normalizeRuntimeName(raw: string): string {
 }
 
 /**
- * Check whether the Claude and Gemini CLI binaries are present.
+ * Check whether the Claude, Gemini, and Codex CLI binaries are present, and whether
+ * required API keys (OPENAI_API_KEY) are set.
  * Reads PRIMARY_RUNTIME, FORGE_DRAFTER_RUNTIME, and FORGE_AUDITOR_RUNTIME from env
- * to decide which binaries are required. A missing needed binary is a fail; a missing
- * unneeded binary is informational (ok: true, info: true).
+ * to decide which binaries/keys are required. A missing needed binary or key is a fail;
+ * a missing unneeded one is informational (ok: true, info: true).
  */
 export function checkRuntimeBinaries(
   env: NodeJS.ProcessEnv,
@@ -59,8 +60,11 @@ export function checkRuntimeBinaries(
 
   const claudeBin = (env.CLAUDE_BIN ?? '').trim() || 'claude';
   const geminiBin = (env.GEMINI_BIN ?? '').trim() || 'gemini';
+  const codexBin = (env.CODEX_BIN ?? '').trim() || 'codex';
   const claudeNeeded = neededRuntimes.has('claude');
   const geminiNeeded = neededRuntimes.has('gemini');
+  const codexNeeded = neededRuntimes.has('codex');
+  const openaiNeeded = neededRuntimes.has('openai');
 
   const checks: DoctorCheckResult[] = [];
 
@@ -95,6 +99,40 @@ export function checkRuntimeBinaries(
       ok: true,
       info: true,
       label: `Gemini CLI not found (looked for "${geminiBin}") — not needed for current runtime`,
+    });
+  }
+
+  const codexPath = whichFn(codexBin);
+  if (codexPath) {
+    checks.push({ ok: true, label: `Codex CLI found: ${codexBin}` });
+  } else if (codexNeeded) {
+    checks.push({
+      ok: false,
+      label: `Codex CLI not found (looked for "${codexBin}")`,
+      hint: 'Install the Codex CLI or set CODEX_BIN',
+    });
+  } else {
+    checks.push({
+      ok: true,
+      info: true,
+      label: `Codex CLI not found (looked for "${codexBin}") — not needed for current runtime`,
+    });
+  }
+
+  const openaiKey = (env.OPENAI_API_KEY ?? '').trim();
+  if (openaiKey) {
+    checks.push({ ok: true, label: 'OPENAI_API_KEY is set' });
+  } else if (openaiNeeded) {
+    checks.push({
+      ok: false,
+      label: 'OPENAI_API_KEY is not set',
+      hint: 'Set OPENAI_API_KEY to your OpenAI API key',
+    });
+  } else {
+    checks.push({
+      ok: true,
+      info: true,
+      label: 'OPENAI_API_KEY is not set — not needed for current runtime',
     });
   }
 

@@ -128,8 +128,84 @@ describe('doctor-lib: checkRuntimeBinaries', () => {
 
   it('returns ok for both when all binaries are found', () => {
     const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'claude', FORGE_DRAFTER_RUNTIME: 'gemini' }, foundAll);
-    expect(checks.find((r) => r.label.includes('Claude CLI'))?.ok).toBe(true);
-    expect(checks.find((r) => r.label.includes('Gemini CLI'))?.ok).toBe(true);
-    expect(checks.every((r) => !r.info)).toBe(true);
+    const claudeCheck = checks.find((r) => r.label.includes('Claude CLI'));
+    const geminiCheck = checks.find((r) => r.label.includes('Gemini CLI'));
+    expect(claudeCheck?.ok).toBe(true);
+    expect(claudeCheck?.info).toBeFalsy();
+    expect(geminiCheck?.ok).toBe(true);
+    expect(geminiCheck?.info).toBeFalsy();
+  });
+
+  it('reports codex as info when claude is primary and codex is absent', () => {
+    const checks = checkRuntimeBinaries({}, (bin) => bin === 'claude' ? '/usr/bin/claude' : null);
+    const c = checks.find((r) => r.label.includes('Codex CLI'));
+    expect(c?.ok).toBe(true);
+    expect(c?.info).toBe(true);
+  });
+
+  it('fails when PRIMARY_RUNTIME=codex and codex binary is missing', () => {
+    const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'codex' }, notFound);
+    const c = checks.find((r) => r.label.includes('Codex CLI'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('passes when PRIMARY_RUNTIME=codex and codex binary is present', () => {
+    const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'codex' }, (bin) => bin === 'codex' ? '/usr/bin/codex' : null);
+    const c = checks.find((r) => r.label.includes('Codex CLI'));
+    expect(c?.ok).toBe(true);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('requires codex binary when FORGE_DRAFTER_RUNTIME=codex', () => {
+    const checks = checkRuntimeBinaries({ FORGE_DRAFTER_RUNTIME: 'codex' }, notFound);
+    const c = checks.find((r) => r.label.includes('Codex CLI'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('uses CODEX_BIN env var for codex binary lookup', () => {
+    const checks = checkRuntimeBinaries(
+      { PRIMARY_RUNTIME: 'codex', CODEX_BIN: 'codex-custom' },
+      (bin) => bin === 'codex-custom' ? '/usr/bin/codex-custom' : null,
+    );
+    const c = checks.find((r) => r.label.includes('Codex CLI'));
+    expect(c?.ok).toBe(true);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('reports OPENAI_API_KEY as info when openai is not a needed runtime', () => {
+    const checks = checkRuntimeBinaries({}, notFound);
+    const c = checks.find((r) => r.label.includes('OPENAI_API_KEY'));
+    expect(c?.ok).toBe(true);
+    expect(c?.info).toBe(true);
+  });
+
+  it('fails when PRIMARY_RUNTIME=openai and OPENAI_API_KEY is absent', () => {
+    const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'openai' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENAI_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('passes when PRIMARY_RUNTIME=openai and OPENAI_API_KEY is set', () => {
+    const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'openai', OPENAI_API_KEY: 'sk-test' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENAI_API_KEY'));
+    expect(c?.ok).toBe(true);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('treats whitespace-only OPENAI_API_KEY as absent', () => {
+    const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'openai', OPENAI_API_KEY: '   ' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENAI_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('requires OPENAI_API_KEY when FORGE_DRAFTER_RUNTIME=openai', () => {
+    const checks = checkRuntimeBinaries({ FORGE_DRAFTER_RUNTIME: 'openai' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENAI_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
   });
 });
