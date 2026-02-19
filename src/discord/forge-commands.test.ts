@@ -1102,6 +1102,59 @@ describe('ForgeOrchestrator', () => {
     expect(mockBdCreate).toHaveBeenCalled();
   });
 
+  it('cancel mid-phase (post-return guard): pipeline returns normally but cancel is set', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+
+    let orchestrator!: ForgeOrchestrator;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(_params) {
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          // Cancel while the pipeline is running, then still yield the response.
+          // The post-return guard should catch this before the output is processed.
+          orchestrator.requestCancel();
+          yield { type: 'text_final', text: draftPlan };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test', async () => {});
+
+    expect(result.finalVerdict).toBe('CANCELLED');
+    expect(result.error).toBeUndefined();
+  });
+
+  it('cancel mid-phase (cancel-aware catch): pipeline throws while cancel is set', async () => {
+    const tmpDir = await makeTmpDir();
+
+    let orchestrator!: ForgeOrchestrator;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(_params) {
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          // Cancel, then emit an error event — pipeline will throw.
+          // The cancel-aware catch should treat the throw as cancellation.
+          orchestrator.requestCancel();
+          yield { type: 'error', message: 'Aborted by signal' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test', async () => {});
+
+    expect(result.finalVerdict).toBe('CANCELLED');
+    expect(result.error).toBeUndefined();
+  });
+
   it('passes existingBeadId through to handlePlanCommand (skips bdCreate)', async () => {
     const { bdCreate, bdAddLabel } = await import('../beads/bd-cli.js');
     const mockBdCreate = vi.mocked(bdCreate);
