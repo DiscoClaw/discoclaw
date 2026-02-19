@@ -566,6 +566,47 @@ describe('executePlanAction', () => {
       expect(lastEdit.content).toContain('Stopped:');
     });
 
+    it('calls onRunComplete with final content after run completes', async () => {
+      const onRunComplete = vi.fn(async (_content: string) => {});
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus', onRunComplete }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(onRunComplete).toHaveBeenCalledOnce();
+      const content: string = onRunComplete.mock.calls[0]![0]!;
+      expect(content).toContain('Plan run complete');
+      expect(content).toContain('plan-042');
+      expect(content).toContain('Phases run:');
+    });
+
+    it('calls onRunComplete even when skipCompletionNotify is true', async () => {
+      const onRunComplete = vi.fn(async (_content: string) => {});
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus', skipCompletionNotify: true, onRunComplete }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // No Discord messages should be sent
+      expect(setup.fn).not.toHaveBeenCalled();
+      expect(setup.msg.edit).not.toHaveBeenCalled();
+      // But onRunComplete is still called
+      expect(onRunComplete).toHaveBeenCalledOnce();
+      const content: string = onRunComplete.mock.calls[0]![0]!;
+      expect(content).toContain('Plan run complete');
+      expect(content).toContain('plan-042');
+    });
+
     it('includes auto-close note in completion notification when plan is closed', async () => {
       const { closePlanIfComplete } = await import('./plan-commands.js');
       (closePlanIfComplete as any).mockResolvedValueOnce({ closed: true, reason: 'all_phases_complete' });
