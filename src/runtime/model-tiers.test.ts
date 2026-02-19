@@ -45,10 +45,18 @@ describe('resolveModel', () => {
     });
   });
 
-  describe('unknown runtimes (gemini, other)', () => {
+  describe('gemini runtime', () => {
+    it('resolves fast → gemini-2.5-flash', () => {
+      expect(resolveModel('fast', 'gemini')).toBe('gemini-2.5-flash');
+    });
+
+    it('resolves capable → gemini-2.5-pro', () => {
+      expect(resolveModel('capable', 'gemini')).toBe('gemini-2.5-pro');
+    });
+  });
+
+  describe('unknown runtimes (other)', () => {
     it('resolves tiers to empty string', () => {
-      expect(resolveModel('fast', 'gemini')).toBe('');
-      expect(resolveModel('capable', 'gemini')).toBe('');
       expect(resolveModel('fast', 'other')).toBe('');
       expect(resolveModel('capable', 'other')).toBe('');
     });
