@@ -2,9 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { handlePlanCommand, parsePlanFileHeader } from './plan-commands.js';
 import { bdUpdate } from '../beads/bd-cli.js';
-import type { RuntimeAdapter } from '../runtime/types.js';
+import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
-import { collectRuntimeText } from './runtime-utils.js';
+import { runPipeline } from '../pipeline/engine.js';
 import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 
@@ -51,7 +51,7 @@ export type ForgeOrchestratorOpts = {
 };
 
 type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
-type EventFn = (evt: import('../runtime/types.js').EngineEvent) => void;
+type EventFn = (evt: EngineEvent) => void;
 
 // ---------------------------------------------------------------------------
 // Parsing
@@ -461,6 +461,33 @@ export function appendAuditRound(
 }
 
 // ---------------------------------------------------------------------------
+// Runtime event-forwarding wrapper
+// ---------------------------------------------------------------------------
+
+/**
+ * Wraps a RuntimeAdapter so every emitted EngineEvent is forwarded to
+ * `onEvent` before being yielded to the pipeline engine. Errors thrown by
+ * `onEvent` are swallowed to prevent UI callbacks from aborting execution.
+ */
+function wrapWithEventForwarding(
+  rt: RuntimeAdapter,
+  onEvent: (evt: EngineEvent) => void,
+): RuntimeAdapter {
+  return {
+    id: rt.id,
+    capabilities: rt.capabilities,
+    invoke(params) {
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        for await (const evt of rt.invoke(params)) {
+          try { onEvent(evt); } catch { /* UI callback errors must not abort execution */ }
+          yield evt;
+        }
+      })();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // ForgeOrchestrator
 // ---------------------------------------------------------------------------
 
@@ -729,6 +756,9 @@ export class ForgeOrchestrator {
     const drafterSessionKey = `forge:${planId}:${rawDrafterModel}:drafter`;
     const auditorSessionKey = `forge:${planId}:${rawAuditorModel}:auditor`;
 
+    // Wrap drafter runtime to forward events to the onEvent callback when provided.
+    const effectiveDrafterRt = onEvent ? wrapWithEventForwarding(drafterRt, onEvent) : drafterRt;
+
     let round = startRound - 1; // will be incremented at top of loop
     let planContent = await fs.readFile(filePath, 'utf-8');
     let lastAuditNotes = '';
@@ -761,16 +791,22 @@ export class ForgeOrchestrator {
           contextSummary,
         );
 
-        const draftOutput = await collectRuntimeText(
-          drafterRt,
-          drafterPrompt,
-          drafterModel,
-          this.opts.cwd,
-          readOnlyTools,
-          addDirs,
-          this.opts.timeoutMs,
-          { ...(drafterRt.capabilities.has('sessions') ? { sessionKey: drafterSessionKey } : {}), onEvent },
-        );
+        const { outputs: draftOutputs } = await runPipeline({
+          steps: [{
+            kind: 'prompt',
+            prompt: drafterPrompt,
+            runtime: effectiveDrafterRt,
+            model: drafterModel,
+            tools: readOnlyTools,
+            addDirs,
+            timeoutMs: this.opts.timeoutMs,
+            sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+          }],
+          runtime: this.opts.runtime,
+          cwd: this.opts.cwd,
+          model: this.opts.model,
+        });
+        const draftOutput = draftOutputs[0] ?? '';
 
         // Write the draft — preserve the header (planId, beadId) from the created file
         planContent = this.mergeDraftWithHeader(planContent, draftOutput);
@@ -814,16 +850,23 @@ export class ForgeOrchestrator {
         projectContext,
         { hasTools: auditorHasFileTools },
       );
-      const auditOutput = await collectRuntimeText(
-        auditorRt,
-        auditorPrompt,
-        effectiveAuditorModel,
-        this.opts.cwd,
-        auditorHasFileTools ? readOnlyTools : [],
-        auditorHasFileTools ? addDirs : [],
-        this.opts.timeoutMs,
-        { ...(auditorRt.capabilities.has('sessions') ? { sessionKey: auditorSessionKey } : {}), onEvent },
-      );
+      const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(auditorRt, onEvent) : auditorRt;
+      const { outputs: auditOutputs } = await runPipeline({
+        steps: [{
+          kind: 'prompt',
+          prompt: auditorPrompt,
+          runtime: effectiveAuditorRt,
+          model: effectiveAuditorModel,
+          tools: auditorHasFileTools ? readOnlyTools : [],
+          ...(auditorHasFileTools ? { addDirs } : {}),
+          timeoutMs: this.opts.timeoutMs,
+          sessionKey: auditorRt.capabilities.has('sessions') ? auditorSessionKey : undefined,
+        }],
+        runtime: this.opts.runtime,
+        cwd: this.opts.cwd,
+        model: this.opts.model,
+      });
+      const auditOutput = auditOutputs[0] ?? '';
 
       lastAuditNotes = auditOutput;
       lastVerdict = parseAuditVerdict(auditOutput);
@@ -870,16 +913,22 @@ export class ForgeOrchestrator {
         projectContext,
       );
 
-      const revisionOutput = await collectRuntimeText(
-        drafterRt,
-        revisionPrompt,
-        drafterModel,
-        this.opts.cwd,
-        readOnlyTools,
-        addDirs,
-        this.opts.timeoutMs,
-        { ...(drafterRt.capabilities.has('sessions') ? { sessionKey: drafterSessionKey } : {}), onEvent },
-      );
+      const { outputs: revisionOutputs } = await runPipeline({
+        steps: [{
+          kind: 'prompt',
+          prompt: revisionPrompt,
+          runtime: effectiveDrafterRt,
+          model: drafterModel,
+          tools: readOnlyTools,
+          addDirs,
+          timeoutMs: this.opts.timeoutMs,
+          sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+        }],
+        runtime: this.opts.runtime,
+        cwd: this.opts.cwd,
+        model: this.opts.model,
+      });
+      const revisionOutput = revisionOutputs[0] ?? '';
 
       planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
       await this.atomicWrite(filePath, planContent);
