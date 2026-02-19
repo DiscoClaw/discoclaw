@@ -52,6 +52,7 @@ import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
 import { setDataFilePath, drainInFlightReplies, cleanupOrphanedReplies } from './discord/inflight-replies.js';
 import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
+import { getGitHash } from './version.js';
 import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
@@ -117,6 +118,12 @@ try {
 // --- Configure inflight reply persistence (for graceful shutdown + cold-start recovery) ---
 setDataFilePath(path.join(pidLockDir, 'inflight.json'));
 
+// --- Resolve current build hash (best-effort; null if git unavailable) ---
+const gitHash = await getGitHash();
+if (gitHash) {
+  log.info({ gitHash }, 'startup:build hash resolved');
+}
+
 // --- Read shutdown context from previous run (before bot connects to avoid race) ---
 let startupInjection: string | null = null;
 let startupCtx: Awaited<ReturnType<typeof readAndClearShutdownContext>>;
@@ -124,9 +131,13 @@ let startupCtx: Awaited<ReturnType<typeof readAndClearShutdownContext>>;
   startupCtx = await readAndClearShutdownContext(pidLockDir, { firstBoot });
   startupInjection = formatStartupInjection(startupCtx);
   if (startupInjection) {
+    if (gitHash) startupInjection = `Build: ${gitHash}. ${startupInjection}`;
     log.info({ type: startupCtx.type, activeForge: startupCtx.shutdown?.activeForge }, 'startup:context loaded');
-  } else if (startupCtx.type === 'first-boot') {
-    log.info('startup:first boot detected (no prior shutdown context)');
+  } else {
+    if (gitHash) startupInjection = `Build: ${gitHash}.`;
+    if (startupCtx.type === 'first-boot') {
+      log.info('startup:first boot detected (no prior shutdown context)');
+    }
   }
 }
 
@@ -1315,5 +1326,6 @@ if (botStatus?.bootReport) {
     permissionsTier: permProbe.status === 'valid' ? permProbe.permissions.tier : undefined,
     runtimeModel,
     bootDurationMs: Date.now() - bootStartMs,
+    buildVersion: gitHash ?? undefined,
   }).catch((err) => log.warn({ err }, 'status-channel: boot report failed'));
 }
