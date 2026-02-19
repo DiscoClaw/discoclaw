@@ -124,6 +124,55 @@ values.DISCOCLAW_CRON_FORUM = await askValidated(
   (val) => validateSnowflake(val) ? null : 'Must be a 17-20 digit number',
 );
 
+// --- Provider selection ---
+console.log('\nSelect your AI provider:');
+console.log('  1) Claude');
+console.log('  2) Gemini');
+console.log('  3) OpenAI');
+console.log('  4) Codex');
+const providerChoice = await askValidated(
+  'Provider [1-4]: ',
+  (val) => (['1', '2', '3', '4'].includes(val) ? null : 'Enter 1, 2, 3, or 4'),
+);
+
+if (providerChoice === '1') {
+  values.PRIMARY_RUNTIME = 'claude';
+  const skipPerms = await ask(
+    'Enable CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS? (required for headless operation) [Y/n] ',
+  );
+  if (skipPerms.toLowerCase() !== 'n') {
+    values.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS = '1';
+  }
+  const streamJson = await ask('Use stream-json output format? (smoother streaming) [Y/n] ');
+  if (streamJson.toLowerCase() !== 'n') {
+    values.CLAUDE_OUTPUT_FORMAT = 'stream-json';
+  }
+} else if (providerChoice === '2') {
+  values.PRIMARY_RUNTIME = 'gemini';
+  console.log('  Note: auth is handled by the gemini binary itself (run `gemini` to authenticate).');
+  const gemBin = await askOptional('Gemini binary path [default: gemini]: ', () => null);
+  values.GEMINI_BIN = gemBin || 'gemini';
+  const gemModel = await askOptional('Gemini model [default: gemini-2.5-pro]: ', () => null);
+  values.GEMINI_MODEL = gemModel || 'gemini-2.5-pro';
+} else if (providerChoice === '3') {
+  values.PRIMARY_RUNTIME = 'openai';
+  console.log('  Note: the OpenAI adapter is HTTP-only.');
+  values.OPENAI_API_KEY = await askValidated(
+    'OpenAI API key: ',
+    (val) => (val ? null : 'API key is required'),
+  );
+} else if (providerChoice === '4') {
+  values.PRIMARY_RUNTIME = 'codex';
+  const codexBin = await askOptional('Codex binary path [leave empty to use PATH]: ', () => null);
+  if (codexBin) values.CODEX_BIN = codexBin;
+  const codexModel = await askOptional('Codex model [leave empty for default]: ', () => null);
+  if (codexModel) values.CODEX_MODEL = codexModel;
+  const bypassApprovals = await ask('Enable CODEX_BYPASS_APPROVALS? [y/N] ');
+  if (bypassApprovals.toLowerCase() === 'y') {
+    values.CODEX_BYPASS_APPROVALS = '1';
+  }
+}
+
 // --- Recommended values ---
 const configRecommended = await ask('\nConfigure recommended settings? [Y/n] ');
 if (configRecommended.toLowerCase() !== 'n') {
@@ -135,18 +184,6 @@ if (configRecommended.toLowerCase() !== 'n') {
     },
   );
   if (guildId) values.DISCORD_GUILD_ID = guildId;
-
-  const skipPerms = await ask(
-    'Enable CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS? (required for headless operation) [Y/n] ',
-  );
-  if (skipPerms.toLowerCase() !== 'n') {
-    values.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS = '1';
-  }
-
-  const streamJson = await ask('Use stream-json output format? (smoother streaming) [Y/n] ');
-  if (streamJson.toLowerCase() !== 'n') {
-    values.CLAUDE_OUTPUT_FORMAT = 'stream-json';
-  }
 }
 
 // --- Optional features ---
@@ -172,16 +209,27 @@ fs.renameSync(tmpPath, envPath);
 
 console.log('\n.env written successfully.\n');
 
-// --- Run preflight ---
-console.log('Running pnpm preflight to validate...\n');
-try {
-  execFileSync('pnpm', ['run', 'preflight'], { cwd: root, stdio: 'inherit' });
-} catch {
-  console.log('\nPreflight reported issues above. Fix them and run pnpm preflight again.\n');
+// --- Run preflight (Claude only) or print next-steps ---
+if (values.PRIMARY_RUNTIME === 'claude') {
+  console.log('Running pnpm preflight to validate...\n');
+  try {
+    execFileSync('pnpm', ['run', 'preflight'], { cwd: root, stdio: 'inherit' });
+  } catch {
+    console.log('\nPreflight reported issues above. Fix them and run pnpm preflight again.\n');
+  }
+  console.log('\nNext steps:');
+  console.log('  pnpm build && pnpm dev\n');
+} else {
+  console.log('\nNext steps:');
+  if (values.PRIMARY_RUNTIME === 'gemini') {
+    console.log('  1. Authenticate with Gemini: run `gemini` and follow the prompts.');
+  } else if (values.PRIMARY_RUNTIME === 'openai') {
+    console.log('  1. Verify your OPENAI_API_KEY is correct.');
+  } else if (values.PRIMARY_RUNTIME === 'codex') {
+    console.log('  1. Ensure the Codex binary is installed and accessible.');
+  }
+  console.log('  2. pnpm build && pnpm dev\n');
 }
-
-console.log('\nNext steps:');
-console.log('  pnpm build && pnpm dev\n');
 
 completed = true;
 rl.close();

@@ -26,13 +26,31 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   lines.push('');
 
   // Core
-  const coreKeys = ['DISCORD_GUILD_ID', 'CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS', 'CLAUDE_OUTPUT_FORMAT'];
+  const coreKeys = [
+    'DISCORD_GUILD_ID',
+    'PRIMARY_RUNTIME',
+    'CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS',
+    'CLAUDE_OUTPUT_FORMAT',
+    'GEMINI_BIN',
+    'GEMINI_MODEL',
+    'OPENAI_API_KEY',
+    'CODEX_BIN',
+    'CODEX_MODEL',
+    'CODEX_BYPASS_APPROVALS',
+  ];
   const hasCore = coreKeys.some((k) => vals[k]);
   if (hasCore) {
     lines.push('# CORE');
     if (vals.DISCORD_GUILD_ID) lines.push(`DISCORD_GUILD_ID=${vals.DISCORD_GUILD_ID}`);
+    if (vals.PRIMARY_RUNTIME) lines.push(`PRIMARY_RUNTIME=${vals.PRIMARY_RUNTIME}`);
     if (vals.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS) lines.push(`CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=${vals.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS}`);
     if (vals.CLAUDE_OUTPUT_FORMAT) lines.push(`CLAUDE_OUTPUT_FORMAT=${vals.CLAUDE_OUTPUT_FORMAT}`);
+    if (vals.GEMINI_BIN) lines.push(`GEMINI_BIN=${vals.GEMINI_BIN}`);
+    if (vals.GEMINI_MODEL) lines.push(`GEMINI_MODEL=${vals.GEMINI_MODEL}`);
+    if (vals.OPENAI_API_KEY) lines.push(`OPENAI_API_KEY=${vals.OPENAI_API_KEY}`);
+    if (vals.CODEX_BIN) lines.push(`CODEX_BIN=${vals.CODEX_BIN}`);
+    if (vals.CODEX_MODEL) lines.push(`CODEX_MODEL=${vals.CODEX_MODEL}`);
+    if (vals.CODEX_BYPASS_APPROVALS) lines.push(`CODEX_BYPASS_APPROVALS=${vals.CODEX_BYPASS_APPROVALS}`);
     lines.push('');
   }
 

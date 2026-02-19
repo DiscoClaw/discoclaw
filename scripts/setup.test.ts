@@ -86,6 +86,45 @@ describe('setup: .env content generation', () => {
     });
     expect(content).not.toContain('# CORE');
   });
+
+  it('includes PRIMARY_RUNTIME and Gemini values when provided', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      PRIMARY_RUNTIME: 'gemini',
+      GEMINI_BIN: 'gemini',
+      GEMINI_MODEL: 'gemini-2.5-pro',
+    });
+    expect(content).toContain('PRIMARY_RUNTIME=gemini');
+    expect(content).toContain('GEMINI_BIN=gemini');
+    expect(content).toContain('GEMINI_MODEL=gemini-2.5-pro');
+  });
+
+  it('includes PRIMARY_RUNTIME and OpenAI key when provided', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      PRIMARY_RUNTIME: 'openai',
+      OPENAI_API_KEY: 'sk-test-key',
+    });
+    expect(content).toContain('PRIMARY_RUNTIME=openai');
+    expect(content).toContain('OPENAI_API_KEY=sk-test-key');
+  });
+
+  it('includes PRIMARY_RUNTIME and Codex values when provided', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      PRIMARY_RUNTIME: 'codex',
+      CODEX_BIN: '/usr/local/bin/codex',
+      CODEX_MODEL: 'codex-latest',
+      CODEX_BYPASS_APPROVALS: '1',
+    });
+    expect(content).toContain('PRIMARY_RUNTIME=codex');
+    expect(content).toContain('CODEX_BIN=/usr/local/bin/codex');
+    expect(content).toContain('CODEX_MODEL=codex-latest');
+    expect(content).toContain('CODEX_BYPASS_APPROVALS=1');
+  });
 });
 
 describe('setup: atomic write design', () => {
