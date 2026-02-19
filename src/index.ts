@@ -10,6 +10,7 @@ import { killAllSubprocesses } from './runtime/cli-adapter.js';
 import { RuntimeRegistry } from './runtime/registry.js';
 import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
 import { createCodexCliRuntime } from './runtime/codex-cli.js';
+import { createGeminiCliRuntime } from './runtime/gemini-cli.js';
 import { createConcurrencyLimiter, withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, resolveDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
@@ -471,6 +472,23 @@ log.info(
     disableSessions: cfg.codexDisableSessions,
   },
   'runtime:codex registered',
+);
+
+// Register Gemini CLI runtime.
+const geminiRuntimeRaw = createGeminiCliRuntime({
+  geminiBin: cfg.geminiBin,
+  defaultModel: cfg.geminiModel,
+  log,
+});
+const geminiRuntime = withConcurrencyLimit(geminiRuntimeRaw, {
+  maxConcurrentInvocations,
+  limiter: sharedConcurrencyLimiter,
+  log,
+});
+runtimeRegistry.register('gemini', geminiRuntime);
+log.info(
+  { geminiBin: cfg.geminiBin, model: cfg.geminiModel },
+  'runtime:gemini registered',
 );
 
 const claudeRequested = primaryRuntimeName === 'claude' || cfg.forgeDrafterRuntime === 'claude' || cfg.forgeAuditorRuntime === 'claude';
