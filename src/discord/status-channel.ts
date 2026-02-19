@@ -84,6 +84,7 @@ export type BootReportData = {
   // Runtime
   runtimeModel?: string;
   bootDurationMs?: number;
+  buildVersion?: string;
 };
 
 export type StatusPoster = {
@@ -270,6 +271,9 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
         value: data.actionCategoriesEnabled.length > 0 ? data.actionCategoriesEnabled.join(', ') : '(none)',
         inline: true,
       });
+
+      // Build version
+      embed.addFields({ name: 'Version', value: data.buildVersion ?? '(unknown)', inline: true });
 
       // Conditional: config warnings
       if (data.configWarnings && data.configWarnings > 0) {
