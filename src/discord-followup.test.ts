@@ -138,7 +138,7 @@ describe('QUERY_ACTION_TYPES', () => {
       'channelList', 'channelInfo', 'threadListArchived',
       'readMessages', 'fetchMessage', 'listPins',
       'memberInfo', 'roleInfo', 'searchMessages', 'eventList',
-      'beadList', 'beadShow',
+      'beadList', 'beadShow', 'forgeStatus',
     ];
     for (const t of expected) {
       expect(QUERY_ACTION_TYPES.has(t)).toBe(true);
@@ -152,8 +152,8 @@ describe('QUERY_ACTION_TYPES', () => {
     }
   });
 
-  it('does not contain forgeStatus (regression: forgeStatus result is self-explanatory and must not trigger follow-up)', () => {
-    expect(QUERY_ACTION_TYPES.has('forgeStatus')).toBe(false);
+  it('contains forgeStatus (forgeStatus returns data the model must synthesize into a reply)', () => {
+    expect(QUERY_ACTION_TYPES.has('forgeStatus')).toBe(true);
   });
 });
 
