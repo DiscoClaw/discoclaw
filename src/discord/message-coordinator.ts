@@ -60,6 +60,7 @@ import { resolveReplyReference } from './reply-reference.js';
 import { resolveThreadContext } from './thread-context.js';
 import { downloadTextAttachments } from './file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './user-errors.js';
+import { parseHelpCommand, handleHelpCommand } from './help-command.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './health-command.js';
 import { parseRestartCommand, handleRestartCommand } from './restart-command.js';
 import { parseModelsCommand, handleModelsCommand } from './models-command.js';
@@ -420,6 +421,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           'Received empty message content in guild — is Message Content Intent enabled in the Developer Portal?',
         );
         await msg.reply({ content: messageContentIntentHint(), allowedMentions: NO_MENTIONS });
+        return;
+      }
+
+      if (parseHelpCommand(String(msg.content ?? ''))) {
+        await msg.reply({ content: handleHelpCommand(), allowedMentions: NO_MENTIONS });
         return;
       }
 
