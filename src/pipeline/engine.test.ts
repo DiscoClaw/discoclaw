@@ -1,8 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { runPipeline } from './engine.js';
-import type { PipelineDef, PromptStep, StepContext } from './engine.js';
+import type { PipelineDef, PromptStep, ShellStep, StepContext } from './engine.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
+
+vi.mock('execa', () => ({
+  execa: vi.fn(),
+}));
+
+import { execa } from 'execa';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,6 +39,19 @@ function baseParams(overrides?: Partial<PipelineDef>): PipelineDef {
     runtime: makeRuntime([{ type: 'done' }]),
     cwd: '/tmp',
     model: 'test-model',
+    ...overrides,
+  };
+}
+
+function makeExecaResult(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+    failed: false,
+    timedOut: false,
+    isCanceled: false,
+    signal: undefined,
     ...overrides,
   };
 }
@@ -518,5 +537,313 @@ describe('runPipeline', () => {
 
     expect(capturedParams[0].tools).toEqual(['Read', 'Glob']);
     expect(capturedParams[0].addDirs).toEqual(['/workspace']);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Shell step tests
+  // ---------------------------------------------------------------------------
+
+  describe('shell steps', () => {
+    beforeEach(() => {
+      vi.mocked(execa).mockReset();
+    });
+
+    function shellStep(command: string[], overrides?: Partial<ShellStep>): ShellStep {
+      return { kind: 'shell', command, ...overrides };
+    }
+
+    it('runs a shell command and captures trimmed stdout as output', async () => {
+      vi.mocked(execa).mockResolvedValue(makeExecaResult({ stdout: 'hello\n' }) as any);
+
+      const result = await runPipeline(baseParams({ steps: [shellStep(['echo', 'hello'])] }));
+
+      expect(result.outputs).toEqual(['hello']);
+    });
+
+    it('passes command array and options to execa', async () => {
+      vi.mocked(execa).mockResolvedValue(makeExecaResult({ stdout: 'out' }) as any);
+
+      await runPipeline(
+        baseParams({
+          steps: [shellStep(['ls', '-la'], { timeoutMs: 3000 })],
+          cwd: '/project',
+        }),
+      );
+
+      expect(vi.mocked(execa)).toHaveBeenCalledWith(
+        'ls',
+        ['-la'],
+        expect.objectContaining({ reject: false, timeout: 3000, cwd: '/project' }),
+      );
+    });
+
+    it('uses step-level cwd override instead of pipeline cwd', async () => {
+      vi.mocked(execa).mockResolvedValue(makeExecaResult({ stdout: '' }) as any);
+
+      await runPipeline(
+        baseParams({
+          steps: [shellStep(['pwd'], { cwd: '/override' })],
+          cwd: '/pipeline',
+        }),
+      );
+
+      expect(vi.mocked(execa)).toHaveBeenCalledWith(
+        'pwd',
+        [],
+        expect.objectContaining({ cwd: '/override' }),
+      );
+    });
+
+    it('falls back to pipeline cwd when step cwd is absent', async () => {
+      vi.mocked(execa).mockResolvedValue(makeExecaResult({ stdout: '' }) as any);
+
+      await runPipeline(
+        baseParams({
+          steps: [shellStep(['pwd'])],
+          cwd: '/pipeline',
+        }),
+      );
+
+      expect(vi.mocked(execa)).toHaveBeenCalledWith(
+        'pwd',
+        [],
+        expect.objectContaining({ cwd: '/pipeline' }),
+      );
+    });
+
+    it('dryRun skips execution and emits a redacted progress message', async () => {
+      const messages: string[] = [];
+
+      const result = await runPipeline(
+        baseParams({
+          steps: [shellStep(['rm', '-rf', '/data'], { dryRun: true, id: 'cleanup' })],
+          onProgress: (msg) => messages.push(msg),
+        }),
+      );
+
+      expect(vi.mocked(execa)).not.toHaveBeenCalled();
+      expect(result.outputs).toEqual(['']);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('cleanup');
+      expect(messages[0]).toContain('rm');
+      // Must not contain any arg values
+      expect(messages[0]).not.toContain('-rf');
+      expect(messages[0]).not.toContain('/data');
+    });
+
+    it('dryRun message includes binary name and arg count', async () => {
+      const messages: string[] = [];
+
+      await runPipeline(
+        baseParams({
+          steps: [shellStep(['git', 'commit', '-m', 'msg'], { dryRun: true })],
+          onProgress: (msg) => messages.push(msg),
+        }),
+      );
+
+      expect(messages[0]).toContain('git');
+      expect(messages[0]).toContain('3'); // 3 args
+    });
+
+    it('confirm=true without confirmAllowed throws before execution', async () => {
+      await expect(
+        runPipeline(
+          baseParams({
+            steps: [shellStep(['rm', '-rf', '/'], { confirm: true })],
+          }),
+        ),
+      ).rejects.toThrow('confirm=true requires confirmAllowed');
+
+      expect(vi.mocked(execa)).not.toHaveBeenCalled();
+    });
+
+    it('confirm=true with confirmAllowed=true allows execution', async () => {
+      vi.mocked(execa).mockResolvedValue(makeExecaResult({ stdout: 'ok' }) as any);
+
+      const result = await runPipeline(
+        baseParams({
+          steps: [shellStep(['echo', 'ok'], { confirm: true })],
+          confirmAllowed: true,
+        }),
+      );
+
+      expect(result.outputs).toEqual(['ok']);
+    });
+
+    it('throws a sanitized timeout error without exposing command args', async () => {
+      vi.mocked(execa).mockResolvedValue(
+        makeExecaResult({ timedOut: true, failed: true }) as any,
+      );
+
+      await expect(
+        runPipeline(
+          baseParams({
+            steps: [shellStep(['sleep', '999'], { timeoutMs: 100 })],
+          }),
+        ),
+      ).rejects.toThrow('timed out after 100ms');
+    });
+
+    it('throws a sanitized spawn-failure error', async () => {
+      vi.mocked(execa).mockResolvedValue(
+        makeExecaResult({ failed: true, exitCode: null }) as any,
+      );
+
+      await expect(
+        runPipeline(baseParams({ steps: [shellStep(['nonexistent_binary_xyz'])] })),
+      ).rejects.toThrow('failed to spawn');
+    });
+
+    it('throws a sanitized non-zero exit error with exit code', async () => {
+      vi.mocked(execa).mockResolvedValue(
+        makeExecaResult({ exitCode: 2, failed: true }) as any,
+      );
+
+      await expect(
+        runPipeline(baseParams({ steps: [shellStep(['false'])] })),
+      ).rejects.toThrow('exited with code 2');
+    });
+
+    it('includes signal name in non-zero exit error when signal is present', async () => {
+      vi.mocked(execa).mockResolvedValue(
+        makeExecaResult({ exitCode: 1, failed: true, signal: 'SIGTERM' }) as any,
+      );
+
+      await expect(
+        runPipeline(baseParams({ steps: [shellStep(['cmd'])] })),
+      ).rejects.toThrow('signal: SIGTERM');
+    });
+
+    it('throws a sanitized canceled error', async () => {
+      vi.mocked(execa).mockResolvedValue(
+        makeExecaResult({ isCanceled: true, failed: true, exitCode: null }) as any,
+      );
+
+      await expect(
+        runPipeline(baseParams({ steps: [shellStep(['sleep', '10'])] })),
+      ).rejects.toThrow('canceled');
+    });
+
+    it('onError skip: failed shell step is skipped and pipeline continues', async () => {
+      vi.mocked(execa)
+        .mockResolvedValueOnce(makeExecaResult({ exitCode: 1, failed: true }) as any)
+        .mockResolvedValueOnce(makeExecaResult({ stdout: 'second-ok' }) as any);
+
+      const result = await runPipeline(
+        baseParams({
+          steps: [
+            shellStep(['false'], { onError: 'skip' }),
+            shellStep(['echo', 'second']),
+          ],
+        }),
+      );
+
+      expect(result.outputs).toEqual(['', 'second-ok']);
+    });
+
+    it('interpolates {{prev.output}} in command args before execution', async () => {
+      vi.mocked(execa)
+        .mockResolvedValueOnce(makeExecaResult({ stdout: 'step-one-result' }) as any)
+        .mockResolvedValueOnce(makeExecaResult({ stdout: '' }) as any);
+
+      await runPipeline(
+        baseParams({
+          steps: [
+            shellStep(['echo', 'step-one-result']),
+            shellStep(['process', '{{prev.output}}']),
+          ],
+        }),
+      );
+
+      expect(vi.mocked(execa)).toHaveBeenNthCalledWith(
+        2,
+        'process',
+        ['step-one-result'],
+        expect.anything(),
+      );
+    });
+
+    it('interpolates {{steps.<id>.output}} in command args', async () => {
+      vi.mocked(execa)
+        .mockResolvedValueOnce(makeExecaResult({ stdout: 'artifact' }) as any)
+        .mockResolvedValueOnce(makeExecaResult({ stdout: '' }) as any)
+        .mockResolvedValueOnce(makeExecaResult({ stdout: '' }) as any);
+
+      await runPipeline(
+        baseParams({
+          steps: [
+            shellStep(['echo', 'artifact'], { id: 'build' }),
+            shellStep(['noop']),
+            shellStep(['deploy', '{{steps.build.output}}']),
+          ],
+        }),
+      );
+
+      expect(vi.mocked(execa)).toHaveBeenNthCalledWith(
+        3,
+        'deploy',
+        ['artifact'],
+        expect.anything(),
+      );
+    });
+
+    it('shell step output is available to subsequent prompt steps via {{prev.output}}', async () => {
+      vi.mocked(execa).mockResolvedValue(makeExecaResult({ stdout: 'shell-result' }) as any);
+
+      const capturedPrompts: string[] = [];
+      const runtime: RuntimeAdapter = {
+        id: 'other',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(params): AsyncIterable<EngineEvent> {
+          capturedPrompts.push(params.prompt);
+          yield { type: 'text_final', text: 'done' };
+          yield { type: 'done' };
+        },
+      };
+
+      await runPipeline(
+        baseParams({
+          steps: [
+            shellStep(['get-data']),
+            step('summarize: {{prev.output}}'),
+          ],
+          runtime,
+        }),
+      );
+
+      expect(capturedPrompts[0]).toBe('summarize: shell-result');
+    });
+
+    it('calls onProgress with step id after successful shell step', async () => {
+      vi.mocked(execa).mockResolvedValue(makeExecaResult({ stdout: '' }) as any);
+      const messages: string[] = [];
+
+      await runPipeline(
+        baseParams({
+          steps: [shellStep(['true'], { id: 'my-step' })],
+          onProgress: (msg) => messages.push(msg),
+        }),
+      );
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('my-step');
+    });
+
+    it('error message wraps failure with step index', async () => {
+      vi.mocked(execa)
+        .mockResolvedValueOnce(makeExecaResult({ stdout: 'ok' }) as any)
+        .mockResolvedValueOnce(makeExecaResult({ exitCode: 1, failed: true }) as any);
+
+      await expect(
+        runPipeline(
+          baseParams({
+            steps: [
+              shellStep(['echo', 'first']),
+              shellStep(['false']),
+            ],
+          }),
+        ),
+      ).rejects.toThrow('Pipeline step 1 failed:');
+    });
   });
 });

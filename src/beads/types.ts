@@ -74,6 +74,8 @@ export type BeadSyncResult = {
   threadsReconciled?: number;
   /** Threads whose [NNN] token didn't match any local bead. */
   orphanThreadsFound?: number;
+  /** Thread closures skipped because an in-flight reply was active in that thread. */
+  closesDeferred?: number;
 };
 
 /** Tag name → Discord forum tag ID. */

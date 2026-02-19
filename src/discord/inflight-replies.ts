@@ -75,6 +75,16 @@ export function inFlightReplyCount(): number {
 }
 
 /**
+ * Returns true if there is at least one in-flight reply for the given channelId.
+ */
+export function hasInFlightForChannel(channelId: string): boolean {
+  for (const entry of registry.values()) {
+    if (entry.channelId === channelId) return true;
+  }
+  return false;
+}
+
+/**
  * Returns true once drainInFlightReplies has been called.
  * Streaming loops should check this and no-op if true,
  * preventing the "Interrupted" text from being overwritten.

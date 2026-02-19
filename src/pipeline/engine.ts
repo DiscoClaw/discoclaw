@@ -1,3 +1,4 @@
+import { execa } from 'execa';
 import type { RuntimeAdapter, RuntimeInvokeParams, EngineEvent } from '../runtime/types.js';
 
 export type StepContext = {
@@ -32,8 +33,27 @@ export type PromptStep = {
   sessionKey?: string | null;
 };
 
+export type ShellStep = {
+  kind: 'shell';
+  /** Optional identifier for named template references (`{{steps.<id>.output}}`). */
+  id?: string;
+  /** Command to execute. First element is the binary; remaining elements are arguments. */
+  command: string[];
+  /** Working directory override. Falls back to the pipeline-level cwd when absent. */
+  cwd?: string;
+  timeoutMs?: number;
+  /** How to handle execution failure. Default: 'fail' (throws). */
+  onError?: 'fail' | 'skip';
+  /** When true, skips execution and emits a redacted progress message instead. */
+  dryRun?: boolean;
+  /** When true, requires confirmAllowed=true on the pipeline definition. */
+  confirm?: boolean;
+};
+
+export type PipelineStep = PromptStep | ShellStep;
+
 export type PipelineDef = {
-  steps: PromptStep[];
+  steps: PipelineStep[];
   runtime: RuntimeAdapter;
   /** Working directory passed to each runtime invocation. */
   cwd: string;
@@ -42,6 +62,8 @@ export type PipelineDef = {
   signal?: AbortSignal;
   /** Called after each step completes (or is skipped). Message contains the step id. */
   onProgress?: (message: string) => void;
+  /** Must be true for any shell step with confirm=true to be allowed. */
+  confirmAllowed?: boolean;
 };
 
 export type PipelineResult = {
@@ -51,12 +73,12 @@ export type PipelineResult = {
 
 /**
  * Replace `{{prev.output}}` and `{{steps.<id>.output}}` variables in a static
- * prompt string. Unresolvable references are returned verbatim.
+ * string. Unresolvable references are returned verbatim.
  */
 function interpolateTemplate(
   template: string,
   stepIndex: number,
-  steps: readonly PromptStep[],
+  steps: readonly PipelineStep[],
   outputs: string[],
 ): string {
   return template.replace(/\{\{([\w.]+)\}\}/g, (match, key: string) => {
@@ -93,11 +115,11 @@ async function collectText(events: AsyncIterable<EngineEvent>, signal?: AbortSig
 }
 
 /**
- * Execute a sequence of prompt steps where each step's text output is made
- * available as context for the next step's prompt.
+ * Execute a sequence of steps where each step's text output is made
+ * available as context for subsequent steps.
  */
 export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
-  const { steps, runtime, cwd, model, signal, onProgress } = def;
+  const { steps, runtime, cwd, model, signal, onProgress, confirmAllowed } = def;
   const outputs: string[] = [];
 
   // Validate step IDs — duplicates are rejected up-front.
@@ -120,6 +142,69 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
       allOutputs: outputs,
     };
 
+    // --- Shell step ---
+    if (step.kind === 'shell') {
+      if (step.confirm && !confirmAllowed) {
+        throw new Error(`Pipeline step ${i}: confirm=true requires confirmAllowed on the pipeline`);
+      }
+
+      if (step.dryRun) {
+        outputs.push('');
+        const binary = step.command[0] ?? '';
+        const argCount = step.command.length - 1;
+        onProgress?.(`step ${stepId}: dry-run (${binary}, ${argCount} arg${argCount !== 1 ? 's' : ''})`);
+        continue;
+      }
+
+      // Interpolate template variables in command args before execution.
+      const interpolatedCommand = step.command.map((arg) =>
+        interpolateTemplate(arg, i, steps, outputs)
+      );
+
+      let text: string;
+      try {
+        const result = await execa(interpolatedCommand[0], interpolatedCommand.slice(1), {
+          reject: false,
+          timeout: step.timeoutMs,
+          cancelSignal: signal,
+          cwd: step.cwd ?? cwd,
+        });
+
+        if (result.isCanceled) {
+          throw new Error('shell: command canceled');
+        }
+
+        if (result.timedOut) {
+          throw new Error(`shell: command timed out after ${step.timeoutMs ?? 0}ms`);
+        }
+
+        if (result.failed && result.exitCode == null) {
+          throw new Error('shell: command failed to spawn');
+        }
+
+        if (result.exitCode !== 0) {
+          const parts = [`shell: command exited with code ${result.exitCode}`];
+          if (result.signal) parts.push(`(signal: ${result.signal})`);
+          throw new Error(parts.join(' '));
+        }
+
+        text = result.stdout.trimEnd();
+      } catch (err) {
+        if (step.onError === 'skip') {
+          outputs.push('');
+          onProgress?.(`step ${stepId}: skipped`);
+          continue;
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`Pipeline step ${i} failed: ${message}`);
+      }
+
+      outputs.push(text);
+      onProgress?.(`step ${stepId}: done`);
+      continue;
+    }
+
+    // --- Prompt step ---
     const resolvedPrompt =
       typeof step.prompt === 'function'
         ? step.prompt(ctx)

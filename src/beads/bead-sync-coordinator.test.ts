@@ -9,6 +9,7 @@ vi.mock('./bead-sync.js', () => ({
     statusesUpdated: 0,
     tagsUpdated: 0,
     warnings: 0,
+    closesDeferred: 0,
   })),
 }));
 
@@ -254,6 +255,71 @@ describe('BeadSyncCoordinator', () => {
     const passedOpts = (runBeadSync as any).mock.calls[0][0];
     expect(passedOpts.tagMap).toEqual(tagMap);
     expect(passedOpts.tagMap).not.toBe(tagMap);
+  });
+});
+
+describe('BeadSyncCoordinator deferred-close retry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not schedule retry when closesDeferred is 0', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    const coord = new BeadSyncCoordinator(makeOpts());
+    await coord.sync();
+
+    expect(runBeadSync).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(35_000);
+
+    // No retry — only the original call.
+    expect((runBeadSync as any).mock.calls.length).toBe(1);
+  });
+
+  it('schedules a retry sync after 30s when closesDeferred > 0', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    (runBeadSync as any).mockResolvedValueOnce({
+      threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+      threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+      closesDeferred: 1,
+    });
+
+    const coord = new BeadSyncCoordinator(makeOpts());
+    await coord.sync();
+
+    expect(runBeadSync).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    // Retry should have fired.
+    expect((runBeadSync as any).mock.calls.length).toBe(2);
+  });
+
+  it('deferred-close retry failure is logged', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    (runBeadSync as any)
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+        closesDeferred: 1,
+      })
+      .mockRejectedValueOnce(new Error('retry boom'));
+
+    const opts = makeOpts();
+    const coord = new BeadSyncCoordinator(opts);
+    await coord.sync();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(opts.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      'beads:coordinator deferred-close retry failed',
+    );
   });
 });
 

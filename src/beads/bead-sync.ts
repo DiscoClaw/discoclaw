@@ -1,5 +1,6 @@
 import type { Client, Guild } from 'discord.js';
 import type { TagMap, BeadData, BeadSyncResult } from './types.js';
+import { hasInFlightForChannel } from '../discord/inflight-replies.js';
 export type { BeadSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
@@ -74,6 +75,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   let statusesUpdated = 0;
   let tagsUpdated = 0;
   let warnings = 0;
+  let closesDeferred = 0;
 
   // Load all beads (including closed for Phase 4).
   const allBeads = await bdList({ status: 'all' }, beadsCwd);
@@ -196,6 +198,12 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
         await sleep(throttleMs);
         continue;
       }
+      if (hasInFlightForChannel(threadId)) {
+        closesDeferred++;
+        log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase4 close deferred (in-flight reply active)');
+        await sleep(throttleMs);
+        continue;
+      }
       await closeBeadThread(client, threadId, bead, tagMap, log);
       threadsArchived++;
       log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase4 archived');
@@ -268,6 +276,12 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
 
         // If bead is closed but thread is not archived, archive it.
         if (bead.status === 'closed' && !thread.archived) {
+          if (hasInFlightForChannel(thread.id)) {
+            closesDeferred++;
+            log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 close deferred (in-flight reply active)');
+            await sleep(throttleMs);
+            continue;
+          }
           // Backfill external_ref if missing so Phase 4 can track this thread.
           if (!existingThreadId) {
             try {
@@ -293,10 +307,15 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
           try {
             const alreadyClosed = await isBeadThreadAlreadyClosed(client, thread.id, bead, tagMap);
             if (!alreadyClosed) {
-              log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 archived thread is stale, unarchiving to reconcile');
-              await closeBeadThread(client, thread.id, bead, tagMap, log);
-              threadsReconciled++;
-              log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 reconciled (re-archived)');
+              if (hasInFlightForChannel(thread.id)) {
+                closesDeferred++;
+                log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 close deferred (in-flight reply active)');
+              } else {
+                log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 archived thread is stale, unarchiving to reconcile');
+                await closeBeadThread(client, thread.id, bead, tagMap, log);
+                threadsReconciled++;
+                log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 reconciled (re-archived)');
+              }
             }
           } catch (err) {
             log?.warn({ err, beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 archived reconcile failed');
@@ -311,8 +330,8 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     }
   }
 
-  log?.info({ threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, threadsReconciled, orphanThreadsFound, warnings }, 'bead-sync: complete');
-  const result: BeadSyncResult = { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, warnings, threadsReconciled, orphanThreadsFound };
+  log?.info({ threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, threadsReconciled, orphanThreadsFound, closesDeferred, warnings }, 'bead-sync: complete');
+  const result: BeadSyncResult = { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, warnings, threadsReconciled, orphanThreadsFound, closesDeferred };
   await opts.statusPoster?.beadSyncComplete(result);
   return result;
 }
