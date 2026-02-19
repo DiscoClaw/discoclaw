@@ -53,6 +53,7 @@ export function createStreamingProgress(
   let statusTick = 0;
   let lastStreamEditAt = 0;
   let progressMessageGone = false;
+  const startedAt = Date.now();
 
   // Static-progress throttle state (mirrors the existing onProgress pattern)
   let lastStaticEditAt = 0;
@@ -92,6 +93,7 @@ export function createStreamingProgress(
       activityLabel,
       finalText,
       statusTick: statusTick++,
+      elapsedMs: now - startedAt,
     });
     try {
       await progressReply.edit({ content, allowedMentions: NO_MENTIONS });

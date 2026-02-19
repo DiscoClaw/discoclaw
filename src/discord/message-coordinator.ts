@@ -50,7 +50,7 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
 import { buildBeadContextSummary } from '../beads/bd-cli.js';
@@ -75,7 +75,7 @@ import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
-export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput };
+export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed };
 
 export type BotParams = {
   token: string;
@@ -1874,7 +1874,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const now = Date.now();
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               lastEditAt = now;
-              const out = selectStreamingOutput({ deltaText, activityLabel, finalText, statusTick: statusTick++, showPreview: Date.now() - t0 >= 7000 });
+              const out = selectStreamingOutput({ deltaText, activityLabel, finalText, statusTick: statusTick++, showPreview: Date.now() - t0 >= 7000, elapsedMs: Date.now() - t0 });
               try {
                 await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
               } catch {

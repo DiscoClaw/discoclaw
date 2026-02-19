@@ -25,6 +25,7 @@ export {
   formatBoldLabel,
   thinkingLabel,
   selectStreamingOutput,
+  formatElapsed,
 } from './discord/message-coordinator.js';
 
 // ---------------------------------------------------------------------------

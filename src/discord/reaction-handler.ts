@@ -443,6 +443,7 @@ function createReactionHandler(
               deltaText, activityLabel: '', finalText,
               statusTick: statusTick++,
               showPreview: Date.now() - t0 >= 7000,
+              elapsedMs: Date.now() - t0,
             });
             try {
               await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
