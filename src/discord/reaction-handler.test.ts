@@ -5,6 +5,8 @@ import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
 import { inFlightReplyCount, _resetForTest as resetInFlight } from './inflight-replies.js';
 import * as reactionPrompts from './reaction-prompts.js';
+import * as abortRegistry from './abort-registry.js';
+import * as forgePlanRegistry from './forge-plan-registry.js';
 
 function makeMockRuntime(response: string): RuntimeAdapter {
   return {
@@ -1506,6 +1508,130 @@ describe('reaction prompt interception', () => {
 
     // The prompt was registered — the reaction handler will intercept the user's reaction.
     expect(reactionPrompts.pendingPromptCount()).toBe(1);
+  });
+});
+
+describe('🛑 forge-aware abort intercept', () => {
+  // Builds a 🛑 reaction on a bot-authored message.
+  function makeStopReaction() {
+    return mockReaction({
+      emoji: { name: '🛑' },
+      message: mockMessage({
+        author: { id: 'bot-1', username: 'TestBot', displayName: 'TestBot' },
+      }),
+    });
+  }
+
+  it('calls tryAbortAll and returns without AI invocation when no resolvedPrompt', async () => {
+    const tryAbortAllSpy = vi.spyOn(abortRegistry, 'tryAbortAll').mockReturnValue(0);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(null);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      expect(tryAbortAllSpy).toHaveBeenCalledOnce();
+      expect(getOrchestratorSpy).toHaveBeenCalledOnce();
+      expect(queue.run).not.toHaveBeenCalled();
+    } finally {
+      tryAbortAllSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
+  it('calls requestCancel on a running forge orchestrator', async () => {
+    const requestCancelFn = vi.fn();
+    const mockOrch = { isRunning: true, requestCancel: requestCancelFn };
+    const tryAbortAllSpy = vi.spyOn(abortRegistry, 'tryAbortAll').mockReturnValue(0);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(mockOrch as any);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      expect(requestCancelFn).toHaveBeenCalledOnce();
+      expect(queue.run).not.toHaveBeenCalled();
+    } finally {
+      tryAbortAllSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
+  it('does not call requestCancel when forge orchestrator is not running', async () => {
+    const requestCancelFn = vi.fn();
+    const mockOrch = { isRunning: false, requestCancel: requestCancelFn };
+    const tryAbortAllSpy = vi.spyOn(abortRegistry, 'tryAbortAll').mockReturnValue(0);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(mockOrch as any);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      expect(requestCancelFn).not.toHaveBeenCalled();
+    } finally {
+      tryAbortAllSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
+  it('increments abort metric when tryAbortAll aborts active streams', async () => {
+    const { MetricsRegistry } = await import('../observability/metrics.js');
+    const metrics = new MetricsRegistry();
+    const tryAbortAllSpy = vi.spyOn(abortRegistry, 'tryAbortAll').mockReturnValue(2);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(null);
+    try {
+      const params = makeParams({ metrics });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      const snap = metrics.snapshot();
+      expect(snap.counters['discord.reaction.abort']).toBe(1);
+    } finally {
+      tryAbortAllSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
+  it('does not increment abort metric when no streams were active', async () => {
+    const { MetricsRegistry } = await import('../observability/metrics.js');
+    const metrics = new MetricsRegistry();
+    const tryAbortAllSpy = vi.spyOn(abortRegistry, 'tryAbortAll').mockReturnValue(0);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(null);
+    try {
+      const params = makeParams({ metrics });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      const snap = metrics.snapshot();
+      expect(snap.counters['discord.reaction.abort']).toBeUndefined();
+    } finally {
+      tryAbortAllSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
+  it('skips the intercept when resolvedPrompt is set — proceeds to AI invocation', async () => {
+    const promptSpy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'Use 🛑?', chosenEmoji: '🛑' });
+    const tryAbortAllSpy = vi.spyOn(abortRegistry, 'tryAbortAll').mockReturnValue(0);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      // Intercept was skipped — tryAbortAll not called.
+      expect(tryAbortAllSpy).not.toHaveBeenCalled();
+      // AI invocation proceeds normally.
+      expect(queue.run).toHaveBeenCalledOnce();
+    } finally {
+      promptSpy.mockRestore();
+      tryAbortAllSpy.mockRestore();
+    }
   });
 });
 
