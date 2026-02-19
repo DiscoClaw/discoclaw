@@ -8,6 +8,7 @@ import {
 } from './reaction-prompts.js';
 import type { ReactionPromptRequest } from './reaction-prompts.js';
 import type { ActionContext } from './actions.js';
+import { QUERY_ACTION_TYPES } from './action-categories.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -108,115 +109,92 @@ describe('executeReactionPromptAction — validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeReactionPromptAction — happy path', () => {
-  it('sends prompt message and adds reactions for each choice', async () => {
+  it('sends prompt message with question text only and adds reactions', async () => {
     const reactFn = vi.fn().mockResolvedValue(undefined);
     const promptMsg = { id: 'prompt-1', react: reactFn };
     const sendFn = vi.fn().mockResolvedValue(promptMsg);
     const ctx = makeCtx();
     (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
 
-    // Resolve the prompt immediately after it is registered.
-    const execPromise = executeReactionPromptAction(makeAction({ choices: ['✅', '❌'] }), ctx);
+    const result = await executeReactionPromptAction(makeAction({ choices: ['✅', '❌'] }), ctx);
 
-    // Give the executor ticks to: (1) resolve send(), (2) call registerPrompt, then simulate reaction.
-    await Promise.resolve();
-    await Promise.resolve();
-    tryResolveReactionPrompt('prompt-1', '✅');
-
-    const result = await execPromise;
-
-    expect(result).toEqual({ ok: true, summary: 'User chose: ✅' });
+    expect(result).toEqual({ ok: true, summary: 'Prompt sent — awaiting user reaction' });
     expect(sendFn).toHaveBeenCalledOnce();
     const sentContent: string = sendFn.mock.calls[0][0].content;
-    expect(sentContent).toContain('Should I proceed?');
-    expect(sentContent).toContain('✅');
-    expect(sentContent).toContain('❌');
+    expect(sentContent).toBe('Should I proceed?');
     expect(reactFn).toHaveBeenCalledWith('✅');
     expect(reactFn).toHaveBeenCalledWith('❌');
   });
 
-  it('resolves with the user-chosen emoji', async () => {
+  it('registers prompt data accessible via tryResolveReactionPrompt', async () => {
     const reactFn = vi.fn().mockResolvedValue(undefined);
     const promptMsg = { id: 'prompt-2', react: reactFn };
     const sendFn = vi.fn().mockResolvedValue(promptMsg);
     const ctx = makeCtx();
     (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
 
-    const execPromise = executeReactionPromptAction(
-      makeAction({ choices: ['🔴', '🟡', '🟢'] }),
-      ctx,
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-    tryResolveReactionPrompt('prompt-2', '🟢');
+    await executeReactionPromptAction(makeAction({ choices: ['🔴', '🟡', '🟢'] }), ctx);
 
-    const result = await execPromise;
-    expect(result).toEqual({ ok: true, summary: 'User chose: 🟢' });
+    const resolved = tryResolveReactionPrompt('prompt-2', '🟢');
+    expect(resolved).toEqual({ question: 'Should I proceed?', chosenEmoji: '🟢' });
   });
 
-  it('resolves when any valid choice is used', async () => {
+  it('accepts any valid emoji choice', async () => {
     const reactFn = vi.fn().mockResolvedValue(undefined);
     const promptMsg = { id: 'prompt-3', react: reactFn };
     const sendFn = vi.fn().mockResolvedValue(promptMsg);
     const ctx = makeCtx();
     (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
 
-    const execPromise = executeReactionPromptAction(
-      makeAction({ choices: ['👍', '👎'] }),
-      ctx,
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-    tryResolveReactionPrompt('prompt-3', '👎');
+    const result = await executeReactionPromptAction(makeAction({ choices: ['👍', '👎'] }), ctx);
+    expect(result).toEqual({ ok: true, summary: 'Prompt sent — awaiting user reaction' });
 
-    const result = await execPromise;
-    expect(result).toEqual({ ok: true, summary: 'User chose: 👎' });
+    const resolved = tryResolveReactionPrompt('prompt-3', '👎');
+    expect(resolved).toEqual({ question: 'Should I proceed?', chosenEmoji: '👎' });
   });
 
-  it('clamps timeoutSeconds to 300', async () => {
-    // This test checks that an extreme timeout doesn't cause issues.
-    // We resolve immediately so we don't actually wait.
-    vi.useFakeTimers();
-    try {
-      const reactFn = vi.fn().mockResolvedValue(undefined);
-      const promptMsg = { id: 'prompt-clamp', react: reactFn };
-      const sendFn = vi.fn().mockResolvedValue(promptMsg);
-      const ctx = makeCtx();
-      (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
+  it('registry is populated before react() calls — ordering invariant', async () => {
+    let countDuringReact = -1;
+    const reactFn = vi.fn().mockImplementation(async () => {
+      // Capture pendingPromptCount at the moment react() is first called.
+      if (countDuringReact === -1) {
+        countDuringReact = pendingPromptCount();
+      }
+    });
+    const promptMsg = { id: 'prompt-order', react: reactFn };
+    const sendFn = vi.fn().mockResolvedValue(promptMsg);
+    const ctx = makeCtx();
+    (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
 
-      const execPromise = executeReactionPromptAction(
-        makeAction({ timeoutSeconds: 9999 }),
-        ctx,
-      );
+    await executeReactionPromptAction(makeAction({ choices: ['✅', '❌'] }), ctx);
 
-      // Give executor ticks to send and register the prompt.
-      await Promise.resolve();
-      await Promise.resolve();
-
-      // Advance time to just under 300s — should NOT have timed out yet.
-      await vi.advanceTimersByTimeAsync(299_000);
-      tryResolveReactionPrompt('prompt-clamp', '✅');
-      const result = await execPromise;
-      expect(result.ok).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    // Registration must have occurred before the first react() call.
+    expect(countDuringReact).toBe(1);
   });
 
-  it('removes prompt from store after resolution', async () => {
+  it('accepts timeoutSeconds without error (field is ignored)', async () => {
+    const reactFn = vi.fn().mockResolvedValue(undefined);
+    const promptMsg = { id: 'prompt-clamp', react: reactFn };
+    const sendFn = vi.fn().mockResolvedValue(promptMsg);
+    const ctx = makeCtx();
+    (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
+
+    const result = await executeReactionPromptAction(makeAction({ timeoutSeconds: 9999 }), ctx);
+    expect(result).toEqual({ ok: true, summary: 'Prompt sent — awaiting user reaction' });
+  });
+
+  it('removes prompt from store after resolution via tryResolveReactionPrompt', async () => {
     const reactFn = vi.fn().mockResolvedValue(undefined);
     const promptMsg = { id: 'prompt-cleanup', react: reactFn };
     const sendFn = vi.fn().mockResolvedValue(promptMsg);
     const ctx = makeCtx();
     (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
 
-    const execPromise = executeReactionPromptAction(makeAction(), ctx);
-    await Promise.resolve();
-    await Promise.resolve();
+    const result = await executeReactionPromptAction(makeAction(), ctx);
+    expect(result.ok).toBe(true);
     expect(pendingPromptCount()).toBe(1);
 
     tryResolveReactionPrompt('prompt-cleanup', '✅');
-    await execPromise;
     expect(pendingPromptCount()).toBe(0);
   });
 });
@@ -237,7 +215,7 @@ describe('executeReactionPromptAction — error paths', () => {
     expect((result as any).error).toContain('Missing Permissions');
   });
 
-  it('returns error when react throws', async () => {
+  it('returns error when react throws and cleans up pending prompt', async () => {
     const reactFn = vi.fn().mockRejectedValue(new Error('Unknown Emoji'));
     const promptMsg = { id: 'prompt-react-err', react: reactFn };
     const sendFn = vi.fn().mockResolvedValue(promptMsg);
@@ -247,30 +225,7 @@ describe('executeReactionPromptAction — error paths', () => {
     const result = await executeReactionPromptAction(makeAction(), ctx);
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('Unknown Emoji');
-  });
-
-  it('returns timeout error when no reaction arrives within timeoutSeconds', async () => {
-    vi.useFakeTimers();
-    try {
-      const reactFn = vi.fn().mockResolvedValue(undefined);
-      const promptMsg = { id: 'prompt-timeout', react: reactFn };
-      const sendFn = vi.fn().mockResolvedValue(promptMsg);
-      const ctx = makeCtx();
-      (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
-
-      const execPromise = executeReactionPromptAction(
-        makeAction({ timeoutSeconds: 10 }),
-        ctx,
-      );
-
-      await vi.advanceTimersByTimeAsync(10_001);
-      const result = await execPromise;
-      expect(result.ok).toBe(false);
-      expect((result as any).error).toContain('timed out');
-      expect(pendingPromptCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(pendingPromptCount()).toBe(0);
   });
 });
 
@@ -279,67 +234,50 @@ describe('executeReactionPromptAction — error paths', () => {
 // ---------------------------------------------------------------------------
 
 describe('tryResolveReactionPrompt', () => {
-  it('returns false for unknown message ID', () => {
-    expect(tryResolveReactionPrompt('nonexistent', '✅')).toBe(false);
+  it('returns null for unknown message ID', () => {
+    expect(tryResolveReactionPrompt('nonexistent', '✅')).toBeNull();
   });
 
-  it('returns false when emoji is not a valid choice', async () => {
+  it('returns null when emoji is not a valid choice', async () => {
     const reactFn = vi.fn().mockResolvedValue(undefined);
     const promptMsg = { id: 'prompt-invalid-emoji', react: reactFn };
     const sendFn = vi.fn().mockResolvedValue(promptMsg);
     const ctx = makeCtx();
     (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
 
-    // Start the prompt but don't await it yet.
-    const execPromise = executeReactionPromptAction(makeAction({ choices: ['✅', '❌'] }), ctx);
-    await Promise.resolve();
-    await Promise.resolve();
+    await executeReactionPromptAction(makeAction({ choices: ['✅', '❌'] }), ctx);
 
-    // Attempt to resolve with an emoji not in the choices list.
-    const consumed = tryResolveReactionPrompt('prompt-invalid-emoji', '🔥');
-    expect(consumed).toBe(false);
-    // Prompt should still be pending.
+    expect(tryResolveReactionPrompt('prompt-invalid-emoji', '🔥')).toBeNull();
     expect(pendingPromptCount()).toBe(1);
 
-    // Now resolve correctly so there's no dangling promise.
     const resolved = tryResolveReactionPrompt('prompt-invalid-emoji', '✅');
-    expect(resolved).toBe(true);
-    await execPromise;
+    expect(resolved).toEqual({ question: 'Should I proceed?', chosenEmoji: '✅' });
   });
 
-  it('returns true and resolves the prompt when emoji matches', async () => {
+  it('returns matched data when emoji matches', async () => {
     const reactFn = vi.fn().mockResolvedValue(undefined);
     const promptMsg = { id: 'prompt-match', react: reactFn };
     const sendFn = vi.fn().mockResolvedValue(promptMsg);
     const ctx = makeCtx();
     (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
 
-    const execPromise = executeReactionPromptAction(makeAction(), ctx);
-    await Promise.resolve();
-    await Promise.resolve();
+    await executeReactionPromptAction(makeAction(), ctx);
 
-    const consumed = tryResolveReactionPrompt('prompt-match', '✅');
-    expect(consumed).toBe(true);
-
-    const result = await execPromise;
-    expect(result.ok).toBe(true);
+    const result = tryResolveReactionPrompt('prompt-match', '✅');
+    expect(result).toEqual({ question: 'Should I proceed?', chosenEmoji: '✅' });
   });
 
-  it('only resolves once — second call returns false', async () => {
+  it('only resolves once — second call returns null', async () => {
     const reactFn = vi.fn().mockResolvedValue(undefined);
     const promptMsg = { id: 'prompt-once', react: reactFn };
     const sendFn = vi.fn().mockResolvedValue(promptMsg);
     const ctx = makeCtx();
     (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
 
-    const execPromise = executeReactionPromptAction(makeAction(), ctx);
-    await Promise.resolve();
-    await Promise.resolve();
+    await executeReactionPromptAction(makeAction(), ctx);
 
-    expect(tryResolveReactionPrompt('prompt-once', '✅')).toBe(true);
-    expect(tryResolveReactionPrompt('prompt-once', '✅')).toBe(false);
-
-    await execPromise;
+    expect(tryResolveReactionPrompt('prompt-once', '✅')).not.toBeNull();
+    expect(tryResolveReactionPrompt('prompt-once', '✅')).toBeNull();
   });
 });
 
@@ -367,5 +305,15 @@ describe('reactionPromptSection', () => {
 
   it('mentions choice count limits', () => {
     expect(reactionPromptSection()).toContain('2–9');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QUERY_ACTION_TYPES regression guard
+// ---------------------------------------------------------------------------
+
+describe('QUERY_ACTION_TYPES exclusion', () => {
+  it('reactionPrompt is not in QUERY_ACTION_TYPES (fire-and-forget, not a query)', () => {
+    expect(QUERY_ACTION_TYPES.has('reactionPrompt')).toBe(false);
   });
 });
