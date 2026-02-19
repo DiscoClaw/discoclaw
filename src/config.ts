@@ -77,6 +77,10 @@ export type DiscoclawConfig = {
   forgeDrafterRuntime?: string;
   forgeAuditorRuntime?: string;
 
+  // Gemini CLI adapter config
+  geminiBin: string;
+  geminiModel: string;
+
   // Codex CLI adapter config
   codexBin: string;
   codexModel: string;
@@ -501,6 +505,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiModel,
       forgeDrafterRuntime,
       forgeAuditorRuntime,
+
+      geminiBin: parseTrimmedString(env, 'GEMINI_BIN') ?? 'gemini',
+      geminiModel: parseTrimmedString(env, 'GEMINI_MODEL') ?? 'gemini-2.5-pro',
 
       codexBin: parseTrimmedString(env, 'CODEX_BIN') ?? 'codex',
       codexModel: parseTrimmedString(env, 'CODEX_MODEL') ?? 'gpt-5.3-codex',
