@@ -14,7 +14,7 @@ function envOpt(name: string): string | undefined {
   return v || undefined;
 }
 
-function parseArgInt(args: string[], name: string): number | undefined {
+export function parseArgInt(args: string[], name: string): number | undefined {
   const idx = args.indexOf(name);
   if (idx < 0) return undefined;
   const v = args[idx + 1];
@@ -24,46 +24,61 @@ function parseArgInt(args: string[], name: string): number | undefined {
   return n;
 }
 
-const args = process.argv.slice(2);
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
 
-const discordToken = env('DISCORD_TOKEN');
-const guildId = env('DISCORD_GUILD_ID');
-const forumId = env('DISCOCLAW_BEADS_FORUM');
-const beadsCwd = envOpt('DISCOCLAW_BEADS_CWD') ?? process.cwd();
-const dataDir = envOpt('DISCOCLAW_DATA_DIR');
-const tagMapPath = envOpt('DISCOCLAW_BEADS_TAG_MAP')
-  ?? (dataDir ? path.join(dataDir, 'beads', 'tag-map.json') : undefined);
+  const discordToken = env('DISCORD_TOKEN');
+  const guildId = env('DISCORD_GUILD_ID');
+  const forumId = env('DISCOCLAW_BEADS_FORUM');
+  const beadsCwd = envOpt('DISCOCLAW_BEADS_CWD') ?? process.cwd();
+  const dataDir = envOpt('DISCOCLAW_DATA_DIR');
+  const tagMapPath = envOpt('DISCOCLAW_BEADS_TAG_MAP')
+    ?? (dataDir ? path.join(dataDir, 'beads', 'tag-map.json') : undefined);
+  const tasksPath = envOpt('DISCOCLAW_TASKS_PATH')
+    ?? (dataDir ? path.join(dataDir, 'beads', 'tasks.jsonl') : undefined);
 
-const throttleMs = parseArgInt(args, '--throttle-ms') ?? 250;
-const archivedLimit = parseArgInt(args, '--archived-limit') ?? 200;
+  const throttleMs = parseArgInt(args, '--throttle-ms') ?? 250;
+  const archivedLimit = parseArgInt(args, '--archived-limit') ?? 200;
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-await client.login(discordToken);
-await new Promise<void>((resolve) => client.once('ready', () => resolve()));
+  // Load in-process task store when a persistence path is configured.
+  if (tasksPath) {
+    const { TaskStore } = await import('../tasks/store.js');
+    const store = new TaskStore({ persistPath: tasksPath });
+    await store.load();
+  }
 
-try {
-  const guild = await client.guilds.fetch(guildId);
-  const tagMap = tagMapPath ? await loadTagMap(tagMapPath) : {};
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  await client.login(discordToken);
+  await new Promise<void>((resolve) => client.once('ready', () => resolve()));
 
-  const mentionUserId = envOpt('DISCOCLAW_BEADS_MENTION_USER');
-  const sidebarRaw = envOpt('DISCOCLAW_BEADS_SIDEBAR');
-  const sidebarEnabled = sidebarRaw === '1' || sidebarRaw?.toLowerCase() === 'true';
-  const sidebarMentionUserId = sidebarEnabled ? mentionUserId : undefined;
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    const tagMap = tagMapPath ? await loadTagMap(tagMapPath) : {};
 
-  const result = await runBeadSync({
-    client,
-    guild,
-    forumId,
-    tagMap,
-    beadsCwd,
-    throttleMs,
-    archivedDedupeLimit: archivedLimit,
-    mentionUserId: sidebarMentionUserId,
-  });
+    const mentionUserId = envOpt('DISCOCLAW_BEADS_MENTION_USER');
+    const sidebarRaw = envOpt('DISCOCLAW_BEADS_SIDEBAR');
+    const sidebarEnabled = sidebarRaw === '1' || sidebarRaw?.toLowerCase() === 'true';
+    const sidebarMentionUserId = sidebarEnabled ? mentionUserId : undefined;
 
-  // Stable machine-readable output (matches legacy script's spirit).
-  process.stdout.write(JSON.stringify(result) + '\n');
-} finally {
-  client.destroy();
+    const result = await runBeadSync({
+      client,
+      guild,
+      forumId,
+      tagMap,
+      beadsCwd,
+      throttleMs,
+      archivedDedupeLimit: archivedLimit,
+      mentionUserId: sidebarMentionUserId,
+    });
+
+    // Stable machine-readable output (matches legacy script's spirit).
+    process.stdout.write(JSON.stringify(result) + '\n');
+  } finally {
+    client.destroy();
+  }
 }
 
+// Only execute when invoked directly as a script, not when imported as a module (e.g., in tests).
+if (import.meta.url === new URL(process.argv[1] ?? '', 'file:').href) {
+  await main();
+}
