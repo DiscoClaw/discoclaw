@@ -167,9 +167,9 @@ if (providerChoice === '1') {
   if (codexBin) values.CODEX_BIN = codexBin;
   const codexModel = await askOptional('Codex model [leave empty for default]: ', () => null);
   if (codexModel) values.CODEX_MODEL = codexModel;
-  const bypassApprovals = await ask('Enable CODEX_BYPASS_APPROVALS? [y/N] ');
+  const bypassApprovals = await ask('Enable CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX? [y/N] ');
   if (bypassApprovals.toLowerCase() === 'y') {
-    values.CODEX_BYPASS_APPROVALS = '1';
+    values.CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX = '1';
   }
 }
 
