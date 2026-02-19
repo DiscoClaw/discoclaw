@@ -885,13 +885,14 @@ Use descriptive prefixes:
 
 After a PR is merged to `main`, always clean up both sides:
 
-1. **Pull main:** `git checkout main && git pull origin main`
-2. **Delete local branch:** `git branch -d <branch-name>`
+1. **Pull main:** `git checkout main && git reset --hard origin/main`
+   - Use `reset --hard` rather than `pull` — if commits were squash-merged, the local branch may show as diverged and `pull` will refuse without a reconcile strategy.
+2. **Delete local branch:** `git branch -D <branch-name>`
+   - Use `-D` (force) rather than `-d`. When GitHub squash-merges a PR, the individual commits on the local branch don't appear in the merge commit, so git reports the branch as "not fully merged" even though the work is on `main`.
 3. **Delete remote branch:** `git push origin --delete <branch-name>`
+   - If GitHub is configured to auto-delete head branches on merge (Settings → General → "Automatically delete head branches"), this step will fail with "remote ref does not exist" — that's fine, the branch is already gone.
 
 All three steps should happen together — don't leave stale branches on either side.
-
-**Tip:** GitHub can auto-delete head branches on merge (Settings → General → "Automatically delete head branches"). When enabled, step 3 is handled automatically.
 
 ### Local cleanup & verification
 
