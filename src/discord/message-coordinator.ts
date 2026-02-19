@@ -49,6 +49,7 @@ import { ToolAwareQueue } from './tool-aware-queue.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
+import { registerAbort } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
@@ -1579,6 +1580,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let replyFinalized = false;
           let hadTextFinal = false;
           let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
+          const { signal: abortSignal, dispose: abortDispose } = registerAbort(reply.id);
+          // Best-effort: add 🛑 so the user can tap it to kill the running stream.
+          (reply as any).react?.('🛑')?.catch(() => { /* best-effort */ });
           // Declared before try so they remain accessible after the finally block closes.
           let historySection = '';
           let summarySection = '';
@@ -1917,6 +1921,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // Images only on initial turn — follow-ups are text-only continuations
               // with action results; re-downloading would waste time and bandwidth.
               images: followUpDepth === 0 ? inputImages : undefined,
+              signal: abortSignal,
             })) {
               // Track event flow for stall warning.
               lastEventAt = Date.now();
@@ -2129,6 +2134,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (!replyFinalized && reply && !isShuttingDown()) {
               try { await reply.delete(); } catch { /* best-effort */ }
             }
+            abortDispose();
             dispose();
           }
 

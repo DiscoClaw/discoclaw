@@ -10,6 +10,7 @@ import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
+import { tryAbort } from './abort-registry.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
 import { editThenSendChunks } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
@@ -83,6 +84,13 @@ function createReactionHandler(
 
       // 4. Allowlist check.
       if (!isAllowlisted(params.allowUserIds, user.id)) return;
+
+      // 4a. Abort intercept — 🛑 on a bot reply kills the running stream.
+      // Returns true for both active (fires abort) and cooldown (already done) entries,
+      // so the reaction is silently consumed rather than triggering an AI invocation.
+      if (mode === 'add' && reaction.emoji.name === '🛑') {
+        if (tryAbort(reaction.message.id)) return;
+      }
 
       // 5. Reaction prompt interception — if this reaction resolves a pending prompt, capture
       // the result and continue into the normal AI invocation flow with prompt-specific text.
