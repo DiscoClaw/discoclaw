@@ -4,7 +4,7 @@ import { hasInFlightForChannel } from '../discord/inflight-replies.js';
 export type { BeadSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
-import { bdList, bdUpdate } from './bd-cli.js';
+import type { TaskStore } from '../tasks/store.js';
 import {
   resolveBeadsForum,
   createBeadThread,
@@ -26,7 +26,7 @@ export type BeadSyncOptions = {
   guild: Guild;
   forumId: string;
   tagMap: TagMap;
-  beadsCwd: string;
+  store: TaskStore;
   log?: LoggerLike;
   throttleMs?: number;
   archivedDedupeLimit?: number;
@@ -57,7 +57,7 @@ async function sleep(ms: number | undefined): Promise<void> {
  *          for closed beads and detect orphan threads with no matching bead.
  */
 export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult> {
-  const { client, guild, forumId, tagMap, beadsCwd, log } = opts;
+  const { client, guild, forumId, tagMap, log } = opts;
   const throttleMs = opts.throttleMs ?? 250;
 
   const forum = await resolveBeadsForum(guild, forumId);
@@ -78,7 +78,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   let closesDeferred = 0;
 
   // Load all beads (including closed for Phase 4).
-  const allBeads = await bdList({ status: 'all' }, beadsCwd);
+  const allBeads = opts.store.list({ status: 'all' });
 
   // Phase 1: Create threads for beads missing external_ref.
   const missingRef = allBeads.filter((b) =>
@@ -92,7 +92,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
       const existing = await findExistingThreadForBead(forum, bead.id, { archivedLimit: opts.archivedDedupeLimit });
       if (existing) {
         try {
-          await bdUpdate(bead.id, { externalRef: `discord:${existing}` }, beadsCwd);
+          opts.store.update(bead.id, { externalRef: `discord:${existing}` });
           log?.info({ beadId: bead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfilled');
         } catch (err) {
           log?.warn({ err, beadId: bead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfill failed');
@@ -105,7 +105,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
       const threadId = await createBeadThread(forum, bead, tagMap, opts.mentionUserId);
       // Link back via external_ref.
       try {
-        await bdUpdate(bead.id, { externalRef: `discord:${threadId}` }, beadsCwd);
+        opts.store.update(bead.id, { externalRef: `discord:${threadId}` });
       } catch (err) {
         log?.warn({ err, beadId: bead.id }, 'bead-sync:phase1 external-ref update failed');
         warnings++;
@@ -125,7 +125,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   );
   for (const bead of needsBlocked) {
     try {
-      await bdUpdate(bead.id, { status: 'blocked' as any }, beadsCwd);
+      opts.store.update(bead.id, { status: 'blocked' as any });
       bead.status = 'blocked'; // keep in-memory copy current for Phase 3
       statusesUpdated++;
       log?.info({ beadId: bead.id }, 'bead-sync:phase2 status updated to blocked');
@@ -285,7 +285,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
           // Backfill external_ref if missing so Phase 4 can track this thread.
           if (!existingThreadId) {
             try {
-              await bdUpdate(bead.id, { externalRef: `discord:${thread.id}` }, beadsCwd);
+              opts.store.update(bead.id, { externalRef: `discord:${thread.id}` });
               log?.info({ beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 external_ref backfilled');
             } catch (err) {
               log?.warn({ err, beadId: bead.id, threadId: thread.id }, 'bead-sync:phase5 external_ref backfill failed');

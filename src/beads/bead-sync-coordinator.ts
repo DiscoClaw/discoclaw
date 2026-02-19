@@ -3,6 +3,7 @@ import type { TagMap, BeadSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
+import type { TaskStore } from '../tasks/store.js';
 import { runBeadSync } from './bead-sync.js';
 import { reloadTagMapInPlace } from './discord-sync.js';
 import { beadThreadCache } from './bead-thread-cache.js';
@@ -13,7 +14,7 @@ export type CoordinatorOptions = {
   forumId: string;
   tagMap: TagMap;
   tagMapPath?: string;
-  beadsCwd: string;
+  store: TaskStore;
   log?: LoggerLike;
   mentionUserId?: string;
   forumCountSync?: ForumCountSync;

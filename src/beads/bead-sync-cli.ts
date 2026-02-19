@@ -40,12 +40,10 @@ async function main(): Promise<void> {
   const throttleMs = parseArgInt(args, '--throttle-ms') ?? 250;
   const archivedLimit = parseArgInt(args, '--archived-limit') ?? 200;
 
-  // Load in-process task store when a persistence path is configured.
-  if (tasksPath) {
-    const { TaskStore } = await import('../tasks/store.js');
-    const store = new TaskStore({ persistPath: tasksPath });
-    await store.load();
-  }
+  // Load in-process task store.
+  const { TaskStore } = await import('../tasks/store.js');
+  const store = new TaskStore(tasksPath ? { persistPath: tasksPath } : {});
+  if (tasksPath) await store.load();
 
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   await client.login(discordToken);
@@ -65,7 +63,7 @@ async function main(): Promise<void> {
       guild,
       forumId,
       tagMap,
-      beadsCwd,
+      store,
       throttleMs,
       archivedDedupeLimit: archivedLimit,
       mentionUserId: sidebarMentionUserId,

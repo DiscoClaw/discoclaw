@@ -129,7 +129,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     forumId: opts.beadCtx.forumId,
     tagMap: opts.beadCtx.tagMap,
     tagMapPath: opts.beadCtx.tagMapPath,
-    beadsCwd: opts.beadsCwd,
+    store: opts.beadCtx.store,
     log: opts.log,
     mentionUserId: opts.sidebarMentionUserId,
     forumCountSync: opts.forumCountSync,

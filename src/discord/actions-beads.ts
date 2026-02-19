@@ -282,7 +282,7 @@ export async function executeBeadAction(
             guild: ctx.guild,
             forumId: beadCtx.forumId,
             tagMap: tagMapSnapshot,
-            beadsCwd: beadCtx.beadsCwd,
+            store: beadCtx.store,
             log: beadCtx.log,
             statusPoster: beadCtx.statusPoster,
             mentionUserId: beadCtx.sidebarMentionUserId,
