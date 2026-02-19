@@ -1,31 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { BeadData } from './types.js';
-
-// Mock the external dependencies that findBeadByThreadId calls internally.
-vi.mock('./bd-cli.js', () => ({
-  bdList: vi.fn(),
-}));
-vi.mock('./discord-sync.js', () => ({
-  getThreadIdFromBead: vi.fn((b: BeadData) => {
-    const ref = (b.external_ref ?? '').trim();
-    if (!ref) return null;
-    if (ref.startsWith('discord:')) return ref.slice('discord:'.length).trim() || null;
-    if (/^\d+$/.test(ref)) return ref;
-    return null;
-  }),
-}));
-
-import { bdList } from './bd-cli.js';
+import { TaskStore } from '../tasks/store.js';
 import { BeadThreadCache } from './bead-thread-cache.js';
 
-const mockedBdList = vi.mocked(bdList);
-
-function makeBead(overrides: Partial<BeadData> = {}): BeadData {
-  return { id: 'ws-001', title: 'Test', status: 'open', external_ref: 'discord:thread-1', ...overrides };
-}
-
-function setupBdList(beads: BeadData[]) {
-  mockedBdList.mockResolvedValue(beads);
+function makeStore(beads: Array<{ externalRef: string; title?: string }>): TaskStore {
+  const store = new TaskStore({ prefix: 'ws' });
+  for (const { externalRef, title } of beads) {
+    const b = store.create({ title: title ?? 'Test' });
+    store.update(b.id, { externalRef });
+  }
+  return store;
 }
 
 describe('BeadThreadCache', () => {
@@ -35,87 +18,89 @@ describe('BeadThreadCache', () => {
 
   it('returns cached bead within TTL', async () => {
     const cache = new BeadThreadCache(60_000);
-    const bead = makeBead();
-    setupBdList([bead]);
+    const store = makeStore([{ externalRef: 'discord:thread-1' }]);
+    const listSpy = vi.spyOn(store, 'list');
 
-    const first = await cache.get('thread-1', '/tmp');
-    expect(first?.id).toBe('ws-001');
-    expect(mockedBdList).toHaveBeenCalledTimes(1);
+    const first = await cache.get('thread-1', store);
+    expect(first).not.toBeNull();
+    expect(listSpy).toHaveBeenCalledTimes(1);
 
-    // Second call should use cache, not call bdList again.
-    const second = await cache.get('thread-1', '/tmp');
-    expect(second?.id).toBe('ws-001');
-    expect(mockedBdList).toHaveBeenCalledTimes(1);
+    // Second call should use cache, not call store.list again.
+    const second = await cache.get('thread-1', store);
+    expect(second?.id).toBe(first?.id);
+    expect(listSpy).toHaveBeenCalledTimes(1);
   });
 
   it('refetches after TTL expires', async () => {
     const cache = new BeadThreadCache(0); // 0ms TTL = always expired
-    const bead1 = makeBead({ id: 'ws-001', external_ref: 'discord:thread-1' });
-    const bead2 = makeBead({ id: 'ws-002', external_ref: 'discord:thread-1' });
-    mockedBdList.mockResolvedValueOnce([bead1]).mockResolvedValueOnce([bead2]);
+    const store = makeStore([{ externalRef: 'discord:thread-1' }]);
+    const listSpy = vi.spyOn(store, 'list');
 
-    const first = await cache.get('thread-1', '/tmp');
-    expect(first?.id).toBe('ws-001');
+    const first = await cache.get('thread-1', store);
+    expect(first).not.toBeNull();
 
-    const second = await cache.get('thread-1', '/tmp');
-    expect(second?.id).toBe('ws-002');
-    expect(mockedBdList).toHaveBeenCalledTimes(2);
+    const second = await cache.get('thread-1', store);
+    expect(second?.id).toBe(first?.id);
+    expect(listSpy).toHaveBeenCalledTimes(2);
   });
 
   it('invalidate() clears all entries', async () => {
     const cache = new BeadThreadCache(60_000);
-    setupBdList([
-      makeBead({ id: 'ws-001', external_ref: 'discord:thread-1' }),
-      makeBead({ id: 'ws-002', external_ref: 'discord:thread-2' }),
+    const store = makeStore([
+      { externalRef: 'discord:thread-1' },
+      { externalRef: 'discord:thread-2' },
     ]);
+    const listSpy = vi.spyOn(store, 'list');
 
-    await cache.get('thread-1', '/tmp');
-    await cache.get('thread-2', '/tmp');
-    expect(mockedBdList).toHaveBeenCalledTimes(2);
+    await cache.get('thread-1', store);
+    await cache.get('thread-2', store);
+    expect(listSpy).toHaveBeenCalledTimes(2);
 
     cache.invalidate();
 
-    await cache.get('thread-1', '/tmp');
-    expect(mockedBdList).toHaveBeenCalledTimes(3);
+    await cache.get('thread-1', store);
+    expect(listSpy).toHaveBeenCalledTimes(3);
   });
 
   it('invalidate(threadId) clears single entry', async () => {
     const cache = new BeadThreadCache(60_000);
-    setupBdList([
-      makeBead({ id: 'ws-001', external_ref: 'discord:thread-1' }),
-      makeBead({ id: 'ws-002', external_ref: 'discord:thread-2' }),
+    const store = makeStore([
+      { externalRef: 'discord:thread-1' },
+      { externalRef: 'discord:thread-2' },
     ]);
+    const listSpy = vi.spyOn(store, 'list');
 
-    await cache.get('thread-1', '/tmp');
-    await cache.get('thread-2', '/tmp');
-    expect(mockedBdList).toHaveBeenCalledTimes(2);
+    await cache.get('thread-1', store);
+    await cache.get('thread-2', store);
+    expect(listSpy).toHaveBeenCalledTimes(2);
 
     cache.invalidate('thread-1');
 
     // thread-1 should refetch, thread-2 should still be cached.
-    await cache.get('thread-1', '/tmp');
-    await cache.get('thread-2', '/tmp');
-    expect(mockedBdList).toHaveBeenCalledTimes(3);
+    await cache.get('thread-1', store);
+    await cache.get('thread-2', store);
+    expect(listSpy).toHaveBeenCalledTimes(3);
   });
 
   it('returns null when no bead matches', async () => {
     const cache = new BeadThreadCache(60_000);
-    setupBdList([]);
+    const store = new TaskStore();
 
-    const result = await cache.get('thread-1', '/tmp');
+    const result = await cache.get('thread-1', store);
     expect(result).toBeNull();
   });
 
   it('caches null results (negative cache)', async () => {
     const cache = new BeadThreadCache(60_000);
-    setupBdList([]);
+    const store = new TaskStore();
+    const listSpy = vi.spyOn(store, 'list');
 
-    const first = await cache.get('thread-1', '/tmp');
+    const first = await cache.get('thread-1', store);
     expect(first).toBeNull();
 
-    const second = await cache.get('thread-1', '/tmp');
+    const second = await cache.get('thread-1', store);
     expect(second).toBeNull();
-    // Only one bdList call — the null was cached.
-    expect(mockedBdList).toHaveBeenCalledTimes(1);
+    // Only one store.list call — the null was cached.
+    expect(listSpy).toHaveBeenCalledTimes(1);
   });
 });

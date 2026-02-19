@@ -213,7 +213,7 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
   if (isThread && threadId && threadParentId && params.beadCtx) {
     if (threadParentId === params.beadCtx.forumId) {
       try {
-        const bead = await beadThreadCache.get(threadId, params.beadCtx.beadsCwd);
+        const bead = await beadThreadCache.get(threadId, params.beadCtx.store);
         if (bead) existingBeadId = bead.id;
       } catch {
         // best-effort — fall through to create a new bead

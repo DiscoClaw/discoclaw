@@ -1093,6 +1093,7 @@ describe('bead resolution dispatch wiring', () => {
         beadsCwd: '/tmp/beads',
         forumId: BEAD_FORUM_ID,
         tagMap: {},
+        store: {} as any,
         runtime: {} as any,
         autoTag: false,
         autoTagModel: 'haiku',
@@ -1126,7 +1127,7 @@ describe('bead resolution dispatch wiring', () => {
       },
     }));
 
-    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-plan', '/tmp/beads');
+    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-plan', expect.any(Object));
     expect(mockedBdCreate).not.toHaveBeenCalled();
 
     // Verify the plan file uses the existing bead ID
@@ -1176,7 +1177,7 @@ describe('bead resolution dispatch wiring', () => {
       },
     }));
 
-    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-null', '/tmp/beads');
+    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-null', expect.any(Object));
     expect(mockedBdCreate).toHaveBeenCalled();
   });
 
@@ -1225,7 +1226,7 @@ describe('bead resolution dispatch wiring', () => {
     }));
 
     // Verify the bead lookup happened for the forge path
-    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-forge', '/tmp/beads');
+    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-forge', expect.any(Object));
   });
 
   it('!forge create in non-bead-forum thread does NOT resolve existingBeadId', async () => {
