@@ -1,16 +1,9 @@
 {
-  "reporting": "",
-  "monitoring": "",
-  "cleanup": "",
-  "notifications": "",
-  "sync": "",
-  "backup": "",
+  "report": "",
   "maintenance": "",
-  "analytics": "",
-  "frequent": "",
+  "monitor": "",
   "hourly": "",
   "daily": "",
   "weekly": "",
-  "monthly": "",
-  "yearly": ""
+  "monthly": ""
 }
