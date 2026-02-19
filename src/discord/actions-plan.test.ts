@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { PLAN_ACTION_TYPES, executePlanAction, planActionsPromptSection } from './actions-plan.js';
 import type { PlanContext } from './actions-plan.js';
 import type { ActionContext } from './actions.js';
+import { TaskStore } from '../tasks/store.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -57,11 +58,6 @@ vi.mock('./forge-plan-registry.js', () => ({
   isPlanRunning: vi.fn(() => false),
 }));
 
-vi.mock('../beads/bd-cli.js', () => ({
-  bdUpdate: vi.fn(async () => {}),
-  bdClose: vi.fn(async () => {}),
-}));
-
 vi.mock('./allowed-mentions.js', () => ({
   NO_MENTIONS: { parse: [] },
 }));
@@ -98,7 +94,7 @@ function makePlanCtx(overrides?: Partial<PlanContext>): PlanContext {
   return {
     plansDir: '/tmp/plans',
     workspaceCwd: '/tmp/workspace',
-    beadsCwd: '/tmp/beads',
+    taskStore: new TaskStore(),
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     ...overrides,
   };
@@ -225,7 +221,6 @@ describe('executePlanAction', () => {
   describe('planApprove', () => {
     it('approves a plan', async () => {
       const { updatePlanFileStatus } = await import('./plan-commands.js');
-      const { bdUpdate } = await import('../beads/bd-cli.js');
 
       const result = await executePlanAction(
         { type: 'planApprove', planId: 'plan-042' },
@@ -241,7 +236,6 @@ describe('executePlanAction', () => {
         '/tmp/plans/plan-042-test.md',
         'APPROVED',
       );
-      expect(bdUpdate).toHaveBeenCalledWith('ws-001', { status: 'in_progress' }, '/tmp/beads');
     });
 
     it('fails without planId', async () => {
@@ -278,7 +272,6 @@ describe('executePlanAction', () => {
   describe('planClose', () => {
     it('closes a plan', async () => {
       const { updatePlanFileStatus } = await import('./plan-commands.js');
-      const { bdClose } = await import('../beads/bd-cli.js');
 
       const result = await executePlanAction(
         { type: 'planClose', planId: 'plan-042' },
@@ -294,7 +287,6 @@ describe('executePlanAction', () => {
         '/tmp/plans/plan-042-test.md',
         'CLOSED',
       );
-      expect(bdClose).toHaveBeenCalledWith('ws-001', 'Plan closed', '/tmp/beads');
     });
 
     it('fails without planId', async () => {
@@ -353,7 +345,7 @@ describe('executePlanAction', () => {
 
       expect(handlePlanCommand).toHaveBeenCalledWith(
         { action: 'create', args: 'New feature', context: 'Extra context here' },
-        { workspaceCwd: '/tmp/workspace', beadsCwd: '/tmp/beads' },
+        expect.objectContaining({ workspaceCwd: '/tmp/workspace' }),
       );
     });
 
@@ -481,7 +473,7 @@ describe('executePlanAction', () => {
       expect(closePlanIfComplete).toHaveBeenCalledWith(
         '/tmp/plans/plan-042-phases.md',
         '/tmp/plans/plan-042-test.md',
-        '/tmp/beads',
+        expect.any(TaskStore),
         expect.any(Function),
         expect.anything(),
       );

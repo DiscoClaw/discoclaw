@@ -56,6 +56,7 @@ import { getGitHash } from './version.js';
 import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
+import { TaskStore } from './tasks/store.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -1005,7 +1006,7 @@ if (beadCtx) {
 // Initialized before cron so cron executor can reference these contexts.
 {
   const plansDir = path.join(workspaceCwd, 'plans');
-  const effectiveBeadsCwd = beadCtx?.beadsCwd ?? workspaceCwd;
+  const effectiveTaskStore = beadCtx?.store ?? new TaskStore();
 
   if (forgeCommandsEnabled && discordActionsForge) {
     botParams.forgeCtx = {
@@ -1017,7 +1018,7 @@ if (beadCtx) {
           model: botParams.runtimeModel,
           cwd: projectRoot,
           workspaceCwd,
-          beadsCwd: effectiveBeadsCwd,
+          taskStore: effectiveTaskStore,
           plansDir,
           maxAuditRounds: forgeMaxAuditRounds,
           progressThrottleMs: forgeProgressThrottleMs,
@@ -1028,7 +1029,7 @@ if (beadCtx) {
         }),
       plansDir,
       workspaceCwd,
-      beadsCwd: effectiveBeadsCwd,
+      taskStore: effectiveTaskStore,
       onProgress: async (msg) => {
         // Action-initiated forges log progress rather than posting to a channel.
         log.info({ msg }, 'forge:action:progress');
@@ -1042,7 +1043,7 @@ if (beadCtx) {
     botParams.planCtx = {
       plansDir,
       workspaceCwd,
-      beadsCwd: effectiveBeadsCwd,
+      taskStore: effectiveTaskStore,
       log,
       runtime: limitedRuntime,
       model: runtimeModel,

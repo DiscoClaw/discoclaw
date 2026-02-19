@@ -1,6 +1,7 @@
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from './action-types.js';
 import type { ForgeOrchestrator } from './forge-commands.js';
+import type { TaskStore } from '../tasks/store.js';
 import { looksLikePlanId, findPlanFile, listPlanFiles } from './plan-commands.js';
 import type { HandlePlanCommandOpts } from './plan-commands.js';
 import { buildPlanSummary } from './forge-commands.js';
@@ -33,7 +34,7 @@ export type ForgeContext = {
   orchestratorFactory: () => ForgeOrchestrator;
   plansDir: string;
   workspaceCwd: string;
-  beadsCwd: string;
+  taskStore: TaskStore;
   /** Callback to send progress messages to the originating channel. */
   onProgress: (msg: string, opts?: { force?: boolean }) => Promise<void>;
   log?: LoggerLike;
@@ -107,7 +108,7 @@ export async function executeForgeAction(
 
       const planOpts: HandlePlanCommandOpts = {
         workspaceCwd: forgeCtx.workspaceCwd,
-        beadsCwd: forgeCtx.beadsCwd,
+        taskStore: forgeCtx.taskStore,
       };
       const found = await findPlanFile(forgeCtx.plansDir, action.planId);
       if (!found) {

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { handlePlanCommand, parsePlanFileHeader } from './plan-commands.js';
-import { bdUpdate } from '../beads/bd-cli.js';
+import type { TaskStore } from '../tasks/store.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
 import { runPipeline } from '../pipeline/engine.js';
@@ -34,7 +34,7 @@ export type ForgeOrchestratorOpts = {
   model: string;
   cwd: string;
   workspaceCwd: string;
-  beadsCwd: string;
+  taskStore: TaskStore;
   plansDir: string;
   maxAuditRounds: number;
   progressThrottleMs: number;
@@ -538,7 +538,7 @@ export class ForgeOrchestrator {
       // Pass context separately so bead title/slug stay clean (context goes in plan body).
       const createResult = await handlePlanCommand(
         { action: 'create', args: description, context, existingBeadId: this.opts.existingBeadId },
-        { workspaceCwd: this.opts.workspaceCwd, beadsCwd: this.opts.beadsCwd },
+        { workspaceCwd: this.opts.workspaceCwd, taskStore: this.opts.taskStore },
       );
 
       // Extract plan ID from the response
@@ -833,7 +833,7 @@ export class ForgeOrchestrator {
         const drafterTitle = drafterTitleMatch?.[1]?.trim();
         if (mergedHeader?.beadId && drafterTitle && drafterTitle !== description) {
           try {
-            await bdUpdate(mergedHeader.beadId, { title: drafterTitle }, this.opts.beadsCwd);
+            this.opts.taskStore.update(mergedHeader.beadId, { title: drafterTitle });
           } catch {
             // best-effort — bead title update failure shouldn't block the forge
           }

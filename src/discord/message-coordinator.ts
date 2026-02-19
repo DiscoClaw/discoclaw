@@ -54,6 +54,7 @@ import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
 import { buildBeadContextSummary } from '../beads/bd-cli.js';
+import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
 import { editThenSendChunks } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
@@ -774,7 +775,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const planCtx: PlanContext = {
           plansDir,
           workspaceCwd: params.workspaceCwd,
-          beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+          taskStore: params.beadCtx?.store ?? new TaskStore(),
           log: params.log,
           depth: 0,
           runtime: params.runtime,
@@ -919,7 +920,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (planCmd) {
               const planOpts = {
                 workspaceCwd: params.workspaceCwd,
-                beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                taskStore: params.beadCtx?.store ?? new TaskStore(),
                 maxContextFiles: params.planPhaseMaxContextFiles,
               };
 
@@ -1171,7 +1172,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     const closeResult = await closePlanIfComplete(
                       phasesFilePath,
                       planFilePath,
-                      planOpts.beadsCwd,
+                      planOpts.taskStore,
                       acquireWriterLock,
                       params.log,
                     );
@@ -1432,7 +1433,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   model: resolveModel(params.runtimeModel, params.runtime.id),
                   cwd: resumeProjectCwd,
                   workspaceCwd: params.workspaceCwd,
-                  beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                  taskStore: params.beadCtx?.store ?? new TaskStore(),
                   plansDir,
                   maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
                   progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,
@@ -1529,7 +1530,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 model: resolveModel(params.runtimeModel, params.runtime.id),
                 cwd: params.projectCwd,
                 workspaceCwd: params.workspaceCwd,
-                beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                taskStore: params.beadCtx?.store ?? new TaskStore(),
                 plansDir,
                 maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
                 progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,
