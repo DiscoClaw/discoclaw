@@ -118,12 +118,12 @@ describe('setup: .env content generation', () => {
       PRIMARY_RUNTIME: 'codex',
       CODEX_BIN: '/usr/local/bin/codex',
       CODEX_MODEL: 'codex-latest',
-      CODEX_BYPASS_APPROVALS: '1',
+      CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX: '1',
     });
     expect(content).toContain('PRIMARY_RUNTIME=codex');
     expect(content).toContain('CODEX_BIN=/usr/local/bin/codex');
     expect(content).toContain('CODEX_MODEL=codex-latest');
-    expect(content).toContain('CODEX_BYPASS_APPROVALS=1');
+    expect(content).toContain('CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=1');
   });
 });
 
