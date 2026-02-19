@@ -144,7 +144,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
 
   // Wire store events to trigger Discord sync on every mutation.
   const triggerSync = () => {
-    syncCoordinator.sync(undefined, 'watcher').catch((err) => {
+    syncCoordinator.sync().catch((err) => {
       opts.log.warn({ err }, 'beads:store-event sync failed');
     });
   };

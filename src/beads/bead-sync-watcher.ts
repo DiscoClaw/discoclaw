@@ -73,7 +73,7 @@ export function startBeadSyncWatcher(opts: BeadSyncWatcherOptions): BeadSyncWatc
     clearDebounce();
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      coordinator.sync(undefined, 'watcher').catch((err) => {
+      coordinator.sync().catch((err) => {
         log?.warn({ err }, 'beads:watcher sync failed');
       });
     }, debounceMs);
