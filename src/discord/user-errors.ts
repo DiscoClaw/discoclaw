@@ -25,6 +25,16 @@ export function mapRuntimeErrorToUserMessage(raw: string): string {
     return 'Claude CLI was not found. Install it and set CLAUDE_BIN (or fix PATH), then restart.';
   }
 
+  const mentionsGemini = lc.includes('gemini');
+
+  if (mentionsGemini && (lc.includes('not found') || lc.includes('enoent') || lc.includes('spawn'))) {
+    return 'Gemini CLI was not found. Install it and set GEMINI_BIN (or fix PATH), then restart.';
+  }
+
+  if (mentionsGemini && (lc.includes('unauthorized') || lc.includes('authentication') || lc.includes('not logged in'))) {
+    return 'Gemini CLI authentication is missing or expired. Re-authenticate Gemini CLI and retry.';
+  }
+
   if (lc.includes('unauthorized') || lc.includes('authentication') || lc.includes('not logged in')) {
     return 'Claude CLI authentication is missing or expired. Re-authenticate Claude CLI and retry.';
   }
