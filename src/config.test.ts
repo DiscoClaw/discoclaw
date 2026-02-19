@@ -370,6 +370,32 @@ describe('parseConfig', () => {
     expect(config.reactionRemoveHandlerEnabled).toBe(true);
   });
 
+  // --- Gemini CLI adapter ---
+  it('defaults geminiBin to "gemini"', () => {
+    const { config } = parseConfig(env());
+    expect(config.geminiBin).toBe('gemini');
+  });
+
+  it('parses GEMINI_BIN when set', () => {
+    const { config } = parseConfig(env({ GEMINI_BIN: '/usr/local/bin/gemini' }));
+    expect(config.geminiBin).toBe('/usr/local/bin/gemini');
+  });
+
+  it('defaults geminiModel to "gemini-2.5-pro"', () => {
+    const { config } = parseConfig(env());
+    expect(config.geminiModel).toBe('gemini-2.5-pro');
+  });
+
+  it('parses GEMINI_MODEL when set', () => {
+    const { config } = parseConfig(env({ GEMINI_MODEL: 'gemini-2.0-flash' }));
+    expect(config.geminiModel).toBe('gemini-2.0-flash');
+  });
+
+  it('does not warn when PRIMARY_RUNTIME=gemini (no preflight-checkable auth)', () => {
+    const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'gemini' }));
+    expect(warnings.some((w) => w.includes('gemini'))).toBe(false);
+  });
+
   // --- Codex dangerous bypass ---
   it('defaults codexDangerouslyBypassApprovalsAndSandbox to false', () => {
     const { config } = parseConfig(env());
