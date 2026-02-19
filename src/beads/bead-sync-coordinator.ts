@@ -89,6 +89,14 @@ export class BeadSyncCoordinator {
       const result = await runBeadSync({ ...this.opts, tagMap: tagMapSnapshot, statusPoster });
       beadThreadCache.invalidate();
       this.opts.forumCountSync?.requestUpdate();
+      if (result.closesDeferred && result.closesDeferred > 0) {
+        this.opts.log?.info({ closesDeferred: result.closesDeferred }, 'beads:coordinator scheduling retry for deferred closes');
+        setTimeout(() => {
+          this.sync(undefined, 'watcher').catch((err) => {
+            this.opts.log?.warn({ err }, 'beads:coordinator deferred-close retry failed');
+          });
+        }, 30_000);
+      }
       return result;
     } finally {
       this.syncing = false;

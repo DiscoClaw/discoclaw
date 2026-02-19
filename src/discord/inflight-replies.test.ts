@@ -6,6 +6,7 @@ import os from 'node:os';
 import {
   registerInFlightReply,
   inFlightReplyCount,
+  hasInFlightForChannel,
   isShuttingDown,
   drainInFlightReplies,
   loadOrphanedReplies,
@@ -86,6 +87,33 @@ describe('registerInFlightReply', () => {
     expect(inFlightReplyCount()).toBe(0);
     dispose();
     expect(inFlightReplyCount()).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasInFlightForChannel
+// ---------------------------------------------------------------------------
+
+describe('hasInFlightForChannel', () => {
+  it('returns false with no registrations', () => {
+    expect(hasInFlightForChannel('ch1')).toBe(false);
+  });
+
+  it('returns true when a reply is registered for that channelId', () => {
+    registerInFlightReply(mockReply(), 'ch1', 'msg1', 'test');
+    expect(hasInFlightForChannel('ch1')).toBe(true);
+  });
+
+  it('returns false for a different channelId', () => {
+    registerInFlightReply(mockReply(), 'ch1', 'msg1', 'test');
+    expect(hasInFlightForChannel('ch2')).toBe(false);
+  });
+
+  it('returns false after the disposer is called', () => {
+    const dispose = registerInFlightReply(mockReply(), 'ch1', 'msg1', 'test');
+    expect(hasInFlightForChannel('ch1')).toBe(true);
+    dispose();
+    expect(hasInFlightForChannel('ch1')).toBe(false);
   });
 });
 

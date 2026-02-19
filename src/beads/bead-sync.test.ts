@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runBeadSync } from './bead-sync.js';
 
+vi.mock('../discord/inflight-replies.js', () => ({
+  hasInFlightForChannel: vi.fn(() => false),
+}));
+
 vi.mock('./bd-cli.js', () => ({
   bdList: vi.fn(async () => []),
   bdUpdate: vi.fn(async () => {}),
@@ -862,6 +866,110 @@ describe('runBeadSync', () => {
     expect(statusPoster.beadSyncComplete).toHaveBeenCalledOnce();
     expect(statusPoster.beadSyncComplete).toHaveBeenCalledWith(result);
     expect(result.warnings).toBe(1);
+  });
+
+  it('phase 4 defers close when in-flight reply is active for that thread', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { closeBeadThread } = await import('./discord-sync.js');
+    const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
+    ]);
+    (hasInFlightForChannel as any).mockReturnValueOnce(true);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(closeBeadThread).not.toHaveBeenCalled();
+    expect(result.threadsArchived).toBe(0);
+    expect(result.closesDeferred).toBe(1);
+  });
+
+  it('phase 5 defers close when in-flight reply is active for non-archived thread', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
+    const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: '' },
+    ]);
+    // Phase 4 sees no thread (no external_ref), so hasInFlightForChannel is not called there.
+    // Phase 5 finds the thread and checks in-flight.
+    (hasInFlightForChannel as any).mockReturnValue(true);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-100', { id: 'thread-100', name: '\u{1F7E2} [001] Closed bead', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(closeBeadThread).not.toHaveBeenCalled();
+    expect(result.threadsReconciled).toBe(0);
+    expect(result.closesDeferred).toBeGreaterThanOrEqual(1);
+
+    (hasInFlightForChannel as any).mockReturnValue(false);
+  });
+
+  it('phase 5 defers close when in-flight reply is active for archived stale thread', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
+    const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
+    ]);
+    // Phase 4: already closed → skip. Phase 5: not already closed (stale) → in-flight → defer.
+    (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    (hasInFlightForChannel as any).mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({ threads: new Map() })),
+        fetchArchived: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-100', { id: 'thread-100', name: '\u{1F7E0} [001] Old stale name', archived: true }],
+          ]),
+        })),
+      },
+    };
+    (resolveBeadsForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(closeBeadThread).not.toHaveBeenCalled();
+    expect(result.threadsReconciled).toBe(0);
+    expect(result.closesDeferred).toBe(1);
   });
 });
 
