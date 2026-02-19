@@ -171,7 +171,9 @@ General-purpose step-chaining primitive. Each step sends a prompt to a runtime a
 | Progress reporting via callback (`onProgress`) | `src/pipeline/engine.ts` | **done** |
 | Dynamic prompt via `(ctx: StepContext) => string` callback | `src/pipeline/engine.ts` | **done** |
 | `AbortSignal` support (pre-check + mid-stream) — undocumented addition; not in plan scope | `src/pipeline/engine.ts` | **done** |
-| Shell step kind | — | *stub — future plan* |
+| Shell step kind (`kind: "shell"`) | `src/pipeline/engine.ts` | **done** |
+| `ShellStep` type | `src/pipeline/engine.ts` | **done** |
+| `confirmAllowed` gate (blocks destructive commands without explicit opt-in) | `src/pipeline/engine.ts` | **done** |
 | Discord-action step kind | — | *stub — future plan* |
 
 ## 15. Transport Abstraction
