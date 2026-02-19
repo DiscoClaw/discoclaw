@@ -1292,7 +1292,7 @@ if (reactionRemoveHandlerEnabled) {
 
 log.info('Discord bot started');
 
-// --- Boot report embed (replaces the bare online() call in startDiscordBot) ---
+// --- Boot report (replaces the bare online() call in startDiscordBot) ---
 if (botStatus?.bootReport) {
   const actionCategoriesEnabled: string[] = [];
   if (discordActionsChannels) actionCategoriesEnabled.push('channels');
