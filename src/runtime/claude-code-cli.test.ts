@@ -866,6 +866,125 @@ describe('pool forwarding (multi-turn opts wiring)', () => {
   });
 });
 
+describe('Claude strategy parseLine (stream_event format)', () => {
+  it('extracts text from stream_event text_delta', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: ' world' } } }),
+        JSON.stringify({ type: 'result', result: 'Hello world' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    const deltas = events.filter((e) => e.type === 'text_delta');
+    expect(deltas).toHaveLength(2);
+    expect(deltas[0].text).toBe('Hello');
+    expect(deltas[1].text).toBe(' world');
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('Hello world');
+  });
+
+  it('does NOT extract text from thinking_delta events', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Let me think about this...' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'The answer is 42.' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 1 } }),
+        JSON.stringify({ type: 'result', result: 'The answer is 42.' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    // Only the text_delta should produce text events — thinking_delta must be filtered out.
+    const deltas = events.filter((e) => e.type === 'text_delta');
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0].text).toBe('The answer is 42.');
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('The answer is 42.');
+  });
+
+  it('does NOT extract text from input_json_delta (tool use)', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Let me read that.' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_path":"/tmp/f"}' } } }),
+        JSON.stringify({ type: 'result', result: 'Let me read that.' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    const deltas = events.filter((e) => e.type === 'text_delta');
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0].text).toBe('Let me read that.');
+  });
+
+  it('consumes assistant partial messages without emitting text', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hi' } } }),
+        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } }),
+        JSON.stringify({ type: 'result', result: 'hi' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    // Only one text_delta from the content_block_delta, not a duplicate from the assistant message.
+    const deltas = events.filter((e) => e.type === 'text_delta');
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0].text).toBe('hi');
+  });
+});
+
 describe('one-shot stream stall timer', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1110,5 +1229,109 @@ describe('one-shot stream stall timer', () => {
     await drainPromise;
 
     expect(events.some((e) => e.type === 'error' && e.message.includes('stream stall'))).toBe(true);
+  });
+});
+
+describe('progress stall timer (thinking spiral guard)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function makeControllableProcess() {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    let resolveProcess: (val: any) => void;
+    const processPromise: any = new Promise((r) => { resolveProcess = r; });
+    processPromise.stdout = stdout;
+    processPromise.stderr = stderr;
+    processPromise.stdin = 'ignore';
+    processPromise.kill = vi.fn(() => {
+      stdout.end();
+      stderr.end();
+      resolveProcess!({ exitCode: null, failed: true, killed: true });
+    });
+    processPromise.then = processPromise.then.bind(processPromise);
+    processPromise.catch = processPromise.catch.bind(processPromise);
+    return { proc: processPromise, stdout, stderr, resolve: resolveProcess!, kill: processPromise.kill };
+  }
+
+  it('fires progress timer when thinking_delta flows but no text_delta', async () => {
+    const { proc, stdout } = makeControllableProcess();
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => proc);
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+      progressStallTimeoutMs: 5000,
+      // Disable the stall timer so only the progress timer matters.
+      streamStallTimeoutMs: 0,
+    });
+
+    const events: any[] = [];
+    const drainPromise = (async () => {
+      for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) events.push(evt);
+    })();
+
+    // Push thinking tokens — these should NOT reset the progress timer.
+    const thinkingLine = JSON.stringify({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'analyzing...' } },
+    }) + '\n';
+
+    // Push one thinking delta every second for 6 seconds (past the 5s progress timeout).
+    for (let i = 0; i < 6; i++) {
+      stdout.write(thinkingLine);
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+
+    await vi.advanceTimersByTimeAsync(100);
+    await drainPromise;
+
+    expect(events.some((e) => e.type === 'error' && e.message.includes('progress stall'))).toBe(true);
+    expect(proc.kill).toHaveBeenCalled();
+  });
+
+  it('does NOT fire when text_delta events keep arriving', async () => {
+    const { proc, stdout, stderr, resolve } = makeControllableProcess();
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => proc);
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+      progressStallTimeoutMs: 5000,
+      streamStallTimeoutMs: 0,
+    });
+
+    const events: any[] = [];
+    const drainPromise = (async () => {
+      for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) events.push(evt);
+    })();
+
+    // Push text_delta every 3 seconds — progress timer (5s) should never fire.
+    for (let i = 0; i < 3; i++) {
+      const line = JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: `chunk${i}` } },
+      }) + '\n';
+      stdout.write(line);
+      await vi.advanceTimersByTimeAsync(3000);
+    }
+
+    // Should not have stalled.
+    expect(events.some((e) => e.type === 'error' && e.message.includes('progress stall'))).toBe(false);
+
+    // Clean up.
+    stdout.end();
+    stderr.end();
+    resolve({ exitCode: 0, stdout: '', stderr: '' });
+    await vi.advanceTimersByTimeAsync(100);
+    await drainPromise;
   });
 });

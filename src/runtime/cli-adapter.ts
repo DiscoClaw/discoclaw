@@ -228,14 +228,19 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     // resets only when a text_delta event is pushed — catching scenarios
     // where thinking tokens flow through stdout but no useful content appears.
     let progressTimer: ReturnType<typeof setTimeout> | null = null;
+    let progressResetCount = 0;
     const clearProgressTimer = () => { if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; } };
     const resetProgressTimer = () => {
       if (!opts.progressStallTimeoutMs) return;
       clearProgressTimer();
+      progressResetCount++;
+      if (progressResetCount === 1) {
+        opts.log?.debug?.(`progress-timer: armed (${opts.progressStallTimeoutMs}ms)`);
+      }
       progressTimer = setTimeout(() => {
         if (finished) return;
         const ms = opts.progressStallTimeoutMs!;
-        opts.log?.info?.(`one-shot: progress stall detected (no text_delta for ${ms}ms), killing process`);
+        opts.log?.info?.(`one-shot: progress stall detected (no text_delta for ${ms}ms, resets=${progressResetCount}), killing process`);
         push({ type: 'error', message: `progress stall: no text output for ${ms}ms (possible thinking spiral)` });
         push({ type: 'done' });
         finished = true;

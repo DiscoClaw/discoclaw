@@ -2,7 +2,8 @@
 // Provides model-specific logic for the universal CLI adapter factory.
 
 import type { RuntimeCapability } from '../types.js';
-import type { CliAdapterStrategy, CliInvokeContext, UniversalCliOpts } from '../cli-strategy.js';
+import type { CliAdapterStrategy, CliInvokeContext, ParsedLineResult, UniversalCliOpts } from '../cli-strategy.js';
+import { extractResultText, extractResultContentBlocks } from '../cli-output-parsers.js';
 
 export const claudeStrategy: CliAdapterStrategy = {
   id: 'claude_code',
@@ -113,6 +114,50 @@ export const claudeStrategy: CliAdapterStrategy = {
     return JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
   },
 
-  // Claude uses default JSONL parsing from the factory (extractTextFromUnknownEvent, etc.)
-  // so we don't need a custom parseLine.
+  parseLine(evt: unknown, _ctx: CliInvokeContext): ParsedLineResult | null {
+    if (!evt || typeof evt !== 'object') return null;
+    const obj = evt as Record<string, unknown>;
+
+    // --- stream_event wrapper (Anthropic API events) ---
+    if (obj.type === 'stream_event' && obj.event && typeof obj.event === 'object') {
+      const inner = obj.event as Record<string, unknown>;
+
+      // content_block_delta — the only event type that carries streaming text.
+      // Only extract text from text_delta; skip thinking_delta, input_json_delta, etc.
+      if (inner.type === 'content_block_delta' && inner.delta && typeof inner.delta === 'object') {
+        const delta = inner.delta as Record<string, unknown>;
+        if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+          return { text: delta.text };
+        }
+        // thinking_delta, input_json_delta, signature_delta, etc. — consumed, no text.
+        return {};
+      }
+
+      // All other stream_event types (message_start, content_block_start,
+      // content_block_stop, message_delta, message_stop) — consumed, no text.
+      return {};
+    }
+
+    // --- assistant partial messages (from --include-partial-messages) ---
+    if (obj.type === 'assistant') return {};
+
+    // --- result event ---
+    if (obj.type === 'result') {
+      const rt = extractResultText(evt);
+      const blocks = extractResultContentBlocks(evt);
+      if (rt || blocks) {
+        return {
+          resultText: rt ?? blocks?.text ?? null,
+          resultImages: blocks?.images,
+        };
+      }
+      return {};
+    }
+
+    // --- system init event ---
+    if (obj.type === 'system') return {};
+
+    // Unknown event — fall through to default parsing.
+    return null;
+  },
 };
