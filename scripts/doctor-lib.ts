@@ -4,6 +4,8 @@ export type DoctorCheckResult = {
   ok: boolean;
   label: string;
   hint?: string;
+  /** True when the result is informational rather than a pass/fail (e.g. a missing binary that is not needed). */
+  info?: boolean;
 };
 
 export function parseBooleanSetting(
@@ -18,6 +20,85 @@ export function parseBooleanSetting(
   if (normalized === '1' || normalized === 'true') return { value: true };
   if (normalized === '0' || normalized === 'false') return { value: false };
   return { value: defaultValue, error: `Got "${raw}"` };
+}
+
+/**
+ * Normalize a raw env value to a canonical runtime name.
+ * Mirrors parseRuntimeName in src/config.ts: lowercase + claude_code → claude alias.
+ */
+function normalizeRuntimeName(raw: string): string {
+  const lower = raw.trim().toLowerCase();
+  return lower === 'claude_code' ? 'claude' : lower;
+}
+
+/**
+ * Check whether the Claude and Gemini CLI binaries are present.
+ * Reads PRIMARY_RUNTIME, FORGE_DRAFTER_RUNTIME, and FORGE_AUDITOR_RUNTIME from env
+ * to decide which binaries are required. A missing needed binary is a fail; a missing
+ * unneeded binary is informational (ok: true, info: true).
+ */
+export function checkRuntimeBinaries(
+  env: NodeJS.ProcessEnv,
+  whichFn: (bin: string) => string | null,
+): DoctorCheckResult[] {
+  const primaryRuntime = (env.PRIMARY_RUNTIME ?? '').trim()
+    ? normalizeRuntimeName(env.PRIMARY_RUNTIME!)
+    : 'claude';
+  const drafterRuntime = (env.FORGE_DRAFTER_RUNTIME ?? '').trim()
+    ? normalizeRuntimeName(env.FORGE_DRAFTER_RUNTIME!)
+    : null;
+  const auditorRuntime = (env.FORGE_AUDITOR_RUNTIME ?? '').trim()
+    ? normalizeRuntimeName(env.FORGE_AUDITOR_RUNTIME!)
+    : null;
+
+  const neededRuntimes = new Set<string>([
+    primaryRuntime,
+    ...(drafterRuntime ? [drafterRuntime] : []),
+    ...(auditorRuntime ? [auditorRuntime] : []),
+  ]);
+
+  const claudeBin = (env.CLAUDE_BIN ?? '').trim() || 'claude';
+  const geminiBin = (env.GEMINI_BIN ?? '').trim() || 'gemini';
+  const claudeNeeded = neededRuntimes.has('claude');
+  const geminiNeeded = neededRuntimes.has('gemini');
+
+  const checks: DoctorCheckResult[] = [];
+
+  const claudePath = whichFn(claudeBin);
+  if (claudePath) {
+    checks.push({ ok: true, label: `Claude CLI found: ${claudeBin}` });
+  } else if (claudeNeeded) {
+    checks.push({
+      ok: false,
+      label: `Claude CLI not found (looked for "${claudeBin}")`,
+      hint: 'Install from https://docs.anthropic.com/en/docs/claude-code or set CLAUDE_BIN',
+    });
+  } else {
+    checks.push({
+      ok: true,
+      info: true,
+      label: `Claude CLI not found (looked for "${claudeBin}") — not needed for current runtime`,
+    });
+  }
+
+  const geminiPath = whichFn(geminiBin);
+  if (geminiPath) {
+    checks.push({ ok: true, label: `Gemini CLI found: ${geminiBin}` });
+  } else if (geminiNeeded) {
+    checks.push({
+      ok: false,
+      label: `Gemini CLI not found (looked for "${geminiBin}")`,
+      hint: 'Install the Gemini CLI or set GEMINI_BIN',
+    });
+  } else {
+    checks.push({
+      ok: true,
+      info: true,
+      label: `Gemini CLI not found (looked for "${geminiBin}") — not needed for current runtime`,
+    });
+  }
+
+  return checks;
 }
 
 export function checkRequiredForums(env: NodeJS.ProcessEnv): DoctorCheckResult[] {
