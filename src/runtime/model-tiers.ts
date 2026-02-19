@@ -16,6 +16,7 @@ export function isModelTier(s: string): s is ModelTier {
  */
 const tierMap: Record<string, Record<ModelTier, string>> = {
   claude_code: { fast: 'haiku', capable: 'opus' },
+  gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro' },
   openai: { fast: '', capable: '' },
   codex: { fast: '', capable: '' },
 };
