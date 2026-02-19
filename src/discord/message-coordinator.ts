@@ -1938,7 +1938,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   invokeHadError = true;
                   invokeErrorMessage = evt.message;
                   taq.handleEvent(evt);
-                  finalText = mapRuntimeErrorToUserMessage(evt.message);
+                  finalText = abortSignal.aborted
+                    ? '*(Response aborted.)*'
+                    : mapRuntimeErrorToUserMessage(evt.message);
                   await maybeEdit(true);
                   // eslint-disable-next-line @typescript-eslint/no-floating-promises
                   statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
@@ -1960,7 +1962,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 } else if (evt.type === 'error') {
                   invokeHadError = true;
                   invokeErrorMessage = evt.message;
-                  finalText = mapRuntimeErrorToUserMessage(evt.message);
+                  finalText = abortSignal.aborted
+                    ? '*(Response aborted.)*'
+                    : mapRuntimeErrorToUserMessage(evt.message);
                   await maybeEdit(true);
                   // eslint-disable-next-line @typescript-eslint/no-floating-promises
                   statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
@@ -2119,7 +2123,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             try {
               if (reply && !isShuttingDown()) {
                 await reply.edit({
-                  content: mapRuntimeErrorToUserMessage(String(innerErr)),
+                  content: abortSignal.aborted
+                    ? '*(Response aborted.)*'
+                    : mapRuntimeErrorToUserMessage(String(innerErr)),
                   allowedMentions: NO_MENTIONS,
                 });
                 replyFinalized = true;
@@ -2135,6 +2141,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               try { await reply.delete(); } catch { /* best-effort */ }
             }
             abortDispose();
+            // Best-effort: remove the 🛑 reaction added at stream start.
+            try { await (reply as any)?.reactions?.resolve?.('🛑')?.remove?.(); } catch { /* best-effort */ }
             dispose();
           }
 
@@ -2180,7 +2188,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
           statusRef?.current?.handlerError({ sessionKey }, err);
           try {
-            if (reply && !isShuttingDown()) {
+            if (!abortSignal?.aborted && reply && !isShuttingDown()) {
               await reply.edit({
                 content: mapRuntimeErrorToUserMessage(String(err)),
                 allowedMentions: NO_MENTIONS,

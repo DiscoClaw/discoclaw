@@ -48,6 +48,14 @@ export function tryAbort(messageId: string): boolean {
   return false;
 }
 
+/**
+ * Returns true if the message is actively streaming (abort not yet fired).
+ * Use this to distinguish an active abort from a cooldown no-op before calling tryAbort.
+ */
+export function isActivelyStreaming(messageId: string): boolean {
+  return active.has(messageId);
+}
+
 /** Clear all state. Only for use in tests. */
 export function _resetForTest(): void {
   active.clear();
