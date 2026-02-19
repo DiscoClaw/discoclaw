@@ -49,6 +49,7 @@ import { ToolAwareQueue } from './tool-aware-queue.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
+import { registerAbort } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
@@ -847,6 +848,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
       await queue.run(sessionKey, async () => {
         let reply: any = null;
+        let abortSignal: AbortSignal | undefined;
         try {
           // Handle !memory commands before session creation or the "..." placeholder.
           if (params.memoryCommandsEnabled) {
@@ -1579,6 +1581,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let replyFinalized = false;
           let hadTextFinal = false;
           let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
+          const { signal, dispose: abortDispose } = registerAbort(reply.id);
+          abortSignal = signal;
+          // Best-effort: add 🛑 so the user can tap it to kill the running stream.
+          (reply as any).react?.('🛑')?.catch(() => { /* best-effort */ });
           // Declared before try so they remain accessible after the finally block closes.
           let historySection = '';
           let summarySection = '';
@@ -1917,6 +1923,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // Images only on initial turn — follow-ups are text-only continuations
               // with action results; re-downloading would waste time and bandwidth.
               images: followUpDepth === 0 ? inputImages : undefined,
+              signal: abortSignal,
             })) {
               // Track event flow for stall warning.
               lastEventAt = Date.now();
@@ -1933,7 +1940,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   invokeHadError = true;
                   invokeErrorMessage = evt.message;
                   taq.handleEvent(evt);
-                  finalText = mapRuntimeErrorToUserMessage(evt.message);
+                  finalText = abortSignal.aborted
+                    ? '*(Response aborted.)*'
+                    : mapRuntimeErrorToUserMessage(evt.message);
                   await maybeEdit(true);
                   // eslint-disable-next-line @typescript-eslint/no-floating-promises
                   statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
@@ -1955,7 +1964,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 } else if (evt.type === 'error') {
                   invokeHadError = true;
                   invokeErrorMessage = evt.message;
-                  finalText = mapRuntimeErrorToUserMessage(evt.message);
+                  finalText = abortSignal.aborted
+                    ? '*(Response aborted.)*'
+                    : mapRuntimeErrorToUserMessage(evt.message);
                   await maybeEdit(true);
                   // eslint-disable-next-line @typescript-eslint/no-floating-promises
                   statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
@@ -2114,7 +2125,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             try {
               if (reply && !isShuttingDown()) {
                 await reply.edit({
-                  content: mapRuntimeErrorToUserMessage(String(innerErr)),
+                  content: abortSignal.aborted
+                    ? '*(Response aborted.)*'
+                    : mapRuntimeErrorToUserMessage(String(innerErr)),
                   allowedMentions: NO_MENTIONS,
                 });
                 replyFinalized = true;
@@ -2129,6 +2142,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (!replyFinalized && reply && !isShuttingDown()) {
               try { await reply.delete(); } catch { /* best-effort */ }
             }
+            abortDispose();
+            // Best-effort: remove the 🛑 reaction added at stream start.
+            try { await (reply as any)?.reactions?.resolve?.('🛑')?.remove?.(); } catch { /* best-effort */ }
             dispose();
           }
 
@@ -2174,7 +2190,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
           statusRef?.current?.handlerError({ sessionKey }, err);
           try {
-            if (reply && !isShuttingDown()) {
+            if (!abortSignal?.aborted && reply && !isShuttingDown()) {
               await reply.edit({
                 content: mapRuntimeErrorToUserMessage(String(err)),
                 allowedMentions: NO_MENTIONS,
