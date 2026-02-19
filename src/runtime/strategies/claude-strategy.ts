@@ -1,9 +1,18 @@
 // Claude Code CLI adapter strategy.
 // Provides model-specific logic for the universal CLI adapter factory.
 
-import type { RuntimeCapability } from '../types.js';
+import type { EngineEvent, RuntimeCapability } from '../types.js';
 import type { CliAdapterStrategy, CliInvokeContext, ParsedLineResult, UniversalCliOpts } from '../cli-strategy.js';
 import { extractResultText, extractResultContentBlocks } from '../cli-output-parsers.js';
+
+// Per-invocation tool tracking state (keyed by ctx to avoid cross-invocation leaks).
+type ToolTrackState = { activeTools: Map<number, string>; inputBufs: Map<number, string> };
+const toolState = new WeakMap<CliInvokeContext, ToolTrackState>();
+function getToolState(ctx: CliInvokeContext): ToolTrackState {
+  let s = toolState.get(ctx);
+  if (!s) { s = { activeTools: new Map(), inputBufs: new Map() }; toolState.set(ctx, s); }
+  return s;
+}
 
 export const claudeStrategy: CliAdapterStrategy = {
   id: 'claude_code',
@@ -114,27 +123,64 @@ export const claudeStrategy: CliAdapterStrategy = {
     return JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
   },
 
-  parseLine(evt: unknown, _ctx: CliInvokeContext): ParsedLineResult | null {
+  parseLine(evt: unknown, ctx: CliInvokeContext): ParsedLineResult | null {
     if (!evt || typeof evt !== 'object') return null;
     const obj = evt as Record<string, unknown>;
 
     // --- stream_event wrapper (Anthropic API events) ---
     if (obj.type === 'stream_event' && obj.event && typeof obj.event === 'object') {
       const inner = obj.event as Record<string, unknown>;
+      const idx = typeof inner.index === 'number' ? inner.index : -1;
 
-      // content_block_delta — the only event type that carries streaming text.
-      // Only extract text from text_delta; skip thinking_delta, input_json_delta, etc.
+      // content_block_start — detect tool_use blocks for activity labels.
+      if (inner.type === 'content_block_start' && inner.content_block && typeof inner.content_block === 'object') {
+        const cb = inner.content_block as Record<string, unknown>;
+        if (cb.type === 'tool_use' && typeof cb.name === 'string') {
+          const ts = getToolState(ctx);
+          ts.activeTools.set(idx, cb.name);
+          ts.inputBufs.set(idx, '');
+        }
+        return {};
+      }
+
+      // content_block_delta — text, thinking, tool input, etc.
       if (inner.type === 'content_block_delta' && inner.delta && typeof inner.delta === 'object') {
         const delta = inner.delta as Record<string, unknown>;
         if (delta.type === 'text_delta' && typeof delta.text === 'string') {
           return { text: delta.text };
         }
+        // Accumulate input_json_delta for tool input (used by tool_end to provide file paths).
+        if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          const ts = getToolState(ctx);
+          const buf = ts.inputBufs.get(idx);
+          if (buf !== undefined) ts.inputBufs.set(idx, buf + delta.partial_json);
+        }
         // thinking_delta, input_json_delta, signature_delta, etc. — consumed, no text.
         return {};
       }
 
-      // All other stream_event types (message_start, content_block_start,
-      // content_block_stop, message_delta, message_stop) — consumed, no text.
+      // content_block_stop — emit tool_start (with parsed input) + tool_end for activity labels.
+      if (inner.type === 'content_block_stop') {
+        const ts = getToolState(ctx);
+        const name = ts.activeTools.get(idx);
+        if (name) {
+          let input: unknown;
+          const buf = ts.inputBufs.get(idx);
+          if (buf) { try { input = JSON.parse(buf); } catch { /* partial */ } }
+          ts.activeTools.delete(idx);
+          ts.inputBufs.delete(idx);
+          // Emit tool_start with the full input (so toolActivityLabel gets file paths),
+          // then tool_end to transition back. The ToolAwareQueue handles this sequence.
+          const events: EngineEvent[] = [
+            { type: 'tool_start', name, ...(input ? { input } : {}) },
+            { type: 'tool_end', name, ok: true },
+          ];
+          return { extraEvents: events };
+        }
+        return {};
+      }
+
+      // All other stream_event types (message_start, message_delta, message_stop) — consumed, no text.
       return {};
     }
 

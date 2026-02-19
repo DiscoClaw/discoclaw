@@ -983,6 +983,78 @@ describe('Claude strategy parseLine (stream_event format)', () => {
     expect(deltas).toHaveLength(1);
     expect(deltas[0].text).toBe('hi');
   });
+
+  it('emits tool_start and tool_end events for tool_use content blocks', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Let me read that.' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_123', name: 'Read' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: 'path":"/tmp/foo.ts"}' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 1 } }),
+        JSON.stringify({ type: 'result', result: 'Let me read that.' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    // Should emit tool_start with name and parsed input, then tool_end.
+    const toolStarts = events.filter((e) => e.type === 'tool_start');
+    expect(toolStarts).toHaveLength(1);
+    expect(toolStarts[0].name).toBe('Read');
+    expect(toolStarts[0].input).toEqual({ file_path: '/tmp/foo.ts' });
+
+    const toolEnds = events.filter((e) => e.type === 'tool_end');
+    expect(toolEnds).toHaveLength(1);
+    expect(toolEnds[0].name).toBe('Read');
+    expect(toolEnds[0].ok).toBe(true);
+  });
+
+  it('emits multiple tool events for sequential tool use blocks', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name: 'Glob' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"pattern":"**/*.ts"}' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_2', name: 'Edit' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_path":"/src/main.ts"}' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 1 } }),
+        JSON.stringify({ type: 'result', result: 'done' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    const toolStarts = events.filter((e) => e.type === 'tool_start');
+    expect(toolStarts).toHaveLength(2);
+    expect(toolStarts[0].name).toBe('Glob');
+    expect(toolStarts[1].name).toBe('Edit');
+    expect(toolStarts[1].input).toEqual({ file_path: '/src/main.ts' });
+  });
 });
 
 describe('one-shot stream stall timer', () => {
