@@ -2,13 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { InitializeBeadsOpts } from './initialize.js';
 
 // ---------------------------------------------------------------------------
-// Mock bd-cli so we can control availability without a real binary
+// Module mocks
 // ---------------------------------------------------------------------------
-
-vi.mock('./bd-cli.js', () => ({
-  checkBdAvailable: vi.fn(),
-  ensureBdDatabaseReady: vi.fn(),
-}));
 
 vi.mock('./discord-sync.js', () => ({
   loadTagMap: vi.fn().mockResolvedValue({ bug: '111', feature: '222' }),
@@ -24,18 +19,10 @@ vi.mock('./bead-sync-coordinator.js', () => ({
   })),
 }));
 
-vi.mock('./bead-sync-watcher.js', () => ({
-  startBeadSyncWatcher: vi.fn().mockReturnValue({ stop: vi.fn() }),
-}));
-
-import { checkBdAvailable, ensureBdDatabaseReady } from './bd-cli.js';
 import { initBeadsForumGuard } from './forum-guard.js';
 import { BeadSyncCoordinator } from './bead-sync-coordinator.js';
-import { startBeadSyncWatcher } from './bead-sync-watcher.js';
 import { initializeBeadsContext, wireBeadsSync } from './initialize.js';
-
-const mockCheckBd = vi.mocked(checkBdAvailable);
-const mockEnsureDbReady = vi.mocked(ensureBdDatabaseReady);
+import { TaskStore } from '../tasks/store.js';
 
 function fakeLog() {
   return {
@@ -65,37 +52,10 @@ describe('initializeBeadsContext', () => {
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({ enabled: false, log }));
     expect(result.beadCtx).toBeUndefined();
-    expect(result.bdAvailable).toBe(false);
     expect(log.warn).not.toHaveBeenCalled();
   });
 
-  it('returns undefined and warns when bd CLI not available', async () => {
-    mockCheckBd.mockResolvedValue({ available: false });
-    const log = fakeLog();
-    const result = await initializeBeadsContext(baseOpts({ log }));
-    expect(result.beadCtx).toBeUndefined();
-    expect(result.bdAvailable).toBe(false);
-    expect(log.warn).toHaveBeenCalledWith(
-      expect.stringContaining('bd CLI not found'),
-    );
-  });
-
-  it('returns undefined and errors when database not ready', async () => {
-    mockCheckBd.mockResolvedValue({ available: true, version: '1.0.0' });
-    mockEnsureDbReady.mockResolvedValue({ ready: false });
-    const log = fakeLog();
-    const result = await initializeBeadsContext(baseOpts({ log }));
-    expect(result.beadCtx).toBeUndefined();
-    expect(result.bdAvailable).toBe(true);
-    expect(log.error).toHaveBeenCalledWith(
-      expect.objectContaining({ beadsCwd: '/tmp/beads' }),
-      expect.stringContaining('database not initialized'),
-    );
-  });
-
   it('returns undefined and warns when no forum resolved', async () => {
-    mockCheckBd.mockResolvedValue({ available: true, version: '1.0.0' });
-    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
       beadsForum: '',
@@ -103,28 +63,20 @@ describe('initializeBeadsContext', () => {
       log,
     }));
     expect(result.beadCtx).toBeUndefined();
-    expect(result.bdAvailable).toBe(true);
-    expect(result.bdVersion).toBe('1.0.0');
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringContaining('no forum resolved'),
     );
   });
 
   it('returns BeadContext when all prerequisites met', async () => {
-    mockCheckBd.mockResolvedValue({ available: true, version: '1.2.3' });
-    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({ log }));
     expect(result.beadCtx).toBeDefined();
     expect(result.beadCtx!.forumId).toBe('forum-123');
     expect(result.beadCtx!.autoTag).toBe(true);
-    expect(result.bdAvailable).toBe(true);
-    expect(result.bdVersion).toBe('1.2.3');
   });
 
   it('resolves forum from systemBeadsForumId when beadsForum is empty', async () => {
-    mockCheckBd.mockResolvedValue({ available: true });
-    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const result = await initializeBeadsContext(baseOpts({
       beadsForum: '',
       systemBeadsForumId: 'system-forum-456',
@@ -134,8 +86,6 @@ describe('initializeBeadsContext', () => {
   });
 
   it('sets sidebarMentionUserId when sidebar enabled with mention user', async () => {
-    mockCheckBd.mockResolvedValue({ available: true });
-    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
       beadsSidebar: true,
@@ -148,8 +98,6 @@ describe('initializeBeadsContext', () => {
   });
 
   it('warns when sidebar enabled but mention user not set', async () => {
-    mockCheckBd.mockResolvedValue({ available: true });
-    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
       beadsSidebar: true,
@@ -164,8 +112,6 @@ describe('initializeBeadsContext', () => {
   });
 
   it('does not set sidebarMentionUserId when sidebar disabled', async () => {
-    mockCheckBd.mockResolvedValue({ available: true });
-    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
       beadsSidebar: false,
@@ -178,23 +124,30 @@ describe('initializeBeadsContext', () => {
   });
 
   it('propagates tagMapPath to BeadContext', async () => {
-    mockCheckBd.mockResolvedValue({ available: true });
-    mockEnsureDbReady.mockResolvedValue({ ready: true, prefix: 'test' });
     const result = await initializeBeadsContext(baseOpts({
       beadsTagMapPath: '/my/custom/tag-map.json',
     }));
     expect(result.beadCtx).toBeDefined();
     expect(result.beadCtx!.tagMapPath).toBe('/my/custom/tag-map.json');
   });
+
+  it('uses provided store instead of creating a new one', async () => {
+    const store = new TaskStore();
+    const result = await initializeBeadsContext(baseOpts({ store }));
+    expect(result.beadCtx).toBeDefined();
+    expect(result.beadCtx!.store).toBe(store);
+  });
 });
 
 describe('wireBeadsSync', () => {
-  it('wires forum guard, coordinator, and sync watcher', async () => {
+  it('wires forum guard, coordinator, and store event listeners', async () => {
     const log = fakeLog();
+    const store = new TaskStore();
     const beadCtx = {
       beadsCwd: '/tmp/beads',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
+      store,
       log,
     } as any;
     const client = {} as any;
@@ -228,28 +181,88 @@ describe('wireBeadsSync', () => {
     // The coordinator's sync() should have been called (fire-and-forget startup sync).
     const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
     expect(coordinatorInstance.sync).toHaveBeenCalled();
-    expect(startBeadSyncWatcher).toHaveBeenCalledWith(
-      expect.objectContaining({
-        beadsCwd: '/tmp/beads',
-        log,
-      }),
-    );
     expect(beadCtx.syncCoordinator).toBeDefined();
-    expect(result.syncWatcher).toBeDefined();
-    expect(result.syncWatcher).toHaveProperty('stop');
+    expect(result).toHaveProperty('stop');
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({ beadsCwd: '/tmp/beads' }),
-      'beads:file-watcher started',
+      'beads:store-event watcher started',
     );
   });
 
-  it('skips forum guard when skipForumGuard is true', async () => {
+  it('store events trigger coordinator sync', async () => {
     const log = fakeLog();
+    const store = new TaskStore({ prefix: 'test' });
     const beadCtx = {
       beadsCwd: '/tmp/beads',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       tagMapPath: '/tmp/tag-map.json',
+      store,
+      log,
+    } as any;
+
+    vi.mocked(BeadSyncCoordinator).mockClear();
+
+    await wireBeadsSync({
+      beadCtx,
+      client: {} as any,
+      guild: {} as any,
+      guildId: 'guild-1',
+      beadsCwd: '/tmp/beads',
+      log,
+    });
+
+    const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
+    const callsBefore = coordinatorInstance.sync.mock.calls.length;
+
+    // Trigger a store mutation — the event listener should call coordinator.sync()
+    store.create({ title: 'Test task' });
+
+    expect(coordinatorInstance.sync.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
+  it('stop() removes store event listeners', async () => {
+    const log = fakeLog();
+    const store = new TaskStore({ prefix: 'test' });
+    const beadCtx = {
+      beadsCwd: '/tmp/beads',
+      forumId: 'forum-123',
+      tagMap: { bug: '111' },
+      tagMapPath: '/tmp/tag-map.json',
+      store,
+      log,
+    } as any;
+
+    vi.mocked(BeadSyncCoordinator).mockClear();
+
+    const result = await wireBeadsSync({
+      beadCtx,
+      client: {} as any,
+      guild: {} as any,
+      guildId: 'guild-1',
+      beadsCwd: '/tmp/beads',
+      log,
+    });
+
+    result.stop();
+
+    const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
+    const callsAfterStop = coordinatorInstance.sync.mock.calls.length;
+
+    // After stop(), store mutations should NOT trigger additional syncs
+    store.create({ title: 'Another task' });
+    expect(coordinatorInstance.sync.mock.calls.length).toBe(callsAfterStop);
+  });
+
+  it('skips forum guard when skipForumGuard is true', async () => {
+    const log = fakeLog();
+    const store = new TaskStore();
+    const beadCtx = {
+      beadsCwd: '/tmp/beads',
+      forumId: 'forum-123',
+      tagMap: { bug: '111' },
+      tagMapPath: '/tmp/tag-map.json',
+      store,
       log,
     } as any;
 
@@ -266,19 +279,20 @@ describe('wireBeadsSync', () => {
     });
 
     expect(initBeadsForumGuard).not.toHaveBeenCalled();
-    // Coordinator and watcher should still be wired
+    // Coordinator should still be wired
     expect(BeadSyncCoordinator).toHaveBeenCalled();
-    expect(startBeadSyncWatcher).toHaveBeenCalled();
   });
 
-  it('propagates tagMapPath to CoordinatorOptions and watcher', async () => {
+  it('propagates tagMapPath to CoordinatorOptions', async () => {
     const log = fakeLog();
     const tagMap = { bug: '111' };
+    const store = new TaskStore();
     const beadCtx = {
       beadsCwd: '/tmp/beads',
       forumId: 'forum-123',
       tagMap,
       tagMapPath: '/config/tag-map.json',
+      store,
       log,
     } as any;
 
@@ -292,12 +306,6 @@ describe('wireBeadsSync', () => {
     });
 
     expect(BeadSyncCoordinator).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tagMapPath: '/config/tag-map.json',
-        tagMap,
-      }),
-    );
-    expect(startBeadSyncWatcher).toHaveBeenCalledWith(
       expect.objectContaining({
         tagMapPath: '/config/tag-map.json',
         tagMap,

@@ -33,7 +33,6 @@ import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
 import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
-import { checkBdAvailable, bdList } from './beads/bd-cli.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
 import { resolveBeadsForum, reloadTagMapInPlace } from './beads/discord-sync.js';
 import { initBeadsForumGuard } from './beads/forum-guard.js';
@@ -583,22 +582,6 @@ if (cfg.forgeAuditorRuntime) {
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
-// Pre-flight: detect whether the bd CLI is installed (used to decide whether to bootstrap the beads forum).
-// Full context init is deferred to post-connect so system bootstrap can auto-create the forum first.
-let bdAvailable = false;
-let bdVersion: string | undefined;
-if (beadsEnabled) {
-  const bd = await checkBdAvailable();
-  bdAvailable = bd.available;
-  bdVersion = bd.version;
-  if (!bd.available) {
-    log.error(
-      'beads: bd CLI not found — beads is enabled and required. ' +
-      'Install bd, set BD_BIN to a custom path, or set DISCOCLAW_BEADS_ENABLED=0 to bypass.',
-    );
-    process.exit(1);
-  }
-}
 
 const botParams = {
   token,
@@ -679,7 +662,7 @@ const botParams = {
   shortTermMaxAgeMs,
   shortTermInjectMaxChars,
   statusChannel,
-  bootstrapEnsureBeadsForum: beadsEnabled && bdAvailable,
+  bootstrapEnsureBeadsForum: beadsEnabled,
   existingCronsId: isSnowflake(cronForum ?? '') ? cronForum : undefined,
   existingBeadsId: isSnowflake(beadsForum) ? beadsForum : undefined,
   toolAwareStreaming,
@@ -923,7 +906,7 @@ await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'infl
 
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
 let beadCtx: BeadContext | undefined;
-if (beadsEnabled && bdAvailable) {
+if (beadsEnabled) {
   // Seed tag map from repo if data-dir copy doesn't exist yet.
   await seedTagMap(beadsTagMapSeedPath, beadsTagMapPath);
 
@@ -964,8 +947,7 @@ if (beadCtx) {
         client,
         beadForum.id,
         async () => {
-          const nonClosed = await bdList({ limit: 0 }, beadsCwd);
-          return nonClosed.length;
+          return beadCtx!.store.list({ status: 'all' }).filter((b) => b.status !== 'closed').length;
         },
         log,
       );
@@ -1006,13 +988,13 @@ if (beadCtx) {
       skipForumGuard: true,
       skipPhase5: cfg.beadsSyncSkipPhase5,
     });
-    beadSyncWatcher = wired.syncWatcher;
+    beadSyncWatcher = wired;
   } else {
     log.warn({ resolvedGuildId }, 'beads:sync-watcher skipped; guild not in cache');
   }
 
   log.info(
-    { beadsCwd, beadsForum: beadCtx.forumId, tagCount: Object.keys(beadCtx.tagMap).length, autoTag: beadsAutoTag, bdVersion },
+    { beadsCwd, beadsForum: beadCtx.forumId, tagCount: Object.keys(beadCtx.tagMap).length, autoTag: beadsAutoTag },
     'beads:initialized',
   );
 }
@@ -1331,8 +1313,7 @@ if (botStatus?.bootReport) {
     shutdownMessage: startupCtx.shutdown?.message,
     shutdownRequestedBy: startupCtx.shutdown?.requestedBy,
     activeForge: startupCtx.shutdown?.activeForge,
-    beadsEnabled: beadsEnabled && bdAvailable,
-    beadDbVersion: bdVersion,
+    beadsEnabled: beadsEnabled,
     forumResolved: Boolean(beadCtx?.forumId),
     cronsEnabled: Boolean(cronEnabled && botParams.cronCtx),
     cronJobCount: cronScheduler?.listJobs().length,
