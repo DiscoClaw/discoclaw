@@ -1,12 +1,20 @@
 /**
  * Smoke-test helpers: prompt definitions, response validation, and env-driven
- * runtime factory.  Used by model-smoke.test.ts to exercise each configured
+ * runtime factories.  Used by model-smoke.test.ts to exercise each configured
  * model tier through the full RuntimeAdapter.invoke() → EngineEvent pipeline.
+ *
+ * Runtime factories:
+ *   buildSmokeRuntime        — Claude Code CLI (CLAUDE_BIN, CLAUDE_OUTPUT_FORMAT, …)
+ *   buildGeminiSmokeRuntime  — Gemini CLI      (GEMINI_BIN, GEMINI_MODEL)
+ *   buildOpenAISmokeRuntime  — OpenAI API      (OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL)
+ *   buildCodexSmokeRuntime   — Codex CLI       (CODEX_BIN, CODEX_MODEL)
  */
 
 import type { EngineEvent, RuntimeAdapter } from './types.js';
 import { createClaudeCliRuntime } from './claude-code-cli.js';
 import { createGeminiCliRuntime } from './gemini-cli.js';
+import { createOpenAICompatRuntime } from './openai-compat.js';
+import { createCodexCliRuntime } from './codex-cli.js';
 
 // ---------------------------------------------------------------------------
 // Prompt definitions
@@ -201,4 +209,32 @@ export function buildGeminiSmokeRuntime(env: NodeJS.ProcessEnv = process.env): G
   const runtime = createGeminiCliRuntime({ geminiBin, defaultModel });
 
   return { runtime, geminiBin };
+}
+
+/**
+ * Build an OpenAI RuntimeAdapter from env vars.
+ * Reads `OPENAI_API_KEY`, `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`),
+ * and `OPENAI_MODEL` (default: `gpt-4o`).
+ */
+export function buildOpenAISmokeRuntime(env: NodeJS.ProcessEnv = process.env) {
+  const apiKey = env.OPENAI_API_KEY?.trim() || '';
+  const baseUrl = env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1';
+  const defaultModel = env.OPENAI_MODEL?.trim() || 'gpt-4o';
+
+  const runtime = createOpenAICompatRuntime({ auth: 'api_key', apiKey, baseUrl, defaultModel });
+
+  return { runtime, apiKey };
+}
+
+/**
+ * Build a Codex CLI RuntimeAdapter from env vars.
+ * Reads `CODEX_BIN` (default: `codex`) and `CODEX_MODEL` (default: `gpt-5.3-codex`).
+ */
+export function buildCodexSmokeRuntime(env: NodeJS.ProcessEnv = process.env) {
+  const codexBin = env.CODEX_BIN?.trim() || 'codex';
+  const defaultModel = env.CODEX_MODEL?.trim() || 'gpt-5.3-codex';
+
+  const runtime = createCodexCliRuntime({ codexBin, defaultModel });
+
+  return { runtime, codexBin };
 }

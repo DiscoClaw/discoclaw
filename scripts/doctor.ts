@@ -84,7 +84,7 @@ if (pnpmVersion) {
   fail('pnpm not found', 'Run: corepack enable  (or install pnpm globally)');
 }
 
-// 3. Runtime CLI binaries (Claude + Gemini)
+// 3. Runtime CLI binaries (Claude, Gemini, Codex, and OpenAI)
 const claudeBin = (process.env.CLAUDE_BIN ?? '').trim() || 'claude';
 for (const check of checkRuntimeBinaries(process.env, which)) {
   if (check.info) {
