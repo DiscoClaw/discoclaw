@@ -1,13 +1,14 @@
-import { EmbedBuilder } from 'discord.js';
+import type { MessageMentionOptions } from 'discord.js';
 import type { LoggerLike } from './action-types.js';
 import type { BeadSyncResult } from '../beads/types.js';
 import type { StartupContext } from './shutdown-context.js';
+import { NO_MENTIONS } from './allowed-mentions.js';
 
-type Sendable = { send(opts: { embeds: EmbedBuilder[] }): Promise<unknown> };
+type Sendable = { send(content: string | { content: string; allowedMentions?: MessageMentionOptions }): Promise<unknown> };
 
 /**
  * Strip CLI args and prompt content from error messages so internals
- * (SOUL.md, IDENTITY.md, full prompts) don't leak into status channel embeds.
+ * (SOUL.md, IDENTITY.md, full prompts) don't leak into status channel messages.
  */
 export function sanitizeErrorMessage(raw: string): string {
   if (!raw) return '(no message)';
@@ -97,14 +98,6 @@ export type StatusPoster = {
   bootReport?(data: BootReportData): Promise<void>;
 };
 
-const Colors = {
-  green: 0x57f287,
-  gray: 0x95a5a6,
-  red: 0xed4245,
-  orange: 0xfee75c,
-  blue: 0x5865f2,
-} as const;
-
 export type StatusPosterOpts = {
   botDisplayName?: string;
   log?: LoggerLike;
@@ -113,67 +106,34 @@ export type StatusPosterOpts = {
 export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): StatusPoster {
   const name = opts?.botDisplayName ?? 'Discoclaw';
   const log = opts?.log;
-  const send = async (embed: EmbedBuilder) => {
+  const send = async (content: string) => {
     try {
-      await channel.send({ embeds: [embed] });
+      await channel.send({ content, allowedMentions: NO_MENTIONS });
     } catch (err) {
-      log?.warn({ err }, 'status-channel: failed to post status embed');
+      log?.warn({ err }, 'status-channel: failed to post status message');
     }
   };
 
   return {
     async online() {
-      await send(
-        new EmbedBuilder()
-          .setColor(Colors.green)
-          .setTitle('Bot Online')
-          .setDescription(`${name} is connected and ready.`)
-          .setTimestamp(),
-      );
+      await send(`**Bot Online** — ${name} is connected and ready.`);
     },
 
     async offline() {
-      await send(
-        new EmbedBuilder()
-          .setColor(Colors.gray)
-          .setTitle('Bot Offline')
-          .setDescription(`${name} is shutting down.`)
-          .setTimestamp(),
-      );
+      await send(`**Bot Offline** — ${name} is shutting down.`);
     },
 
     async runtimeError(context, message) {
-      const embed = new EmbedBuilder()
-        .setColor(Colors.red)
-        .setTitle('Runtime Error')
-        .setDescription(sanitizeErrorMessage(message).slice(0, 4096))
-        .setTimestamp();
-      if (context.sessionKey) embed.addFields({ name: 'Session', value: context.sessionKey, inline: true });
-      if (context.channelName) embed.addFields({ name: 'Channel', value: context.channelName, inline: true });
-      await send(embed);
+      const ctx = [context.sessionKey, context.channelName].filter(Boolean).join(' · ');
+      await send(`**Runtime Error** [${ctx}]\n${sanitizeErrorMessage(message).slice(0, 500)}`);
     },
 
     async handlerError(context, err) {
-      const embed = new EmbedBuilder()
-        .setColor(Colors.red)
-        .setTitle('Handler Failure')
-        .setDescription(sanitizeErrorMessage(String(err) || '(unknown error)').slice(0, 4096))
-        .setTimestamp();
-      if (context.sessionKey) embed.addFields({ name: 'Session', value: context.sessionKey, inline: true });
-      await send(embed);
+      await send(`**Handler Failure** [${context.sessionKey}]\n${sanitizeErrorMessage(String(err) || '(unknown error)').slice(0, 500)}`);
     },
 
     async actionFailed(actionType, error) {
-      await send(
-        new EmbedBuilder()
-          .setColor(Colors.orange)
-          .setTitle('Action Failed')
-          .addFields(
-            { name: 'Action', value: actionType || '(unknown)', inline: true },
-            { name: 'Error', value: (error || '(unknown)').slice(0, 1024) },
-          )
-          .setTimestamp(),
-      );
+      await send(`**Action Failed** [${actionType || '(unknown)'}]\n${(error || '(unknown)').slice(0, 500)}`);
     },
 
     async beadSyncComplete(result) {
@@ -181,106 +141,69 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       const allZero = threadsCreated === 0 && emojisUpdated === 0 && starterMessagesUpdated === 0 && threadsArchived === 0 && statusesUpdated === 0 && tagsUpdated === 0 && (threadsReconciled ?? 0) === 0 && (orphanThreadsFound ?? 0) === 0;
       if (allZero && warnings === 0) return;
 
-      const color = warnings > 0 ? Colors.orange : Colors.green;
-      const embed = new EmbedBuilder()
-        .setColor(color)
-        .setTitle('Bead Sync Complete')
-        .setTimestamp();
+      const parts: string[] = ['**Bead Sync Complete**'];
+      if (threadsCreated > 0) parts.push(`Created: ${threadsCreated}`);
+      if (emojisUpdated > 0) parts.push(`Names Updated: ${emojisUpdated}`);
+      if (starterMessagesUpdated > 0) parts.push(`Starters Updated: ${starterMessagesUpdated}`);
+      if (threadsArchived > 0) parts.push(`Archived: ${threadsArchived}`);
+      if (statusesUpdated > 0) parts.push(`Statuses Fixed: ${statusesUpdated}`);
+      if (tagsUpdated > 0) parts.push(`Tags Updated: ${tagsUpdated}`);
+      if (threadsReconciled && threadsReconciled > 0) parts.push(`Reconciled: ${threadsReconciled}`);
+      if (orphanThreadsFound && orphanThreadsFound > 0) parts.push(`Orphans Found: ${orphanThreadsFound}`);
+      if (warnings > 0) parts.push(`Warnings: ${warnings}`);
 
-      if (threadsCreated > 0) embed.addFields({ name: 'Created', value: String(threadsCreated), inline: true });
-      if (emojisUpdated > 0) embed.addFields({ name: 'Names Updated', value: String(emojisUpdated), inline: true });
-      if (starterMessagesUpdated > 0) embed.addFields({ name: 'Starters Updated', value: String(starterMessagesUpdated), inline: true });
-      if (threadsArchived > 0) embed.addFields({ name: 'Archived', value: String(threadsArchived), inline: true });
-      if (statusesUpdated > 0) embed.addFields({ name: 'Statuses Fixed', value: String(statusesUpdated), inline: true });
-      if (tagsUpdated > 0) embed.addFields({ name: 'Tags Updated', value: String(tagsUpdated), inline: true });
-      if (threadsReconciled && threadsReconciled > 0) embed.addFields({ name: 'Reconciled', value: String(threadsReconciled), inline: true });
-      if (orphanThreadsFound && orphanThreadsFound > 0) embed.addFields({ name: 'Orphans Found', value: String(orphanThreadsFound), inline: true });
-      if (warnings > 0) embed.addFields({ name: 'Warnings', value: String(warnings), inline: true });
-
-      await send(embed);
+      await send(parts.join(' · '));
     },
 
     async bootReport(data) {
-      const colorMap: Record<StartupContext['type'], number> = {
-        crash: Colors.red,
-        intentional: Colors.green,
-        'graceful-unknown': Colors.orange,
-        'first-boot': Colors.blue,
-      };
-
-      const embed = new EmbedBuilder()
-        .setColor(colorMap[data.startupType])
-        .setTitle('Boot Report')
-        .setTimestamp();
-
-      // Startup type
       const typeLabel: Record<StartupContext['type'], string> = {
         crash: 'Crash',
         intentional: 'Intentional',
         'graceful-unknown': 'Graceful (unknown)',
         'first-boot': 'First Boot',
       };
-      embed.addFields({ name: 'Startup', value: typeLabel[data.startupType], inline: true });
 
-      // Boot duration
-      if (data.bootDurationMs !== undefined) {
-        embed.addFields({ name: 'Boot Time', value: `${data.bootDurationMs}ms`, inline: true });
-      }
+      const lines: string[] = ['**Boot Report**'];
+      lines.push(`Startup · ${typeLabel[data.startupType]}`);
+      if (data.bootDurationMs !== undefined) lines.push(`Boot Time · ${data.bootDurationMs}ms`);
+      lines.push(`Model · ${data.runtimeModel || '(default)'}`);
+      lines.push(`Permissions · ${data.permissionsTier || '(unset)'}`);
 
-      // Runtime model
-      embed.addFields({ name: 'Model', value: data.runtimeModel || '(default)', inline: true });
-
-      // Permissions tier
-      embed.addFields({ name: 'Permissions', value: data.permissionsTier || '(unset)', inline: true });
-
-      // Conditional: shutdown reason
       if (data.shutdownReason) {
         const reasonParts = [data.shutdownReason];
         if (data.shutdownRequestedBy) reasonParts.push(`by <@${data.shutdownRequestedBy}>`);
         if (data.shutdownMessage) reasonParts.push(`— ${data.shutdownMessage}`);
-        embed.addFields({ name: 'Last Shutdown', value: reasonParts.join(' '), inline: true });
+        lines.push(`Last Shutdown · ${reasonParts.join(' ')}`);
       }
 
-      // Conditional: active forge at shutdown
       if (data.activeForge) {
-        embed.addFields({ name: 'Forge at Shutdown', value: data.activeForge.slice(0, 1024), inline: true });
+        lines.push(`Forge at Shutdown · ${data.activeForge.slice(0, 200)}`);
       }
 
-      // Beads subsystem
       const beadsStatus = data.beadsEnabled
         ? `on${data.beadDbVersion ? ` · v${data.beadDbVersion}` : ''}${data.forumResolved ? ' · forum ok' : ' · forum unresolved'}`
         : 'off';
-      embed.addFields({ name: 'Beads', value: beadsStatus, inline: true });
+      lines.push(`Beads · ${beadsStatus}`);
 
-      // Crons subsystem
       const cronsStatus = data.cronsEnabled
         ? `on${data.cronJobCount !== undefined ? ` · ${data.cronJobCount} job${data.cronJobCount !== 1 ? 's' : ''}` : ''}`
         : 'off';
-      embed.addFields({ name: 'Crons', value: cronsStatus, inline: true });
+      lines.push(`Crons · ${cronsStatus}`);
 
-      // Memory layers
       const memoryParts: string[] = [];
       if (data.memoryEpisodicOn) memoryParts.push('episodic');
       if (data.memorySemanticOn) memoryParts.push('semantic');
       if (data.memoryWorkingOn) memoryParts.push('working');
-      embed.addFields({ name: 'Memory', value: memoryParts.length > 0 ? memoryParts.join(', ') : 'off', inline: true });
+      lines.push(`Memory · ${memoryParts.length > 0 ? memoryParts.join(', ') : 'off'}`);
 
-      // Action categories
-      embed.addFields({
-        name: 'Actions',
-        value: data.actionCategoriesEnabled.length > 0 ? data.actionCategoriesEnabled.join(', ') : '(none)',
-        inline: true,
-      });
+      lines.push(`Actions · ${data.actionCategoriesEnabled.length > 0 ? data.actionCategoriesEnabled.join(', ') : '(none)'}`);
+      lines.push(`Version · DiscoClaw ${data.buildVersion ?? '(unknown)'}`);
 
-      // Build version
-      embed.addFields({ name: 'Version', value: data.buildVersion ?? '(unknown)', inline: true });
-
-      // Conditional: config warnings
       if (data.configWarnings && data.configWarnings > 0) {
-        embed.addFields({ name: 'Config Warnings', value: String(data.configWarnings), inline: true });
+        lines.push(`Config Warnings · ${data.configWarnings}`);
       }
 
-      await send(embed);
+      await send(lines.join('\n'));
     },
   };
 }
