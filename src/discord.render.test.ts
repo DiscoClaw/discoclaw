@@ -7,6 +7,7 @@ import {
   truncateCodeBlocks,
   thinkingLabel,
   selectStreamingOutput,
+  formatElapsed,
 } from './discord.js';
 
 const ZWS = '\u200b';
@@ -278,6 +279,51 @@ describe('thinkingLabel', () => {
 });
 
 // ---------------------------------------------------------------------------
+// formatElapsed
+// ---------------------------------------------------------------------------
+describe('formatElapsed', () => {
+  it('0ms → (0s)', () => {
+    expect(formatElapsed(0)).toBe('(0s)');
+  });
+
+  it('sub-second (500ms) → (0s)', () => {
+    expect(formatElapsed(500)).toBe('(0s)');
+  });
+
+  it('1s (1000ms) → (1s)', () => {
+    expect(formatElapsed(1000)).toBe('(1s)');
+  });
+
+  it('30s (30000ms) → (30s)', () => {
+    expect(formatElapsed(30000)).toBe('(30s)');
+  });
+
+  it('59s (59000ms) → (59s)', () => {
+    expect(formatElapsed(59000)).toBe('(59s)');
+  });
+
+  it('59999ms rounds down → (59s)', () => {
+    expect(formatElapsed(59999)).toBe('(59s)');
+  });
+
+  it('exactly 60s (60000ms) → (1m0s)', () => {
+    expect(formatElapsed(60000)).toBe('(1m0s)');
+  });
+
+  it('90s (90000ms) → (1m30s)', () => {
+    expect(formatElapsed(90000)).toBe('(1m30s)');
+  });
+
+  it('125s (125000ms) → (2m5s)', () => {
+    expect(formatElapsed(125000)).toBe('(2m5s)');
+  });
+
+  it('large value — 1 hour (3600000ms) → (60m0s)', () => {
+    expect(formatElapsed(3600000)).toBe('(60m0s)');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // formatBoldLabel
 // ---------------------------------------------------------------------------
 describe('formatBoldLabel', () => {
@@ -447,6 +493,94 @@ describe('selectStreamingOutput', () => {
     });
     expect(out).toContain('```text');
     expect(out).toContain('data');
+  });
+
+  // -- elapsed prefix --
+
+  it('elapsedMs prefixes thinking label when deltaText is present', () => {
+    const out = selectStreamingOutput({
+      deltaText: 'streaming text',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 0,
+      elapsedMs: 42000,
+    });
+    expect(out).toContain('**(42s) Thinking.**');
+    expect(out).toContain('streaming text');
+  });
+
+  it('elapsedMs prefixes activity label', () => {
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: 'Reading file...',
+      finalText: '',
+      statusTick: 0,
+      elapsedMs: 72000,
+    });
+    expect(out).toContain('**(1m12s) Reading file...**');
+  });
+
+  it('elapsedMs prefixes default thinking label (no deltaText/activityLabel/finalText)', () => {
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 1,
+      elapsedMs: 5000,
+    });
+    expect(out).toContain('**(5s) Thinking..**');
+  });
+
+  it('no elapsed prefix on final-text-only output', () => {
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: '',
+      finalText: 'done',
+      statusTick: 0,
+      elapsedMs: 30000,
+    });
+    expect(out).toContain('done');
+    expect(out).not.toContain('(30s)');
+    expect(out).not.toContain('**');
+  });
+
+  it('no prefix when elapsedMs is omitted (backward compatibility)', () => {
+    const out = selectStreamingOutput({
+      deltaText: 'hello',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 0,
+    });
+    expect(out).toContain('**Thinking.**');
+    // No (Xs) token present
+    expect(out).not.toMatch(/\(\d+s\)/);
+    expect(out).not.toMatch(/\(\d+m\d+s\)/);
+  });
+
+  it('showPreview=false + elapsedMs: prefix renders in thinking label', () => {
+    const out = selectStreamingOutput({
+      deltaText: 'streaming text',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 0,
+      showPreview: false,
+      elapsedMs: 42000,
+    });
+    expect(out).toBe('**(42s) Thinking.**');
+    expect(out).not.toContain('```');
+  });
+
+  it('showPreview=false + elapsedMs: prefix renders in activity label', () => {
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: 'Reading file...',
+      finalText: '',
+      statusTick: 0,
+      showPreview: false,
+      elapsedMs: 90000,
+    });
+    expect(out).toBe('**(1m30s) Reading file...**');
+    expect(out).not.toContain('```');
   });
 });
 
