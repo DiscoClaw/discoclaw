@@ -1569,6 +1569,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           reply = await msg.reply({ content: formatBoldLabel(thinkingLabel(0)), allowedMentions: NO_MENTIONS });
 
+          // Track this reply for graceful shutdown cleanup and cleanup on early error.
+          let replyFinalized = false;
+          let hadTextFinal = false;
+          let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
+          // Declared before try so they remain accessible after the finally block closes.
+          let historySection = '';
+          let summarySection = '';
+          let processedText = '';
+          try {
+
           const cwd = params.useGroupDirCwd
             ? await ensureGroupDir(params.groupsDir, sessionKey, params.botDisplayName)
             : params.workspaceCwd;
@@ -1602,6 +1612,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               content: mapRuntimeErrorToUserMessage('Configuration error: missing required channel context file for this channel ID.'),
               allowedMentions: NO_MENTIONS,
             });
+            replyFinalized = true;
             return;
           }
 
@@ -1618,7 +1629,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             channelCtx.contextPath,
           );
 
-          let historySection = '';
           if (params.messageHistoryBudget > 0) {
             try {
               historySection = await fetchMessageHistory(
@@ -1631,7 +1641,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          let summarySection = '';
           if (params.summaryEnabled) {
             try {
               const existing = await loadSummary(params.summaryDataDir, sessionKey);
@@ -1805,17 +1814,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           let currentPrompt = prompt;
           let followUpDepth = 0;
-          let processedText = '';
-          // Tracks whether the reply was successfully replaced with real content (or deleted).
-          // If false when the finally block runs, the reply still shows thinking-format content
-          // and must be deleted to prevent a stale "Thinking..." message from persisting.
-          let replyFinalized = false;
-          // Tracks whether a text_final event was received, used to gate action execution.
-          let hadTextFinal = false;
-
-          // Track this reply for graceful shutdown cleanup.
-          let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
-          try {
 
           // -- auto-follow-up loop --
           // When query actions (channelList, readMessages, etc.) succeed, re-invoke
