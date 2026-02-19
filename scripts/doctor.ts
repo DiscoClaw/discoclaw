@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { validateDiscordToken, validateSnowflake, validateSnowflakes } from '../src/validate.js';
 import { missingEnvVars } from './doctor-env-diff.js';
-import { checkRequiredForums, parseBooleanSetting } from './doctor-lib.js';
+import { checkRequiredForums, checkRuntimeBinaries, parseBooleanSetting } from './doctor-lib.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -84,32 +84,37 @@ if (pnpmVersion) {
   fail('pnpm not found', 'Run: corepack enable  (or install pnpm globally)');
 }
 
-// 3. Claude CLI
-const claudeBin = process.env.CLAUDE_BIN || 'claude';
-const claudePath = which(claudeBin);
-if (claudePath) {
-  const claudeVersion = versionOf(claudeBin);
-  ok(`Claude CLI: ${claudeVersion ?? claudePath}`);
+// 3. Runtime CLI binaries (Claude + Gemini)
+const claudeBin = (process.env.CLAUDE_BIN ?? '').trim() || 'claude';
+for (const check of checkRuntimeBinaries(process.env, which)) {
+  if (check.info) {
+    console.log(`  ℹ ${check.label}`);
+  } else if (check.ok) {
+    ok(check.label);
+  } else {
+    fail(check.label, check.hint);
+  }
 
-  // Version check: require >= MIN_CLAUDE_VERSION for new tools and flags.
-  if (claudeVersion) {
-    const parsed = parseSemver(claudeVersion);
-    const minParsed = parseSemver(MIN_CLAUDE_VERSION)!;
-    if (parsed) {
-      if (isVersionAtLeast(parsed, minParsed)) {
-        ok(`Claude CLI version >= ${MIN_CLAUDE_VERSION}`);
+  // Claude-specific version sub-check (only when Claude CLI was found)
+  if (check.ok && !check.info && check.label.startsWith('Claude CLI found')) {
+    const claudeVersion = versionOf(claudeBin);
+    if (claudeVersion) {
+      const parsed = parseSemver(claudeVersion);
+      const minParsed = parseSemver(MIN_CLAUDE_VERSION)!;
+      if (parsed) {
+        if (isVersionAtLeast(parsed, minParsed)) {
+          ok(`Claude CLI version >= ${MIN_CLAUDE_VERSION}`);
+        } else {
+          fail(
+            `Claude CLI version ${parsed.join('.')} < ${MIN_CLAUDE_VERSION}`,
+            `Glob/Grep/Write tools and --fallback-model/--max-budget-usd/--append-system-prompt flags require >= ${MIN_CLAUDE_VERSION}. Run: claude update`,
+          );
+        }
       } else {
-        fail(
-          `Claude CLI version ${parsed.join('.')} < ${MIN_CLAUDE_VERSION}`,
-          `Glob/Grep/Write tools and --fallback-model/--max-budget-usd/--append-system-prompt flags require >= ${MIN_CLAUDE_VERSION}. Run: claude update`,
-        );
+        console.log(`  ℹ Could not parse Claude CLI version from "${claudeVersion}" (forward-compat: continuing)`);
       }
-    } else {
-      console.log(`  ℹ Could not parse Claude CLI version from "${claudeVersion}" (forward-compat: continuing)`);
     }
   }
-} else {
-  fail(`Claude CLI not found (looked for "${claudeBin}")`, 'Install from https://docs.anthropic.com/en/docs/claude-code');
 }
 
 // 3b. bd CLI (required when beads are enabled)
