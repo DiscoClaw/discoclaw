@@ -27,7 +27,7 @@ describe('setup: .env content generation', () => {
     expect(content).toContain('DISCOCLAW_CRON_FORUM=222222222222222222');
   });
 
-  it('includes core values when provided', () => {
+  it('includes core values when provided (backward-compat: no PRIMARY_RUNTIME)', () => {
     const content = buildEnvContent({
       DISCORD_TOKEN: 'abc.def.ghi',
       DISCORD_ALLOW_USER_IDS: '12345678901234567',
@@ -38,6 +38,23 @@ describe('setup: .env content generation', () => {
     expect(content).toContain('DISCORD_GUILD_ID=98765432109876543');
     expect(content).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
     expect(content).toContain('CLAUDE_OUTPUT_FORMAT=stream-json');
+    expect(content).toContain('# CORE');
+    expect(content).not.toContain('# PROVIDER');
+  });
+
+  it('Claude provider path places PRIMARY_RUNTIME and Claude vars in # PROVIDER, not # CORE', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      PRIMARY_RUNTIME: 'claude',
+      CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: '1',
+      CLAUDE_OUTPUT_FORMAT: 'stream-json',
+    });
+    expect(content).toContain('PRIMARY_RUNTIME=claude');
+    expect(content).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
+    expect(content).toContain('CLAUDE_OUTPUT_FORMAT=stream-json');
+    expect(content).toContain('# PROVIDER');
+    expect(content).not.toContain('# CORE');
   });
 
   it('includes optional values when provided', () => {
@@ -85,6 +102,45 @@ describe('setup: .env content generation', () => {
       DISCORD_ALLOW_USER_IDS: '12345678901234567',
     });
     expect(content).not.toContain('# CORE');
+  });
+
+  it('includes PRIMARY_RUNTIME and Gemini values when provided', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      PRIMARY_RUNTIME: 'gemini',
+      GEMINI_BIN: 'gemini',
+      GEMINI_MODEL: 'gemini-2.5-pro',
+    });
+    expect(content).toContain('PRIMARY_RUNTIME=gemini');
+    expect(content).toContain('GEMINI_BIN=gemini');
+    expect(content).toContain('GEMINI_MODEL=gemini-2.5-pro');
+  });
+
+  it('includes PRIMARY_RUNTIME and OpenAI key when provided', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      PRIMARY_RUNTIME: 'openai',
+      OPENAI_API_KEY: 'sk-test-key',
+    });
+    expect(content).toContain('PRIMARY_RUNTIME=openai');
+    expect(content).toContain('OPENAI_API_KEY=sk-test-key');
+  });
+
+  it('includes PRIMARY_RUNTIME and Codex values when provided', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      PRIMARY_RUNTIME: 'codex',
+      CODEX_BIN: '/usr/local/bin/codex',
+      CODEX_MODEL: 'codex-latest',
+      CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX: '1',
+    });
+    expect(content).toContain('PRIMARY_RUNTIME=codex');
+    expect(content).toContain('CODEX_BIN=/usr/local/bin/codex');
+    expect(content).toContain('CODEX_MODEL=codex-latest');
+    expect(content).toContain('CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=1');
   });
 });
 
