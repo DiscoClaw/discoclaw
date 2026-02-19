@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { runPipeline } from './engine.js';
-import type { PipelineParams, PromptStep, StepContext } from './engine.js';
+import type { PipelineDef, PromptStep, StepContext } from './engine.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
 
 // ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ function step(prompt: string | PromptStep['prompt'], overrides?: Partial<PromptS
   return { kind: 'prompt', prompt, ...overrides };
 }
 
-function baseParams(overrides?: Partial<PipelineParams>): PipelineParams {
+function baseParams(overrides?: Partial<PipelineDef>): PipelineDef {
   return {
     steps: [],
     runtime: makeRuntime([{ type: 'done' }]),
@@ -85,7 +85,77 @@ describe('runPipeline', () => {
     expect(result.outputs[0]).toBe('final text');
   });
 
-  it('feeds previous step output into next step as previousOutput', async () => {
+  it('interpolates {{prev.output}} in a static prompt string', async () => {
+    const capturedPrompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        capturedPrompts.push(params.prompt);
+        yield { type: 'text_final', text: `out:${params.prompt}` };
+        yield { type: 'done' };
+      },
+    };
+
+    await runPipeline(
+      baseParams({
+        steps: [step('first'), step('second prev="{{prev.output}}"')],
+        runtime,
+      }),
+    );
+
+    expect(capturedPrompts[1]).toBe('second prev="out:first"');
+  });
+
+  it('interpolates {{steps.<id>.output}} for named step references', async () => {
+    const capturedPrompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        capturedPrompts.push(params.prompt);
+        yield { type: 'text_final', text: `r:${params.prompt}` };
+        yield { type: 'done' };
+      },
+    };
+
+    await runPipeline(
+      baseParams({
+        steps: [
+          step('alpha', { id: 'step1' }),
+          step('beta'),
+          step('result={{steps.step1.output}}'),
+        ],
+        runtime,
+      }),
+    );
+
+    expect(capturedPrompts[2]).toBe('result=r:alpha');
+  });
+
+  it('leaves unresolvable {{steps.nonexistent.output}} as literal text', async () => {
+    const capturedPrompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        capturedPrompts.push(params.prompt);
+        yield { type: 'text_final', text: 'done' };
+        yield { type: 'done' };
+      },
+    };
+
+    await runPipeline(
+      baseParams({
+        steps: [step('ref={{steps.nonexistent.output}}')],
+        runtime,
+      }),
+    );
+
+    expect(capturedPrompts[0]).toBe('ref={{steps.nonexistent.output}}');
+  });
+
+  it('feeds previous step output into next step via callback prompt', async () => {
     const capturedPrompts: string[] = [];
     const runtime: RuntimeAdapter = {
       id: 'other',
@@ -110,7 +180,7 @@ describe('runPipeline', () => {
     expect(capturedPrompts[1]).toBe('second prev="out:first"');
   });
 
-  it('provides allOutputs from all preceding steps to dynamic prompts', async () => {
+  it('provides allOutputs from all preceding steps to callback prompts', async () => {
     let capturedCtx: StepContext | undefined;
     const runtime: RuntimeAdapter = {
       id: 'other',
@@ -167,6 +237,45 @@ describe('runPipeline', () => {
     expect(usedModels[1]).toBe('override-model');
   });
 
+  it('uses step-level runtime override instead of pipeline runtime', async () => {
+    const pipelineInvoked: string[] = [];
+    const stepInvoked: string[] = [];
+
+    const pipelineRuntime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        pipelineInvoked.push(params.prompt);
+        yield { type: 'text_final', text: 'from-pipeline' };
+        yield { type: 'done' };
+      },
+    };
+
+    const stepRuntime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        stepInvoked.push(params.prompt);
+        yield { type: 'text_final', text: 'from-step' };
+        yield { type: 'done' };
+      },
+    };
+
+    const result = await runPipeline(
+      baseParams({
+        steps: [
+          step('first'),
+          step('second', { runtime: stepRuntime }),
+        ],
+        runtime: pipelineRuntime,
+      }),
+    );
+
+    expect(pipelineInvoked).toEqual(['first']);
+    expect(stepInvoked).toEqual(['second']);
+    expect(result.outputs[1]).toBe('from-step');
+  });
+
   it('throws with step index on runtime error event', async () => {
     await expect(
       runPipeline(
@@ -200,6 +309,137 @@ describe('runPipeline', () => {
         }),
       ),
     ).rejects.toThrow('Pipeline step 1 failed: oops');
+  });
+
+  it('onError skip: middle step fails and subsequent step still runs', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        if (params.prompt === 'bad') {
+          yield { type: 'error', message: 'boom' };
+        } else {
+          yield { type: 'text_final', text: `ok:${params.prompt}` };
+          yield { type: 'done' };
+        }
+      },
+    };
+
+    const result = await runPipeline(
+      baseParams({
+        steps: [
+          step('first'),
+          step('bad', { onError: 'skip' }),
+          step('third'),
+        ],
+        runtime,
+      }),
+    );
+
+    expect(result.outputs).toEqual(['ok:first', '', 'ok:third']);
+  });
+
+  it('rejects duplicate step IDs before running any steps', async () => {
+    const invoked: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        invoked.push(params.prompt);
+        yield { type: 'text_final', text: 'done' };
+        yield { type: 'done' };
+      },
+    };
+
+    await expect(
+      runPipeline(
+        baseParams({
+          steps: [
+            step('first', { id: 'dup' }),
+            step('second', { id: 'dup' }),
+          ],
+          runtime,
+        }),
+      ),
+    ).rejects.toThrow('Duplicate step ID: "dup"');
+
+    expect(invoked).toHaveLength(0);
+  });
+
+  it('calls onProgress once per step with the step id in the message', async () => {
+    const messages: string[] = [];
+
+    await runPipeline(
+      baseParams({
+        steps: [
+          step('hello', { id: 'alpha' }),
+          step('world', { id: 'beta' }),
+        ],
+        runtime: makeRuntime([{ type: 'text_final', text: 'done' }, { type: 'done' }]),
+        onProgress: (msg) => messages.push(msg),
+      }),
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toContain('alpha');
+    expect(messages[1]).toContain('beta');
+  });
+
+  it('onProgress is called for skipped steps as well', async () => {
+    const messages: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        if (params.prompt === 'bad') {
+          yield { type: 'error', message: 'boom' };
+        } else {
+          yield { type: 'text_final', text: 'ok' };
+          yield { type: 'done' };
+        }
+      },
+    };
+
+    await runPipeline(
+      baseParams({
+        steps: [
+          step('good', { id: 'step-ok' }),
+          step('bad', { id: 'step-err', onError: 'skip' }),
+        ],
+        runtime,
+        onProgress: (msg) => messages.push(msg),
+      }),
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toContain('step-ok');
+    expect(messages[1]).toContain('step-err');
+  });
+
+  it('forwards step-level timeoutMs to runtime invoke params', async () => {
+    const capturedTimeouts: Array<number | undefined> = [];
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        capturedTimeouts.push(params.timeoutMs);
+        yield { type: 'text_final', text: 'done' };
+        yield { type: 'done' };
+      },
+    };
+
+    await runPipeline(
+      baseParams({
+        steps: [
+          step('first'),
+          step('second', { timeoutMs: 5000 }),
+        ],
+        runtime,
+      }),
+    );
+
+    expect(capturedTimeouts[0]).toBeUndefined();
+    expect(capturedTimeouts[1]).toBe(5000);
   });
 
   it('skips all steps when signal is already aborted', async () => {

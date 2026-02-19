@@ -137,7 +137,7 @@ All actions are gated by category env flags (off by default except channels).
 | Beads subsystem | 6 tests | **done** |
 | Cron subsystem | 3 tests | **done** |
 | Integration (fail-closed, prompt-context, status, channel-context) | 4 tests | **done** |
-| Pipeline engine | 11 tests | **done** |
+| Pipeline engine | 21 tests | **done** |
 
 ## 13. Documentation
 
@@ -159,13 +159,18 @@ General-purpose step-chaining primitive. Each step sends a prompt to a runtime a
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| `StepContext` / `PromptStep` / `PipelineStep` types | `src/pipeline/engine.ts` | **done** |
-| `PipelineParams` / `PipelineResult` types | `src/pipeline/engine.ts` | **done** |
+| `StepContext` / `PromptStep` types | `src/pipeline/engine.ts` | **done** |
+| `PipelineDef` / `PipelineResult` types | `src/pipeline/engine.ts` | **done** |
 | `runPipeline` — sequential step executor | `src/pipeline/engine.ts` | **done** |
 | `collectText` — event-stream drainer (`text_final` \| `text_delta`) | `src/pipeline/engine.ts` | **done** |
+| Template interpolation (`{{prev.output}}`, `{{steps.<id>.output}}`) | `src/pipeline/engine.ts` | **done** |
+| Named step IDs (`id` field) + duplicate ID validation | `src/pipeline/engine.ts` | **done** |
 | Per-step model override | `src/pipeline/engine.ts` | **done** |
-| Dynamic prompt via `(ctx: StepContext) => string` | `src/pipeline/engine.ts` | **done** |
-| `AbortSignal` support (pre-check + mid-stream) | `src/pipeline/engine.ts` | **done** |
+| Per-step runtime override (`runtime` field) | `src/pipeline/engine.ts` | **done** |
+| Error handling: fail-fast (default) or skip-on-error per step (`onError`) | `src/pipeline/engine.ts` | **done** |
+| Progress reporting via callback (`onProgress`) | `src/pipeline/engine.ts` | **done** |
+| Dynamic prompt via `(ctx: StepContext) => string` callback | `src/pipeline/engine.ts` | **done** |
+| `AbortSignal` support (pre-check + mid-stream) — undocumented addition; not in plan scope | `src/pipeline/engine.ts` | **done** |
 | Shell step kind | — | *stub — future plan* |
 | Discord-action step kind | — | *stub — future plan* |
 
