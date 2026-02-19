@@ -29,6 +29,7 @@ export type SyncSource = 'watcher' | 'user';
 export class BeadSyncCoordinator {
   private syncing = false;
   private pendingStatusPoster: StatusPoster | undefined | false = false;
+  private pendingSource: SyncSource = 'watcher';
   private suppressedUntil = 0;
   private catchUpScheduled = false;
 
@@ -72,6 +73,9 @@ export class BeadSyncCoordinator {
       if (statusPoster || this.pendingStatusPoster === false) {
         this.pendingStatusPoster = statusPoster;
       }
+      // Upgrade source to 'user' if any coalesced caller is user-initiated,
+      // so the follow-up correctly bypasses suppression only for user-triggered syncs.
+      if (source === 'user') this.pendingSource = 'user';
       return null; // coalesced into the running sync's follow-up
     }
     this.syncing = true;
@@ -102,9 +106,12 @@ export class BeadSyncCoordinator {
       this.syncing = false;
       if (this.pendingStatusPoster !== false) {
         const pendingPoster = this.pendingStatusPoster;
+        const pendingSource = this.pendingSource;
         this.pendingStatusPoster = false;
-        // Fire-and-forget follow-up for coalesced triggers
-        this.sync(pendingPoster).catch((err) => {
+        this.pendingSource = 'watcher';
+        // Fire-and-forget follow-up for coalesced triggers.
+        // Use the recorded source so watcher-coalesced follow-ups respect suppression.
+        this.sync(pendingPoster, pendingSource).catch((err) => {
           this.opts.log?.warn({ err }, 'beads:coordinator follow-up sync failed');
         });
       }

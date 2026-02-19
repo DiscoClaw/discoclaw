@@ -412,6 +412,74 @@ describe('BeadSyncCoordinator sync suppression', () => {
     expect(runBeadSync).toHaveBeenCalledOnce();
   });
 
+  it('follow-up from watcher-coalesced sync respects suppression', async () => {
+    // Regression: a running sync completing fires a follow-up. If all coalesced callers
+    // were watcher-triggered, the follow-up must respect suppression — otherwise it
+    // can create a duplicate thread for a bead that beadCreate is still setting up.
+    const { runBeadSync } = await import('./bead-sync.js');
+
+    let resolveFirst!: () => void;
+    const firstPromise = new Promise<void>((r) => { resolveFirst = r; });
+    (runBeadSync as any).mockImplementationOnce(async () => {
+      await firstPromise;
+      return { threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0 };
+    });
+
+    const coord = new BeadSyncCoordinator(makeOpts());
+
+    // Sync A starts (watcher-triggered)
+    const first = coord.sync(undefined, 'watcher');
+
+    // A watcher coalesces in while sync A is running
+    const second = await coord.sync(undefined, 'watcher');
+    expect(second).toBeNull();
+
+    // beadCreate calls suppressSync before creating the bead file
+    coord.suppressSync(5000);
+
+    // Sync A completes — this fires the follow-up
+    resolveFirst();
+    await first;
+
+    // Follow-up (from watcher-coalesced call) must respect suppression
+    await vi.advanceTimersByTimeAsync(10);
+    expect(runBeadSync).toHaveBeenCalledOnce(); // follow-up was suppressed
+
+    // Catch-up fires after suppression window
+    await vi.advanceTimersByTimeAsync(5100);
+    expect((runBeadSync as any).mock.calls.length).toBe(2);
+  });
+
+  it('follow-up from user-coalesced sync bypasses suppression', async () => {
+    // If a user-initiated sync coalesced in, the follow-up should bypass suppression.
+    const { runBeadSync } = await import('./bead-sync.js');
+
+    let resolveFirst!: () => void;
+    const firstPromise = new Promise<void>((r) => { resolveFirst = r; });
+    (runBeadSync as any).mockImplementationOnce(async () => {
+      await firstPromise;
+      return { threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0 };
+    });
+
+    const coord = new BeadSyncCoordinator(makeOpts());
+
+    const first = coord.sync(undefined, 'watcher');
+
+    // User-initiated sync coalesces in
+    const second = await coord.sync(undefined, 'user');
+    expect(second).toBeNull();
+
+    // beadCreate suppresses
+    coord.suppressSync(5000);
+
+    resolveFirst();
+    await first;
+
+    // Follow-up (user-upgraded) should bypass suppression and run immediately
+    await vi.advanceTimersByTimeAsync(10);
+    expect((runBeadSync as any).mock.calls.length).toBe(2);
+  });
+
   it('catch-up sync failure is logged', async () => {
     const { runBeadSync } = await import('./bead-sync.js');
     (runBeadSync as any).mockRejectedValueOnce(new Error('catch-up boom'));
