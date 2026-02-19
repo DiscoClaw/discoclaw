@@ -67,6 +67,8 @@ export type PlanContext = {
   onProgress?: (msg: string) => Promise<void>;
   /** When true, suppresses the post-run completion message to the originating channel. Used by forge auto-implement. */
   skipCompletionNotify?: boolean;
+  /** Called with the final completion content after the run finishes. Allows callers (e.g. forge auto-implement) to consume the outcome without a race against Discord status messages. */
+  onRunComplete?: (content: string) => Promise<void>;
 };
 
 // ---------------------------------------------------------------------------
@@ -363,37 +365,39 @@ export async function executePlanAction(
           planCtx.log?.error({ err, planId: action.planId }, 'plan:action:run failed');
         }
 
+        // Build the final outcome content — always, so onRunComplete can use it even when skipCompletionNotify is set.
+        const lines: string[] = [
+          `**Plan run complete:** \`${action.planId}\``,
+          `Phases run: ${phasesRun}`,
+        ];
+        if (hitMaxPhases && !stopReason) {
+          lines.push(`Stopped: reached max-phase limit (${maxPhases})`);
+        }
+        if (stopReason) {
+          lines.push(`Stopped: ${stopMessage ?? stopReason}`);
+        }
+        if (runError) {
+          lines.push(`Error: ${runError instanceof Error ? runError.message : String(runError)}`);
+        }
+        if (autoClosed) {
+          lines.push('Plan auto-closed — all phases terminal.');
+        }
+        try {
+          const phasesContent = await fs.readFile(prepResult.phasesFilePath, 'utf-8');
+          const phases = deserializePhases(phasesContent);
+          const budget = Math.max(0, 2000 - lines.join('\n').length - 50);
+          const summary = buildPostRunSummary(phases, budget);
+          if (summary) {
+            lines.push(summary);
+          }
+        } catch (summaryErr) {
+          planCtx.log?.error({ err: summaryErr, planId: action.planId }, 'plan:action:run summary failed');
+        }
+        const finalContent = lines.join('\n');
+
         // Edit status message to show final outcome, or send a new message if no statusMsg.
         if (!planCtx.skipCompletionNotify) {
           try {
-            const lines: string[] = [
-              `**Plan run complete:** \`${action.planId}\``,
-              `Phases run: ${phasesRun}`,
-            ];
-            if (hitMaxPhases && !stopReason) {
-              lines.push(`Stopped: reached max-phase limit (${maxPhases})`);
-            }
-            if (stopReason) {
-              lines.push(`Stopped: ${stopMessage ?? stopReason}`);
-            }
-            if (runError) {
-              lines.push(`Error: ${runError instanceof Error ? runError.message : String(runError)}`);
-            }
-            if (autoClosed) {
-              lines.push('Plan auto-closed — all phases terminal.');
-            }
-            try {
-              const phasesContent = await fs.readFile(prepResult.phasesFilePath, 'utf-8');
-              const phases = deserializePhases(phasesContent);
-              const budget = Math.max(0, 2000 - lines.join('\n').length - 50);
-              const summary = buildPostRunSummary(phases, budget);
-              if (summary) {
-                lines.push(summary);
-              }
-            } catch (summaryErr) {
-              planCtx.log?.error({ err: summaryErr, planId: action.planId }, 'plan:action:run summary failed');
-            }
-            const finalContent = lines.join('\n');
             if (statusMsg) {
               // Edit the existing status message in place.
               try {
@@ -411,6 +415,13 @@ export async function executePlanAction(
           } catch {
             // best-effort — do not rethrow
           }
+        }
+
+        // Notify caller (e.g. forge auto-implement) with the final content — best-effort.
+        try {
+          await planCtx.onRunComplete?.(finalContent);
+        } catch {
+          // best-effort
         }
       })().catch((err) => {
         planCtx.log?.error({ err, planId: action.planId }, 'plan:action:run failed');
