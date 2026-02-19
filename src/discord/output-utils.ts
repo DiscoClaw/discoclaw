@@ -140,24 +140,34 @@ export function thinkingLabel(tick: number): string {
   return 'Thinking' + '.'.repeat(dotCounts[tick % 4]);
 }
 
+export function formatElapsed(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `(${totalSeconds}s)`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `(${minutes}m${seconds}s)`;
+}
+
 export function selectStreamingOutput(opts: {
   deltaText: string;
   activityLabel: string;
   finalText: string;
   statusTick: number;
   showPreview?: boolean;
+  elapsedMs?: number;
 }): string {
   const preview = opts.showPreview ?? true;
+  const prefix = opts.elapsedMs !== undefined ? formatElapsed(opts.elapsedMs) + ' ' : '';
   // finalText always bypasses the gate — completion/error output renders immediately.
   if (!preview && !opts.finalText) {
-    if (opts.activityLabel) return formatBoldLabel(opts.activityLabel);
-    return formatBoldLabel(thinkingLabel(opts.statusTick));
+    if (opts.activityLabel) return formatBoldLabel(prefix + opts.activityLabel);
+    return formatBoldLabel(prefix + thinkingLabel(opts.statusTick));
   }
   if (opts.deltaText) {
-    const label = thinkingLabel(opts.statusTick);
+    const label = prefix + thinkingLabel(opts.statusTick);
     return `**${label}**\n${renderDiscordTail(opts.deltaText)}`;
   }
-  if (opts.activityLabel) return renderActivityTail(opts.activityLabel);
+  if (opts.activityLabel) return renderActivityTail(prefix + opts.activityLabel);
   if (opts.finalText) return renderDiscordTail(opts.finalText);
-  return renderActivityTail(thinkingLabel(opts.statusTick));
+  return renderActivityTail(prefix + thinkingLabel(opts.statusTick));
 }
