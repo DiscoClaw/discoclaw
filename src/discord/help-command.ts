@@ -15,6 +15,7 @@ export function handleHelpCommand(): string {
     '- `!health` — show bot health and metrics; `!health verbose` for full config',
     '- `!update` — check for or apply code updates; `!update help` for details',
     '- `!restart` — restart the discoclaw service; `!restart help` for details',
+    '- `!stop` — abort all active AI streams and cancel any running forge',
     '- `!help` — this message',
   ].join('\n');
 }

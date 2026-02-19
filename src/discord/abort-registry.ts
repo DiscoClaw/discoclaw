@@ -56,6 +56,22 @@ export function isActivelyStreaming(messageId: string): boolean {
   return active.has(messageId);
 }
 
+/**
+ * Abort all active streams.
+ *
+ * Returns the number of streams that were actively streaming and aborted.
+ * Does not modify the active/cooldown sets — each stream's `dispose()` call
+ * (in its finally block) handles cleanup and cooldown the same way as a
+ * single-message abort via `tryAbort`.
+ */
+export function tryAbortAll(): number {
+  const controllers = [...active.values()];
+  for (const controller of controllers) {
+    controller.abort();
+  }
+  return controllers.length;
+}
+
 /** Clear all state. Only for use in tests. */
 export function _resetForTest(): void {
   active.clear();

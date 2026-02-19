@@ -49,7 +49,7 @@ import { ToolAwareQueue } from './tool-aware-queue.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
-import { registerAbort } from './abort-registry.js';
+import { registerAbort, tryAbortAll } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
@@ -427,6 +427,20 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
       if (parseHelpCommand(String(msg.content ?? ''))) {
         await msg.reply({ content: handleHelpCommand(), allowedMentions: NO_MENTIONS });
+        return;
+      }
+
+      // Handle !stop — abort all active AI streams and cancel any running forge.
+      if (String(msg.content ?? '').trim().toLowerCase() === '!stop') {
+        const aborted = tryAbortAll();
+        const orch = getActiveOrchestrator();
+        const forgeRunning = orch?.isRunning ?? false;
+        if (forgeRunning) orch!.requestCancel();
+        const parts: string[] = [];
+        if (aborted > 0) parts.push(`Aborted ${aborted} active stream${aborted === 1 ? '' : 's'}.`);
+        if (forgeRunning) parts.push('Forge cancel requested.');
+        if (parts.length === 0) parts.push('Nothing active to stop.');
+        await msg.reply({ content: parts.join(' '), allowedMentions: NO_MENTIONS });
         return;
       }
 
