@@ -360,7 +360,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
 }
 
 // ---------------------------------------------------------------------------
-// Legacy Bead* compatibility aliases
+// Legacy compatibility aliases (remove in Phase 5 hard-cut).
 // ---------------------------------------------------------------------------
 
 export type BeadSyncOptions = TaskSyncOptions;

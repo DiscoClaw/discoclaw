@@ -90,8 +90,9 @@ export const STATUS_EMOJI: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Bead* compatibility aliases — mirrors what src/beads/types.ts re-exports
-// so consumers can be rewired to src/tasks/types.ts without a name change.
+// Legacy compatibility aliases (remove in Phase 5 hard-cut).
+// Mirrors what src/beads/types.ts re-exports so consumers can be rewired to
+// src/tasks/types.ts without a symbol rename.
 // ---------------------------------------------------------------------------
 
 export type BeadStatus = TaskStatus;

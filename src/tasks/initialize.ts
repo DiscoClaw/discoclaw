@@ -110,7 +110,7 @@ export type WireTaskSyncOpts = {
   forumCountSync?: ForumCountSync;
   /** Skip forum guard installation (caller already installed it). */
   skipForumGuard?: boolean;
-  /** Disable Phase 5 (thread reconciliation) of the bead sync cycle. */
+  /** Disable Phase 5 (thread reconciliation) of the task sync cycle. */
   skipPhase5?: boolean;
 };
 
@@ -159,7 +159,7 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSync
   };
 }
 
-// Bead* compatibility aliases
+// Legacy compatibility aliases (remove in Phase 5 hard-cut).
 export type InitializeBeadsOpts = InitializeTasksOpts;
 export type InitializeBeadsResult = InitializeTasksResult;
 export type WireBeadsSyncOpts = WireTaskSyncOpts;

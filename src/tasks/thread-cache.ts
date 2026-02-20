@@ -58,7 +58,7 @@ export class TaskThreadCache {
 export const taskThreadCache = new TaskThreadCache();
 
 // ---------------------------------------------------------------------------
-// Bead* compatibility aliases
+// Legacy compatibility aliases (remove in Phase 5 hard-cut).
 // ---------------------------------------------------------------------------
 
 export const findBeadByThreadId = findTaskByThreadId;

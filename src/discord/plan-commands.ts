@@ -33,7 +33,7 @@ export type PlanFileHeader = {
   /** Canonical backing task identifier. */
   taskId?: string;
   /** @deprecated Compatibility alias mirrored from taskId. */
-  beadId: string;
+  beadId?: string;
   status: string;
   title: string;
   project: string;
@@ -87,18 +87,18 @@ export function parsePlanFileHeader(content: string): PlanFileHeader | null {
   const titleMatch = content.match(/^# Plan:\s*(.+)$/m);
   const idMatch = content.match(/^\*\*ID:\*\*\s*(.+)$/m);
   const taskMatch = content.match(/^\*\*Task:\*\*\s*(.+)$/m);
-  const beadMatch = content.match(/^\*\*Bead:\*\*\s*(.+)$/m);
+  const legacyTaskMatch = content.match(/^\*\*Bead:\*\*\s*(.+)$/m);
   const statusMatch = content.match(/^\*\*Status:\*\*\s*(.+)$/m);
   const projectMatch = content.match(/^\*\*Project:\*\*\s*(.+)$/m);
   const createdMatch = content.match(/^\*\*Created:\*\*\s*(.+)$/m);
 
   if (!idMatch) return null;
-  const taskId = taskMatch?.[1]?.trim() ?? beadMatch?.[1]?.trim() ?? '';
+  const taskId = taskMatch?.[1]?.trim() ?? legacyTaskMatch?.[1]?.trim() ?? '';
 
   return {
     planId: idMatch[1]!.trim(),
     taskId,
-    beadId: taskId,
+    beadId: legacyTaskMatch?.[1]?.trim() ?? taskId,
     status: statusMatch?.[1]?.trim() ?? '',
     title: titleMatch?.[1]?.trim() ?? '',
     project: projectMatch?.[1]?.trim() ?? '',
@@ -334,7 +334,7 @@ export async function handlePlanCommand(
           const normalizedTitle = cmd.args.trim().toLowerCase();
           const existingTasks = opts.taskStore.list({ label: 'plan' });
           const match = existingTasks.find(
-            (b) => b.status !== 'closed' && b.title.trim().toLowerCase() === normalizedTitle,
+            (task) => task.status !== 'closed' && task.title.trim().toLowerCase() === normalizedTitle,
           );
 
           if (match) {
