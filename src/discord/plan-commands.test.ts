@@ -510,14 +510,14 @@ describe('handlePlanCommand', () => {
     expect(stat.isDirectory()).toBe(true);
   });
 
-  it('create — skips task store create when existingBeadId is provided', async () => {
+  it('create — skips task store create when existingTaskId is provided', async () => {
     const tmpDir = await makeTmpDir();
     const store = makeStore();
     const createSpy = vi.spyOn(store, 'create');
     const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
-      { action: 'create', args: 'fix the bug', existingBeadId: 'bead-abc' },
+      { action: 'create', args: 'fix the bug', existingTaskId: 'bead-abc' },
       opts,
     );
 
@@ -540,7 +540,7 @@ describe('handlePlanCommand', () => {
     const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     await handlePlanCommand(
-      { action: 'create', args: 'test', existingBeadId: 'bead-xyz' },
+      { action: 'create', args: 'test', existingTaskId: 'bead-xyz' },
       opts,
     );
 
@@ -554,7 +554,7 @@ describe('handlePlanCommand', () => {
     const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
-      { action: 'create', args: 'test', existingBeadId: 'bead-fail' },
+      { action: 'create', args: 'test', existingTaskId: 'bead-fail' },
       opts,
     );
 
