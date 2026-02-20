@@ -3,7 +3,7 @@ import type { TagMap } from './discord-sync.js';
 
 /**
  * Strict tag-map loader for the cron subsystem.
- * Unlike the permissive beads loadTagMap(), this throws on any failure
+ * Unlike the permissive task runtime tag-map loader, this throws on any failure
  * (read error, invalid JSON, wrong shape) so callers can handle it explicitly.
  */
 export async function loadCronTagMapStrict(tagMapPath: string): Promise<TagMap> {
@@ -24,7 +24,7 @@ export async function loadCronTagMapStrict(tagMapPath: string): Promise<TagMap> 
 
 /**
  * Reload tag-map.json and mutate the existing TagMap in-place.
- * Same validate-then-mutate pattern as beads reloadTagMapInPlace:
+ * Same validate-then-mutate pattern as the task runtime loader:
  * only mutates after full validation, throws on any failure so callers
  * can catch and preserve the existing cached map.
  * Returns the new tag count.

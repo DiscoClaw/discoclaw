@@ -78,7 +78,7 @@ export async function checkBdAvailable(): Promise<{ available: boolean; version?
 }
 
 /**
- * Verify the beads database at `cwd` is initialized with an issue_prefix.
+ * Verify the legacy bd database at `cwd` is initialized with an issue_prefix.
  * Without a prefix, bd silently falls through to the global daemon registry
  * and may write to a completely different instance's database.
  *
