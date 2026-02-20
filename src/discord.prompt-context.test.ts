@@ -11,25 +11,12 @@ vi.mock('./beads/bead-thread-cache.js', () => ({
   },
 }));
 
-// Mock bd-cli so plan/forge dispatch tests don't shell out.
-vi.mock('./beads/bd-cli.js', () => ({
-  bdCreate: vi.fn(async () => ({ id: 'ws-test-001', title: 'test', status: 'open' })),
-  bdClose: vi.fn(async () => {}),
-  bdUpdate: vi.fn(async () => {}),
-  bdAddLabel: vi.fn(async () => {}),
-  bdList: vi.fn(async () => []),
-}));
-
 import { beadThreadCache } from './beads/bead-thread-cache.js';
-import { bdCreate, bdList } from './beads/bd-cli.js';
 import { TaskStore } from './tasks/store.js';
 import { createMessageCreateHandler } from './discord.js';
 import { loadDurableMemory, saveDurableMemory, addItem } from './discord/durable-memory.js';
 import { inlineContextFiles } from './discord/prompt-common.js';
 import type { DurableMemoryStore } from './discord/durable-memory.js';
-
-const mockedBdCreate = vi.mocked(bdCreate);
-const mockedBdList = vi.mocked(bdList);
 
 const mockedCacheGet = vi.mocked(beadThreadCache.get);
 
@@ -1100,7 +1087,7 @@ describe('bead resolution dispatch wiring', () => {
     return { queue, runtime, params, workspaceCwd, store };
   }
 
-  it('!plan create in bead forum thread resolves existingBeadId — skips bdCreate', async () => {
+  it('!plan create in bead forum thread resolves existingBeadId — skips store.create', async () => {
     mockedCacheGet.mockResolvedValue({
       id: 'existing-bead-42',
       title: 'Existing bead',
@@ -1109,7 +1096,8 @@ describe('bead resolution dispatch wiring', () => {
       owner: 'David',
     } as any);
 
-    const { queue, params, workspaceCwd } = makePlanForgeParams();
+    const { queue, params, workspaceCwd, store } = makePlanForgeParams();
+    const createSpy = vi.spyOn(store, 'create');
     const handler = createMessageCreateHandler(params, queue);
 
     await handler(makeMsg({
@@ -1125,7 +1113,7 @@ describe('bead resolution dispatch wiring', () => {
     }));
 
     expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-plan', expect.any(Object));
-    expect(mockedBdCreate).not.toHaveBeenCalled();
+    expect(createSpy).not.toHaveBeenCalled();
 
     // Verify the plan file uses the existing bead ID
     const plansDir = path.join(workspaceCwd, 'plans');
@@ -1136,7 +1124,7 @@ describe('bead resolution dispatch wiring', () => {
     expect(content).toContain('**Bead:** existing-bead-42');
   });
 
-  it('!plan create in non-bead-forum thread does NOT resolve — calls bdCreate', async () => {
+  it('!plan create in non-bead-forum thread does NOT resolve — calls store.create', async () => {
     const { queue, params, store } = makePlanForgeParams();
     const createSpy = vi.spyOn(store, 'create');
     const handler = createMessageCreateHandler(params, queue);
@@ -1157,7 +1145,7 @@ describe('bead resolution dispatch wiring', () => {
     expect(createSpy).toHaveBeenCalled();
   });
 
-  it('!plan create when cache returns null falls through to bdCreate', async () => {
+  it('!plan create when cache returns null falls through to store.create', async () => {
     mockedCacheGet.mockResolvedValue(null);
 
     const { queue, params, store } = makePlanForgeParams();
@@ -1482,7 +1470,7 @@ describe('bead resolution dispatch wiring', () => {
   // -------------------------------------------------------------------------
 
   describe('title-match dedup in non-bead channels', () => {
-    it('!plan create reuses existing open bead with matching title — skips bdCreate', async () => {
+    it('!plan create reuses existing open bead with matching title — skips store.create', async () => {
       const { queue, params, workspaceCwd, store } = makePlanForgeParams();
       const existingBead = store.create({ title: 'fix the layout bug', labels: ['plan'] });
       const createSpy = vi.spyOn(store, 'create');
@@ -1557,7 +1545,7 @@ describe('bead resolution dispatch wiring', () => {
       expect(createSpy).toHaveBeenCalled();
     });
 
-    it('!plan create calls bdCreate when no title match exists', async () => {
+    it('!plan create calls store.create when no title match exists', async () => {
       const { queue, params, store } = makePlanForgeParams();
       store.create({ title: 'something unrelated', labels: ['plan'] });
       const createSpy = vi.spyOn(store, 'create');

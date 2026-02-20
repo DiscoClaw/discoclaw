@@ -349,6 +349,14 @@ const sidebarMentionUserId = beadsSidebar ? beadsMentionUser : undefined;
 const beadsAutoTag = cfg.beadsAutoTag;
 let beadsAutoTagModel = cfg.beadsAutoTagModel;
 const discordActionsBeads = cfg.discordActionsBeads;
+const beadsTaskPrefix = cfg.beadsTaskPrefix;
+
+// Initialize shared task store (used by beads, forge, and plan subsystems).
+// Created unconditionally so forge/plan have a persistent store even when beads are disabled.
+await fs.mkdir(beadsDataDir, { recursive: true });
+const sharedTaskStore = new TaskStore({ prefix: beadsTaskPrefix, persistPath: path.join(beadsDataDir, 'tasks.jsonl') });
+await sharedTaskStore.load();
+log.info({ count: sharedTaskStore.size(), prefix: beadsTaskPrefix }, 'tasks:store loaded');
 
 const runtimeFallbackModel = cfg.runtimeFallbackModel;
 const runtimeMaxBudgetUsd = cfg.runtimeMaxBudgetUsd;
@@ -926,6 +934,7 @@ if (beadsEnabled) {
     statusPoster: botStatus ?? undefined,
     log,
     systemBeadsForumId: system?.beadsForumId,
+    store: sharedTaskStore,
   });
   beadCtx = beadsResult.beadCtx;
 }
@@ -1006,7 +1015,7 @@ if (beadCtx) {
 // Initialized before cron so cron executor can reference these contexts.
 {
   const plansDir = path.join(workspaceCwd, 'plans');
-  const effectiveTaskStore = beadCtx?.store ?? new TaskStore();
+  const effectiveTaskStore = sharedTaskStore;
 
   if (forgeCommandsEnabled && discordActionsForge) {
     botParams.forgeCtx = {
