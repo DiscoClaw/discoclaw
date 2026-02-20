@@ -39,6 +39,3 @@ export function buildTaskContextSummary(
     description,
   };
 }
-
-// Legacy compatibility alias (remove in Phase 5 hard-cut).
-export const buildBeadContextSummary = buildTaskContextSummary;

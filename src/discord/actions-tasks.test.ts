@@ -29,7 +29,7 @@ vi.mock('../tasks/discord-sync.js', () => ({
 }));
 
 vi.mock('../tasks/auto-tag.js', () => ({
-  autoTagBead: vi.fn(async () => ['feature']),
+  autoTagTask: vi.fn(async () => ['feature']),
 }));
 
 vi.mock('../tasks/task-sync-engine.js', () => {

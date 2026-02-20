@@ -158,11 +158,3 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSync
     },
   };
 }
-
-// Legacy compatibility aliases (remove in Phase 5 hard-cut).
-export type InitializeBeadsOpts = InitializeTasksOpts;
-export type InitializeBeadsResult = InitializeTasksResult;
-export type WireBeadsSyncOpts = WireTaskSyncOpts;
-export type WireBeadsSyncResult = WireTaskSyncResult;
-export const initializeBeadsContext = initializeTasksContext;
-export const wireBeadsSync = wireTaskSync;

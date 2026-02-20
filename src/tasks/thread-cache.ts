@@ -56,11 +56,3 @@ export class TaskThreadCache {
 
 /** Module-level singleton used by the bot process. */
 export const taskThreadCache = new TaskThreadCache();
-
-// ---------------------------------------------------------------------------
-// Legacy compatibility aliases (remove in Phase 5 hard-cut).
-// ---------------------------------------------------------------------------
-
-export const findBeadByThreadId = findTaskByThreadId;
-export { TaskThreadCache as BeadThreadCache };
-export const beadThreadCache = taskThreadCache;

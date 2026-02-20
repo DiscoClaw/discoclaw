@@ -65,6 +65,3 @@ export async function autoTagTask(
 
   return result;
 }
-
-// Legacy compatibility alias (remove in Phase 5 hard-cut).
-export const autoTagBead = autoTagTask;

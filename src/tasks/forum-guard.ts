@@ -103,7 +103,3 @@ export function initTasksForumGuard(opts: TasksForumGuardOptions): void {
     }
   });
 }
-
-// Legacy compatibility aliases (remove in Phase 5 hard-cut).
-export type BeadsForumGuardOptions = TasksForumGuardOptions;
-export const initBeadsForumGuard = initTasksForumGuard;
