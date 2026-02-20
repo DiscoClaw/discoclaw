@@ -9,8 +9,8 @@ import { MODERATION_ACTION_TYPES, executeModerationAction, moderationActionsProm
 import type { ModerationActionRequest } from './actions-moderation.js';
 import { POLL_ACTION_TYPES, executePollAction, pollActionsPromptSection } from './actions-poll.js';
 import type { PollActionRequest } from './actions-poll.js';
-import { BEAD_ACTION_TYPES, executeBeadAction, beadActionsPromptSection } from './actions-beads.js';
-import type { BeadActionRequest, BeadContext } from './actions-beads.js';
+import { TASK_ACTION_TYPES, executeTaskAction, taskActionsPromptSection } from './actions-tasks.js';
+import type { TaskActionRequest, TaskContext as BeadContext } from './actions-tasks.js';
 import { CRON_ACTION_TYPES, executeCronAction, cronActionsPromptSection } from './actions-crons.js';
 import type { CronActionRequest, CronContext } from './actions-crons.js';
 import { BOT_PROFILE_ACTION_TYPES, executeBotProfileAction, botProfileActionsPromptSection } from './actions-bot-profile.js';
@@ -64,7 +64,7 @@ export type DiscordActionRequest =
   | GuildActionRequest
   | ModerationActionRequest
   | PollActionRequest
-  | BeadActionRequest
+  | TaskActionRequest
   | CronActionRequest
   | BotProfileActionRequest
   | ForgeActionRequest
@@ -101,7 +101,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.guild) for (const t of GUILD_ACTION_TYPES) types.add(t);
   if (flags.moderation) for (const t of MODERATION_ACTION_TYPES) types.add(t);
   if (flags.polls) for (const t of POLL_ACTION_TYPES) types.add(t);
-  if (flags.beads) for (const t of BEAD_ACTION_TYPES) types.add(t);
+  if (flags.beads) for (const t of TASK_ACTION_TYPES) types.add(t);
   if (flags.crons) for (const t of CRON_ACTION_TYPES) types.add(t);
   if (flags.botProfile) for (const t of BOT_PROFILE_ACTION_TYPES) types.add(t);
   if (flags.forge) for (const t of FORGE_ACTION_TYPES) types.add(t);
@@ -281,11 +281,11 @@ export async function executeDiscordActions(
         result = await executeModerationAction(action as ModerationActionRequest, ctx);
       } else if (POLL_ACTION_TYPES.has(action.type)) {
         result = await executePollAction(action as PollActionRequest, ctx);
-      } else if (BEAD_ACTION_TYPES.has(action.type)) {
+      } else if (TASK_ACTION_TYPES.has(action.type)) {
         if (!subs.beadCtx) {
-          result = { ok: false, error: 'Beads subsystem not configured' };
+          result = { ok: false, error: 'Tasks subsystem not configured' };
         } else {
-          result = await executeBeadAction(action as BeadActionRequest, ctx, subs.beadCtx);
+          result = await executeTaskAction(action as TaskActionRequest, ctx, subs.beadCtx);
         }
       } else if (CRON_ACTION_TYPES.has(action.type)) {
         if (!subs.cronCtx) {
@@ -405,7 +405,7 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
   }
 
   if (flags.beads) {
-    sections.push(beadActionsPromptSection());
+    sections.push(taskActionsPromptSection());
   }
 
   if (flags.crons) {
@@ -437,7 +437,7 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
 - Never emit an action with empty, placeholder, or missing values for required parameters. If you don't have the value (e.g., no messageId for react), skip the action entirely.
 - Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
 - Action blocks are removed from the displayed message; results are appended automatically.
-- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, beadList, beadShow, cronList, cronShow, planList, planShow, memoryShow, modelShow) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
+- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
 - Include all needed actions in a single response when possible (e.g., a channelList and multiple channelDelete blocks together).
 
 ### Permissions

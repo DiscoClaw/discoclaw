@@ -15,9 +15,9 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'roleInfo',
   'searchMessages',
   'eventList',
-  // Beads
-  'beadList',
-  'beadShow',
+  // Tasks
+  'taskList',
+  'taskShow',
   // Crons
   'cronList',
   'cronShow',
