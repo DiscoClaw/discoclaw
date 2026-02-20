@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runBeadSync } from './bead-sync.js';
+import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
 
 vi.mock('../discord/inflight-replies.js', () => ({
   hasInFlightForChannel: vi.fn(() => false),
@@ -34,9 +35,21 @@ vi.mock('./discord-sync.js', () => ({
 }));
 
 function makeStore(tasks: any[] = []): any {
+  const byId = new Map<string, any>(tasks.map((task) => [task.id, { ...task }]));
   return {
-    list: vi.fn(() => tasks),
-    update: vi.fn(),
+    list: vi.fn(() => [...byId.values()]),
+    get: vi.fn((id: string) => byId.get(id)),
+    update: vi.fn((id: string, params: { status?: string; externalRef?: string }) => {
+      const existing = byId.get(id);
+      if (!existing) return;
+      const updated = {
+        ...existing,
+        ...(params.status !== undefined ? { status: params.status } : {}),
+        ...(params.externalRef !== undefined ? { external_ref: params.externalRef } : {}),
+      };
+      byId.set(id, updated);
+      return updated;
+    }),
   };
 }
 
@@ -89,6 +102,48 @@ describe('runBeadSync', () => {
     expect(result.threadsCreated).toBe(0);
     expect(createBeadThread).not.toHaveBeenCalled();
     expect(store.update).toHaveBeenCalledWith('ws-002', { externalRef: 'discord:thread-existing' });
+  });
+
+  it('re-checks latest phase 1 task state after lock wait and skips create when already linked', async () => {
+    const { createBeadThread } = await import('./discord-sync.js');
+    const store = makeStore([
+      { id: 'ws-014', title: 'N', status: 'open', labels: [], external_ref: '' },
+    ]);
+
+    let applyUpdate!: () => void;
+    const updateGate = new Promise<void>((resolve) => {
+      applyUpdate = resolve;
+    });
+    let releaseOwner!: () => void;
+    const ownerGate = new Promise<void>((resolve) => {
+      releaseOwner = resolve;
+    });
+
+    const owner = withDirectTaskLifecycle('ws-014', async () => {
+      await updateGate;
+      store.update('ws-014', { externalRef: 'discord:thread-linked' });
+      await ownerGate;
+    });
+
+    const syncRun = runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      store,
+      throttleMs: 0,
+    } as any);
+
+    await Promise.resolve();
+    applyUpdate();
+    await Promise.resolve();
+    releaseOwner();
+
+    const result = await syncRun;
+    await owner;
+
+    expect(result.threadsCreated).toBe(0);
+    expect(createBeadThread).not.toHaveBeenCalled();
   });
 
   it('fixes open+blocked-label to blocked in phase 2', async () => {
