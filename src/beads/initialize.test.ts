@@ -213,12 +213,16 @@ describe('wireBeadsSync', () => {
     });
 
     const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
-    const callsBefore = coordinatorInstance.sync.mock.calls.length;
 
-    // Trigger a store mutation — the event listener should call coordinator.sync()
-    store.create({ title: 'Test task' });
+    // 'created' is intentionally NOT wired — beadCreate handles thread creation directly.
+    const callsBeforeCreate = coordinatorInstance.sync.mock.calls.length;
+    const bead = store.create({ title: 'Test task' });
+    expect(coordinatorInstance.sync.mock.calls.length).toBe(callsBeforeCreate);
 
-    expect(coordinatorInstance.sync.mock.calls.length).toBeGreaterThan(callsBefore);
+    // 'updated' IS wired — should trigger sync.
+    const callsBeforeUpdate = coordinatorInstance.sync.mock.calls.length;
+    store.update(bead.id, { title: 'Updated task' });
+    expect(coordinatorInstance.sync.mock.calls.length).toBeGreaterThan(callsBeforeUpdate);
   });
 
   it('stop() removes store event listeners', async () => {
@@ -250,7 +254,8 @@ describe('wireBeadsSync', () => {
     const callsAfterStop = coordinatorInstance.sync.mock.calls.length;
 
     // After stop(), store mutations should NOT trigger additional syncs
-    store.create({ title: 'Another task' });
+    const bead = store.create({ title: 'Another task' });
+    store.update(bead.id, { title: 'Modified' });
     expect(coordinatorInstance.sync.mock.calls.length).toBe(callsAfterStop);
   });
 
