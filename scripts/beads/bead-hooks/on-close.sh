@@ -1,26 +1,16 @@
 #!/usr/bin/env bash
-# on-close.sh — Canonical close hook wrapper (delegates to TS implementation).
-# Usage: on-close.sh <bead-id>
+# on-close.sh — DEPRECATED: close events are now handled in-process.
+#
+# The in-process TaskStore emits a 'closed' event synchronously on every
+# store.close() call. BeadSyncWatcher subscribes to that event and triggers
+# a full Discord sync automatically. No external hook script is invoked.
+#
+# To trigger a manual sync from the CLI, run:
+#   pnpm tsx src/beads/bead-sync-cli.ts
 set -euo pipefail
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-DISCOCLAW_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+log() { echo "$*" >&2; }
 
-# Auto-source .env when called outside the bot process (e.g. Claude Code sessions).
-if [[ -z "${DISCORD_TOKEN:-}" || -z "${DISCORD_GUILD_ID:-}" || -z "${DISCOCLAW_BEADS_FORUM:-}" ]]; then
-  if [[ -f "$DISCOCLAW_DIR/.env" ]]; then
-    set -a; source "$DISCOCLAW_DIR/.env"; set +a
-  fi
-fi
-
-[[ $# -lt 1 ]] && { echo "Usage: on-close.sh <bead-id>" >&2; exit 1; }
-
-CLI_DIST="$DISCOCLAW_DIR/dist/beads/bead-hooks-cli.js"
-CLI_SRC="$DISCOCLAW_DIR/src/beads/bead-hooks-cli.ts"
-
-if [[ -f "$CLI_DIST" ]]; then
-  exec node "$CLI_DIST" on-close "$1"
-else
-  exec pnpm -C "$DISCOCLAW_DIR" tsx "$CLI_SRC" on-close "$1"
-fi
-
+log "on-close: events are handled in-process via TaskStore (src/beads/bead-sync-watcher.ts)"
+log "          No bd CLI or external hook is required."
+exit 0

@@ -1,38 +1,15 @@
 #!/usr/bin/env bash
-# lib.sh — Shared utilities for bead Discord hooks (discoclaw port).
-# Config via env vars; source .env or export before calling.
+# lib.sh — DEPRECATED: bead Discord hooks have moved in-process.
+#
+# All Discord sync is now triggered automatically via TaskStore events
+# (src/beads/bead-sync-watcher.ts). No external shell hooks are required.
+#
+# Utility functions below are retained only for any remaining scripts that
+# source this file; they carry no bd CLI dependency.
 set -euo pipefail
-
-BEADS_FORUM_ID="${DISCOCLAW_BEADS_FORUM:-}"
-GUILD_ID="${DISCORD_GUILD_ID:-}"
-MENTION_USER_ID="${DISCOCLAW_BEADS_MENTION_USER:-}"
 
 log() {
   echo "$*" >&2
-}
-
-require_discord_token() {
-  if [[ -z "${DISCORD_TOKEN:-}" ]]; then
-    log "Warning: DISCORD_TOKEN not set."
-    return 1
-  fi
-  return 0
-}
-
-get_bead_json() {
-  local bead_id="$1"
-  bd show "$bead_id" --json 2>/dev/null | jq -c '.[0]' 2>/dev/null || true
-}
-
-get_thread_id() {
-  local bead_json="$1"
-  local ext_ref
-  ext_ref=$(echo "$bead_json" | jq -r '.external_ref // empty')
-  if [[ "$ext_ref" =~ ^discord:([0-9]+)$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-  else
-    echo ""
-  fi
 }
 
 get_emoji() {
@@ -87,25 +64,6 @@ build_thread_name() {
   fi
 
   echo "$name"
-}
-
-ensure_unarchived() {
-  local thread_id="$1"
-  local info archived
-  info=$(curl -s -H "Authorization: Bot $DISCORD_TOKEN" \
-    "https://discord.com/api/v10/channels/$thread_id" 2>/dev/null)
-  archived=$(echo "$info" | jq -r '.thread_metadata.archived // "false"')
-  if [[ "$archived" == "true" ]]; then
-    log "Thread $thread_id is archived; unarchiving for update..."
-    curl -s -X PATCH "https://discord.com/api/v10/channels/$thread_id" \
-      -H "Authorization: Bot $DISCORD_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"archived": false}' >/dev/null 2>&1
-    sleep 0.5
-    echo "was_archived"
-  else
-    echo "was_active"
-  fi
 }
 
 truncate_message() {
