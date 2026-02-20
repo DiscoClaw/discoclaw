@@ -13,13 +13,15 @@ describe('legacy-token-guard: unit', () => {
       "const x = process.env.DISCOCLAW_BEADS_FORUM;",
       "const mod = './actions-beads.js';",
       'const beadCtx = {};',
+      "import { runBeadSync } from '../beads/bead-sync.js';",
     ].join('\n');
 
     const matches = scanFileContent('src/example.ts', input, DEFAULT_LEGACY_GUARD_RULES);
-    expect(matches.length).toBeGreaterThanOrEqual(3);
+    expect(matches.length).toBeGreaterThanOrEqual(4);
     expect(matches.some((m) => m.ruleId === 'legacy-env-beads')).toBe(true);
     expect(matches.some((m) => m.ruleId === 'legacy-action-module')).toBe(true);
     expect(matches.some((m) => m.ruleId === 'legacy-bead-context')).toBe(true);
+    expect(matches.some((m) => m.ruleId === 'legacy-beads-import-path')).toBe(true);
   });
 
   it('respects per-rule allowlist globs', () => {
@@ -38,6 +40,12 @@ describe('legacy-token-guard: unit', () => {
     const blockedMatches = scanFileContent('src/runtime/main.ts', 'const beadCtx = {};', rules);
     expect(blockedMatches).toHaveLength(1);
     expect(blockedMatches[0]?.ruleId).toBe('legacy-bead-context');
+  });
+
+  it('allows beads import-path references inside compatibility shim files', () => {
+    const input = "export * from '../beads/bead-sync.js';";
+    const matches = scanFileContent('src/beads/compat-shim.ts', input, DEFAULT_LEGACY_GUARD_RULES);
+    expect(matches.some((m) => m.ruleId === 'legacy-beads-import-path')).toBe(false);
   });
 });
 

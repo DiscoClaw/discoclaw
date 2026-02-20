@@ -64,6 +64,12 @@ export const DEFAULT_LEGACY_GUARD_RULES: GuardRule[] = [
     message: 'Use tasksCwd naming.',
     allowIn: [],
   },
+  {
+    id: 'legacy-beads-import-path',
+    pattern: /\bfrom\s+['"][^'"]*\/beads\/[^'"]*['"]/g,
+    message: 'Import canonical task modules; keep beads path usage isolated to src/beads compatibility shims.',
+    allowIn: ['src/beads/**'],
+  },
 ];
 
 function normalizeRelPath(p: string): string {
