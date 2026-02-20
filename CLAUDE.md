@@ -26,7 +26,7 @@ Never auto-load all `.context/` modules. Read only what the task requires.
 | Ops / systemd / deploy | `.context/ops.md` |
 | Bot setup (invite + env) | `.context/bot-setup.md` |
 | Memory system (layers, config, concurrency) | `.context/memory.md` |
-| Beads / task tracking | `.context/beads.md` |
+| Task tracking | `.context/tasks.md` |
 | Architecture / system overview | `.context/architecture.md` |
 | Tool capabilities / browser automation | `.context/tools.md` |
 

@@ -1,8 +1,8 @@
-# beads.md — Beads Task Tracking
+# tasks.md — Task Tracking
 
-Beads = lightweight issue tracker backed by an **in-process task store**, synced bidirectionally to Discord forum threads.
+Tasks = lightweight issue tracker backed by an **in-process task store**, synced bidirectionally to Discord forum threads.
 Two paths (CLI from terminal, bot via Discord actions) produce identical Discord state.
-See `discord.md` §Beads for the Discord integration side.
+See `discord.md` §Tasks for the Discord integration side.
 
 ## Data Model
 
@@ -34,10 +34,10 @@ See `discord.md` §Beads for the Discord integration side.
 In-process store: `src/beads/task-store.ts`. Data dir: `DISCOCLAW_BEADS_DATA_DIR` (default `<WORKSPACE_CWD>/.beads`).
 
 ```ts
-taskStore.create(data)          // create bead → emits 'create' event synchronously
+taskStore.create(data)          // create task → emits 'create' event synchronously
 taskStore.update(id, patch)     // update fields → emits 'update' event synchronously
-taskStore.close(id, reason?)    // close bead → emits 'close' event synchronously
-taskStore.get(id)               // fetch single bead
+taskStore.close(id, reason?)    // close task → emits 'close' event synchronously
+taskStore.get(id)               // fetch single task
 taskStore.list(opts)            // list with optional status/label/limit filters
 taskStore.addLabel(id, label)   // add label → emits 'update' event synchronously
 ```
@@ -50,10 +50,10 @@ Full sync runs on startup and via `beadSync` action. All paths go through `BeadS
 
 | Phase | Action |
 |-------|--------|
-| 1. Create missing | Open beads without `external_ref` (and without `no-thread` label) get forum threads. Dedupes against existing threads before creating. |
-| 2. Fix mismatches | Open beads with `waiting-*` or `blocked-*` labels get status set to `blocked`. |
-| 3. Sync names/starters | Active beads: unarchive if needed, update thread name (`{emoji} [{shortId}] {title}`), update starter message with metadata. |
-| 4. Archive closed | Closed beads: post close summary, rename thread, archive. |
+| 1. Create missing | Open tasks without `external_ref` (and without `no-thread` label) get forum threads. Dedupes against existing threads before creating. |
+| 2. Fix mismatches | Open tasks with `waiting-*` or `blocked-*` labels get status set to `blocked`. |
+| 3. Sync names/starters | Active tasks: unarchive if needed, update thread name (`{emoji} [{shortId}] {title}`), update starter message with metadata. |
+| 4. Archive closed | Closed tasks: post close summary, rename thread, archive. |
 
 Throttled at 250ms between API calls. Auto-triggered syncs are silent; only explicit `beadSync` posts to the status channel.
 
@@ -63,10 +63,10 @@ Task store emits synchronous events on every write. Discord sync hooks subscribe
 
 | Event | Trigger | Discord Action |
 |-------|---------|----------------|
-| `create` | bead created | Create thread, set `external_ref`, backfill tag labels |
-| `update` | bead updated | Unarchive, update thread name, post update message |
+| `create` | task created | Create thread, set `external_ref`, backfill tag labels |
+| `update` | task updated | Unarchive, update thread name, post update message |
 | `status-change` | status changed | Unarchive, update thread name emoji |
-| `close` | bead closed | Post close summary, rename, archive thread |
+| `close` | task closed | Post close summary, rename, archive thread |
 
 Auto-tagging on `create`: AI classifies title+desc into 1-3 tags, then fires an `update` to apply them.
 
@@ -76,7 +76,7 @@ Auto-tagging on `create`: AI classifies title+desc into 1-3 tags, then fires an 
 
 ## Config Reference
 
-See `dev.md` §Beads for the full env var table. Key vars:
+See `dev.md` §Tasks for the full env var table. Key vars:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
