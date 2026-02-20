@@ -256,8 +256,15 @@ export async function findExistingThreadForBead(
   const all = [...active.threads.values(), ...archived.threads.values()];
 
   const matches = all.filter((t) => typeof t?.name === 'string' && t.name.includes(token));
-  if (matches.length === 1) return matches[0].id;
-  return null;
+  if (matches.length === 0) return null;
+  // Prefer active (non-archived) threads; among ties, pick the newest (highest snowflake ID).
+  const sorted = [...matches].sort((a, b) => {
+    const aActive = a.archived ? 0 : 1;
+    const bActive = b.archived ? 0 : 1;
+    if (aActive !== bActive) return bActive - aActive;
+    return BigInt(b.id) > BigInt(a.id) ? 1 : -1;
+  });
+  return sorted[0].id;
 }
 
 /** Post a close summary, rename with checkmark, and archive the thread. */
