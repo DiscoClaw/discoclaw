@@ -71,8 +71,10 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
       if (!trimmed) continue;
       const bead = JSON.parse(trimmed) as BeadData;
       this.tasks.set(bead.id, bead);
-      // Advance the counter to be ≥ the highest numeric suffix seen.
-      const match = /(\d+)$/.exec(bead.id);
+      // Advance the counter to be ≥ the highest numeric suffix seen,
+      // but only for IDs that share our prefix to avoid contamination
+      // from migrated tasks with different prefixes (e.g. dev-899 → ws-900).
+      const match = new RegExp(`^${this.prefix}-(\\d+)$`).exec(bead.id);
       if (match) {
         const n = parseInt(match[1], 10);
         if (n > this.counter) this.counter = n;
