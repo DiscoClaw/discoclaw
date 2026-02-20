@@ -1,157 +1,19 @@
-import type { Client, Guild } from 'discord.js';
-import type { TaskContext } from '../discord/actions-tasks.js';
-import type { LoggerLike } from '../discord/action-types.js';
-import type { RuntimeAdapter } from '../runtime/types.js';
-import type { StatusPoster } from '../discord/status-channel.js';
-import type { ForumCountSync } from '../discord/forum-count-sync.js';
-import type { TaskStore } from '../tasks/store.js';
-import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from '../tasks/task-sync.js';
-import { TASK_SYNC_TRIGGER_EVENTS } from '../tasks/sync-contract.js';
-import { loadTagMap } from '../tasks/discord-sync.js';
-import { initBeadsForumGuard } from './forum-guard.js';
-
-export type InitializeBeadsOpts = {
-  enabled: boolean;
-  tasksCwd?: string;
-  tasksForum?: string;
-  tasksTagMapPath?: string;
-  tasksMentionUser?: string;
-  tasksSidebar?: boolean;
-  tasksAutoTag?: boolean;
-  tasksAutoTagModel?: string;
-  runtime: RuntimeAdapter;
-  statusPoster?: StatusPoster;
-  log: LoggerLike;
-  /** Resolved from system bootstrap or config. */
-  systemTasksForumId?: string;
-  /** In-process task store. If not provided, an in-memory store is created. */
-  store?: TaskStore;
-};
-
-export type InitializeBeadsResult = {
-  taskCtx: TaskContext | undefined;
-};
-
-// ---------------------------------------------------------------------------
-// Core initialization (no Discord client — context only)
-// ---------------------------------------------------------------------------
+import {
+  initializeTasksContext,
+  wireTaskSync,
+  type InitializeTasksOpts,
+  type InitializeTasksResult,
+  type WireTaskSyncOpts,
+  type WireTaskSyncResult,
+} from '../tasks/initialize.js';
 
 /**
- * Build a TaskContext if prerequisites are met, or return undefined with
- * appropriate log warnings. This covers the "pre-bot" phase — before the
- * Discord client is available. Forum guard and sync watcher are wired
- * separately after the bot connects.
+ * Legacy compatibility shim. Canonical implementation now lives at
+ * `src/tasks/initialize.ts`.
  */
-export async function initializeBeadsContext(
-  opts: InitializeBeadsOpts,
-): Promise<InitializeBeadsResult> {
-  if (!opts.enabled) {
-    return { taskCtx: undefined };
-  }
-
-  const effectiveForum = opts.systemTasksForumId || opts.tasksForum || '';
-  if (!effectiveForum) {
-    opts.log.warn(
-      'tasks: no forum resolved — set DISCORD_GUILD_ID or DISCOCLAW_TASKS_FORUM ' +
-      '(set DISCOCLAW_TASKS_ENABLED=0 to suppress)',
-    );
-    return { taskCtx: undefined };
-  }
-
-  const tagMapPath = opts.tasksTagMapPath || '';
-  const tagMap = await loadTagMap(tagMapPath);
-  const tasksSidebar = opts.tasksSidebar ?? false;
-  const tasksMentionUser = opts.tasksMentionUser;
-  const sidebarMentionUserId = tasksSidebar ? tasksMentionUser : undefined;
-
-  if (tasksSidebar && !tasksMentionUser) {
-    opts.log.warn('tasks:sidebar enabled but DISCOCLAW_TASKS_MENTION_USER not set; sidebar mentions will be inactive');
-  }
-
-  let store = opts.store;
-  if (!store) {
-    const { TaskStore } = await import('../tasks/store.js');
-    store = new TaskStore();
-  }
-
-  const taskCtx: TaskContext = {
-    tasksCwd: opts.tasksCwd || process.cwd(),
-    forumId: effectiveForum,
-    tagMap,
-    tagMapPath,
-    store,
-    runtime: opts.runtime,
-    autoTag: opts.tasksAutoTag ?? true,
-    autoTagModel: opts.tasksAutoTagModel ?? 'fast',
-    mentionUserId: tasksMentionUser,
-    sidebarMentionUserId,
-    statusPoster: opts.statusPoster,
-    log: opts.log,
-  };
-
-  return { taskCtx };
-}
-
-// ---------------------------------------------------------------------------
-// Post-connect wiring (forum guard + store event subscriptions + startup sync)
-// ---------------------------------------------------------------------------
-
-export type WireBeadsSyncOpts = {
-  taskCtx: TaskContext;
-  client: Client;
-  guild: Guild;
-  guildId: string;
-  tasksCwd?: string;
-  sidebarMentionUserId?: string;
-  log: LoggerLike;
-  forumCountSync?: ForumCountSync;
-  /** Skip forum guard installation (caller already installed it). */
-  skipForumGuard?: boolean;
-  /** Disable Phase 5 (thread reconciliation) of the bead sync cycle. */
-  skipPhase5?: boolean;
-};
-
-export type WireBeadsSyncResult = {
-  stop(): void;
-};
-
-export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsSyncResult> {
-  if (!opts.skipForumGuard) {
-    initBeadsForumGuard({
-      client: opts.client,
-      forumId: opts.taskCtx.forumId,
-      log: opts.log,
-      store: opts.taskCtx.store,
-      tagMap: opts.taskCtx.tagMap,
-    });
-  }
-
-  // Preserve wire-time sidebar mention override for coordinator-triggered syncs.
-  if (opts.sidebarMentionUserId !== undefined) {
-    opts.taskCtx.sidebarMentionUserId = opts.sidebarMentionUserId;
-  }
-
-  const syncCoordinator = await ensureTaskSyncCoordinator(
-    opts.taskCtx,
-    { client: opts.client, guild: opts.guild },
-    { skipPhase5: opts.skipPhase5 },
-  );
-
-  // Startup sync: fire-and-forget to avoid blocking cron init
-  syncCoordinator.sync().catch((err) => {
-    opts.log.warn({ err }, 'tasks:startup-sync failed');
-  });
-
-  const subscriptions = wireTaskStoreSyncTriggers(opts.taskCtx, syncCoordinator, opts.log);
-
-  opts.log.info(
-    { tasksCwd: opts.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
-    'tasks:store-event watcher started',
-  );
-
-  return {
-    stop() {
-      subscriptions.stop();
-    },
-  };
-}
+export type InitializeBeadsOpts = InitializeTasksOpts;
+export type InitializeBeadsResult = InitializeTasksResult;
+export type WireBeadsSyncOpts = WireTaskSyncOpts;
+export type WireBeadsSyncResult = WireTaskSyncResult;
+export const initializeBeadsContext = initializeTasksContext;
+export const wireBeadsSync = wireTaskSync;

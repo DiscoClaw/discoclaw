@@ -9,8 +9,8 @@ vi.mock('../tasks/discord-sync.js', () => ({
   loadTagMap: vi.fn().mockResolvedValue({ bug: '111', feature: '222' }),
 }));
 
-vi.mock('./forum-guard.js', () => ({
-  initBeadsForumGuard: vi.fn(),
+vi.mock('../tasks/forum-guard.js', () => ({
+  initTasksForumGuard: vi.fn(),
 }));
 
 vi.mock('../tasks/sync-coordinator.js', () => ({
@@ -19,9 +19,10 @@ vi.mock('../tasks/sync-coordinator.js', () => ({
   })),
 }));
 
-import { initBeadsForumGuard } from './forum-guard.js';
+import { initTasksForumGuard } from '../tasks/forum-guard.js';
 import { TaskSyncCoordinator } from '../tasks/sync-coordinator.js';
 import { initializeBeadsContext, wireBeadsSync } from './initialize.js';
+import { initializeTasksContext, wireTaskSync } from '../tasks/initialize.js';
 import { TaskStore } from '../tasks/store.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
 
@@ -49,6 +50,11 @@ function baseOpts(overrides: Partial<InitializeBeadsOpts> = {}): InitializeBeads
 }
 
 describe('initializeBeadsContext', () => {
+  it('keeps compatibility exports aligned to canonical task initialize helpers', () => {
+    expect(initializeBeadsContext).toBe(initializeTasksContext);
+    expect(wireBeadsSync).toBe(wireTaskSync);
+  });
+
   it('returns undefined with no warnings when disabled', async () => {
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({ enabled: false, log }));
@@ -164,7 +170,7 @@ describe('wireBeadsSync', () => {
       log,
     });
 
-    expect(initBeadsForumGuard).toHaveBeenCalledWith({
+    expect(initTasksForumGuard).toHaveBeenCalledWith({
       client,
       forumId: 'forum-123',
       log,
@@ -306,7 +312,7 @@ describe('wireBeadsSync', () => {
       log,
     } as any;
 
-    vi.mocked(initBeadsForumGuard).mockClear();
+    vi.mocked(initTasksForumGuard).mockClear();
 
     await wireBeadsSync({
       taskCtx,
@@ -318,7 +324,7 @@ describe('wireBeadsSync', () => {
       skipForumGuard: true,
     });
 
-    expect(initBeadsForumGuard).not.toHaveBeenCalled();
+    expect(initTasksForumGuard).not.toHaveBeenCalled();
     // Coordinator should still be wired
     expect(TaskSyncCoordinator).toHaveBeenCalled();
   });
