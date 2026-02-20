@@ -15,7 +15,7 @@ vi.mock('./plan-commands.js', () => ({
     if (id === 'plan-notfound') return null;
     return {
       filePath: `/tmp/plans/${id}-test.md`,
-      header: { planId: id, beadId: 'ws-001', status: 'REVIEW', title: 'Test Plan', project: 'discoclaw', created: '2026-01-01' },
+      header: { planId: id, taskId: 'ws-001', status: 'REVIEW', title: 'Test Plan', project: 'discoclaw', created: '2026-01-01' },
     };
   }),
   listPlanFiles: vi.fn(async () => []),
