@@ -58,6 +58,7 @@ import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { appendUnavailableActionTypesNotice } from './discord/output-common.js';
 import { TaskStore } from './tasks/store.js';
+import { resolveTaskDataPath } from './tasks/path-defaults.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -338,11 +339,16 @@ const cronForum = cfg.cronForum || scaffoldState.cronsForumId;
 const tasksEnabled = cfg.tasksEnabled;
 const tasksCwd = cfg.tasksCwdOverride || workspaceCwd;
 const tasksForum = cfg.tasksForum || scaffoldState.tasksForumId || '';
-const tasksDataDir = dataDir
-  ? path.join(dataDir, 'beads')
-  : path.join(__dirname, '..', 'data', 'beads');
+const tasksDataRoot = dataDir ?? path.join(__dirname, '..', 'data');
+const tasksDataDir = path.join(tasksDataRoot, 'tasks');
+const tasksPersistPath =
+  resolveTaskDataPath(tasksDataRoot, 'tasks.jsonl')
+  ?? path.join(tasksDataDir, 'tasks.jsonl');
+const tasksTagMapDefaultPath =
+  resolveTaskDataPath(tasksDataRoot, 'tag-map.json')
+  ?? path.join(tasksDataDir, 'tag-map.json');
 const tasksTagMapPath = cfg.tasksTagMapPathOverride
-  || path.join(tasksDataDir, 'tag-map.json');
+  || tasksTagMapDefaultPath;
 const tasksTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'beads', 'tag-map.json');
 const tasksMentionUser = cfg.tasksMentionUser;
 const tasksSidebar = cfg.tasksSidebar;
@@ -352,16 +358,18 @@ let tasksAutoTagModel = cfg.tasksAutoTagModel;
 const discordActionsTasks = cfg.discordActionsTasks;
 const tasksPrefix = cfg.tasksPrefix;
 
-// Initialize shared task store (used by beads, forge, and plan subsystems).
-// Created unconditionally so forge/plan have a persistent store even when beads are disabled.
-await fs.mkdir(tasksDataDir, { recursive: true });
+// Initialize shared task store (used by tasks, forge, and plan subsystems).
+// Created unconditionally so forge/plan have a persistent store even when tasks are disabled.
+for (const dir of new Set([path.dirname(tasksPersistPath), path.dirname(tasksTagMapPath)])) {
+  await fs.mkdir(dir, { recursive: true });
+}
 
 // Cutover gate: if the legacy bd SQLite DB exists but the JSONL hasn't been
 // written yet, fail fast rather than silently starting with an empty store.
 // Run `pnpm tsx scripts/beads/migrate.ts` to perform the one-time migration.
 {
   const legacyDbPath = path.join(tasksCwd, '.beads', 'beads.db');
-  const tasksJsonlPath = path.join(tasksDataDir, 'tasks.jsonl');
+  const tasksJsonlPath = tasksPersistPath;
   const legacyExists = await fs.access(legacyDbPath).then(() => true).catch(() => false);
   if (legacyExists) {
     const jsonlExists = await fs.access(tasksJsonlPath).then(() => true).catch(() => false);
@@ -375,7 +383,7 @@ await fs.mkdir(tasksDataDir, { recursive: true });
   }
 }
 
-const sharedTaskStore = new TaskStore({ prefix: tasksPrefix, persistPath: path.join(tasksDataDir, 'tasks.jsonl') });
+const sharedTaskStore = new TaskStore({ prefix: tasksPrefix, persistPath: tasksPersistPath });
 await sharedTaskStore.load();
 log.info({ count: sharedTaskStore.size(), prefix: tasksPrefix }, 'tasks:store loaded');
 
@@ -644,7 +652,7 @@ const botParams = {
   discordActionsModeration,
   discordActionsPolls,
   discordActionsBotProfile,
-  // Enable beads/crons actions only after contexts are configured.
+  // Enable tasks/crons actions only after contexts are configured.
   discordActionsTasks: false,
   discordActionsCrons: false,
   // Forge/plan/memory action flags — contexts are wired below after subsystem init.
