@@ -5,6 +5,8 @@
 export {
   loadTagMap,
   resolveTasksForum,
+  buildThreadName,
+  buildAppliedTagsWithStatus,
   createTaskThread,
   closeTaskThread,
   updateTaskThreadName,
