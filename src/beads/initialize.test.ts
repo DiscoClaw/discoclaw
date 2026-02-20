@@ -5,7 +5,7 @@ import type { InitializeBeadsOpts } from './initialize.js';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('./discord-sync.js', () => ({
+vi.mock('../tasks/discord-sync.js', () => ({
   loadTagMap: vi.fn().mockResolvedValue({ bug: '111', feature: '222' }),
 }));
 
@@ -13,14 +13,14 @@ vi.mock('./forum-guard.js', () => ({
   initBeadsForumGuard: vi.fn(),
 }));
 
-vi.mock('./bead-sync-coordinator.js', () => ({
-  BeadSyncCoordinator: vi.fn().mockImplementation(() => ({
+vi.mock('../tasks/sync-coordinator.js', () => ({
+  TaskSyncCoordinator: vi.fn().mockImplementation(() => ({
     sync: vi.fn().mockResolvedValue(undefined),
   })),
 }));
 
 import { initBeadsForumGuard } from './forum-guard.js';
-import { BeadSyncCoordinator } from './bead-sync-coordinator.js';
+import { TaskSyncCoordinator } from '../tasks/sync-coordinator.js';
 import { initializeBeadsContext, wireBeadsSync } from './initialize.js';
 import { TaskStore } from '../tasks/store.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
@@ -171,7 +171,7 @@ describe('wireBeadsSync', () => {
       store,
       tagMap: { bug: '111' },
     });
-    expect(BeadSyncCoordinator).toHaveBeenCalledWith(
+    expect(TaskSyncCoordinator).toHaveBeenCalledWith(
       expect.objectContaining({
         client,
         guild,
@@ -180,7 +180,7 @@ describe('wireBeadsSync', () => {
       }),
     );
     // The coordinator's sync() should have been called (fire-and-forget startup sync).
-    const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
+    const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
     expect(coordinatorInstance.sync).toHaveBeenCalled();
     expect(taskCtx.syncCoordinator).toBeDefined();
     expect(result).toHaveProperty('stop');
@@ -202,7 +202,7 @@ describe('wireBeadsSync', () => {
       log,
     } as any;
 
-    vi.mocked(BeadSyncCoordinator).mockClear();
+    vi.mocked(TaskSyncCoordinator).mockClear();
 
     await wireBeadsSync({
       taskCtx,
@@ -213,7 +213,7 @@ describe('wireBeadsSync', () => {
       log,
     });
 
-    const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
+    const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
 
     // 'created' is intentionally NOT wired — beadCreate handles thread creation directly.
     const callsBeforeCreate = coordinatorInstance.sync.mock.calls.length;
@@ -238,7 +238,7 @@ describe('wireBeadsSync', () => {
       log,
     } as any;
 
-    vi.mocked(BeadSyncCoordinator).mockClear();
+    vi.mocked(TaskSyncCoordinator).mockClear();
 
     await wireBeadsSync({
       taskCtx,
@@ -249,7 +249,7 @@ describe('wireBeadsSync', () => {
       log,
     });
 
-    const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
+    const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
     const task = store.create({ title: 'Owned lifecycle task' });
     const callsBeforeUpdate = coordinatorInstance.sync.mock.calls.length;
 
@@ -272,7 +272,7 @@ describe('wireBeadsSync', () => {
       log,
     } as any;
 
-    vi.mocked(BeadSyncCoordinator).mockClear();
+    vi.mocked(TaskSyncCoordinator).mockClear();
 
     const result = await wireBeadsSync({
       taskCtx,
@@ -285,7 +285,7 @@ describe('wireBeadsSync', () => {
 
     result.stop();
 
-    const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
+    const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
     const callsAfterStop = coordinatorInstance.sync.mock.calls.length;
 
     // After stop(), store mutations should NOT trigger additional syncs
@@ -320,7 +320,7 @@ describe('wireBeadsSync', () => {
 
     expect(initBeadsForumGuard).not.toHaveBeenCalled();
     // Coordinator should still be wired
-    expect(BeadSyncCoordinator).toHaveBeenCalled();
+    expect(TaskSyncCoordinator).toHaveBeenCalled();
   });
 
   it('propagates tagMapPath to CoordinatorOptions', async () => {
@@ -345,7 +345,7 @@ describe('wireBeadsSync', () => {
       log,
     });
 
-    expect(BeadSyncCoordinator).toHaveBeenCalledWith(
+    expect(TaskSyncCoordinator).toHaveBeenCalledWith(
       expect.objectContaining({
         tagMapPath: '/config/tag-map.json',
         tagMap,

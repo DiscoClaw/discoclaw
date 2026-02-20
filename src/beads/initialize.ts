@@ -7,7 +7,7 @@ import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { TaskStore } from '../tasks/store.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from '../tasks/task-sync.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from '../tasks/sync-contract.js';
-import { loadTagMap } from './discord-sync.js';
+import { loadTagMap } from '../tasks/discord-sync.js';
 import { initBeadsForumGuard } from './forum-guard.js';
 
 export type InitializeBeadsOpts = {
