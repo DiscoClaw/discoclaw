@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BeadData } from '../beads/types.js';
+import type { TaskData } from '../tasks/types.js';
 
 import { loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, buildTaskContextSection, buildTaskThreadSection, resolveEffectiveTools, _resetToolsAuditState } from './prompt-common.js';
 
@@ -172,7 +172,7 @@ describe('loadDailyLogFiles', () => {
 // buildTaskContextSection
 // ---------------------------------------------------------------------------
 
-function makeBead(overrides: Partial<BeadData> = {}): BeadData {
+function makeBead(overrides: Partial<TaskData> = {}): TaskData {
   return { id: 'ws-042', title: 'Fix auth bug', status: 'in_progress', ...overrides };
 }
 
@@ -255,16 +255,16 @@ describe('buildTaskContextSection', () => {
 // buildTaskThreadSection
 // ---------------------------------------------------------------------------
 
-// Mock the cache so we don't need a real bd CLI.
-vi.mock('../beads/bead-thread-cache.js', () => ({
-  beadThreadCache: {
+// Mock the cache so tests can control task lookups deterministically.
+vi.mock('../tasks/thread-cache.js', () => ({
+  taskThreadCache: {
     get: vi.fn(),
   },
 }));
 
-import { beadThreadCache } from '../beads/bead-thread-cache.js';
+import { taskThreadCache } from '../tasks/thread-cache.js';
 
-const mockedCacheGet = vi.mocked(beadThreadCache.get);
+const mockedCacheGet = vi.mocked(taskThreadCache.get);
 
 const SNOWFLAKE_FORUM_ID = '12345678901234567890';
 

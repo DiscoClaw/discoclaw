@@ -52,8 +52,8 @@ import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
-import { beadThreadCache } from '../beads/bead-thread-cache.js';
-import { buildBeadContextSummary } from '../beads/bd-cli.js';
+import { taskThreadCache } from '../tasks/thread-cache.js';
+import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
 import { editThenSendChunks, shouldSuppressFollowUp, appendUnavailableActionTypesNotice } from './output-common.js';
@@ -215,8 +215,8 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
   if (isThread && threadId && threadParentId && taskCtx) {
     if (threadParentId === taskCtx.forumId) {
       try {
-        const bead = await beadThreadCache.get(threadId, taskCtx.store);
-        if (bead) existingBeadId = bead.id;
+        const task = await taskThreadCache.get(threadId, taskCtx.store);
+        if (task) existingBeadId = task.id;
       } catch {
         // best-effort — fall through to create a new bead
       }
@@ -1509,15 +1509,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 threadParentId,
               });
 
-              const beadSummary = buildBeadContextSummary(
+              const taskSummary = buildTaskContextSummary(
                 ctxResult.existingBeadId,
                 (params.taskCtx)?.store,
-                params.log,
               );
 
               const forgeContextParts: string[] = [];
               if (ctxResult.context) forgeContextParts.push(ctxResult.context);
-              if (beadSummary?.summary) forgeContextParts.push(beadSummary.summary);
+              if (taskSummary?.summary) forgeContextParts.push(taskSummary.summary);
               if (ctxResult.pinnedSummary) forgeContextParts.push(ctxResult.pinnedSummary);
 
               const forgeContext = forgeContextParts.length > 0
@@ -1543,7 +1542,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 auditorModel: params.forgeAuditorModel,
                 log: params.log,
                 existingBeadId: ctxResult.existingBeadId,
-                beadDescription: beadSummary?.description,
+                beadDescription: taskSummary?.description,
                 pinnedThreadSummary: ctxResult.pinnedSummary,
               });
               setActiveOrchestrator(createOrchestrator);
