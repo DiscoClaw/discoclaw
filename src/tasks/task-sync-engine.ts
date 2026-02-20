@@ -1,7 +1,7 @@
 import type { Client, Guild } from 'discord.js';
-import type { TagMap, TaskData, TaskSyncResult, BeadSyncResult } from './types.js';
+import type { TagMap, TaskData, TaskSyncResult } from './types.js';
 import { hasInFlightForChannel } from '../discord/inflight-replies.js';
-export type { TaskSyncResult, BeadSyncResult } from './types.js';
+export type { TaskSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
@@ -36,7 +36,6 @@ export type TaskSyncOptions = {
   /** Disable Phase 5 (thread reconciliation). Useful for shared-forum deployments. */
   skipPhase5?: boolean;
 };
-export type BeadSyncOptions = TaskSyncOptions;
 
 function hasLabel(task: TaskData, label: string): boolean {
   return (task.labels ?? []).includes(label);
@@ -83,10 +82,10 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   const allTasks = opts.store.list({ status: 'all' });
 
   // Phase 1: Create threads for tasks missing external_ref.
-  const tasksMissingRef = allTasks.filter((b) =>
-    !getThreadIdFromTask(b) &&
-    b.status !== 'closed' &&
-    !hasLabel(b, 'no-thread'),
+  const tasksMissingRef = allTasks.filter((task) =>
+    !getThreadIdFromTask(task) &&
+    task.status !== 'closed' &&
+    !hasLabel(task, 'no-thread'),
   );
   for (const task of tasksMissingRef) {
     await withTaskLifecycleLock(task.id, async () => {
@@ -132,8 +131,8 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   }
 
   // Phase 2: Fix status/label mismatches (matches legacy shell behavior).
-  const needsBlockedTasks = allTasks.filter((b) =>
-    b.status === 'open' && (b.labels ?? []).some((l) => /^(waiting|blocked)-/.test(l)),
+  const needsBlockedTasks = allTasks.filter((task) =>
+    task.status === 'open' && (task.labels ?? []).some((l) => /^(waiting|blocked)-/.test(l)),
   );
   for (const task of needsBlockedTasks) {
     try {
@@ -149,7 +148,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   }
 
   // Phase 3: Sync emoji/names for existing threads.
-  const tasksWithRef = allTasks.filter((b) => getThreadIdFromTask(b) && b.status !== 'closed');
+  const tasksWithRef = allTasks.filter((task) => getThreadIdFromTask(task) && task.status !== 'closed');
   for (const task of tasksWithRef) {
     await withTaskLifecycleLock(task.id, async () => {
       const latestTask = opts.store.get(task.id) ?? task;
@@ -204,8 +203,8 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   }
 
   // Phase 4: Archive threads for closed tasks.
-  const closedTasks = allTasks.filter((b) =>
-    b.status === 'closed' && getThreadIdFromTask(b),
+  const closedTasks = allTasks.filter((task) =>
+    task.status === 'closed' && getThreadIdFromTask(task),
   );
   for (const task of closedTasks) {
     await withTaskLifecycleLock(task.id, async () => {
@@ -360,4 +359,10 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Legacy Bead* compatibility aliases
+// ---------------------------------------------------------------------------
+
+export type BeadSyncOptions = TaskSyncOptions;
+export type BeadSyncResult = TaskSyncResult;
 export const runBeadSync = runTaskSync;

@@ -26,7 +26,7 @@ export type CronSyncCoordinatorOptions = {
 
 /**
  * Shared cron sync coordinator wrapping runCronSync() with a concurrency guard,
- * tag-map reload, and deterministic snapshotting. Mirrors BeadSyncCoordinator.
+ * tag-map reload, and deterministic snapshotting. Mirrors TaskSyncCoordinator.
  */
 export class CronSyncCoordinator {
   private syncing = false;

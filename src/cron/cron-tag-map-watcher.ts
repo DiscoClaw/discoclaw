@@ -22,7 +22,7 @@ const DIR_POLL_MS = 30_000;
 
 /**
  * Watch tag-map.json for changes and trigger coordinator.sync() on change.
- * Mirrors the tag-map watching portion of BeadSyncWatcher but triggers a
+ * Mirrors the tag-map watching portion of TaskSyncWatcher but triggers a
  * full coordinator sync (reload + runCronSync) instead of just a reload.
  *
  * Uses fs.watch on the parent directory (atomic-write safe) with a stat-based
