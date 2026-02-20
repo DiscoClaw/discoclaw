@@ -2147,7 +2147,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 replyFinalized = true;
               } catch (editErr: any) {
                 // Thread archived by a taskClose action — the close summary was already
-                // posted inside closeBeadThread, so the only thing lost is Claude's
+                // posted inside closeTaskThread, so the only thing lost is Claude's
                 // conversational wrapper ("Done. Closing it out now.").  Swallow gracefully.
                 if (editErr?.code === 50083) {
                   params.log?.info({ sessionKey }, 'discord:reply skipped (thread archived by action)');
