@@ -24,8 +24,6 @@ export type PlanCommand = {
   context?: string;
   /** When set, reuse this task instead of creating a new one (e.g. when issued in a task forum thread). */
   existingTaskId?: string;
-  /** @deprecated Compatibility alias for existingTaskId. */
-  existingBeadId?: string;
 };
 
 export type PlanFileHeader = {
@@ -319,7 +317,7 @@ export async function handlePlanCommand(
 
       // Create backing task — or reuse existing one from task thread context.
       let taskId: string;
-      const existingTaskId = cmd.existingTaskId ?? cmd.existingBeadId;
+      const existingTaskId = cmd.existingTaskId;
       if (existingTaskId) {
         taskId = existingTaskId;
         // Ensure the reused task has the 'plan' label for label-based filtering.
