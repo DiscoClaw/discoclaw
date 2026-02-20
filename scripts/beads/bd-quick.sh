@@ -1,23 +1,35 @@
 #!/bin/bash
-# bd-quick.sh — Quick capture bead + auto Discord thread.
-# Usage: bd-quick.sh "title" [--priority P2] [--tags tag1,tag2]
+# bd-quick.sh — Quick-capture a bead in the task store.
+# Usage: bd-quick.sh "title" [--tags tag1,tag2]
+#
+# Outputs only the new bead ID. Discord sync is handled in-process by
+# BeadSyncWatcher when the bot is running. To trigger a manual sync: bd sync
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-HOOK_SCRIPT="$SCRIPT_DIR/bead-hooks/on-create.sh"
-REAL_BD=$(command -v bd)
+DISCOCLAW_DIR=$(cd "$SCRIPT_DIR/../.." && pwd)
+CLI_DIST="$DISCOCLAW_DIR/dist/tasks/task-cli.js"
+CLI_SRC="$DISCOCLAW_DIR/src/tasks/task-cli.ts"
 
-bd_args=()
+run_task_cli() {
+  if [[ -f "$CLI_DIST" ]]; then
+    node "$CLI_DIST" "$@"
+  else
+    pnpm -C "$DISCOCLAW_DIR" tsx "$CLI_SRC" "$@"
+  fi
+}
+
+title_args=()
 tags_arg=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tags) tags_arg="${2:-}"; shift 2 ;;
-    *) bd_args+=("$1"); shift ;;
+    *) title_args+=("$1"); shift ;;
   esac
 done
 
-bead_id=$("$REAL_BD" q "${bd_args[@]}" 2>&1)
+bead_id=$(run_task_cli quick "${title_args[@]}" 2>&1)
 
 if [[ ! "$bead_id" =~ ^[a-z]+-[a-z0-9]+$ ]]; then
   echo "$bead_id" >&2
@@ -26,8 +38,11 @@ fi
 
 echo "$bead_id"
 
-if [[ -x "$HOOK_SCRIPT" ]]; then
-  hook_args=("$bead_id")
-  [[ -n "$tags_arg" ]] && hook_args+=(--tags "$tags_arg")
-  "$HOOK_SCRIPT" "${hook_args[@]}" || echo "Warning: Thread creation failed for $bead_id" >&2
+# Apply tags as labels (tag:<name>) so Discord sync can map them to forum tags.
+if [[ -n "$tags_arg" ]]; then
+  IFS=',' read -ra tag_list <<< "$tags_arg"
+  for tag in "${tag_list[@]}"; do
+    tag="${tag// /}"
+    [[ -n "$tag" ]] && run_task_cli label-add "$bead_id" "tag:$tag" >/dev/null 2>&1 || true
+  done
 fi
