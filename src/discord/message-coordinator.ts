@@ -1508,8 +1508,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 threadParentId,
               });
 
-              const beadBasePath = params.beadCtx?.beadsCwd ?? params.workspaceCwd;
-              const beadSummary = await buildBeadContextSummary(ctxResult.existingBeadId, beadBasePath, params.log);
+              const beadSummary = buildBeadContextSummary(ctxResult.existingBeadId, params.beadCtx?.store, params.log);
 
               const forgeContextParts: string[] = [];
               if (ctxResult.context) forgeContextParts.push(ctxResult.context);
