@@ -576,7 +576,7 @@ describe('buildBeadContextSummary', () => {
     const store = new TaskStore();
     const bead = store.create({ title: 'Fix the bug' });
     const result = buildBeadContextSummary(bead.id, store);
-    expect(result?.summary).toBe('Bead context for this thread:\nTitle: Fix the bug');
+    expect(result?.summary).toBe('Task context for this thread:\nTitle: Fix the bug');
     expect(result?.description).toBeUndefined();
   });
 

@@ -306,7 +306,7 @@ export async function closeTaskThread(
 
   try {
     await thread.send({
-      content: `**Bead Closed**\n${reason}`,
+      content: `**Task Closed**\n${reason}`,
       allowedMentions: { parse: [], users: [] },
     });
   } catch {
