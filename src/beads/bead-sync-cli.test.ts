@@ -7,7 +7,7 @@ import {
 
 vi.mock('../tasks/task-sync-engine.js', () => {
   const runTaskSync = vi.fn().mockResolvedValue({ created: 0, updated: 0, closed: 0 });
-  return { runTaskSync, runBeadSync: runTaskSync };
+  return { runTaskSync };
 });
 
 // bead-sync-cli.ts uses an import.meta.url guard so that main() does NOT run
@@ -71,8 +71,8 @@ describe('parseArgInt', () => {
 });
 
 describe('runSyncWithStore', () => {
-  it('passes store through to runBeadSync', async () => {
-    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
+  it('passes store through to runTaskSync', async () => {
+    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
     const { TaskStore } = await import('../tasks/store.js');
 
     const store = new TaskStore();
@@ -89,7 +89,7 @@ describe('runSyncWithStore', () => {
       archivedDedupeLimit: 50,
     });
 
-    expect(runBeadSync).toHaveBeenCalledWith(
+    expect(runTaskSync).toHaveBeenCalledWith(
       expect.objectContaining({ store }),
     );
   });
