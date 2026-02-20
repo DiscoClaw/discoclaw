@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseArgInt, runSyncWithStore } from './bead-sync-cli.js';
+import {
+  parseArgInt as parseTaskArgInt,
+  runSyncWithStore as runTaskSyncWithStoreCompat,
+} from '../tasks/task-sync-cli.js';
 
-vi.mock('./bead-sync.js', () => ({
+vi.mock('../tasks/bead-sync.js', () => ({
   runBeadSync: vi.fn().mockResolvedValue({ created: 0, updated: 0, closed: 0 }),
 }));
 
@@ -11,6 +15,11 @@ vi.mock('./bead-sync.js', () => ({
 // or env-var validation.
 
 describe('parseArgInt', () => {
+  it('keeps compatibility exports aligned to canonical task sync CLI module', () => {
+    expect(parseArgInt).toBe(parseTaskArgInt);
+    expect(runSyncWithStore).toBe(runTaskSyncWithStoreCompat);
+  });
+
   it('returns undefined when the flag is not in args', () => {
     expect(parseArgInt(['--foo', '1'], '--bar')).toBeUndefined();
   });
@@ -62,7 +71,7 @@ describe('parseArgInt', () => {
 
 describe('runSyncWithStore', () => {
   it('passes store through to runBeadSync', async () => {
-    const { runBeadSync } = await import('./bead-sync.js');
+    const { runBeadSync } = await import('../tasks/bead-sync.js');
     const { TaskStore } = await import('../tasks/store.js');
 
     const store = new TaskStore();
