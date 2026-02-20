@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { startBeadSyncWatcher } from './bead-sync-watcher.js';
+import { startTaskSyncWatcher } from '../tasks/sync-watcher.js';
 
 function makeCoordinator() {
   return {
@@ -21,6 +22,10 @@ function makeStore() {
 }
 
 describe('startBeadSyncWatcher', () => {
+  it('keeps compatibility export aligned to canonical task sync watcher module', () => {
+    expect(startBeadSyncWatcher).toBe(startTaskSyncWatcher);
+  });
+
   it('triggers sync on store created event', async () => {
     const coordinator = makeCoordinator();
     const store = makeStore();
