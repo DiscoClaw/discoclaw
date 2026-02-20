@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { parseBdJson, normalizeBeadData, bdShow, bdList, bdFindByTitle, ensureBdDatabaseReady, buildBeadContextSummary } from './bd-cli.js';
+import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
 import type { BeadData } from './types.js';
 
@@ -547,6 +548,10 @@ describe('ensureBdDatabaseReady', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildBeadContextSummary', () => {
+  it('keeps compatibility export aligned to canonical task helper', () => {
+    expect(buildBeadContextSummary).toBe(buildTaskContextSummary);
+  });
+
   it('returns undefined when beadId is undefined', () => {
     const store = new TaskStore();
     expect(buildBeadContextSummary(undefined, store)).toBeUndefined();

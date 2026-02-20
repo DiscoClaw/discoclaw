@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { execa } from 'execa';
 import type { BeadData, BeadCreateParams, BeadUpdateParams, BeadListParams } from './types.js';
-import type { TaskStore } from '../tasks/store.js';
+export { buildBeadContextSummary } from '../tasks/context-summary.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -162,40 +162,6 @@ export async function bdShow(id: string, cwd: string): Promise<BeadData | null> 
     if (/not found|no issue found/i.test(msg)) return null;
     throw err;
   }
-}
-
-type ContextLogger = { warn?: (meta: unknown, message: string) => void };
-
-type BeadContextSummary = {
-  summary: string;
-  description?: string;
-};
-
-function truncateText(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
-}
-
-export function buildBeadContextSummary(
-  beadId: string | undefined,
-  store: TaskStore | undefined,
-  _log?: ContextLogger,
-): BeadContextSummary | undefined {
-  if (!beadId || !store) return undefined;
-  const bead = store.get(beadId);
-  if (!bead) return undefined;
-  const lines = ['Bead context for this thread:'];
-  if (bead.title) lines.push(`Title: ${bead.title}`);
-  let description: string | undefined;
-  if (bead.description) {
-    const desc = bead.description.trim().replace(/\s+/g, ' ');
-    const truncated = truncateText(desc, 400);
-    lines.push(`Description: ${truncated}`);
-    description = truncated;
-  }
-  return {
-    summary: lines.join('\n'),
-    description,
-  };
 }
 
 /** List beads matching the given filters. */
