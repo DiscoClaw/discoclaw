@@ -7,6 +7,7 @@ import type { TagMap, TaskData, TaskStatus, TaskSyncResult } from '../tasks/type
 import type { TaskSyncCoordinator } from '../beads/bead-sync-coordinator.js';
 import type { ForumCountSync } from './forum-count-sync.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
+import { shouldActionUseDirectThreadLifecycle } from '../tasks/sync-contract.js';
 import type { TaskStore } from '../tasks/store.js';
 import {
   resolveTasksForum,
@@ -155,32 +156,34 @@ export async function executeTaskAction(
         }
       }
 
-      // Create Discord thread (idempotent: dedupe by [NNN] token before create).
+      // Direct thread lifecycle ownership is action-local for taskCreate.
       let threadId = '';
       try {
-        if (labels.includes('no-thread') || (task.labels ?? []).includes('no-thread')) {
-          // Explicit no-thread policy.
-        } else {
-          const forum = await resolveTasksForum(ctx.guild, taskCtx.forumId);
-          if (forum) {
-            // Prefer an existing thread if one is already present for this task.
-            const existing = await findExistingThreadForTask(forum as ForumChannel, task.id);
-            if (existing) {
-              threadId = existing;
-            } else {
-              const taskForThread: TaskData = { ...task, labels };
-              threadId = await createTaskThread(forum as ForumChannel, taskForThread, taskCtx.tagMap, taskCtx.mentionUserId);
-            }
-
-            // Backfill thread link if needed. Re-check store for concurrent updates.
-            try {
-              const latest = taskCtx.store.get(task.id) ?? task;
-              const currentThreadId = getThreadIdFromTask(latest);
-              if (currentThreadId !== threadId) {
-                taskCtx.store.update(task.id, { externalRef: `discord:${threadId}` });
+        if (shouldActionUseDirectThreadLifecycle(action.type)) {
+          if (labels.includes('no-thread') || (task.labels ?? []).includes('no-thread')) {
+            // Explicit no-thread policy.
+          } else {
+            const forum = await resolveTasksForum(ctx.guild, taskCtx.forumId);
+            if (forum) {
+              // Prefer an existing thread if one is already present for this task.
+              const existing = await findExistingThreadForTask(forum as ForumChannel, task.id);
+              if (existing) {
+                threadId = existing;
+              } else {
+                const taskForThread: TaskData = { ...task, labels };
+                threadId = await createTaskThread(forum as ForumChannel, taskForThread, taskCtx.tagMap, taskCtx.mentionUserId);
               }
-            } catch (err) {
-              taskCtx.log?.warn({ err, taskId: task.id, threadId }, 'tasks:external-ref update failed');
+
+              // Backfill thread link if needed. Re-check store for concurrent updates.
+              try {
+                const latest = taskCtx.store.get(task.id) ?? task;
+                const currentThreadId = getThreadIdFromTask(latest);
+                if (currentThreadId !== threadId) {
+                  taskCtx.store.update(task.id, { externalRef: `discord:${threadId}` });
+                }
+              } catch (err) {
+                taskCtx.log?.warn({ err, taskId: task.id, threadId }, 'tasks:external-ref update failed');
+              }
             }
           }
         }
@@ -211,9 +214,9 @@ export async function executeTaskAction(
         status: action.status as TaskStatus | undefined,
       });
 
-      // Update thread details if task has a linked thread.
+      // Direct thread lifecycle ownership is action-local for taskUpdate.
       const threadId = getThreadIdFromTask(task);
-      if (threadId) {
+      if (threadId && shouldActionUseDirectThreadLifecycle(action.type)) {
         try {
           await ensureUnarchived(ctx.client, threadId);
           await updateTaskThreadName(ctx.client, threadId, task);
@@ -250,8 +253,9 @@ export async function executeTaskAction(
 
       const task = taskCtx.store.close(taskId, action.reason);
 
+      // Direct thread lifecycle ownership is action-local for taskClose.
       const threadId = getThreadIdFromTask(task);
-      if (threadId) {
+      if (threadId && shouldActionUseDirectThreadLifecycle(action.type)) {
         try {
           await closeTaskThread(ctx.client, threadId, task, taskCtx.tagMap, taskCtx.log);
         } catch (err) {

@@ -5,6 +5,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { TaskStore } from '../tasks/store.js';
+import { TASK_SYNC_TRIGGER_EVENTS } from '../tasks/sync-contract.js';
 import { loadTagMap } from './discord-sync.js';
 import { initBeadsForumGuard } from './forum-guard.js';
 
@@ -145,25 +146,26 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     opts.log.warn({ err }, 'beads:startup-sync failed');
   });
 
-  // Wire store events to trigger Discord sync on mutations (updated, closed, labeled).
-  // Note: 'created' is intentionally excluded — beadCreate handles thread creation directly.
-  const triggerSync = () => {
+  // Wire only contract-approved TaskStore mutations into coordinator sync.
+  const triggerSync = (eventName: string) => {
     syncCoordinator.sync().catch((err) => {
-      opts.log.warn({ err }, 'beads:store-event sync failed');
+      opts.log.warn({ err, eventName }, 'beads:store-event sync failed');
     });
   };
   const store = opts.taskCtx.store;
-  store.on('updated', triggerSync);
-  store.on('closed', triggerSync);
-  store.on('labeled', triggerSync);
+  const subscriptions = TASK_SYNC_TRIGGER_EVENTS.map((eventName) => {
+    const handler = () => triggerSync(eventName);
+    store.on(eventName, handler);
+    return { eventName, handler };
+  });
 
-  opts.log.info({ tasksCwd: opts.tasksCwd }, 'tasks:store-event watcher started');
+  opts.log.info({ tasksCwd: opts.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS }, 'tasks:store-event watcher started');
 
   return {
     stop() {
-      store.off('updated', triggerSync);
-      store.off('closed', triggerSync);
-      store.off('labeled', triggerSync);
+      for (const sub of subscriptions) {
+        store.off(sub.eventName, sub.handler);
+      }
     },
   };
 }
