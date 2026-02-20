@@ -1,7 +1,7 @@
 import type { Client, Guild } from 'discord.js';
-import type { TagMap, BeadData, BeadSyncResult } from './types.js';
+import type { TagMap, TaskData, TaskSyncResult, BeadSyncResult } from './types.js';
 import { hasInFlightForChannel } from '../discord/inflight-replies.js';
-export type { BeadSyncResult } from './types.js';
+export type { TaskSyncResult, BeadSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
@@ -22,7 +22,7 @@ import {
   shortBeadId,
 } from './discord-sync.js';
 
-export type BeadSyncOptions = {
+export type TaskSyncOptions = {
   client: Client;
   guild: Guild;
   forumId: string;
@@ -36,9 +36,10 @@ export type BeadSyncOptions = {
   /** Disable Phase 5 (thread reconciliation). Useful for shared-forum deployments. */
   skipPhase5?: boolean;
 };
+export type BeadSyncOptions = TaskSyncOptions;
 
-function hasLabel(bead: BeadData, label: string): boolean {
-  return (bead.labels ?? []).includes(label);
+function hasLabel(task: TaskData, label: string): boolean {
+  return (task.labels ?? []).includes(label);
 }
 
 async function sleep(ms: number | undefined): Promise<void> {
@@ -57,14 +58,14 @@ async function sleep(ms: number | undefined): Promise<void> {
  * Phase 5: Reconcile forum threads against beads — archive stale threads
  *          for closed beads and detect orphan threads with no matching bead.
  */
-export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult> {
+export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult> {
   const { client, guild, forumId, tagMap, log } = opts;
   const throttleMs = opts.throttleMs ?? 250;
 
   const forum = await resolveBeadsForum(guild, forumId);
   if (!forum) {
     log?.warn({ forumId }, 'bead-sync: forum not found');
-    const result: BeadSyncResult = { threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 1 };
+    const result: TaskSyncResult = { threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 1 };
     if (opts.statusPoster?.taskSyncComplete) await opts.statusPoster.taskSyncComplete(result);
     return result;
   }
@@ -243,7 +244,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
 
   if (!opts.skipPhase5) {
     // Build a map of short bead IDs → beads for quick lookup.
-    const beadsByShortId = new Map<string, BeadData[]>();
+    const beadsByShortId = new Map<string, TaskData[]>();
     for (const bead of allBeads) {
       const sid = shortBeadId(bead.id);
       const arr = beadsByShortId.get(sid);
@@ -354,7 +355,9 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   }
 
   log?.info({ threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, threadsReconciled, orphanThreadsFound, closesDeferred, warnings }, 'bead-sync: complete');
-  const result: BeadSyncResult = { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, warnings, threadsReconciled, orphanThreadsFound, closesDeferred };
+  const result: TaskSyncResult = { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, warnings, threadsReconciled, orphanThreadsFound, closesDeferred };
   if (opts.statusPoster?.taskSyncComplete) await opts.statusPoster.taskSyncComplete(result);
   return result;
 }
+
+export const runBeadSync = runTaskSync;
