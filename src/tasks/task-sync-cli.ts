@@ -1,10 +1,10 @@
-import path from 'node:path';
 import type { Client, Guild } from 'discord.js';
 import { Client as DiscordClient, GatewayIntentBits } from 'discord.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { loadTagMap } from './discord-sync.js';
 import { runTaskSync } from './task-sync-engine.js';
 import type { TaskStore } from './store.js';
+import { resolveTaskDataPath } from './path-defaults.js';
 
 function env(name: string): string {
   const v = (process.env[name] ?? '').trim();
@@ -63,9 +63,9 @@ export async function runTaskSyncCliMain(): Promise<void> {
   const forumId = env('DISCOCLAW_TASKS_FORUM');
   const dataDir = envOpt('DISCOCLAW_DATA_DIR');
   const tagMapPath = envOpt('DISCOCLAW_TASKS_TAG_MAP')
-    ?? (dataDir ? path.join(dataDir, 'beads', 'tag-map.json') : undefined);
+    ?? resolveTaskDataPath(dataDir, 'tag-map.json');
   const tasksPath = envOpt('DISCOCLAW_TASKS_PATH')
-    ?? (dataDir ? path.join(dataDir, 'beads', 'tasks.jsonl') : undefined);
+    ?? resolveTaskDataPath(dataDir, 'tasks.jsonl');
 
   const throttleMs = parseArgInt(args, '--throttle-ms') ?? 250;
   const archivedLimit = parseArgInt(args, '--archived-limit') ?? 200;
