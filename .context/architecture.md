@@ -24,7 +24,7 @@ Discord message
 | `src/discord.ts` | Discord client, message handler, prompt assembly |
 | `src/discord/` | Discord subsystems: actions, allowlist, channel context, memory, output |
 | `src/runtime/` | Runtime adapters (Claude CLI), concurrency, process pool |
-| `src/beads/` | Bead management — bd-cli wrapper, sync coordinator, file watcher, auto-tagging |
+| `src/beads/` | Task management — bd-cli wrapper, sync coordinator, file watcher, auto-tagging |
 | `src/cron/` | Cron scheduler, executor, forum sync, run stats |
 | `src/observability/` | Metrics registry |
 | `src/sessions.ts` | Session manager (maps session keys to runtime session IDs) |
@@ -44,8 +44,8 @@ Discord message
   CLI/API. The orchestrator routes to the appropriate adapter based on context (message
   handling, forge drafting, auditing). Available: Claude Code CLI, OpenAI HTTP, Codex CLI.
 - **Discord actions** — structured JSON actions the AI can emit in its response
-  (send messages, create channels, manage beads, etc.), parsed and executed post-response.
-- **Beads** — built-in task tracker synced to Discord forum threads via the `bd` CLI.
+  (send messages, create channels, manage tasks, etc.), parsed and executed post-response.
+- **Tasks** — built-in task tracker synced to Discord forum threads via the `bd` CLI.
   Enabled by default; degrades gracefully when `bd` isn't installed.
 - **Cron** — forum-based scheduled tasks. Each forum thread defines a job;
   archive to pause, unarchive to resume. Enabled by default.

@@ -15,7 +15,7 @@ Core instructions live in `CLAUDE.md` at the repo root.
 | **Runtime adapters (Claude CLI, OpenAI/Gemini later)** | `runtime.md` |
 | **Ops / systemd service** | `ops.md` |
 | **Memory system** | `memory.md` |
-| **Beads / task tracking / bd CLI** | `beads.md` |
+| **Task tracking / bd CLI** | `tasks.md` |
 | **Architecture / system overview** | `architecture.md` |
 | **Tool capabilities / browser automation** | `tools.md` |
 | **Forge/plan standing constraints** | `project.md` *(auto-loaded by forge)* |
@@ -34,7 +34,7 @@ Core instructions live in `CLAUDE.md` at the repo root.
 - **runtime.md** — Runtime adapter interface, Claude CLI flags, capability routing
 - **ops.md** — systemd service notes, logs, restart workflow
 - **memory.md** — Memory layers, user-facing examples, config reference, concurrency
-- **beads.md** — Bead task tracker: data model, bd CLI, hooks, Discord sync, auto-tagging
+- **tasks.md** — Task tracker: data model, bd CLI, hooks, Discord sync, auto-tagging
 - **architecture.md** — System overview, data flow, directory layout, key concepts
 - **bot-setup.md** — One-time bot creation and invite guide
 - **tools.md** — Available tools: browser automation (agent-browser), escalation ladder, CDP connect, security guardrails
