@@ -11,6 +11,7 @@ import {
   createBeadThread, findExistingThreadForBead, closeBeadThread, isBeadThreadAlreadyClosed,
   updateBeadThreadName, updateBeadStarterMessage, updateBeadThreadTags,
 } from './discord-sync.js';
+import { buildThreadName as buildTaskModuleThreadName } from '../tasks/discord-sync.js';
 import { TASK_STATUSES, isTaskStatus, BEAD_STATUSES, isBeadStatus } from './types.js';
 import type { TaskData, TagMap } from '../tasks/types.js';
 
@@ -19,6 +20,10 @@ import type { TaskData, TagMap } from '../tasks/types.js';
 // ---------------------------------------------------------------------------
 
 describe('buildThreadName', () => {
+  it('keeps compatibility export aligned to canonical tasks module', () => {
+    expect(buildThreadName).toBe(buildTaskModuleThreadName);
+  });
+
   it('builds name with emoji prefix and ID', () => {
     const name = buildThreadName('ws-001', 'Fix login bug', 'open');
     expect(name).toBe('\u{1F7E2} [001] Fix login bug');
