@@ -69,12 +69,12 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      const bead = JSON.parse(trimmed) as TaskData;
-      this.tasks.set(bead.id, bead);
+      const task = JSON.parse(trimmed) as TaskData;
+      this.tasks.set(task.id, task);
       // Advance the counter to be ≥ the highest numeric suffix seen,
       // but only for IDs that share our prefix to avoid contamination
       // from migrated tasks with different prefixes (e.g. dev-899 → ws-900).
-      const match = new RegExp(`^${this.prefix}-(\\d+)$`).exec(bead.id);
+      const match = new RegExp(`^${this.prefix}-(\\d+)$`).exec(task.id);
       if (match) {
         const n = parseInt(match[1], 10);
         if (n > this.counter) this.counter = n;
@@ -98,7 +98,7 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
 
   private async writeToDisk(): Promise<void> {
     if (!this.persistPath) return;
-    const lines = [...this.tasks.values()].map((b) => JSON.stringify(b)).join('\n');
+    const lines = [...this.tasks.values()].map((t) => JSON.stringify(t)).join('\n');
     await fs.writeFile(this.persistPath, lines ? lines + '\n' : '', 'utf8');
   }
 
@@ -135,14 +135,14 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
     if (params.status === 'all') {
       // no status filter
     } else if (params.status) {
-      results = results.filter((b) => b.status === params.status);
+      results = results.filter((t) => t.status === params.status);
     } else {
-      results = results.filter((b) => b.status !== 'closed');
+      results = results.filter((t) => t.status !== 'closed');
     }
 
     if (params.label) {
       const label = params.label;
-      results = results.filter((b) => b.labels?.includes(label));
+      results = results.filter((t) => t.labels?.includes(label));
     }
 
     if (params.limit != null && params.limit > 0) {
@@ -163,7 +163,7 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
 
     const candidates = opts?.label ? this.list({ label: opts.label }) : this.list();
     const match = candidates.find(
-      (b) => b.status !== 'closed' && b.title.trim().toLowerCase() === normalized,
+      (t) => t.status !== 'closed' && t.title.trim().toLowerCase() === normalized,
     );
     return match ?? null;
   }
@@ -180,7 +180,7 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
   /** Create a new task. Emits `"created"` synchronously. */
   create(params: TaskCreateParams): TaskData {
     const now = new Date().toISOString();
-    const bead: TaskData = {
+    const task: TaskData = {
       id: this.generateId(),
       title: params.title,
       status: 'open',
@@ -192,10 +192,10 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
       created_at: now,
       updated_at: now,
     };
-    this.tasks.set(bead.id, bead);
-    this.emit('created', bead);
+    this.tasks.set(task.id, task);
+    this.emit('created', task);
     this.schedulePersist();
-    return bead;
+    return task;
   }
 
   /** Update fields on an existing task. Emits `"updated"` synchronously. */

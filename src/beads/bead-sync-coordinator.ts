@@ -82,3 +82,5 @@ export class BeadSyncCoordinator {
     }
   }
 }
+
+export { BeadSyncCoordinator as TaskSyncCoordinator };

@@ -78,9 +78,9 @@ Each action category has its own flag (only active when the master switch is `1`
 | `DISCOCLAW_DISCORD_ACTIONS_GUILD` | `0` | memberInfo, roleInfo, roleAdd, roleRemove, searchMessages, eventList, eventCreate |
 | `DISCOCLAW_DISCORD_ACTIONS_MODERATION` | `0` | timeout, kick, ban |
 | `DISCOCLAW_DISCORD_ACTIONS_POLLS` | `0` | poll |
-| `DISCOCLAW_DISCORD_ACTIONS_BEADS` | `0` | beadCreate, beadUpdate, beadClose, beadShow, beadList, beadSync |
+| `DISCOCLAW_DISCORD_ACTIONS_TASKS` | `1` | taskCreate, taskUpdate, taskClose, taskShow, taskList, taskSync |
 
-Auto-follow-up: When query actions (channelList, channelInfo, threadListArchived, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, beadList, beadShow) succeed, DiscoClaw automatically re-invokes Claude with the results. This allows Claude to reason about query results without requiring the user to send a follow-up message. Controlled by `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` (default `3`, `0` disables). Mutation-only responses do not trigger follow-ups. Trivially short follow-up responses (<50 chars with no actions) are suppressed.
+Auto-follow-up: When query actions (channelList, channelInfo, threadListArchived, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow) succeed, DiscoClaw automatically re-invokes Claude with the results. This allows Claude to reason about query results without requiring the user to send a follow-up message. Controlled by `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` (default `3`, `0` disables). Mutation-only responses do not trigger follow-ups. Trivially short follow-up responses (<50 chars with no actions) are suppressed.
 
 Requirements:
 - The bot needs appropriate permissions in the server (Manage Channels, Manage Roles, Moderate Members, etc.) depending on the actions used. These are server-level role permissions, not Developer Portal settings.
@@ -90,12 +90,12 @@ Requirements:
 - If actions fail with "Missing Permissions", the bot's role lacks the required permission.
 
 ## Status Channel
-When `DISCOCLAW_STATUS_CHANNEL` is set to a channel name or ID, DiscoClaw posts colored embeds on key events:
-- **Bot Online** (green) — posted after the `ready` event fires
-- **Bot Offline** (gray) — posted on SIGTERM/SIGINT (best-effort)
-- **Runtime Error** (red) — Claude CLI returned an error or timed out
-- **Handler Failure** (red) — uncaught exception in message processing
-- **Action Failed** (orange) — a Discord action returned `{ ok: false }`
+When `DISCOCLAW_STATUS_CHANNEL` is set to a channel name or ID, DiscoClaw posts plain-text status messages on key events:
+- **Bot Online** — posted after the `ready` event fires
+- **Bot Offline** — posted on SIGTERM/SIGINT (best-effort)
+- **Runtime Error** — runtime invocation failed or timed out
+- **Handler Failure** — uncaught exception in message processing
+- **Action Failed** — a Discord action returned `{ ok: false }`
 
 Fail-open: if the channel is not found or the env var is unset, the bot works normally with no status posts. Errors posting to the status channel are caught and logged, never crashing the bot.
 
@@ -120,30 +120,17 @@ Overlap protection: if a previous run for the same job is still active, the next
 
 Implementation: `src/cron/`
 
-## Beads (Task Tracking)
-DiscoClaw includes a task tracker that syncs with Discord forum threads via the `bd` CLI (beads issue tracker). It's enabled by default and degrades gracefully when `bd` isn't installed or no forum channel is configured.
+## Tasks (Task Tracking)
+DiscoClaw includes a task tracker backed by in-process `TaskStore` data and synced to Discord forum threads.
 
-Two paths produce the same Discord state:
+- Data model/store: `src/tasks/types.ts`, `src/tasks/store.ts`
+- Discord action path: `src/discord/actions-tasks.ts` (`taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`)
+- Sync modules: `src/beads/bead-sync.ts`, `src/beads/bead-sync-coordinator.ts`, `src/beads/discord-sync.ts`
 
-**CLI path** (developer at terminal): `scripts/beads/bd-wrapper.sh` intercepts `bd create/close/update/q` and fires hook scripts that create/update/archive Discord forum threads via curl.
+Auto-sync is event-driven from the in-process store and runs a startup reconciliation pass.
+Auto-triggered syncs are silent; explicit `taskSync` can post status output.
 
-**Bot path** (AI via Discord action): `<discord-action>{"type":"beadCreate",...}` blocks are parsed and executed by `actions-beads.ts`, which calls `bd` via `bd-cli.ts` and syncs threads via `discord-sync.ts` (discord.js).
-
-Both use the `bd` binary for data storage and produce identical Discord thread state: emoji-prefixed thread names, auto-tagged forum tags, and archive-on-close behavior.
-
-**Auto-sync:** On startup and whenever `.beads/last-touched` changes on disk, a file watcher triggers a full sync automatically. This catches external mutations (e.g., `bd close` in a terminal or another Claude Code session) without requiring a restart or manual `beadSync` action. Auto-triggered syncs are silent (no status channel post); only explicit `beadSync` actions post to the status channel. All sync paths share a `BeadSyncCoordinator` that prevents concurrent syncs and invalidates the bead thread cache.
-
-Bead actions (requires `DISCOCLAW_DISCORD_ACTIONS=1` and `DISCOCLAW_DISCORD_ACTIONS_BEADS=1`):
-- `beadCreate` — create a bead + forum thread (auto-tagged if enabled)
-- `beadUpdate` — update bead fields + sync thread name/emoji
-- `beadClose` — close bead + post summary + archive thread
-- `beadShow` — show bead details
-- `beadList` — list beads with optional status/label filters
-- `beadSync` — run full 4-phase safety-net sync
-
-Data import: point `DISCOCLAW_BEADS_CWD` at an existing beads workspace (e.g., `~/Dropbox/weston`). Existing beads and their `external_ref` fields (thread IDs) work as-is since both bots share the same Discord guild.
-
-Implementation: `src/beads/`, `src/discord/actions-beads.ts`, `scripts/beads/`
+Primary env surface is `DISCOCLAW_TASKS_*` (legacy `DISCOCLAW_BEADS_*` remains temporarily supported with deprecation warnings).
 
 ## Discord API Quirks
 

@@ -38,7 +38,7 @@ Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for 
 | `DISCOCLAW_DISCORD_ACTIONS_GUILD` | `0` | Guild info (memberInfo, roleInfo, roleAdd/Remove, events, search) |
 | `DISCOCLAW_DISCORD_ACTIONS_MODERATION` | `0` | Moderation (timeout, kick, ban) |
 | `DISCOCLAW_DISCORD_ACTIONS_POLLS` | `0` | Poll creation |
-| `DISCOCLAW_DISCORD_ACTIONS_BEADS` | `0` | Bead task tracking (create/update/close/show/list/sync) |
+| `DISCOCLAW_DISCORD_ACTIONS_TASKS` | `1` | Task tracking (create/update/close/show/list/sync) |
 
 ### Claude CLI
 | Variable | Default | Description |
@@ -77,7 +77,7 @@ Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for 
 | `DISCOCLAW_DURABLE_INJECT_MAX_CHARS` | `2000` | Max chars for durable memory injected into prompts |
 | `DISCOCLAW_DURABLE_MAX_ITEMS` | `200` | Max durable items per user |
 | `DISCOCLAW_MEMORY_COMMANDS_ENABLED` | `1` | Enable `!memory` commands (show/remember/forget/reset) |
-| `DISCOCLAW_STATUS_CHANNEL` | *(empty — disabled)* | Channel name or ID for status embeds (bot online/offline, errors) |
+| `DISCOCLAW_STATUS_CHANNEL` | *(empty — disabled)* | Channel name or ID for status messages (bot online/offline, errors) |
 | `RUNTIME_FALLBACK_MODEL` | *(unset)* | Auto-fallback model when primary is overloaded (e.g. `sonnet`) |
 | `RUNTIME_MAX_BUDGET_USD` | *(unset)* | Max USD per CLI process; one-shot = per invocation, multi-turn = per session lifetime |
 | `CLAUDE_APPEND_SYSTEM_PROMPT` | *(unset)* | Append to system prompt (max 4000 chars); skips workspace PA file reads when set |
@@ -90,17 +90,19 @@ Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for 
 |----------|---------|-------------|
 | `AGENT_BROWSER_EXECUTABLE_PATH` | *(empty)* | Path to the browser binary for `agent-browser` (e.g. Chromium). If unset, agent-browser uses its bundled default. |
 
-### Beads (Task Tracking)
+### Tasks (Task Tracking)
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DISCOCLAW_BEADS_ENABLED` | `1` | Master switch — loads beads module |
-| `DISCOCLAW_BEADS_DATA_DIR` | `<WORKSPACE_CWD>/.beads` | Task store data directory |
-| `DISCOCLAW_BEADS_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for bead threads |
-| `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/bead-hooks/tag-map.json` | Path to tag-map.json |
-| `DISCOCLAW_BEADS_MENTION_USER` | *(empty)* | User ID to @mention in new bead threads |
-| `DISCOCLAW_BEADS_SIDEBAR` | `0` | When `1` + `MENTION_USER` set, persists @mention in open bead starters for sidebar visibility |
-| `DISCOCLAW_BEADS_AUTO_TAG` | `1` | Enable AI auto-tagging |
-| `DISCOCLAW_BEADS_AUTO_TAG_MODEL` | `fast` | Model tier or concrete name for auto-tagging |
+| `DISCOCLAW_TASKS_ENABLED` | `1` | Master switch — loads tasks subsystem |
+| `DISCOCLAW_TASKS_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for task threads |
+| `DISCOCLAW_TASKS_CWD` | `<WORKSPACE_CWD>` | Tasks workspace override (legacy import/migration path) |
+| `DISCOCLAW_TASKS_TAG_MAP` | `data/beads/tag-map.json` | Path to task forum tag map |
+| `DISCOCLAW_TASKS_MENTION_USER` | *(empty)* | User ID to @mention in new task threads |
+| `DISCOCLAW_TASKS_SIDEBAR` | `0` | When `1` + `MENTION_USER` set, persists @mention in open task starters for sidebar visibility |
+| `DISCOCLAW_TASKS_AUTO_TAG` | `1` | Enable AI auto-tagging |
+| `DISCOCLAW_TASKS_AUTO_TAG_MODEL` | `fast` | Model tier or concrete name for auto-tagging |
+| `DISCOCLAW_TASKS_SYNC_SKIP_PHASE5` | `0` | Disable phase-5 reconciliation during sync |
+| `DISCOCLAW_TASKS_PREFIX` | `ws` | Prefix for generated task IDs (e.g. `ws-001`) |
 
 ## Debugging
 
@@ -170,15 +172,15 @@ This is especially useful for systemd, where env loading can differ from your sh
 - **Timeout issues:** Look for `timeout` in logs. Adjust `RUNTIME_TIMEOUT_MS` if needed.
 - **PID lock conflicts:** Look for `pidlock` in logs. See ops.md for stale lock handling.
 
-## Bead Auto-Sync
+## Task Auto-Sync
 
-When the bot is running, bead changes trigger Discord sync immediately via in-process events:
+When the bot is running, task changes trigger Discord sync immediately via in-process events:
 
 - **Startup sync:** On boot, a fire-and-forget full sync runs to catch any drift that occurred while the bot was down.
 - **Synchronous events:** The in-process task store emits events on every write (`create`, `update`, `status-change`, `close`). Discord sync subscribers handle each event immediately — no file watcher, no debounce, no subprocess spawning.
-- **Coordinator:** All sync paths (event-driven, startup, manual `beadSync` action) share a `BeadSyncCoordinator` that prevents concurrent syncs and invalidates the bead thread cache. Auto-triggered syncs are silent; only manual `beadSync` posts to the status channel.
+- **Coordinator:** All sync paths (event-driven, startup, manual `taskSync` action) share a `BeadSyncCoordinator` that prevents concurrent syncs and invalidates the thread cache. Auto-triggered syncs are silent; only manual sync posts to the status channel.
 
-No extra env vars are needed — auto-sync activates whenever `DISCOCLAW_BEADS_ENABLED=1` and a guild is available.
+No extra env vars are needed — auto-sync activates whenever `DISCOCLAW_TASKS_ENABLED=1` and a guild is available.
 
 ## Smoke Tests
 

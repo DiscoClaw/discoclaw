@@ -117,15 +117,36 @@ export type DiscoclawConfig = {
   webhookPort: number;
   webhookConfigPath?: string;
 
+  tasksEnabled: boolean;
+  tasksCwdOverride?: string;
+  tasksForum?: string;
+  tasksTagMapPathOverride?: string;
+  tasksMentionUser?: string;
+  tasksSidebar: boolean;
+  tasksAutoTag: boolean;
+  tasksAutoTagModel: string;
+  tasksSyncSkipPhase5: boolean;
+  tasksPrefix: string;
+
+  /** @deprecated Use tasksEnabled. */
   beadsEnabled: boolean;
+  /** @deprecated Use tasksCwdOverride. */
   beadsCwdOverride?: string;
+  /** @deprecated Use tasksForum. */
   beadsForum?: string;
+  /** @deprecated Use tasksTagMapPathOverride. */
   beadsTagMapPathOverride?: string;
+  /** @deprecated Use tasksMentionUser. */
   beadsMentionUser?: string;
+  /** @deprecated Use tasksSidebar. */
   beadsSidebar: boolean;
+  /** @deprecated Use tasksAutoTag. */
   beadsAutoTag: boolean;
+  /** @deprecated Use tasksAutoTagModel. */
   beadsAutoTagModel: string;
+  /** @deprecated Use tasksSyncSkipPhase5. */
   beadsSyncSkipPhase5: boolean;
+  /** @deprecated Use tasksPrefix. */
   beadsTaskPrefix: string;
 
   runtimeFallbackModel?: string;
@@ -236,6 +257,49 @@ function parseTrimmedString(
   if (raw == null) return undefined;
   const trimmed = raw.trim();
   return trimmed || undefined;
+}
+
+function resolveAliasedEnvName(
+  env: NodeJS.ProcessEnv,
+  primaryName: string,
+  legacyName: string,
+  warnings: string[],
+): string | undefined {
+  const primary = parseTrimmedString(env, primaryName);
+  if (primary !== undefined) return primaryName;
+
+  const legacy = parseTrimmedString(env, legacyName);
+  if (legacy !== undefined) {
+    warnings.push(`${legacyName} is deprecated; use ${primaryName}`);
+    return legacyName;
+  }
+  return undefined;
+}
+
+function parseTrimmedStringAliased(
+  env: NodeJS.ProcessEnv,
+  primaryName: string,
+  legacyName: string,
+  warnings: string[],
+): { value: string | undefined; sourceName?: string } {
+  const sourceName = resolveAliasedEnvName(env, primaryName, legacyName, warnings);
+  if (!sourceName) return { value: undefined, sourceName: undefined };
+  return {
+    value: parseTrimmedString(env, sourceName),
+    sourceName,
+  };
+}
+
+function parseBooleanAliased(
+  env: NodeJS.ProcessEnv,
+  primaryName: string,
+  legacyName: string,
+  defaultValue: boolean,
+  warnings: string[],
+): boolean {
+  const sourceName = resolveAliasedEnvName(env, primaryName, legacyName, warnings);
+  if (!sourceName) return defaultValue;
+  return parseBoolean(env, sourceName, defaultValue);
 }
 
 function parseRuntimeName(
@@ -399,11 +463,23 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const webhookPort = parsePositiveInt(env, 'DISCOCLAW_WEBHOOK_PORT', 9400);
   const webhookConfigPath = parseTrimmedString(env, 'DISCOCLAW_WEBHOOK_CONFIG');
 
-  const beadsEnabled = parseBoolean(env, 'DISCOCLAW_BEADS_ENABLED', true);
-  let beadsForum = parseTrimmedString(env, 'DISCOCLAW_BEADS_FORUM');
-  if (beadsForum && !/^\d{8,}$/.test(beadsForum)) {
-    warnings.push('DISCOCLAW_BEADS_FORUM is not a valid snowflake; ignoring (system bootstrap will auto-create)');
-    beadsForum = undefined;
+  const tasksEnabled = parseBooleanAliased(
+    env,
+    'DISCOCLAW_TASKS_ENABLED',
+    'DISCOCLAW_BEADS_ENABLED',
+    true,
+    warnings,
+  );
+  const tasksForumParsed = parseTrimmedStringAliased(
+    env,
+    'DISCOCLAW_TASKS_FORUM',
+    'DISCOCLAW_BEADS_FORUM',
+    warnings,
+  );
+  let tasksForum = tasksForumParsed.value;
+  if (tasksForum && !/^\d{8,}$/.test(tasksForum)) {
+    warnings.push(`${tasksForumParsed.sourceName ?? 'DISCOCLAW_TASKS_FORUM'} is not a valid snowflake; ignoring (system bootstrap will auto-create)`);
+    tasksForum = undefined;
   }
 
   const primaryRuntime = parseRuntimeName(env, 'PRIMARY_RUNTIME') ?? 'claude';
@@ -423,6 +499,58 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
 
   const fastModel = parseTrimmedString(env, 'DISCOCLAW_FAST_MODEL') ?? 'fast';
+
+  const tasksCwdOverride = parseTrimmedStringAliased(
+    env,
+    'DISCOCLAW_TASKS_CWD',
+    'DISCOCLAW_BEADS_CWD',
+    warnings,
+  ).value;
+  const tasksTagMapPathOverride = parseTrimmedStringAliased(
+    env,
+    'DISCOCLAW_TASKS_TAG_MAP',
+    'DISCOCLAW_BEADS_TAG_MAP',
+    warnings,
+  ).value;
+  const tasksMentionUser = parseTrimmedStringAliased(
+    env,
+    'DISCOCLAW_TASKS_MENTION_USER',
+    'DISCOCLAW_BEADS_MENTION_USER',
+    warnings,
+  ).value;
+  const tasksSidebar = parseBooleanAliased(
+    env,
+    'DISCOCLAW_TASKS_SIDEBAR',
+    'DISCOCLAW_BEADS_SIDEBAR',
+    false,
+    warnings,
+  );
+  const tasksAutoTag = parseBooleanAliased(
+    env,
+    'DISCOCLAW_TASKS_AUTO_TAG',
+    'DISCOCLAW_BEADS_AUTO_TAG',
+    true,
+    warnings,
+  );
+  const tasksAutoTagModel = parseTrimmedStringAliased(
+    env,
+    'DISCOCLAW_TASKS_AUTO_TAG_MODEL',
+    'DISCOCLAW_BEADS_AUTO_TAG_MODEL',
+    warnings,
+  ).value ?? fastModel;
+  const tasksSyncSkipPhase5 = parseBooleanAliased(
+    env,
+    'DISCOCLAW_TASKS_SYNC_SKIP_PHASE5',
+    'BEAD_SYNC_SKIP_PHASE5',
+    false,
+    warnings,
+  );
+  const tasksPrefix = parseTrimmedStringAliased(
+    env,
+    'DISCOCLAW_TASKS_PREFIX',
+    'DISCOCLAW_BEADS_TASK_PREFIX',
+    warnings,
+  ).value ?? 'ws';
 
   return {
     config: {
@@ -547,16 +675,27 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       webhookPort,
       webhookConfigPath,
 
-      beadsEnabled,
-      beadsCwdOverride: parseTrimmedString(env, 'DISCOCLAW_BEADS_CWD'),
-      beadsForum,
-      beadsTagMapPathOverride: parseTrimmedString(env, 'DISCOCLAW_BEADS_TAG_MAP'),
-      beadsMentionUser: parseTrimmedString(env, 'DISCOCLAW_BEADS_MENTION_USER'),
-      beadsSidebar: parseBoolean(env, 'DISCOCLAW_BEADS_SIDEBAR', false),
-      beadsAutoTag: parseBoolean(env, 'DISCOCLAW_BEADS_AUTO_TAG', true),
-      beadsAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_BEADS_AUTO_TAG_MODEL') ?? fastModel,
-      beadsSyncSkipPhase5: parseBoolean(env, 'BEAD_SYNC_SKIP_PHASE5', false),
-      beadsTaskPrefix: parseTrimmedString(env, 'DISCOCLAW_BEADS_TASK_PREFIX') ?? 'ws',
+      tasksEnabled,
+      tasksCwdOverride,
+      tasksForum,
+      tasksTagMapPathOverride,
+      tasksMentionUser,
+      tasksSidebar,
+      tasksAutoTag,
+      tasksAutoTagModel,
+      tasksSyncSkipPhase5,
+      tasksPrefix,
+      // Backward-compat mirrors for legacy call sites.
+      beadsEnabled: tasksEnabled,
+      beadsCwdOverride: tasksCwdOverride,
+      beadsForum: tasksForum,
+      beadsTagMapPathOverride: tasksTagMapPathOverride,
+      beadsMentionUser: tasksMentionUser,
+      beadsSidebar: tasksSidebar,
+      beadsAutoTag: tasksAutoTag,
+      beadsAutoTagModel: tasksAutoTagModel,
+      beadsSyncSkipPhase5: tasksSyncSkipPhase5,
+      beadsTaskPrefix: tasksPrefix,
 
       claudeBin: parseTrimmedString(env, 'CLAUDE_BIN') ?? 'claude',
       dangerouslySkipPermissions: parseBoolean(env, 'CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS', false),

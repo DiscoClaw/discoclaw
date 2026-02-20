@@ -34,7 +34,7 @@ import type { MemoryContext } from './discord/actions-memory.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
 import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
-import { resolveBeadsForum, reloadTagMapInPlace } from './beads/discord-sync.js';
+import { resolveTasksForum, reloadTagMapInPlace } from './beads/discord-sync.js';
 import { initBeadsForumGuard } from './beads/forum-guard.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { probeWorkspacePermissions } from './workspace-permissions.js';
@@ -334,34 +334,34 @@ try {
 }
 const cronForum = cfg.cronForum || scaffoldState.cronsForumId;
 
-// --- Beads subsystem ---
-const beadsEnabled = cfg.beadsEnabled;
-const beadsCwd = cfg.beadsCwdOverride || workspaceCwd;
-const beadsForum = cfg.beadsForum || scaffoldState.beadsForumId || '';
-const beadsDataDir = dataDir
+// --- Tasks subsystem ---
+const tasksEnabled = cfg.tasksEnabled;
+const tasksCwd = cfg.tasksCwdOverride || workspaceCwd;
+const tasksForum = cfg.tasksForum || scaffoldState.beadsForumId || '';
+const tasksDataDir = dataDir
   ? path.join(dataDir, 'beads')
   : path.join(__dirname, '..', 'data', 'beads');
-const beadsTagMapPath = cfg.beadsTagMapPathOverride
-  || path.join(beadsDataDir, 'tag-map.json');
-const beadsTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'beads', 'tag-map.json');
-const beadsMentionUser = cfg.beadsMentionUser;
-const beadsSidebar = cfg.beadsSidebar;
-const sidebarMentionUserId = beadsSidebar ? beadsMentionUser : undefined;
-const beadsAutoTag = cfg.beadsAutoTag;
-let beadsAutoTagModel = cfg.beadsAutoTagModel;
+const tasksTagMapPath = cfg.tasksTagMapPathOverride
+  || path.join(tasksDataDir, 'tag-map.json');
+const tasksTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'beads', 'tag-map.json');
+const tasksMentionUser = cfg.tasksMentionUser;
+const tasksSidebar = cfg.tasksSidebar;
+const sidebarMentionUserId = tasksSidebar ? tasksMentionUser : undefined;
+const tasksAutoTag = cfg.tasksAutoTag;
+let tasksAutoTagModel = cfg.tasksAutoTagModel;
 const discordActionsTasks = cfg.discordActionsTasks;
-const beadsTaskPrefix = cfg.beadsTaskPrefix;
+const tasksPrefix = cfg.tasksPrefix;
 
 // Initialize shared task store (used by beads, forge, and plan subsystems).
 // Created unconditionally so forge/plan have a persistent store even when beads are disabled.
-await fs.mkdir(beadsDataDir, { recursive: true });
+await fs.mkdir(tasksDataDir, { recursive: true });
 
 // Cutover gate: if the legacy bd SQLite DB exists but the JSONL hasn't been
 // written yet, fail fast rather than silently starting with an empty store.
 // Run `pnpm tsx scripts/beads/migrate.ts` to perform the one-time migration.
 {
-  const legacyDbPath = path.join(beadsCwd, '.beads', 'beads.db');
-  const tasksJsonlPath = path.join(beadsDataDir, 'tasks.jsonl');
+  const legacyDbPath = path.join(tasksCwd, '.beads', 'beads.db');
+  const tasksJsonlPath = path.join(tasksDataDir, 'tasks.jsonl');
   const legacyExists = await fs.access(legacyDbPath).then(() => true).catch(() => false);
   if (legacyExists) {
     const jsonlExists = await fs.access(tasksJsonlPath).then(() => true).catch(() => false);
@@ -375,9 +375,9 @@ await fs.mkdir(beadsDataDir, { recursive: true });
   }
 }
 
-const sharedTaskStore = new TaskStore({ prefix: beadsTaskPrefix, persistPath: path.join(beadsDataDir, 'tasks.jsonl') });
+const sharedTaskStore = new TaskStore({ prefix: tasksPrefix, persistPath: path.join(tasksDataDir, 'tasks.jsonl') });
 await sharedTaskStore.load();
-log.info({ count: sharedTaskStore.size(), prefix: beadsTaskPrefix }, 'tasks:store loaded');
+log.info({ count: sharedTaskStore.size(), prefix: tasksPrefix }, 'tasks:store loaded');
 
 const runtimeFallbackModel = cfg.runtimeFallbackModel;
 const runtimeMaxBudgetUsd = cfg.runtimeMaxBudgetUsd;
@@ -544,7 +544,7 @@ runtimeModel = resolveModel(cfg.runtimeModel, runtime.id);
 summaryModel = resolveModel(cfg.summaryModel, runtime.id);
 cronModel = resolveModel(cfg.cronModel, runtime.id);
 cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, runtime.id);
-beadsAutoTagModel = resolveModel(cfg.beadsAutoTagModel, runtime.id);
+  tasksAutoTagModel = resolveModel(cfg.tasksAutoTagModel, runtime.id);
 log.info(
   { primaryRuntime: primaryRuntimeName, runtimeId: runtime.id, model: runtimeModel },
   'runtime:primary selected',
@@ -694,9 +694,9 @@ const botParams = {
   shortTermMaxAgeMs,
   shortTermInjectMaxChars,
   statusChannel,
-  bootstrapEnsureBeadsForum: beadsEnabled,
+  bootstrapEnsureBeadsForum: tasksEnabled,
   existingCronsId: isSnowflake(cronForum ?? '') ? cronForum : undefined,
-  existingBeadsId: isSnowflake(beadsForum) ? beadsForum : undefined,
+  existingBeadsId: isSnowflake(tasksForum) ? tasksForum : undefined,
   toolAwareStreaming,
   streamStallWarningMs,
   actionFollowupDepth,
@@ -723,8 +723,8 @@ const botParams = {
     reactionHandlerEnabled,
     reactionRemoveHandlerEnabled,
     cronEnabled,
-    beadsEnabled,
-    beadsActive: false,
+    tasksEnabled,
+    tasksActive: false,
     requireChannelContext,
     autoIndexChannelContext,
   },
@@ -939,19 +939,19 @@ await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'infl
 
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
 let taskCtx: TaskContext | undefined;
-if (beadsEnabled) {
+if (tasksEnabled) {
   // Seed tag map from repo if data-dir copy doesn't exist yet.
-  await seedTagMap(beadsTagMapSeedPath, beadsTagMapPath);
+  await seedTagMap(tasksTagMapSeedPath, tasksTagMapPath);
 
   const beadsResult = await initializeBeadsContext({
     enabled: true,
-    beadsCwd,
-    beadsForum,
-    beadsTagMapPath,
-    beadsMentionUser,
-    beadsSidebar,
-    beadsAutoTag,
-    beadsAutoTagModel,
+    tasksCwd,
+    tasksForum,
+    tasksTagMapPath,
+    tasksMentionUser,
+    tasksSidebar,
+    tasksAutoTag,
+    tasksAutoTagModel,
     runtime,
     statusPoster: botStatus ?? undefined,
     log,
@@ -967,19 +967,19 @@ if (taskCtx) {
     taskCtx.statusPoster = botStatus;
   }
   botParams.taskCtx = taskCtx;
-  botParams.discordActionsTasks = discordActionsTasks && beadsEnabled;
-  botParams.healthConfigSnapshot.beadsActive = true;
+  botParams.discordActionsTasks = discordActionsTasks && tasksEnabled;
+  botParams.healthConfigSnapshot.tasksActive = true;
 
   // Wire coordinator + watcher + startup sync
   const resolvedGuildId = guildId || system?.guildId || '';
   const guild = resolvedGuildId ? client.guilds.cache.get(resolvedGuildId) : undefined;
   if (guild) {
-    // Create forum count sync for beads.
-    const beadForum = await resolveBeadsForum(guild, taskCtx.forumId);
-    if (beadForum) {
+    // Create forum count sync for tasks.
+    const tasksForumChannel = await resolveTasksForum(guild, taskCtx.forumId);
+    if (tasksForumChannel) {
       beadForumCountSync = new ForumCountSync(
         client,
-        beadForum.id,
+        tasksForumChannel.id,
         async () => {
           return taskCtx!.store.list({ status: 'all' }).filter((b) => b.status !== 'closed').length;
         },
@@ -993,19 +993,19 @@ if (taskCtx) {
     initBeadsForumGuard({ client, forumId: taskCtx.forumId, log, store: taskCtx.store, tagMap: taskCtx.tagMap });
 
     // Tag bootstrap + reload BEFORE wireBeadsSync so the first sync has the correct tag map.
-    if (beadForum) {
+    if (tasksForumChannel) {
       try {
-        await ensureForumTags(guild, beadForum.id, beadsTagMapPath, {
-          seedPath: beadsTagMapSeedPath,
+        await ensureForumTags(guild, tasksForumChannel.id, tasksTagMapPath, {
+          seedPath: tasksTagMapSeedPath,
           log,
         });
       } catch (err) {
-        log.warn({ err }, 'beads:tag bootstrap failed');
+        log.warn({ err }, 'tasks:tag bootstrap failed');
       }
       try {
-        await reloadTagMapInPlace(beadsTagMapPath, taskCtx.tagMap);
+        await reloadTagMapInPlace(tasksTagMapPath, taskCtx.tagMap);
       } catch (err) {
-        log.warn({ err }, 'beads:tag map reload failed');
+        log.warn({ err }, 'tasks:tag map reload failed');
       }
     }
 
@@ -1015,21 +1015,21 @@ if (taskCtx) {
       client,
       guild,
       guildId: resolvedGuildId,
-      beadsCwd,
+      tasksCwd,
       sidebarMentionUserId,
       log,
       forumCountSync: beadForumCountSync,
       skipForumGuard: true,
-      skipPhase5: cfg.beadsSyncSkipPhase5,
+      skipPhase5: cfg.tasksSyncSkipPhase5,
     });
     beadSyncWatcher = wired;
   } else {
-    log.warn({ resolvedGuildId }, 'beads:sync-watcher skipped; guild not in cache');
+    log.warn({ resolvedGuildId }, 'tasks:sync-watcher skipped; guild not in cache');
   }
 
   log.info(
-    { beadsCwd, beadsForum: taskCtx.forumId, tagCount: Object.keys(taskCtx.tagMap).length, autoTag: beadsAutoTag },
-    'beads:initialized',
+    { tasksCwd, tasksForum: taskCtx.forumId, tagCount: Object.keys(taskCtx.tagMap).length, autoTag: tasksAutoTag },
+    'tasks:initialized',
   );
 }
 
@@ -1129,7 +1129,7 @@ if (cronEnabled && effectiveCronForum) {
     guild: discordActionsGuild,
     moderation: discordActionsModeration,
     polls: discordActionsPolls,
-    tasks: discordActionsTasks && beadsEnabled && Boolean(taskCtx),
+    tasks: discordActionsTasks && tasksEnabled && Boolean(taskCtx),
     // Prevent cron jobs from mutating cron state via emitted action blocks.
     crons: false,
     botProfile: false, // Intentionally excluded from cron flows to avoid rate-limit and abuse issues.
@@ -1334,7 +1334,7 @@ if (botStatus?.bootReport) {
   if (discordActionsGuild) actionCategoriesEnabled.push('guild');
   if (discordActionsModeration) actionCategoriesEnabled.push('moderation');
   if (discordActionsPolls) actionCategoriesEnabled.push('polls');
-  if (discordActionsTasks && beadsEnabled) actionCategoriesEnabled.push('tasks');
+  if (discordActionsTasks && tasksEnabled) actionCategoriesEnabled.push('tasks');
   if (discordActionsCrons && cronEnabled) actionCategoriesEnabled.push('crons');
   if (discordActionsBotProfile) actionCategoriesEnabled.push('bot-profile');
   if (discordActionsForge && forgeCommandsEnabled) actionCategoriesEnabled.push('forge');
@@ -1347,7 +1347,7 @@ if (botStatus?.bootReport) {
     shutdownMessage: startupCtx.shutdown?.message,
     shutdownRequestedBy: startupCtx.shutdown?.requestedBy,
     activeForge: startupCtx.shutdown?.activeForge,
-    beadsEnabled: beadsEnabled,
+    tasksEnabled: tasksEnabled,
     forumResolved: Boolean(taskCtx?.forumId),
     cronsEnabled: Boolean(cronEnabled && botParams.cronCtx),
     cronJobCount: cronScheduler?.listJobs().length,

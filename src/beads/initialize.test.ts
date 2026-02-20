@@ -158,7 +158,7 @@ describe('wireBeadsSync', () => {
       client,
       guild,
       guildId: 'guild-1',
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       sidebarMentionUserId: 'user-1',
       log,
     });
@@ -184,7 +184,7 @@ describe('wireBeadsSync', () => {
     expect(taskCtx.syncCoordinator).toBeDefined();
     expect(result).toHaveProperty('stop');
     expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ beadsCwd: '/tmp/beads' }),
+      expect.objectContaining({ tasksCwd: '/tmp/beads' }),
       'tasks:store-event watcher started',
     );
   });
@@ -208,7 +208,7 @@ describe('wireBeadsSync', () => {
       client: {} as any,
       guild: {} as any,
       guildId: 'guild-1',
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       log,
     });
 

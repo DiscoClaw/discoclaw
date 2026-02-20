@@ -18,13 +18,24 @@ describe('setup: .env content generation', () => {
     const content = buildEnvContent({
       DISCORD_TOKEN: 'abc.def.ghi',
       DISCORD_ALLOW_USER_IDS: '12345678901234567',
-      DISCOCLAW_BEADS_FORUM: '111111111111111111',
+      DISCOCLAW_TASKS_FORUM: '111111111111111111',
       DISCOCLAW_CRON_FORUM: '222222222222222222',
     });
     expect(content).toContain('DISCORD_TOKEN=abc.def.ghi');
     expect(content).toContain('DISCORD_ALLOW_USER_IDS=12345678901234567');
-    expect(content).toContain('DISCOCLAW_BEADS_FORUM=111111111111111111');
+    expect(content).toContain('DISCOCLAW_TASKS_FORUM=111111111111111111');
     expect(content).toContain('DISCOCLAW_CRON_FORUM=222222222222222222');
+  });
+
+  it('maps legacy DISCOCLAW_BEADS_FORUM input to DISCOCLAW_TASKS_FORUM output', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      DISCOCLAW_BEADS_FORUM: '111111111111111111',
+      DISCOCLAW_CRON_FORUM: '222222222222222222',
+    });
+    expect(content).toContain('DISCOCLAW_TASKS_FORUM=111111111111111111');
+    expect(content).not.toContain('DISCOCLAW_BEADS_FORUM=');
   });
 
   it('includes core values when provided (backward-compat: no PRIMARY_RUNTIME)', () => {
@@ -61,7 +72,7 @@ describe('setup: .env content generation', () => {
     const content = buildEnvContent({
       DISCORD_TOKEN: 'abc.def.ghi',
       DISCORD_ALLOW_USER_IDS: '12345678901234567',
-      DISCOCLAW_BEADS_FORUM: '111111111111111111',
+      DISCOCLAW_TASKS_FORUM: '111111111111111111',
       DISCOCLAW_CRON_FORUM: '222222222222222222',
       DISCOCLAW_DISCORD_ACTIONS: '1',
       DISCOCLAW_STATUS_CHANNEL: 'status',

@@ -246,12 +246,16 @@ for (const check of checkRequiredForums(process.env)) {
 
 // 11. Task store migration state
 {
-  const beadsCwd = (process.env.DISCOCLAW_BEADS_CWD ?? '').trim() || process.cwd();
+  const tasksCwd = (
+    process.env.DISCOCLAW_TASKS_CWD
+    ?? process.env.DISCOCLAW_BEADS_CWD
+    ?? ''
+  ).trim() || process.cwd();
   const dataDir = (process.env.DISCOCLAW_DATA_DIR ?? '').trim();
   const beadsDataDir = dataDir
     ? path.join(dataDir, 'beads')
     : path.join(root, 'data', 'beads');
-  const legacyDbPath = path.join(beadsCwd, '.beads', 'beads.db');
+  const legacyDbPath = path.join(tasksCwd, '.beads', 'beads.db');
   const tasksJsonlPath = path.join(beadsDataDir, 'tasks.jsonl');
   const legacyExists = fs.existsSync(legacyDbPath);
   const jsonlExists = fs.existsSync(tasksJsonlPath);

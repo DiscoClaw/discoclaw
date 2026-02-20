@@ -1,6 +1,6 @@
 import type { MessageMentionOptions } from 'discord.js';
 import type { LoggerLike } from './action-types.js';
-import type { BeadSyncResult } from '../beads/types.js';
+import type { TaskSyncResult } from '../tasks/types.js';
 import type { StartupContext } from './shutdown-context.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 
@@ -66,8 +66,12 @@ export type BootReportData = {
   shutdownMessage?: string;
   shutdownRequestedBy?: string;
   activeForge?: string;
-  // Beads subsystem
-  beadsEnabled: boolean;
+  // Tasks subsystem
+  tasksEnabled: boolean;
+  tasksDbVersion?: string;
+  /** @deprecated Use tasksEnabled. */
+  beadsEnabled?: boolean;
+  /** @deprecated Use tasksDbVersion. */
   beadDbVersion?: string;
   forumResolved: boolean;
   // Crons subsystem
@@ -94,7 +98,9 @@ export type StatusPoster = {
   runtimeError(context: { sessionKey: string; channelName?: string }, message: string): Promise<void>;
   handlerError(context: { sessionKey: string }, err: unknown): Promise<void>;
   actionFailed(actionType: string, error: string): Promise<void>;
-  beadSyncComplete(result: BeadSyncResult): Promise<void>;
+  taskSyncComplete?(result: TaskSyncResult): Promise<void>;
+  /** @deprecated Prefer taskSyncComplete. */
+  beadSyncComplete(result: TaskSyncResult): Promise<void>;
   bootReport?(data: BootReportData): Promise<void>;
 };
 
@@ -112,6 +118,24 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
     } catch (err) {
       log?.warn({ err }, 'status-channel: failed to post status message');
     }
+  };
+  const sendTaskSyncComplete = async (result: TaskSyncResult) => {
+    const { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, threadsReconciled, orphanThreadsFound, warnings } = result;
+    const allZero = threadsCreated === 0 && emojisUpdated === 0 && starterMessagesUpdated === 0 && threadsArchived === 0 && statusesUpdated === 0 && tagsUpdated === 0 && (threadsReconciled ?? 0) === 0 && (orphanThreadsFound ?? 0) === 0;
+    if (allZero && warnings === 0) return;
+
+    const parts: string[] = ['**Task Sync Complete**'];
+    if (threadsCreated > 0) parts.push(`Created: ${threadsCreated}`);
+    if (emojisUpdated > 0) parts.push(`Names Updated: ${emojisUpdated}`);
+    if (starterMessagesUpdated > 0) parts.push(`Starters Updated: ${starterMessagesUpdated}`);
+    if (threadsArchived > 0) parts.push(`Archived: ${threadsArchived}`);
+    if (statusesUpdated > 0) parts.push(`Statuses Fixed: ${statusesUpdated}`);
+    if (tagsUpdated > 0) parts.push(`Tags Updated: ${tagsUpdated}`);
+    if (threadsReconciled && threadsReconciled > 0) parts.push(`Reconciled: ${threadsReconciled}`);
+    if (orphanThreadsFound && orphanThreadsFound > 0) parts.push(`Orphans Found: ${orphanThreadsFound}`);
+    if (warnings > 0) parts.push(`Warnings: ${warnings}`);
+
+    await send(parts.join(' · '));
   };
 
   return {
@@ -136,23 +160,12 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       await send(`**Action Failed** [${actionType || '(unknown)'}]\n${(error || '(unknown)').slice(0, 500)}`);
     },
 
+    async taskSyncComplete(result) {
+      await sendTaskSyncComplete(result);
+    },
+
     async beadSyncComplete(result) {
-      const { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, threadsReconciled, orphanThreadsFound, warnings } = result;
-      const allZero = threadsCreated === 0 && emojisUpdated === 0 && starterMessagesUpdated === 0 && threadsArchived === 0 && statusesUpdated === 0 && tagsUpdated === 0 && (threadsReconciled ?? 0) === 0 && (orphanThreadsFound ?? 0) === 0;
-      if (allZero && warnings === 0) return;
-
-      const parts: string[] = ['**Task Sync Complete**'];
-      if (threadsCreated > 0) parts.push(`Created: ${threadsCreated}`);
-      if (emojisUpdated > 0) parts.push(`Names Updated: ${emojisUpdated}`);
-      if (starterMessagesUpdated > 0) parts.push(`Starters Updated: ${starterMessagesUpdated}`);
-      if (threadsArchived > 0) parts.push(`Archived: ${threadsArchived}`);
-      if (statusesUpdated > 0) parts.push(`Statuses Fixed: ${statusesUpdated}`);
-      if (tagsUpdated > 0) parts.push(`Tags Updated: ${tagsUpdated}`);
-      if (threadsReconciled && threadsReconciled > 0) parts.push(`Reconciled: ${threadsReconciled}`);
-      if (orphanThreadsFound && orphanThreadsFound > 0) parts.push(`Orphans Found: ${orphanThreadsFound}`);
-      if (warnings > 0) parts.push(`Warnings: ${warnings}`);
-
-      await send(parts.join(' · '));
+      await sendTaskSyncComplete(result);
     },
 
     async bootReport(data) {
@@ -180,10 +193,12 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
         lines.push(`Forge at Shutdown · ${data.activeForge.slice(0, 200)}`);
       }
 
-      const beadsStatus = data.beadsEnabled
-        ? `on${data.beadDbVersion ? ` · v${data.beadDbVersion}` : ''}${data.forumResolved ? ' · forum ok' : ' · forum unresolved'}`
+      const tasksEnabled = data.tasksEnabled ?? data.beadsEnabled ?? false;
+      const tasksDbVersion = data.tasksDbVersion ?? data.beadDbVersion;
+      const tasksStatus = tasksEnabled
+        ? `on${tasksDbVersion ? ` · v${tasksDbVersion}` : ''}${data.forumResolved ? ' · forum ok' : ' · forum unresolved'}`
         : 'off';
-      lines.push(`Tasks · ${beadsStatus}`);
+      lines.push(`Tasks · ${tasksStatus}`);
 
       const cronsStatus = data.cronsEnabled
         ? `on${data.cronJobCount !== undefined ? ` · ${data.cronJobCount} job${data.cronJobCount !== 1 ? 's' : ''}` : ''}`
