@@ -204,21 +204,21 @@ type ConversationContextOptions = {
 type ConversationContextResult = {
   context?: string;
   pinnedSummary?: string;
-  existingBeadId?: string;
+  existingTaskId?: string;
 };
 
 async function gatherConversationContext(opts: ConversationContextOptions): Promise<ConversationContextResult> {
   const { msg, params, isThread, threadId, threadParentId } = opts;
   const taskCtx = params.taskCtx;
 
-  let existingBeadId: string | undefined;
+  let existingTaskId: string | undefined;
   if (isThread && threadId && threadParentId && taskCtx) {
     if (threadParentId === taskCtx.forumId) {
       try {
         const task = await taskThreadCache.get(threadId, taskCtx.store);
-        if (task) existingBeadId = task.id;
+        if (task) existingTaskId = task.id;
       } catch {
-        // best-effort — fall through to create a new bead
+        // best-effort — fall through to create a new task.
       }
     }
   }
@@ -261,7 +261,7 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
   );
 
   const context = contextParts.length > 0 ? contextParts.join('\n\n') : undefined;
-  return { context, pinnedSummary, existingBeadId: existingBeadId };
+  return { context, pinnedSummary, existingTaskId };
 }
 
 async function resolvePinnedMessagesSummary(
@@ -1321,9 +1321,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
               // All other plan actions pass through.
               // For create, include reply context so "!plan fix this" knows what "this" is.
-              // Context travels separately so slug/bead/title stay clean.
-              let effectivePlanCmd = planCmd;
-              if (planCmd.action === 'create' && planCmd.args) {
+                // Context travels separately so slug/task/title stay clean.
+                let effectivePlanCmd = planCmd;
+                if (planCmd.action === 'create' && planCmd.args) {
                 const ctxResult = await gatherConversationContext({
                   msg,
                   params,
@@ -1343,10 +1343,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   effectivePlanCmd = {
                     ...planCmd,
                     context: planContext,
-                    existingBeadId: ctxResult.existingBeadId,
+                    existingTaskId: ctxResult.existingTaskId,
                   };
-                } else if (ctxResult.existingBeadId) {
-                  effectivePlanCmd = { ...planCmd, existingBeadId: ctxResult.existingBeadId };
+                } else if (ctxResult.existingTaskId) {
+                  effectivePlanCmd = { ...planCmd, existingTaskId: ctxResult.existingTaskId };
                 }
               }
               const response = await handlePlanCommand(effectivePlanCmd, planOpts);
@@ -1510,7 +1510,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               });
 
               const taskSummary = buildTaskContextSummary(
-                ctxResult.existingBeadId,
+                ctxResult.existingTaskId,
                 (params.taskCtx)?.store,
               );
 
@@ -1541,8 +1541,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 drafterModel: params.forgeDrafterModel,
                 auditorModel: params.forgeAuditorModel,
                 log: params.log,
-                existingBeadId: ctxResult.existingBeadId,
-                beadDescription: taskSummary?.description,
+                existingTaskId: ctxResult.existingTaskId,
+                taskDescription: taskSummary?.description,
                 pinnedThreadSummary: ctxResult.pinnedSummary,
               });
               setActiveOrchestrator(createOrchestrator);
@@ -1717,7 +1717,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          const [durableSection, shortTermSection, beadSection, replyRef] = await Promise.all([
+          const [durableSection, shortTermSection, taskSection, replyRef] = await Promise.all([
             buildDurableMemorySection({
               enabled: params.durableMemoryEnabled,
               durableDataDir: params.durableDataDir,
@@ -1760,8 +1760,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             (inlinedContext
               ? inlinedContext + '\n\n'
               : '') +
-            (beadSection
-              ? `---\n${beadSection}\n\n`
+            (taskSection
+              ? `---\n${taskSection}\n\n`
               : '') +
             (durableSection
               ? `---\nDurable memory (user-specific notes):\n${durableSection}\n\n`
