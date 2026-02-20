@@ -38,8 +38,6 @@ import {
   acquireWriterLock as registryAcquireWriterLock,
   setActiveOrchestrator,
   getActiveOrchestrator,
-  getActiveForgeId,
-  waitForForgeCompletion,
   addRunningPlan,
   removeRunningPlan,
   isPlanRunning,
@@ -1873,21 +1871,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           let currentPrompt = prompt;
           let followUpDepth = 0;
-
-          // Forge-completion gate: if a forge run is active, wait for it to finish
-          // before invoking the chat runtime. Concurrent invocations produce empty
-          // responses due to resource contention (shared concurrency slots, API rate
-          // limits, or CLI mutual exclusion). Show a "waiting" indicator so the user
-          // knows their message was received, then proceed normally once the forge wraps up.
-          const activeForgeId = getActiveForgeId();
-          if (activeForgeId !== undefined) {
-            await reply.edit({
-              content: `**Waiting for forge \`${activeForgeId}\` to finish...**`,
-              allowedMentions: NO_MENTIONS,
-            });
-            await waitForForgeCompletion();
-            await reply.edit({ content: formatBoldLabel(thinkingLabel(0)), allowedMentions: NO_MENTIONS });
-          }
 
           // -- auto-follow-up loop --
           // When query actions (channelList, readMessages, etc.) succeed, re-invoke

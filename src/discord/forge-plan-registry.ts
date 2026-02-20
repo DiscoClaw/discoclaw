@@ -29,23 +29,6 @@ export function acquireWriterLock(): Promise<() => void> {
 }
 
 // ---------------------------------------------------------------------------
-// Forge-completion gate — callers can await the end of an active forge run
-// before invoking the chat runtime, preventing empty responses due to
-// resource contention between forge and chat runtime invocations.
-// ---------------------------------------------------------------------------
-
-let _forgeCompletionResolve: (() => void) | null = null;
-let _forgeCompletionPromise: Promise<void> = Promise.resolve();
-
-/**
- * Wait until no forge run is active. Resolves immediately if no forge is
- * running, or waits until the current forge run completes.
- */
-export function waitForForgeCompletion(): Promise<void> {
-  return _forgeCompletionPromise;
-}
-
-// ---------------------------------------------------------------------------
 // Active forge orchestrator
 // ---------------------------------------------------------------------------
 
@@ -53,17 +36,6 @@ let _activeOrchestrator: ForgeOrchestrator | null = null;
 
 /** Set the active forge orchestrator (or null to clear). */
 export function setActiveOrchestrator(orch: ForgeOrchestrator | null): void {
-  if (orch !== null && _activeOrchestrator === null) {
-    // Forge starting — arm the gate.
-    _forgeCompletionPromise = new Promise<void>((resolve) => {
-      _forgeCompletionResolve = resolve;
-    });
-  } else if (orch === null && _activeOrchestrator !== null) {
-    // Forge completing — release all waiters.
-    const res = _forgeCompletionResolve;
-    _forgeCompletionResolve = null;
-    res?.();
-  }
   _activeOrchestrator = orch;
 }
 
@@ -111,7 +83,4 @@ export function _resetForTest(): void {
   writerLockChain = Promise.resolve();
   _activeOrchestrator = null;
   _runningPlanIds.clear();
-  _forgeCompletionResolve?.();
-  _forgeCompletionResolve = null;
-  _forgeCompletionPromise = Promise.resolve();
 }
