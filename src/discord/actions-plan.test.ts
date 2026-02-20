@@ -9,35 +9,35 @@ import { TaskStore } from '../tasks/store.js';
 // ---------------------------------------------------------------------------
 
 vi.mock('./plan-commands.js', () => ({
-  resolvePlanHeaderTaskId: vi.fn((header: { taskId?: string; beadId?: string }) =>
-    header.taskId?.trim() || header.beadId?.trim() || '',
+  resolvePlanHeaderTaskId: vi.fn((header: { taskId?: string }) =>
+    header.taskId?.trim() || '',
   ),
   findPlanFile: vi.fn(async (_dir: string, id: string) => {
     if (id === 'plan-notfound') return null;
     if (id === 'plan-implementing') {
       return {
         filePath: `/tmp/plans/${id}-test.md`,
-        header: { planId: id, beadId: 'ws-010', status: 'IMPLEMENTING', title: 'Active Plan', project: 'discoclaw', created: '2026-01-01' },
+        header: { planId: id, taskId: 'ws-010', status: 'IMPLEMENTING', title: 'Active Plan', project: 'discoclaw', created: '2026-01-01' },
       };
     }
     return {
       filePath: `/tmp/plans/${id}-test.md`,
-      header: { planId: id, beadId: 'ws-001', status: 'REVIEW', title: 'Test Plan', project: 'discoclaw', created: '2026-01-01' },
+      header: { planId: id, taskId: 'ws-001', status: 'REVIEW', title: 'Test Plan', project: 'discoclaw', created: '2026-01-01' },
     };
   }),
   listPlanFiles: vi.fn(async () => [
     {
       filePath: '/tmp/plans/plan-001-test.md',
-      header: { planId: 'plan-001', beadId: 'ws-001', status: 'DRAFT', title: 'First Plan', project: 'discoclaw', created: '2026-01-01' },
+      header: { planId: 'plan-001', taskId: 'ws-001', status: 'DRAFT', title: 'First Plan', project: 'discoclaw', created: '2026-01-01' },
     },
     {
       filePath: '/tmp/plans/plan-002-test.md',
-      header: { planId: 'plan-002', beadId: 'ws-002', status: 'APPROVED', title: 'Second Plan', project: 'discoclaw', created: '2026-01-02' },
+      header: { planId: 'plan-002', taskId: 'ws-002', status: 'APPROVED', title: 'Second Plan', project: 'discoclaw', created: '2026-01-02' },
     },
   ]),
   updatePlanFileStatus: vi.fn(async () => {}),
   handlePlanCommand: vi.fn(async (_cmd: any, _opts: any) => {
-    return 'Plan created: **plan-003** (bead: `ws-003`)\nFile: `workspace/plans/plan-003-test.md`\nDescription: New feature';
+    return 'Plan created: **plan-003** (task: `ws-003`)\nFile: `workspace/plans/plan-003-test.md`\nDescription: New feature';
   }),
   preparePlanRun: vi.fn(async (_id: string, _opts: any) => ({
     phasesFilePath: '/tmp/plans/plan-042-phases.md',

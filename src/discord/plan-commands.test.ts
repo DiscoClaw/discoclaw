@@ -212,7 +212,6 @@ describe('parsePlanFileHeader', () => {
     expect(header).toEqual({
       planId: 'plan-001',
       taskId: 'ws-test-001',
-      beadId: 'ws-test-001',
       status: 'DRAFT',
       title: 'Add the plan command',
       project: 'discoclaw',
@@ -229,11 +228,11 @@ describe('parsePlanFileHeader', () => {
     const header = parsePlanFileHeader(content);
     expect(header).not.toBeNull();
     expect(header!.planId).toBe('plan-002');
-    expect(header!.beadId).toBe('');
+    expect(header!.taskId).toBe('');
     expect(header!.title).toBe('');
   });
 
-  it('parses task header alias as beadId', () => {
+  it('parses task header alias as taskId', () => {
     const content = `# Plan: Alias header test
 
 **ID:** plan-003
@@ -243,7 +242,7 @@ describe('parsePlanFileHeader', () => {
     const header = parsePlanFileHeader(content);
     expect(header).not.toBeNull();
     expect(header!.planId).toBe('plan-003');
-    expect(header!.beadId).toBe('ws-task-003');
+    expect(header!.taskId).toBe('ws-task-003');
   });
 });
 

@@ -30,10 +30,11 @@ export type PlanCommand = {
 
 export type PlanFileHeader = {
   planId: string;
-  /** Canonical backing task identifier. */
+  /**
+   * Canonical backing task identifier.
+   * Legacy `**Bead:**` headers are parsed into this field for compatibility.
+   */
   taskId?: string;
-  /** @deprecated Compatibility alias mirrored from taskId. */
-  beadId?: string;
   status: string;
   title: string;
   project: string;
@@ -98,7 +99,6 @@ export function parsePlanFileHeader(content: string): PlanFileHeader | null {
   return {
     planId: idMatch[1]!.trim(),
     taskId,
-    beadId: legacyTaskMatch?.[1]?.trim() ?? taskId,
     status: statusMatch?.[1]?.trim() ?? '',
     title: titleMatch?.[1]?.trim() ?? '',
     project: projectMatch?.[1]?.trim() ?? '',
@@ -107,7 +107,7 @@ export function parsePlanFileHeader(content: string): PlanFileHeader | null {
 }
 
 export function resolvePlanHeaderTaskId(header: PlanFileHeader): string {
-  return header.taskId?.trim() || header.beadId?.trim() || '';
+  return header.taskId?.trim() || '';
 }
 
 // ---------------------------------------------------------------------------
