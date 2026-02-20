@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionResult } from './actions.js';
+import { TaskStore } from '../tasks/store.js';
 
 const ALL_FLAGS: ActionCategoryFlags = {
   channels: true,
@@ -179,6 +180,12 @@ describe('parseDiscordActions', () => {
     expect(actions).toEqual([{ type: 'channelList' }]);
     expect(strippedUnrecognizedTypes).toEqual(['typeA', 'typeB']);
   });
+
+  it('accepts task action types when only legacy beads flag is enabled', () => {
+    const input = '<discord-action>{"type":"taskList"}</discord-action>';
+    const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, beads: true });
+    expect(actions).toEqual([{ type: 'taskList' }]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -326,6 +333,29 @@ describe('executeDiscordActions', () => {
     expect(results).toHaveLength(2);
     expect(results[0].ok).toBe(false);
     expect(results[1].ok).toBe(true);
+  });
+
+  it('uses legacy beadCtx when taskCtx is absent', async () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    store.create({ title: 'test task', priority: 2 });
+    const results = await executeDiscordActions(
+      [{ type: 'taskList', limit: 10 } as any],
+      makeCtx(makeMockGuild([])),
+      undefined,
+      {
+        beadCtx: {
+          tasksCwd: '/tmp',
+          forumId: 'forum-1',
+          tagMap: {},
+          store,
+          runtime: {} as any,
+          autoTag: false,
+          autoTagModel: 'fast',
+        },
+      },
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(true);
   });
 });
 

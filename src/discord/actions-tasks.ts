@@ -4,7 +4,7 @@ import type { LoggerLike } from './action-types.js';
 import type { StatusPoster } from './status-channel.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { TagMap, TaskData, TaskStatus, TaskSyncResult } from '../tasks/types.js';
-import type { BeadSyncCoordinator } from '../beads/bead-sync-coordinator.js';
+import type { TaskSyncCoordinator } from '../beads/bead-sync-coordinator.js';
 import type { ForumCountSync } from './forum-count-sync.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 import type { TaskStore } from '../tasks/store.js';
@@ -81,7 +81,9 @@ const TASK_TYPE_MAP: Record<TaskActionRequest['type'], true> = {
 export const TASK_ACTION_TYPES = new Set<string>(Object.keys(TASK_TYPE_MAP));
 
 export type TaskContext = {
-  beadsCwd: string;
+  tasksCwd?: string;
+  /** @deprecated Use tasksCwd. */
+  beadsCwd?: string;
   forumId: string;
   tagMap: TagMap;
   tagMapPath?: string;
@@ -93,7 +95,7 @@ export type TaskContext = {
   sidebarMentionUserId?: string;
   statusPoster?: StatusPoster;
   log?: LoggerLike;
-  syncCoordinator?: BeadSyncCoordinator;
+  syncCoordinator?: TaskSyncCoordinator;
   forumCountSync?: ForumCountSync;
 };
 
@@ -138,7 +140,7 @@ export async function executeTaskAction(
             task.title,
             task.description ?? '',
             tagNames,
-            { model: taskCtx.autoTagModel, cwd: taskCtx.beadsCwd },
+            { model: taskCtx.autoTagModel, cwd: taskCtx.tasksCwd || taskCtx.beadsCwd || process.cwd() },
           );
           for (const tag of suggestedTags) {
             if (!labels.includes(tag)) labels.push(tag);

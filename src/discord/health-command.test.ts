@@ -32,8 +32,8 @@ describe('renderHealthReport', () => {
       reactionHandlerEnabled: false,
       reactionRemoveHandlerEnabled: false,
       cronEnabled: true,
-      beadsEnabled: false,
-      beadsActive: false,
+      tasksEnabled: false,
+      tasksActive: false,
       requireChannelContext: true,
       autoIndexChannelContext: true,
     } as const;
@@ -55,7 +55,7 @@ describe('renderHealthReport', () => {
     expect(verbose).toContain('Error classes:');
   });
 
-  it('shows tasks=active when beadsActive is true', () => {
+  it('shows tasks=active when tasksActive is true', () => {
     const metrics = new MetricsRegistry();
     const verbose = renderHealthReport({
       metrics,
@@ -65,7 +65,7 @@ describe('renderHealthReport', () => {
         useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
         discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
         messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
-        cronEnabled: true, beadsEnabled: true, beadsActive: true,
+        cronEnabled: true, tasksEnabled: true, tasksActive: true,
         requireChannelContext: true, autoIndexChannelContext: true,
       },
       mode: 'verbose',
@@ -83,7 +83,7 @@ describe('renderHealthReport', () => {
         useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
         discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
         messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
-        cronEnabled: true, beadsEnabled: true, beadsActive: false,
+        cronEnabled: true, tasksEnabled: true, tasksActive: false,
         requireChannelContext: true, autoIndexChannelContext: true,
       },
       mode: 'verbose',
@@ -101,7 +101,7 @@ describe('renderHealthReport', () => {
         useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
         discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
         messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
-        cronEnabled: true, beadsEnabled: false, beadsActive: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
         requireChannelContext: true, autoIndexChannelContext: true,
       },
       mode: 'verbose',

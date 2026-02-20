@@ -22,6 +22,14 @@ function envOpt(name: string): string | undefined {
   return v || undefined;
 }
 
+function envAliased(primaryName: string, legacyName: string): string {
+  return envOpt(primaryName) ?? env(legacyName);
+}
+
+function envOptAliased(primaryName: string, legacyName: string): string | undefined {
+  return envOpt(primaryName) ?? envOpt(legacyName);
+}
+
 export function parseArgInt(args: string[], name: string): number | undefined {
   const idx = args.indexOf(name);
   if (idx < 0) return undefined;
@@ -73,9 +81,9 @@ async function main(): Promise<void> {
 
   const discordToken = env('DISCORD_TOKEN');
   const guildId = env('DISCORD_GUILD_ID');
-  const forumId = env('DISCOCLAW_BEADS_FORUM');
+  const forumId = envAliased('DISCOCLAW_TASKS_FORUM', 'DISCOCLAW_BEADS_FORUM');
   const dataDir = envOpt('DISCOCLAW_DATA_DIR');
-  const tagMapPath = envOpt('DISCOCLAW_BEADS_TAG_MAP')
+  const tagMapPath = envOptAliased('DISCOCLAW_TASKS_TAG_MAP', 'DISCOCLAW_BEADS_TAG_MAP')
     ?? (dataDir ? path.join(dataDir, 'beads', 'tag-map.json') : undefined);
   const tasksPath = envOpt('DISCOCLAW_TASKS_PATH')
     ?? (dataDir ? path.join(dataDir, 'beads', 'tasks.jsonl') : undefined);
@@ -96,8 +104,8 @@ async function main(): Promise<void> {
     const guild = await client.guilds.fetch(guildId);
     const tagMap = tagMapPath ? await loadTagMap(tagMapPath) : {};
 
-    const mentionUserId = envOpt('DISCOCLAW_BEADS_MENTION_USER');
-    const sidebarRaw = envOpt('DISCOCLAW_BEADS_SIDEBAR');
+    const mentionUserId = envOptAliased('DISCOCLAW_TASKS_MENTION_USER', 'DISCOCLAW_BEADS_MENTION_USER');
+    const sidebarRaw = envOptAliased('DISCOCLAW_TASKS_SIDEBAR', 'DISCOCLAW_BEADS_SIDEBAR');
     const sidebarEnabled = sidebarRaw === '1' || sidebarRaw?.toLowerCase() === 'true';
     const sidebarMentionUserId = sidebarEnabled ? mentionUserId : undefined;
 

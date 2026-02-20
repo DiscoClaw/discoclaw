@@ -52,7 +52,7 @@ Discoclaw Setup
 ===============
 This wizard creates a .env file with your Discord bot configuration.
 You'll need your bot token from https://discord.com/developers/applications
-and your Beads/Cron forum channel IDs from Discord.
+and your Tasks/Cron forum channel IDs from Discord.
 `);
 
 // --- Check existing .env ---
@@ -114,8 +114,8 @@ values.DISCORD_ALLOW_USER_IDS = await askValidated(
   },
 );
 
-values.DISCOCLAW_BEADS_FORUM = await askValidated(
-  'Beads forum channel ID (required): ',
+values.DISCOCLAW_TASKS_FORUM = await askValidated(
+  'Tasks forum channel ID (required): ',
   (val) => validateSnowflake(val) ? null : 'Must be a 17-20 digit number',
 );
 

@@ -64,7 +64,8 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   if (!forum) {
     log?.warn({ forumId }, 'bead-sync: forum not found');
     const result: BeadSyncResult = { threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 1 };
-    await opts.statusPoster?.beadSyncComplete(result);
+    if (opts.statusPoster?.taskSyncComplete) await opts.statusPoster.taskSyncComplete(result);
+    else if (opts.statusPoster?.beadSyncComplete) await opts.statusPoster.beadSyncComplete(result);
     return result;
   }
 
@@ -332,6 +333,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
 
   log?.info({ threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, threadsReconciled, orphanThreadsFound, closesDeferred, warnings }, 'bead-sync: complete');
   const result: BeadSyncResult = { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, tagsUpdated, warnings, threadsReconciled, orphanThreadsFound, closesDeferred };
-  await opts.statusPoster?.beadSyncComplete(result);
+  if (opts.statusPoster?.taskSyncComplete) await opts.statusPoster.taskSyncComplete(result);
+  else if (opts.statusPoster?.beadSyncComplete) await opts.statusPoster.beadSyncComplete(result);
   return result;
 }

@@ -22,6 +22,43 @@ export function parseBooleanSetting(
   return { value: defaultValue, error: `Got "${raw}"` };
 }
 
+function parseBooleanAliasedSetting(
+  env: NodeJS.ProcessEnv,
+  primaryName: string,
+  legacyName: string,
+  defaultValue: boolean,
+): { value: boolean; error?: string; errorName?: string } {
+  const primaryRaw = (env[primaryName] ?? '').trim();
+  if (primaryRaw) {
+    const parsed = parseBooleanSetting(env, primaryName, defaultValue);
+    return parsed.error
+      ? { value: parsed.value, error: parsed.error, errorName: primaryName }
+      : { value: parsed.value };
+  }
+
+  const legacyRaw = (env[legacyName] ?? '').trim();
+  if (!legacyRaw) return { value: defaultValue };
+
+  const parsed = parseBooleanSetting(env, legacyName, defaultValue);
+  return parsed.error
+    ? { value: parsed.value, error: parsed.error, errorName: legacyName }
+    : { value: parsed.value };
+}
+
+function parseTrimmedStringAliasedSetting(
+  env: NodeJS.ProcessEnv,
+  primaryName: string,
+  legacyName: string,
+): { value: string; sourceName: string } | null {
+  const primary = (env[primaryName] ?? '').trim();
+  if (primary) return { value: primary, sourceName: primaryName };
+
+  const legacy = (env[legacyName] ?? '').trim();
+  if (legacy) return { value: legacy, sourceName: legacyName };
+
+  return null;
+}
+
 /**
  * Normalize a raw env value to a canonical runtime name.
  * Mirrors parseRuntimeName in src/config.ts: lowercase + claude_code → claude alias.
@@ -169,30 +206,39 @@ export function checkRequiredForums(env: NodeJS.ProcessEnv): DoctorCheckResult[]
     }
   }
 
-  const beadsEnabled = parseBooleanSetting(env, 'DISCOCLAW_BEADS_ENABLED', true);
-  if (beadsEnabled.error) {
+  const tasksEnabled = parseBooleanAliasedSetting(
+    env,
+    'DISCOCLAW_TASKS_ENABLED',
+    'DISCOCLAW_BEADS_ENABLED',
+    true,
+  );
+  if (tasksEnabled.error) {
     checks.push({
       ok: false,
-      label: 'DISCOCLAW_BEADS_ENABLED must be "0"/"1" or "true"/"false"',
-      hint: beadsEnabled.error,
+      label: `${tasksEnabled.errorName ?? 'DISCOCLAW_TASKS_ENABLED'} must be "0"/"1" or "true"/"false"`,
+      hint: tasksEnabled.error,
     });
   }
-  if (beadsEnabled.value) {
-    const beadsForum = (env.DISCOCLAW_BEADS_FORUM ?? '').trim();
-    if (!beadsForum) {
+  if (tasksEnabled.value) {
+    const tasksForum = parseTrimmedStringAliasedSetting(
+      env,
+      'DISCOCLAW_TASKS_FORUM',
+      'DISCOCLAW_BEADS_FORUM',
+    );
+    if (!tasksForum) {
       checks.push({
         ok: false,
-        label: 'DISCOCLAW_BEADS_FORUM is required when DISCOCLAW_BEADS_ENABLED=1',
-        hint: 'Set DISCOCLAW_BEADS_FORUM to your beads forum channel ID (17-20 digits)',
+        label: 'DISCOCLAW_TASKS_FORUM is required when DISCOCLAW_TASKS_ENABLED=1',
+        hint: 'Set DISCOCLAW_TASKS_FORUM to your tasks forum channel ID (17-20 digits). Legacy DISCOCLAW_BEADS_FORUM is also accepted.',
       });
-    } else if (!validateSnowflake(beadsForum)) {
+    } else if (!validateSnowflake(tasksForum.value)) {
       checks.push({
         ok: false,
-        label: 'DISCOCLAW_BEADS_FORUM is not a valid snowflake',
+        label: `${tasksForum.sourceName} is not a valid snowflake`,
         hint: 'Must be a 17-20 digit Discord channel ID',
       });
     } else {
-      checks.push({ ok: true, label: 'DISCOCLAW_BEADS_FORUM is set and valid' });
+      checks.push({ ok: true, label: 'DISCOCLAW_TASKS_FORUM is set and valid' });
     }
   }
 

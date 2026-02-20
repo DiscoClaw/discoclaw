@@ -50,7 +50,7 @@ These are recommended sets of Discord permissions. You pick them by ticking the 
 
 - **Moderator** (recommended for shared servers)
   - Tick: `Manage Channels`, `Manage Messages`, `Manage Threads`, `View Channels`, `Send Messages`, `Send Messages in Threads`, `Read Message History`, `Add Reactions`, `Attach Files`, `Embed Links`, `Use External Emojis`, `Manage Webhooks`
-  - **Required for Discord Actions** (`DISCOCLAW_DISCORD_ACTIONS=1`), beads, and crons.
+  - **Required for Discord Actions** (`DISCOCLAW_DISCORD_ACTIONS=1`), tasks, and crons.
   - **Role hierarchy:** The bot can only manage roles below its own role. In **Server Settings → Roles**, drag the bot's role above any roles you want it to manage.
 
 - **Threads**
@@ -59,7 +59,7 @@ These are recommended sets of Discord permissions. You pick them by ticking the 
 
 - **Minimal**
   - Tick: `View Channels`, `Send Messages`, `Send Messages in Threads`, `Read Message History`
-  - Bot can read and reply in channels and existing threads. Can't create threads, manage channels, or use Discord Actions. Beads and crons won't work.
+  - Bot can read and reply in channels and existing threads. Can't create threads, manage channels, or use Discord Actions. Tasks and crons won't work.
 
 Notes:
 - If you want the bot to reply inside threads reliably, set `DISCORD_AUTO_JOIN_THREADS=1` so it joins threads it encounters (public threads; private threads still require adding the bot).

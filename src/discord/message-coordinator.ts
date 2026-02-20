@@ -473,7 +473,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           || params.healthVerboseAllowlist.has(msg.author.id);
         const mode = healthMode === 'verbose' && verboseAllowed ? 'verbose' : 'basic';
         // Fallback: dead code — healthConfigSnapshot is always provided by index.ts.
-        // Kept for type safety; beadsEnabled/beadsActive may disagree with actual state.
+        // Kept for type safety; task state fields may disagree with actual state.
         const healthConfig: HealthConfigSnapshot = params.healthConfigSnapshot ?? {
           runtimeModel: params.runtimeModel,
           runtimeTimeoutMs: params.runtimeTimeoutMs,
@@ -488,8 +488,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           reactionHandlerEnabled: params.reactionHandlerEnabled,
           reactionRemoveHandlerEnabled: params.reactionRemoveHandlerEnabled,
           cronEnabled: Boolean(params.cronCtx),
-          beadsEnabled: Boolean(params.taskCtx),
-          beadsActive: Boolean(params.taskCtx),
+          tasksEnabled: Boolean(params.taskCtx),
+          tasksActive: Boolean(params.taskCtx),
           requireChannelContext: params.requireChannelContext,
           autoIndexChannelContext: params.autoIndexChannelContext,
         };

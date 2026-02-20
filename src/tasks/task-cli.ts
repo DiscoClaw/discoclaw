@@ -85,7 +85,7 @@ async function main(): Promise<void> {
         '  create <title> [--description <d>] [--priority <n>] [--type <t>]',
         '                 [--owner <o>] [--assignee <o>] [--labels <l1,l2>]',
         '  quick  <title>                       — create and output only the ID',
-        '  get    <id>                          — show a single bead as a JSON array',
+        '  get    <id>                          — show a single task as a JSON array',
         '  list   [--status <s>] [--label <l>] [--limit <n>] [--all]',
         '  update <id> [--title <t>] [--description <d>] [--priority <n>]',
         '              [--status <s>] [--owner <o>] [--assignee <o>] [--external-ref <r>]',
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
       const priority = priorityStr != null ? Number(priorityStr) : undefined;
 
       const store = await getStore();
-      const bead = store.create({
+      const task = store.create({
         title,
         ...(description !== undefined && { description }),
         ...(priority != null && Number.isFinite(priority) && { priority }),
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
       });
 
       await store.flush();
-      process.stdout.write(JSON.stringify(bead) + '\n');
+      process.stdout.write(JSON.stringify(task) + '\n');
       break;
     }
 
@@ -136,9 +136,9 @@ async function main(): Promise<void> {
       if (!title || title.startsWith('-')) throw new Error('quick requires a title');
 
       const store = await getStore();
-      const bead = store.create({ title });
+      const task = store.create({ title });
       await store.flush();
-      process.stdout.write(bead.id + '\n');
+      process.stdout.write(task.id + '\n');
       break;
     }
 
@@ -148,13 +148,13 @@ async function main(): Promise<void> {
       if (!id) throw new Error(`${subcommand} requires an id`);
 
       const store = await getStore();
-      const bead = store.get(id);
-      if (!bead) {
+      const task = store.get(id);
+      if (!task) {
         process.stderr.write(`not found: ${id}\n`);
         process.exit(1);
       }
       // Output as a JSON array to match the shape of bdShow / bd show --json.
-      process.stdout.write(JSON.stringify([bead]) + '\n');
+      process.stdout.write(JSON.stringify([task]) + '\n');
       break;
     }
 
@@ -166,13 +166,13 @@ async function main(): Promise<void> {
       const all = hasFlag(rest, '--all');
 
       const store = await getStore();
-      const beads = store.list({
+      const tasks = store.list({
         status: all ? 'all' : (status ?? undefined),
         label: label ?? undefined,
         limit: limit != null && Number.isFinite(limit) ? limit : undefined,
       });
 
-      process.stdout.write(JSON.stringify(beads) + '\n');
+      process.stdout.write(JSON.stringify(tasks) + '\n');
       break;
     }
 

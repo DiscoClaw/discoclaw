@@ -464,6 +464,54 @@ describe('parseConfig', () => {
     expect(config.beadsEnabled).toBe(false);
   });
 
+  it('parses DISCOCLAW_TASKS_* vars and mirrors legacy beads fields', () => {
+    const { config } = parseConfig(env({
+      DISCOCLAW_TASKS_ENABLED: '0',
+      DISCOCLAW_TASKS_FORUM: '1000000000000000009',
+      DISCOCLAW_TASKS_CWD: '/tmp/tasks',
+      DISCOCLAW_TASKS_TAG_MAP: '/tmp/tasks/tag-map.json',
+      DISCOCLAW_TASKS_MENTION_USER: '123456789012345678',
+      DISCOCLAW_TASKS_SIDEBAR: '1',
+      DISCOCLAW_TASKS_AUTO_TAG: '0',
+      DISCOCLAW_TASKS_AUTO_TAG_MODEL: 'fast',
+      DISCOCLAW_TASKS_PREFIX: 'dev',
+      DISCOCLAW_TASKS_SYNC_SKIP_PHASE5: '1',
+      DISCOCLAW_BEADS_FORUM: undefined,
+    }));
+
+    expect(config.tasksEnabled).toBe(false);
+    expect(config.tasksForum).toBe('1000000000000000009');
+    expect(config.tasksCwdOverride).toBe('/tmp/tasks');
+    expect(config.tasksTagMapPathOverride).toBe('/tmp/tasks/tag-map.json');
+    expect(config.tasksMentionUser).toBe('123456789012345678');
+    expect(config.tasksSidebar).toBe(true);
+    expect(config.tasksAutoTag).toBe(false);
+    expect(config.tasksAutoTagModel).toBe('fast');
+    expect(config.tasksPrefix).toBe('dev');
+    expect(config.tasksSyncSkipPhase5).toBe(true);
+    // Legacy mirrors
+    expect(config.beadsEnabled).toBe(config.tasksEnabled);
+    expect(config.beadsForum).toBe(config.tasksForum);
+    expect(config.beadsTaskPrefix).toBe(config.tasksPrefix);
+  });
+
+  it('prefers DISCOCLAW_TASKS_FORUM over DISCOCLAW_BEADS_FORUM when both are set', () => {
+    const { config } = parseConfig(env({
+      DISCOCLAW_TASKS_FORUM: '1000000000000000008',
+      DISCOCLAW_BEADS_FORUM: '1000000000000000007',
+    }));
+    expect(config.tasksForum).toBe('1000000000000000008');
+    expect(config.beadsForum).toBe('1000000000000000008');
+  });
+
+  it('emits deprecation warning when legacy DISCOCLAW_BEADS_ENABLED is used', () => {
+    const { warnings } = parseConfig(env({
+      DISCOCLAW_TASKS_ENABLED: undefined,
+      DISCOCLAW_BEADS_ENABLED: '0',
+    }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_BEADS_ENABLED is deprecated; use DISCOCLAW_TASKS_ENABLED'))).toBe(true);
+  });
+
   // --- Verbose CLI flag ---
   it('CLAUDE_VERBOSE defaults to false', () => {
     const { config } = parseConfig(env());

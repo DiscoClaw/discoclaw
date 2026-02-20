@@ -10,13 +10,27 @@ import { initBeadsForumGuard } from './forum-guard.js';
 
 export type InitializeBeadsOpts = {
   enabled: boolean;
-  beadsCwd: string;
-  beadsForum: string;
-  beadsTagMapPath: string;
+  tasksCwd?: string;
+  tasksForum?: string;
+  tasksTagMapPath?: string;
+  tasksMentionUser?: string;
+  tasksSidebar?: boolean;
+  tasksAutoTag?: boolean;
+  tasksAutoTagModel?: string;
+  /** @deprecated Use tasksCwd. */
+  beadsCwd?: string;
+  /** @deprecated Use tasksForum. */
+  beadsForum?: string;
+  /** @deprecated Use tasksTagMapPath. */
+  beadsTagMapPath?: string;
+  /** @deprecated Use tasksMentionUser. */
   beadsMentionUser?: string;
-  beadsSidebar: boolean;
-  beadsAutoTag: boolean;
-  beadsAutoTagModel: string;
+  /** @deprecated Use tasksSidebar. */
+  beadsSidebar?: boolean;
+  /** @deprecated Use tasksAutoTag. */
+  beadsAutoTag?: boolean;
+  /** @deprecated Use tasksAutoTagModel. */
+  beadsAutoTagModel?: string;
   runtime: RuntimeAdapter;
   statusPoster?: StatusPoster;
   log: LoggerLike;
@@ -35,7 +49,7 @@ export type InitializeBeadsResult = {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a BeadContext if prerequisites are met, or return undefined with
+ * Build a TaskContext if prerequisites are met, or return undefined with
  * appropriate log warnings. This covers the "pre-bot" phase — before the
  * Discord client is available. Forum guard and sync watcher are wired
  * separately after the bot connects.
@@ -47,20 +61,23 @@ export async function initializeBeadsContext(
     return { taskCtx: undefined };
   }
 
-  const effectiveForum = opts.systemBeadsForumId || opts.beadsForum || '';
+  const effectiveForum = opts.systemBeadsForumId || opts.tasksForum || opts.beadsForum || '';
   if (!effectiveForum) {
     opts.log.warn(
-      'beads: no forum resolved — set DISCORD_GUILD_ID or DISCOCLAW_BEADS_FORUM ' +
-      '(set DISCOCLAW_BEADS_ENABLED=0 to suppress)',
+      'tasks: no forum resolved — set DISCORD_GUILD_ID or DISCOCLAW_TASKS_FORUM ' +
+      '(set DISCOCLAW_TASKS_ENABLED=0 to suppress)',
     );
     return { taskCtx: undefined };
   }
 
-  const tagMap = await loadTagMap(opts.beadsTagMapPath);
-  const sidebarMentionUserId = opts.beadsSidebar ? opts.beadsMentionUser : undefined;
+  const tagMapPath = opts.tasksTagMapPath || opts.beadsTagMapPath || '';
+  const tagMap = await loadTagMap(tagMapPath);
+  const tasksSidebar = opts.tasksSidebar ?? opts.beadsSidebar ?? false;
+  const tasksMentionUser = opts.tasksMentionUser ?? opts.beadsMentionUser;
+  const sidebarMentionUserId = tasksSidebar ? tasksMentionUser : undefined;
 
-  if (opts.beadsSidebar && !opts.beadsMentionUser) {
-    opts.log.warn('beads:sidebar enabled but DISCOCLAW_BEADS_MENTION_USER not set; sidebar mentions will be inactive');
+  if (tasksSidebar && !tasksMentionUser) {
+    opts.log.warn('tasks:sidebar enabled but DISCOCLAW_TASKS_MENTION_USER not set; sidebar mentions will be inactive');
   }
 
   let store = opts.store;
@@ -70,15 +87,16 @@ export async function initializeBeadsContext(
   }
 
   const taskCtx: TaskContext = {
+    tasksCwd: opts.tasksCwd || opts.beadsCwd || process.cwd(),
     beadsCwd: opts.beadsCwd,
     forumId: effectiveForum,
     tagMap,
-    tagMapPath: opts.beadsTagMapPath,
+    tagMapPath,
     store,
     runtime: opts.runtime,
-    autoTag: opts.beadsAutoTag,
-    autoTagModel: opts.beadsAutoTagModel,
-    mentionUserId: opts.beadsMentionUser,
+    autoTag: opts.tasksAutoTag ?? opts.beadsAutoTag ?? true,
+    autoTagModel: opts.tasksAutoTagModel ?? opts.beadsAutoTagModel ?? 'fast',
+    mentionUserId: tasksMentionUser,
     sidebarMentionUserId,
     statusPoster: opts.statusPoster,
     log: opts.log,
@@ -96,7 +114,9 @@ export type WireBeadsSyncOpts = {
   client: Client;
   guild: Guild;
   guildId: string;
-  beadsCwd: string;
+  tasksCwd?: string;
+  /** @deprecated Use tasksCwd. */
+  beadsCwd?: string;
   sidebarMentionUserId?: string;
   log: LoggerLike;
   forumCountSync?: ForumCountSync;
@@ -154,7 +174,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
   store.on('closed', triggerSync);
   store.on('labeled', triggerSync);
 
-  opts.log.info({ beadsCwd: opts.beadsCwd }, 'tasks:store-event watcher started');
+  opts.log.info({ tasksCwd: opts.tasksCwd || opts.beadsCwd }, 'tasks:store-event watcher started');
 
   return {
     stop() {

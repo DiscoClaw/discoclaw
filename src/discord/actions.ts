@@ -49,6 +49,8 @@ export type ActionCategoryFlags = {
   moderation: boolean;
   polls: boolean;
   tasks?: boolean;
+  /** @deprecated Use tasks. */
+  beads?: boolean;
   crons: boolean;
   botProfile: boolean;
   forge: boolean;
@@ -82,6 +84,8 @@ import type { LoggerLike } from './action-types.js';
 
 export type SubsystemContexts = {
   taskCtx?: TaskContext;
+  /** @deprecated Use taskCtx. */
+  beadCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
   planCtx?: PlanContext;
@@ -101,7 +105,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.guild) for (const t of GUILD_ACTION_TYPES) types.add(t);
   if (flags.moderation) for (const t of MODERATION_ACTION_TYPES) types.add(t);
   if (flags.polls) for (const t of POLL_ACTION_TYPES) types.add(t);
-  if (flags.tasks) for (const t of TASK_ACTION_TYPES) types.add(t);
+  if (flags.tasks || flags.beads) for (const t of TASK_ACTION_TYPES) types.add(t);
   if (flags.crons) for (const t of CRON_ACTION_TYPES) types.add(t);
   if (flags.botProfile) for (const t of BOT_PROFILE_ACTION_TYPES) types.add(t);
   if (flags.forge) for (const t of FORGE_ACTION_TYPES) types.add(t);
@@ -275,7 +279,7 @@ export async function executeDiscordActions(
       } else if (POLL_ACTION_TYPES.has(action.type)) {
         result = await executePollAction(action as PollActionRequest, ctx);
       } else if (TASK_ACTION_TYPES.has(action.type)) {
-        const taskCtx = effectiveSubs.taskCtx;
+        const taskCtx = effectiveSubs.taskCtx ?? effectiveSubs.beadCtx;
         if (!taskCtx) {
           result = { ok: false, error: 'Tasks subsystem not configured' };
         } else {
@@ -398,7 +402,7 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
     sections.push(pollActionsPromptSection());
   }
 
-  if (flags.tasks) {
+  if (flags.tasks || flags.beads) {
     sections.push(taskActionsPromptSection());
   }
 

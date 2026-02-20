@@ -105,7 +105,7 @@ Anthropic's automatic prompt caching can reuse prompt prefixes that don't change
 - **Rolling summary generation** — fast-tier call every N turns (default: 5, `DISCOCLAW_SUMMARY_EVERY_N_TURNS`)
 - **Cron execution** — each scheduled job fires its own API call (tier per `DISCOCLAW_CRON_MODEL`, default: fast)
 - **Cron auto-tagging** — fast-tier call per new cron (when `DISCOCLAW_CRON_AUTO_TAG=1`)
-- **Bead auto-tagging** — fast-tier call per new bead (when `DISCOCLAW_BEADS_AUTO_TAG=1`, tier per `DISCOCLAW_BEADS_AUTO_TAG_MODEL`, default: fast)
+- **Task auto-tagging** — fast-tier call per new task (when `DISCOCLAW_TASKS_AUTO_TAG=1`, tier per `DISCOCLAW_TASKS_AUTO_TAG_MODEL`, default: fast)
 - **Forge auditor (OpenAI runtime)** — When `FORGE_AUDITOR_RUNTIME=openai`, each audit round in a forge run calls the OpenAI API instead of Claude. These calls are billed by OpenAI, not Anthropic. The forge drafter/reviser still uses Claude.
 
 ### Cache-breaking changes

@@ -79,18 +79,18 @@ All actions are gated by category env flags (off by default except channels).
 | Plan management (autonomous) | list, show, approve, close, create, run | `actions-plan.ts` | **done** |
 | Memory (durable memory mutation) | remember, forget, show | `actions-memory.ts` | **done** |
 
-## 7. Beads Subsystem (`src/beads/`)
+## 7. Task Sync Subsystem (`src/beads/`)
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| Bead types + status model | `src/beads/types.ts` | **done** |
+| Task compatibility types/shims | `src/beads/types.ts` | **done** |
 | `bd` CLI compatibility shim (preflight + migration only) | `src/beads/bd-cli.ts` | **done** |
 | Discord forum thread sync | `src/beads/discord-sync.ts` | **done** |
 | Auto-tag (AI classification) | `src/beads/auto-tag.ts` | **done** |
-| Full bead ↔ thread sync (reads from `TaskStore`) | `src/beads/bead-sync.ts` | **done** |
+| Full task ↔ thread sync (reads from `TaskStore`) | `src/beads/bead-sync.ts` | **done** |
 | Sync coordinator (concurrency guard + cache) | `src/beads/bead-sync-coordinator.ts` | **done** |
 | Store-event watcher (triggers sync on every `TaskStore` mutation) | `src/beads/bead-sync-watcher.ts` | **done** |
-| Bead thread cache | `src/beads/bead-thread-cache.ts` | **done** |
+| Task thread cache | `src/beads/bead-thread-cache.ts` | **done** |
 | Hook scripts (on-create, on-update, etc.) | `scripts/beads/` | **done** |
 
 ## 8. Tasks Subsystem (`src/tasks/`)
@@ -208,7 +208,7 @@ Platform-agnostic message normalization layer (Phase 1 of transport portability)
 - [ ] **README rewrite** — current README is developer-internal; needs a clear "what is this / quickstart / how to run" for anyone cloning the repo.
 - [x] **`.env.example`** — slimmed to essentials; `.env.example.full` has all ~90 options.
 - [x] **First-run experience** — `pnpm setup` provides guided interactive configuration; `pnpm preflight` validates the result.
-- [x] **Graceful degradation when external prerequisites missing** — beads no longer requires the `bd` CLI at runtime (the in-process `TaskStore` is the live path); `bd` is only needed for the one-time data migration. Cron requires a forum channel. Clean errors / skip when prerequisites aren't configured.
+- [x] **Graceful degradation when external prerequisites missing** — tasks no longer require the `bd` CLI at runtime (the in-process `TaskStore` is the live path); `bd` is only needed for one-time data migration. Cron requires a forum channel. Clean errors / skip when prerequisites aren't configured.
 
 ### Nice-to-have before MVP
 
