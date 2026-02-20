@@ -437,21 +437,3 @@ export async function ensureUnarchived(client: Client, threadId: string): Promis
     await thread.setArchived(false);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Legacy compatibility re-exports (remove in Phase 5 hard-cut).
-// Internal src/beads shims and external consumers still rely on these names.
-// ---------------------------------------------------------------------------
-
-export { shortTaskId as shortBeadId };
-export { taskIdToken as beadIdToken };
-export { resolveTasksForum as resolveBeadsForum };
-export { getThreadIdFromTask as getThreadIdFromBead };
-export { buildTaskStarterContent as buildBeadStarterContent };
-export { createTaskThread as createBeadThread };
-export { findExistingThreadForTask as findExistingThreadForBead };
-export { closeTaskThread as closeBeadThread };
-export { isTaskThreadAlreadyClosed as isBeadThreadAlreadyClosed };
-export { updateTaskThreadName as updateBeadThreadName };
-export { updateTaskStarterMessage as updateBeadStarterMessage };
-export { updateTaskThreadTags as updateBeadThreadTags };
