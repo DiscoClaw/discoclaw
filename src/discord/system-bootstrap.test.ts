@@ -303,7 +303,7 @@ describe('ensureSystemScaffold', () => {
     const cronsCh = (guild.__cache as Map<string, any>).get('1000000000000000001');
     const beadsCh = (guild.__cache as Map<string, any>).get('1000000000000000002');
     expect(cronsCh.name).toBe('crons');
-    expect(beadsCh.name).toBe('beads');
+    expect(beadsCh.name).toBe('tasks');
 
     // Should have logged name reconciliation.
     expect(log.info).toHaveBeenCalledWith(
@@ -311,7 +311,7 @@ describe('ensureSystemScaffold', () => {
       expect.stringContaining('reconciled name'),
     );
     expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'beads', was: 'beads-6' }),
+      expect.objectContaining({ name: 'tasks', was: 'beads-6' }),
       expect.stringContaining('reconciled name'),
     );
   });
