@@ -246,7 +246,7 @@ export async function ensureSystemScaffold(
     beads = await ensureChild(
       guild,
       system.id,
-      { name: 'beads', type: ChannelType.GuildForum, topic: 'Beads are managed by the bot. Use bead commands or the bd CLI to create tasks. Do not create threads manually — they will be archived.' },
+      { name: 'tasks', type: ChannelType.GuildForum, topic: 'Tasks are managed by the bot. Use task commands or the bd CLI to create tasks. Do not create threads manually — they will be archived.' },
       log,
       params.existingBeadsId,
     );
