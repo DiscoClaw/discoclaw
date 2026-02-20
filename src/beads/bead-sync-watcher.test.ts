@@ -118,7 +118,7 @@ describe('startBeadSyncWatcher', () => {
 
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
-      'beads:watcher sync failed',
+      'tasks:watcher sync failed',
     );
 
     handle.stop();

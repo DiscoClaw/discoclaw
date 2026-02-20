@@ -4,7 +4,7 @@ import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BeadData } from '../beads/types.js';
 
-import { loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, buildBeadContextSection, buildBeadThreadSection, resolveEffectiveTools, _resetToolsAuditState } from './prompt-common.js';
+import { loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, buildTaskContextSection, buildTaskThreadSection, resolveEffectiveTools, _resetToolsAuditState } from './prompt-common.js';
 
 describe('loadWorkspacePaFiles', () => {
   const dirs: string[] = [];
@@ -169,14 +169,14 @@ describe('loadDailyLogFiles', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildBeadContextSection
+// buildTaskContextSection
 // ---------------------------------------------------------------------------
 
 function makeBead(overrides: Partial<BeadData> = {}): BeadData {
   return { id: 'ws-042', title: 'Fix auth bug', status: 'in_progress', ...overrides };
 }
 
-describe('buildBeadContextSection', () => {
+describe('buildTaskContextSection', () => {
   it('formats all fields as JSON', () => {
     const bead = makeBead({
       priority: 2,
@@ -184,7 +184,7 @@ describe('buildBeadContextSection', () => {
       labels: ['bug', 'auth'],
       description: 'Users are getting 401 errors on login.',
     });
-    const section = buildBeadContextSection(bead);
+    const section = buildTaskContextSection(bead);
     expect(section).toContain('```json');
     const json = JSON.parse(section.split('```json\n')[1].split('\n```')[0]);
     expect(json.id).toBe('ws-042');
@@ -198,7 +198,7 @@ describe('buildBeadContextSection', () => {
 
   it('handles missing optional fields', () => {
     const bead = makeBead(); // no priority, owner, labels, description
-    const section = buildBeadContextSection(bead);
+    const section = buildTaskContextSection(bead);
     const json = JSON.parse(section.split('```json\n')[1].split('\n```')[0]);
     expect(json.id).toBe('ws-042');
     expect(json.priority).toBeUndefined();
@@ -210,7 +210,7 @@ describe('buildBeadContextSection', () => {
   it('truncates long descriptions', () => {
     const longDesc = 'A'.repeat(600);
     const bead = makeBead({ description: longDesc });
-    const section = buildBeadContextSection(bead);
+    const section = buildTaskContextSection(bead);
     const json = JSON.parse(section.split('```json\n')[1].split('\n```')[0]);
     expect(json.description.length).toBe(500);
     expect(json.description).toMatch(/\u2026$/);
@@ -218,13 +218,13 @@ describe('buildBeadContextSection', () => {
 
   it('includes forum sendMessage guidance for active beads', () => {
     const bead = makeBead();
-    const section = buildBeadContextSection(bead);
+    const section = buildTaskContextSection(bead);
     expect(section).toContain('Do not emit a sendMessage action targeting the parent forum channel');
   });
 
   it('omits forum sendMessage guidance for closed beads', () => {
     const bead = makeBead({ status: 'closed' });
-    const section = buildBeadContextSection(bead);
+    const section = buildTaskContextSection(bead);
     expect(section).not.toContain('Do not emit a sendMessage action targeting the parent forum channel');
   });
 
@@ -236,7 +236,7 @@ describe('buildBeadContextSection', () => {
       labels: ['bug'],
       description: 'Full description here',
     });
-    const section = buildBeadContextSection(bead);
+    const section = buildTaskContextSection(bead);
     const json = JSON.parse(section.split('```json\n')[1].split('\n```')[0]);
     expect(json.id).toBe('ws-042');
     expect(json.title).toBe('Fix auth bug');
@@ -247,12 +247,12 @@ describe('buildBeadContextSection', () => {
     expect(json.labels).toBeUndefined();
     expect(json.description).toBeUndefined();
     // Should include the behavioral hint.
-    expect(section).toContain('This bead is resolved');
+    expect(section).toContain('This task is resolved');
   });
 });
 
 // ---------------------------------------------------------------------------
-// buildBeadThreadSection
+// buildTaskThreadSection
 // ---------------------------------------------------------------------------
 
 // Mock the cache so we don't need a real bd CLI.
@@ -281,48 +281,48 @@ function makeBeadCtx(overrides: Partial<{ beadsCwd: string; forumId: string }> =
   };
 }
 
-describe('buildBeadThreadSection', () => {
+describe('buildTaskThreadSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('returns empty string when not a thread', async () => {
-    const result = await buildBeadThreadSection({
+    const result = await buildTaskThreadSection({
       isThread: false,
       threadId: null,
       threadParentId: null,
-      beadCtx: makeBeadCtx(),
+      taskCtx: makeBeadCtx(),
     });
     expect(result).toBe('');
   });
 
-  it('returns empty string when beadCtx is undefined', async () => {
-    const result = await buildBeadThreadSection({
+  it('returns empty string when taskCtx is undefined', async () => {
+    const result = await buildTaskThreadSection({
       isThread: true,
       threadId: 'thread-1',
       threadParentId: SNOWFLAKE_FORUM_ID,
-      beadCtx: undefined,
+      taskCtx: undefined,
     });
     expect(result).toBe('');
   });
 
   it('returns empty string when threadParentId does not match forumId', async () => {
-    const result = await buildBeadThreadSection({
+    const result = await buildTaskThreadSection({
       isThread: true,
       threadId: 'thread-1',
       threadParentId: '99999999999999999999',
-      beadCtx: makeBeadCtx(),
+      taskCtx: makeBeadCtx(),
     });
     expect(result).toBe('');
   });
 
   it('returns empty string when forumId is not a snowflake (logs warning)', async () => {
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const result = await buildBeadThreadSection({
+    const result = await buildTaskThreadSection({
       isThread: true,
       threadId: 'thread-1',
       threadParentId: 'beads',
-      beadCtx: makeBeadCtx({ forumId: 'beads' }),
+      taskCtx: makeBeadCtx({ forumId: 'beads' }),
       log,
     });
     expect(result).toBe('');
@@ -334,24 +334,24 @@ describe('buildBeadThreadSection', () => {
 
   it('returns formatted section when bead found', async () => {
     mockedCacheGet.mockResolvedValue(makeBead({ priority: 1, owner: 'David' }));
-    const result = await buildBeadThreadSection({
+    const result = await buildTaskThreadSection({
       isThread: true,
       threadId: 'thread-1',
       threadParentId: SNOWFLAKE_FORUM_ID,
-      beadCtx: makeBeadCtx(),
+      taskCtx: makeBeadCtx(),
     });
-    expect(result).toContain('Bead task context');
+    expect(result).toContain('Task context for this thread');
     expect(result).toContain('```json');
     expect(result).toContain('ws-042');
   });
 
   it('returns empty string when bead not found', async () => {
     mockedCacheGet.mockResolvedValue(null);
-    const result = await buildBeadThreadSection({
+    const result = await buildTaskThreadSection({
       isThread: true,
       threadId: 'thread-1',
       threadParentId: SNOWFLAKE_FORUM_ID,
-      beadCtx: makeBeadCtx(),
+      taskCtx: makeBeadCtx(),
     });
     expect(result).toBe('');
   });
@@ -359,11 +359,11 @@ describe('buildBeadThreadSection', () => {
   it('returns empty string when cache throws (graceful degradation)', async () => {
     mockedCacheGet.mockRejectedValue(new Error('bd CLI not available'));
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const result = await buildBeadThreadSection({
+    const result = await buildTaskThreadSection({
       isThread: true,
       threadId: 'thread-1',
       threadParentId: SNOWFLAKE_FORUM_ID,
-      beadCtx: makeBeadCtx(),
+      taskCtx: makeBeadCtx(),
       log,
     });
     expect(result).toBe('');

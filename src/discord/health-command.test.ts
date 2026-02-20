@@ -55,7 +55,7 @@ describe('renderHealthReport', () => {
     expect(verbose).toContain('Error classes:');
   });
 
-  it('shows beads=active when beadsActive is true', () => {
+  it('shows tasks=active when beadsActive is true', () => {
     const metrics = new MetricsRegistry();
     const verbose = renderHealthReport({
       metrics,
@@ -70,10 +70,10 @@ describe('renderHealthReport', () => {
       },
       mode: 'verbose',
     });
-    expect(verbose).toContain('beads=active');
+    expect(verbose).toContain('tasks=active');
   });
 
-  it('shows beads=degraded when enabled but not active', () => {
+  it('shows tasks=degraded when enabled but not active', () => {
     const metrics = new MetricsRegistry();
     const verbose = renderHealthReport({
       metrics,
@@ -88,10 +88,10 @@ describe('renderHealthReport', () => {
       },
       mode: 'verbose',
     });
-    expect(verbose).toContain('beads=degraded');
+    expect(verbose).toContain('tasks=degraded');
   });
 
-  it('shows beads=off when explicitly disabled', () => {
+  it('shows tasks=off when explicitly disabled', () => {
     const metrics = new MetricsRegistry();
     const verbose = renderHealthReport({
       metrics,
@@ -106,7 +106,7 @@ describe('renderHealthReport', () => {
       },
       mode: 'verbose',
     });
-    expect(verbose).toContain('beads=off');
+    expect(verbose).toContain('tasks=off');
   });
 
   it('renders tools report', () => {

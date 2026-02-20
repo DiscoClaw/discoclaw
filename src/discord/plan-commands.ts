@@ -81,6 +81,7 @@ export function toSlug(description: string): string {
 export function parsePlanFileHeader(content: string): PlanFileHeader | null {
   const titleMatch = content.match(/^# Plan:\s*(.+)$/m);
   const idMatch = content.match(/^\*\*ID:\*\*\s*(.+)$/m);
+  const taskMatch = content.match(/^\*\*Task:\*\*\s*(.+)$/m);
   const beadMatch = content.match(/^\*\*Bead:\*\*\s*(.+)$/m);
   const statusMatch = content.match(/^\*\*Status:\*\*\s*(.+)$/m);
   const projectMatch = content.match(/^\*\*Project:\*\*\s*(.+)$/m);
@@ -90,7 +91,7 @@ export function parsePlanFileHeader(content: string): PlanFileHeader | null {
 
   return {
     planId: idMatch[1]!.trim(),
-    beadId: beadMatch?.[1]?.trim() ?? '',
+    beadId: taskMatch?.[1]?.trim() ?? beadMatch?.[1]?.trim() ?? '',
     status: statusMatch?.[1]?.trim() ?? '',
     title: titleMatch?.[1]?.trim() ?? '',
     project: projectMatch?.[1]?.trim() ?? '',
@@ -354,6 +355,7 @@ export async function handlePlanCommand(
         .replace(/\{\{TITLE\}\}/g, cmd.args)
         .replace(/\{\{PLAN_ID\}\}/g, planId)
         .replace(/\{\{BEAD_ID\}\}/g, beadId)
+        .replace(/\{\{TASK_ID\}\}/g, beadId)
         .replace(/\{\{DATE\}\}/g, date)
         .replace(/\{\{PROJECT\}\}/g, 'discoclaw')
         // Set status to DRAFT (remove the options list)

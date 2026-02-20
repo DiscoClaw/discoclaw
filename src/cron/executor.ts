@@ -4,7 +4,7 @@ import type { CronJob } from './types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { ActionCategoryFlags, ActionContext } from '../discord/actions.js';
-import type { BeadContext } from '../discord/actions-beads.js';
+import type { TaskContext } from '../discord/actions-tasks.js';
 import type { CronContext } from '../discord/actions-crons.js';
 import type { ForgeContext } from '../discord/actions-forge.js';
 import type { PlanContext } from '../discord/actions-plan.js';
@@ -16,7 +16,7 @@ import type { CronRunControl } from './run-control.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import * as discordActions from '../discord/actions.js';
-import { sendChunks } from '../discord/output-common.js';
+import { sendChunks, appendUnavailableActionTypesNotice } from '../discord/output-common.js';
 import { loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
@@ -38,7 +38,7 @@ export type CronExecutorContext = {
   discordActionsEnabled: boolean;
   actionFlags: ActionCategoryFlags;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
-  beadCtx?: BeadContext;
+  taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
   planCtx?: PlanContext;
@@ -261,10 +261,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
 
     let processedText = output;
+    let strippedUnrecognizedTypes: string[] = [];
 
     // Handle Discord actions if enabled.
     if (ctx.discordActionsEnabled) {
-      const { cleanText, actions } = discordActions.parseDiscordActions(processedText, ctx.actionFlags);
+      const parsed = discordActions.parseDiscordActions(processedText, ctx.actionFlags);
+      const { cleanText, actions } = parsed;
+      strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
       if (actions.length > 0) {
         const actCtx = {
           guild,
@@ -274,7 +277,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           deferScheduler: ctx.deferScheduler,
         };
         const results = await discordActions.executeDiscordActions(actions, actCtx, ctx.log, {
-          beadCtx: ctx.beadCtx,
+          taskCtx: ctx.taskCtx,
           cronCtx: ctx.cronCtx,
           forgeCtx: ctx.forgeCtx,
           planCtx: ctx.planCtx,
@@ -290,7 +293,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           ? cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
           : cleanText.trimEnd();
         // When all display lines were suppressed and there's no prose, skip posting.
-        if (!processedText.trim() && anyActionSucceeded) {
+        if (!processedText.trim() && anyActionSucceeded && strippedUnrecognizedTypes.length === 0) {
           ctx.log?.info({ jobId: job.id }, 'cron:reply suppressed (actions-only, no display text)');
         }
 
@@ -305,6 +308,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         processedText = cleanText;
       }
     }
+    processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
 
     await sendChunks(targetChannel as any, processedText, collectedImages);
 

@@ -6,6 +6,8 @@ import {
   replyThenSendChunks,
   sendChunks,
   shouldSuppressFollowUp,
+  buildUnavailableActionTypesNotice,
+  appendUnavailableActionTypesNotice,
 } from './output-common.js';
 import type { ImageData } from '../runtime/types.js';
 
@@ -169,6 +171,42 @@ describe('shouldSuppressFollowUp', () => {
 
   it('does not suppress when strippedUnrecognizedCount > 0, even with zero actions and images', () => {
     expect(shouldSuppressFollowUp('short', 0, 0, 3)).toBe(false);
+  });
+});
+
+describe('buildUnavailableActionTypesNotice', () => {
+  it('returns empty string when no types were stripped', () => {
+    expect(buildUnavailableActionTypesNotice([])).toBe('');
+  });
+
+  it('renders singular notice for one unavailable type', () => {
+    const out = buildUnavailableActionTypesNotice(['channelCreate']);
+    expect(out).toContain('Ignored unavailable action type:');
+    expect(out).toContain('`channelCreate`');
+  });
+
+  it('deduplicates and renders plural notice for multiple unavailable types', () => {
+    const out = buildUnavailableActionTypesNotice(['taskSync', 'taskSync', 'planRun']);
+    expect(out).toContain('Ignored unavailable action types:');
+    expect(out).toContain('`taskSync`');
+    expect(out).toContain('`planRun`');
+  });
+});
+
+describe('appendUnavailableActionTypesNotice', () => {
+  it('appends the notice under existing text', () => {
+    const out = appendUnavailableActionTypesNotice('hello', ['channelCreate']);
+    expect(out).toContain('hello');
+    expect(out).toContain('Ignored unavailable action type');
+  });
+
+  it('returns notice alone when base text is empty', () => {
+    const out = appendUnavailableActionTypesNotice('', ['channelCreate']);
+    expect(out.startsWith('Ignored unavailable action type')).toBe(true);
+  });
+
+  it('returns original text when no stripped types are provided', () => {
+    expect(appendUnavailableActionTypesNotice('hello', [])).toBe('hello');
   });
 });
 

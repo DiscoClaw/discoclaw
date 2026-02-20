@@ -83,7 +83,7 @@ function baseParams(runtimeOverride: any, overrides: Partial<any> = {}) {
     discordActionsGuild: false,
     discordActionsModeration: false,
     discordActionsPolls: false,
-    discordActionsBeads: false,
+    discordActionsTasks: false,
     discordActionsBotProfile: false,
     messageHistoryBudget: 0,
     summaryEnabled: false,
@@ -308,6 +308,25 @@ describe('auto-follow-up for query actions', () => {
       expect(sendResult.edit).toHaveBeenCalled();
       expect(sendResult.delete).not.toHaveBeenCalled();
     }
+  });
+
+  it('shows unavailable action types when actions are stripped', async () => {
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: '<discord-action>{"type":"notARealAction"}</discord-action>' } as any;
+      }),
+    } as any;
+
+    const msg = makeMsg();
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    await handler(msg);
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(1);
+    const replyObj = await msg.reply.mock.results[0]?.value;
+    const lastEditContent = replyObj?.edit?.mock?.calls?.[replyObj.edit.mock.calls.length - 1]?.[0]?.content ?? '';
+    expect(lastEditContent).toContain('Ignored unavailable action type:');
+    expect(lastEditContent).toContain('`notARealAction`');
+    expect(replyObj.delete).not.toHaveBeenCalled();
   });
 
   it('follow-up runs inside queue (serialization preserved)', async () => {

@@ -36,7 +36,7 @@ export type ConfigMutableParams = {
     syncCoordinator?: { setAutoTagModel(model: string): void };
     executorCtx?: { model: string; cronExecModel?: string };
   };
-  beadCtx?: { autoTagModel: string };
+  taskCtx?: { autoTagModel: string };
   planCtx?: { model?: string };
 };
 
@@ -46,7 +46,7 @@ export type ConfigMutableParams = {
 
 const ROLE_DESCRIPTIONS: Record<ModelRole, string> = {
   chat: 'Discord messages, plan runs, deferred runs, forge fallback',
-  fast: 'All small/fast tasks (summary, cron, cron auto-tag, beads auto-tag)',
+  fast: 'All small/fast tasks (summary, cron, cron auto-tag, tasks auto-tag)',
   'forge-drafter': 'Forge plan drafting/revision',
   'forge-auditor': 'Forge plan auditing',
   summary: 'Rolling summaries only',
@@ -97,9 +97,9 @@ export function executeConfigAction(
             bp.cronCtx.syncCoordinator?.setAutoTagModel(model);
             changes.push(`cron-auto-tag → ${model}`);
           }
-          if (bp.beadCtx) {
-            bp.beadCtx.autoTagModel = model;
-            changes.push(`beads-auto-tag → ${model}`);
+          if (bp.taskCtx) {
+            bp.taskCtx.autoTagModel = model;
+            changes.push(`tasks-auto-tag → ${model}`);
           }
           break;
         case 'forge-drafter':
@@ -161,8 +161,9 @@ export function executeConfigAction(
         rows.push(['cron-exec', cronExecModel || `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['cron-exec']]);
         rows.push(['cron-auto-tag', bp.cronCtx.autoTagModel, ROLE_DESCRIPTIONS.cron]);
       }
-      if (bp.beadCtx) {
-        rows.push(['beads-auto-tag', bp.beadCtx.autoTagModel, 'Beads auto-tagging']);
+      const taskAutoTagModel = bp.taskCtx?.autoTagModel;
+      if (taskAutoTagModel) {
+        rows.push(['tasks-auto-tag', taskAutoTagModel, 'Tasks auto-tagging']);
       }
 
       const adapterDefault = configCtx.runtime.defaultModel;
@@ -206,7 +207,7 @@ export function configActionsPromptSection(): string {
 | Role | What it controls |
 |------|-----------------|
 | \`chat\` | Discord messages, plan runs, deferred runs, forge fallback |
-| \`fast\` | All small/fast tasks (summary, cron auto-tag, beads auto-tag) |
+| \`fast\` | All small/fast tasks (summary, cron auto-tag, tasks auto-tag) |
 | \`forge-drafter\` | Forge plan drafting/revision |
 | \`forge-auditor\` | Forge plan auditing |
 | \`summary\` | Rolling summaries only (overrides fast) |

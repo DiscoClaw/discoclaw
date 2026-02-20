@@ -8,22 +8,23 @@ import type { ActionContext } from './actions.js';
 // ---------------------------------------------------------------------------
 
 vi.mock('../beads/discord-sync.js', () => ({
-  resolveBeadsForum: vi.fn(() => ({
+  resolveTasksForum: vi.fn(() => ({
     threads: {
       create: vi.fn(async () => ({ id: 'thread-new' })),
     },
   })),
-  createBeadThread: vi.fn(async () => 'thread-new'),
-  closeBeadThread: vi.fn(async () => {}),
-  updateBeadThreadName: vi.fn(async () => {}),
-  updateBeadStarterMessage: vi.fn(async () => true),
-  updateBeadThreadTags: vi.fn(async () => false),
+  createTaskThread: vi.fn(async () => 'thread-new'),
+  closeTaskThread: vi.fn(async () => {}),
+  updateTaskThreadName: vi.fn(async () => {}),
+  updateTaskStarterMessage: vi.fn(async () => true),
+  updateTaskThreadTags: vi.fn(async () => false),
   ensureUnarchived: vi.fn(async () => {}),
-  getThreadIdFromBead: vi.fn((bead: any) => {
-    const ref = bead.external_ref ?? '';
+  getThreadIdFromTask: vi.fn((task: any) => {
+    const ref = task.externalRef ?? task.external_ref ?? '';
     if (ref.startsWith('discord:')) return ref.slice('discord:'.length);
     return null;
   }),
+  findExistingThreadForTask: vi.fn(async () => null),
   reloadTagMapInPlace: vi.fn(async () => 2),
 }));
 
@@ -126,12 +127,12 @@ function makeTaskCtx(overrides?: Partial<TaskContext>): TaskContext {
 
 describe('TASK_ACTION_TYPES', () => {
   it('contains all task action types', () => {
-    expect(TASK_ACTION_TYPES.has('beadCreate')).toBe(true);
-    expect(TASK_ACTION_TYPES.has('beadUpdate')).toBe(true);
-    expect(TASK_ACTION_TYPES.has('beadClose')).toBe(true);
-    expect(TASK_ACTION_TYPES.has('beadShow')).toBe(true);
-    expect(TASK_ACTION_TYPES.has('beadList')).toBe(true);
-    expect(TASK_ACTION_TYPES.has('beadSync')).toBe(true);
+    expect(TASK_ACTION_TYPES.has('taskCreate')).toBe(true);
+    expect(TASK_ACTION_TYPES.has('taskUpdate')).toBe(true);
+    expect(TASK_ACTION_TYPES.has('taskClose')).toBe(true);
+    expect(TASK_ACTION_TYPES.has('taskShow')).toBe(true);
+    expect(TASK_ACTION_TYPES.has('taskList')).toBe(true);
+    expect(TASK_ACTION_TYPES.has('taskSync')).toBe(true);
     expect(TASK_ACTION_TYPES.has('tagMapReload')).toBe(true);
   });
 
@@ -141,9 +142,9 @@ describe('TASK_ACTION_TYPES', () => {
 });
 
 describe('executeTaskAction', () => {
-  it('beadCreate returns created bead summary', async () => {
+  it('taskCreate returns created bead summary', async () => {
     const result = await executeTaskAction(
-      { type: 'beadCreate', title: 'New task', priority: 1 },
+      { type: 'taskCreate', title: 'New task', priority: 1 },
       makeCtx(),
       makeTaskCtx(),
     );
@@ -152,41 +153,41 @@ describe('executeTaskAction', () => {
     expect((result as any).summary).toContain('New task');
   });
 
-  it('beadCreate calls forumCountSync.requestUpdate', async () => {
+  it('taskCreate calls forumCountSync.requestUpdate', async () => {
     const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
     await executeTaskAction(
-      { type: 'beadCreate', title: 'Counted task' },
+      { type: 'taskCreate', title: 'Counted task' },
       makeCtx(),
       makeTaskCtx({ forumCountSync: mockSync as any }),
     );
     expect(mockSync.requestUpdate).toHaveBeenCalled();
   });
 
-  it('beadCreate fails without title', async () => {
+  it('taskCreate fails without title', async () => {
     const result = await executeTaskAction(
-      { type: 'beadCreate', title: '' },
+      { type: 'taskCreate', title: '' },
       makeCtx(),
       makeTaskCtx(),
     );
     expect(result.ok).toBe(false);
   });
 
-  it('beadCreate honors no-thread by skipping thread creation', async () => {
-    const { createBeadThread } = await import('../beads/discord-sync.js');
-    (createBeadThread as any).mockClear?.();
+  it('taskCreate honors no-thread by skipping thread creation', async () => {
+    const { createTaskThread } = await import('../beads/discord-sync.js');
+    (createTaskThread as any).mockClear?.();
 
     const result = await executeTaskAction(
-      { type: 'beadCreate', title: 'No thread please', tags: 'no-thread,feature' },
+      { type: 'taskCreate', title: 'No thread please', tags: 'no-thread,feature' },
       makeCtx(),
       makeTaskCtx(),
     );
     expect(result.ok).toBe(true);
-    expect(createBeadThread).not.toHaveBeenCalled();
+    expect(createTaskThread).not.toHaveBeenCalled();
   });
 
-  it('beadUpdate returns updated summary', async () => {
+  it('taskUpdate returns updated summary', async () => {
     const result = await executeTaskAction(
-      { type: 'beadUpdate', beadId: 'ws-001', status: 'in_progress', priority: 1 },
+      { type: 'taskUpdate', taskId: 'ws-001', status: 'in_progress', priority: 1 },
       makeCtx(),
       makeTaskCtx(),
     );
@@ -195,45 +196,45 @@ describe('executeTaskAction', () => {
     expect((result as any).summary).toContain('in_progress');
   });
 
-  it('beadUpdate calls forumCountSync.requestUpdate when status changed', async () => {
+  it('taskUpdate calls forumCountSync.requestUpdate when status changed', async () => {
     const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
     await executeTaskAction(
-      { type: 'beadUpdate', beadId: 'ws-001', status: 'in_progress' },
+      { type: 'taskUpdate', taskId: 'ws-001', status: 'in_progress' },
       makeCtx(),
       makeTaskCtx({ forumCountSync: mockSync as any }),
     );
     expect(mockSync.requestUpdate).toHaveBeenCalled();
   });
 
-  it('beadUpdate does NOT call forumCountSync.requestUpdate without status change', async () => {
+  it('taskUpdate does NOT call forumCountSync.requestUpdate without status change', async () => {
     const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
     await executeTaskAction(
-      { type: 'beadUpdate', beadId: 'ws-001', title: 'New title' },
+      { type: 'taskUpdate', taskId: 'ws-001', title: 'New title' },
       makeCtx(),
       makeTaskCtx({ forumCountSync: mockSync as any }),
     );
     expect(mockSync.requestUpdate).not.toHaveBeenCalled();
   });
 
-  it('beadUpdate fails without beadId', async () => {
+  it('taskUpdate fails without taskId', async () => {
     const result = await executeTaskAction(
-      { type: 'beadUpdate', beadId: '' },
+      { type: 'taskUpdate', taskId: '' },
       makeCtx(),
       makeTaskCtx(),
     );
     expect(result.ok).toBe(false);
   });
 
-  it('beadUpdate calls updateBeadStarterMessage when bead has a linked thread', async () => {
-    const { updateBeadStarterMessage } = await import('../beads/discord-sync.js');
-    (updateBeadStarterMessage as any).mockClear();
+  it('taskUpdate calls updateBeadStarterMessage when bead has a linked thread', async () => {
+    const { updateTaskStarterMessage } = await import('../beads/discord-sync.js');
+    (updateTaskStarterMessage as any).mockClear();
 
     await executeTaskAction(
-      { type: 'beadUpdate', beadId: 'ws-001', description: 'Updated desc' },
+      { type: 'taskUpdate', taskId: 'ws-001', description: 'Updated desc' },
       makeCtx(),
       makeTaskCtx(),
     );
-    expect(updateBeadStarterMessage).toHaveBeenCalledWith(
+    expect(updateTaskStarterMessage).toHaveBeenCalledWith(
       expect.anything(),
       '111222333',
       expect.objectContaining({ id: 'ws-001' }),
@@ -241,16 +242,16 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('beadUpdate passes sidebarMentionUserId to updateBeadStarterMessage', async () => {
-    const { updateBeadStarterMessage } = await import('../beads/discord-sync.js');
-    (updateBeadStarterMessage as any).mockClear();
+  it('taskUpdate passes sidebarMentionUserId to updateBeadStarterMessage', async () => {
+    const { updateTaskStarterMessage } = await import('../beads/discord-sync.js');
+    (updateTaskStarterMessage as any).mockClear();
 
     await executeTaskAction(
-      { type: 'beadUpdate', beadId: 'ws-001', description: 'Updated desc' },
+      { type: 'taskUpdate', taskId: 'ws-001', description: 'Updated desc' },
       makeCtx(),
       makeTaskCtx({ sidebarMentionUserId: '999' }),
     );
-    expect(updateBeadStarterMessage).toHaveBeenCalledWith(
+    expect(updateTaskStarterMessage).toHaveBeenCalledWith(
       expect.anything(),
       '111222333',
       expect.objectContaining({ id: 'ws-001' }),
@@ -258,28 +259,28 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('beadUpdate succeeds even if updateBeadStarterMessage throws', async () => {
-    const { updateBeadStarterMessage } = await import('../beads/discord-sync.js');
-    (updateBeadStarterMessage as any).mockRejectedValueOnce(new Error('Discord API error'));
+  it('taskUpdate succeeds even if updateBeadStarterMessage throws', async () => {
+    const { updateTaskStarterMessage } = await import('../beads/discord-sync.js');
+    (updateTaskStarterMessage as any).mockRejectedValueOnce(new Error('Discord API error'));
 
     const result = await executeTaskAction(
-      { type: 'beadUpdate', beadId: 'ws-001', status: 'in_progress' },
+      { type: 'taskUpdate', taskId: 'ws-001', status: 'in_progress' },
       makeCtx(),
       makeTaskCtx(),
     );
     expect(result.ok).toBe(true);
   });
 
-  it('beadUpdate calls updateBeadThreadTags when bead has a linked thread', async () => {
-    const { updateBeadThreadTags } = await import('../beads/discord-sync.js');
-    (updateBeadThreadTags as any).mockClear();
+  it('taskUpdate calls updateBeadThreadTags when bead has a linked thread', async () => {
+    const { updateTaskThreadTags } = await import('../beads/discord-sync.js');
+    (updateTaskThreadTags as any).mockClear();
 
     await executeTaskAction(
-      { type: 'beadUpdate', beadId: 'ws-001', status: 'in_progress' },
+      { type: 'taskUpdate', taskId: 'ws-001', status: 'in_progress' },
       makeCtx(),
       makeTaskCtx(),
     );
-    expect(updateBeadThreadTags).toHaveBeenCalledWith(
+    expect(updateTaskThreadTags).toHaveBeenCalledWith(
       expect.anything(),
       '111222333',
       expect.objectContaining({ id: 'ws-001' }),
@@ -287,17 +288,17 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('beadClose passes tagMap to closeBeadThread', async () => {
-    const { closeBeadThread } = await import('../beads/discord-sync.js');
-    (closeBeadThread as any).mockClear();
+  it('taskClose passes tagMap to closeBeadThread', async () => {
+    const { closeTaskThread } = await import('../beads/discord-sync.js');
+    (closeTaskThread as any).mockClear();
 
     const taskCtx = makeTaskCtx();
     await executeTaskAction(
-      { type: 'beadClose', beadId: 'ws-001', reason: 'Done' },
+      { type: 'taskClose', taskId: 'ws-001', reason: 'Done' },
       makeCtx(),
       taskCtx,
     );
-    expect(closeBeadThread).toHaveBeenCalledWith(
+    expect(closeTaskThread).toHaveBeenCalledWith(
       expect.anything(),
       '111222333',
       expect.objectContaining({ id: 'ws-001' }),
@@ -306,9 +307,9 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('beadUpdate rejects invalid status', async () => {
+  it('taskUpdate rejects invalid status', async () => {
     const result = await executeTaskAction(
-      { type: 'beadUpdate', beadId: 'ws-001', status: 'nonsense' },
+      { type: 'taskUpdate', taskId: 'ws-001', status: 'nonsense' },
       makeCtx(),
       makeTaskCtx(),
     );
@@ -316,9 +317,9 @@ describe('executeTaskAction', () => {
     expect((result as any).error).toContain('Invalid');
   });
 
-  it('beadClose returns closed summary', async () => {
+  it('taskClose returns closed summary', async () => {
     const result = await executeTaskAction(
-      { type: 'beadClose', beadId: 'ws-001', reason: 'Done' },
+      { type: 'taskClose', taskId: 'ws-001', reason: 'Done' },
       makeCtx(),
       makeTaskCtx(),
     );
@@ -327,19 +328,19 @@ describe('executeTaskAction', () => {
     expect((result as any).summary).toContain('Done');
   });
 
-  it('beadClose calls forumCountSync.requestUpdate', async () => {
+  it('taskClose calls forumCountSync.requestUpdate', async () => {
     const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
     await executeTaskAction(
-      { type: 'beadClose', beadId: 'ws-001' },
+      { type: 'taskClose', taskId: 'ws-001' },
       makeCtx(),
       makeTaskCtx({ forumCountSync: mockSync as any }),
     );
     expect(mockSync.requestUpdate).toHaveBeenCalled();
   });
 
-  it('beadShow returns bead details', async () => {
+  it('taskShow returns bead details', async () => {
     const result = await executeTaskAction(
-      { type: 'beadShow', beadId: 'ws-001' },
+      { type: 'taskShow', taskId: 'ws-001' },
       makeCtx(),
       makeTaskCtx(),
     );
@@ -348,9 +349,9 @@ describe('executeTaskAction', () => {
     expect((result as any).summary).toContain('ws-001');
   });
 
-  it('beadShow fails for unknown bead', async () => {
+  it('taskShow fails for unknown bead', async () => {
     const result = await executeTaskAction(
-      { type: 'beadShow', beadId: 'ws-notfound' },
+      { type: 'taskShow', taskId: 'ws-notfound' },
       makeCtx(),
       makeTaskCtx(),
     );
@@ -358,9 +359,9 @@ describe('executeTaskAction', () => {
     expect((result as any).error).toContain('not found');
   });
 
-  it('beadList returns bead list', async () => {
+  it('taskList returns bead list', async () => {
     const result = await executeTaskAction(
-      { type: 'beadList', status: 'open', limit: 10 },
+      { type: 'taskList', status: 'open', limit: 10 },
       makeCtx(),
       makeTaskCtx(),
     );
@@ -369,10 +370,10 @@ describe('executeTaskAction', () => {
     expect((result as any).summary).toContain('ws-002');
   });
 
-  it('beadList defaults to limit 50 when no limit provided', async () => {
+  it('taskList defaults to limit 50 when no limit provided', async () => {
     const store = makeStore();
     await executeTaskAction(
-      { type: 'beadList', status: 'all' },
+      { type: 'taskList', status: 'all' },
       makeCtx(),
       makeTaskCtx({ store: store as any }),
     );
@@ -382,10 +383,10 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('beadList respects explicit limit', async () => {
+  it('taskList respects explicit limit', async () => {
     const store = makeStore();
     await executeTaskAction(
-      { type: 'beadList', status: 'all', limit: 5 },
+      { type: 'taskList', status: 'all', limit: 5 },
       makeCtx(),
       makeTaskCtx({ store: store as any }),
     );
@@ -395,9 +396,9 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('beadSync returns extended sync summary', async () => {
+  it('taskSync returns extended sync summary', async () => {
     const result = await executeTaskAction(
-      { type: 'beadSync' },
+      { type: 'taskSync' },
       makeCtx(),
       makeTaskCtx(),
     );
@@ -406,13 +407,13 @@ describe('executeTaskAction', () => {
     expect((result as any).summary).toContain('5 starters');
   });
 
-  it('beadSync passes statusPoster through to runBeadSync', async () => {
+  it('taskSync passes statusPoster through to runBeadSync', async () => {
     const { runBeadSync } = await import('../beads/bead-sync.js');
     (runBeadSync as any).mockClear();
 
-    const mockPoster = { beadSyncComplete: vi.fn() } as any;
+    const mockPoster = { taskSyncComplete: vi.fn() } as any;
     await executeTaskAction(
-      { type: 'beadSync' },
+      { type: 'taskSync' },
       makeCtx(),
       makeTaskCtx({ statusPoster: mockPoster }),
     );
@@ -422,12 +423,12 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('beadSync passes sidebarMentionUserId as mentionUserId to runBeadSync', async () => {
+  it('taskSync passes sidebarMentionUserId as mentionUserId to runBeadSync', async () => {
     const { runBeadSync } = await import('../beads/bead-sync.js');
     (runBeadSync as any).mockClear();
 
     await executeTaskAction(
-      { type: 'beadSync' },
+      { type: 'taskSync' },
       makeCtx(),
       makeTaskCtx({ sidebarMentionUserId: '999' }),
     );
@@ -506,7 +507,7 @@ describe('tagMapReload action', () => {
   });
 });
 
-describe('beadSync fallback with tagMapPath', () => {
+describe('taskSync fallback with tagMapPath', () => {
   it('reloads tag map before runBeadSync in fallback path', async () => {
     const { reloadTagMapInPlace } = await import('../beads/discord-sync.js');
     const { runBeadSync } = await import('../beads/bead-sync.js');
@@ -514,7 +515,7 @@ describe('beadSync fallback with tagMapPath', () => {
     (runBeadSync as any).mockClear();
 
     await executeTaskAction(
-      { type: 'beadSync' },
+      { type: 'taskSync' },
       makeCtx(),
       makeTaskCtx({ tagMapPath: '/tmp/tag-map.json' }),
     );
@@ -528,7 +529,7 @@ describe('beadSync fallback with tagMapPath', () => {
     (reloadTagMapInPlace as any).mockClear();
 
     await executeTaskAction(
-      { type: 'beadSync' },
+      { type: 'taskSync' },
       makeCtx(),
       makeTaskCtx(), // No tagMapPath
     );
@@ -540,9 +541,9 @@ describe('beadSync fallback with tagMapPath', () => {
 describe('taskActionsPromptSection', () => {
   it('returns non-empty prompt section', () => {
     const section = taskActionsPromptSection();
-    expect(section).toContain('beadCreate');
-    expect(section).toContain('beadClose');
-    expect(section).toContain('beadList');
+    expect(section).toContain('taskCreate');
+    expect(section).toContain('taskClose');
+    expect(section).toContain('taskList');
   });
 
   it('includes tagMapReload in prompt section', () => {
@@ -550,36 +551,33 @@ describe('taskActionsPromptSection', () => {
     expect(section).toContain('tagMapReload');
   });
 
-  it('includes bead quality guidelines', () => {
+  it('includes task quality guidelines', () => {
     const section = taskActionsPromptSection();
     expect(section).toContain('imperative mood');
     expect(section).toContain('Description');
     expect(section).toContain('P0');
     expect(section).toContain('P1');
-    expect(section).toContain('beadUpdate');
+    expect(section).toContain('taskUpdate');
   });
 
   it('keeps guidelines block under 600 chars', () => {
     const section = taskActionsPromptSection();
-    const marker = '#### Bead Quality Guidelines';
-    const crossRefMarker = '#### Cross-Bead References';
+    const marker = '#### Task Quality Guidelines';
+    const crossRefMarker = '#### Cross-Task References';
     const idx = section.indexOf(marker);
     expect(idx).toBeGreaterThanOrEqual(0);
     const crossRefIdx = section.indexOf(crossRefMarker);
-    // Slice up to the cross-bead section (or end of string if not found)
+    // Slice up to the cross-task section (or end of string if not found)
     const end = crossRefIdx > idx ? crossRefIdx : section.length;
     const guidelinesBlock = section.slice(idx, end);
     expect(guidelinesBlock.length).toBeLessThanOrEqual(600);
   });
 
-  it('includes cross-bead references guideline', () => {
+  it('includes cross-task references guideline', () => {
     const section = taskActionsPromptSection();
-    expect(section).toContain('#### Cross-Bead References');
-    expect(section).toContain('beadShow');
-    expect(section).toContain('beadUpdate');
-    expect(section).toContain('sendMessage');
-    expect(section).toContain('readMessages');
-    expect(section).toContain('listPins');
-    expect(section).toContain('stale');
+    expect(section).toContain('#### Cross-Task References');
+    expect(section).toContain('taskShow');
+    expect(section).toContain('taskUpdate');
+    expect(section).toContain('taskSync');
   });
 });

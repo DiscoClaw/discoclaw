@@ -26,7 +26,7 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-guild.ts`
 - `src/discord/actions-moderation.ts`
 - `src/discord/actions-poll.ts`
-- `src/discord/actions-beads.ts`
+- `src/discord/actions-tasks.ts`
 - `src/discord/actions-crons.ts`
 - `src/discord/actions-bot-profile.ts`
 - `src/discord/actions-forge.ts`
@@ -53,10 +53,10 @@ Plan action types (in `src/discord/actions-plan.ts`):
 Memory action types (in `src/discord/actions-memory.ts`):
 - `memoryRemember`, `memoryForget`, `memoryShow`
 
-Bead action types (in `src/discord/actions-beads.ts`):
-- `beadCreate`, `beadUpdate`, `beadClose`, `beadShow`, `beadList`, `beadSync`, `tagMapReload`
+Task action types (in `src/discord/actions-tasks.ts`):
+- `taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`, `tagMapReload`
 
-> **Bead References:** Bead IDs are the stable identifier for cross-bead interaction. When interacting with another bead (e.g. reading its content, posting an update, or pinning a message), always use `beadShow`/`beadUpdate`/etc. with the bead's ID — do not use `sendMessage`/`readMessages`/`listPins` with a thread channel name. Thread channel names can become stale (renamed, archived, or recreated), while bead IDs remain valid across those changes.
+> **Task References:** Task IDs are the stable identifier for cross-task interaction. When interacting with another task (e.g. reading its content, posting an update, or closing it), always use `taskShow`/`taskUpdate`/etc. with the task ID. Do not use channel-name based messaging actions for task threads.
 
 Query actions (read-only actions that can trigger an auto-follow-up loop):
 - `src/discord/action-categories.ts`
@@ -80,7 +80,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_GUILD`
   - `DISCOCLAW_DISCORD_ACTIONS_MODERATION`
   - `DISCOCLAW_DISCORD_ACTIONS_POLLS`
-  - `DISCOCLAW_DISCORD_ACTIONS_BEADS` (also requires beads subsystem enabled/configured)
+  - `DISCOCLAW_DISCORD_ACTIONS_TASKS` (also requires tasks subsystem enabled/configured)
   - `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1; also requires cron subsystem enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 0)
   - `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 0; also requires forge commands enabled)
@@ -106,11 +106,11 @@ Important behavioral notes:
   - `parseDiscordActions(text, flags)` in `src/discord/actions.ts` extracts JSON blocks.
   - It drops malformed JSON silently.
   - It drops actions whose `type` is not enabled by the current flags.
-  - It returns `{ cleanText, actions }` where `cleanText` has the blocks removed.
+  - It returns `{ cleanText, actions, strippedUnrecognizedTypes }` where `cleanText` has the blocks removed.
 
 4. Execute:
   - `executeDiscordActions(actions, ctx, log, subsystemContexts)` in `src/discord/actions.ts` dispatches to the right category module based on `action.type`.
-  - Subsystem contexts (`beadCtx`, `cronCtx`, `forgeCtx`, `planCtx`, `memoryCtx`) are passed as a `SubsystemContexts` bag. Actions requiring a missing context return a "not configured" error.
+  - Subsystem contexts (`taskCtx`, `cronCtx`, `forgeCtx`, `planCtx`, `memoryCtx`) are passed as a `SubsystemContexts` bag. Actions requiring a missing context return a "not configured" error.
   - Each action returns `{ ok: true, summary }` or `{ ok: false, error }`.
 
 5. Post-processing:
@@ -122,7 +122,7 @@ Important behavioral notes:
 
 ## Autonomous Action Categories
 
-The forge, plan, and memory categories enable the AI runtime to self-initiate operations that previously required human `!` commands. Combined with cron jobs, these enable fully autonomous workflows: crons that check for approved plans and forge them, post-forge memory updates, bot-initiated planning from bead context, etc.
+The forge, plan, and memory categories enable the AI runtime to self-initiate operations that previously required human `!` commands. Combined with cron jobs, these enable fully autonomous workflows: crons that check for approved plans and forge them, post-forge memory updates, bot-initiated planning from task context, etc.
 
 ### Forge Actions (`actions-forge.ts`)
 
@@ -146,20 +146,20 @@ Allow the model to create, inspect, approve, and close plans without a human `!p
 
 | Action | Description | Mutating? |
 |--------|-------------|-----------|
-| `planCreate` | Create a new plan file + backing bead | Yes |
+| `planCreate` | Create a new plan file + backing task | Yes |
 | `planList` | List plans, optionally filtered by status | No (query) |
-| `planShow` | Show plan details (header, status, bead) | No (query) |
-| `planApprove` | Set plan status to APPROVED, update backing bead | Yes |
-| `planClose` | Set plan status to CLOSED, close backing bead | Yes |
+| `planShow` | Show plan details (header, status, task) | No (query) |
+| `planApprove` | Set plan status to APPROVED, update backing task | Yes |
+| `planClose` | Set plan status to CLOSED, close backing task | Yes |
 | `planRun` | Execute all remaining phases of a plan (fire-and-forget); posts a live-updating status message to the channel reflecting the current phase and final outcome (unless `skipCompletionNotify` is set) | Yes |
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 0, requires `DISCOCLAW_PLAN_COMMANDS_ENABLED`).
-Context: Requires `PlanContext` with plans directory, bead CWD, runtime, and model.
+Context: Requires `PlanContext` with plans directory, workspace CWD, runtime, and model.
 
 Note: `planApprove` and `planClose` are blocked while a plan is `IMPLEMENTING`.
 Recursion guard: `planRun` is blocked at `depth >= 1` to prevent plan runs from spawning nested plan runs.
 Status gate: `planRun` requires the plan to be in `APPROVED` or `IMPLEMENTING` status.
-Auto-close: When all phases complete (done or skipped), `planRun` automatically closes the plan and its backing bead via `closePlanIfComplete`.
+Auto-close: When all phases complete (done or skipped), `planRun` automatically closes the plan and its backing task via `closePlanIfComplete`.
 
 ### Memory Actions (`actions-memory.ts`)
 
@@ -296,4 +296,3 @@ See `docs/discord-bot-setup.md` for recommended permission profiles and the note
 ```bash
 pnpm test
 ```
-

@@ -73,8 +73,8 @@ export function renderHealthReport(opts: {
     lines.push(`runtimeSessions=${opts.config.useRuntimeSessions} toolAwareStreaming=${opts.config.toolAwareStreaming} maxConcurrent=${opts.config.maxConcurrentInvocations}`);
     lines.push(`actions=${opts.config.discordActionsEnabled} summary=${opts.config.summaryEnabled} durableMemory=${opts.config.durableMemoryEnabled}`);
     lines.push(`historyBudget=${opts.config.messageHistoryBudget} requireChannelContext=${opts.config.requireChannelContext} autoIndexContext=${opts.config.autoIndexChannelContext}`);
-    const beadsState = opts.config.beadsActive ? 'active' : opts.config.beadsEnabled ? 'degraded' : 'off';
-    lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} cron=${opts.config.cronEnabled} beads=${beadsState}`);
+    const tasksState = opts.config.beadsActive ? 'active' : opts.config.beadsEnabled ? 'degraded' : 'off';
+    lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} cron=${opts.config.cronEnabled} tasks=${tasksState}`);
 
     if (snap.memory) {
       lines.push(renderMemoryLine(snap.memory));

@@ -93,7 +93,7 @@ describe('createStatusPoster', () => {
     });
     expect(ch.send).toHaveBeenCalledOnce();
     const msg = sentContent(ch);
-    expect(msg).toContain('**Bead Sync Complete**');
+    expect(msg).toContain('**Task Sync Complete**');
     expect(msg).toContain('Created: 1');
     expect(msg).toContain('Starters Updated: 2');
     expect(msg).toContain('Archived: 3');
@@ -110,7 +110,7 @@ describe('createStatusPoster', () => {
     });
     expect(ch.send).toHaveBeenCalledOnce();
     const msg = sentContent(ch);
-    expect(msg).toContain('**Bead Sync Complete**');
+    expect(msg).toContain('**Task Sync Complete**');
     expect(msg).toContain('Warnings: 2');
   });
 

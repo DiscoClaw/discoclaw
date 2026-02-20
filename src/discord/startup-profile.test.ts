@@ -99,7 +99,7 @@ function baseParams(overrides: Partial<BotParams> = {}): BotParams {
     discordActionsGuild: false,
     discordActionsModeration: false,
     discordActionsPolls: false,
-    discordActionsBeads: false,
+    discordActionsTasks: false,
     discordActionsBotProfile: false,
     messageHistoryBudget: 0,
     summaryEnabled: false,

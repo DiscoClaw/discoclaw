@@ -44,7 +44,7 @@ function baseParams(metrics: MetricsRegistry, overrides: Partial<any> = {}) {
     discordActionsGuild: false,
     discordActionsModeration: false,
     discordActionsPolls: false,
-    discordActionsBeads: false,
+    discordActionsTasks: false,
     discordActionsBotProfile: false,
     messageHistoryBudget: 0,
     summaryEnabled: false,

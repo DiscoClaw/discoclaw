@@ -1,5 +1,5 @@
 import type { Client, Guild } from 'discord.js';
-import type { BeadContext } from '../discord/actions-beads.js';
+import type { TaskContext } from '../discord/actions-tasks.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
@@ -27,7 +27,7 @@ export type InitializeBeadsOpts = {
 };
 
 export type InitializeBeadsResult = {
-  beadCtx: BeadContext | undefined;
+  taskCtx: TaskContext | undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@ export async function initializeBeadsContext(
   opts: InitializeBeadsOpts,
 ): Promise<InitializeBeadsResult> {
   if (!opts.enabled) {
-    return { beadCtx: undefined };
+    return { taskCtx: undefined };
   }
 
   const effectiveForum = opts.systemBeadsForumId || opts.beadsForum || '';
@@ -53,7 +53,7 @@ export async function initializeBeadsContext(
       'beads: no forum resolved — set DISCORD_GUILD_ID or DISCOCLAW_BEADS_FORUM ' +
       '(set DISCOCLAW_BEADS_ENABLED=0 to suppress)',
     );
-    return { beadCtx: undefined };
+    return { taskCtx: undefined };
   }
 
   const tagMap = await loadTagMap(opts.beadsTagMapPath);
@@ -69,7 +69,7 @@ export async function initializeBeadsContext(
     store = new TaskStore();
   }
 
-  const beadCtx: BeadContext = {
+  const taskCtx: TaskContext = {
     beadsCwd: opts.beadsCwd,
     forumId: effectiveForum,
     tagMap,
@@ -84,7 +84,7 @@ export async function initializeBeadsContext(
     log: opts.log,
   };
 
-  return { beadCtx };
+  return { taskCtx };
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ export async function initializeBeadsContext(
 // ---------------------------------------------------------------------------
 
 export type WireBeadsSyncOpts = {
-  beadCtx: BeadContext;
+  taskCtx: TaskContext;
   client: Client;
   guild: Guild;
   guildId: string;
@@ -114,10 +114,10 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
   if (!opts.skipForumGuard) {
     initBeadsForumGuard({
       client: opts.client,
-      forumId: opts.beadCtx.forumId,
+      forumId: opts.taskCtx.forumId,
       log: opts.log,
-      store: opts.beadCtx.store,
-      tagMap: opts.beadCtx.tagMap,
+      store: opts.taskCtx.store,
+      tagMap: opts.taskCtx.tagMap,
     });
   }
 
@@ -126,16 +126,16 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
   const syncCoordinator = new BeadSyncCoordinator({
     client: opts.client,
     guild: opts.guild,
-    forumId: opts.beadCtx.forumId,
-    tagMap: opts.beadCtx.tagMap,
-    tagMapPath: opts.beadCtx.tagMapPath,
-    store: opts.beadCtx.store,
+    forumId: opts.taskCtx.forumId,
+    tagMap: opts.taskCtx.tagMap,
+    tagMapPath: opts.taskCtx.tagMapPath,
+    store: opts.taskCtx.store,
     log: opts.log,
     mentionUserId: opts.sidebarMentionUserId,
     forumCountSync: opts.forumCountSync,
     skipPhase5: opts.skipPhase5,
   });
-  opts.beadCtx.syncCoordinator = syncCoordinator;
+  opts.taskCtx.syncCoordinator = syncCoordinator;
 
   // Startup sync: fire-and-forget to avoid blocking cron init
   syncCoordinator.sync().catch((err) => {
@@ -149,12 +149,12 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
       opts.log.warn({ err }, 'beads:store-event sync failed');
     });
   };
-  const store = opts.beadCtx.store;
+  const store = opts.taskCtx.store;
   store.on('updated', triggerSync);
   store.on('closed', triggerSync);
   store.on('labeled', triggerSync);
 
-  opts.log.info({ beadsCwd: opts.beadsCwd }, 'beads:store-event watcher started');
+  opts.log.info({ beadsCwd: opts.beadsCwd }, 'tasks:store-event watcher started');
 
   return {
     stop() {

@@ -498,7 +498,7 @@ export async function executeCronAction(
           status: null,
           log: cronCtx.log,
           discordActionsEnabled: false,
-          actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
+          actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, tasks: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
           deferScheduler: cronCtx.deferScheduler,
           statsStore: cronCtx.statsStore,
         };

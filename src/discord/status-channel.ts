@@ -141,7 +141,7 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       const allZero = threadsCreated === 0 && emojisUpdated === 0 && starterMessagesUpdated === 0 && threadsArchived === 0 && statusesUpdated === 0 && tagsUpdated === 0 && (threadsReconciled ?? 0) === 0 && (orphanThreadsFound ?? 0) === 0;
       if (allZero && warnings === 0) return;
 
-      const parts: string[] = ['**Bead Sync Complete**'];
+      const parts: string[] = ['**Task Sync Complete**'];
       if (threadsCreated > 0) parts.push(`Created: ${threadsCreated}`);
       if (emojisUpdated > 0) parts.push(`Names Updated: ${emojisUpdated}`);
       if (starterMessagesUpdated > 0) parts.push(`Starters Updated: ${starterMessagesUpdated}`);
@@ -183,7 +183,7 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       const beadsStatus = data.beadsEnabled
         ? `on${data.beadDbVersion ? ` · v${data.beadDbVersion}` : ''}${data.forumResolved ? ' · forum ok' : ' · forum unresolved'}`
         : 'off';
-      lines.push(`Beads · ${beadsStatus}`);
+      lines.push(`Tasks · ${beadsStatus}`);
 
       const cronsStatus = data.cronsEnabled
         ? `on${data.cronJobCount !== undefined ? ` · ${data.cronJobCount} job${data.cronJobCount !== 1 ? 's' : ''}` : ''}`

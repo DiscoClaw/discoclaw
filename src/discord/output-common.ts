@@ -161,6 +161,32 @@ export function shouldSuppressFollowUp(
   return chars < 50;
 }
 
+/**
+ * Build a user-facing note for action types that were stripped because they
+ * were unknown or disabled by the current action category flags.
+ */
+export function buildUnavailableActionTypesNotice(strippedTypes: string[]): string {
+  const uniqueTypes = Array.from(
+    new Set(strippedTypes.map((t) => t.trim()).filter(Boolean)),
+  );
+  if (uniqueTypes.length === 0) return '';
+  const renderedTypes = uniqueTypes.map((t) => `\`${t}\``).join(', ');
+  if (uniqueTypes.length === 1) {
+    return `Ignored unavailable action type: ${renderedTypes} (unknown type or category disabled).`;
+  }
+  return `Ignored unavailable action types: ${renderedTypes} (unknown type or category disabled).`;
+}
+
+export function appendUnavailableActionTypesNotice(
+  text: string,
+  strippedTypes: string[],
+): string {
+  const notice = buildUnavailableActionTypesNotice(strippedTypes);
+  if (!notice) return text;
+  const base = String(text ?? '').trimEnd();
+  return base ? `${base}\n\n${notice}` : notice;
+}
+
 export async function sendChunks(
   channel: { send: (opts: SendOpts) => Promise<unknown> },
   text: string,

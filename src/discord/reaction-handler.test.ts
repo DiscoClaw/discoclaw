@@ -127,7 +127,7 @@ function makeParams(overrides?: Partial<Omit<BotParams, 'token'>>): Omit<BotPara
     discordActionsGuild: false,
     discordActionsModeration: false,
     discordActionsPolls: false,
-    discordActionsBeads: false,
+    discordActionsTasks: false,
     discordActionsCrons: false,
     discordActionsBotProfile: false,
     messageHistoryBudget: 0,
@@ -823,6 +823,36 @@ describe('createReactionAddHandler', () => {
     await handler(reaction as any, mockUser() as any);
 
     expect(replyObj.delete).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces unavailable action types instead of suppressing empty output', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: '<discord-action>{"type":"totallyUnknownAction"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).not.toHaveBeenCalled();
+    const lastEdit = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1]?.[0]?.content ?? '';
+    expect(lastEdit).toContain('Ignored unavailable action type:');
+    expect(lastEdit).toContain('`totallyUnknownAction`');
   });
 
   it('dispose() is called even when suppression triggers early return', async () => {

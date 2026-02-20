@@ -2,9 +2,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { TaskStore } from '../tasks/store.js';
 import { BeadThreadCache } from './bead-thread-cache.js';
 
-function makeStore(beads: Array<{ externalRef: string; title?: string }>): TaskStore {
+function makeStore(tasks: Array<{ externalRef: string; title?: string }>): TaskStore {
   const store = new TaskStore({ prefix: 'ws' });
-  for (const { externalRef, title } of beads) {
+  for (const { externalRef, title } of tasks) {
     const b = store.create({ title: title ?? 'Test' });
     store.update(b.id, { externalRef });
   }

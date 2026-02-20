@@ -29,12 +29,12 @@ describe('migrate — writeJsonl', () => {
     const path = TMP_PATH('write-load');
     await cleanup(path);
 
-    const beads: TaskData[] = [
+    const tasks: TaskData[] = [
       { id: 'ws-001', title: 'Alpha', status: 'open', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
       { id: 'ws-002', title: 'Beta', status: 'closed', closed_at: '2024-01-02T00:00:00Z', updated_at: '2024-01-02T00:00:00Z' },
     ];
 
-    await writeJsonl(path, beads);
+    await writeJsonl(path, tasks);
 
     const store = new TaskStore({ prefix: 'ws', persistPath: path });
     await store.load();
@@ -95,13 +95,13 @@ describe('migrate — writeJsonl', () => {
     const path = TMP_PATH('counter');
     await cleanup(path);
 
-    const beads: TaskData[] = [
+    const tasks: TaskData[] = [
       { id: 'ws-003', title: 'C', status: 'open' },
       { id: 'ws-001', title: 'A', status: 'open' },
       { id: 'ws-007', title: 'G', status: 'open' },
     ];
 
-    await writeJsonl(path, beads);
+    await writeJsonl(path, tasks);
 
     const store = new TaskStore({ prefix: 'ws', persistPath: path });
     await store.load();
