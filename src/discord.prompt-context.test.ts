@@ -3,22 +3,22 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-// Mock the bead thread cache so integration tests can control bead lookups.
-vi.mock('./beads/bead-thread-cache.js', () => ({
-  beadThreadCache: {
+// Mock the task thread cache so integration tests can control task lookups.
+vi.mock('./tasks/thread-cache.js', () => ({
+  taskThreadCache: {
     get: vi.fn().mockResolvedValue(null),
     invalidate: vi.fn(),
   },
 }));
 
-import { beadThreadCache } from './beads/bead-thread-cache.js';
+import { taskThreadCache } from './tasks/thread-cache.js';
 import { TaskStore } from './tasks/store.js';
 import { createMessageCreateHandler } from './discord.js';
 import { loadDurableMemory, saveDurableMemory, addItem } from './discord/durable-memory.js';
 import { inlineContextFiles } from './discord/prompt-common.js';
 import type { DurableMemoryStore } from './discord/durable-memory.js';
 
-const mockedCacheGet = vi.mocked(beadThreadCache.get);
+const mockedCacheGet = vi.mocked(taskThreadCache.get);
 
 function makeQueue() {
   return {

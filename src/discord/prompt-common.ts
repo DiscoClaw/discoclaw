@@ -8,7 +8,7 @@ import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import type { LoggerLike } from './action-types.js';
 import type { TaskData } from '../tasks/types.js';
 import type { TaskContext } from './actions-tasks.js';
-import { beadThreadCache } from '../beads/bead-thread-cache.js';
+import { taskThreadCache } from '../tasks/thread-cache.js';
 import type { RuntimeCapability } from '../runtime/types.js';
 import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';
 
@@ -247,7 +247,7 @@ export async function buildTaskThreadSection(opts: {
   if (opts.threadParentId !== forumId) return '';
 
   try {
-    const task = await beadThreadCache.get(opts.threadId, store);
+    const task = await taskThreadCache.get(opts.threadId, store);
     if (!task) return '';
     return buildTaskContextSection(task);
   } catch (err) {
