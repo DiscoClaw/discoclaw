@@ -50,6 +50,10 @@ export type ForgeOrchestratorOpts = {
   pinnedThreadSummary?: string;
 };
 
+function resolveHeaderTaskId(header: { taskId?: string; beadId: string }): string {
+  return header.taskId?.trim() || header.beadId?.trim() || '';
+}
+
 type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
 type EventFn = (evt: EngineEvent) => void;
 
@@ -405,7 +409,7 @@ export function buildPlanSummary(planContent: string): string {
 
   if (header) {
     lines.push(`**${header.planId}** — ${header.title}`);
-    lines.push(`Status: ${header.status} | Bead: \`${header.beadId}\``);
+    lines.push(`Status: ${header.status} | Task: \`${resolveHeaderTaskId(header)}\``);
     lines.push('');
   }
 
@@ -825,19 +829,20 @@ export class ForgeOrchestrator {
         }
         const draftOutput = draftPipelineResult.outputs[0] ?? '';
 
-        // Write the draft — preserve the header (planId, beadId) from the created file
+        // Write the draft — preserve the header (planId, taskId) from the created file.
         planContent = this.mergeDraftWithHeader(planContent, draftOutput);
         await this.atomicWrite(filePath, planContent);
 
-        // Update bead title to match the drafter's Plan title (raw user input is often messy).
+        // Update task title to match the drafter's Plan title (raw user input is often messy).
         const drafterTitleMatch = draftOutput.match(/^# Plan:\s*(.+)$/m);
         const mergedHeader = parsePlanFileHeader(planContent);
         const drafterTitle = drafterTitleMatch?.[1]?.trim();
-        if (mergedHeader?.beadId && drafterTitle && drafterTitle !== description) {
+        const taskId = mergedHeader ? resolveHeaderTaskId(mergedHeader) : '';
+        if (taskId && drafterTitle && drafterTitle !== description) {
           try {
-            this.opts.taskStore.update(mergedHeader.beadId, { title: drafterTitle });
+            this.opts.taskStore.update(taskId, { title: drafterTitle });
           } catch {
-            // best-effort — bead title update failure shouldn't block the forge
+            // best-effort — task title update failure shouldn't block the forge
           }
         }
       } else if (round > startRound) {

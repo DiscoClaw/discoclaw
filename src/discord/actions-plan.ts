@@ -24,6 +24,10 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 
 const DEFAULT_PLAN_PHASE_TIMEOUT_MS = 1_800_000;
 
+function resolveHeaderTaskId(header: PlanFileHeader): string {
+  return header.taskId?.trim() || header.beadId?.trim() || '';
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -102,7 +106,10 @@ export async function executePlanAction(
       filtered.sort((a, b) => a.header.planId.localeCompare(b.header.planId));
 
       const lines = filtered.map(
-        (p) => `\`${p.header.planId}\` [${p.header.status}] — ${p.header.title}${p.header.beadId ? ` (bead: \`${p.header.beadId}\`)` : ''}`,
+        (p) => {
+          const taskId = resolveHeaderTaskId(p.header);
+          return `\`${p.header.planId}\` [${p.header.status}] — ${p.header.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
+        },
       );
       return { ok: true, summary: lines.join('\n') };
     }
@@ -120,7 +127,7 @@ export async function executePlanAction(
       const lines = [
         `**${found.header.planId}** — ${found.header.title}`,
         `Status: ${found.header.status}`,
-        `Bead: \`${found.header.beadId}\``,
+        `Task: \`${resolveHeaderTaskId(found.header)}\``,
         `Project: ${found.header.project}`,
         `Created: ${found.header.created}`,
       ];
@@ -146,10 +153,11 @@ export async function executePlanAction(
 
       await updatePlanFileStatus(found.filePath, 'APPROVED');
 
-      // Update backing bead to in_progress.
-      if (found.header.beadId) {
+      // Update backing task to in_progress.
+      const taskId = resolveHeaderTaskId(found.header);
+      if (taskId) {
         try {
-          planCtx.taskStore.update(found.header.beadId, { status: 'in_progress' });
+          planCtx.taskStore.update(taskId, { status: 'in_progress' });
         } catch {
           // best-effort
         }
@@ -177,10 +185,11 @@ export async function executePlanAction(
 
       await updatePlanFileStatus(found.filePath, 'CLOSED');
 
-      // Close backing bead.
-      if (found.header.beadId) {
+      // Close backing task.
+      const taskId = resolveHeaderTaskId(found.header);
+      if (taskId) {
         try {
-          planCtx.taskStore.close(found.header.beadId, 'Plan closed');
+          planCtx.taskStore.close(taskId, 'Plan closed');
         } catch {
           // best-effort
         }
