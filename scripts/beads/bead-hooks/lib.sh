@@ -2,7 +2,7 @@
 # lib.sh — DEPRECATED: bead Discord hooks have moved in-process.
 #
 # All Discord sync is now triggered automatically via TaskStore events
-# (src/beads/bead-sync-watcher.ts). No external shell hooks are required.
+# (src/tasks/sync-watcher.ts). No external shell hooks are required.
 #
 # Utility functions below are retained only for any remaining scripts that
 # source this file; they carry no bd CLI dependency.
