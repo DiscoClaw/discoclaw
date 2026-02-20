@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { validateDiscordToken, validateSnowflake, validateSnowflakes } from '../src/validate.js';
 import { missingEnvVars } from './doctor-env-diff.js';
-import { checkRequiredForums, checkRuntimeBinaries, parseBooleanSetting } from './doctor-lib.js';
+import { checkRequiredForums, checkRuntimeBinaries } from './doctor-lib.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -114,24 +114,6 @@ for (const check of checkRuntimeBinaries(process.env, which)) {
         console.log(`  ℹ Could not parse Claude CLI version from "${claudeVersion}" (forward-compat: continuing)`);
       }
     }
-  }
-}
-
-// 3b. bd CLI (required when beads are enabled)
-const bdBin = process.env.BD_BIN || 'bd';
-const bdPath = which(bdBin);
-const beadsEnabledSetting = parseBooleanSetting(process.env, 'DISCOCLAW_BEADS_ENABLED', true);
-const beadsEnabledForBdCheck = beadsEnabledSetting.error ? true : beadsEnabledSetting.value;
-if (bdPath) {
-  ok(`bd CLI: ${bdPath}`);
-} else {
-  if (beadsEnabledForBdCheck) {
-    fail(
-      `bd CLI not found (looked for "${bdBin}")`,
-      'Beads is enabled by default and required. Install bd, set BD_BIN, or set DISCOCLAW_BEADS_ENABLED=0 to bypass.',
-    );
-  } else {
-    console.log('  ℹ bd CLI not found (beads disabled via DISCOCLAW_BEADS_ENABLED=0)');
   }
 }
 
