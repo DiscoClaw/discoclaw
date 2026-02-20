@@ -142,6 +142,43 @@ describe('parseDiscordActions', () => {
     expect(actions).toHaveLength(0);
     expect(cleanText).toBe('Before\n\nAfter');
   });
+
+  it('returns empty strippedUnrecognizedTypes when all action types are recognized', () => {
+    const input = '<discord-action>{"type":"channelList"}</discord-action>';
+    const { strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS);
+    expect(strippedUnrecognizedTypes).toEqual([]);
+  });
+
+  it('collects unrecognized type names in strippedUnrecognizedTypes (first pass)', () => {
+    const input = '<discord-action>{"type":"somethingWeird","id":"123"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toEqual(['somethingWeird']);
+  });
+
+  it('collects flag-disabled type names in strippedUnrecognizedTypes (first pass)', () => {
+    const input = '<discord-action>{"type":"channelCreate","name":"test"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, { ...ALL_FLAGS, channels: false });
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toEqual(['channelCreate']);
+  });
+
+  it('collects unrecognized type names in strippedUnrecognizedTypes (second pass / malformed block)', () => {
+    const input = '<discord-action>{"type":"unknownType","foo":"bar"}</parameter>\n</invoke>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toEqual(['unknownType']);
+  });
+
+  it('collects multiple unrecognized types across both passes', () => {
+    const input =
+      '<discord-action>{"type":"typeA"}</discord-action>' +
+      '<discord-action>{"type":"channelList"}</discord-action>' +
+      '<discord-action>{"type":"typeB"}</parameter>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelList' }]);
+    expect(strippedUnrecognizedTypes).toEqual(['typeA', 'typeB']);
+  });
 });
 
 // ---------------------------------------------------------------------------
