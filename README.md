@@ -4,7 +4,7 @@
 
 # DiscoClaw
 
-A personal AI orchestrator that turns Discord into a persistent workspace — built on three pillars: **Memory**, **Beads**, and **Crons**.
+A personal AI orchestrator that turns Discord into a persistent workspace — built on three pillars: **Memory**, **Tasks**, and **Crons**.
 
 DiscoClaw is an orchestrator: it coordinates between a user interface (Discord), one or more AI runtimes (Claude Code, OpenAI, Codex), and local system resources — managing conversation state, task routing, scheduling, and tool access. The intelligence is rented; the coordination is owned.
 
@@ -32,11 +32,11 @@ Your assistant carries context across every conversation, channel, and restart.
 
 **Why Discord fits:** channels = context boundaries, DMs = private deep context, conversation history is the raw material.
 
-## Beads — the bot tracks your work
+## Tasks — the bot tracks your work
 
 A lightweight in-process task store that syncs bidirectionally with Discord forum threads.
 
-- **Create from either side** — Ask your assistant in chat or use `!bead` commands
+- **Create from either side** — Ask your assistant in chat or use task commands
 - **Bidirectional sync** — Status, priority, and tags stay in sync between the task store and Discord threads
 - **Status emoji and auto-tagging** — Thread names show live status at a glance
 - **Discord actions** — Your assistant manages tasks through conversation: create channels, send messages, search history, run polls, and more
