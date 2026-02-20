@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../tasks/task-sync-engine.js', () => {
+vi.mock('./task-sync-engine.js', () => {
   const runTaskSync = vi.fn(async () => ({
     threadsCreated: 0,
     emojisUpdated: 0,
@@ -14,16 +14,16 @@ vi.mock('../tasks/task-sync-engine.js', () => {
   return { runTaskSync };
 });
 
-vi.mock('../tasks/thread-cache.js', () => ({
+vi.mock('./thread-cache.js', () => ({
   taskThreadCache: { invalidate: vi.fn() },
 }));
 
-vi.mock('../tasks/discord-sync.js', () => ({
+vi.mock('./discord-sync.js', () => ({
   reloadTagMapInPlace: vi.fn(async () => 2),
 }));
 
-import { BeadSyncCoordinator } from './bead-sync-coordinator.js';
-import { reloadTagMapInPlace } from '../tasks/discord-sync.js';
+import { TaskSyncCoordinator } from './sync-coordinator.js';
+import { reloadTagMapInPlace } from './discord-sync.js';
 
 function makeOpts(): any {
   return {
@@ -36,12 +36,12 @@ function makeOpts(): any {
   };
 }
 
-describe('BeadSyncCoordinator', () => {
+describe('TaskSyncCoordinator', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('calls runTaskSync and returns result', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
-    const coord = new BeadSyncCoordinator(makeOpts());
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    const coord = new TaskSyncCoordinator(makeOpts());
     const result = await coord.sync();
 
     expect(runTaskSync).toHaveBeenCalledOnce();
@@ -49,17 +49,17 @@ describe('BeadSyncCoordinator', () => {
   });
 
   it('invalidates cache after sync', async () => {
-    const { taskThreadCache } = await import('../tasks/thread-cache.js');
-    const coord = new BeadSyncCoordinator(makeOpts());
+    const { taskThreadCache } = await import('./thread-cache.js');
+    const coord = new TaskSyncCoordinator(makeOpts());
     await coord.sync();
 
     expect(taskThreadCache.invalidate).toHaveBeenCalledOnce();
   });
 
   it('passes statusPoster through to runTaskSync', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     const statusPoster = { taskSyncComplete: vi.fn() } as any;
-    const coord = new BeadSyncCoordinator(makeOpts());
+    const coord = new TaskSyncCoordinator(makeOpts());
     await coord.sync(statusPoster);
 
     expect(runTaskSync).toHaveBeenCalledWith(
@@ -68,8 +68,8 @@ describe('BeadSyncCoordinator', () => {
   });
 
   it('omits statusPoster when not provided', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
-    const coord = new BeadSyncCoordinator(makeOpts());
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    const coord = new TaskSyncCoordinator(makeOpts());
     await coord.sync();
 
     expect(runTaskSync).toHaveBeenCalledWith(
@@ -78,7 +78,7 @@ describe('BeadSyncCoordinator', () => {
   });
 
   it('returns null for concurrent call and triggers follow-up', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
 
     // Make the first sync take a while
     let resolveFirst!: () => void;
@@ -88,7 +88,7 @@ describe('BeadSyncCoordinator', () => {
       return { threadsCreated: 1, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0 };
     });
 
-    const coord = new BeadSyncCoordinator(makeOpts());
+    const coord = new TaskSyncCoordinator(makeOpts());
 
     // Start first sync (will block)
     const first = coord.sync();
@@ -110,12 +110,12 @@ describe('BeadSyncCoordinator', () => {
   });
 
   it('propagates runTaskSync errors and remains usable', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
-    const { taskThreadCache } = await import('../tasks/thread-cache.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    const { taskThreadCache } = await import('./thread-cache.js');
 
     (runTaskSync as any).mockRejectedValueOnce(new Error('Discord API down'));
 
-    const coord = new BeadSyncCoordinator(makeOpts());
+    const coord = new TaskSyncCoordinator(makeOpts());
 
     // First call should throw
     await expect(coord.sync()).rejects.toThrow('Discord API down');
@@ -130,7 +130,7 @@ describe('BeadSyncCoordinator', () => {
   });
 
   it('follow-up uses the coalesced caller statusPoster, not the running one', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
 
     let resolveFirst!: () => void;
     const firstPromise = new Promise<void>((r) => { resolveFirst = r; });
@@ -139,7 +139,7 @@ describe('BeadSyncCoordinator', () => {
       return { threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, warnings: 0 };
     });
 
-    const coord = new BeadSyncCoordinator(makeOpts());
+    const coord = new TaskSyncCoordinator(makeOpts());
     const statusPoster = { taskSyncComplete: vi.fn() } as any;
 
     // Watcher triggers sync without statusPoster
@@ -162,7 +162,7 @@ describe('BeadSyncCoordinator', () => {
   });
 
   it('logs warning when follow-up sync fails', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
 
     let resolveFirst!: () => void;
     const firstPromise = new Promise<void>((r) => { resolveFirst = r; });
@@ -174,7 +174,7 @@ describe('BeadSyncCoordinator', () => {
       .mockRejectedValueOnce(new Error('follow-up boom'));
 
     const opts = makeOpts();
-    const coord = new BeadSyncCoordinator(opts);
+    const coord = new TaskSyncCoordinator(opts);
 
     const first = coord.sync();
     await coord.sync(); // coalesce
@@ -192,14 +192,14 @@ describe('BeadSyncCoordinator', () => {
   });
 
   it('reloads tag map before runTaskSync when tagMapPath is set', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     (reloadTagMapInPlace as any).mockClear();
 
     const opts = makeOpts();
     opts.tagMapPath = '/tmp/tag-map.json';
     opts.tagMap = { bug: '111' };
 
-    const coord = new BeadSyncCoordinator(opts);
+    const coord = new TaskSyncCoordinator(opts);
     await coord.sync();
 
     expect(reloadTagMapInPlace).toHaveBeenCalledWith('/tmp/tag-map.json', opts.tagMap);
@@ -210,14 +210,14 @@ describe('BeadSyncCoordinator', () => {
   });
 
   it('preserves existing map and continues sync when tag-map reload fails', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     (reloadTagMapInPlace as any).mockRejectedValueOnce(new Error('bad json'));
 
     const opts = makeOpts();
     opts.tagMapPath = '/tmp/tag-map.json';
     opts.tagMap = { bug: '111' };
 
-    const coord = new BeadSyncCoordinator(opts);
+    const coord = new TaskSyncCoordinator(opts);
     const result = await coord.sync();
 
     // Sync still runs despite reload failure
@@ -234,14 +234,14 @@ describe('BeadSyncCoordinator', () => {
 
     const opts = makeOpts();
     // No tagMapPath set
-    const coord = new BeadSyncCoordinator(opts);
+    const coord = new TaskSyncCoordinator(opts);
     await coord.sync();
 
     expect(reloadTagMapInPlace).not.toHaveBeenCalled();
   });
 
   it('passes a tagMap snapshot to runTaskSync', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     (reloadTagMapInPlace as any).mockClear();
 
     const tagMap = { bug: '111' };
@@ -249,7 +249,7 @@ describe('BeadSyncCoordinator', () => {
     opts.tagMapPath = '/tmp/tag-map.json';
     opts.tagMap = tagMap;
 
-    const coord = new BeadSyncCoordinator(opts);
+    const coord = new TaskSyncCoordinator(opts);
     await coord.sync();
 
     // runTaskSync should receive a snapshot (different object reference)
@@ -259,7 +259,7 @@ describe('BeadSyncCoordinator', () => {
   });
 });
 
-describe('BeadSyncCoordinator deferred-close retry', () => {
+describe('TaskSyncCoordinator deferred-close retry', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -270,8 +270,8 @@ describe('BeadSyncCoordinator deferred-close retry', () => {
   });
 
   it('does not schedule retry when closesDeferred is 0', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
-    const coord = new BeadSyncCoordinator(makeOpts());
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    const coord = new TaskSyncCoordinator(makeOpts());
     await coord.sync();
 
     expect(runTaskSync).toHaveBeenCalledOnce();
@@ -283,14 +283,14 @@ describe('BeadSyncCoordinator deferred-close retry', () => {
   });
 
   it('schedules a retry sync after 30s when closesDeferred > 0', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     (runTaskSync as any).mockResolvedValueOnce({
       threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
       threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
       closesDeferred: 1,
     });
 
-    const coord = new BeadSyncCoordinator(makeOpts());
+    const coord = new TaskSyncCoordinator(makeOpts());
     await coord.sync();
 
     expect(runTaskSync).toHaveBeenCalledOnce();
@@ -302,7 +302,7 @@ describe('BeadSyncCoordinator deferred-close retry', () => {
   });
 
   it('deferred-close retry failure is logged', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     (runTaskSync as any)
       .mockResolvedValueOnce({
         threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
@@ -312,7 +312,7 @@ describe('BeadSyncCoordinator deferred-close retry', () => {
       .mockRejectedValueOnce(new Error('retry boom'));
 
     const opts = makeOpts();
-    const coord = new BeadSyncCoordinator(opts);
+    const coord = new TaskSyncCoordinator(opts);
     await coord.sync();
 
     await vi.advanceTimersByTimeAsync(30_000);

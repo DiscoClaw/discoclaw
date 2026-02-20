@@ -1,15 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { TaskStore } from '../tasks/store.js';
+import { TaskStore } from './store.js';
 import {
   TaskThreadCache,
   taskThreadCache,
   findTaskByThreadId,
-} from '../tasks/thread-cache.js';
-import {
-  BeadThreadCache,
-  beadThreadCache,
-  findBeadByThreadId,
-} from './bead-thread-cache.js';
+} from './thread-cache.js';
 
 function makeStore(tasks: Array<{ externalRef: string; title?: string }>): TaskStore {
   const store = new TaskStore({ prefix: 'ws' });
@@ -25,7 +20,7 @@ describe('TaskThreadCache', () => {
     vi.clearAllMocks();
   });
 
-  it('returns cached bead within TTL', async () => {
+  it('returns cached task within TTL', async () => {
     const cache = new TaskThreadCache(60_000);
     const store = makeStore([{ externalRef: 'discord:thread-1' }]);
     const listSpy = vi.spyOn(store, 'list');
@@ -91,7 +86,7 @@ describe('TaskThreadCache', () => {
     expect(listSpy).toHaveBeenCalledTimes(3);
   });
 
-  it('returns null when no bead matches', async () => {
+  it('returns null when no task matches', async () => {
     const cache = new TaskThreadCache(60_000);
     const store = new TaskStore();
 
@@ -113,9 +108,8 @@ describe('TaskThreadCache', () => {
     expect(listSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps bead compatibility exports aligned to canonical task exports', () => {
-    expect(BeadThreadCache).toBe(TaskThreadCache);
-    expect(beadThreadCache).toBe(taskThreadCache);
-    expect(findBeadByThreadId).toBe(findTaskByThreadId);
+  it('exposes module-level singleton and lookup export', () => {
+    expect(taskThreadCache).toBeInstanceOf(TaskThreadCache);
+    expect(typeof findTaskByThreadId).toBe('function');
   });
 });
