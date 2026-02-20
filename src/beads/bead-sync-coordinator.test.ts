@@ -13,16 +13,16 @@ vi.mock('./bead-sync.js', () => ({
   })),
 }));
 
-vi.mock('./bead-thread-cache.js', () => ({
-  beadThreadCache: { invalidate: vi.fn() },
+vi.mock('../tasks/thread-cache.js', () => ({
+  taskThreadCache: { invalidate: vi.fn() },
 }));
 
-vi.mock('./discord-sync.js', () => ({
+vi.mock('../tasks/discord-sync.js', () => ({
   reloadTagMapInPlace: vi.fn(async () => 2),
 }));
 
 import { BeadSyncCoordinator } from './bead-sync-coordinator.js';
-import { reloadTagMapInPlace } from './discord-sync.js';
+import { reloadTagMapInPlace } from '../tasks/discord-sync.js';
 
 function makeOpts(): any {
   return {
@@ -48,11 +48,11 @@ describe('BeadSyncCoordinator', () => {
   });
 
   it('invalidates cache after sync', async () => {
-    const { beadThreadCache } = await import('./bead-thread-cache.js');
+    const { taskThreadCache } = await import('../tasks/thread-cache.js');
     const coord = new BeadSyncCoordinator(makeOpts());
     await coord.sync();
 
-    expect(beadThreadCache.invalidate).toHaveBeenCalledOnce();
+    expect(taskThreadCache.invalidate).toHaveBeenCalledOnce();
   });
 
   it('passes statusPoster through to runBeadSync', async () => {
@@ -110,7 +110,7 @@ describe('BeadSyncCoordinator', () => {
 
   it('propagates runBeadSync errors and remains usable', async () => {
     const { runBeadSync } = await import('./bead-sync.js');
-    const { beadThreadCache } = await import('./bead-thread-cache.js');
+    const { taskThreadCache } = await import('../tasks/thread-cache.js');
 
     (runBeadSync as any).mockRejectedValueOnce(new Error('Discord API down'));
 
@@ -120,12 +120,12 @@ describe('BeadSyncCoordinator', () => {
     await expect(coord.sync()).rejects.toThrow('Discord API down');
 
     // Cache should not be invalidated on failure
-    expect(beadThreadCache.invalidate).not.toHaveBeenCalled();
+    expect(taskThreadCache.invalidate).not.toHaveBeenCalled();
 
     // Coordinator should still be usable for subsequent calls
     const result = await coord.sync();
     expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
-    expect(beadThreadCache.invalidate).toHaveBeenCalledOnce();
+    expect(taskThreadCache.invalidate).toHaveBeenCalledOnce();
   });
 
   it('follow-up uses the coalesced caller statusPoster, not the running one', async () => {
@@ -322,4 +322,3 @@ describe('BeadSyncCoordinator deferred-close retry', () => {
     );
   });
 });
-
