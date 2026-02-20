@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { migrateFromBd, writeJsonl } from './migrate.js';
 import { TaskStore } from './store.js';
-import type { BeadData } from '../beads/types.js';
+import type { TaskData } from './types.js';
 
 vi.mock('../beads/bd-cli.js', () => ({
   bdList: vi.fn(),
@@ -29,7 +29,7 @@ describe('migrate — writeJsonl', () => {
     const path = TMP_PATH('write-load');
     await cleanup(path);
 
-    const beads: BeadData[] = [
+    const beads: TaskData[] = [
       { id: 'ws-001', title: 'Alpha', status: 'open', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
       { id: 'ws-002', title: 'Beta', status: 'closed', closed_at: '2024-01-02T00:00:00Z', updated_at: '2024-01-02T00:00:00Z' },
     ];
@@ -44,11 +44,11 @@ describe('migrate — writeJsonl', () => {
     await cleanup(path);
   });
 
-  it('preserves all BeadData fields in the JSONL output', async () => {
+  it('preserves all TaskData fields in the JSONL output', async () => {
     const path = TMP_PATH('fields');
     await cleanup(path);
 
-    const bead: BeadData = {
+    const bead: TaskData = {
       id: 'ws-005',
       title: 'Rich task',
       status: 'in_progress',
@@ -95,7 +95,7 @@ describe('migrate — writeJsonl', () => {
     const path = TMP_PATH('counter');
     await cleanup(path);
 
-    const beads: BeadData[] = [
+    const beads: TaskData[] = [
       { id: 'ws-003', title: 'C', status: 'open' },
       { id: 'ws-001', title: 'A', status: 'open' },
       { id: 'ws-007', title: 'G', status: 'open' },
@@ -126,7 +126,7 @@ describe('migrate — migrateFromBd', () => {
     const path = TMP_PATH('bd-basic');
     await cleanup(path);
 
-    const mockBeads: BeadData[] = [
+    const mockBeads: TaskData[] = [
       { id: 'dc-001', title: 'Task one', status: 'open', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
       { id: 'dc-002', title: 'Task two', status: 'in_progress', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
     ];

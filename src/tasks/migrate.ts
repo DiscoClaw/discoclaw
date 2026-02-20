@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { bdList } from '../beads/bd-cli.js';
-import type { BeadData } from '../beads/types.js';
+import type { TaskData } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,8 +26,8 @@ export type MigrateResult = {
  * Write an array of BeadData records to a JSONL file (one JSON object per line).
  * Exported separately so tests can exercise the write path without a live bd install.
  */
-export async function writeJsonl(destPath: string, beads: BeadData[]): Promise<void> {
-  const lines = beads.map((b) => JSON.stringify(b)).join('\n');
+export async function writeJsonl(destPath: string, tasks: TaskData[]): Promise<void> {
+  const lines = tasks.map((b) => JSON.stringify(b)).join('\n');
   await fs.writeFile(destPath, lines ? lines + '\n' : '', 'utf8');
 }
 
@@ -45,12 +45,12 @@ export async function writeJsonl(destPath: string, beads: BeadData[]): Promise<v
  * `await store.load()` to make the data available in-process.
  */
 export async function migrateFromBd(opts: MigrateOptions): Promise<MigrateResult> {
-  const beads = await bdList({ status: 'all', limit: 0 }, opts.cwd);
-  if (beads.length === 0) {
+  const tasks = await bdList({ status: 'all', limit: 0 }, opts.cwd);
+  if (tasks.length === 0) {
     console.warn(
       '[migrate] bd exported zero tasks — if you expected data, check that bd is pointed at the right workspace. Writing empty JSONL.',
     );
   }
-  await writeJsonl(opts.destPath, beads);
-  return { migrated: beads.length };
+  await writeJsonl(opts.destPath, tasks);
+  return { migrated: tasks.length };
 }

@@ -1,16 +1,16 @@
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
-import type { BeadData, BeadCreateParams, BeadUpdateParams, BeadListParams } from '../beads/types.js';
+import type { TaskData, TaskCreateParams, TaskUpdateParams, TaskListParams } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Event map
 // ---------------------------------------------------------------------------
 
 type TaskStoreEventMap = {
-  created: [bead: BeadData];
-  updated: [bead: BeadData, prev: BeadData];
-  closed: [bead: BeadData];
-  labeled: [bead: BeadData, label: string];
+  created: [task: TaskData];
+  updated: [task: TaskData, prev: TaskData];
+  closed: [task: TaskData];
+  labeled: [task: TaskData, label: string];
 };
 
 // ---------------------------------------------------------------------------
@@ -30,14 +30,14 @@ export type TaskStoreOptions = {
 
 /**
  * In-process task store — an EventEmitter-backed Map that owns the read/write
- * path for bead data. Replaces the external `bd` CLI dependency.
+ * path for task data. Replaces the external `bd` CLI dependency.
  *
  * All mutations are synchronous on the in-memory store and emit typed events
  * immediately. Persistence to a JSONL file (if configured) is fire-and-forget;
  * call `flush()` to await the latest write.
  */
 export class TaskStore extends EventEmitter<TaskStoreEventMap> {
-  private readonly tasks = new Map<string, BeadData>();
+  private readonly tasks = new Map<string, TaskData>();
   private counter = 0;
   private readonly prefix: string;
   private readonly persistPath: string | undefined;
@@ -69,7 +69,7 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      const bead = JSON.parse(trimmed) as BeadData;
+      const bead = JSON.parse(trimmed) as TaskData;
       this.tasks.set(bead.id, bead);
       // Advance the counter to be ≥ the highest numeric suffix seen,
       // but only for IDs that share our prefix to avoid contamination
@@ -116,7 +116,7 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
   // ---------------------------------------------------------------------------
 
   /** Return the task with the given ID, or `undefined` if not found. */
-  get(id: string): BeadData | undefined {
+  get(id: string): TaskData | undefined {
     return this.tasks.get(id);
   }
 
@@ -129,7 +129,7 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
    * - `label`: further filter by a label string.
    * - `limit`: cap the number of results (0 or omitted = no cap).
    */
-  list(params: BeadListParams = {}): BeadData[] {
+  list(params: TaskListParams = {}): TaskData[] {
     let results = [...this.tasks.values()];
 
     if (params.status === 'all') {
@@ -157,7 +157,7 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
    * (case-insensitive, trimmed). Optionally filter by label.
    * Returns the first match, or null if none found.
    */
-  findByTitle(title: string, opts?: { label?: string }): BeadData | null {
+  findByTitle(title: string, opts?: { label?: string }): TaskData | null {
     const normalized = title.trim().toLowerCase();
     if (!normalized) return null;
 
@@ -178,9 +178,9 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
   // ---------------------------------------------------------------------------
 
   /** Create a new task. Emits `"created"` synchronously. */
-  create(params: BeadCreateParams): BeadData {
+  create(params: TaskCreateParams): TaskData {
     const now = new Date().toISOString();
-    const bead: BeadData = {
+    const bead: TaskData = {
       id: this.generateId(),
       title: params.title,
       status: 'open',
@@ -199,11 +199,11 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
   }
 
   /** Update fields on an existing task. Emits `"updated"` synchronously. */
-  update(id: string, params: BeadUpdateParams): BeadData {
+  update(id: string, params: TaskUpdateParams): TaskData {
     const prev = this.tasks.get(id);
     if (!prev) throw new Error(`task not found: ${id}`);
     const now = new Date().toISOString();
-    const updated: BeadData = {
+    const updated: TaskData = {
       ...prev,
       ...(params.title !== undefined && { title: params.title }),
       ...(params.description !== undefined && { description: params.description }),
@@ -220,11 +220,11 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
   }
 
   /** Close a task. Emits `"closed"` synchronously. */
-  close(id: string, reason?: string): BeadData {
+  close(id: string, reason?: string): TaskData {
     const prev = this.tasks.get(id);
     if (!prev) throw new Error(`task not found: ${id}`);
     const now = new Date().toISOString();
-    const closed: BeadData = {
+    const closed: TaskData = {
       ...prev,
       status: 'closed',
       closed_at: now,
@@ -238,12 +238,12 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
   }
 
   /** Add a label to a task. No-op (returns existing task) if already present. Emits `"labeled"` synchronously. */
-  addLabel(id: string, label: string): BeadData {
+  addLabel(id: string, label: string): TaskData {
     const prev = this.tasks.get(id);
     if (!prev) throw new Error(`task not found: ${id}`);
     if (prev.labels?.includes(label)) return prev;
     const now = new Date().toISOString();
-    const updated: BeadData = {
+    const updated: TaskData = {
       ...prev,
       labels: [...(prev.labels ?? []), label],
       updated_at: now,
@@ -255,12 +255,12 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
   }
 
   /** Remove a label from a task. No-op (returns existing task) if label is absent. Emits `"updated"` synchronously. */
-  removeLabel(id: string, label: string): BeadData {
+  removeLabel(id: string, label: string): TaskData {
     const prev = this.tasks.get(id);
     if (!prev) throw new Error(`task not found: ${id}`);
     if (!prev.labels?.includes(label)) return prev;
     const now = new Date().toISOString();
-    const updated: BeadData = {
+    const updated: TaskData = {
       ...prev,
       labels: prev.labels.filter((l) => l !== label),
       updated_at: now,

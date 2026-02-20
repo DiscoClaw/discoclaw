@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TaskStore } from './store.js';
-import type { BeadData } from '../beads/types.js';
+import type { TaskData } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -73,7 +73,7 @@ describe('TaskStore — create', () => {
   });
 
   it('emits "created" event synchronously', () => {
-    const emitted: BeadData[] = [];
+    const emitted: TaskData[] = [];
     store.on('created', (b) => emitted.push(b));
     const t = store.create({ title: 'T' });
     expect(emitted).toHaveLength(1);
@@ -232,7 +232,7 @@ describe('TaskStore — update', () => {
 
   it('emits "updated" with next bead and previous bead', () => {
     const t = store.create({ title: 'T' });
-    const events: Array<[BeadData, BeadData]> = [];
+    const events: Array<[TaskData, TaskData]> = [];
     store.on('updated', (b, prev) => events.push([b, prev]));
     store.update(t.id, { title: 'Updated' });
     expect(events).toHaveLength(1);
@@ -242,7 +242,7 @@ describe('TaskStore — update', () => {
 
   it('does not mutate the previous snapshot passed to the event', () => {
     const t = store.create({ title: 'T' });
-    let capturedPrev: BeadData | undefined;
+    let capturedPrev: TaskData | undefined;
     store.on('updated', (_, prev) => { capturedPrev = prev; });
     store.update(t.id, { title: 'Updated' });
     expect(capturedPrev?.title).toBe('T');
@@ -288,7 +288,7 @@ describe('TaskStore — close', () => {
 
   it('emits "closed" event synchronously', () => {
     const t = store.create({ title: 'T' });
-    const events: BeadData[] = [];
+    const events: TaskData[] = [];
     store.on('closed', (b) => events.push(b));
     store.close(t.id);
     expect(events).toHaveLength(1);
@@ -339,7 +339,7 @@ describe('TaskStore — addLabel', () => {
 
   it('emits "labeled" event with the bead and label', () => {
     const t = store.create({ title: 'T' });
-    const events: Array<[BeadData, string]> = [];
+    const events: Array<[TaskData, string]> = [];
     store.on('labeled', (b, label) => events.push([b, label]));
     store.addLabel(t.id, 'plan');
     expect(events).toHaveLength(1);
@@ -384,7 +384,7 @@ describe('TaskStore — removeLabel', () => {
 
   it('emits "updated" when a label is removed', () => {
     const t = store.create({ title: 'T', labels: ['plan'] });
-    const events: Array<[BeadData, BeadData]> = [];
+    const events: Array<[TaskData, TaskData]> = [];
     store.on('updated', (b, prev) => events.push([b, prev]));
     store.removeLabel(t.id, 'plan');
     expect(events).toHaveLength(1);

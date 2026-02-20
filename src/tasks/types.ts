@@ -58,6 +58,29 @@ export type TaskListParams = {
   limit?: number;
 };
 
+export type TaskCloseParams = {
+  reason?: string;
+};
+
+export type TaskSyncResult = {
+  threadsCreated: number;
+  emojisUpdated: number;
+  starterMessagesUpdated: number;
+  threadsArchived: number;
+  statusesUpdated: number;
+  tagsUpdated: number;
+  warnings: number;
+  /** Threads archived because their task was closed but the thread wasn't archived. */
+  threadsReconciled?: number;
+  /** Threads whose [NNN] token didn't match any local task. */
+  orphanThreadsFound?: number;
+  /** Thread closures skipped because an in-flight reply was active in that thread. */
+  closesDeferred?: number;
+};
+
+/** Tag name → Discord forum tag ID. */
+export type TagMap = Record<string, string>;
+
 /** Status → emoji prefix for thread names. */
 export const STATUS_EMOJI: Record<TaskStatus, string> = {
   open: '\u{1F7E2}',        // 🟢
