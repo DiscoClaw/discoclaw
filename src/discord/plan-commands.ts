@@ -106,7 +106,7 @@ export function parsePlanFileHeader(content: string): PlanFileHeader | null {
   };
 }
 
-function resolveHeaderTaskId(header: PlanFileHeader): string {
+export function resolvePlanHeaderTaskId(header: PlanFileHeader): string {
   return header.taskId?.trim() || header.beadId?.trim() || '';
 }
 
@@ -177,7 +177,7 @@ export async function findPlanFile(plansDir: string, id: string): Promise<{ file
     const content = await fs.readFile(filePath, 'utf-8');
     const header = parsePlanFileHeader(content);
     if (!header) continue;
-    const taskId = resolveHeaderTaskId(header);
+    const taskId = resolvePlanHeaderTaskId(header);
     if (header.planId === id || taskId === id || (normalizedId && header.planId === normalizedId)) {
       return { filePath, header };
     }
@@ -319,7 +319,7 @@ export async function handlePlanCommand(
 
       // Create backing task — or reuse existing one from task thread context.
       let taskId: string;
-      const existingTaskId = cmd.existingTaskId || cmd.existingBeadId;
+      const existingTaskId = cmd.existingTaskId ?? cmd.existingBeadId;
       if (existingTaskId) {
         taskId = existingTaskId;
         // Ensure the reused task has the 'plan' label for label-based filtering.
@@ -417,7 +417,7 @@ export async function handlePlanCommand(
 
       const lines = plans.map(
         (p) => {
-          const taskId = resolveHeaderTaskId(p);
+          const taskId = resolvePlanHeaderTaskId(p);
           return `- \`${p.planId}\` [${p.status}] — ${p.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
         },
       );
@@ -455,7 +455,7 @@ export async function handlePlanCommand(
       return [
         `**${found.header.planId}** — ${found.header.title}`,
         `Status: ${found.header.status}`,
-        `Task: \`${resolveHeaderTaskId(found.header)}\``,
+        `Task: \`${resolvePlanHeaderTaskId(found.header)}\``,
         `Project: ${found.header.project}`,
         `Created: ${found.header.created}`,
         '',
@@ -476,7 +476,7 @@ export async function handlePlanCommand(
       await updatePlanFileStatus(found.filePath, 'APPROVED');
 
       // Update backing task to in_progress.
-      const taskId = resolveHeaderTaskId(found.header);
+      const taskId = resolvePlanHeaderTaskId(found.header);
       if (taskId) {
         try {
           opts.taskStore.update(taskId, { status: 'in_progress' });
@@ -499,7 +499,7 @@ export async function handlePlanCommand(
       await updatePlanFileStatus(found.filePath, 'CLOSED');
 
       // Close backing task.
-      const taskId = resolveHeaderTaskId(found.header);
+      const taskId = resolvePlanHeaderTaskId(found.header);
       if (taskId) {
         try {
           opts.taskStore.close(taskId, 'Plan closed');
@@ -738,7 +738,7 @@ export async function closePlanIfComplete(
       return { closed: false, reason: 'wrong_status' };
     }
 
-    taskId = resolveHeaderTaskId(header) || undefined;
+    taskId = resolvePlanHeaderTaskId(header) || undefined;
 
     // Close the plan (under lock, as updatePlanFileStatus requires)
     await updatePlanFileStatus(planFilePath, 'CLOSED');

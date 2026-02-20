@@ -116,7 +116,7 @@ export function botProfileActionsPromptSection(): string {
 
 **botSetActivity** — Set the bot's activity text:
 \`\`\`
-<discord-action>{"type":"botSetActivity","name":"with beads","activityType":"Playing"}</discord-action>
+<discord-action>{"type":"botSetActivity","name":"with tasks","activityType":"Playing"}</discord-action>
 \`\`\`
 - \`name\` (required): The activity text shown in the bot's presence.
 - \`activityType\` (optional): One of \`Playing\` (default), \`Listening\`, \`Watching\`, \`Competing\`, \`Custom\`.

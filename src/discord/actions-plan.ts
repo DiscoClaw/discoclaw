@@ -9,6 +9,7 @@ import {
   handlePlanCommand,
   preparePlanRun,
   closePlanIfComplete,
+  resolvePlanHeaderTaskId,
   NO_PHASES_SENTINEL,
 } from './plan-commands.js';
 import type { HandlePlanCommandOpts, PlanFileHeader } from './plan-commands.js';
@@ -23,10 +24,6 @@ import {
 import { NO_MENTIONS } from './allowed-mentions.js';
 
 const DEFAULT_PLAN_PHASE_TIMEOUT_MS = 1_800_000;
-
-function resolveHeaderTaskId(header: PlanFileHeader): string {
-  return header.taskId?.trim() || header.beadId?.trim() || '';
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,7 +104,7 @@ export async function executePlanAction(
 
       const lines = filtered.map(
         (p) => {
-          const taskId = resolveHeaderTaskId(p.header);
+          const taskId = resolvePlanHeaderTaskId(p.header);
           return `\`${p.header.planId}\` [${p.header.status}] — ${p.header.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
         },
       );
@@ -127,7 +124,7 @@ export async function executePlanAction(
       const lines = [
         `**${found.header.planId}** — ${found.header.title}`,
         `Status: ${found.header.status}`,
-        `Task: \`${resolveHeaderTaskId(found.header)}\``,
+        `Task: \`${resolvePlanHeaderTaskId(found.header)}\``,
         `Project: ${found.header.project}`,
         `Created: ${found.header.created}`,
       ];
@@ -154,7 +151,7 @@ export async function executePlanAction(
       await updatePlanFileStatus(found.filePath, 'APPROVED');
 
       // Update backing task to in_progress.
-      const taskId = resolveHeaderTaskId(found.header);
+      const taskId = resolvePlanHeaderTaskId(found.header);
       if (taskId) {
         try {
           planCtx.taskStore.update(taskId, { status: 'in_progress' });
@@ -186,7 +183,7 @@ export async function executePlanAction(
       await updatePlanFileStatus(found.filePath, 'CLOSED');
 
       // Close backing task.
-      const taskId = resolveHeaderTaskId(found.header);
+      const taskId = resolvePlanHeaderTaskId(found.header);
       if (taskId) {
         try {
           planCtx.taskStore.close(taskId, 'Plan closed');

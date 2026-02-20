@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { handlePlanCommand, parsePlanFileHeader } from './plan-commands.js';
+import { handlePlanCommand, parsePlanFileHeader, resolvePlanHeaderTaskId } from './plan-commands.js';
 import type { TaskStore } from '../tasks/store.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 import type { LoggerLike } from './action-types.js';
@@ -53,10 +53,6 @@ export type ForgeOrchestratorOpts = {
   /** Optional pinned-thread summary to expose to the drafter. */
   pinnedThreadSummary?: string;
 };
-
-function resolveHeaderTaskId(header: { taskId?: string; beadId?: string }): string {
-  return header.taskId?.trim() || header.beadId?.trim() || '';
-}
 
 type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
 type EventFn = (evt: EngineEvent) => void;
@@ -413,7 +409,7 @@ export function buildPlanSummary(planContent: string): string {
 
   if (header) {
     lines.push(`**${header.planId}** — ${header.title}`);
-    lines.push(`Status: ${header.status} | Task: \`${resolveHeaderTaskId(header)}\``);
+    lines.push(`Status: ${header.status} | Task: \`${resolvePlanHeaderTaskId(header)}\``);
     lines.push('');
   }
 
@@ -842,7 +838,7 @@ export class ForgeOrchestrator {
         const drafterTitleMatch = draftOutput.match(/^# Plan:\s*(.+)$/m);
         const mergedHeader = parsePlanFileHeader(planContent);
         const drafterTitle = drafterTitleMatch?.[1]?.trim();
-        const taskId = mergedHeader ? resolveHeaderTaskId(mergedHeader) : '';
+        const taskId = mergedHeader ? resolvePlanHeaderTaskId(mergedHeader) : '';
         if (taskId && drafterTitle && drafterTitle !== description) {
           try {
             this.opts.taskStore.update(taskId, { title: drafterTitle });

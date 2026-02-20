@@ -9,6 +9,9 @@ import { TaskStore } from '../tasks/store.js';
 // ---------------------------------------------------------------------------
 
 vi.mock('./plan-commands.js', () => ({
+  resolvePlanHeaderTaskId: vi.fn((header: { taskId?: string; beadId?: string }) =>
+    header.taskId?.trim() || header.beadId?.trim() || '',
+  ),
   findPlanFile: vi.fn(async (_dir: string, id: string) => {
     if (id === 'plan-notfound') return null;
     if (id === 'plan-implementing') {

@@ -290,7 +290,7 @@ export async function executeChannelAction(
         return { ok: false, error: 'threadEdit requires at least one of appliedTags or name' };
       }
 
-      // Cache-first fetch, same pattern as fetchThreadChannel in bead sync.
+      // Cache-first fetch, same pattern as fetchThreadChannel in task sync.
       let thread: ThreadChannel | null = null;
       const cached = ctx.client.channels.cache.get(action.threadId);
       if (cached && cached.isThread()) {
