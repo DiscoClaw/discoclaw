@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { bdList } from '../beads/bd-cli.js';
+import { bdList } from './bd-cli.js';
 import type { TaskData } from './types.js';
 
 // ---------------------------------------------------------------------------

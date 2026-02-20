@@ -3,11 +3,11 @@ import { migrateFromBd, writeJsonl } from './migrate.js';
 import { TaskStore } from './store.js';
 import type { TaskData } from './types.js';
 
-vi.mock('../beads/bd-cli.js', () => ({
+vi.mock('./bd-cli.js', () => ({
   bdList: vi.fn(),
 }));
 
-import { bdList } from '../beads/bd-cli.js';
+import { bdList } from './bd-cli.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

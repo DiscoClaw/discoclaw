@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { parseBdJson, normalizeBeadData, bdShow, bdList, bdFindByTitle, ensureBdDatabaseReady, buildBeadContextSummary } from './bd-cli.js';
+import { parseBdJson as parseTaskBdJson, bdList as taskBdList } from '../tasks/bd-cli.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
 import type { BeadData } from './types.js';
@@ -20,6 +21,11 @@ vi.mock('node:fs/promises', () => ({
 // ---------------------------------------------------------------------------
 
 describe('parseBdJson', () => {
+  it('keeps compatibility exports aligned to canonical task bd-cli', () => {
+    expect(parseBdJson).toBe(parseTaskBdJson);
+    expect(bdList).toBe(taskBdList);
+  });
+
   it('parses array output', () => {
     const input = JSON.stringify([
       { id: 'ws-001', title: 'Test', status: 'open' },
