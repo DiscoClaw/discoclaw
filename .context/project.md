@@ -27,7 +27,6 @@ Plans that grow too large fail — they blow past token limits, cause audit/revi
 
 ### Scope limits
 - A plan should target **3–5 files** max. If a feature touches more, decompose into multiple sequential plans before drafting.
-- If a plan requires more than **3 new exported functions/types**, it's too big. Split it.
 
 ### Size limits
 - Plan content (excluding the Audit Log section) should not exceed **200 lines**. If the draft exceeds this, the scope is too large.
