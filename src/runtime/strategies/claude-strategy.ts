@@ -154,8 +154,13 @@ export const claudeStrategy: CliAdapterStrategy = {
           const ts = getToolState(ctx);
           const buf = ts.inputBufs.get(idx);
           if (buf !== undefined) ts.inputBufs.set(idx, buf + delta.partial_json);
+          // Signal activity so the progress stall timer resets — tool input
+          // generation is real work, not a thinking spiral.
+          return { activity: true };
         }
-        // thinking_delta, input_json_delta, signature_delta, etc. — consumed, no text.
+        // thinking_delta, signature_delta, etc. — consumed, no text, no activity signal.
+        // thinking_delta intentionally does NOT set activity: the spiral detector
+        // is specifically designed to catch long thinking spans with no output.
         return {};
       }
 

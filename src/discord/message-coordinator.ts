@@ -775,7 +775,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const planCtx: PlanContext = {
           plansDir,
           workspaceCwd: params.workspaceCwd,
-          taskStore: params.beadCtx?.store ?? new TaskStore(),
+          taskStore: params.planCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
           log: params.log,
           depth: 0,
           runtime: params.runtime,
@@ -920,7 +920,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (planCmd) {
               const planOpts = {
                 workspaceCwd: params.workspaceCwd,
-                taskStore: params.beadCtx?.store ?? new TaskStore(),
+                taskStore: params.planCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
                 maxContextFiles: params.planPhaseMaxContextFiles,
               };
 
@@ -1433,7 +1433,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   model: resolveModel(params.runtimeModel, params.runtime.id),
                   cwd: resumeProjectCwd,
                   workspaceCwd: params.workspaceCwd,
-                  taskStore: params.beadCtx?.store ?? new TaskStore(),
+                  taskStore: params.forgeCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
                   plansDir,
                   maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
                   progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,
@@ -1529,7 +1529,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 model: resolveModel(params.runtimeModel, params.runtime.id),
                 cwd: params.projectCwd,
                 workspaceCwd: params.workspaceCwd,
-                taskStore: params.beadCtx?.store ?? new TaskStore(),
+                taskStore: params.forgeCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
                 plansDir,
                 maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
                 progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,

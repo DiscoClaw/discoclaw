@@ -318,6 +318,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
                 resetProgressTimer();
               }
               if (parsed.inToolUse === false) inToolUse = false;
+            } else if (parsed.activity) {
+              // Non-text activity (e.g. tool input generation) — reset the
+              // progress stall timer so legitimate work isn't killed.
+              resetProgressTimer();
             }
 
             // Handle result text.
