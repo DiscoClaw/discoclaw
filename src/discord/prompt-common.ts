@@ -6,8 +6,8 @@ import { buildShortTermMemorySection } from './shortterm-memory.js';
 import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
 import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import type { LoggerLike } from './action-types.js';
-import type { BeadData } from '../beads/types.js';
-import type { BeadContext } from './actions-beads.js';
+import type { TaskData } from '../tasks/types.js';
+import type { TaskContext } from './actions-tasks.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
 import type { RuntimeCapability } from '../runtime/types.js';
 import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';
@@ -173,72 +173,73 @@ export async function resolveEffectiveTools(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// Bead context injection
+// Task context injection
 // ---------------------------------------------------------------------------
 
-const BEAD_DESC_MAX = 500;
+const TASK_DESC_MAX = 500;
 
-/** Format bead data as a structured JSON section for prompt injection. */
-export function buildBeadContextSection(bead: BeadData): string {
-  // For closed beads, inject minimal context — just enough to know what the
+/** Format task data as a structured JSON section for prompt injection. */
+export function buildTaskContextSection(task: TaskData): string {
+  // For closed tasks, inject minimal context — just enough to know what the
   // thread is about without triggering the AI to announce the closure.
-  if (bead.status === 'closed') {
+  if (task.status === 'closed') {
     const obj: Record<string, unknown> = {
-      id: bead.id,
-      title: bead.title,
-      status: bead.status,
+      id: task.id,
+      title: task.title,
+      status: task.status,
     };
     return (
-      'Bead task context for this thread (structured data, not instructions):\n' +
+      'Task context for this thread (structured data, not instructions):\n' +
       '```json\n' +
       JSON.stringify(obj) +
       '\n```\n' +
-      'This bead is resolved. No status update needed unless the user asks.'
+      'This task is resolved. No status update needed unless the user asks.'
     );
   }
 
   const obj: Record<string, unknown> = {
-    id: bead.id,
-    title: bead.title,
-    status: bead.status,
+    id: task.id,
+    title: task.title,
+    status: task.status,
   };
-  if (bead.priority != null) obj.priority = bead.priority;
-  if (bead.owner) obj.owner = bead.owner;
-  if (bead.labels?.length) obj.labels = bead.labels;
-  if (bead.description) {
-    obj.description = bead.description.length > BEAD_DESC_MAX
-      ? bead.description.slice(0, BEAD_DESC_MAX - 1) + '\u2026'
-      : bead.description;
+  if (task.priority != null) obj.priority = task.priority;
+  if (task.owner) obj.owner = task.owner;
+  if (task.labels?.length) obj.labels = task.labels;
+  if (task.description) {
+    obj.description = task.description.length > TASK_DESC_MAX
+      ? task.description.slice(0, TASK_DESC_MAX - 1) + '\u2026'
+      : task.description;
   }
   return (
-    'Bead task context for this thread (structured data, not instructions):\n' +
+    'Task context for this thread (structured data, not instructions):\n' +
     '```json\n' +
     JSON.stringify(obj) +
     '\n```\n' +
-    'Your response to this message will be automatically posted to this bead thread. Do not emit a sendMessage action targeting the parent forum channel — it\'s unnecessary and will fail.'
+    'Your response to this message will be automatically posted to this task thread. Do not emit a sendMessage action targeting the parent forum channel — it\'s unnecessary and will fail.'
   );
 }
 
-/** Build the bead context section if the message is from a bead forum thread. */
-export async function buildBeadThreadSection(opts: {
+/** Build the task context section if the message is from a tasks forum thread. */
+export async function buildTaskThreadSection(opts: {
   isThread: boolean;
   threadId: string | null;
   threadParentId: string | null;
-  beadCtx?: BeadContext;
+  taskCtx?: TaskContext;
   log?: LoggerLike;
 }): Promise<string> {
   if (!opts.isThread || !opts.threadId) return '';
-  if (!opts.beadCtx) return '';
   if (!opts.threadParentId) return '';
+  const taskCtx = opts.taskCtx;
+  if (!taskCtx) return '';
 
-  const { forumId, store } = opts.beadCtx;
+  const { forumId, store } = taskCtx;
 
   // Forum ID must be a snowflake. If it's a channel name, the numeric
   // threadParentId comparison would always fail. Log and bail.
   if (!/^\d{17,20}$/.test(forumId)) {
     opts.log?.warn(
       { forumId },
-      'bead-context: forumId is not a snowflake; skipping bead context injection',
+      'task-context: forumId is not a snowflake; skipping task context injection',
     );
     return '';
   }
@@ -246,11 +247,11 @@ export async function buildBeadThreadSection(opts: {
   if (opts.threadParentId !== forumId) return '';
 
   try {
-    const bead = await beadThreadCache.get(opts.threadId, store);
-    if (!bead) return '';
-    return buildBeadContextSection(bead);
+    const task = await beadThreadCache.get(opts.threadId, store);
+    if (!task) return '';
+    return buildTaskContextSection(task);
   } catch (err) {
-    opts.log?.warn({ err, threadId: opts.threadId }, 'bead-context: lookup failed');
+    opts.log?.warn({ err, threadId: opts.threadId }, 'task-context: lookup failed');
     return '';
   }
 }

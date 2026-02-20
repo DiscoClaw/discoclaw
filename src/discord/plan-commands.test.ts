@@ -231,6 +231,19 @@ describe('parsePlanFileHeader', () => {
     expect(header!.beadId).toBe('');
     expect(header!.title).toBe('');
   });
+
+  it('parses task header alias as beadId', () => {
+    const content = `# Plan: Alias header test
+
+**ID:** plan-003
+**Task:** ws-task-003
+**Status:** DRAFT
+`;
+    const header = parsePlanFileHeader(content);
+    expect(header).not.toBeNull();
+    expect(header!.planId).toBe('plan-003');
+    expect(header!.beadId).toBe('ws-task-003');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -354,6 +367,29 @@ describe('handlePlanCommand', () => {
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
     expect(content).toContain('## Objective');
     expect(content).toContain('**Status:** DRAFT');
+  });
+
+  it('create — fills {{TASK_ID}} placeholder in custom template', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+    await fs.writeFile(
+      path.join(plansDir, '.plan-template.md'),
+      '# Plan: {{TITLE}}\n\n**ID:** {{PLAN_ID}}\n**Task:** {{TASK_ID}}\n**Status:** DRAFT | APPROVED\n',
+    );
+
+    const store = makeStore();
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'Custom task placeholder' },
+      baseOpts({ workspaceCwd: tmpDir, taskStore: store }),
+    );
+
+    expect(result).toContain('plan-001');
+    const beadId = store.list({ label: 'plan' })[0]!.id;
+    const files = await fs.readdir(plansDir);
+    const planFile = files.find((f) => f.startsWith('plan-001'));
+    const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+    expect(content).toContain(`**Task:** ${beadId}`);
   });
 
   it('create — appends context to plan file body and bead description without polluting slug or bead title', async () => {

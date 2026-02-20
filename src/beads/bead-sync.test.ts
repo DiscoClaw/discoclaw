@@ -33,9 +33,9 @@ vi.mock('./discord-sync.js', () => ({
   }),
 }));
 
-function makeStore(beads: any[] = []): any {
+function makeStore(tasks: any[] = []): any {
   return {
-    list: vi.fn(() => beads),
+    list: vi.fn(() => tasks),
     update: vi.fn(),
   };
 }

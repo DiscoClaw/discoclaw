@@ -51,7 +51,7 @@ The `bd` CLI integration had several structural problems:
 
 ### Updated: `src/discord/`
 
-`plan-commands.ts`, `actions-beads.ts`, `actions-forge.ts`, `actions-plan.ts`,
+`plan-commands.ts`, `actions-tasks.ts`, `actions-forge.ts`, `actions-plan.ts`,
 `forge-commands.ts`, and `message-coordinator.ts` now accept and use a `TaskStore`
 instance (`taskStore` / `store` field) instead of importing `bd-cli` functions.
 

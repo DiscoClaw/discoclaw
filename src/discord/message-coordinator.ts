@@ -14,7 +14,7 @@ import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
-import type { BeadContext } from './actions-beads.js';
+import type { TaskContext } from './actions-tasks.js';
 import type { CronContext } from './actions-crons.js';
 import type { ForgeContext } from './actions-forge.js';
 import { executePlanAction } from './actions-plan.js';
@@ -51,12 +51,12 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed } from './output-utils.js';
-import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
+import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
 import { buildBeadContextSummary } from '../beads/bd-cli.js';
 import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
-import { editThenSendChunks, shouldSuppressFollowUp } from './output-common.js';
+import { editThenSendChunks, shouldSuppressFollowUp, appendUnavailableActionTypesNotice } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { resolveReplyReference } from './reply-reference.js';
 import { resolveThreadContext } from './thread-context.js';
@@ -116,7 +116,7 @@ export type BotParams = {
   discordActionsGuild: boolean;
   discordActionsModeration: boolean;
   discordActionsPolls: boolean;
-  discordActionsBeads: boolean;
+  discordActionsTasks?: boolean;
   discordActionsCrons?: boolean;
   discordActionsBotProfile?: boolean;
   discordActionsForge?: boolean;
@@ -127,7 +127,7 @@ export type BotParams = {
   deferMaxDelaySeconds?: number;
   deferMaxConcurrent?: number;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
-  beadCtx?: BeadContext;
+  taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
   planCtx?: PlanContext;
@@ -209,12 +209,13 @@ type ConversationContextResult = {
 
 async function gatherConversationContext(opts: ConversationContextOptions): Promise<ConversationContextResult> {
   const { msg, params, isThread, threadId, threadParentId } = opts;
+  const taskCtx = params.taskCtx;
 
   let existingBeadId: string | undefined;
-  if (isThread && threadId && threadParentId && params.beadCtx) {
-    if (threadParentId === params.beadCtx.forumId) {
+  if (isThread && threadId && threadParentId && taskCtx) {
+    if (threadParentId === taskCtx.forumId) {
       try {
-        const bead = await beadThreadCache.get(threadId, params.beadCtx.store);
+        const bead = await beadThreadCache.get(threadId, taskCtx.store);
         if (bead) existingBeadId = bead.id;
       } catch {
         // best-effort — fall through to create a new bead
@@ -260,7 +261,7 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
   );
 
   const context = contextParts.length > 0 ? contextParts.join('\n\n') : undefined;
-  return { context, pinnedSummary, existingBeadId };
+  return { context, pinnedSummary, existingBeadId: existingBeadId };
 }
 
 async function resolvePinnedMessagesSummary(
@@ -388,7 +389,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         guild: params.discordActionsGuild,
         moderation: params.discordActionsModeration,
         polls: params.discordActionsPolls,
-        beads: params.discordActionsBeads,
+        tasks: params.discordActionsTasks,
         crons: params.discordActionsCrons ?? false,
         botProfile: params.discordActionsBotProfile ?? false,
         forge: params.discordActionsForge ?? false,
@@ -487,8 +488,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           reactionHandlerEnabled: params.reactionHandlerEnabled,
           reactionRemoveHandlerEnabled: params.reactionRemoveHandlerEnabled,
           cronEnabled: Boolean(params.cronCtx),
-          beadsEnabled: Boolean(params.beadCtx),
-          beadsActive: Boolean(params.beadCtx),
+          beadsEnabled: Boolean(params.taskCtx),
+          beadsActive: Boolean(params.taskCtx),
           requireChannelContext: params.requireChannelContext,
           autoIndexChannelContext: params.autoIndexChannelContext,
         };
@@ -775,7 +776,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const planCtx: PlanContext = {
           plansDir,
           workspaceCwd: params.workspaceCwd,
-          taskStore: params.planCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
+          taskStore: params.planCtx?.taskStore ?? (params.taskCtx)?.store ?? new TaskStore(),
           log: params.log,
           depth: 0,
           runtime: params.runtime,
@@ -920,7 +921,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (planCmd) {
               const planOpts = {
                 workspaceCwd: params.workspaceCwd,
-                taskStore: params.planCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
+                taskStore: params.planCtx?.taskStore ?? (params.taskCtx)?.store ?? new TaskStore(),
                 maxContextFiles: params.planPhaseMaxContextFiles,
               };
 
@@ -1177,7 +1178,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       params.log,
                     );
                     if (closeResult.closed) {
-                      await editSummary(summaryMsg + '\n\nPlan and backing bead auto-closed.');
+                      await editSummary(summaryMsg + '\n\nPlan and backing task auto-closed.');
                     }
                   })().then(
                     () => { /* success — cleanup handled by outer finally */ },
@@ -1433,7 +1434,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   model: resolveModel(params.runtimeModel, params.runtime.id),
                   cwd: resumeProjectCwd,
                   workspaceCwd: params.workspaceCwd,
-                  taskStore: params.forgeCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
+                  taskStore: params.forgeCtx?.taskStore ?? (params.taskCtx)?.store ?? new TaskStore(),
                   plansDir,
                   maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
                   progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,
@@ -1508,7 +1509,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 threadParentId,
               });
 
-              const beadSummary = buildBeadContextSummary(ctxResult.existingBeadId, params.beadCtx?.store, params.log);
+              const beadSummary = buildBeadContextSummary(
+                ctxResult.existingBeadId,
+                (params.taskCtx)?.store,
+                params.log,
+              );
 
               const forgeContextParts: string[] = [];
               if (ctxResult.context) forgeContextParts.push(ctxResult.context);
@@ -1529,7 +1534,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 model: resolveModel(params.runtimeModel, params.runtime.id),
                 cwd: params.projectCwd,
                 workspaceCwd: params.workspaceCwd,
-                taskStore: params.forgeCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
+                taskStore: params.forgeCtx?.taskStore ?? (params.taskCtx)?.store ?? new TaskStore(),
                 plansDir,
                 maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
                 progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,
@@ -1730,11 +1735,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               maxAgeMs: params.shortTermMaxAgeMs,
               log: params.log,
             }),
-            buildBeadThreadSection({
+            buildTaskThreadSection({
               isThread,
               threadId,
               threadParentId,
-              beadCtx: params.beadCtx,
+              taskCtx: params.taskCtx,
               log: params.log,
             }),
             resolveReplyReference(msg, params.botDisplayName, params.log),
@@ -2071,7 +2076,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   channelName: (msg.channel as any)?.name ?? undefined,
                 } : undefined;
                 actionResults = await executeDiscordActions(parsed.actions, actCtx, params.log, {
-                  beadCtx: params.beadCtx,
+                  taskCtx: params.taskCtx,
                   cronCtx: params.cronCtx,
                   forgeCtx: params.forgeCtx,
                   planCtx: params.planCtx,
@@ -2092,7 +2097,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   : parsed.cleanText.trimEnd();
                 // When all display lines were suppressed (e.g. sendMessage-only) and there's
                 // no prose, delete the placeholder instead of posting "(no output)".
-                if (!processedText.trim() && anyActionSucceeded && collectedImages.length === 0) {
+                if (
+                  !processedText.trim()
+                  && anyActionSucceeded
+                  && collectedImages.length === 0
+                  && strippedUnrecognizedTypes.length === 0
+                ) {
                   try { await reply.delete(); } catch { /* ignore */ }
                   replyFinalized = true;
                   params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
@@ -2112,6 +2122,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
               }
             }
+            processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
 
             // Suppression: if a follow-up response is trivially short and has no further
             // actions, suppress it to avoid posting empty messages like "Got it."
@@ -2136,7 +2147,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
                 replyFinalized = true;
               } catch (editErr: any) {
-                // Thread archived by a beadClose action — the close summary was already
+                // Thread archived by a taskClose action — the close summary was already
                 // posted inside closeBeadThread, so the only thing lost is Claude's
                 // conversational wrapper ("Done. Closing it out now.").  Swallow gracefully.
                 if (editErr?.code === 50083) {

@@ -926,13 +926,13 @@ describe('runPipeline', () => {
           steps: [
             step('ref-value', { id: 'src' }),
             step('ignored'),
-            discordStep([{ type: 'beadUpdate', note: '{{steps.src.output}}' }], { execute }),
+            discordStep([{ type: 'taskUpdate', note: '{{steps.src.output}}' }], { execute }),
           ],
           runtime: makeRuntime([{ type: 'text_final', text: 'ref-value' }, { type: 'done' }]),
         }),
       );
 
-      expect(execute).toHaveBeenCalledWith([{ type: 'beadUpdate', note: 'ref-value' }]);
+      expect(execute).toHaveBeenCalledWith([{ type: 'taskUpdate', note: 'ref-value' }]);
     });
 
     it('interpolates string values inside nested objects and arrays', async () => {
@@ -943,7 +943,7 @@ describe('runPipeline', () => {
           steps: [
             step('v'),
             discordStep(
-              [{ type: 'beadUpdate', nested: { key: '{{prev.output}}' }, tags: ['tag-{{prev.output}}'] }],
+              [{ type: 'taskUpdate', nested: { key: '{{prev.output}}' }, tags: ['tag-{{prev.output}}'] }],
               { execute },
             ),
           ],
@@ -952,7 +952,7 @@ describe('runPipeline', () => {
       );
 
       expect(execute).toHaveBeenCalledWith([
-        { type: 'beadUpdate', nested: { key: 'v' }, tags: ['tag-v'] },
+        { type: 'taskUpdate', nested: { key: 'v' }, tags: ['tag-v'] },
       ]);
     });
 

@@ -6,45 +6,76 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { TagMap, TaskData, TaskStatus, TaskSyncResult } from '../tasks/types.js';
 import type { BeadSyncCoordinator } from '../beads/bead-sync-coordinator.js';
 import type { ForumCountSync } from './forum-count-sync.js';
-
-/** Pre-computed set for filtering status names from tag candidates. */
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
-const STATUS_NAME_SET = new Set<string>(TASK_STATUSES);
 import type { TaskStore } from '../tasks/store.js';
 import {
-  resolveBeadsForum,
-  createBeadThread,
-  closeBeadThread,
-  updateBeadThreadName,
-  updateBeadStarterMessage,
-  updateBeadThreadTags,
+  resolveTasksForum,
+  createTaskThread,
+  closeTaskThread,
+  updateTaskThreadName,
+  updateTaskStarterMessage,
+  updateTaskThreadTags,
   ensureUnarchived,
-  getThreadIdFromBead,
+  getThreadIdFromTask,
   reloadTagMapInPlace,
+  findExistingThreadForTask,
 } from '../beads/discord-sync.js';
 import { autoTagBead } from '../beads/auto-tag.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
+
+/** Pre-computed set for filtering status names from tag candidates. */
+const STATUS_NAME_SET = new Set<string>(TASK_STATUSES);
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+type TaskCreatePayload = {
+  title: string;
+  description?: string;
+  priority?: number;
+  tags?: string;
+};
+
+type TaskUpdatePayload = {
+  taskId?: string;
+  title?: string;
+  description?: string;
+  priority?: number;
+  status?: string;
+};
+
+type TaskClosePayload = {
+  taskId?: string;
+  reason?: string;
+};
+
+type TaskShowPayload = {
+  taskId?: string;
+};
+
+type TaskListPayload = {
+  status?: string;
+  label?: string;
+  limit?: number;
+};
+
 export type TaskActionRequest =
-  | { type: 'beadCreate'; title: string; description?: string; priority?: number; tags?: string }
-  | { type: 'beadUpdate'; beadId: string; title?: string; description?: string; priority?: number; status?: string }
-  | { type: 'beadClose'; beadId: string; reason?: string }
-  | { type: 'beadShow'; beadId: string }
-  | { type: 'beadList'; status?: string; label?: string; limit?: number }
-  | { type: 'beadSync' }
+  | ({ type: 'taskCreate' } & TaskCreatePayload)
+  | ({ type: 'taskUpdate' } & TaskUpdatePayload)
+  | ({ type: 'taskClose' } & TaskClosePayload)
+  | ({ type: 'taskShow' } & TaskShowPayload)
+  | ({ type: 'taskList' } & TaskListPayload)
+  | { type: 'taskSync' }
   | { type: 'tagMapReload' };
 
 const TASK_TYPE_MAP: Record<TaskActionRequest['type'], true> = {
-  beadCreate: true,
-  beadUpdate: true,
-  beadClose: true,
-  beadShow: true,
-  beadList: true,
-  beadSync: true,
+  taskCreate: true,
+  taskUpdate: true,
+  taskClose: true,
+  taskShow: true,
+  taskList: true,
+  taskSync: true,
   tagMapReload: true,
 };
 export const TASK_ACTION_TYPES = new Set<string>(Object.keys(TASK_TYPE_MAP));
@@ -66,6 +97,10 @@ export type TaskContext = {
   forumCountSync?: ForumCountSync;
 };
 
+function resolveTaskId(action: { taskId?: string }): string {
+  return (action.taskId ?? '').trim();
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -76,9 +111,9 @@ export async function executeTaskAction(
   taskCtx: TaskContext,
 ): Promise<DiscordActionResult> {
   switch (action.type) {
-    case 'beadCreate': {
+    case 'taskCreate': {
       if (!action.title) {
-        return { ok: false, error: 'beadCreate requires a title' };
+        return { ok: false, error: 'taskCreate requires a title' };
       }
 
       // Resolve labels from tags string (comma-separated).
@@ -87,7 +122,7 @@ export async function executeTaskAction(
         labels.push(...action.tags.split(',').map((t) => t.trim()).filter(Boolean));
       }
 
-      const bead = taskCtx.store.create({
+      const task = taskCtx.store.create({
         title: action.title,
         description: action.description,
         priority: action.priority,
@@ -95,13 +130,13 @@ export async function executeTaskAction(
       });
 
       // Auto-tag if enabled and we have available tags (excluding status tags).
-      const tagNames = Object.keys(taskCtx.tagMap).filter(k => !STATUS_NAME_SET.has(k));
+      const tagNames = Object.keys(taskCtx.tagMap).filter((k) => !STATUS_NAME_SET.has(k));
       if (taskCtx.autoTag && tagNames.length > 0) {
         try {
           const suggestedTags = await autoTagBead(
             taskCtx.runtime,
-            bead.title,
-            bead.description ?? '',
+            task.title,
+            task.description ?? '',
             tagNames,
             { model: taskCtx.autoTagModel, cwd: taskCtx.beadsCwd },
           );
@@ -109,170 +144,179 @@ export async function executeTaskAction(
             if (!labels.includes(tag)) labels.push(tag);
           }
           for (const tag of suggestedTags) {
-            try { taskCtx.store.addLabel(bead.id, `tag:${tag}`); } catch {}
+            try {
+              taskCtx.store.addLabel(task.id, `tag:${tag}`);
+            } catch {
+              // best-effort
+            }
           }
         } catch (err) {
-          taskCtx.log?.warn({ err, beadId: bead.id }, 'beads:auto-tag failed');
+          taskCtx.log?.warn({ err, taskId: task.id }, 'tasks:auto-tag failed');
         }
       }
 
-      // Create Discord thread.
+      // Create Discord thread (idempotent: dedupe by [NNN] token before create).
       let threadId = '';
       try {
-        // Honor no-thread policy across all implementations.
-        if (labels.includes('no-thread') || (bead.labels ?? []).includes('no-thread')) {
-          // Skip thread creation.
+        if (labels.includes('no-thread') || (task.labels ?? []).includes('no-thread')) {
+          // Explicit no-thread policy.
         } else {
-          const forum = await resolveBeadsForum(ctx.guild, taskCtx.forumId);
+          const forum = await resolveTasksForum(ctx.guild, taskCtx.forumId);
           if (forum) {
-          // Merge auto-tag labels into bead data for thread creation.
-          const beadForThread: TaskData = { ...bead, labels };
-          threadId = await createBeadThread(forum, beadForThread, taskCtx.tagMap, taskCtx.mentionUserId);
+            // Prefer an existing thread if one is already present for this task.
+            const existing = await findExistingThreadForTask(forum as ForumChannel, task.id);
+            if (existing) {
+              threadId = existing;
+            } else {
+              const taskForThread: TaskData = { ...task, labels };
+              threadId = await createTaskThread(forum as ForumChannel, taskForThread, taskCtx.tagMap, taskCtx.mentionUserId);
+            }
 
-          // Link thread ID back to bead via external_ref.
-          try {
-            taskCtx.store.update(bead.id, { externalRef: `discord:${threadId}` });
-          } catch (err) {
-            taskCtx.log?.warn({ err, beadId: bead.id, threadId }, 'beads:external-ref update failed');
-          }
+            // Backfill thread link if needed. Re-check store for concurrent updates.
+            try {
+              const latest = taskCtx.store.get(task.id) ?? task;
+              const currentThreadId = getThreadIdFromTask(latest);
+              if (currentThreadId !== threadId) {
+                taskCtx.store.update(task.id, { externalRef: `discord:${threadId}` });
+              }
+            } catch (err) {
+              taskCtx.log?.warn({ err, taskId: task.id, threadId }, 'tasks:external-ref update failed');
+            }
           }
         }
       } catch (err) {
-        taskCtx.log?.warn({ err, beadId: bead.id }, 'beads:thread creation failed');
+        taskCtx.log?.warn({ err, taskId: task.id }, 'tasks:thread creation failed');
       }
 
       beadThreadCache.invalidate();
       taskCtx.forumCountSync?.requestUpdate();
-      const threadNote = threadId ? ` (thread created)` : '';
-      return { ok: true, summary: `Bead ${bead.id} created: "${bead.title}"${threadNote}` };
+      const threadNote = threadId ? ' (thread linked)' : '';
+      return { ok: true, summary: `Task ${task.id} created: "${task.title}"${threadNote}` };
     }
 
-    case 'beadUpdate': {
-      if (!action.beadId) {
-        return { ok: false, error: 'beadUpdate requires beadId' };
+    case 'taskUpdate': {
+      const taskId = resolveTaskId(action);
+      if (!taskId) {
+        return { ok: false, error: 'taskUpdate requires taskId' };
       }
 
       if (action.status && !isTaskStatus(action.status)) {
-        return { ok: false, error: `Invalid bead status: "${action.status}"` };
+        return { ok: false, error: `Invalid task status: "${action.status}"` };
       }
 
-      const bead = taskCtx.store.update(
-        action.beadId,
-        {
-          title: action.title,
-          description: action.description,
-          priority: action.priority,
-          status: action.status as TaskStatus | undefined,
-        },
-      );
+      const task = taskCtx.store.update(taskId, {
+        title: action.title,
+        description: action.description,
+        priority: action.priority,
+        status: action.status as TaskStatus | undefined,
+      });
 
-      // Update thread name if bead has a linked thread.
-      const threadId = getThreadIdFromBead(bead);
+      // Update thread details if task has a linked thread.
+      const threadId = getThreadIdFromTask(task);
       if (threadId) {
         try {
           await ensureUnarchived(ctx.client, threadId);
-          await updateBeadThreadName(ctx.client, threadId, bead);
+          await updateTaskThreadName(ctx.client, threadId, task);
         } catch (err) {
-          taskCtx.log?.warn({ err, beadId: action.beadId, threadId }, 'beads:thread name update failed');
+          taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:thread name update failed');
         }
         try {
-          await updateBeadStarterMessage(ctx.client, threadId, bead, taskCtx.sidebarMentionUserId);
+          await updateTaskStarterMessage(ctx.client, threadId, task, taskCtx.sidebarMentionUserId);
         } catch (err) {
-          taskCtx.log?.warn({ err, beadId: action.beadId, threadId }, 'beads:starter message update failed');
+          taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:starter message update failed');
         }
         try {
-          await updateBeadThreadTags(ctx.client, threadId, bead, taskCtx.tagMap);
+          await updateTaskThreadTags(ctx.client, threadId, task, taskCtx.tagMap);
         } catch (err) {
-          taskCtx.log?.warn({ err, beadId: action.beadId, threadId }, 'beads:thread tag update failed');
+          taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:thread tag update failed');
         }
       }
 
       beadThreadCache.invalidate();
       if (action.status) taskCtx.forumCountSync?.requestUpdate();
+
       const changes: string[] = [];
       if (action.title) changes.push(`title → "${action.title}"`);
       if (action.status) changes.push(`status → ${action.status}`);
       if (action.priority != null) changes.push(`priority → P${action.priority}`);
-      return { ok: true, summary: `Bead ${action.beadId} updated: ${changes.join(', ') || 'no changes'}` };
+      return { ok: true, summary: `Task ${taskId} updated: ${changes.join(', ') || 'no changes'}` };
     }
 
-    case 'beadClose': {
-      if (!action.beadId) {
-        return { ok: false, error: 'beadClose requires beadId' };
+    case 'taskClose': {
+      const taskId = resolveTaskId(action);
+      if (!taskId) {
+        return { ok: false, error: 'taskClose requires taskId' };
       }
 
-      const bead = taskCtx.store.close(action.beadId, action.reason);
+      const task = taskCtx.store.close(taskId, action.reason);
 
-      // Close thread.
-      const threadId = getThreadIdFromBead(bead);
+      const threadId = getThreadIdFromTask(task);
       if (threadId) {
         try {
-          await closeBeadThread(ctx.client, threadId, bead, taskCtx.tagMap, taskCtx.log);
+          await closeTaskThread(ctx.client, threadId, task, taskCtx.tagMap, taskCtx.log);
         } catch (err) {
-          taskCtx.log?.warn({ err, beadId: action.beadId, threadId }, 'beads:thread close failed');
+          taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:thread close failed');
         }
       }
 
       beadThreadCache.invalidate();
       taskCtx.forumCountSync?.requestUpdate();
-      return { ok: true, summary: `Bead ${action.beadId} closed${action.reason ? `: ${action.reason}` : ''}` };
+      return { ok: true, summary: `Task ${taskId} closed${action.reason ? `: ${action.reason}` : ''}` };
     }
 
-    case 'beadShow': {
-      if (!action.beadId) {
-        return { ok: false, error: 'beadShow requires beadId' };
+    case 'taskShow': {
+      const taskId = resolveTaskId(action);
+      if (!taskId) {
+        return { ok: false, error: 'taskShow requires taskId' };
       }
 
-      const bead = taskCtx.store.get(action.beadId);
-      if (!bead) {
-        return { ok: false, error: `Bead "${action.beadId}" not found` };
+      const task = taskCtx.store.get(taskId);
+      if (!task) {
+        return { ok: false, error: `Task "${taskId}" not found` };
       }
 
       const lines = [
-        `**${bead.title}** (\`${bead.id}\`)`,
-        `Status: ${bead.status} | Priority: P${bead.priority}`,
+        `**${task.title}** (\`${task.id}\`)`,
+        `Status: ${task.status} | Priority: P${task.priority}`,
       ];
-      if (bead.owner) lines.push(`Owner: ${bead.owner}`);
-      if (bead.labels?.length) lines.push(`Labels: ${bead.labels.join(', ')}`);
-      if (bead.description) lines.push(`\n${bead.description.slice(0, 500)}`);
+      if (task.owner) lines.push(`Owner: ${task.owner}`);
+      if (task.labels?.length) lines.push(`Labels: ${task.labels.join(', ')}`);
+      if (task.description) lines.push(`\n${task.description.slice(0, 500)}`);
       return { ok: true, summary: lines.join('\n') };
     }
 
-    case 'beadList': {
-      // Default to 50 for interactive queries to avoid unbounded prompt payloads.
-      const beads = taskCtx.store.list({
+    case 'taskList': {
+      const tasks = taskCtx.store.list({
         status: action.status,
         label: action.label,
         limit: action.limit ?? 50,
       });
 
-      if (beads.length === 0) {
-        return { ok: true, summary: 'No beads found matching the filter.' };
+      if (tasks.length === 0) {
+        return { ok: true, summary: 'No tasks found matching the filter.' };
       }
 
-      const lines = beads.map(
-        (b) => `\`${b.id}\` [${b.status}] P${b.priority} — ${b.title}`,
+      const lines = tasks.map(
+        (t) => `\`${t.id}\` [${t.status}] P${t.priority} — ${t.title}`,
       );
       return { ok: true, summary: lines.join('\n') };
     }
 
-    case 'beadSync': {
+    case 'taskSync': {
       try {
         let result: TaskSyncResult;
         if (taskCtx.syncCoordinator) {
-          // Use coordinator: passes statusPoster for user-initiated syncs.
           const coordResult = await taskCtx.syncCoordinator.sync(taskCtx.statusPoster);
           if (!coordResult) {
             return { ok: true, summary: 'Sync already running; changes will be picked up.' };
           }
           result = coordResult;
         } else {
-          // Fallback: no coordinator (watcher not initialized).
           if (taskCtx.tagMapPath) {
             try {
               await reloadTagMapInPlace(taskCtx.tagMapPath, taskCtx.tagMap);
             } catch (err) {
-              taskCtx.log?.warn({ err, tagMapPath: taskCtx.tagMapPath }, 'beads:tag-map reload failed; using cached map');
+              taskCtx.log?.warn({ err, tagMapPath: taskCtx.tagMapPath }, 'tasks:tag-map reload failed; using cached map');
             }
           }
           const tagMapSnapshot = { ...taskCtx.tagMap };
@@ -290,13 +334,14 @@ export async function executeTaskAction(
           beadThreadCache.invalidate();
           taskCtx.forumCountSync?.requestUpdate();
         }
+
         return {
           ok: true,
           summary: `Sync complete: ${result.threadsCreated} created, ${result.emojisUpdated} updated, ${result.starterMessagesUpdated} starters, ${result.tagsUpdated} tags, ${result.threadsArchived} archived, ${result.statusesUpdated} status-fixes${result.threadsReconciled ? `, ${result.threadsReconciled} reconciled` : ''}${result.orphanThreadsFound ? `, ${result.orphanThreadsFound} orphans` : ''}${result.warnings ? `, ${result.warnings} warnings` : ''}`,
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        return { ok: false, error: `Bead sync failed: ${msg}` };
+        return { ok: false, error: `Task sync failed: ${msg}` };
       }
     }
 
@@ -326,45 +371,45 @@ export async function executeTaskAction(
 // ---------------------------------------------------------------------------
 
 export function taskActionsPromptSection(): string {
-  return `### Bead Task Tracking
+  return `### Task Tracking
 
-**beadCreate** — Create a new bead (task):
+**taskCreate** — Create a new task:
 \`\`\`
-<discord-action>{"type":"beadCreate","title":"Task title","description":"Optional details","priority":2,"tags":"feature,work"}</discord-action>
+<discord-action>{"type":"taskCreate","title":"Task title","description":"Optional details","priority":2,"tags":"feature,work"}</discord-action>
 \`\`\`
-- \`title\` (required): Bead title.
+- \`title\` (required): Task title.
 - \`description\` (optional): Detailed description.
 - \`priority\` (optional): 0-4 (0=highest, default 2).
 - \`tags\` (optional): Comma-separated labels/tags.
 
-**beadUpdate** — Update a bead's fields:
+**taskUpdate** — Update a task's fields:
 \`\`\`
-<discord-action>{"type":"beadUpdate","beadId":"ws-001","status":"in_progress","priority":1}</discord-action>
+<discord-action>{"type":"taskUpdate","taskId":"ws-001","status":"in_progress","priority":1}</discord-action>
 \`\`\`
-- \`beadId\` (required): Bead ID.
+- \`taskId\` (required): Task ID.
 - \`title\`, \`description\`, \`priority\`, \`status\` (optional): Fields to update.
 
-**beadClose** — Close a bead:
+**taskClose** — Close a task:
 \`\`\`
-<discord-action>{"type":"beadClose","beadId":"ws-001","reason":"Done"}</discord-action>
-\`\`\`
-
-**beadShow** — Show bead details:
-\`\`\`
-<discord-action>{"type":"beadShow","beadId":"ws-001"}</discord-action>
+<discord-action>{"type":"taskClose","taskId":"ws-001","reason":"Done"}</discord-action>
 \`\`\`
 
-**beadList** — List beads:
+**taskShow** — Show task details:
 \`\`\`
-<discord-action>{"type":"beadList","status":"open","limit":10}</discord-action>
+<discord-action>{"type":"taskShow","taskId":"ws-001"}</discord-action>
+\`\`\`
+
+**taskList** — List tasks:
+\`\`\`
+<discord-action>{"type":"taskList","status":"open","limit":10}</discord-action>
 \`\`\`
 - \`status\` (optional): Filter by status (open, in_progress, blocked, closed, all).
 - \`label\` (optional): Filter by label.
 - \`limit\` (optional): Max results.
 
-**beadSync** — Run full sync between beads DB and Discord threads:
+**taskSync** — Run full sync between local task store and Discord threads:
 \`\`\`
-<discord-action>{"type":"beadSync"}</discord-action>
+<discord-action>{"type":"taskSync"}</discord-action>
 \`\`\`
 
 **tagMapReload** — Reload tag map from disk (hot-reload without restart):
@@ -372,18 +417,18 @@ export function taskActionsPromptSection(): string {
 <discord-action>{"type":"tagMapReload"}</discord-action>
 \`\`\`
 
-#### Bead Quality Guidelines
+#### Task Quality Guidelines
 - **Title**: imperative mood, specific, <60 chars. Good: "Add retry logic to webhook handler", "Plan March Denver trip". Bad: "fix stuff".
 - **Description** should answer what/why/scope. Use markdown for structure. Include what "done" looks like for larger tasks.
 - **Priority**: P0=urgent, P1=important, P2=normal (default), P3=nice-to-have, P4=someday.
-- If the user explicitly asks to create a bead, always create it — don't second-guess.
-- Apply the same description quality standards when using beadUpdate to backfill details.
+- If the user explicitly asks to create a task, always create it.
+- Apply the same description quality standards when using taskUpdate to backfill details.
 
-#### Cross-Bead References
-When interacting with another bead, always use bead actions with its bead ID — not \`sendMessage\`, \`readMessages\`, or \`listPins\` against a thread channel name. Thread names can go stale when threads are deleted or archived, causing those actions to fail or target the wrong channel. Use the appropriate bead action instead:
-- **Read bead content**: \`beadShow <id>\`
-- **Update a bead**: \`beadUpdate <id>\`
-- **Close a bead**: \`beadClose <id>\`
-- **Find beads**: \`beadList\` (filter by status or label)
-- **Reconcile Discord threads**: \`beadSync\``;
+#### Cross-Task References
+When interacting with another task, always use task actions with its task ID, not channel-name based messaging actions:
+- **Read task content**: \`taskShow <id>\`
+- **Update a task**: \`taskUpdate <id>\`
+- **Close a task**: \`taskClose <id>\`
+- **Find tasks**: \`taskList\` (filter by status or label)
+- **Reconcile Discord threads**: \`taskSync\``;
 }

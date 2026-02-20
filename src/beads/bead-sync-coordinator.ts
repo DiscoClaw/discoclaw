@@ -52,7 +52,7 @@ export class BeadSyncCoordinator {
         try {
           await reloadTagMapInPlace(this.opts.tagMapPath, this.opts.tagMap);
         } catch (err) {
-          this.opts.log?.warn({ err, tagMapPath: this.opts.tagMapPath }, 'beads:tag-map reload failed; using cached map');
+          this.opts.log?.warn({ err, tagMapPath: this.opts.tagMapPath }, 'tasks:tag-map reload failed; using cached map');
         }
       }
       // Snapshot tagMap for deterministic behavior within this sync run
@@ -64,7 +64,7 @@ export class BeadSyncCoordinator {
         this.opts.log?.info({ closesDeferred: result.closesDeferred }, 'beads:coordinator scheduling retry for deferred closes');
         setTimeout(() => {
           this.sync().catch((err) => {
-            this.opts.log?.warn({ err }, 'beads:coordinator deferred-close retry failed');
+            this.opts.log?.warn({ err }, 'tasks:coordinator deferred-close retry failed');
           });
         }, 30_000);
       }
@@ -76,7 +76,7 @@ export class BeadSyncCoordinator {
         this.pendingStatusPoster = false;
         // Fire-and-forget follow-up for coalesced triggers.
         this.sync(pendingPoster).catch((err) => {
-          this.opts.log?.warn({ err }, 'beads:coordinator follow-up sync failed');
+          this.opts.log?.warn({ err }, 'tasks:coordinator follow-up sync failed');
         });
       }
     }

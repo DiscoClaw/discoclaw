@@ -10,7 +10,7 @@ import type { ModerationActionRequest } from './actions-moderation.js';
 import { POLL_ACTION_TYPES, executePollAction, pollActionsPromptSection } from './actions-poll.js';
 import type { PollActionRequest } from './actions-poll.js';
 import { TASK_ACTION_TYPES, executeTaskAction, taskActionsPromptSection } from './actions-tasks.js';
-import type { TaskActionRequest, TaskContext as BeadContext } from './actions-tasks.js';
+import type { TaskActionRequest, TaskContext } from './actions-tasks.js';
 import { CRON_ACTION_TYPES, executeCronAction, cronActionsPromptSection } from './actions-crons.js';
 import type { CronActionRequest, CronContext } from './actions-crons.js';
 import { BOT_PROFILE_ACTION_TYPES, executeBotProfileAction, botProfileActionsPromptSection } from './actions-bot-profile.js';
@@ -48,7 +48,7 @@ export type ActionCategoryFlags = {
   guild: boolean;
   moderation: boolean;
   polls: boolean;
-  beads: boolean;
+  tasks?: boolean;
   crons: boolean;
   botProfile: boolean;
   forge: boolean;
@@ -81,7 +81,7 @@ export type DiscordActionResult =
 import type { LoggerLike } from './action-types.js';
 
 export type SubsystemContexts = {
-  beadCtx?: BeadContext;
+  taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
   planCtx?: PlanContext;
@@ -101,7 +101,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.guild) for (const t of GUILD_ACTION_TYPES) types.add(t);
   if (flags.moderation) for (const t of MODERATION_ACTION_TYPES) types.add(t);
   if (flags.polls) for (const t of POLL_ACTION_TYPES) types.add(t);
-  if (flags.beads) for (const t of TASK_ACTION_TYPES) types.add(t);
+  if (flags.tasks) for (const t of TASK_ACTION_TYPES) types.add(t);
   if (flags.crons) for (const t of CRON_ACTION_TYPES) types.add(t);
   if (flags.botProfile) for (const t of BOT_PROFILE_ACTION_TYPES) types.add(t);
   if (flags.forge) for (const t of FORGE_ACTION_TYPES) types.add(t);
@@ -252,16 +252,9 @@ export async function executeDiscordActions(
   actions: DiscordActionRequest[],
   ctx: ActionContext,
   log?: LoggerLike,
-  beadCtxOrSubs?: BeadContext | SubsystemContexts,
-  cronCtx?: CronContext,
+  subs?: SubsystemContexts,
 ): Promise<DiscordActionResult[]> {
-  // Support both legacy positional args and new bag-style call.
-  let subs: SubsystemContexts;
-  if (beadCtxOrSubs && typeof beadCtxOrSubs === 'object' && 'beadCtx' in beadCtxOrSubs) {
-    subs = beadCtxOrSubs;
-  } else {
-    subs = { beadCtx: beadCtxOrSubs as BeadContext | undefined, cronCtx };
-  }
+  const effectiveSubs = subs ?? {};
 
   const results: DiscordActionResult[] = [];
 
@@ -282,44 +275,45 @@ export async function executeDiscordActions(
       } else if (POLL_ACTION_TYPES.has(action.type)) {
         result = await executePollAction(action as PollActionRequest, ctx);
       } else if (TASK_ACTION_TYPES.has(action.type)) {
-        if (!subs.beadCtx) {
+        const taskCtx = effectiveSubs.taskCtx;
+        if (!taskCtx) {
           result = { ok: false, error: 'Tasks subsystem not configured' };
         } else {
-          result = await executeTaskAction(action as TaskActionRequest, ctx, subs.beadCtx);
+          result = await executeTaskAction(action as TaskActionRequest, ctx, taskCtx);
         }
       } else if (CRON_ACTION_TYPES.has(action.type)) {
-        if (!subs.cronCtx) {
+        if (!effectiveSubs.cronCtx) {
           result = { ok: false, error: 'Cron subsystem not configured' };
         } else {
-          result = await executeCronAction(action as CronActionRequest, ctx, subs.cronCtx);
+          result = await executeCronAction(action as CronActionRequest, ctx, effectiveSubs.cronCtx);
         }
       } else if (BOT_PROFILE_ACTION_TYPES.has(action.type)) {
         result = await executeBotProfileAction(action as BotProfileActionRequest, ctx);
       } else if (FORGE_ACTION_TYPES.has(action.type)) {
-        if (!subs.forgeCtx) {
+        if (!effectiveSubs.forgeCtx) {
           result = { ok: false, error: 'Forge subsystem not configured' };
         } else {
-          result = await executeForgeAction(action as ForgeActionRequest, ctx, subs.forgeCtx);
+          result = await executeForgeAction(action as ForgeActionRequest, ctx, effectiveSubs.forgeCtx);
         }
       } else if (PLAN_ACTION_TYPES.has(action.type)) {
-        if (!subs.planCtx) {
+        if (!effectiveSubs.planCtx) {
           result = { ok: false, error: 'Plan subsystem not configured' };
         } else {
-          result = await executePlanAction(action as PlanActionRequest, ctx, subs.planCtx);
+          result = await executePlanAction(action as PlanActionRequest, ctx, effectiveSubs.planCtx);
         }
       } else if (MEMORY_ACTION_TYPES.has(action.type)) {
-        if (!subs.memoryCtx) {
+        if (!effectiveSubs.memoryCtx) {
           result = { ok: false, error: 'Memory subsystem not configured' };
         } else {
-          result = await executeMemoryAction(action as MemoryActionRequest, ctx, subs.memoryCtx);
+          result = await executeMemoryAction(action as MemoryActionRequest, ctx, effectiveSubs.memoryCtx);
         }
       } else if (DEFER_ACTION_TYPES.has(action.type)) {
         result = await executeDeferAction(action as DeferActionRequest, ctx);
       } else if (CONFIG_ACTION_TYPES.has(action.type)) {
-        if (!subs.configCtx) {
+        if (!effectiveSubs.configCtx) {
           result = { ok: false, error: 'Config subsystem not configured' };
         } else {
-          result = executeConfigAction(action as ConfigActionRequest, subs.configCtx);
+          result = executeConfigAction(action as ConfigActionRequest, effectiveSubs.configCtx);
         }
       } else {
         result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
@@ -404,7 +398,7 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
     sections.push(pollActionsPromptSection());
   }
 
-  if (flags.beads) {
+  if (flags.tasks) {
     sections.push(taskActionsPromptSection());
   }
 

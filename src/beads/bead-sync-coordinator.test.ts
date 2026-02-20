@@ -186,7 +186,7 @@ describe('BeadSyncCoordinator', () => {
 
     expect(opts.log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
-      'beads:coordinator follow-up sync failed',
+      'tasks:coordinator follow-up sync failed',
     );
   });
 
@@ -224,7 +224,7 @@ describe('BeadSyncCoordinator', () => {
     expect(runBeadSync).toHaveBeenCalled();
     expect(opts.log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error), tagMapPath: '/tmp/tag-map.json' }),
-      'beads:tag-map reload failed; using cached map',
+      'tasks:tag-map reload failed; using cached map',
     );
   });
 
@@ -318,7 +318,7 @@ describe('BeadSyncCoordinator deferred-close retry', () => {
 
     expect(opts.log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
-      'beads:coordinator deferred-close retry failed',
+      'tasks:coordinator deferred-close retry failed',
     );
   });
 });

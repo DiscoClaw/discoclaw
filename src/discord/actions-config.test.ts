@@ -14,7 +14,7 @@ function makeBotParams(overrides?: Partial<ConfigMutableParams>): ConfigMutableP
     forgeDrafterModel: undefined,
     forgeAuditorModel: undefined,
     cronCtx: { autoTagModel: 'fast', executorCtx: { model: 'capable' } },
-    beadCtx: { autoTagModel: 'fast' },
+    taskCtx: { autoTagModel: 'fast' },
     ...overrides,
   };
 }
@@ -180,7 +180,7 @@ describe('modelSet', () => {
     expect(result.ok).toBe(true);
     expect(ctx.botParams.summaryModel).toBe('haiku');
     expect(ctx.botParams.cronCtx!.autoTagModel).toBe('haiku');
-    expect(ctx.botParams.beadCtx!.autoTagModel).toBe('haiku');
+    expect(ctx.botParams.taskCtx!.autoTagModel).toBe('haiku');
   });
 
   it('sets forge-drafter model', () => {
@@ -251,8 +251,8 @@ describe('modelSet', () => {
     expect(result.summary).toContain('resolves to opus');
   });
 
-  it('fast role succeeds when cronCtx and beadCtx are missing', () => {
-    const ctx = makeCtx({ cronCtx: undefined, beadCtx: undefined });
+  it('fast role succeeds when cronCtx and taskCtx are missing', () => {
+    const ctx = makeCtx({ cronCtx: undefined, taskCtx: undefined });
     const result = executeConfigAction({ type: 'modelSet', role: 'fast', model: 'haiku' }, ctx);
     expect(result.ok).toBe(true);
     expect(ctx.botParams.summaryModel).toBe('haiku');

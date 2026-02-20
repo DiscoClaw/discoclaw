@@ -26,7 +26,7 @@ import { CronScheduler } from './cron/scheduler.js';
 import { executeCronJob } from './cron/executor.js';
 import { initCronForum } from './cron/forum-sync.js';
 import { CronRunControl } from './cron/run-control.js';
-import type { BeadContext } from './discord/actions-beads.js';
+import type { TaskContext } from './discord/actions-tasks.js';
 import type { CronContext } from './discord/actions-crons.js';
 import type { ForgeContext } from './discord/actions-forge.js';
 import type { PlanContext } from './discord/actions-plan.js';
@@ -56,6 +56,7 @@ import { getGitHash } from './version.js';
 import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
+import { appendUnavailableActionTypesNotice } from './discord/output-common.js';
 import { TaskStore } from './tasks/store.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
@@ -348,7 +349,7 @@ const beadsSidebar = cfg.beadsSidebar;
 const sidebarMentionUserId = beadsSidebar ? beadsMentionUser : undefined;
 const beadsAutoTag = cfg.beadsAutoTag;
 let beadsAutoTagModel = cfg.beadsAutoTagModel;
-const discordActionsBeads = cfg.discordActionsBeads;
+const discordActionsTasks = cfg.discordActionsTasks;
 const beadsTaskPrefix = cfg.beadsTaskPrefix;
 
 // Initialize shared task store (used by beads, forge, and plan subsystems).
@@ -644,7 +645,7 @@ const botParams = {
   discordActionsPolls,
   discordActionsBotProfile,
   // Enable beads/crons actions only after contexts are configured.
-  discordActionsBeads: false,
+  discordActionsTasks: false,
   discordActionsCrons: false,
   // Forge/plan/memory action flags — contexts are wired below after subsystem init.
   discordActionsForge: discordActionsForge && forgeCommandsEnabled,
@@ -655,7 +656,7 @@ const botParams = {
   deferMaxDelaySeconds: cfg.deferMaxDelaySeconds,
   deferMaxConcurrent: cfg.deferMaxConcurrent,
   deferScheduler: undefined as DeferScheduler<DeferActionRequest, ActionContext> | undefined,
-  beadCtx: undefined as BeadContext | undefined,
+  taskCtx: undefined as TaskContext | undefined,
   cronCtx: undefined as CronContext | undefined,
   forgeCtx: undefined as ForgeContext | undefined,
   planCtx: undefined as PlanContext | undefined,
@@ -789,7 +790,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
       guild: botParams.discordActionsGuild,
       moderation: botParams.discordActionsModeration,
       polls: botParams.discordActionsPolls,
-      beads: Boolean(botParams.discordActionsBeads),
+      tasks: Boolean(botParams.discordActionsTasks),
       crons: Boolean(botParams.discordActionsCrons),
       botProfile: Boolean(botParams.discordActionsBotProfile),
       forge: Boolean(botParams.discordActionsForge),
@@ -875,7 +876,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
     let actionResults: DiscordActionResult[] = [];
     if (parsed.actions.length > 0) {
       actionResults = await executeDiscordActions(parsed.actions, actCtx, log, {
-        beadCtx: botParams.beadCtx,
+        taskCtx: botParams.taskCtx,
         cronCtx: botParams.cronCtx,
         forgeCtx: botParams.forgeCtx,
         planCtx: botParams.planCtx,
@@ -889,6 +890,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
     if (displayLines.length > 0) {
       outgoingText = outgoingText ? `${outgoingText}\n\n${displayLines.join('\n')}` : displayLines.join('\n');
     }
+    outgoingText = appendUnavailableActionTypesNotice(outgoingText, parsed.strippedUnrecognizedTypes).trim();
     if (!outgoingText && runtimeError) {
       outgoingText = runtimeError;
     }
@@ -936,7 +938,7 @@ if (system) {
 await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'inflight.json'), log });
 
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
-let beadCtx: BeadContext | undefined;
+let taskCtx: TaskContext | undefined;
 if (beadsEnabled) {
   // Seed tag map from repo if data-dir copy doesn't exist yet.
   await seedTagMap(beadsTagMapSeedPath, beadsTagMapPath);
@@ -956,16 +958,16 @@ if (beadsEnabled) {
     systemBeadsForumId: system?.beadsForumId,
     store: sharedTaskStore,
   });
-  beadCtx = beadsResult.beadCtx;
+  taskCtx = beadsResult.taskCtx;
 }
 
-if (beadCtx) {
+if (taskCtx) {
   // Attach status poster now that the bot is connected (may not have been available during pre-flight).
-  if (!beadCtx.statusPoster && botStatus) {
-    beadCtx.statusPoster = botStatus;
+  if (!taskCtx.statusPoster && botStatus) {
+    taskCtx.statusPoster = botStatus;
   }
-  botParams.beadCtx = beadCtx;
-  botParams.discordActionsBeads = discordActionsBeads && beadsEnabled;
+  botParams.taskCtx = taskCtx;
+  botParams.discordActionsTasks = discordActionsTasks && beadsEnabled;
   botParams.healthConfigSnapshot.beadsActive = true;
 
   // Wire coordinator + watcher + startup sync
@@ -973,22 +975,22 @@ if (beadCtx) {
   const guild = resolvedGuildId ? client.guilds.cache.get(resolvedGuildId) : undefined;
   if (guild) {
     // Create forum count sync for beads.
-    const beadForum = await resolveBeadsForum(guild, beadCtx.forumId);
+    const beadForum = await resolveBeadsForum(guild, taskCtx.forumId);
     if (beadForum) {
       beadForumCountSync = new ForumCountSync(
         client,
         beadForum.id,
         async () => {
-          return beadCtx!.store.list({ status: 'all' }).filter((b) => b.status !== 'closed').length;
+          return taskCtx!.store.list({ status: 'all' }).filter((b) => b.status !== 'closed').length;
         },
         log,
       );
-      beadCtx.forumCountSync = beadForumCountSync;
+      taskCtx.forumCountSync = beadForumCountSync;
       beadForumCountSync.requestUpdate();
     }
 
     // Install forum guard before any async operations that touch the forum.
-    initBeadsForumGuard({ client, forumId: beadCtx.forumId, log, store: beadCtx.store, tagMap: beadCtx.tagMap });
+    initBeadsForumGuard({ client, forumId: taskCtx.forumId, log, store: taskCtx.store, tagMap: taskCtx.tagMap });
 
     // Tag bootstrap + reload BEFORE wireBeadsSync so the first sync has the correct tag map.
     if (beadForum) {
@@ -1001,7 +1003,7 @@ if (beadCtx) {
         log.warn({ err }, 'beads:tag bootstrap failed');
       }
       try {
-        await reloadTagMapInPlace(beadsTagMapPath, beadCtx.tagMap);
+        await reloadTagMapInPlace(beadsTagMapPath, taskCtx.tagMap);
       } catch (err) {
         log.warn({ err }, 'beads:tag map reload failed');
       }
@@ -1009,7 +1011,7 @@ if (beadCtx) {
 
     // Wire coordinator + watcher + startup sync (now uses correct tag map).
     const wired = await wireBeadsSync({
-      beadCtx,
+      taskCtx,
       client,
       guild,
       guildId: resolvedGuildId,
@@ -1026,7 +1028,7 @@ if (beadCtx) {
   }
 
   log.info(
-    { beadsCwd, beadsForum: beadCtx.forumId, tagCount: Object.keys(beadCtx.tagMap).length, autoTag: beadsAutoTag },
+    { beadsCwd, beadsForum: taskCtx.forumId, tagCount: Object.keys(taskCtx.tagMap).length, autoTag: beadsAutoTag },
     'beads:initialized',
   );
 }
@@ -1127,7 +1129,7 @@ if (cronEnabled && effectiveCronForum) {
     guild: discordActionsGuild,
     moderation: discordActionsModeration,
     polls: discordActionsPolls,
-    beads: discordActionsBeads && beadsEnabled && Boolean(beadCtx),
+    tasks: discordActionsTasks && beadsEnabled && Boolean(taskCtx),
     // Prevent cron jobs from mutating cron state via emitted action blocks.
     crons: false,
     botProfile: false, // Intentionally excluded from cron flows to avoid rate-limit and abuse issues.
@@ -1181,7 +1183,7 @@ if (cronEnabled && effectiveCronForum) {
     discordActionsEnabled,
     actionFlags: cronActionFlags,
     deferScheduler: botParams.deferScheduler,
-    beadCtx,
+    taskCtx,
     cronCtx,
     forgeCtx: botParams.forgeCtx,
     planCtx: botParams.planCtx,
@@ -1332,7 +1334,7 @@ if (botStatus?.bootReport) {
   if (discordActionsGuild) actionCategoriesEnabled.push('guild');
   if (discordActionsModeration) actionCategoriesEnabled.push('moderation');
   if (discordActionsPolls) actionCategoriesEnabled.push('polls');
-  if (discordActionsBeads && beadsEnabled) actionCategoriesEnabled.push('beads');
+  if (discordActionsTasks && beadsEnabled) actionCategoriesEnabled.push('tasks');
   if (discordActionsCrons && cronEnabled) actionCategoriesEnabled.push('crons');
   if (discordActionsBotProfile) actionCategoriesEnabled.push('bot-profile');
   if (discordActionsForge && forgeCommandsEnabled) actionCategoriesEnabled.push('forge');
@@ -1346,7 +1348,7 @@ if (botStatus?.bootReport) {
     shutdownRequestedBy: startupCtx.shutdown?.requestedBy,
     activeForge: startupCtx.shutdown?.activeForge,
     beadsEnabled: beadsEnabled,
-    forumResolved: Boolean(beadCtx?.forumId),
+    forumResolved: Boolean(taskCtx?.forumId),
     cronsEnabled: Boolean(cronEnabled && botParams.cronCtx),
     cronJobCount: cronScheduler?.listJobs().length,
     memoryEpisodicOn: summaryEnabled,

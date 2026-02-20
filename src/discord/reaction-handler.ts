@@ -12,8 +12,8 @@ import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { tryAbortAll } from './abort-registry.js';
 import { getActiveOrchestrator } from './forge-plan-registry.js';
-import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
-import { editThenSendChunks } from './output-common.js';
+import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
+import { editThenSendChunks, appendUnavailableActionTypesNotice } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
@@ -218,7 +218,7 @@ function createReactionHandler(
 
           const paFiles = await loadWorkspacePaFiles(params.workspaceCwd, { skip: !!params.appendSystemPrompt });
           const contextFiles = buildContextFiles(paFiles, params.discordChannelContext, channelCtx.contextPath);
-          const [durableSection, beadSection] = await Promise.all([
+          const [durableSection, taskSection] = await Promise.all([
             buildDurableMemorySection({
               enabled: params.durableMemoryEnabled,
               durableDataDir: params.durableDataDir,
@@ -226,11 +226,11 @@ function createReactionHandler(
               durableInjectMaxChars: params.durableInjectMaxChars,
               log: params.log,
             }),
-            buildBeadThreadSection({
+            buildTaskThreadSection({
               isThread,
               threadId,
               threadParentId,
-              beadCtx: params.beadCtx,
+              taskCtx: params.taskCtx,
               log: params.log,
             }),
           ]);
@@ -268,8 +268,8 @@ function createReactionHandler(
             (inlinedContext
               ? inlinedContext + '\n\n'
               : '') +
-            (beadSection
-              ? `---\n${beadSection}\n\n`
+            (taskSection
+              ? `---\n${taskSection}\n\n`
               : '') +
             (durableSection
               ? `---\nDurable memory (user-specific notes):\n${durableSection}\n\n`
@@ -338,7 +338,7 @@ function createReactionHandler(
             guild: params.discordActionsGuild,
             moderation: params.discordActionsModeration,
             polls: params.discordActionsPolls,
-            beads: params.discordActionsBeads,
+            tasks: params.discordActionsTasks,
             crons: params.discordActionsCrons ?? false,
             botProfile: params.discordActionsBotProfile ?? false,
             forge: params.discordActionsForge ?? false,
@@ -526,10 +526,12 @@ function createReactionHandler(
           let parsedActionCount = 0;
           let parsedActions: DiscordActionRequest[] = [];
           let actionResults: DiscordActionResult[] = [];
+          let strippedUnrecognizedTypes: string[] = [];
           if (params.discordActionsEnabled && msg.guild && hadTextFinal && !invokeError) {
             const parsed = parseDiscordActions(processedText, actionFlags);
             parsedActionCount = parsed.actions.length;
             parsedActions = parsed.actions;
+            strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
             if (parsed.actions.length > 0) {
               const actCtx = {
                 guild: msg.guild,
@@ -549,7 +551,7 @@ function createReactionHandler(
                 channelName: (msg.channel as any)?.name ?? undefined,
               } : undefined;
               const results = await executeDiscordActions(parsed.actions, actCtx, params.log, {
-                beadCtx: params.beadCtx,
+                taskCtx: params.taskCtx,
                 cronCtx: params.cronCtx,
                 forgeCtx: params.forgeCtx,
                 planCtx: params.planCtx,
@@ -568,7 +570,12 @@ function createReactionHandler(
                 : parsed.cleanText.trimEnd();
               // When all display lines were suppressed (e.g. sendMessage-only) and there's
               // no prose, delete the placeholder instead of posting "(no output)".
-              if (!processedText.trim() && anyActionSucceeded && collectedImages.length === 0) {
+              if (
+                !processedText.trim()
+                && anyActionSucceeded
+                && collectedImages.length === 0
+                && strippedUnrecognizedTypes.length === 0
+              ) {
                 try { await (reply as any)?.delete(); } catch { /* ignore */ }
                 replyFinalized = true;
                 params.log?.info({ sessionKey }, `${logPrefix}:reply suppressed (actions-only, no display text)`);
@@ -587,6 +594,7 @@ function createReactionHandler(
               processedText = parsed.cleanText;
             }
           }
+          processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
 
           // Suppress empty responses and the HEARTBEAT_OK sentinel — delete placeholder and bail.
           const strippedText = processedText.replace(/\s+/g, ' ').trim();

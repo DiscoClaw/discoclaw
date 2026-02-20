@@ -35,7 +35,7 @@ export type DiscoclawConfig = {
   discordActionsGuild: boolean;
   discordActionsModeration: boolean;
   discordActionsPolls: boolean;
-  discordActionsBeads: boolean;
+  discordActionsTasks: boolean;
   discordActionsCrons: boolean;
   discordActionsBotProfile: boolean;
   discordActionsForge: boolean;
@@ -348,7 +348,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsGuild = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_GUILD', false);
   const discordActionsModeration = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MODERATION', false);
   const discordActionsPolls = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_POLLS', false);
-  const discordActionsBeads = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BEADS', true);
+  const discordActionsTasks = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_TASKS', true);
   const discordActionsCrons = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_CRONS', true);
   const discordActionsBotProfile = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', false);
   const discordActionsForge = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_FORGE', false);
@@ -373,7 +373,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       { name: 'DISCOCLAW_DISCORD_ACTIONS_GUILD', enabled: discordActionsGuild },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_MODERATION', enabled: discordActionsModeration },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_POLLS', enabled: discordActionsPolls },
-      { name: 'DISCOCLAW_DISCORD_ACTIONS_BEADS', enabled: discordActionsBeads },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_TASKS', enabled: discordActionsTasks },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_CRONS', enabled: discordActionsCrons },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', enabled: discordActionsBotProfile },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_FORGE', enabled: discordActionsForge },
@@ -467,7 +467,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsGuild,
       discordActionsModeration,
       discordActionsPolls,
-      discordActionsBeads,
+      discordActionsTasks,
       discordActionsCrons,
       discordActionsBotProfile,
       discordActionsForge,

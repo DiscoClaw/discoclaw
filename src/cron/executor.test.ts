@@ -81,7 +81,7 @@ const BASE_CRON_ACTION_FLAGS: ActionCategoryFlags = {
   guild: false,
   moderation: false,
   polls: false,
-  beads: false,
+  tasks: false,
   crons: false,
   botProfile: false,
   forge: false,
@@ -269,7 +269,7 @@ describe('executeCronJob', () => {
     const ctx = makeCtx({
       runtime,
       discordActionsEnabled: true,
-      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, tasks: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
     });
     const job = makeJob();
     await executeCronJob(job, ctx);
@@ -297,7 +297,7 @@ describe('executeCronJob', () => {
     const ctx = makeCtx({
       runtime,
       discordActionsEnabled: true,
-      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, beads: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
+      actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, tasks: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
     });
     const job = makeJob();
     await executeCronJob(job, ctx);
@@ -307,6 +307,32 @@ describe('executeCronJob', () => {
     // Only one send: the action's sendMessage. No cron output post.
     expect(channel.send).toHaveBeenCalledTimes(1);
     expect(channel.send.mock.calls[0][0].content).toBe('hello');
+  });
+
+  it('posts unavailable action notice when action types are stripped', async () => {
+    const responseWithUnknownAction = '<discord-action>{"type":"totallyUnknownAction"}</discord-action>';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: responseWithUnknownAction };
+        yield { type: 'done' };
+      },
+    };
+    const ctx = makeCtx({
+      runtime,
+      discordActionsEnabled: true,
+      actionFlags: { channels: true, messaging: false, guild: false, moderation: false, polls: false, tasks: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
+    });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+    const outputContent = channel.send.mock.calls[0][0].content;
+    expect(outputContent).toContain('Ignored unavailable action type:');
+    expect(outputContent).toContain('`totallyUnknownAction`');
   });
 
   it('does not post if output is empty', async () => {

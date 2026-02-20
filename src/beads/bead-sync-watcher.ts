@@ -24,7 +24,7 @@ export function startBeadSyncWatcher(opts: BeadSyncWatcherOptions): BeadSyncWatc
 
   const triggerSync = () => {
     coordinator.sync().catch((err) => {
-      log?.warn({ err }, 'beads:watcher sync failed');
+      log?.warn({ err }, 'tasks:watcher sync failed');
     });
   };
 

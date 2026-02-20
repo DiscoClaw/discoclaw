@@ -113,7 +113,7 @@ describe('prompt inlines context file contents', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -196,7 +196,7 @@ describe('prompt inlines context file contents', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -269,7 +269,7 @@ describe('prompt inlines context file contents', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -304,7 +304,7 @@ describe('prompt inlines context file contents', () => {
 });
 
 describe('discord action flags are not frozen at handler creation', () => {
-  it('beads prompt section appears after toggling discordActionsBeads on the same params object', async () => {
+  it('tasks prompt section appears after toggling discordActionsTasks on the same params object', async () => {
     const queue = makeQueue();
     const prompts: string[] = [];
     const runtime = {
@@ -335,7 +335,7 @@ describe('discord action flags are not frozen at handler creation', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -366,12 +366,12 @@ describe('discord action flags are not frozen at handler creation', () => {
 
     await handler(makeMsg({ channelId: 'chan', content: 'first' }));
     expect(prompts[0]).toContain('## Discord Actions');
-    expect(prompts[0]).not.toContain('beadCreate');
+    expect(prompts[0]).not.toContain('taskCreate');
 
-    params.discordActionsBeads = true;
+    params.discordActionsTasks = true;
     await handler(makeMsg({ channelId: 'chan', content: 'second' }));
     expect(prompts[1]).toContain('## Discord Actions');
-    expect(prompts[1]).toContain('beadCreate');
+    expect(prompts[1]).toContain('taskCreate');
   });
 });
 
@@ -413,7 +413,7 @@ describe('durable memory injection into prompt', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -492,7 +492,7 @@ describe('workspace PA files in prompt', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -571,7 +571,7 @@ describe('workspace PA files in prompt', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -640,7 +640,7 @@ describe('workspace PA files in prompt', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -708,7 +708,7 @@ describe('memory command interception', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -784,7 +784,7 @@ function makeBeadParams(overrides?: Partial<any>) {
     discordActionsGuild: false,
     discordActionsModeration: false,
     discordActionsPolls: false,
-    discordActionsBeads: false,
+    discordActionsTasks: false,
     discordActionsBotProfile: false,
     messageHistoryBudget: 0,
     summaryEnabled: false,
@@ -808,7 +808,7 @@ function makeBeadParams(overrides?: Partial<any>) {
     reactionMaxAgeMs: 86400000,
     streamStallWarningMs: 0,
     botDisplayName: 'TestBot',
-    beadCtx: {
+    taskCtx: {
       beadsCwd: '/tmp/beads',
       forumId: BEAD_FORUM_ID,
       tagMap: {},
@@ -850,7 +850,7 @@ describe('bead context injection into prompt', () => {
     }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    expect(getPrompt()).toContain('Bead task context for this thread');
+    expect(getPrompt()).toContain('Task context for this thread');
     expect(getPrompt()).toContain('ws-042');
     expect(getPrompt()).toContain('Fix auth bug');
   });
@@ -862,7 +862,7 @@ describe('bead context injection into prompt', () => {
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    expect(getPrompt()).not.toContain('Bead task context');
+    expect(getPrompt()).not.toContain('Task context for this thread');
   });
 
   it('does not include bead section for non-bead thread channels', async () => {
@@ -882,7 +882,7 @@ describe('bead context injection into prompt', () => {
     }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    expect(getPrompt()).not.toContain('Bead task context');
+    expect(getPrompt()).not.toContain('Task context for this thread');
     // Cache should not even be called — forum ID mismatch short-circuits.
     expect(mockedCacheGet).not.toHaveBeenCalled();
   });
@@ -894,7 +894,7 @@ describe('bead context injection into prompt', () => {
     await handler(makeMsg({ channelId: 'regular-channel' }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    expect(getPrompt()).not.toContain('Bead task context');
+    expect(getPrompt()).not.toContain('Task context for this thread');
     expect(mockedCacheGet).not.toHaveBeenCalled();
   });
 });
@@ -932,7 +932,7 @@ describe('!memory remember threads Discord metadata into durable source', () => 
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -1047,7 +1047,7 @@ describe('bead resolution dispatch wiring', () => {
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsBeads: false,
+      discordActionsTasks: false,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -1073,7 +1073,7 @@ describe('bead resolution dispatch wiring', () => {
       streamStallWarningMs: 0,
       botDisplayName: 'TestBot',
       planCommandsEnabled: true,
-      beadCtx: {
+      taskCtx: {
         beadsCwd: '/tmp/beads',
         forumId: BEAD_FORUM_ID,
         tagMap: {},
@@ -1168,8 +1168,8 @@ describe('bead resolution dispatch wiring', () => {
     expect(createSpy).toHaveBeenCalled();
   });
 
-  it('!plan create without beadCtx skips bead lookup entirely', async () => {
-    const { queue, params, workspaceCwd } = makePlanForgeParams({ beadCtx: undefined });
+  it('!plan create without taskCtx skips bead lookup entirely', async () => {
+    const { queue, params, workspaceCwd } = makePlanForgeParams({ taskCtx: undefined });
     const handler = createMessageCreateHandler(params, queue);
 
     await handler(makeMsg({
