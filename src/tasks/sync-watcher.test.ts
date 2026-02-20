@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { startBeadSyncWatcher } from './bead-sync-watcher.js';
-import { startTaskSyncWatcher } from '../tasks/sync-watcher.js';
+import { startTaskSyncWatcher } from './sync-watcher.js';
 
 function makeCoordinator() {
   return {
@@ -21,15 +20,11 @@ function makeStore() {
   return new EventEmitter() as any;
 }
 
-describe('startBeadSyncWatcher', () => {
-  it('keeps compatibility export aligned to canonical task sync watcher module', () => {
-    expect(startBeadSyncWatcher).toBe(startTaskSyncWatcher);
-  });
-
+describe('startTaskSyncWatcher', () => {
   it('triggers sync on store created event', async () => {
     const coordinator = makeCoordinator();
     const store = makeStore();
-    const handle = startBeadSyncWatcher({ coordinator, store });
+    const handle = startTaskSyncWatcher({ coordinator, store });
 
     store.emit('created', {});
     await Promise.resolve();
@@ -43,7 +38,7 @@ describe('startBeadSyncWatcher', () => {
   it('triggers sync on store updated event', async () => {
     const coordinator = makeCoordinator();
     const store = makeStore();
-    const handle = startBeadSyncWatcher({ coordinator, store });
+    const handle = startTaskSyncWatcher({ coordinator, store });
 
     store.emit('updated', {}, {});
     await Promise.resolve();
@@ -56,7 +51,7 @@ describe('startBeadSyncWatcher', () => {
   it('triggers sync on store closed event', async () => {
     const coordinator = makeCoordinator();
     const store = makeStore();
-    const handle = startBeadSyncWatcher({ coordinator, store });
+    const handle = startTaskSyncWatcher({ coordinator, store });
 
     store.emit('closed', {});
     await Promise.resolve();
@@ -69,7 +64,7 @@ describe('startBeadSyncWatcher', () => {
   it('triggers sync on store labeled event', async () => {
     const coordinator = makeCoordinator();
     const store = makeStore();
-    const handle = startBeadSyncWatcher({ coordinator, store });
+    const handle = startTaskSyncWatcher({ coordinator, store });
 
     store.emit('labeled', {}, 'some-label');
     await Promise.resolve();
@@ -82,7 +77,7 @@ describe('startBeadSyncWatcher', () => {
   it('no sync fires after stop()', async () => {
     const coordinator = makeCoordinator();
     const store = makeStore();
-    const handle = startBeadSyncWatcher({ coordinator, store });
+    const handle = startTaskSyncWatcher({ coordinator, store });
 
     handle.stop();
 
@@ -95,7 +90,7 @@ describe('startBeadSyncWatcher', () => {
   it('multiple events each trigger a sync call (coordinator coalesces)', async () => {
     const coordinator = makeCoordinator();
     const store = makeStore();
-    const handle = startBeadSyncWatcher({ coordinator, store });
+    const handle = startTaskSyncWatcher({ coordinator, store });
 
     store.emit('created', {});
     store.emit('updated', {}, {});
@@ -114,7 +109,7 @@ describe('startBeadSyncWatcher', () => {
     } as any;
     const store = makeStore();
     const log = { warn: vi.fn(), info: vi.fn(), error: vi.fn() };
-    const handle = startBeadSyncWatcher({ coordinator, store, log });
+    const handle = startTaskSyncWatcher({ coordinator, store, log });
 
     store.emit('created', {});
 
