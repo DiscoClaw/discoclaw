@@ -850,6 +850,20 @@ The 🛑 reaction on the forge progress message and the `!stop` command trigger 
 ```
 → `A forge is already running. Use !forge cancel to stop it first.`
 
+### Chat messages during a forge run
+
+When a `!forge` is active, regular chat messages (non-command DMs routed to the AI runtime) are not rejected — they wait for the forge to complete, then proceed normally.
+
+The handler posts an immediate acknowledgement:
+
+```
+⏳ A forge is running — your message will be processed once it finishes.
+```
+
+and then awaits the forge's completion promise before invoking the runtime. Once the forge wraps up (success, cancellation, or error), the runtime call proceeds with the original message and the acknowledgement message is updated with the real response.
+
+This prevents the empty `(no output)` responses caused by runtime resource contention (shared concurrency slots, API rate limits, or CLI mutual exclusion) when two runtime invocations overlap during a forge run.
+
 ### Running a phase when phases are stale
 
 ```
@@ -937,6 +951,7 @@ These steps mirror the rebuild workflow in `AGENTS.md`/`TOOLS.md` and ensure we 
 - **Writer lock:** Promise-chain mutex (`workspaceWriterLock` in `discord.ts`) serializes all plan/forge file writes within a single process.
 - **Forge singleton:** Only one `ForgeOrchestrator` instance can be running at a time (module-level variable in `discord.ts`).
 - **Phase execution:** `!plan run` auto-chains all pending phases in a loop (up to `MAX_PLAN_RUN_PHASES` = 50). `!plan run-one` executes a single phase. Both are fire-and-forget from the Discord queue. The writer lock is acquired and released per-phase to avoid starvation.
+- **Forge-completion gate:** When a forge is active, chat runtime invocations (regular DMs, not `!forge`/`!plan` commands) are queued behind the forge's completion promise. The handler acknowledges the message immediately (`⏳ A forge is running — your message will be processed once it finishes.`) and awaits the forge before calling the runtime. This prevents empty `(no output)` responses caused by concurrent runtime invocations competing for shared concurrency slots, API rate limits, or CLI mutual exclusion.
 - **Single-user design:** No multi-user concurrency guards. The Discord allowlist is the access boundary.
 
 ### Command dispatch split
