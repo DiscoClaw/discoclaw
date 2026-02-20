@@ -5,8 +5,8 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { TaskStore } from '../tasks/store.js';
+import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from '../tasks/task-sync.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from '../tasks/sync-contract.js';
-import { isDirectTaskLifecycleActive } from '../tasks/task-lifecycle.js';
 import { loadTagMap } from './discord-sync.js';
 import { initBeadsForumGuard } from './forum-guard.js';
 
@@ -126,53 +126,32 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     });
   }
 
-  const { BeadSyncCoordinator } = await import('./bead-sync-coordinator.js');
+  // Preserve wire-time sidebar mention override for coordinator-triggered syncs.
+  if (opts.sidebarMentionUserId !== undefined) {
+    opts.taskCtx.sidebarMentionUserId = opts.sidebarMentionUserId;
+  }
 
-  const syncCoordinator = new BeadSyncCoordinator({
-    client: opts.client,
-    guild: opts.guild,
-    forumId: opts.taskCtx.forumId,
-    tagMap: opts.taskCtx.tagMap,
-    tagMapPath: opts.taskCtx.tagMapPath,
-    store: opts.taskCtx.store,
-    log: opts.log,
-    mentionUserId: opts.sidebarMentionUserId,
-    forumCountSync: opts.forumCountSync,
-    skipPhase5: opts.skipPhase5,
-  });
-  opts.taskCtx.syncCoordinator = syncCoordinator;
+  const syncCoordinator = await ensureTaskSyncCoordinator(
+    opts.taskCtx,
+    { client: opts.client, guild: opts.guild },
+    { skipPhase5: opts.skipPhase5 },
+  );
 
   // Startup sync: fire-and-forget to avoid blocking cron init
   syncCoordinator.sync().catch((err) => {
     opts.log.warn({ err }, 'beads:startup-sync failed');
   });
 
-  // Wire only contract-approved TaskStore mutations into coordinator sync.
-  const triggerSync = (eventName: string, taskId?: string) => {
-    syncCoordinator.sync().catch((err) => {
-      opts.log.warn({ err, eventName, taskId }, 'beads:store-event sync failed');
-    });
-  };
-  const store = opts.taskCtx.store;
-  const subscriptions = TASK_SYNC_TRIGGER_EVENTS.map((eventName) => {
-    const handler = (task: { id: string }) => {
-      const taskId = task?.id;
-      if (taskId && isDirectTaskLifecycleActive(taskId)) {
-        return;
-      }
-      triggerSync(eventName, taskId);
-    };
-    store.on(eventName, handler);
-    return { eventName, handler };
-  });
+  const subscriptions = wireTaskStoreSyncTriggers(opts.taskCtx, syncCoordinator, opts.log);
 
-  opts.log.info({ tasksCwd: opts.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS }, 'tasks:store-event watcher started');
+  opts.log.info(
+    { tasksCwd: opts.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
+    'tasks:store-event watcher started',
+  );
 
   return {
     stop() {
-      for (const sub of subscriptions) {
-        store.off(sub.eventName, sub.handler);
-      }
+      subscriptions.stop();
     },
   };
 }

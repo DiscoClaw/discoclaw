@@ -3,12 +3,13 @@ import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from './action-types.js';
 import type { StatusPoster } from './status-channel.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { TagMap, TaskData, TaskStatus, TaskSyncResult } from '../tasks/types.js';
+import type { TagMap, TaskData, TaskStatus } from '../tasks/types.js';
 import type { TaskSyncCoordinator } from '../beads/bead-sync-coordinator.js';
 import type { ForumCountSync } from './forum-count-sync.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 import { shouldActionUseDirectThreadLifecycle } from '../tasks/sync-contract.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
+import { runTaskSync } from '../tasks/task-sync.js';
 import type { TaskStore } from '../tasks/store.js';
 import {
   resolveTasksForum,
@@ -103,39 +104,8 @@ function resolveTaskId(action: { taskId?: string }): string {
   return (action.taskId ?? '').trim();
 }
 
-async function getOrCreateTaskSyncCoordinator(
-  taskCtx: TaskContext,
-  ctx: ActionContext,
-): Promise<TaskSyncCoordinator> {
-  if (taskCtx.syncCoordinator) return taskCtx.syncCoordinator;
-
-  const { BeadSyncCoordinator } = await import('../beads/bead-sync-coordinator.js');
-  const syncCoordinator = new BeadSyncCoordinator({
-    client: ctx.client,
-    guild: ctx.guild,
-    forumId: taskCtx.forumId,
-    tagMap: taskCtx.tagMap,
-    tagMapPath: taskCtx.tagMapPath,
-    store: taskCtx.store,
-    log: taskCtx.log,
-    mentionUserId: taskCtx.sidebarMentionUserId,
-    forumCountSync: taskCtx.forumCountSync,
-  });
-  taskCtx.syncCoordinator = syncCoordinator;
-  return syncCoordinator;
-}
-
-async function runTaskSync(
-  taskCtx: TaskContext,
-  ctx: ActionContext,
-  statusPoster?: StatusPoster,
-): Promise<TaskSyncResult | null> {
-  const syncCoordinator = await getOrCreateTaskSyncCoordinator(taskCtx, ctx);
-  return syncCoordinator.sync(statusPoster);
-}
-
 function scheduleRepairSync(taskCtx: TaskContext, taskId: string, ctx: ActionContext): void {
-  runTaskSync(taskCtx, ctx).catch((err) => {
+  runTaskSync(taskCtx, { client: ctx.client, guild: ctx.guild }).catch((err) => {
     taskCtx.log?.warn({ err, taskId }, 'tasks:repair sync failed');
   });
 }
@@ -380,7 +350,11 @@ export async function executeTaskAction(
 
     case 'taskSync': {
       try {
-        const result = await runTaskSync(taskCtx, ctx, taskCtx.statusPoster);
+        const result = await runTaskSync(
+          taskCtx,
+          { client: ctx.client, guild: ctx.guild },
+          taskCtx.statusPoster,
+        );
         if (!result) {
           return { ok: true, summary: 'Sync already running; changes will be picked up.' };
         }
