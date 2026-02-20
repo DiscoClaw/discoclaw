@@ -3,7 +3,7 @@ import type { Client, Guild } from 'discord.js';
 import { Client as DiscordClient, GatewayIntentBits } from 'discord.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { loadTagMap } from './discord-sync.js';
-import { runTaskSync } from './bead-sync.js';
+import { runTaskSync } from './task-sync-engine.js';
 import type { TaskStore } from './store.js';
 
 function env(name: string): string {

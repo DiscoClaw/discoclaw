@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runBeadSync } from './bead-sync.js';
-import { runBeadSync as runTaskModuleBeadSync } from '../tasks/bead-sync.js';
+import { runBeadSync as runTaskModuleBeadSync } from '../tasks/task-sync-engine.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
 
 vi.mock('../discord/inflight-replies.js', () => ({
