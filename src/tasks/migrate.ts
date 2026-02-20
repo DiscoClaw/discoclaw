@@ -14,7 +14,7 @@ export type MigrateOptions = {
 };
 
 export type MigrateResult = {
-  /** Number of beads written to destPath. */
+  /** Number of tasks written to destPath. */
   migrated: number;
 };
 
@@ -23,7 +23,7 @@ export type MigrateResult = {
 // ---------------------------------------------------------------------------
 
 /**
- * Write an array of BeadData records to a JSONL file (one JSON object per line).
+ * Write an array of TaskData records to a JSONL file (one JSON object per line).
  * Exported separately so tests can exercise the write path without a live bd install.
  */
 export async function writeJsonl(destPath: string, tasks: TaskData[]): Promise<void> {
@@ -36,7 +36,7 @@ export async function writeJsonl(destPath: string, tasks: TaskData[]): Promise<v
 // ---------------------------------------------------------------------------
 
 /**
- * One-shot migration: reads **all** beads from the bd CLI (all statuses, no
+ * One-shot migration: reads **all** tasks from the bd CLI (all statuses, no
  * limit) and writes them as JSONL to `destPath` so that `TaskStore.load()`
  * can consume them.
  *
