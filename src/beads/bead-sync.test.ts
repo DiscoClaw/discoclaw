@@ -7,7 +7,7 @@ vi.mock('../discord/inflight-replies.js', () => ({
   hasInFlightForChannel: vi.fn(() => false),
 }));
 
-vi.mock('../tasks/discord-sync.js', () => {
+vi.mock('./discord-sync.js', () => {
   const resolveTasksForum = vi.fn(async () => ({ threads: { fetchActive: vi.fn(async () => ({ threads: new Map() })), fetchArchived: vi.fn(async () => ({ threads: new Map() })) } }));
   const createTaskThread = vi.fn(async () => 'thread-new');
   const closeTaskThread = vi.fn(async () => {});
@@ -96,7 +96,7 @@ describe('runBeadSync', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('skips no-thread beads in phase 1', async () => {
-    const { createBeadThread } = await import('../tasks/discord-sync.js');
+    const { createBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-001', title: 'A', status: 'open', labels: ['no-thread'], external_ref: '' },
     ]);
@@ -115,7 +115,7 @@ describe('runBeadSync', () => {
   });
 
   it('dedupes by backfilling external_ref when a matching thread exists', async () => {
-    const { createBeadThread, findExistingThreadForBead } = await import('../tasks/discord-sync.js');
+    const { createBeadThread, findExistingThreadForBead } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-002', title: 'B', status: 'open', labels: [], external_ref: '' },
     ]);
@@ -136,7 +136,7 @@ describe('runBeadSync', () => {
   });
 
   it('re-checks latest phase 1 task state after lock wait and skips create when already linked', async () => {
-    const { createBeadThread } = await import('../tasks/discord-sync.js');
+    const { createBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-014', title: 'N', status: 'open', labels: [], external_ref: '' },
     ]);
@@ -196,7 +196,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 3 skips beads whose thread is already archived', async () => {
-    const { isThreadArchived, ensureUnarchived, updateBeadThreadName } = await import('../tasks/discord-sync.js');
+    const { isThreadArchived, ensureUnarchived, updateBeadThreadName } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-030', title: 'Archived active', status: 'in_progress', labels: [], external_ref: 'discord:300' },
     ]);
@@ -218,7 +218,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 3 processes non-archived beads through the guard', async () => {
-    const { isThreadArchived, ensureUnarchived, updateBeadThreadName } = await import('../tasks/discord-sync.js');
+    const { isThreadArchived, ensureUnarchived, updateBeadThreadName } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-031', title: 'Active bead', status: 'open', labels: [], external_ref: 'discord:301' },
     ]);
@@ -241,7 +241,7 @@ describe('runBeadSync', () => {
   });
 
   it('renames threads for active beads in phase 3 and counts changes', async () => {
-    const { ensureUnarchived, updateBeadThreadName } = await import('../tasks/discord-sync.js');
+    const { ensureUnarchived, updateBeadThreadName } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-004', title: 'D', status: 'in_progress', labels: [], external_ref: 'discord:123' },
     ]);
@@ -262,7 +262,7 @@ describe('runBeadSync', () => {
   });
 
   it('calls updateBeadStarterMessage for active beads with threads in phase 3', async () => {
-    const { updateBeadStarterMessage } = await import('../tasks/discord-sync.js');
+    const { updateBeadStarterMessage } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-010', title: 'J', status: 'in_progress', labels: [], external_ref: 'discord:456' },
     ]);
@@ -282,7 +282,7 @@ describe('runBeadSync', () => {
   });
 
   it('passes mentionUserId through to updateBeadStarterMessage in phase 3', async () => {
-    const { updateBeadStarterMessage } = await import('../tasks/discord-sync.js');
+    const { updateBeadStarterMessage } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-012', title: 'L', status: 'in_progress', labels: [], external_ref: 'discord:456' },
     ]);
@@ -302,7 +302,7 @@ describe('runBeadSync', () => {
   });
 
   it('passes mentionUserId through to createBeadThread in phase 1', async () => {
-    const { createBeadThread } = await import('../tasks/discord-sync.js');
+    const { createBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-013', title: 'M', status: 'open', labels: [], external_ref: '' },
     ]);
@@ -321,7 +321,7 @@ describe('runBeadSync', () => {
   });
 
   it('starterMessagesUpdated stays 0 when updateBeadStarterMessage returns false', async () => {
-    const { updateBeadStarterMessage } = await import('../tasks/discord-sync.js');
+    const { updateBeadStarterMessage } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-011', title: 'K', status: 'open', labels: [], external_ref: 'discord:789' },
     ]);
@@ -340,7 +340,7 @@ describe('runBeadSync', () => {
   });
 
   it('archives threads for closed beads in phase 4', async () => {
-    const { closeBeadThread } = await import('../tasks/discord-sync.js');
+    const { closeBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
     ]);
@@ -359,7 +359,7 @@ describe('runBeadSync', () => {
   });
 
   it('skips fully-closed bead threads in phase 4', async () => {
-    const { closeBeadThread, isBeadThreadAlreadyClosed } = await import('../tasks/discord-sync.js');
+    const { closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-006', title: 'F', status: 'closed', labels: [], external_ref: 'discord:888' },
     ]);
@@ -380,7 +380,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 4 uses isBeadThreadAlreadyClosed for full state check', async () => {
-    const { isBeadThreadAlreadyClosed, closeBeadThread } = await import('../tasks/discord-sync.js');
+    const { isBeadThreadAlreadyClosed, closeBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-040', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:400' },
     ]);
@@ -400,7 +400,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 4 recovers archived thread with wrong name/tags', async () => {
-    const { isBeadThreadAlreadyClosed, closeBeadThread } = await import('../tasks/discord-sync.js');
+    const { isBeadThreadAlreadyClosed, closeBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-050', title: 'Stale name', status: 'closed', labels: [], external_ref: 'discord:500' },
     ]);
@@ -454,7 +454,7 @@ describe('runBeadSync', () => {
   });
 
   it('tagsUpdated counter increments when updateBeadThreadTags returns true', async () => {
-    const { updateBeadThreadTags } = await import('../tasks/discord-sync.js');
+    const { updateBeadThreadTags } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-020', title: 'T', status: 'open', labels: [], external_ref: 'discord:777' },
     ]);
@@ -474,7 +474,7 @@ describe('runBeadSync', () => {
   });
 
   it('warnings increment when updateBeadThreadTags throws', async () => {
-    const { updateBeadThreadTags } = await import('../tasks/discord-sync.js');
+    const { updateBeadThreadTags } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-021', title: 'U', status: 'open', labels: [], external_ref: 'discord:888' },
     ]);
@@ -493,7 +493,7 @@ describe('runBeadSync', () => {
   });
 
   it('increments warnings counter on phase failures', async () => {
-    const { updateBeadThreadName } = await import('../tasks/discord-sync.js');
+    const { updateBeadThreadName } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-008', title: 'H', status: 'in_progress', labels: [], external_ref: 'discord:555' },
     ]);
@@ -512,7 +512,7 @@ describe('runBeadSync', () => {
   });
 
   it('warnings counter increments when forum is not found', async () => {
-    const { resolveBeadsForum } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum } = await import('./discord-sync.js');
     (resolveBeadsForum as any).mockResolvedValueOnce(null);
 
     const result = await runBeadSync({
@@ -547,7 +547,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 archives non-archived thread for closed bead and backfills external_ref', async () => {
-    const { resolveBeadsForum, closeBeadThread } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: '' },
     ]);
@@ -580,7 +580,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 detects orphan threads with no matching bead', async () => {
-    const { resolveBeadsForum } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum } = await import('./discord-sync.js');
     const store = makeStore([]);
 
     const mockForum = {
@@ -610,7 +610,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 skips threads with short-id collision (multiple beads)', async () => {
-    const { resolveBeadsForum, closeBeadThread } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-001', title: 'First', status: 'closed', labels: [], external_ref: '' },
       { id: 'other-001', title: 'Second', status: 'open', labels: [], external_ref: '' },
@@ -645,7 +645,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 skips thread when bead external_ref points to a different thread', async () => {
-    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-OTHER' },
     ]);
@@ -681,7 +681,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 archives thread when bead external_ref matches this thread', async () => {
-    const { resolveBeadsForum, closeBeadThread } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
@@ -715,7 +715,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 still archives thread when external_ref backfill fails', async () => {
-    const { resolveBeadsForum, closeBeadThread } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: '' },
     ]);
@@ -750,7 +750,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 skips already-archived thread for closed bead when fully reconciled', async () => {
-    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
@@ -787,7 +787,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 reconciles stale archived thread for closed bead via unarchive→edit→re-archive', async () => {
-    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
@@ -824,7 +824,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 no-ops gracefully when forum has 0 threads', async () => {
-    const { resolveBeadsForum } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum } = await import('./discord-sync.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Some bead', status: 'open', labels: [], external_ref: '' },
     ]);
@@ -852,7 +852,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 handles fetchActive API error gracefully', async () => {
-    const { resolveBeadsForum } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum } = await import('./discord-sync.js');
     const store = makeStore([]);
 
     const mockForum = {
@@ -879,7 +879,7 @@ describe('runBeadSync', () => {
   });
 
   it('calls statusPoster.taskSyncComplete in forum-not-found early return', async () => {
-    const { resolveBeadsForum } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum } = await import('./discord-sync.js');
     (resolveBeadsForum as any).mockResolvedValueOnce(null);
 
     const statusPoster = { taskSyncComplete: vi.fn(async () => {}) } as any;
@@ -899,7 +899,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 4 defers close when in-flight reply is active for that thread', async () => {
-    const { closeBeadThread } = await import('../tasks/discord-sync.js');
+    const { closeBeadThread } = await import('./discord-sync.js');
     const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
     const store = makeStore([
       { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
@@ -921,7 +921,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 defers close when in-flight reply is active for non-archived thread', async () => {
-    const { resolveBeadsForum, closeBeadThread } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
     const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: '' },
@@ -960,7 +960,7 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 defers close when in-flight reply is active for archived stale thread', async () => {
-    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('../tasks/discord-sync.js');
+    const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
     const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
