@@ -358,11 +358,3 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   if (opts.statusPoster?.taskSyncComplete) await opts.statusPoster.taskSyncComplete(result);
   return result;
 }
-
-// ---------------------------------------------------------------------------
-// Legacy compatibility aliases (remove in Phase 5 hard-cut).
-// ---------------------------------------------------------------------------
-
-export type BeadSyncOptions = TaskSyncOptions;
-export type BeadSyncResult = TaskSyncResult;
-export const runBeadSync = runTaskSync;

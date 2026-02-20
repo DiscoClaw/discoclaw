@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runBeadSync } from './bead-sync.js';
-import { runBeadSync as runTaskModuleBeadSync } from '../tasks/task-sync-engine.js';
+import { runTaskSync as runTaskModuleSync } from '../tasks/task-sync-engine.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
 
 vi.mock('../discord/inflight-replies.js', () => ({
@@ -90,7 +90,7 @@ function makeGuild(): any {
 
 describe('runBeadSync', () => {
   it('keeps compatibility export aligned to canonical task sync module', () => {
-    expect(runBeadSync).toBe(runTaskModuleBeadSync);
+    expect(runBeadSync).toBe(runTaskModuleSync);
   });
 
   beforeEach(() => vi.clearAllMocks());

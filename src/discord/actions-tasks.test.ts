@@ -42,7 +42,7 @@ vi.mock('../tasks/task-sync-engine.js', () => {
     tagsUpdated: 0,
     warnings: 0,
   }));
-  return { runTaskSync, runBeadSync: runTaskSync };
+  return { runTaskSync };
 });
 
 // ---------------------------------------------------------------------------
@@ -438,9 +438,9 @@ describe('executeTaskAction', () => {
     expect((result as any).summary).toContain('5 starters');
   });
 
-  it('taskSync passes statusPoster through to runBeadSync', async () => {
-    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
-    (runBeadSync as any).mockClear();
+  it('taskSync passes statusPoster through to runTaskSync', async () => {
+    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    (runTaskSync as any).mockClear();
 
     const mockPoster = { taskSyncComplete: vi.fn() } as any;
     await executeTaskAction(
@@ -449,14 +449,14 @@ describe('executeTaskAction', () => {
       makeTaskCtx({ statusPoster: mockPoster }),
     );
 
-    expect(runBeadSync).toHaveBeenCalledWith(
+    expect(runTaskSync).toHaveBeenCalledWith(
       expect.objectContaining({ statusPoster: mockPoster, mentionUserId: undefined }),
     );
   });
 
-  it('taskSync passes sidebarMentionUserId as mentionUserId to runBeadSync', async () => {
-    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
-    (runBeadSync as any).mockClear();
+  it('taskSync passes sidebarMentionUserId as mentionUserId to runTaskSync', async () => {
+    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    (runTaskSync as any).mockClear();
 
     await executeTaskAction(
       { type: 'taskSync' },
@@ -464,14 +464,14 @@ describe('executeTaskAction', () => {
       makeTaskCtx({ sidebarMentionUserId: '999' }),
     );
 
-    expect(runBeadSync).toHaveBeenCalledWith(
+    expect(runTaskSync).toHaveBeenCalledWith(
       expect.objectContaining({ mentionUserId: '999' }),
     );
   });
 
   it('taskSync lazily creates and reuses syncCoordinator when missing', async () => {
-    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
-    (runBeadSync as any).mockClear();
+    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    (runTaskSync as any).mockClear();
 
     const taskCtx = makeTaskCtx();
     expect(taskCtx.syncCoordinator).toBeUndefined();
@@ -491,13 +491,13 @@ describe('executeTaskAction', () => {
     );
 
     expect(taskCtx.syncCoordinator).toBe(firstCoordinator);
-    expect(runBeadSync).toHaveBeenCalledTimes(2);
+    expect(runTaskSync).toHaveBeenCalledTimes(2);
   });
 
   it('taskUpdate schedules repair sync after thread lifecycle failure without prewired coordinator', async () => {
-    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
     const { updateTaskThreadName } = await import('../tasks/discord-sync.js');
-    (runBeadSync as any).mockClear();
+    (runTaskSync as any).mockClear();
     (updateTaskThreadName as any).mockRejectedValueOnce(new Error('rename failed'));
 
     const result = await executeTaskAction(
@@ -508,7 +508,7 @@ describe('executeTaskAction', () => {
     expect(result.ok).toBe(true);
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runBeadSync).toHaveBeenCalled();
+    expect(runTaskSync).toHaveBeenCalled();
   });
 });
 
@@ -581,11 +581,11 @@ describe('tagMapReload action', () => {
 });
 
 describe('taskSync coordinator tagMap reload behavior', () => {
-  it('reloads tag map before runBeadSync when tagMapPath is configured', async () => {
+  it('reloads tag map before runTaskSync when tagMapPath is configured', async () => {
     const { reloadTagMapInPlace } = await import('../tasks/discord-sync.js');
-    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
     (reloadTagMapInPlace as any).mockClear();
-    (runBeadSync as any).mockClear();
+    (runTaskSync as any).mockClear();
 
     await executeTaskAction(
       { type: 'taskSync' },
@@ -594,7 +594,7 @@ describe('taskSync coordinator tagMap reload behavior', () => {
     );
 
     expect(reloadTagMapInPlace).toHaveBeenCalledWith('/tmp/tag-map.json', expect.any(Object));
-    expect(runBeadSync).toHaveBeenCalled();
+    expect(runTaskSync).toHaveBeenCalled();
   });
 
   it('does not attempt reload without tagMapPath', async () => {
