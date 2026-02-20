@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { execa } from 'execa';
 import type { TaskData, TaskCreateParams, TaskUpdateParams, TaskListParams } from './types.js';
-export { buildTaskContextSummary, buildBeadContextSummary } from './context-summary.js';
+export { buildTaskContextSummary } from './context-summary.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -26,7 +26,6 @@ export function normalizeTaskData(task: TaskData): TaskData {
   if (mapped) return { ...task, status: mapped };
   return task;
 }
-export const normalizeBeadData = normalizeTaskData;
 
 // ---------------------------------------------------------------------------
 // JSON parsing helper
