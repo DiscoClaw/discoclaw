@@ -191,7 +191,8 @@ export function buildDrafterPrompt(
     '## Instructions',
     '',
     '- Read the codebase using your tools (Read, Glob, Grep) to understand the existing code before writing the plan.',
-    '- Be specific in the file-by-file changes section — include actual file paths, function names, and type signatures.',
+    '- **`## Changes` is a required top-level section.** List every file that will be created, modified, or deleted with concrete file paths. Do not place file change information inside a `## Phases` section or any other section — changes belong exclusively in `## Changes`. If you need to describe implementation sequencing, use a separate `## Phases` section.',
+    '- Be specific in the `## Changes` section — include actual file paths, function names, and type signatures.',
     '- Identify real risks and dependencies based on the actual codebase.',
     '- Write concrete, verifiable test cases.',
     '- Include documentation updates in the Changes section when adding new features, config options, or public APIs. Consider: docs/*.md, .env.example files, README.md, INVENTORY.md, and inline code comments.',
@@ -258,11 +259,12 @@ export function buildAuditorPrompt(
   instructions.push(
     'Review the plan for:',
     '1. Missing or underspecified details (vague scope, unclear file changes)',
-    '2. Architectural issues (wrong abstraction, missing error handling, wrong patterns)',
-    '3. Risk gaps (unidentified failure modes, missing rollback plans)',
-    '4. Test coverage gaps (missing edge cases, untested error paths)',
-    '5. Dependency issues (circular deps, version conflicts, missing imports)',
-    '6. Documentation gaps (does the plan update relevant docs, README, .env.example, INVENTORY.md, or inline comments for new/changed features, config options, or public APIs? Missing doc updates are medium severity.)',
+    '2. Structural integrity — the plan MUST have a `## Changes` section with concrete file paths. If file changes are described only inside a `## Phases` section (or any section other than `## Changes`), flag it as **blocking**.',
+    '3. Architectural issues (wrong abstraction, missing error handling, wrong patterns)',
+    '4. Risk gaps (unidentified failure modes, missing rollback plans)',
+    '5. Test coverage gaps (missing edge cases, untested error paths)',
+    '6. Dependency issues (circular deps, version conflicts, missing imports)',
+    '7. Documentation gaps (does the plan update relevant docs, README, .env.example, INVENTORY.md, or inline comments for new/changed features, config options, or public APIs? Missing doc updates are medium severity.)',
     '',
   );
 
