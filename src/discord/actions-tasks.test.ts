@@ -32,7 +32,7 @@ vi.mock('../tasks/auto-tag.js', () => ({
   autoTagBead: vi.fn(async () => ['feature']),
 }));
 
-vi.mock('../tasks/bead-sync.js', () => {
+vi.mock('../tasks/task-sync-engine.js', () => {
   const runTaskSync = vi.fn(async () => ({
     threadsCreated: 1,
     emojisUpdated: 2,
@@ -439,7 +439,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskSync passes statusPoster through to runBeadSync', async () => {
-    const { runBeadSync } = await import('../tasks/bead-sync.js');
+    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
     (runBeadSync as any).mockClear();
 
     const mockPoster = { taskSyncComplete: vi.fn() } as any;
@@ -455,7 +455,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskSync passes sidebarMentionUserId as mentionUserId to runBeadSync', async () => {
-    const { runBeadSync } = await import('../tasks/bead-sync.js');
+    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
     (runBeadSync as any).mockClear();
 
     await executeTaskAction(
@@ -470,7 +470,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskSync lazily creates and reuses syncCoordinator when missing', async () => {
-    const { runBeadSync } = await import('../tasks/bead-sync.js');
+    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
     (runBeadSync as any).mockClear();
 
     const taskCtx = makeTaskCtx();
@@ -495,7 +495,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskUpdate schedules repair sync after thread lifecycle failure without prewired coordinator', async () => {
-    const { runBeadSync } = await import('../tasks/bead-sync.js');
+    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
     const { updateTaskThreadName } = await import('../tasks/discord-sync.js');
     (runBeadSync as any).mockClear();
     (updateTaskThreadName as any).mockRejectedValueOnce(new Error('rename failed'));
@@ -583,7 +583,7 @@ describe('tagMapReload action', () => {
 describe('taskSync coordinator tagMap reload behavior', () => {
   it('reloads tag map before runBeadSync when tagMapPath is configured', async () => {
     const { reloadTagMapInPlace } = await import('../tasks/discord-sync.js');
-    const { runBeadSync } = await import('../tasks/bead-sync.js');
+    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
     (reloadTagMapInPlace as any).mockClear();
     (runBeadSync as any).mockClear();
 

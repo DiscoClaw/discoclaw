@@ -5,7 +5,7 @@ import {
   runSyncWithStore as runTaskSyncWithStoreCompat,
 } from '../tasks/task-sync-cli.js';
 
-vi.mock('../tasks/bead-sync.js', () => {
+vi.mock('../tasks/task-sync-engine.js', () => {
   const runTaskSync = vi.fn().mockResolvedValue({ created: 0, updated: 0, closed: 0 });
   return { runTaskSync, runBeadSync: runTaskSync };
 });
@@ -72,7 +72,7 @@ describe('parseArgInt', () => {
 
 describe('runSyncWithStore', () => {
   it('passes store through to runBeadSync', async () => {
-    const { runBeadSync } = await import('../tasks/bead-sync.js');
+    const { runBeadSync } = await import('../tasks/task-sync-engine.js');
     const { TaskStore } = await import('../tasks/store.js');
 
     const store = new TaskStore();
