@@ -34,10 +34,10 @@ Your assistant carries context across every conversation, channel, and restart.
 
 ## Beads — the bot tracks your work
 
-A lightweight issue tracker ([beads](https://github.com/qwibitai/beads)) that syncs bidirectionally with Discord forum threads.
+A lightweight in-process task store that syncs bidirectionally with Discord forum threads.
 
-- **Create from either side** — `bd add "fix login bug"` in the terminal or ask your assistant in chat
-- **Bidirectional sync** — Status, priority, and tags stay in sync between the CLI and Discord threads
+- **Create from either side** — Ask your assistant in chat or use `!bead` commands
+- **Bidirectional sync** — Status, priority, and tags stay in sync between the task store and Discord threads
 - **Status emoji and auto-tagging** — Thread names show live status at a glance
 - **Discord actions** — Your assistant manages tasks through conversation: create channels, send messages, search history, run polls, and more
 
@@ -183,7 +183,7 @@ pnpm test       # run tests
 
 ## Built with
 
-[Claude Code](https://claude.ai/claude-code), [OpenAI Codex](https://openai.com/index/openai-codex/), [discord.js](https://discord.js.org), [Croner](https://github.com/hexagon/croner), and [Beads](https://github.com/qwibitai/beads).
+[Claude Code](https://claude.ai/claude-code), [OpenAI Codex](https://openai.com/index/openai-codex/), [discord.js](https://discord.js.org), and [Croner](https://github.com/hexagon/croner).
 
 ## License
 
