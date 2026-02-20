@@ -89,9 +89,11 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
 
   private schedulePersist(): void {
     if (!this.persistPath) return;
-    this.persistPromise = this.writeToDisk().catch(() => {
-      // Persist errors are non-fatal; in-memory state remains authoritative.
-    });
+    this.persistPromise = (this.persistPromise ?? Promise.resolve())
+      .then(() => this.writeToDisk())
+      .catch(() => {
+        // Persist errors are non-fatal; in-memory state remains authoritative.
+      });
   }
 
   private async writeToDisk(): Promise<void> {
