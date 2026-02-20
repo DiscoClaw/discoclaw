@@ -1,6 +1,6 @@
 # beads.md — Beads Task Tracking
 
-Beads = lightweight issue tracker backed by the `bd` CLI, synced bidirectionally to Discord forum threads.
+Beads = lightweight issue tracker backed by an **in-process task store**, synced bidirectionally to Discord forum threads.
 Two paths (CLI from terminal, bot via Discord actions) produce identical Discord state.
 See `discord.md` §Beads for the Discord integration side.
 
@@ -29,24 +29,24 @@ See `discord.md` §Beads for the Discord integration side.
 
 **Status emoji:** open=🟢 in_progress=🟡 blocked=⚠️ closed=☑️
 
-## CLI (`bd`)
+## Task Store
 
-Wrapper: `src/beads/bd-cli.ts`. Binary: `BD_BIN` (default `bd`), CWD: `DISCOCLAW_BEADS_CWD`.
+In-process store: `src/beads/task-store.ts`. Data dir: `DISCOCLAW_BEADS_DATA_DIR` (default `<WORKSPACE_CWD>/.beads`).
 
-```bash
-bd show  --json <id>
-bd list  --json [--all | --status <s>] [--label <l>] [--limit <n>]
-bd create --json <title> [--description <d>] [--priority <n>] [--type <t>] [--assignee <o>] [--labels <l1,l2>]
-bd update <id> [--title <t>] [--description <d>] [--priority <n>] [--status <s>] [--assignee <o>] [--external-ref <ref>]
-bd close  <id> [--reason <r>]
-bd label add <id> <label>
+```ts
+taskStore.create(data)          // create bead → emits 'create' event synchronously
+taskStore.update(id, patch)     // update fields → emits 'update' event synchronously
+taskStore.close(id, reason?)    // close bead → emits 'close' event synchronously
+taskStore.get(id)               // fetch single bead
+taskStore.list(opts)            // list with optional status/label/limit filters
+taskStore.addLabel(id, label)   // add label → emits 'update' event synchronously
 ```
 
-JSON output is parsed via `parseBdJson<T>()` which strips markdown fences and handles error objects.
+All writes are synchronous events — no subprocess spawning, no file watcher, no debounce.
 
 ## Discord Sync (4-Phase)
 
-Full sync runs on startup, on file-watcher trigger, and via `beadSync` action. All paths go through `BeadSyncCoordinator` to prevent concurrent runs.
+Full sync runs on startup and via `beadSync` action. All paths go through `BeadSyncCoordinator` to prevent concurrent runs.
 
 | Phase | Action |
 |-------|--------|
@@ -57,21 +57,18 @@ Full sync runs on startup, on file-watcher trigger, and via `beadSync` action. A
 
 Throttled at 250ms between API calls. Auto-triggered syncs are silent; only explicit `beadSync` posts to the status channel.
 
-## Hooks
+## Events
 
-Shell scripts in `scripts/beads/bead-hooks/` delegate to `bead-hooks-cli.ts`:
+Task store emits synchronous events on every write. Discord sync hooks subscribe directly — no shell scripts, no subprocesses.
 
-| Script | Trigger | Action |
-|--------|---------|--------|
-| `on-create.sh` | bead created | Create thread, set `external_ref`, backfill tag labels |
-| `on-update.sh` | bead updated | Unarchive, update thread name, post update message |
-| `on-status-change.sh` | status changed | Unarchive, update thread name emoji |
-| `on-close.sh` | bead closed | Post close summary, rename, archive thread |
-| `auto-tag.sh` | called by on-create | AI classify title+desc into 1-3 tags via `fast` tier |
+| Event | Trigger | Discord Action |
+|-------|---------|----------------|
+| `create` | bead created | Create thread, set `external_ref`, backfill tag labels |
+| `update` | bead updated | Unarchive, update thread name, post update message |
+| `status-change` | status changed | Unarchive, update thread name emoji |
+| `close` | bead closed | Post close summary, rename, archive thread |
 
-**`lib.sh`** — shared utils: `get_bead_json`, `build_thread_name`, `ensure_unarchived`, `truncate_message`.
-
-**Claude Code hook** (`.claude/hooks/bead-close-sync.sh`): PostToolUse hook that detects `bd close` in Bash and fires `on-close.sh` immediately, faster than the 2s file-watcher debounce. Setup requires `.claude/settings.local.json` entry (see `dev.md` §Bead Close Sync).
+Auto-tagging on `create`: AI classifies title+desc into 1-3 tags, then fires an `update` to apply them.
 
 ## Auto-Tagging
 
@@ -84,8 +81,7 @@ See `dev.md` §Beads for the full env var table. Key vars:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `DISCOCLAW_BEADS_ENABLED` | `1` | Master switch |
-| `BD_BIN` | `bd` | Path to bd binary |
-| `DISCOCLAW_BEADS_CWD` | `WORKSPACE_CWD` | bd working directory |
+| `DISCOCLAW_BEADS_DATA_DIR` | `<WORKSPACE_CWD>/.beads` | Task store data directory |
 | `DISCOCLAW_BEADS_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for threads |
 | `DISCOCLAW_BEADS_AUTO_TAG` | `1` | AI tagging on create |
 | `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/bead-hooks/tag-map.json` | Tag-to-forum-tag ID map |
@@ -95,16 +91,12 @@ See `dev.md` §Beads for the full env var table. Key vars:
 | Component | Location |
 |-----------|----------|
 | Types & status emoji | `src/beads/types.ts` |
-| BD CLI wrapper | `src/beads/bd-cli.ts` |
-| Hook entry point | `src/beads/bead-hooks-cli.ts` |
+| In-process task store | `src/beads/task-store.ts` |
 | Discord thread ops | `src/beads/discord-sync.ts` |
 | 4-phase sync | `src/beads/bead-sync.ts` |
 | Auto-tag | `src/beads/auto-tag.ts` |
 | Thread cache | `src/beads/bead-thread-cache.ts` |
-| File watcher | `src/beads/bead-sync-watcher.ts` |
 | Sync coordinator | `src/beads/bead-sync-coordinator.ts` |
 | Forum guard | `src/beads/forum-guard.ts` |
-| Shell hooks | `scripts/beads/bead-hooks/` |
-| Wrapper scripts | `scripts/beads/bd-wrapper.sh`, `bd-new.sh`, `bd-close-archive.sh` |
-| Claude Code hook | `.claude/hooks/bead-close-sync.sh` |
+| Tag map | `scripts/beads/bead-hooks/tag-map.json` |
 | Discord actions | `src/discord/actions-beads.ts` |
