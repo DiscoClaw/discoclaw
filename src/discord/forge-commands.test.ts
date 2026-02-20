@@ -1111,13 +1111,13 @@ describe('ForgeOrchestrator', () => {
     expect(result.error).toBeUndefined();
   });
 
-  it('passes existingBeadId through to handlePlanCommand (skips create)', async () => {
+  it('passes existingTaskId through to handlePlanCommand (skips create)', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
-    const opts = await baseOpts(tmpDir, runtime, { existingBeadId: 'existing-bead-42' });
+    const opts = await baseOpts(tmpDir, runtime, { existingTaskId: 'existing-task-42' });
     const createSpy = vi.spyOn(opts.taskStore, 'create');
     const addLabelSpy = vi.spyOn(opts.taskStore, 'addLabel');
     const orchestrator = new ForgeOrchestrator(opts);
@@ -1126,18 +1126,18 @@ describe('ForgeOrchestrator', () => {
 
     expect(result.planId).toMatch(/^plan-001$/);
     expect(result.error).toBeUndefined();
-    // taskStore.create should NOT have been called — reusing existing bead
+    // taskStore.create should NOT have been called — reusing existing task
     expect(createSpy).not.toHaveBeenCalled();
     // taskStore.addLabel should have been called to add the 'plan' label
-    expect(addLabelSpy).toHaveBeenCalledWith('existing-bead-42', 'plan');
+    expect(addLabelSpy).toHaveBeenCalledWith('existing-task-42', 'plan');
 
-    // Verify the plan file contains the existing bead ID
+    // Verify the plan file contains the existing task ID.
     const plansDir = path.join(tmpDir, 'plans');
     const entries = await fs.readdir(plansDir);
     const planFile = entries.find((e) => e.startsWith('plan-001') && e.endsWith('.md') && !e.includes('template'));
     expect(planFile).toBeTruthy();
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-    expect(content).toContain('**Bead:** existing-bead-42');
+    expect(content).toContain('**Bead:** existing-task-42');
   });
 });
 

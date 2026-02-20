@@ -42,9 +42,13 @@ export type ForgeOrchestratorOpts = {
   drafterModel?: string;
   auditorModel?: string;
   log?: LoggerLike;
-  /** When set, reuse this bead instead of creating a new one (e.g. when issued in a bead forum thread). */
+  /** When set, reuse this task instead of creating a new one (e.g. when issued in a task forum thread). */
+  existingTaskId?: string;
+  /** @deprecated Compatibility alias for existingTaskId. */
   existingBeadId?: string;
-  /** Optional summary of the bead description to expose to the drafter. */
+  /** Optional summary of the task description to expose to the drafter. */
+  taskDescription?: string;
+  /** @deprecated Compatibility alias for taskDescription. */
   beadDescription?: string;
   /** Optional pinned-thread summary to expose to the drafter. */
   pinnedThreadSummary?: string;
@@ -201,7 +205,7 @@ export function buildDrafterPrompt(
     '- Write concrete, verifiable test cases.',
     '- Include documentation updates in the Changes section when adding new features, config options, or public APIs. Consider: docs/*.md, .env.example files, README.md, INVENTORY.md, and inline code comments.',
     '- Set the status to DRAFT.',
-    '- Replace all {{PLACEHOLDER}} tokens with actual values. The plan ID and bead ID will be filled in by the system — use `(system)` as placeholders for those.',
+    '- Replace all {{PLACEHOLDER}} tokens with actual values. The plan ID and task ID will be filled in by the system — use `(system)` as placeholders for those.',
     '- Output the complete plan markdown and nothing else.',
   ].join('\n');
 }
@@ -541,9 +545,10 @@ export class ForgeOrchestrator {
 
     try {
       // 1. Create the plan file via handlePlanCommand
-      // Pass context separately so bead title/slug stay clean (context goes in plan body).
+      // Pass context separately so task title/slug stay clean (context goes in plan body).
+      const existingTaskId = this.opts.existingTaskId || this.opts.existingBeadId;
       const createResult = await handlePlanCommand(
-        { action: 'create', args: description, context, existingBeadId: this.opts.existingBeadId },
+        { action: 'create', args: description, context, existingTaskId },
         { workspaceCwd: this.opts.workspaceCwd, taskStore: this.opts.taskStore },
       );
 
@@ -582,7 +587,7 @@ export class ForgeOrchestrator {
 
       // Build context summary from workspace files (includes project context and additional thread info)
       const contextSummary = await this.buildContextSummary(projectContext, {
-        beadDescription: this.opts.beadDescription,
+        taskDescription: this.opts.taskDescription || this.opts.beadDescription,
         pinnedThreadSummary: this.opts.pinnedThreadSummary,
       });
 
@@ -1007,7 +1012,7 @@ export class ForgeOrchestrator {
 
   private async buildContextSummary(
     projectContext?: string,
-    opts?: { beadDescription?: string; pinnedThreadSummary?: string },
+    opts?: { taskDescription?: string; beadDescription?: string; pinnedThreadSummary?: string },
   ): Promise<string> {
     const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
     const sections: string[] = [];
@@ -1035,8 +1040,9 @@ export class ForgeOrchestrator {
       // skip if missing
     }
 
-    if (opts?.beadDescription) {
-      sections.push(`--- bead-description (thread) ---\n${opts.beadDescription.trim()}`);
+    const taskDescription = opts?.taskDescription || opts?.beadDescription;
+    if (taskDescription) {
+      sections.push(`--- task-description (thread) ---\n${taskDescription.trim()}`);
     }
 
     if (opts?.pinnedThreadSummary) {
@@ -1061,7 +1067,7 @@ export class ForgeOrchestrator {
 
   /**
    * Merge drafter output into the plan file, preserving the system-generated header
-   * (plan ID, bead ID, created date) from the original file.
+   * (plan ID, task ID, created date) from the original file.
    */
   private mergeDraftWithHeader(originalContent: string, draftOutput: string): string {
     // Extract the header from the original file (up to and including the first ---)
