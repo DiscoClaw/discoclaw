@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead, updateBeadStarterMessage, closeBeadThread, isBeadThreadAlreadyClosed, isThreadArchived, reloadTagMapInPlace, getStatusTagIds, buildAppliedTagsWithStatus, updateBeadThreadTags, createBeadThread, shortBeadId, beadIdToken, extractShortIdFromThreadName } from './discord-sync.js';
-import type { BeadData, TagMap } from './types.js';
+import { buildThreadName, buildTaskStarterContent, getThreadIdFromTask, updateTaskStarterMessage, closeTaskThread, isTaskThreadAlreadyClosed, isThreadArchived, reloadTagMapInPlace, getStatusTagIds, buildAppliedTagsWithStatus, updateTaskThreadTags, createTaskThread, shortTaskId, taskIdToken, extractShortIdFromThreadName } from './discord-sync.js';
+import type { TaskData, TagMap } from '../tasks/types.js';
 
 // ---------------------------------------------------------------------------
 // buildThreadName
@@ -42,11 +42,11 @@ describe('buildThreadName', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildBeadStarterContent
+// buildTaskStarterContent
 // ---------------------------------------------------------------------------
 
-describe('buildBeadStarterContent', () => {
-  const makeBead = (overrides?: Partial<BeadData>): BeadData => ({
+describe('buildTaskStarterContent', () => {
+  const makeTask = (overrides?: Partial<TaskData>): TaskData => ({
     id: 'ws-001',
     title: 'Test',
     description: 'A test bead',
@@ -64,7 +64,7 @@ describe('buildBeadStarterContent', () => {
   });
 
   it('produces correct format with description, ID, priority, status', () => {
-    const content = buildBeadStarterContent(makeBead());
+    const content = buildTaskStarterContent(makeTask());
     expect(content).toContain('A test bead');
     expect(content).toContain('**ID:** `ws-001`');
     expect(content).toContain('**Priority:** P2');
@@ -72,37 +72,37 @@ describe('buildBeadStarterContent', () => {
   });
 
   it('includes owner when present', () => {
-    const content = buildBeadStarterContent(makeBead({ owner: 'alice' }));
+    const content = buildTaskStarterContent(makeTask({ owner: 'alice' }));
     expect(content).toContain('**Owner:** alice');
   });
 
   it('omits owner when empty', () => {
-    const content = buildBeadStarterContent(makeBead({ owner: '' }));
+    const content = buildTaskStarterContent(makeTask({ owner: '' }));
     expect(content).not.toContain('**Owner:**');
   });
 
   it('does not include mention lines when mentionUserId omitted', () => {
-    const content = buildBeadStarterContent(makeBead());
+    const content = buildTaskStarterContent(makeTask());
     expect(content).not.toContain('<@');
   });
 
   it('appends mention when mentionUserId provided', () => {
-    const content = buildBeadStarterContent(makeBead(), '999888777');
+    const content = buildTaskStarterContent(makeTask(), '999888777');
     expect(content).toContain('<@999888777>');
   });
 
   it('defaults priority to P2 when undefined', () => {
-    const content = buildBeadStarterContent(makeBead({ priority: undefined as any }));
+    const content = buildTaskStarterContent(makeTask({ priority: undefined as any }));
     expect(content).toContain('**Priority:** P2');
   });
 });
 
 // ---------------------------------------------------------------------------
-// getThreadIdFromBead
+// getThreadIdFromTask
 // ---------------------------------------------------------------------------
 
-describe('getThreadIdFromBead', () => {
-  const makeBead = (externalRef: string): BeadData => ({
+describe('getThreadIdFromTask', () => {
+  const makeTask = (externalRef: string): TaskData => ({
     id: 'ws-001',
     title: 'Test',
     description: '',
@@ -119,32 +119,32 @@ describe('getThreadIdFromBead', () => {
   });
 
   it('extracts thread ID from discord: prefix', () => {
-    expect(getThreadIdFromBead(makeBead('discord:123456789'))).toBe('123456789');
+    expect(getThreadIdFromTask(makeTask('discord:123456789'))).toBe('123456789');
   });
 
   it('extracts raw numeric ID', () => {
-    expect(getThreadIdFromBead(makeBead('123456789'))).toBe('123456789');
+    expect(getThreadIdFromTask(makeTask('123456789'))).toBe('123456789');
   });
 
   it('returns null for empty external_ref', () => {
-    expect(getThreadIdFromBead(makeBead(''))).toBeNull();
+    expect(getThreadIdFromTask(makeTask(''))).toBeNull();
   });
 
   it('returns null for non-discord external_ref', () => {
-    expect(getThreadIdFromBead(makeBead('gh-123'))).toBeNull();
+    expect(getThreadIdFromTask(makeTask('gh-123'))).toBeNull();
   });
 
   it('handles whitespace', () => {
-    expect(getThreadIdFromBead(makeBead('  discord:123  '))).toBe('123');
+    expect(getThreadIdFromTask(makeTask('  discord:123  '))).toBe('123');
   });
 });
 
 // ---------------------------------------------------------------------------
-// updateBeadStarterMessage
+// updateTaskStarterMessage
 // ---------------------------------------------------------------------------
 
-describe('updateBeadStarterMessage', () => {
-  const bead: BeadData = {
+describe('updateTaskStarterMessage', () => {
+  const task: TaskData = {
     id: 'ws-001',
     title: 'Test',
     description: 'A test bead',
@@ -183,7 +183,7 @@ describe('updateBeadStarterMessage', () => {
 
   it('returns false when thread is not found', async () => {
     const client = { channels: { cache: { get: () => undefined } }, user: { id: 'bot-123' } } as any;
-    expect(await updateBeadStarterMessage(client, 'missing', bead)).toBe(false);
+    expect(await updateTaskStarterMessage(client, 'missing', task)).toBe(false);
   });
 
   it('returns false when fetchStarterMessage throws', async () => {
@@ -191,57 +191,57 @@ describe('updateBeadStarterMessage', () => {
       isThread: () => true,
       fetchStarterMessage: vi.fn(async () => { throw new Error('not found'); }),
     };
-    expect(await updateBeadStarterMessage(makeClient(thread), '123', bead)).toBe(false);
+    expect(await updateTaskStarterMessage(makeClient(thread), '123', task)).toBe(false);
   });
 
   it('returns false when starter is not bot-authored', async () => {
     const thread = makeThread({ author: { id: 'user-456' } });
-    expect(await updateBeadStarterMessage(makeClient(thread), '123', bead)).toBe(false);
+    expect(await updateTaskStarterMessage(makeClient(thread), '123', task)).toBe(false);
     expect(thread._editFn).not.toHaveBeenCalled();
   });
 
   it('returns false when content is already identical (idempotent)', async () => {
-    const currentContent = buildBeadStarterContent(bead);
+    const currentContent = buildTaskStarterContent(task);
     const thread = makeThread({ content: currentContent });
-    expect(await updateBeadStarterMessage(makeClient(thread), '123', bead)).toBe(false);
+    expect(await updateTaskStarterMessage(makeClient(thread), '123', task)).toBe(false);
     expect(thread._editFn).not.toHaveBeenCalled();
   });
 
   it('edits starter and returns true when content differs', async () => {
     const thread = makeThread({ content: 'stale content' });
-    const result = await updateBeadStarterMessage(makeClient(thread), '123', bead);
+    const result = await updateTaskStarterMessage(makeClient(thread), '123', task);
     expect(result).toBe(true);
     expect(thread._editFn).toHaveBeenCalledWith({
-      content: buildBeadStarterContent(bead),
+      content: buildTaskStarterContent(task),
       allowedMentions: { parse: [], users: [] },
     });
   });
 
   it('passes mentionUserId to content builder and sets allowedMentions.users', async () => {
     const thread = makeThread({ content: 'stale content' });
-    const result = await updateBeadStarterMessage(makeClient(thread), '123', bead, '999');
+    const result = await updateTaskStarterMessage(makeClient(thread), '123', task, '999');
     expect(result).toBe(true);
     expect(thread._editFn).toHaveBeenCalledWith({
-      content: buildBeadStarterContent(bead, '999'),
+      content: buildTaskStarterContent(task, '999'),
       allowedMentions: { parse: [], users: ['999'] },
     });
   });
 
   it('skips edit when mention content already matches', async () => {
-    const contentWithMention = buildBeadStarterContent(bead, '999');
+    const contentWithMention = buildTaskStarterContent(task, '999');
     const thread = makeThread({ content: contentWithMention });
-    const result = await updateBeadStarterMessage(makeClient(thread), '123', bead, '999');
+    const result = await updateTaskStarterMessage(makeClient(thread), '123', task, '999');
     expect(result).toBe(false);
     expect(thread._editFn).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// closeBeadThread
+// closeTaskThread
 // ---------------------------------------------------------------------------
 
-describe('closeBeadThread', () => {
-  const bead: BeadData = {
+describe('closeTaskThread', () => {
+  const task: TaskData = {
     id: 'ws-001',
     title: 'Test',
     description: 'A test bead',
@@ -291,13 +291,13 @@ describe('closeBeadThread', () => {
   }
 
   it('strips mention from starter message before archiving', async () => {
-    const contentWithMention = buildBeadStarterContent(bead, '999');
+    const contentWithMention = buildTaskStarterContent(task, '999');
     const thread = makeCloseThread({ starterContent: contentWithMention });
     const client = makeClient(thread);
 
-    await closeBeadThread(client, 'thread-1', bead);
+    await closeTaskThread(client, 'thread-1', task);
 
-    const cleanContent = buildBeadStarterContent(bead);
+    const cleanContent = buildTaskStarterContent(task);
     expect(thread._editFn).toHaveBeenCalledWith({
       content: cleanContent.slice(0, 2000),
       allowedMentions: { parse: [], users: [] },
@@ -305,11 +305,11 @@ describe('closeBeadThread', () => {
   });
 
   it('skips starter edit when content has no mention', async () => {
-    const cleanContent = buildBeadStarterContent(bead);
+    const cleanContent = buildTaskStarterContent(task);
     const thread = makeCloseThread({ starterContent: cleanContent });
     const client = makeClient(thread);
 
-    await closeBeadThread(client, 'thread-1', bead);
+    await closeTaskThread(client, 'thread-1', task);
 
     expect(thread._editFn).not.toHaveBeenCalled();
   });
@@ -319,7 +319,7 @@ describe('closeBeadThread', () => {
     thread.fetchStarterMessage = vi.fn(async () => { throw new Error('not found'); });
     const client = makeClient(thread);
 
-    await closeBeadThread(client, 'thread-1', bead);
+    await closeTaskThread(client, 'thread-1', task);
 
     expect(thread._sendFn).toHaveBeenCalled();
     expect(thread._setNameFn).toHaveBeenCalled();
@@ -332,7 +332,7 @@ describe('closeBeadThread', () => {
       user: { id: 'bot-123' },
     } as any;
 
-    await closeBeadThread(client, 'missing', bead);
+    await closeTaskThread(client, 'missing', task);
     // No error thrown — function completes silently.
   });
 });
@@ -462,11 +462,11 @@ describe('buildAppliedTagsWithStatus', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createBeadThread — status tag application
+// createTaskThread — status tag application
 // ---------------------------------------------------------------------------
 
-describe('createBeadThread', () => {
-  const makeBead = (overrides?: Partial<BeadData>): BeadData => ({
+describe('createTaskThread', () => {
+  const makeTask = (overrides?: Partial<TaskData>): TaskData => ({
     id: 'ws-001',
     title: 'Test bead',
     description: 'A test',
@@ -489,10 +489,10 @@ describe('createBeadThread', () => {
 
   it('includes status tag in appliedTags when tagMap has status entry', async () => {
     const tagMap: TagMap = { open: 's1', feature: 'c1' };
-    const bead = makeBead({ status: 'open', labels: ['feature'] });
+    const task = makeTask({ status: 'open', labels: ['feature'] });
     const createFn = vi.fn(async (_opts: any) => ({ id: 'new-thread' }));
 
-    await createBeadThread(makeForum(createFn), bead, tagMap);
+    await createTaskThread(makeForum(createFn), task, tagMap);
 
     const args = createFn.mock.calls[0]![0];
     expect(args.appliedTags).toContain('s1');
@@ -500,12 +500,12 @@ describe('createBeadThread', () => {
     expect(args.appliedTags.length).toBeLessThanOrEqual(5);
   });
 
-  it('omits status tag when tagMap has no status entry for bead status', async () => {
+  it('omits status tag when tagMap has no status entry for task status', async () => {
     const tagMap: TagMap = { feature: 'c1' };
-    const bead = makeBead({ status: 'open', labels: ['feature'] });
+    const task = makeTask({ status: 'open', labels: ['feature'] });
     const createFn = vi.fn(async (_opts: any) => ({ id: 'new-thread' }));
 
-    await createBeadThread(makeForum(createFn), bead, tagMap);
+    await createTaskThread(makeForum(createFn), task, tagMap);
 
     const args = createFn.mock.calls[0]![0];
     expect(args.appliedTags).toContain('c1');
@@ -515,10 +515,10 @@ describe('createBeadThread', () => {
 
   it('caps total appliedTags at 5 even with many labels', async () => {
     const tagMap: TagMap = { open: 's1', a: 'c1', b: 'c2', c: 'c3', d: 'c4', e: 'c5' };
-    const bead = makeBead({ status: 'open', labels: ['a', 'b', 'c', 'd', 'e'] });
+    const task = makeTask({ status: 'open', labels: ['a', 'b', 'c', 'd', 'e'] });
     const createFn = vi.fn(async (_opts: any) => ({ id: 'new-thread' }));
 
-    await createBeadThread(makeForum(createFn), bead, tagMap);
+    await createTaskThread(makeForum(createFn), task, tagMap);
 
     const args = createFn.mock.calls[0]![0];
     expect(args.appliedTags.length).toBe(5);
@@ -527,10 +527,10 @@ describe('createBeadThread', () => {
 
   it('passes mentionUserId to starter content and allowedMentions', async () => {
     const tagMap: TagMap = { open: 's1' };
-    const bead = makeBead({ status: 'open', labels: [] });
+    const task = makeTask({ status: 'open', labels: [] });
     const createFn = vi.fn(async (_opts: any) => ({ id: 'new-thread' }));
 
-    await createBeadThread(makeForum(createFn), bead, tagMap, '999');
+    await createTaskThread(makeForum(createFn), task, tagMap, '999');
 
     const args = createFn.mock.calls[0]![0];
     expect(args.message.content).toContain('<@999>');
@@ -539,11 +539,11 @@ describe('createBeadThread', () => {
 });
 
 // ---------------------------------------------------------------------------
-// updateBeadThreadTags
+// updateTaskThreadTags
 // ---------------------------------------------------------------------------
 
-describe('updateBeadThreadTags', () => {
-  const bead: BeadData = {
+describe('updateTaskThreadTags', () => {
+  const task: TaskData = {
     id: 'ws-001', title: 'Test', status: 'in_progress',
     priority: 2, external_ref: '', labels: [],
   };
@@ -557,7 +557,7 @@ describe('updateBeadThreadTags', () => {
 
   it('returns false when thread not found', async () => {
     const client = { channels: { cache: { get: () => undefined } } } as any;
-    const result = await updateBeadThreadTags(client, 'missing', bead, { in_progress: 's2' });
+    const result = await updateTaskThreadTags(client, 'missing', task, { in_progress: 's2' });
     expect(result).toBe(false);
   });
 
@@ -568,7 +568,7 @@ describe('updateBeadThreadTags', () => {
       appliedTags: ['s2', 'c1'],
       edit: vi.fn(),
     };
-    const result = await updateBeadThreadTags(makeClient(thread), '123', bead, tagMap);
+    const result = await updateTaskThreadTags(makeClient(thread), '123', task, tagMap);
     expect(result).toBe(false);
     expect(thread.edit).not.toHaveBeenCalled();
   });
@@ -580,7 +580,7 @@ describe('updateBeadThreadTags', () => {
       appliedTags: ['c1', 's1'],
       edit: vi.fn(),
     };
-    const result = await updateBeadThreadTags(makeClient(thread), '123', bead, tagMap);
+    const result = await updateTaskThreadTags(makeClient(thread), '123', task, tagMap);
     expect(result).toBe(true);
     expect(thread.edit).toHaveBeenCalledWith({
       appliedTags: expect.arrayContaining(['s2', 'c1']),
@@ -590,11 +590,11 @@ describe('updateBeadThreadTags', () => {
 });
 
 // ---------------------------------------------------------------------------
-// closeBeadThread with tagMap
+// closeTaskThread with tagMap
 // ---------------------------------------------------------------------------
 
-describe('closeBeadThread with tagMap', () => {
-  const bead: BeadData = {
+describe('closeTaskThread with tagMap', () => {
+  const task: TaskData = {
     id: 'ws-001', title: 'Test', status: 'closed',
     priority: 2, external_ref: '', labels: [], close_reason: 'Done',
   };
@@ -626,7 +626,7 @@ describe('closeBeadThread with tagMap', () => {
   it('applies closed status tag before archiving when tagMap provided', async () => {
     const tagMap: TagMap = { closed: 'sc', feature: 'c1' };
     const thread = makeCloseThread({ appliedTags: ['c1'] });
-    await closeBeadThread(makeClient(thread), 'thread-1', bead, tagMap);
+    await closeTaskThread(makeClient(thread), 'thread-1', task, tagMap);
 
     expect(thread.edit).toHaveBeenCalledWith({
       appliedTags: expect.arrayContaining(['sc', 'c1']),
@@ -637,25 +637,25 @@ describe('closeBeadThread with tagMap', () => {
   it('skips tag edit when tags already match', async () => {
     const tagMap: TagMap = { closed: 'sc', feature: 'c1' };
     const thread = makeCloseThread({ appliedTags: ['c1', 'sc'] });
-    await closeBeadThread(makeClient(thread), 'thread-1', bead, tagMap);
+    await closeTaskThread(makeClient(thread), 'thread-1', task, tagMap);
 
     expect(thread.edit).not.toHaveBeenCalled();
   });
 
   it('skips tag update when tagMap is undefined (backward compat)', async () => {
     const thread = makeCloseThread({ appliedTags: ['c1'] });
-    await closeBeadThread(makeClient(thread), 'thread-1', bead);
+    await closeTaskThread(makeClient(thread), 'thread-1', task);
 
     expect(thread.edit).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// isBeadThreadAlreadyClosed with tagMap
+// isTaskThreadAlreadyClosed with tagMap
 // ---------------------------------------------------------------------------
 
-describe('isBeadThreadAlreadyClosed with tagMap', () => {
-  const bead: BeadData = {
+describe('isTaskThreadAlreadyClosed with tagMap', () => {
+  const task: TaskData = {
     id: 'ws-001', title: 'Test', status: 'closed',
     priority: 2, external_ref: '', labels: [],
   };
@@ -676,7 +676,7 @@ describe('isBeadThreadAlreadyClosed with tagMap', () => {
       name: closedName,
       appliedTags: ['c1'],
     };
-    const result = await isBeadThreadAlreadyClosed(makeClient(thread), '123', bead, tagMap);
+    const result = await isTaskThreadAlreadyClosed(makeClient(thread), '123', task, tagMap);
     expect(result).toBe(false);
   });
 
@@ -688,7 +688,7 @@ describe('isBeadThreadAlreadyClosed with tagMap', () => {
       name: closedName,
       appliedTags: ['so', 'c1'], // has open tag instead of closed
     };
-    const result = await isBeadThreadAlreadyClosed(makeClient(thread), '123', bead, tagMap);
+    const result = await isTaskThreadAlreadyClosed(makeClient(thread), '123', task, tagMap);
     expect(result).toBe(false);
   });
 
@@ -700,7 +700,7 @@ describe('isBeadThreadAlreadyClosed with tagMap', () => {
       name: closedName,
       appliedTags: ['c1', 'sc'],
     };
-    const result = await isBeadThreadAlreadyClosed(makeClient(thread), '123', bead, tagMap);
+    const result = await isTaskThreadAlreadyClosed(makeClient(thread), '123', task, tagMap);
     expect(result).toBe(true);
   });
 
@@ -711,7 +711,7 @@ describe('isBeadThreadAlreadyClosed with tagMap', () => {
       name: closedName,
       appliedTags: [],
     };
-    const result = await isBeadThreadAlreadyClosed(makeClient(thread), '123', bead);
+    const result = await isTaskThreadAlreadyClosed(makeClient(thread), '123', task);
     expect(result).toBe(true);
   });
 
@@ -723,7 +723,7 @@ describe('isBeadThreadAlreadyClosed with tagMap', () => {
       name: closedName,
       appliedTags: [],
     };
-    const result = await isBeadThreadAlreadyClosed(makeClient(thread), '123', bead, tagMap);
+    const result = await isTaskThreadAlreadyClosed(makeClient(thread), '123', task, tagMap);
     expect(result).toBe(true);
   });
 });
@@ -759,7 +759,7 @@ describe('isThreadArchived', () => {
 
   it('returns true for archived thread regardless of name/tag metadata', async () => {
     // isThreadArchived only checks archived state, not name or tags.
-    // Phase 4 of bead-sync uses isBeadThreadAlreadyClosed instead, which
+    // Phase 4 of bead-sync uses isTaskThreadAlreadyClosed instead, which
     // checks all three (archived + name + tags) for proper recovery.
     const thread = {
       isThread: () => true,
@@ -773,34 +773,34 @@ describe('isThreadArchived', () => {
 });
 
 // ---------------------------------------------------------------------------
-// shortBeadId
+// shortTaskId
 // ---------------------------------------------------------------------------
 
-describe('shortBeadId', () => {
+describe('shortTaskId', () => {
   it('strips project prefix', () => {
-    expect(shortBeadId('ws-001')).toBe('001');
+    expect(shortTaskId('ws-001')).toBe('001');
   });
 
   it('returns full string when no dash', () => {
-    expect(shortBeadId('001')).toBe('001');
+    expect(shortTaskId('001')).toBe('001');
   });
 
   it('strips only first dash segment', () => {
-    expect(shortBeadId('my-proj-042')).toBe('proj-042');
+    expect(shortTaskId('my-proj-042')).toBe('proj-042');
   });
 });
 
 // ---------------------------------------------------------------------------
-// beadIdToken
+// taskIdToken
 // ---------------------------------------------------------------------------
 
-describe('beadIdToken', () => {
+describe('taskIdToken', () => {
   it('wraps short ID in brackets', () => {
-    expect(beadIdToken('ws-001')).toBe('[001]');
+    expect(taskIdToken('ws-001')).toBe('[001]');
   });
 
   it('works without prefix', () => {
-    expect(beadIdToken('042')).toBe('[042]');
+    expect(taskIdToken('042')).toBe('[042]');
   });
 });
 
