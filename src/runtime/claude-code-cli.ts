@@ -43,6 +43,7 @@ export type ClaudeCliRuntimeOpts = {
   multiTurnIdleTimeoutMs?: number;
   multiTurnMaxProcesses?: number;
   streamStallTimeoutMs?: number;
+  progressStallTimeoutMs?: number;
 };
 
 export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapter {
@@ -64,5 +65,6 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     multiTurnIdleTimeoutMs: opts.multiTurnIdleTimeoutMs,
     multiTurnMaxProcesses: opts.multiTurnMaxProcesses,
     streamStallTimeoutMs: opts.streamStallTimeoutMs,
+    progressStallTimeoutMs: opts.progressStallTimeoutMs,
   });
 }

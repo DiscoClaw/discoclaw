@@ -3,6 +3,7 @@ import { FORGE_ACTION_TYPES, executeForgeAction, forgeActionsPromptSection } fro
 import type { ForgeContext } from './actions-forge.js';
 import type { ActionContext } from './actions.js';
 import { _resetForTest, setActiveOrchestrator } from './forge-plan-registry.js';
+import { TaskStore } from '../tasks/store.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -65,7 +66,7 @@ function makeForgeCtx(overrides?: Partial<ForgeContext>): ForgeContext {
     orchestratorFactory: vi.fn(() => mockOrch) as any,
     plansDir: '/tmp/plans',
     workspaceCwd: '/tmp/workspace',
-    beadsCwd: '/tmp/beads',
+    taskStore: new TaskStore(),
     onProgress: vi.fn(async () => {}),
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     ...overrides,

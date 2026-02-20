@@ -1,14 +1,14 @@
 import type { BeadData } from './types.js';
-import { bdList } from './bd-cli.js';
 import { getThreadIdFromBead } from './discord-sync.js';
+import type { TaskStore } from '../tasks/store.js';
 
 // ---------------------------------------------------------------------------
 // Thread → bead lookup
 // ---------------------------------------------------------------------------
 
 /** Find a bead by its Discord thread ID (matches via external_ref). */
-export async function findBeadByThreadId(threadId: string, cwd: string): Promise<BeadData | null> {
-  const beads = await bdList({ status: 'all' }, cwd);
+export function findBeadByThreadId(threadId: string, store: TaskStore): BeadData | null {
+  const beads = store.list({ status: 'all' });
   return beads.find((b) => getThreadIdFromBead(b) === threadId) ?? null;
 }
 
@@ -32,13 +32,14 @@ export class BeadThreadCache {
   }
 
   /** Get bead for a thread ID (cached or fresh). Returns null if no bead matches. */
-  async get(threadId: string, beadsCwd: string): Promise<BeadData | null> {
+  async get(threadId: string, store: TaskStore): Promise<BeadData | null> {
     const entry = this.cache.get(threadId);
     if (entry && Date.now() - entry.fetchedAt < this.ttlMs) {
       return entry.bead;
     }
 
-    const bead = await findBeadByThreadId(threadId, beadsCwd);
+    const beads = store.list({ status: 'all' });
+    const bead = beads.find((b) => getThreadIdFromBead(b) === threadId) ?? null;
     this.cache.set(threadId, { bead, fetchedAt: Date.now() });
     return bead;
   }

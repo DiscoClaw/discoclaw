@@ -3,6 +3,7 @@ import type { TagMap, BeadSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
+import type { TaskStore } from '../tasks/store.js';
 import { runBeadSync } from './bead-sync.js';
 import { reloadTagMapInPlace } from './discord-sync.js';
 import { beadThreadCache } from './bead-thread-cache.js';
@@ -13,69 +14,35 @@ export type CoordinatorOptions = {
   forumId: string;
   tagMap: TagMap;
   tagMapPath?: string;
-  beadsCwd: string;
+  store: TaskStore;
   log?: LoggerLike;
   mentionUserId?: string;
   forumCountSync?: ForumCountSync;
   skipPhase5?: boolean;
 };
 
-export type SyncSource = 'watcher' | 'user';
-
 /**
  * Shared sync coordinator that wraps runBeadSync() with a concurrency guard
- * and cache invalidation. Used by file watcher, startup sync, and beadSync action.
+ * and cache invalidation. Used by startup sync and beadSync action.
  */
 export class BeadSyncCoordinator {
   private syncing = false;
   private pendingStatusPoster: StatusPoster | undefined | false = false;
-  private pendingSource: SyncSource = 'watcher';
-  private suppressedUntil = 0;
-  private catchUpScheduled = false;
 
   constructor(private readonly opts: CoordinatorOptions) {}
 
   /**
-   * Suppress watcher-triggered syncs for the given duration.
-   * User-triggered syncs always bypass suppression.
-   * After the window expires, a catch-up sync fires automatically.
-   */
-  suppressSync(durationMs: number): void {
-    this.suppressedUntil = Date.now() + durationMs;
-  }
-
-  /**
    * Run sync with concurrency guard.
    * - statusPoster: pass for explicit user-triggered syncs (beadSync action);
-   *   omit for auto-triggered syncs (watcher, startup) to avoid status channel noise.
-   * - source: 'watcher' for file-watcher triggered syncs (respects suppression),
-   *   'user' (default) for user-initiated syncs (always runs).
+   *   omit for auto-triggered syncs (startup) to avoid status channel noise.
    */
-  async sync(statusPoster?: StatusPoster, source: SyncSource = 'user'): Promise<BeadSyncResult | null> {
-    // Watcher-triggered syncs respect the suppression window.
-    if (source === 'watcher' && Date.now() < this.suppressedUntil) {
-      if (!this.catchUpScheduled) {
-        this.catchUpScheduled = true;
-        const delayMs = Math.max(0, this.suppressedUntil - Date.now());
-        setTimeout(() => {
-          this.catchUpScheduled = false;
-          this.sync(undefined, 'watcher').catch((err) => {
-            this.opts.log?.warn({ err }, 'beads:coordinator catch-up sync failed');
-          });
-        }, delayMs);
-      }
-      return null;
-    }
-
+  async sync(statusPoster?: StatusPoster): Promise<BeadSyncResult | null> {
     if (this.syncing) {
       // Preserve the most specific statusPoster from coalesced callers:
       // if any caller passes one, use it for the follow-up.
       if (statusPoster || this.pendingStatusPoster === false) {
         this.pendingStatusPoster = statusPoster;
       }
-      // Upgrade source to 'user' if any coalesced caller is user-initiated,
-      // so the follow-up correctly bypasses suppression only for user-triggered syncs.
-      if (source === 'user') this.pendingSource = 'user';
       return null; // coalesced into the running sync's follow-up
     }
     this.syncing = true;
@@ -96,7 +63,7 @@ export class BeadSyncCoordinator {
       if (result.closesDeferred && result.closesDeferred > 0) {
         this.opts.log?.info({ closesDeferred: result.closesDeferred }, 'beads:coordinator scheduling retry for deferred closes');
         setTimeout(() => {
-          this.sync(undefined, 'watcher').catch((err) => {
+          this.sync().catch((err) => {
             this.opts.log?.warn({ err }, 'beads:coordinator deferred-close retry failed');
           });
         }, 30_000);
@@ -106,12 +73,9 @@ export class BeadSyncCoordinator {
       this.syncing = false;
       if (this.pendingStatusPoster !== false) {
         const pendingPoster = this.pendingStatusPoster;
-        const pendingSource = this.pendingSource;
         this.pendingStatusPoster = false;
-        this.pendingSource = 'watcher';
         // Fire-and-forget follow-up for coalesced triggers.
-        // Use the recorded source so watcher-coalesced follow-ups respect suppression.
-        this.sync(pendingPoster, pendingSource).catch((err) => {
+        this.sync(pendingPoster).catch((err) => {
           this.opts.log?.warn({ err }, 'beads:coordinator follow-up sync failed');
         });
       }

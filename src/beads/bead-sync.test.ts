@@ -5,11 +5,6 @@ vi.mock('../discord/inflight-replies.js', () => ({
   hasInFlightForChannel: vi.fn(() => false),
 }));
 
-vi.mock('./bd-cli.js', () => ({
-  bdList: vi.fn(async () => []),
-  bdUpdate: vi.fn(async () => {}),
-}));
-
 vi.mock('./discord-sync.js', () => ({
   resolveBeadsForum: vi.fn(async () => ({ threads: { fetchActive: vi.fn(async () => ({ threads: new Map() })), fetchArchived: vi.fn(async () => ({ threads: new Map() })) } })),
   createBeadThread: vi.fn(async () => 'thread-new'),
@@ -38,6 +33,13 @@ vi.mock('./discord-sync.js', () => ({
   }),
 }));
 
+function makeStore(beads: any[] = []): any {
+  return {
+    list: vi.fn(() => beads),
+    update: vi.fn(),
+  };
+}
+
 function makeClient(): any {
   return { channels: { cache: { get: () => undefined } } };
 }
@@ -50,10 +52,8 @@ describe('runBeadSync', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('skips no-thread beads in phase 1', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { createBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'A', status: 'open', labels: ['no-thread'], external_ref: '' },
     ]);
 
@@ -62,7 +62,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -71,10 +71,8 @@ describe('runBeadSync', () => {
   });
 
   it('dedupes by backfilling external_ref when a matching thread exists', async () => {
-    const { bdList, bdUpdate } = await import('./bd-cli.js');
     const { createBeadThread, findExistingThreadForBead } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-002', title: 'B', status: 'open', labels: [], external_ref: '' },
     ]);
     (findExistingThreadForBead as any).mockResolvedValueOnce('thread-existing');
@@ -84,19 +82,17 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
     expect(result.threadsCreated).toBe(0);
     expect(createBeadThread).not.toHaveBeenCalled();
-    expect(bdUpdate).toHaveBeenCalledWith('ws-002', { externalRef: 'discord:thread-existing' }, '/tmp');
+    expect(store.update).toHaveBeenCalledWith('ws-002', { externalRef: 'discord:thread-existing' });
   });
 
   it('fixes open+blocked-label to blocked in phase 2', async () => {
-    const { bdList, bdUpdate } = await import('./bd-cli.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-003', title: 'C', status: 'open', labels: ['blocked-waiting-on'], external_ref: 'discord:1' },
     ]);
 
@@ -105,19 +101,17 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
     expect(result.statusesUpdated).toBe(1);
-    expect(bdUpdate).toHaveBeenCalledWith('ws-003', { status: 'blocked' }, '/tmp');
+    expect(store.update).toHaveBeenCalledWith('ws-003', { status: 'blocked' });
   });
 
   it('phase 3 skips beads whose thread is already archived', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { isThreadArchived, ensureUnarchived, updateBeadThreadName } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-030', title: 'Archived active', status: 'in_progress', labels: [], external_ref: 'discord:300' },
     ]);
     (isThreadArchived as any).mockResolvedValueOnce(true);
@@ -127,7 +121,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -138,10 +132,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 3 processes non-archived beads through the guard', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { isThreadArchived, ensureUnarchived, updateBeadThreadName } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-031', title: 'Active bead', status: 'open', labels: [], external_ref: 'discord:301' },
     ]);
     (isThreadArchived as any).mockResolvedValueOnce(false);
@@ -152,7 +144,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -163,10 +155,8 @@ describe('runBeadSync', () => {
   });
 
   it('renames threads for active beads in phase 3 and counts changes', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { ensureUnarchived, updateBeadThreadName } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-004', title: 'D', status: 'in_progress', labels: [], external_ref: 'discord:123' },
     ]);
     (updateBeadThreadName as any).mockResolvedValueOnce(true);
@@ -176,7 +166,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -186,10 +176,8 @@ describe('runBeadSync', () => {
   });
 
   it('calls updateBeadStarterMessage for active beads with threads in phase 3', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { updateBeadStarterMessage } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-010', title: 'J', status: 'in_progress', labels: [], external_ref: 'discord:456' },
     ]);
     (updateBeadStarterMessage as any).mockResolvedValueOnce(true);
@@ -199,7 +187,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -208,10 +196,8 @@ describe('runBeadSync', () => {
   });
 
   it('passes mentionUserId through to updateBeadStarterMessage in phase 3', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { updateBeadStarterMessage } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-012', title: 'L', status: 'in_progress', labels: [], external_ref: 'discord:456' },
     ]);
     (updateBeadStarterMessage as any).mockResolvedValueOnce(true);
@@ -221,7 +207,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
       mentionUserId: '999',
     } as any);
@@ -230,10 +216,8 @@ describe('runBeadSync', () => {
   });
 
   it('passes mentionUserId through to createBeadThread in phase 1', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { createBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-013', title: 'M', status: 'open', labels: [], external_ref: '' },
     ]);
 
@@ -242,7 +226,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
       mentionUserId: '999',
     } as any);
@@ -251,10 +235,8 @@ describe('runBeadSync', () => {
   });
 
   it('starterMessagesUpdated stays 0 when updateBeadStarterMessage returns false', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { updateBeadStarterMessage } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-011', title: 'K', status: 'open', labels: [], external_ref: 'discord:789' },
     ]);
     (updateBeadStarterMessage as any).mockResolvedValueOnce(false);
@@ -264,7 +246,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -272,10 +254,8 @@ describe('runBeadSync', () => {
   });
 
   it('archives threads for closed beads in phase 4', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { closeBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
     ]);
 
@@ -284,7 +264,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -293,10 +273,8 @@ describe('runBeadSync', () => {
   });
 
   it('skips fully-closed bead threads in phase 4', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-006', title: 'F', status: 'closed', labels: [], external_ref: 'discord:888' },
     ]);
     (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(true);
@@ -306,7 +284,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -316,10 +294,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 4 uses isBeadThreadAlreadyClosed for full state check', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { isBeadThreadAlreadyClosed, closeBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-040', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:400' },
     ]);
     (isBeadThreadAlreadyClosed as any).mockResolvedValueOnce(false);
@@ -329,7 +305,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -338,10 +314,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 4 recovers archived thread with wrong name/tags', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { isBeadThreadAlreadyClosed, closeBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-050', title: 'Stale name', status: 'closed', labels: [], external_ref: 'discord:500' },
     ]);
     // Thread is archived but has wrong name — isBeadThreadAlreadyClosed returns false
@@ -352,7 +326,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -362,16 +336,14 @@ describe('runBeadSync', () => {
   });
 
   it('calls statusPoster.beadSyncComplete with the result when provided', async () => {
-    const { bdList } = await import('./bd-cli.js');
-    (bdList as any).mockResolvedValueOnce([]);
-
+    const store = makeStore([]);
     const statusPoster = { beadSyncComplete: vi.fn(async () => {}) } as any;
     const result = await runBeadSync({
       client: makeClient(),
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
       statusPoster,
     } as any);
@@ -381,15 +353,14 @@ describe('runBeadSync', () => {
   });
 
   it('works fine without statusPoster', async () => {
-    const { bdList } = await import('./bd-cli.js');
-    (bdList as any).mockResolvedValueOnce([]);
+    const store = makeStore([]);
 
     const result = await runBeadSync({
       client: makeClient(),
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -397,10 +368,8 @@ describe('runBeadSync', () => {
   });
 
   it('tagsUpdated counter increments when updateBeadThreadTags returns true', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { updateBeadThreadTags } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-020', title: 'T', status: 'open', labels: [], external_ref: 'discord:777' },
     ]);
     (updateBeadThreadTags as any).mockResolvedValueOnce(true);
@@ -410,7 +379,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: { open: 's1' },
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -419,10 +388,8 @@ describe('runBeadSync', () => {
   });
 
   it('warnings increment when updateBeadThreadTags throws', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { updateBeadThreadTags } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-021', title: 'U', status: 'open', labels: [], external_ref: 'discord:888' },
     ]);
     (updateBeadThreadTags as any).mockRejectedValueOnce(new Error('Discord API failure'));
@@ -432,7 +399,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -440,10 +407,8 @@ describe('runBeadSync', () => {
   });
 
   it('increments warnings counter on phase failures', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { updateBeadThreadName } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-008', title: 'H', status: 'in_progress', labels: [], external_ref: 'discord:555' },
     ]);
     (updateBeadThreadName as any).mockRejectedValueOnce(new Error('Discord API failure'));
@@ -453,7 +418,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -469,7 +434,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store: makeStore([]),
       throttleMs: 0,
     } as any);
 
@@ -477,8 +442,7 @@ describe('runBeadSync', () => {
   });
 
   it('accepts skipPhase5 option without error and skips phase 5', async () => {
-    const { bdList } = await import('./bd-cli.js');
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'A', status: 'closed', labels: [], external_ref: '' },
     ]);
 
@@ -487,7 +451,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
       skipPhase5: true,
     } as any);
@@ -497,10 +461,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 archives non-archived thread for closed bead and backfills external_ref', async () => {
-    const { bdList, bdUpdate } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: '' },
     ]);
 
@@ -522,20 +484,18 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
     expect(result.threadsReconciled).toBe(1);
-    expect(bdUpdate).toHaveBeenCalledWith('ws-001', { externalRef: 'discord:thread-100' }, '/tmp');
+    expect(store.update).toHaveBeenCalledWith('ws-001', { externalRef: 'discord:thread-100' });
     expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {}, undefined);
   });
 
   it('phase 5 detects orphan threads with no matching bead', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([]);
+    const store = makeStore([]);
 
     const mockForum = {
       threads: {
@@ -555,7 +515,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -564,10 +524,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 skips threads with short-id collision (multiple beads)', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'First', status: 'closed', labels: [], external_ref: '' },
       { id: 'other-001', title: 'Second', status: 'open', labels: [], external_ref: '' },
     ]);
@@ -590,7 +548,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -601,10 +559,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 skips thread when bead external_ref points to a different thread', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-OTHER' },
     ]);
     // Phase 4 will try to archive thread-OTHER — let it skip via already-closed check.
@@ -628,7 +584,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -639,10 +595,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 archives thread when bead external_ref matches this thread', async () => {
-    const { bdList, bdUpdate } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
 
@@ -664,24 +618,22 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
     expect(result.threadsReconciled).toBe(1);
     // No backfill needed — external_ref already set.
-    expect(bdUpdate).not.toHaveBeenCalledWith('ws-001', { externalRef: expect.anything() }, expect.anything());
+    expect(store.update).not.toHaveBeenCalledWith('ws-001', { externalRef: expect.anything() });
     expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {}, undefined);
   });
 
   it('phase 5 still archives thread when external_ref backfill fails', async () => {
-    const { bdList, bdUpdate } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: '' },
     ]);
-    (bdUpdate as any).mockRejectedValueOnce(new Error('bd CLI failure'));
+    store.update.mockImplementationOnce(() => { throw new Error('store failure'); });
 
     const mockForum = {
       threads: {
@@ -701,7 +653,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -712,10 +664,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 skips already-archived thread for closed bead when fully reconciled', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
     // Phase 4 checks isBeadThreadAlreadyClosed → true (skip).
@@ -740,7 +690,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -751,10 +701,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 reconciles stale archived thread for closed bead via unarchive→edit→re-archive', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
     // Phase 4 checks isBeadThreadAlreadyClosed → true (skip Phase 4 archive).
@@ -779,7 +727,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -790,10 +738,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 no-ops gracefully when forum has 0 threads', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'Some bead', status: 'open', labels: [], external_ref: '' },
     ]);
 
@@ -811,7 +757,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -820,10 +766,8 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 handles fetchActive API error gracefully', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([]);
+    const store = makeStore([]);
 
     const mockForum = {
       threads: {
@@ -839,7 +783,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -858,7 +802,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store: makeStore([]),
       throttleMs: 0,
       statusPoster,
     } as any);
@@ -869,11 +813,9 @@ describe('runBeadSync', () => {
   });
 
   it('phase 4 defers close when in-flight reply is active for that thread', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { closeBeadThread } = await import('./discord-sync.js');
     const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
     ]);
     (hasInFlightForChannel as any).mockReturnValueOnce(true);
@@ -883,7 +825,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -893,11 +835,9 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 defers close when in-flight reply is active for non-archived thread', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread } = await import('./discord-sync.js');
     const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: '' },
     ]);
     // Phase 4 sees no thread (no external_ref), so hasInFlightForChannel is not called there.
@@ -922,7 +862,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -934,11 +874,9 @@ describe('runBeadSync', () => {
   });
 
   it('phase 5 defers close when in-flight reply is active for archived stale thread', async () => {
-    const { bdList } = await import('./bd-cli.js');
     const { resolveBeadsForum, closeBeadThread, isBeadThreadAlreadyClosed } = await import('./discord-sync.js');
     const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
-
-    (bdList as any).mockResolvedValueOnce([
+    const store = makeStore([
       { id: 'ws-001', title: 'Closed bead', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
     // Phase 4: already closed → skip (no hasInFlightForChannel call). Phase 5: stale → in-flight → defer.
@@ -963,7 +901,7 @@ describe('runBeadSync', () => {
       guild: makeGuild(),
       forumId: 'forum',
       tagMap: {},
-      beadsCwd: '/tmp',
+      store,
       throttleMs: 0,
     } as any);
 
@@ -972,4 +910,3 @@ describe('runBeadSync', () => {
     expect(result.closesDeferred).toBe(1);
   });
 });
-

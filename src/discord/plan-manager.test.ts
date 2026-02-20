@@ -978,6 +978,43 @@ describe('executePhase', () => {
     expect(capturedPrompt).toContain('workspace/TOOLS.md');
   });
 
+  it('passes signal through to runtime.invoke()', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params) {
+        capturedSignal = params.signal;
+        yield { type: 'text_final', text: 'ok' };
+      },
+    };
+
+    const ac = new AbortController();
+    const opts = makeOpts(runtime);
+    opts.signal = ac.signal;
+
+    await executePhase(phase, SAMPLE_PLAN, basePhases, opts);
+    expect(capturedSignal).toBe(ac.signal);
+  });
+
+  it('returns failed when signal is already aborted', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke() {
+        yield { type: 'error', message: 'aborted' };
+      },
+    };
+
+    const opts = makeOpts(runtime);
+    opts.signal = ac.signal;
+
+    const result = await executePhase(phase, SAMPLE_PLAN, basePhases, opts);
+    expect(result.status).toBe('failed');
+  });
+
   it('filters workspace path from implement phase addDirs', async () => {
     let capturedAddDirs: string[] | undefined;
     const runtime: RuntimeAdapter = {

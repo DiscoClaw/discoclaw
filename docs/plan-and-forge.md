@@ -55,7 +55,7 @@ Show available plan commands.
 
 Create a new plan from a description. Generates a plan ID (`plan-NNN`), fills the plan template, and writes the file.
 
-**Bead dedup:** When invoked outside a bead forum thread (no `existingBeadId`), the command checks for an existing open bead with a matching title (case-insensitive, trimmed) before creating a new one. If a match is found, the existing bead is reused — no duplicate is created. This prevents orphaned forum threads from accidental double-invocations or pre-created beads. The lookup filters `bdList({ label: 'plan' })` and excludes `closed` beads.
+**Bead dedup:** When invoked outside a bead forum thread (no `existingBeadId`), the command checks for an existing open bead with a matching title (case-insensitive, trimmed) before creating a new one. If a match is found, the existing bead is reused — no duplicate is created. This prevents orphaned forum threads from accidental double-invocations or pre-created beads. The lookup calls `taskStore.list({ label: 'plan' })` and excludes `closed` beads.
 
 When invoked inside a bead forum thread, the thread's bead is reused directly (no dedup check needed).
 
@@ -748,14 +748,17 @@ Source: `ForgeOrchestrator.loadProjectContext()` in `forge-commands.ts` reads fr
 
 Every plan gets a backing bead. The bead ID is stored in the plan header. Bead acquisition follows a three-tier strategy:
 
-1. **Bead thread context** — if the command is issued in a bead forum thread (`existingBeadId` is set), that bead is reused directly. A `plan` label is added (best-effort).
-2. **Title-match dedup** — if no `existingBeadId`, `bdList({ label: 'plan' })` is queried and filtered for non-closed beads whose title matches the plan description (case-insensitive, trimmed). If a match is found, it is reused.
-3. **Create new** — if no match is found, `bdCreate()` creates a fresh bead with the `plan` label.
+1. **Bead thread context** — if the command is issued in a bead forum thread (`existingBeadId` is set), that bead is reused directly. A `plan` label is added (best-effort) via `taskStore.addLabel()`.
+2. **Title-match dedup** — if no `existingBeadId`, `taskStore.list({ label: 'plan' })` is queried and filtered for non-closed beads whose title matches the plan description (case-insensitive, trimmed). If a match is found, it is reused.
+3. **Create new** — if no match is found, `taskStore.create()` creates a fresh bead with the `plan` label.
+
+All three operations use the in-process `TaskStore` — no subprocess is spawned. The `TaskStore` instance is passed in as `taskStore` (a `HandlePlanCommandOpts` field).
 
 Status sync:
 
-- `!plan approve` → bead updated to `in_progress`
-- `!plan close` → bead closed with "Plan closed" message
+- `!plan approve` → `taskStore.update(beadId, { status: 'in_progress' })`
+- `!plan close` → `taskStore.close(beadId, 'Plan closed')`
+- All phases complete (auto-close) → `taskStore.close(beadId, 'All phases complete')`
 
 Bead updates are best-effort — failures don't block plan operations.
 

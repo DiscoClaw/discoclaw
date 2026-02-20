@@ -531,6 +531,22 @@ describe('parseConfig', () => {
     expect(config.streamStallWarningMs).toBe(0);
   });
 
+  // --- Progress stall detection ---
+  it('defaults progressStallTimeoutMs to 300000', () => {
+    const { config } = parseConfig(env());
+    expect(config.progressStallTimeoutMs).toBe(300000);
+  });
+
+  it('parses custom progressStallTimeoutMs', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_PROGRESS_STALL_TIMEOUT_MS: '60000' }));
+    expect(config.progressStallTimeoutMs).toBe(60000);
+  });
+
+  it('accepts 0 for progressStallTimeoutMs (disables feature)', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_PROGRESS_STALL_TIMEOUT_MS: '0' }));
+    expect(config.progressStallTimeoutMs).toBe(0);
+  });
+
   // --- Webhook ---
   it('defaults webhookEnabled to false', () => {
     const { config } = parseConfig(env());

@@ -4,8 +4,8 @@ import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
+import type { TaskStore } from '../tasks/store.js';
 import { loadTagMap } from './discord-sync.js';
-import { checkBdAvailable, ensureBdDatabaseReady } from './bd-cli.js';
 import { initBeadsForumGuard } from './forum-guard.js';
 
 export type InitializeBeadsOpts = {
@@ -22,12 +22,12 @@ export type InitializeBeadsOpts = {
   log: LoggerLike;
   /** Resolved from system bootstrap or config. */
   systemBeadsForumId?: string;
+  /** In-process task store. If not provided, an in-memory store is created. */
+  store?: TaskStore;
 };
 
 export type InitializeBeadsResult = {
   beadCtx: BeadContext | undefined;
-  bdAvailable: boolean;
-  bdVersion?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -44,31 +44,8 @@ export async function initializeBeadsContext(
   opts: InitializeBeadsOpts,
 ): Promise<InitializeBeadsResult> {
   if (!opts.enabled) {
-    return { beadCtx: undefined, bdAvailable: false };
+    return { beadCtx: undefined };
   }
-
-  const bd = await checkBdAvailable();
-  if (!bd.available) {
-    opts.log.warn(
-      'beads: bd CLI not found — install bd or set BD_BIN to a custom path ' +
-      '(set DISCOCLAW_BEADS_ENABLED=0 to suppress this warning)',
-    );
-    return { beadCtx: undefined, bdAvailable: false };
-  }
-
-  // Verify the database is initialized with a prefix. Without this, bd may
-  // silently route operations to a different instance's database via the
-  // global daemon registry (~/.beads/registry.json).
-  const dbCheck = await ensureBdDatabaseReady(opts.beadsCwd);
-  if (!dbCheck.ready) {
-    opts.log.error(
-      { beadsCwd: opts.beadsCwd },
-      'beads: database not initialized and auto-init failed — ' +
-      'run "bd --db <path> --no-daemon config set issue_prefix <prefix>" manually',
-    );
-    return { beadCtx: undefined, bdAvailable: bd.available, bdVersion: bd.version };
-  }
-  opts.log.info({ beadsCwd: opts.beadsCwd, prefix: dbCheck.prefix }, 'beads:database prefix verified');
 
   const effectiveForum = opts.systemBeadsForumId || opts.beadsForum || '';
   if (!effectiveForum) {
@@ -76,7 +53,7 @@ export async function initializeBeadsContext(
       'beads: no forum resolved — set DISCORD_GUILD_ID or DISCOCLAW_BEADS_FORUM ' +
       '(set DISCOCLAW_BEADS_ENABLED=0 to suppress)',
     );
-    return { beadCtx: undefined, bdAvailable: bd.available, bdVersion: bd.version };
+    return { beadCtx: undefined };
   }
 
   const tagMap = await loadTagMap(opts.beadsTagMapPath);
@@ -86,11 +63,18 @@ export async function initializeBeadsContext(
     opts.log.warn('beads:sidebar enabled but DISCOCLAW_BEADS_MENTION_USER not set; sidebar mentions will be inactive');
   }
 
+  let store = opts.store;
+  if (!store) {
+    const { TaskStore } = await import('../tasks/store.js');
+    store = new TaskStore();
+  }
+
   const beadCtx: BeadContext = {
     beadsCwd: opts.beadsCwd,
     forumId: effectiveForum,
     tagMap,
     tagMapPath: opts.beadsTagMapPath,
+    store,
     runtime: opts.runtime,
     autoTag: opts.beadsAutoTag,
     autoTagModel: opts.beadsAutoTagModel,
@@ -100,11 +84,11 @@ export async function initializeBeadsContext(
     log: opts.log,
   };
 
-  return { beadCtx, bdAvailable: bd.available, bdVersion: bd.version };
+  return { beadCtx };
 }
 
 // ---------------------------------------------------------------------------
-// Post-connect wiring (forum guard + sync watcher + startup sync)
+// Post-connect wiring (forum guard + store event subscriptions + startup sync)
 // ---------------------------------------------------------------------------
 
 export type WireBeadsSyncOpts = {
@@ -123,7 +107,7 @@ export type WireBeadsSyncOpts = {
 };
 
 export type WireBeadsSyncResult = {
-  syncWatcher: { stop(): void } | null;
+  stop(): void;
 };
 
 export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsSyncResult> {
@@ -132,13 +116,12 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
       client: opts.client,
       forumId: opts.beadCtx.forumId,
       log: opts.log,
-      beadsCwd: opts.beadCtx.beadsCwd,
+      store: opts.beadCtx.store,
       tagMap: opts.beadCtx.tagMap,
     });
   }
 
   const { BeadSyncCoordinator } = await import('./bead-sync-coordinator.js');
-  const { startBeadSyncWatcher } = await import('./bead-sync-watcher.js');
 
   const syncCoordinator = new BeadSyncCoordinator({
     client: opts.client,
@@ -146,7 +129,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     forumId: opts.beadCtx.forumId,
     tagMap: opts.beadCtx.tagMap,
     tagMapPath: opts.beadCtx.tagMapPath,
-    beadsCwd: opts.beadsCwd,
+    store: opts.beadCtx.store,
     log: opts.log,
     mentionUserId: opts.sidebarMentionUserId,
     forumCountSync: opts.forumCountSync,
@@ -159,14 +142,26 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     opts.log.warn({ err }, 'beads:startup-sync failed');
   });
 
-  const syncWatcher = startBeadSyncWatcher({
-    coordinator: syncCoordinator,
-    beadsCwd: opts.beadsCwd,
-    log: opts.log,
-    tagMapPath: opts.beadCtx.tagMapPath,
-    tagMap: opts.beadCtx.tagMap,
-  });
-  opts.log.info({ beadsCwd: opts.beadsCwd }, 'beads:file-watcher started');
+  // Wire store events to trigger Discord sync on every mutation.
+  const triggerSync = () => {
+    syncCoordinator.sync().catch((err) => {
+      opts.log.warn({ err }, 'beads:store-event sync failed');
+    });
+  };
+  const store = opts.beadCtx.store;
+  store.on('created', triggerSync);
+  store.on('updated', triggerSync);
+  store.on('closed', triggerSync);
+  store.on('labeled', triggerSync);
 
-  return { syncWatcher };
+  opts.log.info({ beadsCwd: opts.beadsCwd }, 'beads:store-event watcher started');
+
+  return {
+    stop() {
+      store.off('created', triggerSync);
+      store.off('updated', triggerSync);
+      store.off('closed', triggerSync);
+      store.off('labeled', triggerSync);
+    },
+  };
 }

@@ -231,7 +231,7 @@ export async function buildBeadThreadSection(opts: {
   if (!opts.beadCtx) return '';
   if (!opts.threadParentId) return '';
 
-  const { forumId, beadsCwd } = opts.beadCtx;
+  const { forumId, store } = opts.beadCtx;
 
   // Forum ID must be a snowflake. If it's a channel name, the numeric
   // threadParentId comparison would always fail. Log and bail.
@@ -246,7 +246,7 @@ export async function buildBeadThreadSection(opts: {
   if (opts.threadParentId !== forumId) return '';
 
   try {
-    const bead = await beadThreadCache.get(opts.threadId, beadsCwd);
+    const bead = await beadThreadCache.get(opts.threadId, store);
     if (!bead) return '';
     return buildBeadContextSection(bead);
   } catch (err) {

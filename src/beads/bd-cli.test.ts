@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
-import { parseBdJson, normalizeBeadData, bdShow, bdList, bdFindByTitle, ensureBdDatabaseReady } from './bd-cli.js';
+import { parseBdJson, normalizeBeadData, bdShow, bdList, bdFindByTitle, ensureBdDatabaseReady, buildBeadContextSummary } from './bd-cli.js';
+import { TaskStore } from '../tasks/store.js';
 import type { BeadData } from './types.js';
 
 vi.mock('execa', () => ({
@@ -538,5 +539,60 @@ describe('ensureBdDatabaseReady', () => {
     expect(mockRealpath).toHaveBeenCalledWith('/home/user/code/discoclaw/workspace');
     const setArgs = mockExeca.mock.calls[1][1] as string[];
     expect(setArgs).toContain('data');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildBeadContextSummary — in-process TaskStore path
+// ---------------------------------------------------------------------------
+
+describe('buildBeadContextSummary', () => {
+  it('returns undefined when beadId is undefined', () => {
+    const store = new TaskStore();
+    expect(buildBeadContextSummary(undefined, store)).toBeUndefined();
+  });
+
+  it('returns undefined when store is undefined', () => {
+    expect(buildBeadContextSummary('t-001', undefined)).toBeUndefined();
+  });
+
+  it('returns undefined when bead is not found in store', () => {
+    const store = new TaskStore();
+    expect(buildBeadContextSummary('t-001', store)).toBeUndefined();
+  });
+
+  it('returns summary with title only when no description', () => {
+    const store = new TaskStore();
+    const bead = store.create({ title: 'Fix the bug' });
+    const result = buildBeadContextSummary(bead.id, store);
+    expect(result?.summary).toBe('Bead context for this thread:\nTitle: Fix the bug');
+    expect(result?.description).toBeUndefined();
+  });
+
+  it('returns summary with title and truncated description', () => {
+    const store = new TaskStore();
+    const bead = store.create({ title: 'My task', description: 'a'.repeat(500) });
+    const result = buildBeadContextSummary(bead.id, store);
+    expect(result?.summary).toContain('Title: My task');
+    expect(result?.description).toHaveLength(400);
+    expect(result?.description?.endsWith('\u2026')).toBe(true);
+  });
+
+  it('collapses whitespace in description', () => {
+    const store = new TaskStore();
+    const bead = store.create({ title: 'T', description: 'hello\n  world' });
+    const result = buildBeadContextSummary(bead.id, store);
+    expect(result?.description).toBe('hello world');
+  });
+
+  it('does not call execa — store.get is synchronous', () => {
+    // This test verifies no subprocess is spawned. Since buildBeadContextSummary
+    // is now a synchronous function, it cannot be an async subprocess call.
+    const store = new TaskStore();
+    const bead = store.create({ title: 'Sync task' });
+    const returnValue = buildBeadContextSummary(bead.id, store);
+    // Must return a plain object, not a Promise.
+    expect(returnValue).not.toBeInstanceOf(Promise);
+    expect(returnValue?.summary).toContain('Sync task');
   });
 });

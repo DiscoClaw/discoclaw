@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,26 +19,20 @@ import {
   NO_PHASES_SENTINEL,
 } from './plan-commands.js';
 import type { PlanCommand, HandlePlanCommandOpts } from './plan-commands.js';
-
-// Mock the bd-cli module so we don't shell out to the real CLI.
-vi.mock('../beads/bd-cli.js', () => ({
-  bdCreate: vi.fn(async () => ({ id: 'ws-test-001', title: 'test', status: 'open' })),
-  bdClose: vi.fn(async () => {}),
-  bdUpdate: vi.fn(async () => {}),
-  bdAddLabel: vi.fn(async () => {}),
-  bdList: vi.fn(async () => []),
-}));
-
-import { bdCreate, bdClose, bdUpdate, bdList } from '../beads/bd-cli.js';
+import { TaskStore } from '../tasks/store.js';
 
 async function makeTmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'plan-commands-test-'));
 }
 
+function makeStore(prefix = 'ws'): TaskStore {
+  return new TaskStore({ prefix });
+}
+
 function baseOpts(overrides: Partial<HandlePlanCommandOpts> = {}): HandlePlanCommandOpts {
   return {
     workspaceCwd: '/tmp/test-workspace',
-    beadsCwd: '/tmp/test-beads',
+    taskStore: makeStore(),
     ...overrides,
   };
 }
@@ -244,15 +238,6 @@ describe('parsePlanFileHeader', () => {
 // ---------------------------------------------------------------------------
 
 describe('handlePlanCommand', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    // Reset the mock to return a fresh bead each time.
-    vi.mocked(bdCreate).mockResolvedValue({
-      id: 'ws-test-001',
-      title: 'test',
-      status: 'open',
-    });
-  });
 
   it('help — returns usage text', async () => {
     const result = await handlePlanCommand({ action: 'help', args: '' }, baseOpts());
@@ -265,7 +250,8 @@ describe('handlePlanCommand', () => {
 
   it('create — writes plan file and creates bead', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const store = makeStore();
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'Add user authentication' },
@@ -273,14 +259,15 @@ describe('handlePlanCommand', () => {
     );
 
     expect(result).toContain('plan-001');
-    expect(result).toContain('ws-test-001');
     expect(result).toContain('Add user authentication');
 
     // Verify bead was created with plan label.
-    expect(bdCreate).toHaveBeenCalledWith(
-      { title: 'Add user authentication', labels: ['plan'] },
-      opts.beadsCwd,
-    );
+    const tasks = store.list({ label: 'plan' });
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.title).toBe('Add user authentication');
+    expect(tasks[0]!.labels).toContain('plan');
+    const beadId = tasks[0]!.id;
+    expect(result).toContain(beadId);
 
     // Verify file was written.
     const plansDir = path.join(tmpDir, 'plans');
@@ -290,7 +277,7 @@ describe('handlePlanCommand', () => {
 
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
     expect(content).toContain('**ID:** plan-001');
-    expect(content).toContain('**Bead:** ws-test-001');
+    expect(content).toContain(`**Bead:** ${beadId}`);
     expect(content).toContain('**Status:** DRAFT');
   });
 
@@ -338,13 +325,14 @@ describe('handlePlanCommand', () => {
     expect(result).toContain('Usage');
   });
 
-  it('create — handles bdCreate failure gracefully', async () => {
-    vi.mocked(bdCreate).mockRejectedValueOnce(new Error('bd not found'));
+  it('create — handles task store create failure gracefully', async () => {
     const tmpDir = await makeTmpDir();
+    const store = makeStore();
+    vi.spyOn(store, 'create').mockImplementationOnce(() => { throw new Error('store error'); });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'Something' },
-      baseOpts({ workspaceCwd: tmpDir }),
+      baseOpts({ workspaceCwd: tmpDir, taskStore: store }),
     );
 
     expect(result).toContain('Failed to create backing bead');
@@ -370,7 +358,8 @@ describe('handlePlanCommand', () => {
 
   it('create — appends context to plan file body and bead description without polluting slug or bead title', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const store = makeStore();
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'fix the login flow', context: 'Context (replied-to message):\n[Weston]: The login handler crashes on empty passwords.' },
@@ -381,14 +370,11 @@ describe('handlePlanCommand', () => {
     expect(result).toContain('fix the login flow');
 
     // Bead title should be the raw args, not polluted with context
-    expect(bdCreate).toHaveBeenCalledWith(
-      {
-        title: 'fix the login flow',
-        labels: ['plan'],
-        description: 'Context (replied-to message):\n[Weston]: The login handler crashes on empty passwords.',
-      },
-      opts.beadsCwd,
-    );
+    const tasks = store.list({ label: 'plan' });
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.title).toBe('fix the login flow');
+    expect(tasks[0]!.labels).toContain('plan');
+    expect(tasks[0]!.description).toBe('Context (replied-to message):\n[Weston]: The login handler crashes on empty passwords.');
 
     // Slug should not contain context text
     const plansDir = path.join(tmpDir, 'plans');
@@ -406,7 +392,8 @@ describe('handlePlanCommand', () => {
 
   it('create — trims whitespace around context before writing section and bead description', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const store = makeStore();
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
     const rawContext = '\n  Trimmed context line\n  Another line  \n';
     const expectedContext = rawContext.trim();
 
@@ -421,43 +408,46 @@ describe('handlePlanCommand', () => {
     const content = await fs.readFile(path.join(plansDir, planFile), 'utf-8');
     expect(content).toContain(`## Context\n\n${expectedContext}\n`);
 
-    const createCall = (bdCreate as any).mock.calls[0][0];
-    expect(createCall.description).toBe(expectedContext);
+    const tasks = store.list({ label: 'plan' });
+    expect(tasks[0]!.description).toBe(expectedContext);
   });
 
   it('create — does not pass description when context is absent', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const store = makeStore();
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     await handlePlanCommand(
       { action: 'create', args: 'simple plan' },
       opts,
     );
 
-    expect(bdCreate).toHaveBeenCalledWith(
-      { title: 'simple plan', labels: ['plan'] },
-      opts.beadsCwd,
-    );
+    const tasks = store.list({ label: 'plan' });
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.title).toBe('simple plan');
+    expect(tasks[0]!.description).toBeUndefined();
   });
 
   it('create — does not pass description when context is whitespace-only', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const store = makeStore();
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     await handlePlanCommand(
       { action: 'create', args: 'plan with blank context', context: '  \n  ' },
       opts,
     );
 
-    expect(bdCreate).toHaveBeenCalledWith(
-      { title: 'plan with blank context', labels: ['plan'] },
-      opts.beadsCwd,
-    );
+    const tasks = store.list({ label: 'plan' });
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.title).toBe('plan with blank context');
+    expect(tasks[0]!.description).toBeUndefined();
   });
 
   it('create — truncates long context in bead description', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const store = makeStore();
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
     const longContext = 'x'.repeat(5000);
 
     await handlePlanCommand(
@@ -465,9 +455,9 @@ describe('handlePlanCommand', () => {
       opts,
     );
 
-    const call = (bdCreate as any).mock.calls[0];
-    expect(call[0].description).toHaveLength(1800);
-    expect(call[0].description).toBe('x'.repeat(1800));
+    const tasks = store.list({ label: 'plan' });
+    expect(tasks[0]!.description).toHaveLength(1800);
+    expect(tasks[0]!.description).toBe('x'.repeat(1800));
   });
 
   it('create — creates plans dir when missing', async () => {
@@ -484,9 +474,11 @@ describe('handlePlanCommand', () => {
     expect(stat.isDirectory()).toBe(true);
   });
 
-  it('create — skips bdCreate when existingBeadId is provided', async () => {
+  it('create — skips task store create when existingBeadId is provided', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
+    const store = makeStore();
+    const createSpy = vi.spyOn(store, 'create');
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'fix the bug', existingBeadId: 'bead-abc' },
@@ -495,7 +487,7 @@ describe('handlePlanCommand', () => {
 
     expect(result).toContain('plan-001');
     expect(result).toContain('bead-abc');
-    expect(bdCreate).not.toHaveBeenCalled();
+    expect(createSpy).not.toHaveBeenCalled();
 
     // Verify the plan file contains the existing bead ID
     const plansDir = path.join(tmpDir, 'plans');
@@ -505,24 +497,25 @@ describe('handlePlanCommand', () => {
     expect(content).toContain('**Bead:** bead-abc');
   });
 
-  it('create — calls bdAddLabel when reusing existing bead', async () => {
+  it('create — calls addLabel when reusing existing bead', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
-    const { bdAddLabel } = await import('../beads/bd-cli.js');
+    const store = makeStore();
+    const spy = vi.spyOn(store, 'addLabel');
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     await handlePlanCommand(
       { action: 'create', args: 'test', existingBeadId: 'bead-xyz' },
       opts,
     );
 
-    expect(vi.mocked(bdAddLabel)).toHaveBeenCalledWith('bead-xyz', 'plan', opts.beadsCwd);
+    expect(spy).toHaveBeenCalledWith('bead-xyz', 'plan');
   });
 
-  it('create — bdAddLabel failure does not block plan creation', async () => {
+  it('create — addLabel failure does not block plan creation', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
-    const { bdAddLabel } = await import('../beads/bd-cli.js');
-    vi.mocked(bdAddLabel).mockRejectedValueOnce(new Error('label fail'));
+    const store = makeStore();
+    vi.spyOn(store, 'addLabel').mockImplementationOnce(() => { throw new Error('label fail'); });
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'test', existingBeadId: 'bead-fail' },
@@ -542,11 +535,10 @@ describe('handlePlanCommand', () => {
 
   it('create — reuses existing open bead with matching title instead of creating duplicate', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
-
-    vi.mocked(bdList).mockResolvedValueOnce([
-      { id: 'ws-existing-001', title: 'Add user authentication', status: 'open' },
-    ]);
+    const store = makeStore();
+    const existing = store.create({ title: 'Add user authentication', labels: ['plan'] });
+    const createSpy = vi.spyOn(store, 'create');
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'Add user authentication' },
@@ -554,77 +546,82 @@ describe('handlePlanCommand', () => {
     );
 
     expect(result).toContain('plan-001');
-    expect(result).toContain('ws-existing-001');
-    expect(bdCreate).not.toHaveBeenCalled();
-    expect(bdList).toHaveBeenCalledWith({ label: 'plan' }, opts.beadsCwd);
+    expect(result).toContain(existing.id);
+    expect(createSpy).not.toHaveBeenCalled();
+    // Store still has exactly the one pre-existing task
+    expect(store.list({ label: 'plan' })).toHaveLength(1);
   });
 
   it('create — dedup is case-insensitive and trims whitespace', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
-
-    vi.mocked(bdList).mockResolvedValueOnce([
-      { id: 'ws-existing-002', title: '  Fix The Bug  ', status: 'open' },
-    ]);
+    const store = makeStore();
+    const existing = store.create({ title: '  Fix The Bug  ', labels: ['plan'] });
+    const createSpy = vi.spyOn(store, 'create');
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'fix the bug' },
       opts,
     );
 
-    expect(result).toContain('ws-existing-002');
-    expect(bdCreate).not.toHaveBeenCalled();
+    expect(result).toContain(existing.id);
+    expect(createSpy).not.toHaveBeenCalled();
   });
 
   it('create — does not reuse closed beads with matching title', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
-
-    vi.mocked(bdList).mockResolvedValueOnce([
-      { id: 'ws-closed-001', title: 'Add user authentication', status: 'closed' },
-    ]);
+    const store = makeStore();
+    const closed = store.create({ title: 'Add user authentication', labels: ['plan'] });
+    store.close(closed.id, 'done');
+    const createSpy = vi.spyOn(store, 'create');
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'Add user authentication' },
       opts,
     );
 
-    expect(result).toContain('ws-test-001');
-    expect(bdCreate).toHaveBeenCalled();
+    expect(createSpy).toHaveBeenCalled();
+    // A new task was created (total 2 in store including the closed one)
+    expect(store.list({ status: 'all' })).toHaveLength(2);
+    // Result contains the new task's ID
+    const newTask = store.list({ label: 'plan' })[0]!;
+    expect(result).toContain(newTask.id);
   });
 
   it('create — creates new bead when no title match exists', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
-
-    vi.mocked(bdList).mockResolvedValueOnce([
-      { id: 'ws-other-001', title: 'Something else entirely', status: 'open' },
-    ]);
+    const store = makeStore();
+    store.create({ title: 'Something else entirely', labels: ['plan'] });
+    const createSpy = vi.spyOn(store, 'create');
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'Add user authentication' },
       opts,
     );
 
-    expect(result).toContain('ws-test-001');
-    expect(bdCreate).toHaveBeenCalled();
+    expect(createSpy).toHaveBeenCalled();
+    expect(store.list({ label: 'plan' })).toHaveLength(2);
+    const newTask = store.list({ label: 'plan' }).find((t) => t.title === 'Add user authentication')!;
+    expect(result).toContain(newTask.id);
   });
 
   it('create — dedup reuses in_progress bead with matching title', async () => {
     const tmpDir = await makeTmpDir();
-    const opts = baseOpts({ workspaceCwd: tmpDir });
-
-    vi.mocked(bdList).mockResolvedValueOnce([
-      { id: 'ws-inprog-001', title: 'Add user authentication', status: 'in_progress' },
-    ]);
+    const store = makeStore();
+    const existing = store.create({ title: 'Add user authentication', labels: ['plan'] });
+    store.update(existing.id, { status: 'in_progress' });
+    const createSpy = vi.spyOn(store, 'create');
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
 
     const result = await handlePlanCommand(
       { action: 'create', args: 'Add user authentication' },
       opts,
     );
 
-    expect(result).toContain('ws-inprog-001');
-    expect(bdCreate).not.toHaveBeenCalled();
+    expect(result).toContain(existing.id);
+    expect(createSpy).not.toHaveBeenCalled();
   });
 
   it('list — shows active plans as bullet list', async () => {
@@ -1075,9 +1072,11 @@ describe('handlePlanCommand', () => {
       '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
+    const store = makeStore();
+    const updateSpy = vi.spyOn(store, 'update');
     const result = await handlePlanCommand(
       { action: 'approve', args: 'plan-001' },
-      baseOpts({ workspaceCwd: tmpDir }),
+      baseOpts({ workspaceCwd: tmpDir, taskStore: store }),
     );
 
     expect(result).toContain('approved');
@@ -1087,8 +1086,8 @@ describe('handlePlanCommand', () => {
     expect(content).toContain('**Status:** APPROVED');
     expect(content).not.toContain('**Status:** DRAFT');
 
-    // Verify bead was updated.
-    expect(bdUpdate).toHaveBeenCalledWith('ws-001', { status: 'in_progress' }, expect.any(String));
+    // Verify task store update was attempted with in_progress.
+    expect(updateSpy).toHaveBeenCalledWith('ws-001', { status: 'in_progress' });
   });
 
   it('approve — returns usage when no args', async () => {
@@ -1110,9 +1109,11 @@ describe('handlePlanCommand', () => {
       '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** APPROVED\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
+    const store = makeStore();
+    const closeSpy = vi.spyOn(store, 'close');
     const result = await handlePlanCommand(
       { action: 'close', args: 'plan-001' },
-      baseOpts({ workspaceCwd: tmpDir }),
+      baseOpts({ workspaceCwd: tmpDir, taskStore: store }),
     );
 
     expect(result).toContain('closed');
@@ -1121,8 +1122,8 @@ describe('handlePlanCommand', () => {
     const content = await fs.readFile(filePath, 'utf-8');
     expect(content).toContain('**Status:** CLOSED');
 
-    // Verify bead was closed.
-    expect(bdClose).toHaveBeenCalledWith('ws-001', 'Plan closed', expect.any(String));
+    // Verify task store close was attempted.
+    expect(closeSpy).toHaveBeenCalledWith('ws-001', 'Plan closed');
   });
 
   it('close — returns usage when no args', async () => {
@@ -1918,10 +1919,6 @@ function makeAcquireLock(): { acquireLock: () => Promise<() => void>; lockCalls:
 }
 
 describe('closePlanIfComplete', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('closes plan and bead when all phases are done', async () => {
     const tmpDir = await makeTmpDir();
     const phasesPath = path.join(tmpDir, 'phases.md');
@@ -1930,8 +1927,10 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(phasesPath, makePhasesFile(['done', 'done']));
     await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
 
+    const store = makeStore();
+    const closeSpy = vi.spyOn(store, 'close');
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, store, lock.acquireLock);
 
     expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
 
@@ -1939,8 +1938,8 @@ describe('closePlanIfComplete', () => {
     const content = await fs.readFile(planPath, 'utf-8');
     expect(content).toContain('**Status:** CLOSED');
 
-    // Bead should be closed
-    expect(bdClose).toHaveBeenCalledWith('ws-001', 'All phases complete', '/tmp/beads');
+    // Bead close attempted on the task store
+    expect(closeSpy).toHaveBeenCalledWith('ws-001', 'All phases complete');
 
     // Lock acquired and released exactly once
     expect(lock.lockCalls).toBe(1);
@@ -1956,7 +1955,7 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(planPath, makePlanFile({ status: 'IMPLEMENTING' }));
 
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock);
 
     expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
   });
@@ -1970,7 +1969,7 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
 
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock);
 
     expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
   });
@@ -1984,7 +1983,7 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
 
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock);
 
     expect(result).toEqual({ closed: false, reason: 'not_all_complete' });
 
@@ -2005,7 +2004,7 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
 
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock);
 
     expect(result).toEqual({ closed: false, reason: 'not_all_complete' });
   });
@@ -2019,7 +2018,7 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
 
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock);
 
     expect(result).toEqual({ closed: false, reason: 'not_all_complete' });
   });
@@ -2033,7 +2032,7 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(planPath, makePlanFile({ status: 'DRAFT' }));
 
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock);
 
     expect(result).toEqual({ closed: false, reason: 'wrong_status' });
 
@@ -2051,7 +2050,7 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(planPath, makePlanFile({ status: 'CLOSED' }));
 
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock);
 
     expect(result).toEqual({ closed: false, reason: 'wrong_status' });
   });
@@ -2066,7 +2065,7 @@ describe('closePlanIfComplete', () => {
     const result = await closePlanIfComplete(
       path.join(tmpDir, 'nonexistent-phases.md'),
       planPath,
-      '/tmp/beads',
+      makeStore(),
       lock.acquireLock,
       log,
     );
@@ -2086,7 +2085,7 @@ describe('closePlanIfComplete', () => {
 
     const lock = makeAcquireLock();
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock, log);
+    const result = await closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock, log);
 
     expect(result).toEqual({ closed: false, reason: 'read_error' });
     expect(log.warn).toHaveBeenCalled();
@@ -2104,7 +2103,7 @@ describe('closePlanIfComplete', () => {
     const result = await closePlanIfComplete(
       phasesPath,
       path.join(tmpDir, 'nonexistent-plan.md'),
-      '/tmp/beads',
+      makeStore(),
       lock.acquireLock,
       log,
     );
@@ -2121,14 +2120,16 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(phasesPath, makePhasesFile(['done']));
     await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED', beadId: '' }));
 
+    const store = makeStore();
+    const closeSpy = vi.spyOn(store, 'close');
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, store, lock.acquireLock);
 
     expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
-    expect(bdClose).not.toHaveBeenCalled();
+    expect(closeSpy).not.toHaveBeenCalled();
   });
 
-  it('still closes plan when bdClose fails (best-effort)', async () => {
+  it('still closes plan when task store close fails (best-effort)', async () => {
     const tmpDir = await makeTmpDir();
     const phasesPath = path.join(tmpDir, 'phases.md');
     const planPath = path.join(tmpDir, 'plan.md');
@@ -2136,11 +2137,12 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(phasesPath, makePhasesFile(['done']));
     await fs.writeFile(planPath, makePlanFile({ status: 'APPROVED' }));
 
-    vi.mocked(bdClose).mockRejectedValueOnce(new Error('bead not found'));
+    const store = makeStore();
+    vi.spyOn(store, 'close').mockImplementationOnce(() => { throw new Error('bead not found'); });
 
     const lock = makeAcquireLock();
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock, log);
+    const result = await closePlanIfComplete(phasesPath, planPath, store, lock.acquireLock, log);
 
     expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
 
@@ -2169,7 +2171,7 @@ describe('closePlanIfComplete', () => {
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
     await expect(
-      closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock, log),
+      closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock, log),
     ).rejects.toThrow();
 
     // Lock must still be released
@@ -2188,7 +2190,7 @@ describe('closePlanIfComplete', () => {
     await fs.writeFile(planPath, makePlanFile({ status: 'IMPLEMENTING' }));
 
     const lock = makeAcquireLock();
-    const result = await closePlanIfComplete(phasesPath, planPath, '/tmp/beads', lock.acquireLock);
+    const result = await closePlanIfComplete(phasesPath, planPath, makeStore(), lock.acquireLock);
 
     expect(result).toEqual({ closed: true, reason: 'all_phases_complete' });
 

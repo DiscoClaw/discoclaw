@@ -11,24 +11,12 @@ vi.mock('./beads/bead-thread-cache.js', () => ({
   },
 }));
 
-// Mock bd-cli so plan/forge dispatch tests don't shell out.
-vi.mock('./beads/bd-cli.js', () => ({
-  bdCreate: vi.fn(async () => ({ id: 'ws-test-001', title: 'test', status: 'open' })),
-  bdClose: vi.fn(async () => {}),
-  bdUpdate: vi.fn(async () => {}),
-  bdAddLabel: vi.fn(async () => {}),
-  bdList: vi.fn(async () => []),
-}));
-
 import { beadThreadCache } from './beads/bead-thread-cache.js';
-import { bdCreate, bdList } from './beads/bd-cli.js';
+import { TaskStore } from './tasks/store.js';
 import { createMessageCreateHandler } from './discord.js';
 import { loadDurableMemory, saveDurableMemory, addItem } from './discord/durable-memory.js';
 import { inlineContextFiles } from './discord/prompt-common.js';
 import type { DurableMemoryStore } from './discord/durable-memory.js';
-
-const mockedBdCreate = vi.mocked(bdCreate);
-const mockedBdList = vi.mocked(bdList);
 
 const mockedCacheGet = vi.mocked(beadThreadCache.get);
 
@@ -1024,12 +1012,6 @@ describe('inlineContextFiles required option', () => {
 describe('bead resolution dispatch wiring', () => {
   beforeEach(() => {
     mockedCacheGet.mockReset().mockResolvedValue(null);
-    mockedBdCreate.mockReset().mockResolvedValue({
-      id: 'ws-test-001',
-      title: 'test',
-      status: 'open',
-    });
-    mockedBdList.mockReset().mockResolvedValue([]);
   });
 
   function makePlanForgeParams(overrides?: Partial<any>) {
@@ -1041,6 +1023,8 @@ describe('bead resolution dispatch wiring', () => {
         yield { type: 'text_final', text: 'ok' } as any;
       }),
     } as any;
+
+    const store = new TaskStore({ prefix: 'ws' });
 
     const params: any = {
       allowUserIds: new Set(['123']),
@@ -1093,16 +1077,17 @@ describe('bead resolution dispatch wiring', () => {
         beadsCwd: '/tmp/beads',
         forumId: BEAD_FORUM_ID,
         tagMap: {},
+        store,
         runtime: {} as any,
         autoTag: false,
         autoTagModel: 'haiku',
       },
       ...overrides,
     };
-    return { queue, runtime, params, workspaceCwd };
+    return { queue, runtime, params, workspaceCwd, store };
   }
 
-  it('!plan create in bead forum thread resolves existingBeadId — skips bdCreate', async () => {
+  it('!plan create in bead forum thread resolves existingBeadId — skips store.create', async () => {
     mockedCacheGet.mockResolvedValue({
       id: 'existing-bead-42',
       title: 'Existing bead',
@@ -1111,7 +1096,8 @@ describe('bead resolution dispatch wiring', () => {
       owner: 'David',
     } as any);
 
-    const { queue, params, workspaceCwd } = makePlanForgeParams();
+    const { queue, params, workspaceCwd, store } = makePlanForgeParams();
+    const createSpy = vi.spyOn(store, 'create');
     const handler = createMessageCreateHandler(params, queue);
 
     await handler(makeMsg({
@@ -1126,8 +1112,8 @@ describe('bead resolution dispatch wiring', () => {
       },
     }));
 
-    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-plan', '/tmp/beads');
-    expect(mockedBdCreate).not.toHaveBeenCalled();
+    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-plan', expect.any(Object));
+    expect(createSpy).not.toHaveBeenCalled();
 
     // Verify the plan file uses the existing bead ID
     const plansDir = path.join(workspaceCwd, 'plans');
@@ -1138,8 +1124,9 @@ describe('bead resolution dispatch wiring', () => {
     expect(content).toContain('**Bead:** existing-bead-42');
   });
 
-  it('!plan create in non-bead-forum thread does NOT resolve — calls bdCreate', async () => {
-    const { queue, params } = makePlanForgeParams();
+  it('!plan create in non-bead-forum thread does NOT resolve — calls store.create', async () => {
+    const { queue, params, store } = makePlanForgeParams();
+    const createSpy = vi.spyOn(store, 'create');
     const handler = createMessageCreateHandler(params, queue);
 
     await handler(makeMsg({
@@ -1155,13 +1142,14 @@ describe('bead resolution dispatch wiring', () => {
     }));
 
     expect(mockedCacheGet).not.toHaveBeenCalled();
-    expect(mockedBdCreate).toHaveBeenCalled();
+    expect(createSpy).toHaveBeenCalled();
   });
 
-  it('!plan create when cache returns null falls through to bdCreate', async () => {
+  it('!plan create when cache returns null falls through to store.create', async () => {
     mockedCacheGet.mockResolvedValue(null);
 
-    const { queue, params } = makePlanForgeParams();
+    const { queue, params, store } = makePlanForgeParams();
+    const createSpy = vi.spyOn(store, 'create');
     const handler = createMessageCreateHandler(params, queue);
 
     await handler(makeMsg({
@@ -1176,12 +1164,12 @@ describe('bead resolution dispatch wiring', () => {
       },
     }));
 
-    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-null', '/tmp/beads');
-    expect(mockedBdCreate).toHaveBeenCalled();
+    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-null', expect.any(Object));
+    expect(createSpy).toHaveBeenCalled();
   });
 
   it('!plan create without beadCtx skips bead lookup entirely', async () => {
-    const { queue, params } = makePlanForgeParams({ beadCtx: undefined });
+    const { queue, params, workspaceCwd } = makePlanForgeParams({ beadCtx: undefined });
     const handler = createMessageCreateHandler(params, queue);
 
     await handler(makeMsg({
@@ -1197,7 +1185,10 @@ describe('bead resolution dispatch wiring', () => {
     }));
 
     expect(mockedCacheGet).not.toHaveBeenCalled();
-    expect(mockedBdCreate).toHaveBeenCalled();
+    // Plan file should be created (bead is created via ephemeral TaskStore)
+    const plansDir = path.join(workspaceCwd, 'plans');
+    const files = await fs.readdir(plansDir);
+    expect(files.find((f) => f.endsWith('.md'))).toBeTruthy();
   });
 
   it('!forge create in bead forum thread resolves existingBeadId', async () => {
@@ -1225,7 +1216,7 @@ describe('bead resolution dispatch wiring', () => {
     }));
 
     // Verify the bead lookup happened for the forge path
-    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-forge', '/tmp/beads');
+    expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-forge', expect.any(Object));
   });
 
   it('!forge create in non-bead-forum thread does NOT resolve existingBeadId', async () => {
@@ -1479,16 +1470,10 @@ describe('bead resolution dispatch wiring', () => {
   // -------------------------------------------------------------------------
 
   describe('title-match dedup in non-bead channels', () => {
-    beforeEach(() => {
-      mockedBdList.mockReset().mockResolvedValue([]);
-    });
-
-    it('!plan create reuses existing open bead with matching title — skips bdCreate', async () => {
-      mockedBdList.mockResolvedValueOnce([
-        { id: 'ws-dedup-001', title: 'fix the layout bug', status: 'open' } as any,
-      ]);
-
-      const { queue, params, workspaceCwd } = makePlanForgeParams();
+    it('!plan create reuses existing open bead with matching title — skips store.create', async () => {
+      const { queue, params, workspaceCwd, store } = makePlanForgeParams();
+      const existingBead = store.create({ title: 'fix the layout bug', labels: ['plan'] });
+      const createSpy = vi.spyOn(store, 'create');
       const handler = createMessageCreateHandler(params, queue);
 
       await handler(makeMsg({
@@ -1502,8 +1487,7 @@ describe('bead resolution dispatch wiring', () => {
         },
       }));
 
-      expect(mockedBdList).toHaveBeenCalled();
-      expect(mockedBdCreate).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
 
       // Verify the plan file uses the deduped bead ID
       const plansDir = path.join(workspaceCwd, 'plans');
@@ -1511,15 +1495,13 @@ describe('bead resolution dispatch wiring', () => {
       const planFile = files.find((f) => f.endsWith('.md'));
       expect(planFile).toBeTruthy();
       const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-      expect(content).toContain('**Bead:** ws-dedup-001');
+      expect(content).toContain(`**Bead:** ${existingBead.id}`);
     });
 
     it('!plan create dedup is case-insensitive and trims whitespace', async () => {
-      mockedBdList.mockResolvedValueOnce([
-        { id: 'ws-dedup-002', title: '  Fix The Bug  ', status: 'open' } as any,
-      ]);
-
-      const { queue, params, workspaceCwd } = makePlanForgeParams();
+      const { queue, params, workspaceCwd, store } = makePlanForgeParams();
+      const existingBead = store.create({ title: '  Fix The Bug  ', labels: ['plan'] });
+      const createSpy = vi.spyOn(store, 'create');
       const handler = createMessageCreateHandler(params, queue);
 
       await handler(makeMsg({
@@ -1533,21 +1515,20 @@ describe('bead resolution dispatch wiring', () => {
         },
       }));
 
-      expect(mockedBdCreate).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
 
       const plansDir = path.join(workspaceCwd, 'plans');
       const files = await fs.readdir(plansDir);
       const planFile = files.find((f) => f.endsWith('.md'));
       const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-      expect(content).toContain('**Bead:** ws-dedup-002');
+      expect(content).toContain(`**Bead:** ${existingBead.id}`);
     });
 
     it('!plan create does not reuse closed beads with matching title', async () => {
-      mockedBdList.mockResolvedValueOnce([
-        { id: 'ws-closed-001', title: 'fix the bug', status: 'closed' } as any,
-      ]);
-
-      const { queue, params } = makePlanForgeParams();
+      const { queue, params, store } = makePlanForgeParams();
+      const closedBead = store.create({ title: 'fix the bug', labels: ['plan'] });
+      store.close(closedBead.id, 'done');
+      const createSpy = vi.spyOn(store, 'create');
       const handler = createMessageCreateHandler(params, queue);
 
       await handler(makeMsg({
@@ -1561,15 +1542,13 @@ describe('bead resolution dispatch wiring', () => {
         },
       }));
 
-      expect(mockedBdCreate).toHaveBeenCalled();
+      expect(createSpy).toHaveBeenCalled();
     });
 
-    it('!plan create calls bdCreate when no title match exists', async () => {
-      mockedBdList.mockResolvedValueOnce([
-        { id: 'ws-other-001', title: 'something unrelated', status: 'open' } as any,
-      ]);
-
-      const { queue, params } = makePlanForgeParams();
+    it('!plan create calls store.create when no title match exists', async () => {
+      const { queue, params, store } = makePlanForgeParams();
+      store.create({ title: 'something unrelated', labels: ['plan'] });
+      const createSpy = vi.spyOn(store, 'create');
       const handler = createMessageCreateHandler(params, queue);
 
       await handler(makeMsg({
@@ -1583,15 +1562,14 @@ describe('bead resolution dispatch wiring', () => {
         },
       }));
 
-      expect(mockedBdCreate).toHaveBeenCalled();
+      expect(createSpy).toHaveBeenCalled();
     });
 
     it('!plan create dedup reuses in_progress bead with matching title', async () => {
-      mockedBdList.mockResolvedValueOnce([
-        { id: 'ws-inprog-001', title: 'fix the bug', status: 'in_progress' } as any,
-      ]);
-
-      const { queue, params, workspaceCwd } = makePlanForgeParams();
+      const { queue, params, workspaceCwd, store } = makePlanForgeParams();
+      const inProgressBead = store.create({ title: 'fix the bug', labels: ['plan'] });
+      store.update(inProgressBead.id, { status: 'in_progress' });
+      const createSpy = vi.spyOn(store, 'create');
       const handler = createMessageCreateHandler(params, queue);
 
       await handler(makeMsg({
@@ -1605,13 +1583,13 @@ describe('bead resolution dispatch wiring', () => {
         },
       }));
 
-      expect(mockedBdCreate).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
 
       const plansDir = path.join(workspaceCwd, 'plans');
       const files = await fs.readdir(plansDir);
       const planFile = files.find((f) => f.endsWith('.md'));
       const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-      expect(content).toContain('**Bead:** ws-inprog-001');
+      expect(content).toContain(`**Bead:** ${inProgressBead.id}`);
     });
   });
 });

@@ -84,16 +84,27 @@ All actions are gated by category env flags (off by default except channels).
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | Bead types + status model | `src/beads/types.ts` | **done** |
-| `bd` CLI wrapper | `src/beads/bd-cli.ts` | **done** |
+| `bd` CLI compatibility shim (preflight + migration only) | `src/beads/bd-cli.ts` | **done** |
 | Discord forum thread sync | `src/beads/discord-sync.ts` | **done** |
 | Auto-tag (AI classification) | `src/beads/auto-tag.ts` | **done** |
-| Full bead ↔ thread sync | `src/beads/bead-sync.ts` | **done** |
+| Full bead ↔ thread sync (reads from `TaskStore`) | `src/beads/bead-sync.ts` | **done** |
 | Sync coordinator (concurrency guard + cache) | `src/beads/bead-sync-coordinator.ts` | **done** |
-| File watcher (auto-sync on external changes) | `src/beads/bead-sync-watcher.ts` | **done** |
+| Store-event watcher (triggers sync on every `TaskStore` mutation) | `src/beads/bead-sync-watcher.ts` | **done** |
 | Bead thread cache | `src/beads/bead-thread-cache.ts` | **done** |
 | Hook scripts (on-create, on-update, etc.) | `scripts/beads/` | **done** |
 
-## 8. Cron Subsystem (`src/cron/`)
+## 8. Tasks Subsystem (`src/tasks/`)
+
+In-process task store that replaces the external `bd` CLI dependency for the read/write
+path. See `docs/tasks-migration.md` for migration details.
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| Task types (`TaskData`, `TaskStatus`, `STATUS_EMOJI`, param types) | `src/tasks/types.ts` | **done** |
+| `TaskStore` (EventEmitter-backed Map, JSONL persistence) | `src/tasks/store.ts` | **done** |
+| One-shot bd → JSONL migration helper | `src/tasks/migrate.ts` | **done** |
+
+## 9. Cron Subsystem (`src/cron/`)
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
@@ -102,7 +113,7 @@ All actions are gated by category env flags (off by default except channels).
 | Forum sync (thread → cron def) | `src/cron/forum-sync.ts` | **done** |
 | Parser (schedule + timezone + channel) | `src/cron/parser.ts` | **done** |
 
-## 9. Workspace Bootstrap
+## 10. Workspace Bootstrap
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
@@ -110,7 +121,7 @@ All actions are gated by category env flags (off by default except channels).
 | Templates (SOUL, IDENTITY, USER, AGENTS, TOOLS, HEARTBEAT) | `templates/workspace/` | **done** |
 | Dropbox-backed symlinks (content, workspace, exports) | filesystem | **done** |
 
-## 10. Status & Observability
+## 11. Status & Observability
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
@@ -118,7 +129,7 @@ All actions are gated by category env flags (off by default except channels).
 | Pino structured logging | throughout | **done** |
 | Metrics / dashboard | — | *stub — not started* |
 
-## 11. Ops & Deploy
+## 12. Ops & Deploy
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
@@ -127,19 +138,20 @@ All actions are gated by category env flags (off by default except channels).
 | Bot setup skill (invite + env) | `.claude/skills/` | **done** |
 | Setup guide | `docs/discord-bot-setup.md` | **done** |
 
-## 12. Tests
+## 13. Tests
 
 | Area | Files | Status |
 |------|-------|--------|
 | Core (pidlock, bootstrap, permissions) | 3 tests | **done** |
 | Discord subsystem | 14 tests | **done** |
 | Runtime adapters (Claude CLI + OpenAI-compat + Codex CLI + registry) | 4 tests | **done** |
-| Beads subsystem | 6 tests | **done** |
+| Beads subsystem | 11 test files | **done** |
+| Tasks subsystem (`TaskStore`, migration) | 2 test files | **done** |
 | Cron subsystem | 3 tests | **done** |
 | Integration (fail-closed, prompt-context, status, channel-context) | 4 tests | **done** |
 | Pipeline engine | 51 tests | **done** |
 
-## 13. Documentation
+## 14. Documentation
 
 | Doc | File | Status |
 |-----|------|--------|
@@ -150,10 +162,11 @@ All actions are gated by category env flags (off by default except channels).
 | Context modules | `.context/*.md` | **done** |
 | Token usage & efficiency | `docs/token-efficiency.md` | **done** |
 | Plan & Forge reference | `docs/plan-and-forge.md` | **done** |
+| Tasks migration (bd CLI → TaskStore) | `docs/tasks-migration.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
 
-## 14. Pipeline Engine (`src/pipeline/`)
+## 15. Pipeline Engine (`src/pipeline/`)
 
 General-purpose step-chaining primitive. Each step sends a prompt to a runtime adapter; its text output is injected as context for the next step. Foundational building block for composable action chaining.
 
@@ -176,7 +189,7 @@ General-purpose step-chaining primitive. Each step sends a prompt to a runtime a
 | `confirmAllowed` gate (blocks destructive commands without explicit opt-in) | `src/pipeline/engine.ts` | **done** |
 | Discord-action step kind | `src/pipeline/engine.ts` | **done** |
 
-## 15. Transport Abstraction
+## 16. Transport Abstraction
 
 Platform-agnostic message normalization layer (Phase 1 of transport portability). Downstream consumers can be migrated off discord.js types incrementally.
 
@@ -195,7 +208,7 @@ Platform-agnostic message normalization layer (Phase 1 of transport portability)
 - [ ] **README rewrite** — current README is developer-internal; needs a clear "what is this / quickstart / how to run" for anyone cloning the repo.
 - [x] **`.env.example`** — slimmed to essentials; `.env.example.full` has all ~90 options.
 - [x] **First-run experience** — `pnpm setup` provides guided interactive configuration; `pnpm preflight` validates the result.
-- [x] **Graceful degradation when external prerequisites missing** — beads requires `bd` CLI, cron requires a forum channel. Ensure clean errors / skip when these aren't configured.
+- [x] **Graceful degradation when external prerequisites missing** — beads no longer requires the `bd` CLI at runtime (the in-process `TaskStore` is the live path); `bd` is only needed for the one-time data migration. Cron requires a forum channel. Clean errors / skip when prerequisites aren't configured.
 
 ### Nice-to-have before MVP
 

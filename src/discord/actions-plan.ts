@@ -13,7 +13,7 @@ import {
 } from './plan-commands.js';
 import type { HandlePlanCommandOpts, PlanFileHeader } from './plan-commands.js';
 import { runNextPhase, resolveProjectCwd, deserializePhases, buildPostRunSummary } from './plan-manager.js';
-import { bdUpdate, bdClose } from '../beads/bd-cli.js';
+import type { TaskStore } from '../tasks/store.js';
 import {
   acquireWriterLock,
   addRunningPlan,
@@ -49,7 +49,7 @@ export const PLAN_ACTION_TYPES = new Set<string>(Object.keys(PLAN_TYPE_MAP));
 export type PlanContext = {
   plansDir: string;
   workspaceCwd: string;
-  beadsCwd: string;
+  taskStore: TaskStore;
   log?: LoggerLike;
   /** Recursion depth — 0 for user/cron origins, 1+ for action-triggered sub-invocations. */
   depth?: number;
@@ -149,7 +149,7 @@ export async function executePlanAction(
       // Update backing bead to in_progress.
       if (found.header.beadId) {
         try {
-          await bdUpdate(found.header.beadId, { status: 'in_progress' }, planCtx.beadsCwd);
+          planCtx.taskStore.update(found.header.beadId, { status: 'in_progress' });
         } catch {
           // best-effort
         }
@@ -180,7 +180,7 @@ export async function executePlanAction(
       // Close backing bead.
       if (found.header.beadId) {
         try {
-          await bdClose(found.header.beadId, 'Plan closed', planCtx.beadsCwd);
+          planCtx.taskStore.close(found.header.beadId, 'Plan closed');
         } catch {
           // best-effort
         }
@@ -196,7 +196,7 @@ export async function executePlanAction(
 
       const opts: HandlePlanCommandOpts = {
         workspaceCwd: planCtx.workspaceCwd,
-        beadsCwd: planCtx.beadsCwd,
+        taskStore: planCtx.taskStore,
       };
 
       const result = await handlePlanCommand(
@@ -231,7 +231,7 @@ export async function executePlanAction(
 
       const planOpts: HandlePlanCommandOpts = {
         workspaceCwd: planCtx.workspaceCwd,
-        beadsCwd: planCtx.beadsCwd,
+        taskStore: planCtx.taskStore,
       };
 
       // Validate the plan and get phase info synchronously.
@@ -355,7 +355,7 @@ export async function executePlanAction(
           const closeResult = await closePlanIfComplete(
             prepResult.phasesFilePath,
             prepResult.planFilePath,
-            planCtx.beadsCwd,
+            planCtx.taskStore,
             acquireWriterLock,
             planCtx.log,
           );

@@ -126,6 +126,7 @@ export type DiscoclawConfig = {
   beadsAutoTag: boolean;
   beadsAutoTagModel: string;
   beadsSyncSkipPhase5: boolean;
+  beadsTaskPrefix: string;
 
   runtimeFallbackModel?: string;
   runtimeMaxBudgetUsd?: number;
@@ -145,6 +146,7 @@ export type DiscoclawConfig = {
   multiTurnIdleTimeoutMs: number;
   multiTurnMaxProcesses: number;
   streamStallTimeoutMs: number;
+  progressStallTimeoutMs: number;
   streamStallWarningMs: number;
   maxConcurrentInvocations: number;
   debugRuntime: boolean;
@@ -554,6 +556,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       beadsAutoTag: parseBoolean(env, 'DISCOCLAW_BEADS_AUTO_TAG', true),
       beadsAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_BEADS_AUTO_TAG_MODEL') ?? fastModel,
       beadsSyncSkipPhase5: parseBoolean(env, 'BEAD_SYNC_SKIP_PHASE5', false),
+      beadsTaskPrefix: parseTrimmedString(env, 'DISCOCLAW_BEADS_TASK_PREFIX') ?? 'ws',
 
       claudeBin: parseTrimmedString(env, 'CLAUDE_BIN') ?? 'claude',
       dangerouslySkipPermissions: parseBoolean(env, 'CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS', false),
@@ -569,6 +572,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       multiTurnIdleTimeoutMs: parsePositiveInt(env, 'DISCOCLAW_MULTI_TURN_IDLE_TIMEOUT_MS', 300000),
       multiTurnMaxProcesses: parsePositiveInt(env, 'DISCOCLAW_MULTI_TURN_MAX_PROCESSES', 5),
       streamStallTimeoutMs: parseNonNegativeInt(env, 'DISCOCLAW_STREAM_STALL_TIMEOUT_MS', 300000),
+      progressStallTimeoutMs: parseNonNegativeInt(env, 'DISCOCLAW_PROGRESS_STALL_TIMEOUT_MS', 300000),
       streamStallWarningMs: parseNonNegativeInt(env, 'DISCOCLAW_STREAM_STALL_WARNING_MS', 150000),
       maxConcurrentInvocations: parseNonNegativeInt(env, 'DISCOCLAW_MAX_CONCURRENT_INVOCATIONS', 0),
       debugRuntime: parseBoolean(env, 'DISCOCLAW_DEBUG_RUNTIME', false),

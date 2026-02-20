@@ -54,6 +54,7 @@ import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
 import { beadThreadCache } from '../beads/bead-thread-cache.js';
 import { buildBeadContextSummary } from '../beads/bd-cli.js';
+import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
 import { editThenSendChunks } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
@@ -213,7 +214,7 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
   if (isThread && threadId && threadParentId && params.beadCtx) {
     if (threadParentId === params.beadCtx.forumId) {
       try {
-        const bead = await beadThreadCache.get(threadId, params.beadCtx.beadsCwd);
+        const bead = await beadThreadCache.get(threadId, params.beadCtx.store);
         if (bead) existingBeadId = bead.id;
       } catch {
         // best-effort — fall through to create a new bead
@@ -774,7 +775,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const planCtx: PlanContext = {
           plansDir,
           workspaceCwd: params.workspaceCwd,
-          beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+          taskStore: params.planCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
           log: params.log,
           depth: 0,
           runtime: params.runtime,
@@ -919,7 +920,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (planCmd) {
               const planOpts = {
                 workspaceCwd: params.workspaceCwd,
-                beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                taskStore: params.planCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
                 maxContextFiles: params.planPhaseMaxContextFiles,
               };
 
@@ -1017,6 +1018,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     : undefined;
 
                   const timeoutMs = params.planPhaseTimeoutMs ?? 5 * 60_000;
+                  // Register plan run with abort registry so !stop can kill it.
+                  const planAbort = registerAbort(msg.id);
+
                   const phaseOpts = {
                     runtime: params.runtime,
                     model: resolveModel(params.runtimeModel, params.runtime.id),
@@ -1027,6 +1031,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     log: params.log,
                     maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
                     onEvent: onPlanRunEvent,
+                    signal: planAbort.signal,
                   };
 
                   const editSummary = async (content: string) => {
@@ -1167,7 +1172,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     const closeResult = await closePlanIfComplete(
                       phasesFilePath,
                       planFilePath,
-                      planOpts.beadsCwd,
+                      planOpts.taskStore,
                       acquireWriterLock,
                       params.log,
                     );
@@ -1192,6 +1197,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   ).catch((err) => {
                     params.log?.error({ err }, 'plan-run: unhandled rejection in callback');
                   }).finally(() => {
+                    planAbort.dispose();
                     removeRunningPlan(planId);
                   });
 
@@ -1427,7 +1433,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   model: resolveModel(params.runtimeModel, params.runtime.id),
                   cwd: resumeProjectCwd,
                   workspaceCwd: params.workspaceCwd,
-                  beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                  taskStore: params.forgeCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
                   plansDir,
                   maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
                   progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,
@@ -1502,8 +1508,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 threadParentId,
               });
 
-              const beadBasePath = params.beadCtx?.beadsCwd ?? params.workspaceCwd;
-              const beadSummary = await buildBeadContextSummary(ctxResult.existingBeadId, beadBasePath, params.log);
+              const beadSummary = buildBeadContextSummary(ctxResult.existingBeadId, params.beadCtx?.store, params.log);
 
               const forgeContextParts: string[] = [];
               if (ctxResult.context) forgeContextParts.push(ctxResult.context);
@@ -1524,7 +1529,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 model: resolveModel(params.runtimeModel, params.runtime.id),
                 cwd: params.projectCwd,
                 workspaceCwd: params.workspaceCwd,
-                beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                taskStore: params.forgeCtx?.taskStore ?? params.beadCtx?.store ?? new TaskStore(),
                 plansDir,
                 maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
                 progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,

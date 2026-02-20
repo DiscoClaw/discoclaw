@@ -4,48 +4,8 @@ import type { BeadContext } from './actions-beads.js';
 import type { ActionContext } from './actions.js';
 
 // ---------------------------------------------------------------------------
-// Mocks — override bd-cli and discord-sync modules
+// Mocks — override discord-sync and related modules
 // ---------------------------------------------------------------------------
-
-vi.mock('../beads/bd-cli.js', () => ({
-  bdShow: vi.fn(async (id: string) => {
-    if (id === 'ws-notfound') return null;
-    return {
-      id,
-      title: 'Test bead',
-      description: 'A test',
-      status: 'open',
-      priority: 2,
-      issue_type: 'task',
-      owner: '',
-      external_ref: 'discord:111222333',
-      labels: ['feature'],
-      comments: [],
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-    };
-  }),
-  bdList: vi.fn(async () => [
-    { id: 'ws-001', title: 'First', status: 'open', priority: 2 },
-    { id: 'ws-002', title: 'Second', status: 'in_progress', priority: 1 },
-  ]),
-  bdCreate: vi.fn(async (params: any) => ({
-    id: 'ws-new',
-    title: params.title,
-    description: params.description ?? '',
-    status: 'open',
-    priority: params.priority ?? 2,
-    issue_type: 'task',
-    owner: '',
-    external_ref: '',
-    labels: params.labels ?? [],
-    comments: [],
-    created_at: '2026-01-01T00:00:00Z',
-    updated_at: '2026-01-01T00:00:00Z',
-  })),
-  bdUpdate: vi.fn(async () => {}),
-  bdClose: vi.fn(async () => {}),
-}));
 
 vi.mock('../beads/discord-sync.js', () => ({
   resolveBeadsForum: vi.fn(() => ({
@@ -83,10 +43,6 @@ vi.mock('../beads/bead-sync.js', () => ({
   })),
 }));
 
-vi.mock('execa', () => ({
-  execa: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
-}));
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -106,11 +62,57 @@ function makeCtx(): ActionContext {
   };
 }
 
+function makeStore() {
+  const defaultBead = (id: string) => ({
+    id,
+    title: 'Test bead',
+    description: 'A test',
+    status: 'open' as const,
+    priority: 2,
+    issue_type: 'task',
+    owner: '',
+    external_ref: 'discord:111222333',
+    labels: ['feature'],
+    comments: [],
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  });
+
+  return {
+    get: vi.fn((id: string) => {
+      if (id === 'ws-notfound') return undefined;
+      return defaultBead(id);
+    }),
+    list: vi.fn(() => [
+      { id: 'ws-001', title: 'First', status: 'open', priority: 2 },
+      { id: 'ws-002', title: 'Second', status: 'in_progress', priority: 1 },
+    ]),
+    create: vi.fn((params: any) => ({
+      id: 'ws-new',
+      title: params.title,
+      description: params.description ?? '',
+      status: 'open' as const,
+      priority: params.priority ?? 2,
+      issue_type: 'task',
+      owner: '',
+      external_ref: '',
+      labels: params.labels ?? [],
+      comments: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    })),
+    update: vi.fn((id: string) => defaultBead(id)),
+    close: vi.fn((id: string) => ({ ...defaultBead(id), status: 'closed' as const })),
+    addLabel: vi.fn((id: string) => defaultBead(id)),
+  };
+}
+
 function makeBeadCtx(overrides?: Partial<BeadContext>): BeadContext {
   return {
     beadsCwd: '/tmp/test-beads',
     forumId: 'forum-123',
     tagMap: { feature: 'tag-1', bug: 'tag-2' },
+    store: makeStore() as any,
     runtime: { id: 'other', capabilities: new Set(), invoke: async function* () {} } as any,
     autoTag: false,
     autoTagModel: 'haiku',
@@ -325,27 +327,6 @@ describe('executeBeadAction', () => {
     expect((result as any).summary).toContain('Done');
   });
 
-  it('beadClose calls suppressSync with 10_000 before bdClose', async () => {
-    const { bdClose } = await import('../beads/bd-cli.js');
-    (bdClose as any).mockClear();
-
-    const callOrder: string[] = [];
-    const mockCoordinator = {
-      suppressSync: vi.fn(() => { callOrder.push('suppressSync'); }),
-      sync: vi.fn(),
-    };
-    (bdClose as any).mockImplementation(async () => { callOrder.push('bdClose'); });
-
-    await executeBeadAction(
-      { type: 'beadClose', beadId: 'ws-001', reason: 'Done' },
-      makeCtx(),
-      makeBeadCtx({ syncCoordinator: mockCoordinator as any }),
-    );
-
-    expect(mockCoordinator.suppressSync).toHaveBeenCalledWith(10_000);
-    expect(callOrder.indexOf('suppressSync')).toBeLessThan(callOrder.indexOf('bdClose'));
-  });
-
   it('beadClose calls forumCountSync.requestUpdate', async () => {
     const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
     await executeBeadAction(
@@ -389,36 +370,28 @@ describe('executeBeadAction', () => {
   });
 
   it('beadList defaults to limit 50 when no limit provided', async () => {
-    const { bdList } = await import('../beads/bd-cli.js');
-    const mockBdList = bdList as ReturnType<typeof vi.fn>;
-    mockBdList.mockClear();
-
+    const store = makeStore();
     await executeBeadAction(
       { type: 'beadList', status: 'all' },
       makeCtx(),
-      makeBeadCtx(),
+      makeBeadCtx({ store: store as any }),
     );
 
-    expect(mockBdList).toHaveBeenCalledWith(
+    expect(store.list).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 50 }),
-      expect.any(String),
     );
   });
 
   it('beadList respects explicit limit', async () => {
-    const { bdList } = await import('../beads/bd-cli.js');
-    const mockBdList = bdList as ReturnType<typeof vi.fn>;
-    mockBdList.mockClear();
-
+    const store = makeStore();
     await executeBeadAction(
       { type: 'beadList', status: 'all', limit: 5 },
       makeCtx(),
-      makeBeadCtx(),
+      makeBeadCtx({ store: store as any }),
     );
 
-    expect(mockBdList).toHaveBeenCalledWith(
+    expect(store.list).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 5 }),
-      expect.any(String),
     );
   });
 

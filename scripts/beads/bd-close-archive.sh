@@ -1,26 +1,48 @@
 #!/usr/bin/env bash
-# bd-close-archive.sh — Close beads and archive their Discord forum threads.
+# bd-close-archive.sh — Close beads in the task store.
+# Usage: bd-close-archive.sh <id> [<id>...] [--reason <reason>]
+#
+# Discord thread archiving is handled in-process by BeadSyncWatcher when the
+# bot is running. To trigger a manual sync: bd sync
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-HOOK_SCRIPT="$SCRIPT_DIR/bead-hooks/on-close.sh"
+DISCOCLAW_DIR=$(cd "$SCRIPT_DIR/../.." && pwd)
+CLI_DIST="$DISCOCLAW_DIR/dist/tasks/task-cli.js"
+CLI_SRC="$DISCOCLAW_DIR/src/tasks/task-cli.ts"
+
+run_task_cli() {
+  if [[ -f "$CLI_DIST" ]]; then
+    node "$CLI_DIST" "$@"
+  else
+    pnpm -C "$DISCOCLAW_DIR" tsx "$CLI_SRC" "$@"
+  fi
+}
 
 BEAD_IDS=()
-for arg in "$@"; do
-  [[ "$arg" == -* ]] && continue
-  [[ "$arg" =~ ^[a-z]+-[a-z0-9]+$ ]] && BEAD_IDS+=("$arg")
+reason_args=()
+
+# Split positional bead IDs from --reason flag.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --reason|-r) reason_args+=(--reason "${2:-}"); shift 2 ;;
+    -*)          shift ;;  # ignore unknown flags
+    *)
+      [[ "$1" =~ ^[a-z]+-[a-z0-9]+$ ]] && BEAD_IDS+=("$1")
+      shift
+      ;;
+  esac
 done
 
-echo "Closing bead(s)..."
-bd close "$@"
-CLOSE_STATUS=$?
-[[ $CLOSE_STATUS -ne 0 ]] && exit $CLOSE_STATUS
-
-if [[ -x "$HOOK_SCRIPT" ]]; then
-  for bead_id in "${BEAD_IDS[@]}"; do
-    "$HOOK_SCRIPT" "$bead_id" || echo "Warning: Failed to archive Discord thread for $bead_id" >&2
-  done
-else
-  echo "Warning: Hook script not found: $HOOK_SCRIPT" >&2
+if [[ ${#BEAD_IDS[@]} -eq 0 ]]; then
+  echo "Usage: bd close <id> [<id>...] [--reason <reason>]" >&2
+  exit 1
 fi
+
+echo "Closing bead(s)..."
+for bead_id in "${BEAD_IDS[@]}"; do
+  run_task_cli close "$bead_id" "${reason_args[@]}" || {
+    echo "Warning: Failed to close $bead_id" >&2
+  }
+done
 echo "Done!"

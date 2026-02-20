@@ -33,7 +33,6 @@ import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
 import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
-import { checkBdAvailable, bdList } from './beads/bd-cli.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
 import { resolveBeadsForum, reloadTagMapInPlace } from './beads/discord-sync.js';
 import { initBeadsForumGuard } from './beads/forum-guard.js';
@@ -57,6 +56,7 @@ import { getGitHash } from './version.js';
 import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
+import { TaskStore } from './tasks/store.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -342,13 +342,41 @@ const beadsDataDir = dataDir
   : path.join(__dirname, '..', 'data', 'beads');
 const beadsTagMapPath = cfg.beadsTagMapPathOverride
   || path.join(beadsDataDir, 'tag-map.json');
-const beadsTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'beads', 'bead-hooks', 'tag-map.json');
+const beadsTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'beads', 'tag-map.json');
 const beadsMentionUser = cfg.beadsMentionUser;
 const beadsSidebar = cfg.beadsSidebar;
 const sidebarMentionUserId = beadsSidebar ? beadsMentionUser : undefined;
 const beadsAutoTag = cfg.beadsAutoTag;
 let beadsAutoTagModel = cfg.beadsAutoTagModel;
 const discordActionsBeads = cfg.discordActionsBeads;
+const beadsTaskPrefix = cfg.beadsTaskPrefix;
+
+// Initialize shared task store (used by beads, forge, and plan subsystems).
+// Created unconditionally so forge/plan have a persistent store even when beads are disabled.
+await fs.mkdir(beadsDataDir, { recursive: true });
+
+// Cutover gate: if the legacy bd SQLite DB exists but the JSONL hasn't been
+// written yet, fail fast rather than silently starting with an empty store.
+// Run `pnpm tsx scripts/beads/migrate.ts` to perform the one-time migration.
+{
+  const legacyDbPath = path.join(beadsCwd, '.beads', 'beads.db');
+  const tasksJsonlPath = path.join(beadsDataDir, 'tasks.jsonl');
+  const legacyExists = await fs.access(legacyDbPath).then(() => true).catch(() => false);
+  if (legacyExists) {
+    const jsonlExists = await fs.access(tasksJsonlPath).then(() => true).catch(() => false);
+    if (!jsonlExists) {
+      log.error(
+        { legacyDbPath, tasksJsonlPath },
+        'tasks:cutover-gate: legacy beads.db found but tasks.jsonl is missing — run migration before starting the service',
+      );
+      process.exit(1);
+    }
+  }
+}
+
+const sharedTaskStore = new TaskStore({ prefix: beadsTaskPrefix, persistPath: path.join(beadsDataDir, 'tasks.jsonl') });
+await sharedTaskStore.load();
+log.info({ count: sharedTaskStore.size(), prefix: beadsTaskPrefix }, 'tasks:store loaded');
 
 const runtimeFallbackModel = cfg.runtimeFallbackModel;
 const runtimeMaxBudgetUsd = cfg.runtimeMaxBudgetUsd;
@@ -368,6 +396,7 @@ const multiTurnHangTimeoutMs = cfg.multiTurnHangTimeoutMs;
 const multiTurnIdleTimeoutMs = cfg.multiTurnIdleTimeoutMs;
 const multiTurnMaxProcesses = cfg.multiTurnMaxProcesses;
 const streamStallTimeoutMs = cfg.streamStallTimeoutMs;
+const progressStallTimeoutMs = cfg.progressStallTimeoutMs;
 const streamStallWarningMs = cfg.streamStallWarningMs;
 const maxConcurrentInvocations = cfg.maxConcurrentInvocations;
 const sharedConcurrencyLimiter = createConcurrencyLimiter(maxConcurrentInvocations);
@@ -425,6 +454,7 @@ const registerClaudeRuntime = () => {
     multiTurnIdleTimeoutMs,
     multiTurnMaxProcesses,
     streamStallTimeoutMs,
+    progressStallTimeoutMs,
   });
   const limitedClaudeRuntime = withConcurrencyLimit(claudeRuntime, {
     maxConcurrentInvocations,
@@ -583,22 +613,6 @@ if (cfg.forgeAuditorRuntime) {
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
-// Pre-flight: detect whether the bd CLI is installed (used to decide whether to bootstrap the beads forum).
-// Full context init is deferred to post-connect so system bootstrap can auto-create the forum first.
-let bdAvailable = false;
-let bdVersion: string | undefined;
-if (beadsEnabled) {
-  const bd = await checkBdAvailable();
-  bdAvailable = bd.available;
-  bdVersion = bd.version;
-  if (!bd.available) {
-    log.error(
-      'beads: bd CLI not found — beads is enabled and required. ' +
-      'Install bd, set BD_BIN to a custom path, or set DISCOCLAW_BEADS_ENABLED=0 to bypass.',
-    );
-    process.exit(1);
-  }
-}
 
 const botParams = {
   token,
@@ -679,7 +693,7 @@ const botParams = {
   shortTermMaxAgeMs,
   shortTermInjectMaxChars,
   statusChannel,
-  bootstrapEnsureBeadsForum: beadsEnabled && bdAvailable,
+  bootstrapEnsureBeadsForum: beadsEnabled,
   existingCronsId: isSnowflake(cronForum ?? '') ? cronForum : undefined,
   existingBeadsId: isSnowflake(beadsForum) ? beadsForum : undefined,
   toolAwareStreaming,
@@ -923,7 +937,7 @@ await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'infl
 
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
 let beadCtx: BeadContext | undefined;
-if (beadsEnabled && bdAvailable) {
+if (beadsEnabled) {
   // Seed tag map from repo if data-dir copy doesn't exist yet.
   await seedTagMap(beadsTagMapSeedPath, beadsTagMapPath);
 
@@ -940,6 +954,7 @@ if (beadsEnabled && bdAvailable) {
     statusPoster: botStatus ?? undefined,
     log,
     systemBeadsForumId: system?.beadsForumId,
+    store: sharedTaskStore,
   });
   beadCtx = beadsResult.beadCtx;
 }
@@ -964,8 +979,7 @@ if (beadCtx) {
         client,
         beadForum.id,
         async () => {
-          const nonClosed = await bdList({ limit: 0 }, beadsCwd);
-          return nonClosed.length;
+          return beadCtx!.store.list({ status: 'all' }).filter((b) => b.status !== 'closed').length;
         },
         log,
       );
@@ -974,7 +988,7 @@ if (beadCtx) {
     }
 
     // Install forum guard before any async operations that touch the forum.
-    initBeadsForumGuard({ client, forumId: beadCtx.forumId, log, beadsCwd, tagMap: beadCtx.tagMap });
+    initBeadsForumGuard({ client, forumId: beadCtx.forumId, log, store: beadCtx.store, tagMap: beadCtx.tagMap });
 
     // Tag bootstrap + reload BEFORE wireBeadsSync so the first sync has the correct tag map.
     if (beadForum) {
@@ -1006,13 +1020,13 @@ if (beadCtx) {
       skipForumGuard: true,
       skipPhase5: cfg.beadsSyncSkipPhase5,
     });
-    beadSyncWatcher = wired.syncWatcher;
+    beadSyncWatcher = wired;
   } else {
     log.warn({ resolvedGuildId }, 'beads:sync-watcher skipped; guild not in cache');
   }
 
   log.info(
-    { beadsCwd, beadsForum: beadCtx.forumId, tagCount: Object.keys(beadCtx.tagMap).length, autoTag: beadsAutoTag, bdVersion },
+    { beadsCwd, beadsForum: beadCtx.forumId, tagCount: Object.keys(beadCtx.tagMap).length, autoTag: beadsAutoTag },
     'beads:initialized',
   );
 }
@@ -1021,7 +1035,7 @@ if (beadCtx) {
 // Initialized before cron so cron executor can reference these contexts.
 {
   const plansDir = path.join(workspaceCwd, 'plans');
-  const effectiveBeadsCwd = beadCtx?.beadsCwd ?? workspaceCwd;
+  const effectiveTaskStore = sharedTaskStore;
 
   if (forgeCommandsEnabled && discordActionsForge) {
     botParams.forgeCtx = {
@@ -1033,7 +1047,7 @@ if (beadCtx) {
           model: botParams.runtimeModel,
           cwd: projectRoot,
           workspaceCwd,
-          beadsCwd: effectiveBeadsCwd,
+          taskStore: effectiveTaskStore,
           plansDir,
           maxAuditRounds: forgeMaxAuditRounds,
           progressThrottleMs: forgeProgressThrottleMs,
@@ -1044,7 +1058,7 @@ if (beadCtx) {
         }),
       plansDir,
       workspaceCwd,
-      beadsCwd: effectiveBeadsCwd,
+      taskStore: effectiveTaskStore,
       onProgress: async (msg) => {
         // Action-initiated forges log progress rather than posting to a channel.
         log.info({ msg }, 'forge:action:progress');
@@ -1058,7 +1072,7 @@ if (beadCtx) {
     botParams.planCtx = {
       plansDir,
       workspaceCwd,
-      beadsCwd: effectiveBeadsCwd,
+      taskStore: effectiveTaskStore,
       log,
       runtime: limitedRuntime,
       model: runtimeModel,
@@ -1331,8 +1345,7 @@ if (botStatus?.bootReport) {
     shutdownMessage: startupCtx.shutdown?.message,
     shutdownRequestedBy: startupCtx.shutdown?.requestedBy,
     activeForge: startupCtx.shutdown?.activeForge,
-    beadsEnabled: beadsEnabled && bdAvailable,
-    beadDbVersion: bdVersion,
+    beadsEnabled: beadsEnabled,
     forumResolved: Boolean(beadCtx?.forumId),
     cronsEnabled: Boolean(cronEnabled && botParams.cronCtx),
     cronJobCount: cronScheduler?.listJobs().length,

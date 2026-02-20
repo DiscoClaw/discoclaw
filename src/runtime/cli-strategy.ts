@@ -24,6 +24,13 @@ export type ParsedLineResult = {
   extraEvents?: EngineEvent[];
   /** Whether this line is inside a tool-use block (suppress streaming). */
   inToolUse?: boolean;
+  /**
+   * If true, this event represents meaningful non-text activity (e.g. tool
+   * input generation) that should reset the progress stall timer even though
+   * no text_delta was produced. Intentionally NOT set for thinking_delta —
+   * those are exactly what the spiral detector is meant to catch.
+   */
+  activity?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -57,6 +64,7 @@ export type UniversalCliOpts = {
   multiTurnIdleTimeoutMs?: number;
   multiTurnMaxProcesses?: number;
   streamStallTimeoutMs?: number;
+  progressStallTimeoutMs?: number;
   sessionScanning?: boolean;
   echoStdio?: boolean;
   verbose?: boolean;
