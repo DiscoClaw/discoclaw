@@ -18,19 +18,21 @@ Implementation: `src/tasks/store.ts`
 
 ## Discord Sync
 
-Runtime sync implementation remains in `src/beads/*` modules for now, but is task-driven:
+Canonical runtime sync implementation lives in `src/tasks/*`:
 
-- `src/beads/bead-sync.ts`
-- `src/beads/bead-sync-coordinator.ts`
-- `src/beads/discord-sync.ts`
-- `src/beads/bead-thread-cache.ts`
-- `src/beads/forum-guard.ts`
+- `src/tasks/task-sync-engine.ts`
+- `src/tasks/sync-coordinator.ts`
+- `src/tasks/discord-sync.ts`
+- `src/tasks/thread-cache.ts`
+- `src/tasks/forum-guard.ts`
+
+Legacy compatibility shims remain in `src/beads/*` and re-export task modules.
 
 Primary action trigger is `taskSync` via `src/discord/actions-tasks.ts`.
 
 ## Auto-Tagging
 
-Auto-tagging runs through `src/beads/auto-tag.ts` and is controlled by the tasks env surface:
+Auto-tagging runs through `src/tasks/auto-tag.ts` (with a compatibility shim at `src/beads/auto-tag.ts`) and is controlled by the tasks env surface:
 
 - `DISCOCLAW_TASKS_AUTO_TAG`
 - `DISCOCLAW_TASKS_AUTO_TAG_MODEL`

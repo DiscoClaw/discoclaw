@@ -79,21 +79,30 @@ All actions are gated by category env flags (off by default except channels).
 | Plan management (autonomous) | list, show, approve, close, create, run | `actions-plan.ts` | **done** |
 | Memory (durable memory mutation) | remember, forget, show | `actions-memory.ts` | **done** |
 
-## 7. Task Sync Subsystem (`src/beads/`)
+## 7. Task Sync Subsystem (`src/tasks/`)
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| Discord forum thread sync helpers | `src/tasks/discord-sync.ts` | **done** |
+| Full task ↔ thread sync engine | `src/tasks/task-sync-engine.ts` | **done** |
+| Sync coordinator (concurrency guard + cache) | `src/tasks/sync-coordinator.ts` | **done** |
+| Store-event watcher (triggers sync on every `TaskStore` mutation) | `src/tasks/sync-watcher.ts` | **done** |
+| Task thread cache | `src/tasks/thread-cache.ts` | **done** |
+| Forum guard + startup checks | `src/tasks/forum-guard.ts`, `src/tasks/initialize.ts` | **done** |
+| Auto-tag (AI classification) | `src/tasks/auto-tag.ts` | **done** |
+| Task sync CLI entrypoint | `src/tasks/task-sync-cli.ts` | **done** |
+
+## 8. Compatibility Shims (`src/beads/`)
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | Task compatibility types/shims | `src/beads/types.ts` | **done** |
 | `bd` CLI compatibility shim (preflight + migration only) | `src/beads/bd-cli.ts` | **done** |
-| Discord forum thread sync | `src/beads/discord-sync.ts` | **done** |
-| Auto-tag (AI classification) | `src/beads/auto-tag.ts` | **done** |
-| Full task ↔ thread sync (reads from `TaskStore`) | `src/beads/bead-sync.ts` | **done** |
-| Sync coordinator (concurrency guard + cache) | `src/beads/bead-sync-coordinator.ts` | **done** |
-| Store-event watcher (triggers sync on every `TaskStore` mutation) | `src/beads/bead-sync-watcher.ts` | **done** |
-| Task thread cache | `src/beads/bead-thread-cache.ts` | **done** |
+| Task sync compatibility exports | `src/beads/bead-sync.ts`, `src/beads/bead-sync-coordinator.ts`, `src/beads/bead-sync-watcher.ts` | **done** |
+| Discord sync compatibility exports | `src/beads/discord-sync.ts`, `src/beads/bead-thread-cache.ts`, `src/beads/forum-guard.ts`, `src/beads/initialize.ts`, `src/beads/auto-tag.ts` | **done** |
 | Hook scripts (on-create, on-update, etc.) | `scripts/beads/` | **done** |
 
-## 8. Tasks Subsystem (`src/tasks/`)
+## 9. Task Store + Migration (`src/tasks/`)
 
 In-process task store that replaces the external `bd` CLI dependency for the read/write
 path. See `docs/tasks-migration.md` for migration details.
@@ -104,7 +113,7 @@ path. See `docs/tasks-migration.md` for migration details.
 | `TaskStore` (EventEmitter-backed Map, JSONL persistence) | `src/tasks/store.ts` | **done** |
 | One-shot bd → JSONL migration helper | `src/tasks/migrate.ts` | **done** |
 
-## 9. Cron Subsystem (`src/cron/`)
+## 10. Cron Subsystem (`src/cron/`)
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
@@ -113,7 +122,7 @@ path. See `docs/tasks-migration.md` for migration details.
 | Forum sync (thread → cron def) | `src/cron/forum-sync.ts` | **done** |
 | Parser (schedule + timezone + channel) | `src/cron/parser.ts` | **done** |
 
-## 10. Workspace Bootstrap
+## 11. Workspace Bootstrap
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
@@ -121,7 +130,7 @@ path. See `docs/tasks-migration.md` for migration details.
 | Templates (SOUL, IDENTITY, USER, AGENTS, TOOLS, HEARTBEAT) | `templates/workspace/` | **done** |
 | Dropbox-backed symlinks (content, workspace, exports) | filesystem | **done** |
 
-## 11. Status & Observability
+## 12. Status & Observability
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
@@ -129,7 +138,7 @@ path. See `docs/tasks-migration.md` for migration details.
 | Pino structured logging | throughout | **done** |
 | Metrics / dashboard | — | *stub — not started* |
 
-## 12. Ops & Deploy
+## 13. Ops & Deploy
 
 | Component | File(s) | Status |
 |-----------|---------|--------|

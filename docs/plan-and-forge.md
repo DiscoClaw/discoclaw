@@ -43,9 +43,9 @@ Show available plan commands.
 **!plan commands:**
 - `!plan <description>` — create a new plan
 - `!plan list` — list active plans
-- `!plan show <plan-id|bead-id>` — show plan details
-- `!plan approve <plan-id|bead-id>` — approve for implementation
-- `!plan close <plan-id|bead-id>` — close/abandon a plan
+- `!plan show <plan-id|task-id>` — show plan details
+- `!plan approve <plan-id|task-id>` — approve for implementation
+- `!plan close <plan-id|task-id>` — close/abandon a plan
 - `!plan phases <plan-id>` — show/generate phase checklist
 - `!plan run <plan-id>` — execute next pending phase
 - `!plan skip <plan-id>` — skip a failed/in-progress phase
@@ -55,9 +55,9 @@ Show available plan commands.
 
 Create a new plan from a description. Generates a plan ID (`plan-NNN`), fills the plan template, and writes the file.
 
-**Bead dedup:** When invoked outside a bead forum thread (no `existingBeadId`), the command checks for an existing open bead with a matching title (case-insensitive, trimmed) before creating a new one. If a match is found, the existing bead is reused — no duplicate is created. This prevents orphaned forum threads from accidental double-invocations or pre-created beads. The lookup calls `taskStore.list({ label: 'plan' })` and excludes `closed` beads.
+**Task dedup:** When invoked outside a task forum thread (no `existingTaskId`), the command checks for an existing open task with a matching title (case-insensitive, trimmed) before creating a new one. If a match is found, the existing task is reused — no duplicate is created. This prevents orphaned forum threads from accidental double-invocations or pre-created tasks. The lookup calls `taskStore.list({ label: 'plan' })` and excludes `closed` tasks.
 
-When invoked inside a bead forum thread, the thread's bead is reused directly (no dedup check needed).
+When invoked inside a task forum thread, the thread's task is reused directly (no dedup check needed).
 
 **Context injection:** `!plan <description>` now auto-injects the replied-to message, thread starter/recent posts, and fallback history when nothing else is available. This is powered by the shared `gatherConversationContext()` helper, which `!forge` also uses, so `!plan fix this` and other plan commands tap the same replied-to/thread context that the forge prompt receives.
 
@@ -67,7 +67,7 @@ When invoked inside a bead forum thread, the thread's bead is reused directly (n
 
 **Output:**
 ```
-Plan created: **plan-017** (bead: `abc123`)
+Plan created: **plan-017** (task: `abc123`)
 File: `workspace/plans/plan-017-add-webhook-support-for-external-notifications.md`
 Description: Add webhook support for external notifications
 ```
@@ -82,14 +82,14 @@ List all plans with their status.
 
 **Output:**
 ```
-- `plan-015` [APPROVED] — Implement phase manager (bead: `abc111`)
-- `plan-016` [DONE] — Add forge orchestrator (bead: `abc222`)
-- `plan-017` [DRAFT] — Add webhook support (bead: `abc333`)
+- `plan-015` [APPROVED] — Implement phase manager (task: `abc111`)
+- `plan-016` [DONE] — Add forge orchestrator (task: `abc222`)
+- `plan-017` [DRAFT] — Add webhook support (task: `abc333`)
 ```
 
-### `!plan show <plan-id|bead-id>`
+### `!plan show <plan-id|task-id>`
 
-Show plan details: header fields, objective, and latest audit verdict. Accepts either a plan ID or a bead ID.
+Show plan details: header fields, objective, and latest audit verdict. Accepts either a plan ID or a task ID.
 
 ```
 !plan show plan-017
@@ -99,7 +99,7 @@ Show plan details: header fields, objective, and latest audit verdict. Accepts e
 ```
 **plan-017** — Add webhook support
 Status: DRAFT
-Bead: `abc333`
+Task: `abc333`
 Project: discoclaw
 Created: 2026-02-12
 
@@ -108,9 +108,9 @@ Created: 2026-02-12
 **Latest audit:** (no audit yet)
 ```
 
-### `!plan approve <plan-id|bead-id>`
+### `!plan approve <plan-id|task-id>`
 
-Set plan status to `APPROVED` and update the backing bead to `in_progress`. Blocked if the plan is currently `IMPLEMENTING`.
+Set plan status to `APPROVED` and update the backing task to `in_progress`. Blocked if the plan is currently `IMPLEMENTING`.
 
 ```
 !plan approve plan-017
@@ -121,9 +121,9 @@ Set plan status to `APPROVED` and update the backing bead to `in_progress`. Bloc
 Plan **plan-017** approved for implementation.
 ```
 
-### `!plan close <plan-id|bead-id>`
+### `!plan close <plan-id|task-id>`
 
-Set plan status to `CLOSED` and close the backing bead. Blocked if the plan is currently `IMPLEMENTING`.
+Set plan status to `CLOSED` and close the backing task. Blocked if the plan is currently `IMPLEMENTING`.
 
 ```
 !plan close plan-017
@@ -165,7 +165,7 @@ Regenerate phases from the current plan content, overwriting the existing phases
 
 Execute all pending phases sequentially (up to 50, safety cap). Requires the plan to be in `APPROVED` or `IMPLEMENTING` status. Acquires the workspace writer lock per-phase, validates staleness, then fires in the background. Stops on failure, audit deviation, staleness, or shutdown — resume with another `!plan run`.
 
-**Auto-close:** When all phases reach a terminal status (done or skipped), the plan is automatically set to `CLOSED` and its backing bead is closed. This happens in both the command path (`!plan run` in Discord) and the action path (`planRun` via Discord actions).
+**Auto-close:** When all phases reach a terminal status (done or skipped), the plan is automatically set to `CLOSED` and its backing task is closed. This happens in both the command path (`!plan run` in Discord) and the action path (`planRun` via Discord actions).
 
 ```
 !plan run plan-017
@@ -278,7 +278,7 @@ Show available forge commands.
 
 > **Architecture note:** The `!forge help` text is defined inline in `discord.ts` (inside the `forgeCmd.action === 'help'` branch), not in `forge-commands.ts`. All `!forge` command dispatch happens in `discord.ts` rather than in the commands module — this is a known architectural quirk, not a recommended pattern.
 
-**Context alignment:** When a `!forge` is started, the drafter prompt is fed the bead description and any pinned thread posts via the same shared `gatherConversationContext()` helper that `!plan` uses. That helper also captures replied-to messages, starter/recent thread posts, and fallback history, so both commands always reference the same conversation context even inside an existing bead thread.
+**Context alignment:** When a `!forge` is started, the drafter prompt is fed the task description and any pinned thread posts via the same shared `gatherConversationContext()` helper that `!plan` uses. That helper also captures replied-to messages, starter/recent thread posts, and fallback history, so both commands always reference the same conversation context even inside an existing task thread.
 
 ### `!forge <description>`
 
@@ -575,7 +575,7 @@ Plans are markdown files in `workspace/plans/` named `plan-NNN-slug.md`.
 # Plan: <title>
 
 **ID:** plan-NNN
-**Bead:** <bead-id>
+**Task:** <task-id>
 **Created:** YYYY-MM-DD
 **Status:** DRAFT | REVIEW | APPROVED | IMPLEMENTING | AUDITING | DONE | CLOSED | CANCELLED
 **Project:** discoclaw
@@ -584,6 +584,8 @@ Plans are markdown files in `workspace/plans/` named `plan-NNN-slug.md`.
 **Parsing:** `parsePlanFileHeader()` in `plan-commands.ts` extracts these fields via regex.
 
 **Status updates:** `updatePlanFileStatus()` in `plan-commands.ts` regex-replaces the `**Status:**` line.
+
+**Legacy compatibility:** During the bridge/hard-cut tail, the parser still accepts legacy `**Bead:**` headers and maps them to `taskId`.
 
 ### Template
 
@@ -595,7 +597,7 @@ The plan template source is `workspace/plans/.plan-template.md` (tried first). I
 |-------|---------------|
 | `{{TITLE}}` | Plan description |
 | `{{PLAN_ID}}` | Generated plan ID (e.g., `plan-017`) |
-| `{{BEAD_ID}}` | Backing bead ID |
+| `{{BEAD_ID}}` | Backing task ID (legacy placeholder name kept for template compatibility) |
 | `{{DATE}}` | ISO date (YYYY-MM-DD) |
 | `{{PROJECT}}` | Hardcoded to `discoclaw` |
 
@@ -726,7 +728,7 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 
 | Variable | Default | Parser | Description |
 |----------|---------|--------|-------------|
-| `DISCOCLAW_TASKS_SYNC_SKIP_PHASE5` | `false` | `parseBoolean` | Disable Phase 5 (thread reconciliation) of the task sync cycle. When `true`, the sync will not archive orphaned forum threads or reconcile thread state against tasks. Recommended for shared-forum deployments where multiple bot instances or manual Discord activity may create threads that should not be auto-archived. Passed through to sync options in `src/beads/bead-sync.ts`. |
+| `DISCOCLAW_TASKS_SYNC_SKIP_PHASE5` | `false` | `parseBoolean` | Disable Phase 5 (thread reconciliation) of the task sync cycle. When `true`, the sync will not archive orphaned forum threads or reconcile thread state against tasks. Recommended for shared-forum deployments where multiple bot instances or manual Discord activity may create threads that should not be auto-archived. Passed through to sync options in `src/tasks/task-sync-engine.ts`. |
 
 ---
 
@@ -744,23 +746,23 @@ Source: `ForgeOrchestrator.loadProjectContext()` in `forge-commands.ts` reads fr
 
 ## 11. Workspace Integration
 
-### Bead backing
+### Task backing
 
-Every plan gets a backing bead. The bead ID is stored in the plan header. Bead acquisition follows a three-tier strategy:
+Every plan gets a backing task. The task ID is stored in the plan header. Backing-task acquisition follows a three-tier strategy:
 
-1. **Bead thread context** — if the command is issued in a bead forum thread (`existingBeadId` is set), that bead is reused directly. A `plan` label is added (best-effort) via `taskStore.addLabel()`.
-2. **Title-match dedup** — if no `existingBeadId`, `taskStore.list({ label: 'plan' })` is queried and filtered for non-closed beads whose title matches the plan description (case-insensitive, trimmed). If a match is found, it is reused.
-3. **Create new** — if no match is found, `taskStore.create()` creates a fresh bead with the `plan` label.
+1. **Task thread context** — if the command is issued in a task forum thread (`existingTaskId` is set), that task is reused directly. A `plan` label is added (best-effort) via `taskStore.addLabel()`.
+2. **Title-match dedup** — if no `existingTaskId`, `taskStore.list({ label: 'plan' })` is queried and filtered for non-closed tasks whose title matches the plan description (case-insensitive, trimmed). If a match is found, it is reused.
+3. **Create new** — if no match is found, `taskStore.create()` creates a fresh task with the `plan` label.
 
 All three operations use the in-process `TaskStore` — no subprocess is spawned. The `TaskStore` instance is passed in as `taskStore` (a `HandlePlanCommandOpts` field).
 
 Status sync:
 
-- `!plan approve` → `taskStore.update(beadId, { status: 'in_progress' })`
-- `!plan close` → `taskStore.close(beadId, 'Plan closed')`
-- All phases complete (auto-close) → `taskStore.close(beadId, 'All phases complete')`
+- `!plan approve` → `taskStore.update(taskId, { status: 'in_progress' })`
+- `!plan close` → `taskStore.close(taskId, 'Plan closed')`
+- All phases complete (auto-close) → `taskStore.close(taskId, 'All phases complete')`
 
-Bead updates are best-effort — failures don't block plan operations.
+Task updates are best-effort — failures don't block plan operations.
 
 ### File storage
 

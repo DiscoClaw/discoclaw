@@ -1,6 +1,6 @@
 # Tasks Migration — bd CLI to In-Process TaskStore
 
-Documents the migration of the beads read/write path from the external `bd` CLI to the
+Documents the migration of the task read/write path from the external `bd` CLI to the
 in-process `TaskStore` (plan-138).
 
 ---
@@ -22,7 +22,7 @@ The `bd` CLI integration had several structural problems:
   setups. Every call required pinning via the `--db <path>` flag.
 - **External process overhead** — every `bdCreate`, `bdUpdate`, and `bdClose` spawned a
   subprocess. Latency scaled with the number of mutations in a sync cycle.
-- **Impedance mismatch** — the `bd` data model diverged slightly from `BeadData` (legacy
+- **Impedance mismatch** — the `bd` data model diverged slightly from `TaskData` (legacy
   `done`/`tombstone` statuses, variable field presence). A normalization layer was required
   for every read.
 
@@ -38,16 +38,20 @@ The `bd` CLI integration had several structural problems:
 | In-process store | `src/tasks/store.ts` | `TaskStore` — EventEmitter-backed Map; synchronous in-memory writes; optional JSONL persistence |
 | Migration helper | `src/tasks/migrate.ts` | `migrateFromBd()` one-shot bd → JSONL dump; `writeJsonl()` utility |
 
-### Updated: `src/beads/`
+### Canonical runtime: `src/tasks/`
 
 | File | Change |
 |------|--------|
-| `bead-sync-watcher.ts` | Rewired to subscribe to `TaskStore` events instead of `fs.watch` on the bd file |
-| `bead-sync-coordinator.ts` | Now accepts `store: TaskStore`; reads beads from the store, not from `bdList` |
-| `bead-sync.ts` | Accepts `store: TaskStore`; all bead reads go through `store.list()` / `store.get()` |
+| `sync-watcher.ts` | Subscribes to `TaskStore` events (replacing `fs.watch` file-trigger model) |
+| `sync-coordinator.ts` | Accepts `store: TaskStore`; reads tasks from the store, not from `bdList` |
+| `task-sync-engine.ts` | Accepts `store: TaskStore`; sync reads go through `store.list()` / `store.get()` |
 | `initialize.ts` | Creates or accepts a `TaskStore`; wires store events to sync coordinator |
-| `discord-sync.ts` | Thread-to-bead matching uses store lookups, not CLI calls |
-| `bd-cli.ts` | Retained as a compatibility shim. `buildBeadContextSummary()` now accepts a `TaskStore`. Raw CLI wrappers (`bdCreate`, `bdUpdate`, `bdClose`, `bdList` for live mutations) are no longer called by any production path. |
+| `discord-sync.ts` | Thread-to-task matching uses store lookups, not CLI calls |
+
+### Compatibility layer: `src/beads/`
+
+Legacy `src/beads/*` files remain as task-backed compatibility shims and aliases.
+`src/beads/bd-cli.ts` is also retained for migration/preflight helper functions.
 
 ### Updated: `src/discord/`
 
@@ -60,7 +64,7 @@ instance (`taskStore` / `store` field) instead of importing `bd-cli` functions.
 ## 3. TaskStore
 
 `TaskStore` (`src/tasks/store.ts`) is an `EventEmitter<TaskStoreEventMap>`-backed
-`Map<string, BeadData>`.
+`Map<string, TaskData>`.
 
 ### Operations
 
@@ -82,10 +86,10 @@ instance (`taskStore` / `store` field) instead of importing `bd-cli` functions.
 
 | Event | Payload | When |
 |-------|---------|------|
-| `"created"` | `(bead: BeadData)` | After `create()` |
-| `"updated"` | `(bead: BeadData, prev: BeadData)` | After `update()` or `removeLabel()` |
-| `"closed"` | `(bead: BeadData)` | After `close()` |
-| `"labeled"` | `(bead: BeadData, label: string)` | After `addLabel()` |
+| `"created"` | `(task: TaskData)` | After `create()` |
+| `"updated"` | `(task: TaskData, prev: TaskData)` | After `update()` or `removeLabel()` |
+| `"closed"` | `(task: TaskData)` | After `close()` |
+| `"labeled"` | `(task: TaskData, label: string)` | After `addLabel()` |
 
 Events are **synchronous** — listeners fire before the mutating method returns. This is
 what makes the event-driven sync model race-free: by the time `coordinator.sync()` is
@@ -108,7 +112,7 @@ during `load()`, so restarting the process never re-uses an existing ID.
 Configure `persistPath` to enable JSONL durability:
 
 ```ts
-const store = new TaskStore({ persistPath: '/path/to/beads.jsonl' });
+const store = new TaskStore({ persistPath: '/path/to/tasks.jsonl' });
 await store.load(); // populate from existing file
 ```
 
@@ -126,14 +130,14 @@ To seed a fresh `TaskStore` from an existing `bd` database:
 import { migrateFromBd } from './src/tasks/migrate.js';
 import { TaskStore } from './src/tasks/store.js';
 
-// Step 1: dump all beads from bd to JSONL
+// Step 1: dump all tasks from bd to JSONL
 await migrateFromBd({
   cwd: process.cwd(),          // bd workspace root
-  destPath: '/path/to/beads.jsonl',
+  destPath: '/path/to/tasks.jsonl',
 });
 
 // Step 2: create a store that reads and persists to that file
-const store = new TaskStore({ persistPath: '/path/to/beads.jsonl' });
+const store = new TaskStore({ persistPath: '/path/to/tasks.jsonl' });
 await store.load();
 ```
 
@@ -161,26 +165,26 @@ ran against data that hadn't landed yet. The debounce was a band-aid.
 
 ```
 store.create/update/close/addLabel → event emitted synchronously
-  → startBeadSyncWatcher listener → coordinator.sync()
-  → BeadSyncCoordinator coalesces concurrent calls → one sync run
+  → startTaskSyncWatcher listener → coordinator.sync()
+  → TaskSyncCoordinator coalesces concurrent calls → one sync run
 ```
 
 There is no debounce. The store event fires after the in-memory write is committed.
-`BeadSyncCoordinator`'s internal `syncing` flag coalesces any concurrent trigger into a
+`TaskSyncCoordinator`'s internal `syncing` flag coalesces any concurrent trigger into a
 follow-up run, so at most two full syncs can be in flight for any burst of mutations.
 
 ### Watcher API
 
 ```ts
-import { startBeadSyncWatcher } from './src/beads/bead-sync-watcher.js';
+import { startTaskSyncWatcher } from './src/tasks/sync-watcher.js';
 
-const handle = startBeadSyncWatcher({ coordinator, store, log });
+const handle = startTaskSyncWatcher({ coordinator, store, log });
 // later…
 handle.stop(); // unsubscribes all listeners
 ```
 
-`wireBeadsSync()` in `initialize.ts` manages this subscription automatically as part of
-the standard beads boot sequence.
+`wireTaskSync()` in `initialize.ts` manages this subscription automatically as part of
+the standard tasks boot sequence.
 
 ---
 
