@@ -81,10 +81,26 @@ export type TaskSyncResult = {
 /** Tag name → Discord forum tag ID. */
 export type TagMap = Record<string, string>;
 
-/** Status → emoji prefix for thread names. */
-export const STATUS_EMOJI: Record<TaskStatus, string> = {
+/** Status → emoji prefix for thread names. Widened to Record<string, string> for consumers that index with a plain string. */
+export const STATUS_EMOJI: Record<string, string> = {
   open: '\u{1F7E2}',        // 🟢
   in_progress: '\u{1F7E1}', // 🟡
   blocked: '\u26A0\uFE0F',  // ⚠️
   closed: '\u2611\uFE0F',   // ☑️
 };
+
+// ---------------------------------------------------------------------------
+// Bead* compatibility aliases — mirrors what src/beads/types.ts re-exports
+// so consumers can be rewired to src/tasks/types.ts without a name change.
+// ---------------------------------------------------------------------------
+
+export type BeadStatus = TaskStatus;
+export type BeadData = TaskData;
+export type BeadSyncResult = TaskSyncResult;
+export type BeadCreateParams = TaskCreateParams;
+export type BeadUpdateParams = TaskUpdateParams;
+export type BeadCloseParams = TaskCloseParams;
+export type BeadListParams = TaskListParams;
+
+export const BEAD_STATUSES = TASK_STATUSES;
+export const isBeadStatus = isTaskStatus;
