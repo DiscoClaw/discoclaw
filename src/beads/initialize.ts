@@ -142,14 +142,14 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     opts.log.warn({ err }, 'beads:startup-sync failed');
   });
 
-  // Wire store events to trigger Discord sync on every mutation.
+  // Wire store events to trigger Discord sync on mutations (updated, closed, labeled).
+  // Note: 'created' is intentionally excluded — beadCreate handles thread creation directly.
   const triggerSync = () => {
     syncCoordinator.sync().catch((err) => {
       opts.log.warn({ err }, 'beads:store-event sync failed');
     });
   };
   const store = opts.beadCtx.store;
-  store.on('created', triggerSync);
   store.on('updated', triggerSync);
   store.on('closed', triggerSync);
   store.on('labeled', triggerSync);
@@ -158,7 +158,6 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
 
   return {
     stop() {
-      store.off('created', triggerSync);
       store.off('updated', triggerSync);
       store.off('closed', triggerSync);
       store.off('labeled', triggerSync);
