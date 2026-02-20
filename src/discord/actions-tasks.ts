@@ -4,11 +4,11 @@ import type { LoggerLike } from './action-types.js';
 import type { StatusPoster } from './status-channel.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { TagMap, TaskData, TaskStatus } from '../tasks/types.js';
-import type { TaskSyncCoordinator } from '../beads/bead-sync-coordinator.js';
 import type { ForumCountSync } from './forum-count-sync.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 import { shouldActionUseDirectThreadLifecycle } from '../tasks/sync-contract.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
+import type { TaskSyncCoordinatorLike } from '../tasks/task-sync.js';
 import { runTaskSync } from '../tasks/task-sync.js';
 import type { TaskStore } from '../tasks/store.js';
 import {
@@ -96,7 +96,7 @@ export type TaskContext = {
   sidebarMentionUserId?: string;
   statusPoster?: StatusPoster;
   log?: LoggerLike;
-  syncCoordinator?: TaskSyncCoordinator;
+  syncCoordinator?: TaskSyncCoordinatorLike;
   forumCountSync?: ForumCountSync;
 };
 

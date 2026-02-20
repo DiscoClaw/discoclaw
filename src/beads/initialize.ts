@@ -139,7 +139,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
 
   // Startup sync: fire-and-forget to avoid blocking cron init
   syncCoordinator.sync().catch((err) => {
-    opts.log.warn({ err }, 'beads:startup-sync failed');
+    opts.log.warn({ err }, 'tasks:startup-sync failed');
   });
 
   const subscriptions = wireTaskStoreSyncTriggers(opts.taskCtx, syncCoordinator, opts.log);
