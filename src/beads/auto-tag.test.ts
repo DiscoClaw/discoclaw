@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { autoTagBead } from './auto-tag.js';
+import { autoTagTask } from '../tasks/auto-tag.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 
 function makeMockRuntime(output: string): RuntimeAdapter {
@@ -65,5 +66,9 @@ describe('autoTagBead', () => {
     const runtime = makeMockRuntime('');
     const result = await autoTagBead(runtime, 'Test', '', TAGS);
     expect(result).toEqual([]);
+  });
+
+  it('keeps bead compatibility export aligned to canonical task helper', () => {
+    expect(autoTagBead).toBe(autoTagTask);
   });
 });

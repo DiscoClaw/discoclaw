@@ -1,15 +1,70 @@
 import type { RuntimeAdapter } from '../runtime/types.js';
-import { autoTagBead } from '../beads/auto-tag.js';
+import { resolveModel } from '../runtime/model-tiers.js';
+
+export type AutoTagOptions = {
+  model?: string;
+  cwd?: string;
+  timeoutMs?: number;
+};
 
 /**
- * Canonical task-named auto-tag helper.
+ * Use an AI model to classify a task into 1-3 forum tags from the available
+ * set. Returns an array of valid tag names (silently drops unknown ones).
  */
-export function autoTagTask(
+export async function autoTagTask(
   runtime: RuntimeAdapter,
   title: string,
   description: string,
   availableTags: string[],
-  opts?: { model?: string; cwd?: string },
+  opts?: AutoTagOptions,
 ): Promise<string[]> {
-  return autoTagBead(runtime, title, description, availableTags, opts);
+  if (availableTags.length === 0) return [];
+
+  const tagList = availableTags.join(', ');
+  const prompt =
+    `Classify this task into 1-3 tags from the following list. ` +
+    `Reply with ONLY comma-separated tag names, nothing else.\n\n` +
+    `Available tags: ${tagList}\n\n` +
+    `Title: ${title}\n` +
+    (description ? `Description: ${description.slice(0, 500)}\n` : '');
+
+  let finalText = '';
+  let deltaText = '';
+
+  for await (const evt of runtime.invoke({
+    prompt,
+    model: resolveModel(opts?.model ?? 'fast', runtime.id),
+    cwd: opts?.cwd ?? '.',
+    timeoutMs: opts?.timeoutMs ?? 15_000,
+    tools: [],
+  })) {
+    if (evt.type === 'text_final') {
+      finalText = evt.text;
+    } else if (evt.type === 'text_delta') {
+      deltaText += evt.text;
+    } else if (evt.type === 'error') {
+      return [];
+    }
+  }
+
+  const output = (finalText || deltaText).trim();
+  if (!output) return [];
+
+  const tagSet = new Set(availableTags.map((tag) => tag.toLowerCase()));
+  const candidates = output.split(/[,\n]+/).map((tag) => tag.trim()).filter(Boolean);
+
+  const result: string[] = [];
+  for (const candidate of candidates) {
+    // Find the original-cased tag name.
+    const match = availableTags.find((tag) => tag.toLowerCase() === candidate.toLowerCase());
+    if (match && tagSet.has(candidate.toLowerCase())) {
+      result.push(match);
+    }
+    if (result.length >= 3) break;
+  }
+
+  return result;
 }
+
+// Bead* compatibility alias
+export const autoTagBead = autoTagTask;
