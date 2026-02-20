@@ -32,10 +32,10 @@ import type { ForgeContext } from './discord/actions-forge.js';
 import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
-import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
+import { initializeTasksContext, wireTaskSync } from './tasks/initialize.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
-import { resolveTasksForum, reloadTagMapInPlace } from './beads/discord-sync.js';
-import { initBeadsForumGuard } from './beads/forum-guard.js';
+import { resolveTasksForum, reloadTagMapInPlace } from './tasks/discord-sync.js';
+import { initTasksForumGuard } from './tasks/forum-guard.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { probeWorkspacePermissions } from './workspace-permissions.js';
 import { loadRunStats } from './cron/run-stats.js';
@@ -145,9 +145,9 @@ let startupCtx: Awaited<ReturnType<typeof readAndClearShutdownContext>>;
 
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
-let beadSyncWatcher: { stop(): void } | null = null;
+let taskSyncWatcher: { stop(): void } | null = null;
 let cronTagMapWatcher: { stop(): void } | null = null;
-let beadForumCountSync: ForumCountSync | undefined;
+let taskForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
 let webhookServer: WebhookServer | null = null;
 let savedCronExecCtx: import('./cron/executor.js').CronExecutorContext | null = null;
@@ -172,9 +172,9 @@ const shutdown = async () => {
   // Kill all CLI subprocesses so they release session locks before the new instance starts.
   killAllSubprocesses();
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
-  beadForumCountSync?.stop();
+  taskForumCountSync?.stop();
   cronForumCountSync?.stop();
-  beadSyncWatcher?.stop();
+  taskSyncWatcher?.stop();
   cronTagMapWatcher?.stop();
   cronScheduler?.stopAll();
   if (webhookServer) {
@@ -937,13 +937,13 @@ if (system) {
 // --- Cold-start: clean up orphaned in-flight replies from a previous unclean exit ---
 await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'inflight.json'), log });
 
-// --- Configure beads context after bootstrap (so the forum can be auto-created) ---
+// --- Configure task context after bootstrap (so the forum can be auto-created) ---
 let taskCtx: TaskContext | undefined;
 if (tasksEnabled) {
   // Seed tag map from repo if data-dir copy doesn't exist yet.
   await seedTagMap(tasksTagMapSeedPath, tasksTagMapPath);
 
-  const beadsResult = await initializeBeadsContext({
+  const tasksResult = await initializeTasksContext({
     enabled: true,
     tasksCwd,
     tasksForum,
@@ -958,7 +958,7 @@ if (tasksEnabled) {
     systemTasksForumId: system?.tasksForumId,
     store: sharedTaskStore,
   });
-  taskCtx = beadsResult.taskCtx;
+  taskCtx = tasksResult.taskCtx;
 }
 
 if (taskCtx) {
@@ -977,7 +977,7 @@ if (taskCtx) {
     // Create forum count sync for tasks.
     const tasksForumChannel = await resolveTasksForum(guild, taskCtx.forumId);
     if (tasksForumChannel) {
-      beadForumCountSync = new ForumCountSync(
+      taskForumCountSync = new ForumCountSync(
         client,
         tasksForumChannel.id,
         async () => {
@@ -985,14 +985,14 @@ if (taskCtx) {
         },
         log,
       );
-      taskCtx.forumCountSync = beadForumCountSync;
-      beadForumCountSync.requestUpdate();
+      taskCtx.forumCountSync = taskForumCountSync;
+      taskForumCountSync.requestUpdate();
     }
 
     // Install forum guard before any async operations that touch the forum.
-    initBeadsForumGuard({ client, forumId: taskCtx.forumId, log, store: taskCtx.store, tagMap: taskCtx.tagMap });
+    initTasksForumGuard({ client, forumId: taskCtx.forumId, log, store: taskCtx.store, tagMap: taskCtx.tagMap });
 
-    // Tag bootstrap + reload BEFORE wireBeadsSync so the first sync has the correct tag map.
+    // Tag bootstrap + reload BEFORE wireTaskSync so the first sync has the correct tag map.
     if (tasksForumChannel) {
       try {
         await ensureForumTags(guild, tasksForumChannel.id, tasksTagMapPath, {
@@ -1010,7 +1010,7 @@ if (taskCtx) {
     }
 
     // Wire coordinator + watcher + startup sync (now uses correct tag map).
-    const wired = await wireBeadsSync({
+    const wired = await wireTaskSync({
       taskCtx,
       client,
       guild,
@@ -1018,11 +1018,11 @@ if (taskCtx) {
       tasksCwd,
       sidebarMentionUserId,
       log,
-      forumCountSync: beadForumCountSync,
+      forumCountSync: taskForumCountSync,
       skipForumGuard: true,
       skipPhase5: cfg.tasksSyncSkipPhase5,
     });
-    beadSyncWatcher = wired;
+    taskSyncWatcher = wired;
   } else {
     log.warn({ resolvedGuildId }, 'tasks:sync-watcher skipped; guild not in cache');
   }
