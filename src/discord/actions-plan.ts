@@ -461,7 +461,7 @@ export function planActionsPromptSection(): string {
 \`\`\`
 <discord-action>{"type":"planShow","planId":"plan-042"}</discord-action>
 \`\`\`
-- \`planId\` (required): The plan ID or backing bead ID.
+- \`planId\` (required): The plan ID or backing task ID (legacy header IDs are still accepted).
 
 **planApprove** — Approve a plan for implementation:
 \`\`\`
@@ -475,7 +475,7 @@ export function planActionsPromptSection(): string {
 \`\`\`
 - \`planId\` (required): The plan ID to close.
 
-**planCreate** — Create a new plan (drafts a plan file and backing bead):
+**planCreate** — Create a new plan (drafts a plan file and backing task):
 \`\`\`
 <discord-action>{"type":"planCreate","description":"Add retry logic to webhook handler","context":"Optional extra context"}</discord-action>
 \`\`\`
@@ -487,12 +487,12 @@ export function planActionsPromptSection(): string {
 <discord-action>{"type":"planRun","planId":"plan-042"}</discord-action>
 \`\`\`
 - \`planId\` (required): The plan ID to execute.
-- The plan must be in APPROVED or IMPLEMENTING status. Phases run sequentially with the writer lock. On successful completion of all phases, the plan is auto-closed and the backing bead is closed.
+- The plan must be in APPROVED or IMPLEMENTING status. Phases run sequentially with the writer lock. On successful completion of all phases, the plan is auto-closed and the backing task is closed.
 
 #### Plan Guidelines
 - Use planList to check existing plans before creating duplicates.
 - Plans go through statuses: DRAFT → REVIEW → APPROVED → IMPLEMENTING → CLOSED.
 - Use forgeCreate to draft+audit a plan, or planCreate for a bare plan file without forge auditing.
-- Approving a plan marks its backing bead as in_progress.
+- Approving a plan marks its backing task as in_progress.
 - Use planRun to execute approved plans autonomously.`;
 }

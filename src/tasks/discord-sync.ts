@@ -439,8 +439,8 @@ export async function ensureUnarchived(client: Client, threadId: string): Promis
 }
 
 // ---------------------------------------------------------------------------
-// Backward-compatible re-exports (old Bead* names)
-// Internal beads modules and external consumers use these until renamed.
+// Legacy compatibility re-exports (remove in Phase 5 hard-cut).
+// Internal src/beads shims and external consumers still rely on these names.
 // ---------------------------------------------------------------------------
 
 export { shortTaskId as shortBeadId };

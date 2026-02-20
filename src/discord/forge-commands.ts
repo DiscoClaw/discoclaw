@@ -54,7 +54,7 @@ export type ForgeOrchestratorOpts = {
   pinnedThreadSummary?: string;
 };
 
-function resolveHeaderTaskId(header: { taskId?: string; beadId: string }): string {
+function resolveHeaderTaskId(header: { taskId?: string; beadId?: string }): string {
   return header.taskId?.trim() || header.beadId?.trim() || '';
 }
 
@@ -546,7 +546,7 @@ export class ForgeOrchestrator {
     try {
       // 1. Create the plan file via handlePlanCommand
       // Pass context separately so task title/slug stay clean (context goes in plan body).
-      const existingTaskId = this.opts.existingTaskId || this.opts.existingBeadId;
+      const existingTaskId = this.opts.existingTaskId ?? this.opts.existingBeadId;
       const createResult = await handlePlanCommand(
         { action: 'create', args: description, context, existingTaskId },
         { workspaceCwd: this.opts.workspaceCwd, taskStore: this.opts.taskStore },
@@ -587,7 +587,7 @@ export class ForgeOrchestrator {
 
       // Build context summary from workspace files (includes project context and additional thread info)
       const contextSummary = await this.buildContextSummary(projectContext, {
-        taskDescription: this.opts.taskDescription || this.opts.beadDescription,
+        taskDescription: this.opts.taskDescription ?? this.opts.beadDescription,
         pinnedThreadSummary: this.opts.pinnedThreadSummary,
       });
 
@@ -1012,7 +1012,12 @@ export class ForgeOrchestrator {
 
   private async buildContextSummary(
     projectContext?: string,
-    opts?: { taskDescription?: string; beadDescription?: string; pinnedThreadSummary?: string },
+    opts?: {
+      taskDescription?: string;
+      /** @deprecated Compatibility alias for taskDescription. */
+      beadDescription?: string;
+      pinnedThreadSummary?: string;
+    },
   ): Promise<string> {
     const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
     const sections: string[] = [];
@@ -1040,7 +1045,7 @@ export class ForgeOrchestrator {
       // skip if missing
     }
 
-    const taskDescription = opts?.taskDescription || opts?.beadDescription;
+    const taskDescription = opts?.taskDescription ?? opts?.beadDescription;
     if (taskDescription) {
       sections.push(`--- task-description (thread) ---\n${taskDescription.trim()}`);
     }
