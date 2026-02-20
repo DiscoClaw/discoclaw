@@ -56,7 +56,7 @@ import { beadThreadCache } from '../beads/bead-thread-cache.js';
 import { buildBeadContextSummary } from '../beads/bd-cli.js';
 import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
-import { editThenSendChunks } from './output-common.js';
+import { editThenSendChunks, shouldSuppressFollowUp } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { resolveReplyReference } from './reply-reference.js';
 import { resolveThreadContext } from './thread-context.js';
@@ -2044,6 +2044,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             processedText = finalText || deltaText || (collectedImages.length > 0 ? '' : '(no output)');
             let actions: { type: string }[] = [];
             let actionResults: DiscordActionResult[] = [];
+            let strippedUnrecognizedTypes: string[] = [];
             // Gate action execution on successful stream completion — do not execute
             // actions against partial or error output, which could cause side effects
             // based on incomplete model responses.
@@ -2051,6 +2052,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const parsed = parseDiscordActions(processedText, actionFlags);
               if (parsed.actions.length > 0) {
                 actions = parsed.actions;
+                strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
                 const actCtx = {
                   guild: msg.guild,
                   client: msg.client,
@@ -2107,20 +2109,26 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 }
               } else {
                 processedText = parsed.cleanText;
+                strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
               }
             }
 
             // Suppression: if a follow-up response is trivially short and has no further
             // actions, suppress it to avoid posting empty messages like "Got it."
-            // Skip suppression when images are present.
-            if (followUpDepth > 0 && actions.length === 0 && collectedImages.length === 0) {
-              const stripped = processedText.replace(/\s+/g, ' ').trim();
-              if (stripped.length < 50) {
+            // Skip suppression when images are present, or when unrecognized action blocks
+            // were stripped (the AI tried to act — the user must see "(no output)").
+            if (followUpDepth > 0) {
+              if (shouldSuppressFollowUp(processedText, actions.length, collectedImages.length, strippedUnrecognizedTypes.length)) {
+                const stripped = processedText.replace(/\s+/g, ' ').trim();
                 try { await reply.delete(); } catch { /* ignore */ }
                 replyFinalized = true;
                 params.log?.info({ sessionKey, followUpDepth, chars: stripped.length }, 'followup:suppressed');
                 break;
+              } else if (strippedUnrecognizedTypes.length > 0 && actions.length === 0 && collectedImages.length === 0) {
+                params.log?.info({ sessionKey, followUpDepth, types: strippedUnrecognizedTypes }, 'followup:suppression-bypassed');
               }
+            } else if (strippedUnrecognizedTypes.length > 0 && actions.length === 0) {
+              params.log?.info({ sessionKey, types: strippedUnrecognizedTypes }, 'discord:unrecognized-action-types-stripped');
             }
 
             if (!isShuttingDown()) {
