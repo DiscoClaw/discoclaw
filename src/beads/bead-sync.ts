@@ -5,6 +5,7 @@ export type { BeadSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from '../tasks/store.js';
+import { withTaskLifecycleLock } from '../tasks/task-lifecycle.js';
 import {
   resolveBeadsForum,
   createBeadThread,
@@ -87,35 +88,45 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     !hasLabel(b, 'no-thread'),
   );
   for (const bead of missingRef) {
-    try {
-      // Dedupe: if the thread already exists, backfill external_ref instead of creating a duplicate.
-      const existing = await findExistingThreadForBead(forum, bead.id, { archivedLimit: opts.archivedDedupeLimit });
-      if (existing) {
-        try {
-          opts.store.update(bead.id, { externalRef: `discord:${existing}` });
-          log?.info({ beadId: bead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfilled');
-        } catch (err) {
-          log?.warn({ err, beadId: bead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfill failed');
-          warnings++;
-        }
-        await sleep(throttleMs);
-        continue;
+    await withTaskLifecycleLock(bead.id, async () => {
+      const latestBead = opts.store.get(bead.id) ?? bead;
+      if (
+        getThreadIdFromBead(latestBead) ||
+        latestBead.status === 'closed' ||
+        hasLabel(latestBead, 'no-thread')
+      ) {
+        return;
       }
 
-      const threadId = await createBeadThread(forum, bead, tagMap, opts.mentionUserId);
-      // Link back via external_ref.
       try {
-        opts.store.update(bead.id, { externalRef: `discord:${threadId}` });
+        // Dedupe: if the thread already exists, backfill external_ref instead of creating a duplicate.
+        const existing = await findExistingThreadForBead(forum, latestBead.id, { archivedLimit: opts.archivedDedupeLimit });
+        if (existing) {
+          try {
+            opts.store.update(latestBead.id, { externalRef: `discord:${existing}` });
+            log?.info({ beadId: latestBead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfilled');
+          } catch (err) {
+            log?.warn({ err, beadId: latestBead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfill failed');
+            warnings++;
+          }
+          return;
+        }
+
+        const threadId = await createBeadThread(forum, latestBead, tagMap, opts.mentionUserId);
+        // Link back via external_ref.
+        try {
+          opts.store.update(latestBead.id, { externalRef: `discord:${threadId}` });
+        } catch (err) {
+          log?.warn({ err, beadId: latestBead.id }, 'bead-sync:phase1 external-ref update failed');
+          warnings++;
+        }
+        threadsCreated++;
+        log?.info({ beadId: latestBead.id, threadId }, 'bead-sync:phase1 thread created');
       } catch (err) {
-        log?.warn({ err, beadId: bead.id }, 'bead-sync:phase1 external-ref update failed');
+        log?.warn({ err, beadId: latestBead.id }, 'bead-sync:phase1 failed');
         warnings++;
       }
-      threadsCreated++;
-      log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase1 thread created');
-    } catch (err) {
-      log?.warn({ err, beadId: bead.id }, 'bead-sync:phase1 failed');
-      warnings++;
-    }
+    });
     await sleep(throttleMs);
   }
 
@@ -139,48 +150,55 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   // Phase 3: Sync emoji/names for existing threads.
   const withRef = allBeads.filter((b) => getThreadIdFromBead(b) && b.status !== 'closed');
   for (const bead of withRef) {
-    const threadId = getThreadIdFromBead(bead)!;
-    // Skip threads that are already archived — a concurrent beadClose may have
-    // just archived this thread, and unarchiving it would undo that work.
-    // Note: isThreadArchived never throws (fetchThreadChannel catches internally).
-    if (await isThreadArchived(client, threadId)) {
-      await sleep(throttleMs);
-      continue;
-    }
-    // If archived, unarchive and keep unarchived for active beads.
-    try {
-      await ensureUnarchived(client, threadId);
-    } catch {}
-    try {
-      const changed = await updateBeadThreadName(client, threadId, bead);
-      if (changed) {
-        emojisUpdated++;
-        log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase3 name updated');
+    await withTaskLifecycleLock(bead.id, async () => {
+      const latestBead = opts.store.get(bead.id) ?? bead;
+      const threadId = getThreadIdFromBead(latestBead);
+      if (!threadId || latestBead.status === 'closed') {
+        return;
       }
-    } catch (err) {
-      log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase3 failed');
-      warnings++;
-    }
-    try {
-      const starterChanged = await updateBeadStarterMessage(client, threadId, bead, opts.mentionUserId);
-      if (starterChanged) {
-        starterMessagesUpdated++;
-        log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase3 starter updated');
+
+      // Skip threads that are already archived — a concurrent taskClose may have
+      // just archived this thread, and unarchiving it would undo that work.
+      // Note: isThreadArchived never throws (fetchThreadChannel catches internally).
+      if (await isThreadArchived(client, threadId)) {
+        return;
       }
-    } catch (err) {
-      log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase3 starter update failed');
-      warnings++;
-    }
-    try {
-      const tagChanged = await updateBeadThreadTags(client, threadId, bead, tagMap);
-      if (tagChanged) {
-        tagsUpdated++;
-        log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase3 tags updated');
+
+      // If archived, unarchive and keep unarchived for active tasks.
+      try {
+        await ensureUnarchived(client, threadId);
+      } catch {}
+      try {
+        const changed = await updateBeadThreadName(client, threadId, latestBead);
+        if (changed) {
+          emojisUpdated++;
+          log?.info({ beadId: latestBead.id, threadId }, 'bead-sync:phase3 name updated');
+        }
+      } catch (err) {
+        log?.warn({ err, beadId: latestBead.id, threadId }, 'bead-sync:phase3 failed');
+        warnings++;
       }
-    } catch (err) {
-      log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase3 tag update failed');
-      warnings++;
-    }
+      try {
+        const starterChanged = await updateBeadStarterMessage(client, threadId, latestBead, opts.mentionUserId);
+        if (starterChanged) {
+          starterMessagesUpdated++;
+          log?.info({ beadId: latestBead.id, threadId }, 'bead-sync:phase3 starter updated');
+        }
+      } catch (err) {
+        log?.warn({ err, beadId: latestBead.id, threadId }, 'bead-sync:phase3 starter update failed');
+        warnings++;
+      }
+      try {
+        const tagChanged = await updateBeadThreadTags(client, threadId, latestBead, tagMap);
+        if (tagChanged) {
+          tagsUpdated++;
+          log?.info({ beadId: latestBead.id, threadId }, 'bead-sync:phase3 tags updated');
+        }
+      } catch (err) {
+        log?.warn({ err, beadId: latestBead.id, threadId }, 'bead-sync:phase3 tag update failed');
+        warnings++;
+      }
+    });
     await sleep(throttleMs);
   }
 
@@ -189,28 +207,33 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     b.status === 'closed' && getThreadIdFromBead(b),
   );
   for (const bead of closedBeads) {
-    const threadId = getThreadIdFromBead(bead)!;
-    try {
-      // Full idempotency check: skip only if the thread is archived AND has
-      // the correct closed name and tags. This lets sync recover threads that
-      // were archived with stale names (e.g., rename failed silently during close).
-      if (await isBeadThreadAlreadyClosed(client, threadId, bead, tagMap)) {
-        await sleep(throttleMs);
-        continue;
+    await withTaskLifecycleLock(bead.id, async () => {
+      const latestBead = opts.store.get(bead.id) ?? bead;
+      const threadId = getThreadIdFromBead(latestBead);
+      if (!threadId || latestBead.status !== 'closed') {
+        return;
       }
-      if (hasInFlightForChannel(threadId)) {
-        closesDeferred++;
-        log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase4 close deferred (in-flight reply active)');
-        await sleep(throttleMs);
-        continue;
+
+      try {
+        // Full idempotency check: skip only if the thread is archived AND has
+        // the correct closed name and tags. This lets sync recover threads that
+        // were archived with stale names (e.g., rename failed silently during close).
+        if (await isBeadThreadAlreadyClosed(client, threadId, latestBead, tagMap)) {
+          return;
+        }
+        if (hasInFlightForChannel(threadId)) {
+          closesDeferred++;
+          log?.info({ beadId: latestBead.id, threadId }, 'bead-sync:phase4 close deferred (in-flight reply active)');
+          return;
+        }
+        await closeBeadThread(client, threadId, latestBead, tagMap, log);
+        threadsArchived++;
+        log?.info({ beadId: latestBead.id, threadId }, 'bead-sync:phase4 archived');
+      } catch (err) {
+        log?.warn({ err, beadId: latestBead.id, threadId }, 'bead-sync:phase4 failed');
+        warnings++;
       }
-      await closeBeadThread(client, threadId, bead, tagMap, log);
-      threadsArchived++;
-      log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase4 archived');
-    } catch (err) {
-      log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase4 failed');
-      warnings++;
-    }
+    });
     await sleep(throttleMs);
   }
 

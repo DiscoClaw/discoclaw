@@ -185,6 +185,36 @@ describe('executeTaskAction', () => {
     expect(createTaskThread).not.toHaveBeenCalled();
   });
 
+  it('taskCreate skips thread creation when task is already linked before direct lifecycle step', async () => {
+    const { createTaskThread } = await import('../beads/discord-sync.js');
+    (createTaskThread as any).mockClear?.();
+
+    const store = makeStore();
+    (store.get as any).mockImplementation((id: string) => ({
+      id,
+      title: 'Already linked',
+      status: 'open',
+      priority: 2,
+      issue_type: 'task',
+      owner: '',
+      external_ref: 'discord:thread-existing',
+      labels: ['feature'],
+      comments: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    }));
+
+    const result = await executeTaskAction(
+      { type: 'taskCreate', title: 'Task already linked' },
+      makeCtx(),
+      makeTaskCtx({ store: store as any }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('thread linked');
+    expect(createTaskThread).not.toHaveBeenCalled();
+  });
+
   it('taskUpdate returns updated summary', async () => {
     const result = await executeTaskAction(
       { type: 'taskUpdate', taskId: 'ws-001', status: 'in_progress', priority: 1 },

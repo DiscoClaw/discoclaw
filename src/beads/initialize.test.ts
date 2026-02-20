@@ -23,6 +23,7 @@ import { initBeadsForumGuard } from './forum-guard.js';
 import { BeadSyncCoordinator } from './bead-sync-coordinator.js';
 import { initializeBeadsContext, wireBeadsSync } from './initialize.js';
 import { TaskStore } from '../tasks/store.js';
+import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
 
 function fakeLog() {
   return {
@@ -223,6 +224,40 @@ describe('wireBeadsSync', () => {
     const callsBeforeUpdate = coordinatorInstance.sync.mock.calls.length;
     store.update(bead.id, { title: 'Updated task' });
     expect(coordinatorInstance.sync.mock.calls.length).toBeGreaterThan(callsBeforeUpdate);
+  });
+
+  it('does not trigger coordinator sync while direct task lifecycle ownership is active', async () => {
+    const log = fakeLog();
+    const store = new TaskStore({ prefix: 'test' });
+    const taskCtx = {
+      tasksCwd: '/tmp/beads',
+      forumId: 'forum-123',
+      tagMap: { bug: '111' },
+      tagMapPath: '/tmp/tag-map.json',
+      store,
+      log,
+    } as any;
+
+    vi.mocked(BeadSyncCoordinator).mockClear();
+
+    await wireBeadsSync({
+      taskCtx,
+      client: {} as any,
+      guild: {} as any,
+      guildId: 'guild-1',
+      tasksCwd: '/tmp/beads',
+      log,
+    });
+
+    const coordinatorInstance = vi.mocked(BeadSyncCoordinator).mock.results[0]?.value;
+    const task = store.create({ title: 'Owned lifecycle task' });
+    const callsBeforeUpdate = coordinatorInstance.sync.mock.calls.length;
+
+    await withDirectTaskLifecycle(task.id, async () => {
+      store.update(task.id, { title: 'Updated while owned' });
+    });
+
+    expect(coordinatorInstance.sync.mock.calls.length).toBe(callsBeforeUpdate);
   });
 
   it('stop() removes store event listeners', async () => {

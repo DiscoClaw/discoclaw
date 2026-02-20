@@ -8,6 +8,7 @@ import type { TaskSyncCoordinator } from '../beads/bead-sync-coordinator.js';
 import type { ForumCountSync } from './forum-count-sync.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 import { shouldActionUseDirectThreadLifecycle } from '../tasks/sync-contract.js';
+import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
 import type { TaskStore } from '../tasks/store.js';
 import {
   resolveTasksForum,
@@ -102,6 +103,13 @@ function resolveTaskId(action: { taskId?: string }): string {
   return (action.taskId ?? '').trim();
 }
 
+function scheduleRepairSync(taskCtx: TaskContext, taskId: string): void {
+  if (!taskCtx.syncCoordinator) return;
+  taskCtx.syncCoordinator.sync().catch((err) => {
+    taskCtx.log?.warn({ err, taskId }, 'tasks:repair sync failed');
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -130,65 +138,79 @@ export async function executeTaskAction(
         labels,
       });
 
-      // Auto-tag if enabled and we have available tags (excluding status tags).
-      const tagNames = Object.keys(taskCtx.tagMap).filter((k) => !STATUS_NAME_SET.has(k));
-      if (taskCtx.autoTag && tagNames.length > 0) {
-        try {
-          const suggestedTags = await autoTagBead(
-            taskCtx.runtime,
-            task.title,
-            task.description ?? '',
-            tagNames,
-            { model: taskCtx.autoTagModel, cwd: taskCtx.tasksCwd || process.cwd() },
-          );
-          for (const tag of suggestedTags) {
-            if (!labels.includes(tag)) labels.push(tag);
-          }
-          for (const tag of suggestedTags) {
-            try {
-              taskCtx.store.addLabel(task.id, `tag:${tag}`);
-            } catch {
-              // best-effort
+      let threadId = '';
+      let needsRepairSync = false;
+      await withDirectTaskLifecycle(task.id, async () => {
+        // Auto-tag if enabled and we have available tags (excluding status tags).
+        const tagNames = Object.keys(taskCtx.tagMap).filter((k) => !STATUS_NAME_SET.has(k));
+        if (taskCtx.autoTag && tagNames.length > 0) {
+          try {
+            const suggestedTags = await autoTagBead(
+              taskCtx.runtime,
+              task.title,
+              task.description ?? '',
+              tagNames,
+              { model: taskCtx.autoTagModel, cwd: taskCtx.tasksCwd || process.cwd() },
+            );
+            for (const tag of suggestedTags) {
+              if (!labels.includes(tag)) labels.push(tag);
             }
+            for (const tag of suggestedTags) {
+              try {
+                taskCtx.store.addLabel(task.id, `tag:${tag}`);
+              } catch {
+                // best-effort
+              }
+            }
+          } catch (err) {
+            taskCtx.log?.warn({ err, taskId: task.id }, 'tasks:auto-tag failed');
+          }
+        }
+
+        if (!shouldActionUseDirectThreadLifecycle(action.type)) return;
+
+        const latest = taskCtx.store.get(task.id) ?? task;
+        const currentThreadId = getThreadIdFromTask(latest);
+        if (currentThreadId) {
+          threadId = currentThreadId;
+          return;
+        }
+
+        if (labels.includes('no-thread') || (latest.labels ?? []).includes('no-thread')) {
+          return;
+        }
+
+        try {
+          const forum = await resolveTasksForum(ctx.guild, taskCtx.forumId);
+          if (!forum) return;
+
+          // Prefer an existing thread if one is already present for this task.
+          const existing = await findExistingThreadForTask(forum as ForumChannel, task.id);
+          if (existing) {
+            threadId = existing;
+          } else {
+            const taskForThread: TaskData = { ...latest, labels };
+            threadId = await createTaskThread(forum as ForumChannel, taskForThread, taskCtx.tagMap, taskCtx.mentionUserId);
+          }
+
+          // Backfill thread link if needed. Re-check store for concurrent updates.
+          try {
+            const newest = taskCtx.store.get(task.id) ?? task;
+            const newestThreadId = getThreadIdFromTask(newest);
+            if (newestThreadId !== threadId) {
+              taskCtx.store.update(task.id, { externalRef: `discord:${threadId}` });
+            }
+          } catch (err) {
+            taskCtx.log?.warn({ err, taskId: task.id, threadId }, 'tasks:external-ref update failed');
           }
         } catch (err) {
-          taskCtx.log?.warn({ err, taskId: task.id }, 'tasks:auto-tag failed');
+          needsRepairSync = true;
+          taskCtx.log?.warn({ err, taskId: task.id }, 'tasks:thread creation failed');
         }
-      }
+      });
 
-      // Direct thread lifecycle ownership is action-local for taskCreate.
-      let threadId = '';
-      try {
-        if (shouldActionUseDirectThreadLifecycle(action.type)) {
-          if (labels.includes('no-thread') || (task.labels ?? []).includes('no-thread')) {
-            // Explicit no-thread policy.
-          } else {
-            const forum = await resolveTasksForum(ctx.guild, taskCtx.forumId);
-            if (forum) {
-              // Prefer an existing thread if one is already present for this task.
-              const existing = await findExistingThreadForTask(forum as ForumChannel, task.id);
-              if (existing) {
-                threadId = existing;
-              } else {
-                const taskForThread: TaskData = { ...task, labels };
-                threadId = await createTaskThread(forum as ForumChannel, taskForThread, taskCtx.tagMap, taskCtx.mentionUserId);
-              }
-
-              // Backfill thread link if needed. Re-check store for concurrent updates.
-              try {
-                const latest = taskCtx.store.get(task.id) ?? task;
-                const currentThreadId = getThreadIdFromTask(latest);
-                if (currentThreadId !== threadId) {
-                  taskCtx.store.update(task.id, { externalRef: `discord:${threadId}` });
-                }
-              } catch (err) {
-                taskCtx.log?.warn({ err, taskId: task.id, threadId }, 'tasks:external-ref update failed');
-              }
-            }
-          }
-        }
-      } catch (err) {
-        taskCtx.log?.warn({ err, taskId: task.id }, 'tasks:thread creation failed');
+      if (needsRepairSync) {
+        scheduleRepairSync(taskCtx, task.id);
       }
 
       beadThreadCache.invalidate();
@@ -207,32 +229,43 @@ export async function executeTaskAction(
         return { ok: false, error: `Invalid task status: "${action.status}"` };
       }
 
-      const task = taskCtx.store.update(taskId, {
-        title: action.title,
-        description: action.description,
-        priority: action.priority,
-        status: action.status as TaskStatus | undefined,
+      let needsRepairSync = false;
+      await withDirectTaskLifecycle(taskId, async () => {
+        const updatedTask = taskCtx.store.update(taskId, {
+          title: action.title,
+          description: action.description,
+          priority: action.priority,
+          status: action.status as TaskStatus | undefined,
+        });
+
+        const threadId = getThreadIdFromTask(updatedTask);
+        if (threadId && shouldActionUseDirectThreadLifecycle(action.type)) {
+          try {
+            await ensureUnarchived(ctx.client, threadId);
+            await updateTaskThreadName(ctx.client, threadId, updatedTask);
+          } catch (err) {
+            needsRepairSync = true;
+            taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:thread name update failed');
+          }
+          try {
+            await updateTaskStarterMessage(ctx.client, threadId, updatedTask, taskCtx.sidebarMentionUserId);
+          } catch (err) {
+            needsRepairSync = true;
+            taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:starter message update failed');
+          }
+          try {
+            await updateTaskThreadTags(ctx.client, threadId, updatedTask, taskCtx.tagMap);
+          } catch (err) {
+            needsRepairSync = true;
+            taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:thread tag update failed');
+          }
+        }
+
+        return updatedTask;
       });
 
-      // Direct thread lifecycle ownership is action-local for taskUpdate.
-      const threadId = getThreadIdFromTask(task);
-      if (threadId && shouldActionUseDirectThreadLifecycle(action.type)) {
-        try {
-          await ensureUnarchived(ctx.client, threadId);
-          await updateTaskThreadName(ctx.client, threadId, task);
-        } catch (err) {
-          taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:thread name update failed');
-        }
-        try {
-          await updateTaskStarterMessage(ctx.client, threadId, task, taskCtx.sidebarMentionUserId);
-        } catch (err) {
-          taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:starter message update failed');
-        }
-        try {
-          await updateTaskThreadTags(ctx.client, threadId, task, taskCtx.tagMap);
-        } catch (err) {
-          taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:thread tag update failed');
-        }
+      if (needsRepairSync) {
+        scheduleRepairSync(taskCtx, taskId);
       }
 
       beadThreadCache.invalidate();
@@ -251,16 +284,25 @@ export async function executeTaskAction(
         return { ok: false, error: 'taskClose requires taskId' };
       }
 
-      const task = taskCtx.store.close(taskId, action.reason);
+      let needsRepairSync = false;
+      await withDirectTaskLifecycle(taskId, async () => {
+        const closedTask = taskCtx.store.close(taskId, action.reason);
 
-      // Direct thread lifecycle ownership is action-local for taskClose.
-      const threadId = getThreadIdFromTask(task);
-      if (threadId && shouldActionUseDirectThreadLifecycle(action.type)) {
-        try {
-          await closeTaskThread(ctx.client, threadId, task, taskCtx.tagMap, taskCtx.log);
-        } catch (err) {
-          taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:thread close failed');
+        const threadId = getThreadIdFromTask(closedTask);
+        if (threadId && shouldActionUseDirectThreadLifecycle(action.type)) {
+          try {
+            await closeTaskThread(ctx.client, threadId, closedTask, taskCtx.tagMap, taskCtx.log);
+          } catch (err) {
+            needsRepairSync = true;
+            taskCtx.log?.warn({ err, taskId, threadId }, 'tasks:thread close failed');
+          }
         }
+
+        return closedTask;
+      });
+
+      if (needsRepairSync) {
+        scheduleRepairSync(taskCtx, taskId);
       }
 
       beadThreadCache.invalidate();

@@ -6,6 +6,7 @@ import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { TaskStore } from '../tasks/store.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from '../tasks/sync-contract.js';
+import { isDirectTaskLifecycleActive } from '../tasks/task-lifecycle.js';
 import { loadTagMap } from './discord-sync.js';
 import { initBeadsForumGuard } from './forum-guard.js';
 
@@ -147,14 +148,20 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
   });
 
   // Wire only contract-approved TaskStore mutations into coordinator sync.
-  const triggerSync = (eventName: string) => {
+  const triggerSync = (eventName: string, taskId?: string) => {
     syncCoordinator.sync().catch((err) => {
-      opts.log.warn({ err, eventName }, 'beads:store-event sync failed');
+      opts.log.warn({ err, eventName, taskId }, 'beads:store-event sync failed');
     });
   };
   const store = opts.taskCtx.store;
   const subscriptions = TASK_SYNC_TRIGGER_EVENTS.map((eventName) => {
-    const handler = () => triggerSync(eventName);
+    const handler = (task: { id: string }) => {
+      const taskId = task?.id;
+      if (taskId && isDirectTaskLifecycleActive(taskId)) {
+        return;
+      }
+      triggerSync(eventName, taskId);
+    };
     store.on(eventName, handler);
     return { eventName, handler };
   });
