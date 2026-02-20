@@ -211,6 +211,7 @@ describe('parsePlanFileHeader', () => {
     const header = parsePlanFileHeader(content);
     expect(header).toEqual({
       planId: 'plan-001',
+      taskId: 'ws-test-001',
       beadId: 'ws-test-001',
       status: 'DRAFT',
       title: 'Add the plan command',
@@ -348,7 +349,7 @@ describe('handlePlanCommand', () => {
       baseOpts({ workspaceCwd: tmpDir, taskStore: store }),
     );
 
-    expect(result).toContain('Failed to create backing bead');
+    expect(result).toContain('Failed to create backing task');
   });
 
   it('create — uses fallback template when .plan-template.md is missing', async () => {

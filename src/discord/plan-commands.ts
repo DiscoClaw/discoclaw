@@ -22,12 +22,17 @@ export type PlanCommand = {
   action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'run-one' | 'skip' | 'audit';
   args: string;
   context?: string;
-  /** When set, reuse this bead instead of creating a new one (e.g. when issued in a bead forum thread). */
+  /** When set, reuse this task instead of creating a new one (e.g. when issued in a task forum thread). */
+  existingTaskId?: string;
+  /** @deprecated Compatibility alias for existingTaskId. */
   existingBeadId?: string;
 };
 
 export type PlanFileHeader = {
   planId: string;
+  /** Canonical backing task identifier. */
+  taskId?: string;
+  /** @deprecated Compatibility alias mirrored from taskId. */
   beadId: string;
   status: string;
   title: string;
@@ -88,15 +93,21 @@ export function parsePlanFileHeader(content: string): PlanFileHeader | null {
   const createdMatch = content.match(/^\*\*Created:\*\*\s*(.+)$/m);
 
   if (!idMatch) return null;
+  const taskId = taskMatch?.[1]?.trim() ?? beadMatch?.[1]?.trim() ?? '';
 
   return {
     planId: idMatch[1]!.trim(),
-    beadId: taskMatch?.[1]?.trim() ?? beadMatch?.[1]?.trim() ?? '',
+    taskId,
+    beadId: taskId,
     status: statusMatch?.[1]?.trim() ?? '',
     title: titleMatch?.[1]?.trim() ?? '',
     project: projectMatch?.[1]?.trim() ?? '',
     created: createdMatch?.[1]?.trim() ?? '',
   };
+}
+
+function resolveHeaderTaskId(header: PlanFileHeader): string {
+  return header.taskId?.trim() || header.beadId?.trim() || '';
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +177,8 @@ export async function findPlanFile(plansDir: string, id: string): Promise<{ file
     const content = await fs.readFile(filePath, 'utf-8');
     const header = parsePlanFileHeader(content);
     if (!header) continue;
-    if (header.planId === id || header.beadId === id || (normalizedId && header.planId === normalizedId)) {
+    const taskId = resolveHeaderTaskId(header);
+    if (header.planId === id || taskId === id || (normalizedId && header.planId === normalizedId)) {
       return { filePath, header };
     }
   }
@@ -305,39 +317,40 @@ export async function handlePlanCommand(
       const date = new Date().toISOString().split('T')[0]!;
       const trimmedContext = cmd.context?.trim();
 
-      // Create backing bead — or reuse existing one from bead thread context
-      let beadId: string;
-      if (cmd.existingBeadId) {
-        beadId = cmd.existingBeadId;
-        // Ensure the reused bead has the 'plan' label for label-based filtering
+      // Create backing task — or reuse existing one from task thread context.
+      let taskId: string;
+      const existingTaskId = cmd.existingTaskId || cmd.existingBeadId;
+      if (existingTaskId) {
+        taskId = existingTaskId;
+        // Ensure the reused task has the 'plan' label for label-based filtering.
         try {
-          opts.taskStore.addLabel(beadId, 'plan');
+          opts.taskStore.addLabel(taskId, 'plan');
         } catch {
-          // best-effort — label addition failure shouldn't block plan creation
+          // best-effort — label addition failure shouldn't block plan creation.
         }
       } else {
         try {
-          // Dedup: if an open bead with a matching title already exists, reuse it
+          // Dedup: if an open task with a matching title already exists, reuse it.
           const normalizedTitle = cmd.args.trim().toLowerCase();
-          const existingBeads = opts.taskStore.list({ label: 'plan' });
-          const match = existingBeads.find(
+          const existingTasks = opts.taskStore.list({ label: 'plan' });
+          const match = existingTasks.find(
             (b) => b.status !== 'closed' && b.title.trim().toLowerCase() === normalizedTitle,
           );
 
           if (match) {
-            beadId = match.id;
+            taskId = match.id;
           } else {
-            const bead = opts.taskStore.create(
+            const task = opts.taskStore.create(
               {
                 title: cmd.args,
                 labels: ['plan'],
                 ...(trimmedContext ? { description: trimmedContext.slice(0, 1800) } : {}),
               },
             );
-            beadId = bead.id;
+            taskId = task.id;
           }
         } catch (err) {
-          return `Failed to create backing bead: ${String(err)}`;
+          return `Failed to create backing task: ${String(err)}`;
         }
       }
 
@@ -354,8 +367,8 @@ export async function handlePlanCommand(
       const content = template
         .replace(/\{\{TITLE\}\}/g, cmd.args)
         .replace(/\{\{PLAN_ID\}\}/g, planId)
-        .replace(/\{\{BEAD_ID\}\}/g, beadId)
-        .replace(/\{\{TASK_ID\}\}/g, beadId)
+        .replace(/\{\{BEAD_ID\}\}/g, taskId)
+        .replace(/\{\{TASK_ID\}\}/g, taskId)
         .replace(/\{\{DATE\}\}/g, date)
         .replace(/\{\{PROJECT\}\}/g, 'discoclaw')
         // Set status to DRAFT (remove the options list)
@@ -364,14 +377,14 @@ export async function handlePlanCommand(
           '**Status:** DRAFT',
         );
 
-      // Append reply context below the template body (keeps slug/bead/title clean)
+      // Append reply context below the template body (keeps slug/task/title clean).
       const contextSection = trimmedContext ? `\n## Context\n\n${trimmedContext}\n` : '';
       const finalContent = content + contextSection;
 
       await fs.writeFile(filePath, finalContent, 'utf-8');
 
       return [
-        `Plan created: **${planId}** (bead: \`${beadId}\`)`,
+        `Plan created: **${planId}** (task: \`${taskId}\`)`,
         `File: \`workspace/plans/${fileName}\``,
         `Description: ${cmd.args}`,
       ].join('\n');
@@ -403,7 +416,10 @@ export async function handlePlanCommand(
       plans.sort((a, b) => a.planId.localeCompare(b.planId));
 
       const lines = plans.map(
-        (p) => `- \`${p.planId}\` [${p.status}] — ${p.title}${p.beadId ? ` (bead: \`${p.beadId}\`)` : ''}`,
+        (p) => {
+          const taskId = resolveHeaderTaskId(p);
+          return `- \`${p.planId}\` [${p.status}] — ${p.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
+        },
       );
       return lines.join('\n');
     }
@@ -439,7 +455,7 @@ export async function handlePlanCommand(
       return [
         `**${found.header.planId}** — ${found.header.title}`,
         `Status: ${found.header.status}`,
-        `Bead: \`${found.header.beadId}\``,
+        `Task: \`${resolveHeaderTaskId(found.header)}\``,
         `Project: ${found.header.project}`,
         `Created: ${found.header.created}`,
         '',
@@ -459,12 +475,13 @@ export async function handlePlanCommand(
 
       await updatePlanFileStatus(found.filePath, 'APPROVED');
 
-      // Update backing bead to in_progress
-      if (found.header.beadId) {
+      // Update backing task to in_progress.
+      const taskId = resolveHeaderTaskId(found.header);
+      if (taskId) {
         try {
-          opts.taskStore.update(found.header.beadId, { status: 'in_progress' });
+          opts.taskStore.update(taskId, { status: 'in_progress' });
         } catch {
-          // best-effort — bead update failure shouldn't block approval
+          // best-effort — task update failure shouldn't block approval.
         }
       }
 
@@ -481,10 +498,11 @@ export async function handlePlanCommand(
 
       await updatePlanFileStatus(found.filePath, 'CLOSED');
 
-      // Close backing bead
-      if (found.header.beadId) {
+      // Close backing task.
+      const taskId = resolveHeaderTaskId(found.header);
+      if (taskId) {
         try {
-          opts.taskStore.close(found.header.beadId, 'Plan closed');
+          opts.taskStore.close(taskId, 'Plan closed');
         } catch {
           // best-effort
         }
@@ -674,7 +692,7 @@ export async function closePlanIfComplete(
   acquireLock: () => Promise<() => void>,
   log?: LoggerLike,
 ): Promise<{ closed: boolean; reason: string }> {
-  let beadId: string | undefined;
+  let taskId: string | undefined;
   const releaseLock = await acquireLock();
   try {
     // Read and deserialize phases
@@ -720,7 +738,7 @@ export async function closePlanIfComplete(
       return { closed: false, reason: 'wrong_status' };
     }
 
-    beadId = header.beadId || undefined;
+    taskId = resolveHeaderTaskId(header) || undefined;
 
     // Close the plan (under lock, as updatePlanFileStatus requires)
     await updatePlanFileStatus(planFilePath, 'CLOSED');
@@ -728,12 +746,12 @@ export async function closePlanIfComplete(
     releaseLock();
   }
 
-  // Best-effort bead close (no lock needed)
-  if (beadId) {
+  // Best-effort task close (no lock needed).
+  if (taskId) {
     try {
-      taskStore.close(beadId, 'All phases complete');
+      taskStore.close(taskId, 'All phases complete');
     } catch (err) {
-      log?.warn({ err, beadId }, 'closePlanIfComplete: failed to close bead (best-effort)');
+      log?.warn({ err, taskId }, 'closePlanIfComplete: failed to close task (best-effort)');
     }
   }
 
