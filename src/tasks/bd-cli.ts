@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { execa } from 'execa';
-import type { BeadData, BeadCreateParams, BeadUpdateParams, BeadListParams } from './types.js';
+import type { TaskData, TaskCreateParams, TaskUpdateParams, TaskListParams } from './types.js';
 export { buildTaskContextSummary, buildBeadContextSummary } from './context-summary.js';
 
 // ---------------------------------------------------------------------------
@@ -15,17 +15,18 @@ const BD_BIN = process.env.BD_BIN || 'bd';
 // ---------------------------------------------------------------------------
 
 /** Map removed statuses to their replacement. */
-const LEGACY_STATUS_MAP: Record<string, BeadData['status']> = {
+const LEGACY_STATUS_MAP: Record<string, TaskData['status']> = {
   done: 'closed',
   tombstone: 'closed',
 };
 
-/** Normalize legacy bead statuses (`done`, `tombstone`) → `closed`. */
-export function normalizeBeadData(bead: BeadData): BeadData {
-  const mapped = LEGACY_STATUS_MAP[bead.status as string];
-  if (mapped) return { ...bead, status: mapped };
-  return bead;
+/** Normalize legacy task statuses (`done`, `tombstone`) → `closed`. */
+export function normalizeTaskData(task: TaskData): TaskData {
+  const mapped = LEGACY_STATUS_MAP[task.status as string];
+  if (mapped) return { ...task, status: mapped };
+  return task;
 }
+export const normalizeBeadData = normalizeTaskData;
 
 // ---------------------------------------------------------------------------
 // JSON parsing helper
@@ -38,7 +39,7 @@ export function normalizeBeadData(bead: BeadData): BeadData {
  *   - Markdown-fenced JSON (```json ... ```)
  *   - Empty / error output
  */
-export function parseBdJson<T = BeadData>(stdout: string): T[] {
+export function parseBdJson<T = TaskData>(stdout: string): T[] {
   let text = stdout.trim();
   if (!text) return [];
 
@@ -148,12 +149,12 @@ async function runBd(args: string[], cwd: string): Promise<string> {
   return result.stdout;
 }
 
-/** Show a single bead by ID. Returns null if not found. */
-export async function bdShow(id: string, cwd: string): Promise<BeadData | null> {
+/** Show a single task item by ID. Returns null if not found. */
+export async function bdShow(id: string, cwd: string): Promise<TaskData | null> {
   try {
     const stdout = await runBd(['show', '--json', id], cwd);
-    const items = parseBdJson<BeadData>(stdout);
-    return items[0] ? normalizeBeadData(items[0]) : null;
+    const items = parseBdJson<TaskData>(stdout);
+    return items[0] ? normalizeTaskData(items[0]) : null;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // Known "not found" variants from the bd CLI:
@@ -164,12 +165,12 @@ export async function bdShow(id: string, cwd: string): Promise<BeadData | null> 
   }
 }
 
-/** List beads matching the given filters. */
-export async function bdList(params: BeadListParams, cwd: string): Promise<BeadData[]> {
+/** List task items matching the given filters. */
+export async function bdList(params: TaskListParams, cwd: string): Promise<TaskData[]> {
   const args = ['list', '--json'];
   if (params.status === 'all') {
     args.push('--all');
-    // The bd CLI applies a default limit of 50.  When fetching *all* beads
+    // The bd CLI applies a default limit of 50.  When fetching *all* tasks
     // and no explicit limit was provided, pass --limit 0 to disable the cap.
     if (params.limit == null) args.push('--limit', '0');
   } else if (params.status) {
@@ -179,13 +180,13 @@ export async function bdList(params: BeadListParams, cwd: string): Promise<BeadD
   if (params.limit != null) args.push('--limit', String(params.limit));
 
   const stdout = await runBd(args, cwd);
-  const items = parseBdJson<BeadData>(stdout);
+  const items = parseBdJson<TaskData>(stdout);
 
-  return items.map(normalizeBeadData);
+  return items.map(normalizeTaskData);
 }
 
 /**
- * Find a non-closed bead whose title matches the given string
+ * Find a non-closed task whose title matches the given string
  * (case-insensitive, trimmed). Optionally filter by label.
  * Returns the first match, or null if none found.
  */
@@ -193,19 +194,19 @@ export async function bdFindByTitle(
   title: string,
   cwd: string,
   opts?: { label?: string },
-): Promise<BeadData | null> {
+): Promise<TaskData | null> {
   const normalizedTitle = title.trim().toLowerCase();
   if (!normalizedTitle) return null;
 
-  const beads = await bdList(opts?.label ? { label: opts.label } : {}, cwd);
-  const match = beads.find(
-    (b) => b.status !== 'closed' && b.title.trim().toLowerCase() === normalizedTitle,
+  const tasks = await bdList(opts?.label ? { label: opts.label } : {}, cwd);
+  const match = tasks.find(
+    (task) => task.status !== 'closed' && task.title.trim().toLowerCase() === normalizedTitle,
   );
   return match ?? null;
 }
 
-/** Create a new bead. Returns the created bead data. */
-export async function bdCreate(params: BeadCreateParams, cwd: string): Promise<BeadData> {
+/** Create a new task item. Returns the created task data. */
+export async function bdCreate(params: TaskCreateParams, cwd: string): Promise<TaskData> {
   const args = ['create', '--json', params.title];
   if (params.description) args.push('--description', params.description);
   if (params.priority != null) args.push('--priority', String(params.priority));
@@ -214,13 +215,13 @@ export async function bdCreate(params: BeadCreateParams, cwd: string): Promise<B
   if (params.labels?.length) args.push('--labels', params.labels.join(','));
 
   const stdout = await runBd(args, cwd);
-  const items = parseBdJson<BeadData>(stdout);
+  const items = parseBdJson<TaskData>(stdout);
   if (!items[0]) throw new Error('bd create returned no data');
   return items[0];
 }
 
-/** Update a bead's fields. */
-export async function bdUpdate(id: string, params: BeadUpdateParams, cwd: string): Promise<void> {
+/** Update a task item's fields. */
+export async function bdUpdate(id: string, params: TaskUpdateParams, cwd: string): Promise<void> {
   const args = ['update', id];
   if (params.title) args.push('--title', params.title);
   if (params.description) args.push('--description', params.description);
@@ -232,14 +233,14 @@ export async function bdUpdate(id: string, params: BeadUpdateParams, cwd: string
   await runBd(args, cwd);
 }
 
-/** Close a bead. */
+/** Close a task item. */
 export async function bdClose(id: string, reason: string | undefined, cwd: string): Promise<void> {
   const args = ['close', id];
   if (reason) args.push('--reason', reason);
   await runBd(args, cwd);
 }
 
-/** Add a label to a bead. */
+/** Add a label to a task item. */
 export async function bdAddLabel(id: string, label: string, cwd: string): Promise<void> {
   await runBd(['label', 'add', id, label], cwd);
 }
