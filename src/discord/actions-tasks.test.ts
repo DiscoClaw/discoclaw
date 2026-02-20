@@ -32,8 +32,8 @@ vi.mock('../tasks/auto-tag.js', () => ({
   autoTagBead: vi.fn(async () => ['feature']),
 }));
 
-vi.mock('../tasks/bead-sync.js', () => ({
-  runBeadSync: vi.fn(async () => ({
+vi.mock('../tasks/bead-sync.js', () => {
+  const runTaskSync = vi.fn(async () => ({
     threadsCreated: 1,
     emojisUpdated: 2,
     starterMessagesUpdated: 5,
@@ -41,8 +41,9 @@ vi.mock('../tasks/bead-sync.js', () => ({
     statusesUpdated: 4,
     tagsUpdated: 0,
     warnings: 0,
-  })),
-}));
+  }));
+  return { runTaskSync, runBeadSync: runTaskSync };
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

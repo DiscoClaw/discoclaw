@@ -5,9 +5,10 @@ import {
   runSyncWithStore as runTaskSyncWithStoreCompat,
 } from '../tasks/task-sync-cli.js';
 
-vi.mock('../tasks/bead-sync.js', () => ({
-  runBeadSync: vi.fn().mockResolvedValue({ created: 0, updated: 0, closed: 0 }),
-}));
+vi.mock('../tasks/bead-sync.js', () => {
+  const runTaskSync = vi.fn().mockResolvedValue({ created: 0, updated: 0, closed: 0 });
+  return { runTaskSync, runBeadSync: runTaskSync };
+});
 
 // bead-sync-cli.ts uses an import.meta.url guard so that main() does NOT run
 // when the module is imported (only when invoked as a script). This lets us

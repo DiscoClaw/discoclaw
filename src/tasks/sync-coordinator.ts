@@ -4,7 +4,7 @@ import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { TaskStore } from './store.js';
 import type { TagMap, TaskSyncResult } from './types.js';
-import { runBeadSync } from './bead-sync.js';
+import { runTaskSync } from './bead-sync.js';
 import { reloadTagMapInPlace } from './discord-sync.js';
 import { taskThreadCache } from './thread-cache.js';
 
@@ -51,7 +51,7 @@ export class TaskSyncCoordinator {
       }
       // Snapshot tagMap for deterministic behavior within this sync run
       const tagMapSnapshot = { ...this.opts.tagMap };
-      const result = await runBeadSync({ ...this.opts, tagMap: tagMapSnapshot, statusPoster });
+      const result = await runTaskSync({ ...this.opts, tagMap: tagMapSnapshot, statusPoster });
       taskThreadCache.invalidate();
       this.opts.forumCountSync?.requestUpdate();
       if (result.closesDeferred && result.closesDeferred > 0) {

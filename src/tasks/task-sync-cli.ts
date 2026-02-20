@@ -3,7 +3,7 @@ import type { Client, Guild } from 'discord.js';
 import { Client as DiscordClient, GatewayIntentBits } from 'discord.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { loadTagMap } from './discord-sync.js';
-import { runBeadSync } from './bead-sync.js';
+import { runTaskSync } from './bead-sync.js';
 import type { TaskStore } from './store.js';
 
 function env(name: string): string {
@@ -43,7 +43,7 @@ export type RunTaskSyncWithStoreOpts = {
  * unit-tested with mocked dependencies.
  */
 export async function runTaskSyncWithStore(opts: RunTaskSyncWithStoreOpts): Promise<TaskSyncResult> {
-  return runBeadSync({
+  return runTaskSync({
     client: opts.client,
     guild: opts.guild,
     forumId: opts.forumId,

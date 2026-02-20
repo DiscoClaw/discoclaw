@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../tasks/bead-sync.js', () => ({
-  runBeadSync: vi.fn(async () => ({
+vi.mock('../tasks/bead-sync.js', () => {
+  const runTaskSync = vi.fn(async () => ({
     threadsCreated: 0,
     emojisUpdated: 0,
     starterMessagesUpdated: 0,
@@ -10,8 +10,9 @@ vi.mock('../tasks/bead-sync.js', () => ({
     tagsUpdated: 0,
     warnings: 0,
     closesDeferred: 0,
-  })),
-}));
+  }));
+  return { runTaskSync, runBeadSync: runTaskSync };
+});
 
 vi.mock('../tasks/thread-cache.js', () => ({
   taskThreadCache: { invalidate: vi.fn() },
