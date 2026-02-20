@@ -4,7 +4,7 @@ import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { TaskStore } from './store.js';
 import type { TagMap, TaskSyncResult } from './types.js';
-import { runBeadSync } from '../beads/bead-sync.js';
+import { runBeadSync } from './bead-sync.js';
 import { reloadTagMapInPlace } from './discord-sync.js';
 import { taskThreadCache } from './thread-cache.js';
 
