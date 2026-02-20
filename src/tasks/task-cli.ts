@@ -1,6 +1,6 @@
-import path from 'node:path';
 import { TaskStore } from './store.js';
 import { isTaskStatus, type TaskStatus } from './types.js';
+import { resolveTaskDataPath } from './path-defaults.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,7 +57,7 @@ async function getStore(): Promise<TaskStore> {
   const dataDir = envOpt('DISCOCLAW_DATA_DIR');
   const tasksPath =
     envOpt('DISCOCLAW_TASKS_PATH') ??
-    (dataDir ? path.join(dataDir, 'beads', 'tasks.jsonl') : undefined);
+    resolveTaskDataPath(dataDir, 'tasks.jsonl');
 
   if (!tasksPath) {
     throw new Error('DISCOCLAW_TASKS_PATH or DISCOCLAW_DATA_DIR is required');
