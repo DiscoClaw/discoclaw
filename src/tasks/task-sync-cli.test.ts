@@ -1,24 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseArgInt, runSyncWithStore } from './bead-sync-cli.js';
-import {
-  parseArgInt as parseTaskArgInt,
-  runSyncWithStore as runTaskSyncWithStoreCompat,
-} from '../tasks/task-sync-cli.js';
+import { parseArgInt, runSyncWithStore, runTaskSyncWithStore } from './task-sync-cli.js';
 
-vi.mock('../tasks/task-sync-engine.js', () => {
+vi.mock('./task-sync-engine.js', () => {
   const runTaskSync = vi.fn().mockResolvedValue({ created: 0, updated: 0, closed: 0 });
   return { runTaskSync };
 });
 
-// bead-sync-cli.ts uses an import.meta.url guard so that main() does NOT run
+// task-sync-cli.ts uses an import.meta.url guard so that main() does NOT run
 // when the module is imported (only when invoked as a script). This lets us
 // import and test the exported helpers without triggering Discord connections
 // or env-var validation.
 
 describe('parseArgInt', () => {
-  it('keeps compatibility exports aligned to canonical task sync CLI module', () => {
-    expect(parseArgInt).toBe(parseTaskArgInt);
-    expect(runSyncWithStore).toBe(runTaskSyncWithStoreCompat);
+  it('keeps runSyncWithStore as an alias for runTaskSyncWithStore', () => {
+    expect(runSyncWithStore).toBe(runTaskSyncWithStore);
   });
 
   it('returns undefined when the flag is not in args', () => {
@@ -72,8 +67,8 @@ describe('parseArgInt', () => {
 
 describe('runSyncWithStore', () => {
   it('passes store through to runTaskSync', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
-    const { TaskStore } = await import('../tasks/store.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    const { TaskStore } = await import('./store.js');
 
     const store = new TaskStore();
     const fakeClient = {} as any;
