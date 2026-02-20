@@ -467,6 +467,48 @@ describe('executeTaskAction', () => {
       expect.objectContaining({ mentionUserId: '999' }),
     );
   });
+
+  it('taskSync lazily creates and reuses syncCoordinator when missing', async () => {
+    const { runBeadSync } = await import('../beads/bead-sync.js');
+    (runBeadSync as any).mockClear();
+
+    const taskCtx = makeTaskCtx();
+    expect(taskCtx.syncCoordinator).toBeUndefined();
+
+    await executeTaskAction(
+      { type: 'taskSync' },
+      makeCtx(),
+      taskCtx,
+    );
+    const firstCoordinator = taskCtx.syncCoordinator;
+    expect(firstCoordinator).toBeDefined();
+
+    await executeTaskAction(
+      { type: 'taskSync' },
+      makeCtx(),
+      taskCtx,
+    );
+
+    expect(taskCtx.syncCoordinator).toBe(firstCoordinator);
+    expect(runBeadSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('taskUpdate schedules repair sync after thread lifecycle failure without prewired coordinator', async () => {
+    const { runBeadSync } = await import('../beads/bead-sync.js');
+    const { updateTaskThreadName } = await import('../beads/discord-sync.js');
+    (runBeadSync as any).mockClear();
+    (updateTaskThreadName as any).mockRejectedValueOnce(new Error('rename failed'));
+
+    const result = await executeTaskAction(
+      { type: 'taskUpdate', taskId: 'ws-001', status: 'in_progress' },
+      makeCtx(),
+      makeTaskCtx(),
+    );
+    expect(result.ok).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runBeadSync).toHaveBeenCalled();
+  });
 });
 
 describe('tagMapReload action', () => {
@@ -537,8 +579,8 @@ describe('tagMapReload action', () => {
   });
 });
 
-describe('taskSync fallback with tagMapPath', () => {
-  it('reloads tag map before runBeadSync in fallback path', async () => {
+describe('taskSync coordinator tagMap reload behavior', () => {
+  it('reloads tag map before runBeadSync when tagMapPath is configured', async () => {
     const { reloadTagMapInPlace } = await import('../beads/discord-sync.js');
     const { runBeadSync } = await import('../beads/bead-sync.js');
     (reloadTagMapInPlace as any).mockClear();

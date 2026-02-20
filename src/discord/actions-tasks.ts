@@ -103,9 +103,39 @@ function resolveTaskId(action: { taskId?: string }): string {
   return (action.taskId ?? '').trim();
 }
 
-function scheduleRepairSync(taskCtx: TaskContext, taskId: string): void {
-  if (!taskCtx.syncCoordinator) return;
-  taskCtx.syncCoordinator.sync().catch((err) => {
+async function getOrCreateTaskSyncCoordinator(
+  taskCtx: TaskContext,
+  ctx: ActionContext,
+): Promise<TaskSyncCoordinator> {
+  if (taskCtx.syncCoordinator) return taskCtx.syncCoordinator;
+
+  const { BeadSyncCoordinator } = await import('../beads/bead-sync-coordinator.js');
+  const syncCoordinator = new BeadSyncCoordinator({
+    client: ctx.client,
+    guild: ctx.guild,
+    forumId: taskCtx.forumId,
+    tagMap: taskCtx.tagMap,
+    tagMapPath: taskCtx.tagMapPath,
+    store: taskCtx.store,
+    log: taskCtx.log,
+    mentionUserId: taskCtx.sidebarMentionUserId,
+    forumCountSync: taskCtx.forumCountSync,
+  });
+  taskCtx.syncCoordinator = syncCoordinator;
+  return syncCoordinator;
+}
+
+async function runTaskSync(
+  taskCtx: TaskContext,
+  ctx: ActionContext,
+  statusPoster?: StatusPoster,
+): Promise<TaskSyncResult | null> {
+  const syncCoordinator = await getOrCreateTaskSyncCoordinator(taskCtx, ctx);
+  return syncCoordinator.sync(statusPoster);
+}
+
+function scheduleRepairSync(taskCtx: TaskContext, taskId: string, ctx: ActionContext): void {
+  runTaskSync(taskCtx, ctx).catch((err) => {
     taskCtx.log?.warn({ err, taskId }, 'tasks:repair sync failed');
   });
 }
@@ -210,7 +240,7 @@ export async function executeTaskAction(
       });
 
       if (needsRepairSync) {
-        scheduleRepairSync(taskCtx, task.id);
+        scheduleRepairSync(taskCtx, task.id, ctx);
       }
 
       beadThreadCache.invalidate();
@@ -265,7 +295,7 @@ export async function executeTaskAction(
       });
 
       if (needsRepairSync) {
-        scheduleRepairSync(taskCtx, taskId);
+        scheduleRepairSync(taskCtx, taskId, ctx);
       }
 
       beadThreadCache.invalidate();
@@ -302,7 +332,7 @@ export async function executeTaskAction(
       });
 
       if (needsRepairSync) {
-        scheduleRepairSync(taskCtx, taskId);
+        scheduleRepairSync(taskCtx, taskId, ctx);
       }
 
       beadThreadCache.invalidate();
@@ -350,35 +380,9 @@ export async function executeTaskAction(
 
     case 'taskSync': {
       try {
-        let result: TaskSyncResult;
-        if (taskCtx.syncCoordinator) {
-          const coordResult = await taskCtx.syncCoordinator.sync(taskCtx.statusPoster);
-          if (!coordResult) {
-            return { ok: true, summary: 'Sync already running; changes will be picked up.' };
-          }
-          result = coordResult;
-        } else {
-          if (taskCtx.tagMapPath) {
-            try {
-              await reloadTagMapInPlace(taskCtx.tagMapPath, taskCtx.tagMap);
-            } catch (err) {
-              taskCtx.log?.warn({ err, tagMapPath: taskCtx.tagMapPath }, 'tasks:tag-map reload failed; using cached map');
-            }
-          }
-          const tagMapSnapshot = { ...taskCtx.tagMap };
-          const { runBeadSync } = await import('../beads/bead-sync.js');
-          result = await runBeadSync({
-            client: ctx.client,
-            guild: ctx.guild,
-            forumId: taskCtx.forumId,
-            tagMap: tagMapSnapshot,
-            store: taskCtx.store,
-            log: taskCtx.log,
-            statusPoster: taskCtx.statusPoster,
-            mentionUserId: taskCtx.sidebarMentionUserId,
-          });
-          beadThreadCache.invalidate();
-          taskCtx.forumCountSync?.requestUpdate();
+        const result = await runTaskSync(taskCtx, ctx, taskCtx.statusPoster);
+        if (!result) {
+          return { ok: true, summary: 'Sync already running; changes will be picked up.' };
         }
 
         return {
