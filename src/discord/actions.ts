@@ -153,6 +153,7 @@ function stripMalformedActions(
   text: string,
   validTypes: Set<string>,
   actions: DiscordActionRequest[],
+  strippedUnrecognizedTypes: string[],
 ): string {
   const MARKER = '<discord-action>';
   let result = '';
@@ -190,8 +191,12 @@ function stripMalformedActions(
     // Try to parse and collect the action.
     try {
       const parsed = JSON.parse(jsonStr);
-      if (parsed && typeof parsed.type === 'string' && validTypes.has(parsed.type)) {
-        actions.push(parsed as DiscordActionRequest);
+      if (parsed && typeof parsed.type === 'string') {
+        if (validTypes.has(parsed.type)) {
+          actions.push(parsed as DiscordActionRequest);
+        } else {
+          strippedUnrecognizedTypes.push(parsed.type);
+        }
       }
     } catch {
       // Malformed JSON — strip it from display anyway.
@@ -209,16 +214,21 @@ function stripMalformedActions(
 export function parseDiscordActions(
   text: string,
   flags: ActionCategoryFlags,
-): { cleanText: string; actions: DiscordActionRequest[] } {
+): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[] } {
   const validTypes = buildValidTypes(flags);
   const actions: DiscordActionRequest[] = [];
+  const strippedUnrecognizedTypes: string[] = [];
 
   // First pass: well-formed <discord-action>...</discord-action> blocks.
   let cleaned = text.replace(ACTION_RE, (_match, json: string) => {
     try {
       const parsed = JSON.parse(json.trim());
-      if (parsed && typeof parsed.type === 'string' && validTypes.has(parsed.type)) {
-        actions.push(parsed as DiscordActionRequest);
+      if (parsed && typeof parsed.type === 'string') {
+        if (validTypes.has(parsed.type)) {
+          actions.push(parsed as DiscordActionRequest);
+        } else {
+          strippedUnrecognizedTypes.push(parsed.type);
+        }
       }
     } catch {
       // Malformed JSON — skip silently.
@@ -227,11 +237,11 @@ export function parseDiscordActions(
   });
 
   // Second pass: malformed blocks (wrong closing tag or no closing tag).
-  cleaned = stripMalformedActions(cleaned, validTypes, actions);
+  cleaned = stripMalformedActions(cleaned, validTypes, actions, strippedUnrecognizedTypes);
 
   const cleanText = cleaned.replace(/\n{3,}/g, '\n\n').trim();
 
-  return { cleanText, actions };
+  return { cleanText, actions, strippedUnrecognizedTypes };
 }
 
 // ---------------------------------------------------------------------------
