@@ -1,6 +1,7 @@
 import type { Client, AnyThreadChannel } from 'discord.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { TagMap } from './types.js';
+import type { TaskStore } from '../tasks/store.js';
 import { findBeadByThreadId } from './bead-thread-cache.js';
 import { buildAppliedTagsWithStatus, buildThreadName } from './discord-sync.js';
 
@@ -8,7 +9,7 @@ export type BeadsForumGuardOptions = {
   client: Client;
   forumId: string;
   log?: LoggerLike;
-  beadsCwd?: string;
+  store?: TaskStore;
   tagMap?: TagMap;
 };
 
@@ -36,13 +37,13 @@ async function rejectManualThread(
 
 async function reArchiveBeadThread(
   thread: AnyThreadChannel,
-  beadsCwd: string,
+  store: TaskStore,
   tagMap: TagMap,
   log?: LoggerLike,
 ): Promise<boolean> {
   let bead;
   try {
-    bead = await findBeadByThreadId(thread.id, beadsCwd);
+    bead = findBeadByThreadId(thread.id, store);
   } catch {
     return false;
   }
@@ -69,14 +70,14 @@ async function reArchiveBeadThread(
 }
 
 export function initBeadsForumGuard(opts: BeadsForumGuardOptions): void {
-  const { client, forumId, log, beadsCwd, tagMap } = opts;
+  const { client, forumId, log, store, tagMap } = opts;
 
   client.on('threadCreate', async (thread: AnyThreadChannel) => {
     try {
       if (thread.parentId !== forumId) return;
       if (isBotOwned(thread)) return;
-      if (beadsCwd && tagMap) {
-        if (await reArchiveBeadThread(thread, beadsCwd, tagMap, log)) return;
+      if (store && tagMap) {
+        if (await reArchiveBeadThread(thread, store, tagMap, log)) return;
       }
       await rejectManualThread(thread, log);
     } catch (err) {
@@ -90,8 +91,8 @@ export function initBeadsForumGuard(opts: BeadsForumGuardOptions): void {
       // Only act on unarchive transitions.
       if (newThread.archived) return;
       if (isBotOwned(newThread)) return;
-      if (beadsCwd && tagMap) {
-        if (await reArchiveBeadThread(newThread, beadsCwd, tagMap, log)) return;
+      if (store && tagMap) {
+        if (await reArchiveBeadThread(newThread, store, tagMap, log)) return;
       }
       await rejectManualThread(newThread, log);
     } catch (err) {

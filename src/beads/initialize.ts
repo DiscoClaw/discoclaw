@@ -116,7 +116,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
       client: opts.client,
       forumId: opts.beadCtx.forumId,
       log: opts.log,
-      beadsCwd: opts.beadCtx.beadsCwd,
+      store: opts.beadCtx.store,
       tagMap: opts.beadCtx.tagMap,
     });
   }

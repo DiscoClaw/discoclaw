@@ -968,7 +968,7 @@ if (beadCtx) {
     }
 
     // Install forum guard before any async operations that touch the forum.
-    initBeadsForumGuard({ client, forumId: beadCtx.forumId, log, beadsCwd, tagMap: beadCtx.tagMap });
+    initBeadsForumGuard({ client, forumId: beadCtx.forumId, log, store: beadCtx.store, tagMap: beadCtx.tagMap });
 
     // Tag bootstrap + reload BEFORE wireBeadsSync so the first sync has the correct tag map.
     if (beadForum) {

@@ -1,5 +1,4 @@
 import type { BeadData } from './types.js';
-import { bdList } from './bd-cli.js';
 import { getThreadIdFromBead } from './discord-sync.js';
 import type { TaskStore } from '../tasks/store.js';
 
@@ -8,8 +7,8 @@ import type { TaskStore } from '../tasks/store.js';
 // ---------------------------------------------------------------------------
 
 /** Find a bead by its Discord thread ID (matches via external_ref). */
-export async function findBeadByThreadId(threadId: string, cwd: string): Promise<BeadData | null> {
-  const beads = await bdList({ status: 'all' }, cwd);
+export function findBeadByThreadId(threadId: string, store: TaskStore): BeadData | null {
+  const beads = store.list({ status: 'all' });
   return beads.find((b) => getThreadIdFromBead(b) === threadId) ?? null;
 }
 

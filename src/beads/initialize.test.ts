@@ -167,7 +167,7 @@ describe('wireBeadsSync', () => {
       client,
       forumId: 'forum-123',
       log,
-      beadsCwd: '/tmp/beads',
+      store,
       tagMap: { bug: '111' },
     });
     expect(BeadSyncCoordinator).toHaveBeenCalledWith(
