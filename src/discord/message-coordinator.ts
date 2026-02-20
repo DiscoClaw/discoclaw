@@ -165,7 +165,7 @@ export type BotParams = {
   shortTermMaxAgeMs: number;
   shortTermInjectMaxChars: number;
   statusChannel?: string;
-  bootstrapEnsureBeadsForum?: boolean;
+  bootstrapEnsureTasksForum?: boolean;
   toolAwareStreaming?: boolean;
   streamStallWarningMs: number;
   actionFollowupDepth: number;
@@ -182,7 +182,7 @@ export type BotParams = {
   botAvatar?: string;
   appendSystemPrompt?: string;
   existingCronsId?: string;
-  existingBeadsId?: string;
+  existingTasksId?: string;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -389,7 +389,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         guild: params.discordActionsGuild,
         moderation: params.discordActionsModeration,
         polls: params.discordActionsPolls,
-        tasks: params.discordActionsTasks,
+        tasks: params.discordActionsTasks ?? false,
         crons: params.discordActionsCrons ?? false,
         botProfile: params.discordActionsBotProfile ?? false,
         forge: params.discordActionsForge ?? false,

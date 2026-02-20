@@ -246,11 +246,7 @@ for (const check of checkRequiredForums(process.env)) {
 
 // 11. Task store migration state
 {
-  const tasksCwd = (
-    process.env.DISCOCLAW_TASKS_CWD
-    ?? process.env.DISCOCLAW_BEADS_CWD
-    ?? ''
-  ).trim() || process.cwd();
+  const tasksCwd = (process.env.DISCOCLAW_TASKS_CWD ?? '').trim() || process.cwd();
   const dataDir = (process.env.DISCOCLAW_DATA_DIR ?? '').trim();
   const beadsDataDir = dataDir
     ? path.join(dataDir, 'beads')

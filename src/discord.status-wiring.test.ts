@@ -80,7 +80,7 @@ function mockStatus() {
     runtimeError: vi.fn(async () => {}),
     handlerError: vi.fn(async () => {}),
     actionFailed: vi.fn(async () => {}),
-    beadSyncComplete: vi.fn(async () => {}),
+    taskSyncComplete: vi.fn(async () => {}),
   };
 }
 

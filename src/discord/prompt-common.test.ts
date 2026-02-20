@@ -268,9 +268,9 @@ const mockedCacheGet = vi.mocked(beadThreadCache.get);
 
 const SNOWFLAKE_FORUM_ID = '12345678901234567890';
 
-function makeBeadCtx(overrides: Partial<{ beadsCwd: string; forumId: string }> = {}) {
+function makeBeadCtx(overrides: Partial<{ tasksCwd: string; forumId: string }> = {}) {
   return {
-    beadsCwd: '/tmp/beads',
+    tasksCwd: '/tmp/beads',
     forumId: SNOWFLAKE_FORUM_ID,
     tagMap: {},
     store: {} as any,

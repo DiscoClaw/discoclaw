@@ -85,10 +85,10 @@ describe('createStatusPoster', () => {
     expect(msg).toContain('Missing perms');
   });
 
-  it('beadSyncComplete() sends plain text with non-zero fields only', async () => {
+  it('taskSyncComplete() sends plain text with non-zero fields only', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);
-    await poster.beadSyncComplete({
+    await poster.taskSyncComplete({
       threadsCreated: 1, emojisUpdated: 0, starterMessagesUpdated: 2, threadsArchived: 3, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
     });
     expect(ch.send).toHaveBeenCalledOnce();
@@ -102,10 +102,10 @@ describe('createStatusPoster', () => {
     expect(msg).not.toContain('Warnings');
   });
 
-  it('beadSyncComplete() includes warnings when > 0', async () => {
+  it('taskSyncComplete() includes warnings when > 0', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);
-    await poster.beadSyncComplete({
+    await poster.taskSyncComplete({
       threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 2,
     });
     expect(ch.send).toHaveBeenCalledOnce();
@@ -114,10 +114,10 @@ describe('createStatusPoster', () => {
     expect(msg).toContain('Warnings: 2');
   });
 
-  it('beadSyncComplete() includes all non-zero counters and warnings together', async () => {
+  it('taskSyncComplete() includes all non-zero counters and warnings together', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);
-    await poster.beadSyncComplete({
+    await poster.taskSyncComplete({
       threadsCreated: 2, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 1, statusesUpdated: 0, tagsUpdated: 0, warnings: 1,
     });
     expect(ch.send).toHaveBeenCalledOnce();
@@ -127,10 +127,10 @@ describe('createStatusPoster', () => {
     expect(msg).toContain('Warnings: 1');
   });
 
-  it('beadSyncComplete() is silent when all counters and warnings are zero', async () => {
+  it('taskSyncComplete() is silent when all counters and warnings are zero', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);
-    await poster.beadSyncComplete({
+    await poster.taskSyncComplete({
       threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
     });
     expect(ch.send).not.toHaveBeenCalled();

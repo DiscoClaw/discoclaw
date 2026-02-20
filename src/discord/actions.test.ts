@@ -181,9 +181,9 @@ describe('parseDiscordActions', () => {
     expect(strippedUnrecognizedTypes).toEqual(['typeA', 'typeB']);
   });
 
-  it('accepts task action types when only legacy beads flag is enabled', () => {
+  it('accepts task action types when tasks flag is enabled', () => {
     const input = '<discord-action>{"type":"taskList"}</discord-action>';
-    const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, beads: true });
+    const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, tasks: true });
     expect(actions).toEqual([{ type: 'taskList' }]);
   });
 });
@@ -335,7 +335,7 @@ describe('executeDiscordActions', () => {
     expect(results[1].ok).toBe(true);
   });
 
-  it('uses legacy beadCtx when taskCtx is absent', async () => {
+  it('executes task actions when taskCtx is provided', async () => {
     const store = new TaskStore({ prefix: 'ws' });
     store.create({ title: 'test task', priority: 2 });
     const results = await executeDiscordActions(
@@ -343,7 +343,7 @@ describe('executeDiscordActions', () => {
       makeCtx(makeMockGuild([])),
       undefined,
       {
-        beadCtx: {
+        taskCtx: {
           tasksCwd: '/tmp',
           forumId: 'forum-1',
           tagMap: {},

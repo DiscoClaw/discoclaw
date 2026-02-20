@@ -18,7 +18,7 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   ];
 
   // Required
-  const tasksForum = vals.DISCOCLAW_TASKS_FORUM ?? vals.DISCOCLAW_BEADS_FORUM ?? '';
+  const tasksForum = vals.DISCOCLAW_TASKS_FORUM ?? '';
   lines.push('# REQUIRED');
   lines.push(`DISCORD_TOKEN=${vals.DISCORD_TOKEN ?? ''}`);
   lines.push(`DISCORD_ALLOW_USER_IDS=${vals.DISCORD_ALLOW_USER_IDS ?? ''}`);

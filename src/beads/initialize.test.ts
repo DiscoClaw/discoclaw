@@ -35,12 +35,12 @@ function fakeLog() {
 function baseOpts(overrides: Partial<InitializeBeadsOpts> = {}): InitializeBeadsOpts {
   return {
     enabled: true,
-    beadsCwd: '/tmp/beads',
-    beadsForum: 'forum-123',
-    beadsTagMapPath: '/tmp/tag-map.json',
-    beadsSidebar: false,
-    beadsAutoTag: true,
-    beadsAutoTagModel: 'haiku',
+    tasksCwd: '/tmp/beads',
+    tasksForum: 'forum-123',
+    tasksTagMapPath: '/tmp/tag-map.json',
+    tasksSidebar: false,
+    tasksAutoTag: true,
+    tasksAutoTagModel: 'haiku',
     runtime: {} as any,
     log: fakeLog(),
     ...overrides,
@@ -58,8 +58,8 @@ describe('initializeBeadsContext', () => {
   it('returns undefined and warns when no forum resolved', async () => {
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
-      beadsForum: '',
-      systemBeadsForumId: undefined,
+      tasksForum: '',
+      systemTasksForumId: undefined,
       log,
     }));
     expect(result.taskCtx).toBeUndefined();
@@ -68,7 +68,7 @@ describe('initializeBeadsContext', () => {
     );
   });
 
-  it('returns BeadContext when all prerequisites met', async () => {
+  it('returns TaskContext when all prerequisites met', async () => {
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({ log }));
     expect(result.taskCtx).toBeDefined();
@@ -76,10 +76,10 @@ describe('initializeBeadsContext', () => {
     expect(result.taskCtx!.autoTag).toBe(true);
   });
 
-  it('resolves forum from systemBeadsForumId when beadsForum is empty', async () => {
+  it('resolves forum from systemTasksForumId when tasksForum is empty', async () => {
     const result = await initializeBeadsContext(baseOpts({
-      beadsForum: '',
-      systemBeadsForumId: 'system-forum-456',
+      tasksForum: '',
+      systemTasksForumId: 'system-forum-456',
     }));
     expect(result.taskCtx).toBeDefined();
     expect(result.taskCtx!.forumId).toBe('system-forum-456');
@@ -88,8 +88,8 @@ describe('initializeBeadsContext', () => {
   it('sets sidebarMentionUserId when sidebar enabled with mention user', async () => {
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
-      beadsSidebar: true,
-      beadsMentionUser: 'user-789',
+      tasksSidebar: true,
+      tasksMentionUser: 'user-789',
       log,
     }));
     expect(result.taskCtx).toBeDefined();
@@ -100,8 +100,8 @@ describe('initializeBeadsContext', () => {
   it('warns when sidebar enabled but mention user not set', async () => {
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
-      beadsSidebar: true,
-      beadsMentionUser: undefined,
+      tasksSidebar: true,
+      tasksMentionUser: undefined,
       log,
     }));
     expect(result.taskCtx).toBeDefined();
@@ -114,8 +114,8 @@ describe('initializeBeadsContext', () => {
   it('does not set sidebarMentionUserId when sidebar disabled', async () => {
     const log = fakeLog();
     const result = await initializeBeadsContext(baseOpts({
-      beadsSidebar: false,
-      beadsMentionUser: 'user-789',
+      tasksSidebar: false,
+      tasksMentionUser: 'user-789',
       log,
     }));
     expect(result.taskCtx).toBeDefined();
@@ -123,9 +123,9 @@ describe('initializeBeadsContext', () => {
     expect(log.warn).not.toHaveBeenCalled();
   });
 
-  it('propagates tagMapPath to BeadContext', async () => {
+  it('propagates tagMapPath to TaskContext', async () => {
     const result = await initializeBeadsContext(baseOpts({
-      beadsTagMapPath: '/my/custom/tag-map.json',
+      tasksTagMapPath: '/my/custom/tag-map.json',
     }));
     expect(result.taskCtx).toBeDefined();
     expect(result.taskCtx!.tagMapPath).toBe('/my/custom/tag-map.json');
@@ -144,7 +144,7 @@ describe('wireBeadsSync', () => {
     const log = fakeLog();
     const store = new TaskStore();
     const taskCtx = {
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       store,
@@ -193,7 +193,7 @@ describe('wireBeadsSync', () => {
     const log = fakeLog();
     const store = new TaskStore({ prefix: 'test' });
     const taskCtx = {
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       tagMapPath: '/tmp/tag-map.json',
@@ -229,7 +229,7 @@ describe('wireBeadsSync', () => {
     const log = fakeLog();
     const store = new TaskStore({ prefix: 'test' });
     const taskCtx = {
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       tagMapPath: '/tmp/tag-map.json',
@@ -244,7 +244,7 @@ describe('wireBeadsSync', () => {
       client: {} as any,
       guild: {} as any,
       guildId: 'guild-1',
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       log,
     });
 
@@ -263,7 +263,7 @@ describe('wireBeadsSync', () => {
     const log = fakeLog();
     const store = new TaskStore();
     const taskCtx = {
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       tagMapPath: '/tmp/tag-map.json',
@@ -278,7 +278,7 @@ describe('wireBeadsSync', () => {
       client: {} as any,
       guild: {} as any,
       guildId: 'guild-1',
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       log,
       skipForumGuard: true,
     });
@@ -293,7 +293,7 @@ describe('wireBeadsSync', () => {
     const tagMap = { bug: '111' };
     const store = new TaskStore();
     const taskCtx = {
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       forumId: 'forum-123',
       tagMap,
       tagMapPath: '/config/tag-map.json',
@@ -306,7 +306,7 @@ describe('wireBeadsSync', () => {
       client: {} as any,
       guild: {} as any,
       guildId: 'guild-1',
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       log,
     });
 

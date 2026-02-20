@@ -157,13 +157,13 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
     }
   });
 
-  // Ensure "System" category scaffold (status/crons/beads) in a single target guild.
+  // Ensure "System" category scaffold (status/crons/tasks) in a single target guild.
   let system: SystemScaffold | null = null;
   try {
     const guild = selectBootstrapGuild(client, params.guildId, params.log);
     if (guild) {
       system = await ensureSystemScaffold(
-        { guild, ensureBeads: Boolean(params.bootstrapEnsureBeadsForum), botDisplayName: params.botDisplayName, existingCronsId: params.existingCronsId, existingBeadsId: params.existingBeadsId },
+        { guild, ensureTasks: Boolean(params.bootstrapEnsureTasksForum), botDisplayName: params.botDisplayName, existingCronsId: params.existingCronsId, existingTasksId: params.existingTasksId },
         params.log,
       );
     }

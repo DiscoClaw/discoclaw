@@ -726,7 +726,7 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 
 | Variable | Default | Parser | Description |
 |----------|---------|--------|-------------|
-| `DISCOCLAW_TASKS_SYNC_SKIP_PHASE5` | `false` | `parseBoolean` | Disable Phase 5 (thread reconciliation) of the task sync cycle. When `true`, the sync will not archive orphaned forum threads or reconcile thread state against tasks. Recommended for shared-forum deployments where multiple bot instances or manual Discord activity may create threads that should not be auto-archived. Passed through to sync options in `src/beads/bead-sync.ts`. Legacy `BEAD_SYNC_SKIP_PHASE5` is still accepted with deprecation warnings. |
+| `DISCOCLAW_TASKS_SYNC_SKIP_PHASE5` | `false` | `parseBoolean` | Disable Phase 5 (thread reconciliation) of the task sync cycle. When `true`, the sync will not archive orphaned forum threads or reconcile thread state against tasks. Recommended for shared-forum deployments where multiple bot instances or manual Discord activity may create threads that should not be auto-archived. Passed through to sync options in `src/beads/bead-sync.ts`. |
 
 ---
 

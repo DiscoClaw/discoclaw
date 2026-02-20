@@ -49,5 +49,3 @@ Primary names:
 - `DISCOCLAW_TASKS_AUTO_TAG_MODEL`
 - `DISCOCLAW_TASKS_SYNC_SKIP_PHASE5`
 - `DISCOCLAW_TASKS_PREFIX`
-
-Legacy compatibility names (`DISCOCLAW_BEADS_*`, `BEAD_SYNC_SKIP_PHASE5`) are still accepted but deprecated.

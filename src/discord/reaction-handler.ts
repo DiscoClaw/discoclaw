@@ -338,7 +338,7 @@ function createReactionHandler(
             guild: params.discordActionsGuild,
             moderation: params.discordActionsModeration,
             polls: params.discordActionsPolls,
-            tasks: params.discordActionsTasks,
+            tasks: params.discordActionsTasks ?? false,
             crons: params.discordActionsCrons ?? false,
             botProfile: params.discordActionsBotProfile ?? false,
             forge: params.discordActionsForge ?? false,

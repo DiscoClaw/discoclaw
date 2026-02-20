@@ -11,7 +11,7 @@ function env(overrides: Record<string, string | undefined> = {}): NodeJS.Process
     DISCORD_ALLOW_USER_IDS: '123',
     // Provide valid snowflakes for forums that are enabled by default.
     DISCOCLAW_CRON_FORUM: '1000000000000000001',
-    DISCOCLAW_BEADS_FORUM: '1000000000000000002',
+    DISCOCLAW_TASKS_FORUM: '1000000000000000002',
     ...overrides,
   };
 }
@@ -26,7 +26,7 @@ describe('parseConfig', () => {
     expect(config.summaryModel).toBe('fast');
     expect(config.cronModel).toBe('fast');
     expect(config.cronAutoTagModel).toBe('fast');
-    expect(config.beadsAutoTagModel).toBe('fast');
+    expect(config.tasksAutoTagModel).toBe('fast');
     expect(config.outputFormat).toBe('text');
     expect(warnings.some((w) => w.includes('category flags are ignored'))).toBe(false);
     expect(infos.some((i) => i.includes('category flags are ignored'))).toBe(false);
@@ -278,21 +278,21 @@ describe('parseConfig', () => {
     expect(config.shortTermInjectMaxChars).toBe(1000);
   });
 
-  // --- Beads enabled ---
-  it('defaults beadsEnabled to true', () => {
+  // --- Tasks enabled ---
+  it('defaults tasksEnabled to true', () => {
     const { config } = parseConfig(env());
-    expect(config.beadsEnabled).toBe(true);
+    expect(config.tasksEnabled).toBe(true);
   });
 
-  // --- Beads sidebar ---
-  it('defaults beadsSidebar to false', () => {
+  // --- Tasks sidebar ---
+  it('defaults tasksSidebar to false', () => {
     const { config } = parseConfig(env());
-    expect(config.beadsSidebar).toBe(false);
+    expect(config.tasksSidebar).toBe(false);
   });
 
-  it('parses DISCOCLAW_BEADS_SIDEBAR=1 as true', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_BEADS_SIDEBAR: '1' }));
-    expect(config.beadsSidebar).toBe(true);
+  it('parses DISCOCLAW_TASKS_SIDEBAR=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_TASKS_SIDEBAR: '1' }));
+    expect(config.tasksSidebar).toBe(true);
   });
 
   // --- Fallback model ---
@@ -441,30 +441,30 @@ describe('parseConfig', () => {
     expect(config.cronEnabled).toBe(false);
   });
 
-  it('allows missing beadsForum when beadsEnabled (bootstrap will auto-create)', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '1', DISCOCLAW_BEADS_FORUM: undefined }));
-    expect(config.beadsEnabled).toBe(true);
-    expect(config.beadsForum).toBeUndefined();
+  it('allows missing tasksForum when tasksEnabled (bootstrap will auto-create)', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_TASKS_ENABLED: '1', DISCOCLAW_TASKS_FORUM: undefined }));
+    expect(config.tasksEnabled).toBe(true);
+    expect(config.tasksForum).toBeUndefined();
   });
 
-  it('warns and clears beadsForum when not a snowflake', () => {
-    const { config, warnings } = parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '1', DISCOCLAW_BEADS_FORUM: 'beads' }));
-    expect(config.beadsForum).toBeUndefined();
-    expect(warnings.some(w => w.includes('DISCOCLAW_BEADS_FORUM is not a valid snowflake'))).toBe(true);
+  it('warns and clears tasksForum when not a snowflake', () => {
+    const { config, warnings } = parseConfig(env({ DISCOCLAW_TASKS_ENABLED: '1', DISCOCLAW_TASKS_FORUM: 'tasks' }));
+    expect(config.tasksForum).toBeUndefined();
+    expect(warnings.some(w => w.includes('DISCOCLAW_TASKS_FORUM is not a valid snowflake'))).toBe(true);
   });
 
-  it('accepts valid snowflake for beadsForum when beadsEnabled=true', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '1', DISCOCLAW_BEADS_FORUM: '1000000000000000002' }));
-    expect(config.beadsForum).toBe('1000000000000000002');
-    expect(config.beadsEnabled).toBe(true);
+  it('accepts valid snowflake for tasksForum when tasksEnabled=true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_TASKS_ENABLED: '1', DISCOCLAW_TASKS_FORUM: '1000000000000000002' }));
+    expect(config.tasksForum).toBe('1000000000000000002');
+    expect(config.tasksEnabled).toBe(true);
   });
 
-  it('does not validate beadsForum when beadsEnabled=false', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_BEADS_ENABLED: '0' }));
-    expect(config.beadsEnabled).toBe(false);
+  it('does not validate tasksForum when tasksEnabled=false', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_TASKS_ENABLED: '0' }));
+    expect(config.tasksEnabled).toBe(false);
   });
 
-  it('parses DISCOCLAW_TASKS_* vars and mirrors legacy beads fields', () => {
+  it('parses DISCOCLAW_TASKS_* vars', () => {
     const { config } = parseConfig(env({
       DISCOCLAW_TASKS_ENABLED: '0',
       DISCOCLAW_TASKS_FORUM: '1000000000000000009',
@@ -476,7 +476,6 @@ describe('parseConfig', () => {
       DISCOCLAW_TASKS_AUTO_TAG_MODEL: 'fast',
       DISCOCLAW_TASKS_PREFIX: 'dev',
       DISCOCLAW_TASKS_SYNC_SKIP_PHASE5: '1',
-      DISCOCLAW_BEADS_FORUM: undefined,
     }));
 
     expect(config.tasksEnabled).toBe(false);
@@ -489,27 +488,6 @@ describe('parseConfig', () => {
     expect(config.tasksAutoTagModel).toBe('fast');
     expect(config.tasksPrefix).toBe('dev');
     expect(config.tasksSyncSkipPhase5).toBe(true);
-    // Legacy mirrors
-    expect(config.beadsEnabled).toBe(config.tasksEnabled);
-    expect(config.beadsForum).toBe(config.tasksForum);
-    expect(config.beadsTaskPrefix).toBe(config.tasksPrefix);
-  });
-
-  it('prefers DISCOCLAW_TASKS_FORUM over DISCOCLAW_BEADS_FORUM when both are set', () => {
-    const { config } = parseConfig(env({
-      DISCOCLAW_TASKS_FORUM: '1000000000000000008',
-      DISCOCLAW_BEADS_FORUM: '1000000000000000007',
-    }));
-    expect(config.tasksForum).toBe('1000000000000000008');
-    expect(config.beadsForum).toBe('1000000000000000008');
-  });
-
-  it('emits deprecation warning when legacy DISCOCLAW_BEADS_ENABLED is used', () => {
-    const { warnings } = parseConfig(env({
-      DISCOCLAW_TASKS_ENABLED: undefined,
-      DISCOCLAW_BEADS_ENABLED: '0',
-    }));
-    expect(warnings.some((w) => w.includes('DISCOCLAW_BEADS_ENABLED is deprecated; use DISCOCLAW_TASKS_ENABLED'))).toBe(true);
   });
 
   // --- Verbose CLI flag ---
