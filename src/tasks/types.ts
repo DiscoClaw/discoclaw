@@ -88,20 +88,3 @@ export const STATUS_EMOJI: Record<string, string> = {
   blocked: '\u26A0\uFE0F',  // ⚠️
   closed: '\u2611\uFE0F',   // ☑️
 };
-
-// ---------------------------------------------------------------------------
-// Legacy compatibility aliases (remove in Phase 5 hard-cut).
-// Mirrors what src/beads/types.ts re-exports so consumers can be rewired to
-// src/tasks/types.ts without a symbol rename.
-// ---------------------------------------------------------------------------
-
-export type BeadStatus = TaskStatus;
-export type BeadData = TaskData;
-export type BeadSyncResult = TaskSyncResult;
-export type BeadCreateParams = TaskCreateParams;
-export type BeadUpdateParams = TaskUpdateParams;
-export type BeadCloseParams = TaskCloseParams;
-export type BeadListParams = TaskListParams;
-
-export const BEAD_STATUSES = TASK_STATUSES;
-export const isBeadStatus = isTaskStatus;
