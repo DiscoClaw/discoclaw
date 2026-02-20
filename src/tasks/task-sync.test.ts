@@ -7,8 +7,8 @@ import {
 } from './task-sync.js';
 import { withDirectTaskLifecycle } from './task-lifecycle.js';
 
-vi.mock('../beads/bead-sync-coordinator.js', () => ({
-  BeadSyncCoordinator: vi.fn().mockImplementation(() => ({
+vi.mock('./sync-coordinator.js', () => ({
+  TaskSyncCoordinator: vi.fn().mockImplementation(() => ({
     sync: vi.fn(async () => ({
       threadsCreated: 0,
       emojisUpdated: 0,
@@ -39,15 +39,15 @@ function makeRunCtx() {
 
 describe('task-sync coordinator helpers', () => {
   it('creates and reuses coordinator on task context', async () => {
-    const { BeadSyncCoordinator } = await import('../beads/bead-sync-coordinator.js');
+    const { TaskSyncCoordinator } = await import('./sync-coordinator.js');
     const taskCtx = makeTaskCtx();
 
     const first = await ensureTaskSyncCoordinator(taskCtx as any, makeRunCtx(), { skipPhase5: true });
     const second = await ensureTaskSyncCoordinator(taskCtx as any, makeRunCtx());
 
     expect(first).toBe(second);
-    expect(BeadSyncCoordinator).toHaveBeenCalledOnce();
-    expect(BeadSyncCoordinator).toHaveBeenCalledWith(
+    expect(TaskSyncCoordinator).toHaveBeenCalledOnce();
+    expect(TaskSyncCoordinator).toHaveBeenCalledWith(
       expect.objectContaining({
         client: expect.anything(),
         guild: expect.anything(),

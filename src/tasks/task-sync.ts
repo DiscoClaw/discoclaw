@@ -4,6 +4,7 @@ import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { TaskStore } from './store.js';
 import type { TaskSyncResult, TagMap } from './types.js';
+import { TaskSyncCoordinator } from './sync-coordinator.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
 import { isDirectTaskLifecycleActive } from './task-lifecycle.js';
 
@@ -34,8 +35,7 @@ export async function ensureTaskSyncCoordinator(
 ): Promise<TaskSyncCoordinatorLike> {
   if (taskCtx.syncCoordinator) return taskCtx.syncCoordinator;
 
-  const { BeadSyncCoordinator } = await import('../beads/bead-sync-coordinator.js');
-  const syncCoordinator = new BeadSyncCoordinator({
+  const syncCoordinator = new TaskSyncCoordinator({
     client: runCtx.client,
     guild: runCtx.guild,
     forumId: taskCtx.forumId,
@@ -68,7 +68,7 @@ export function wireTaskStoreSyncTriggers(
 ): { stop(): void } {
   const triggerSync = (eventName: string, taskId?: string) => {
     syncCoordinator.sync().catch((err) => {
-      log.warn({ err, eventName, taskId }, 'beads:store-event sync failed');
+      log.warn({ err, eventName, taskId }, 'tasks:store-event sync failed');
     });
   };
 

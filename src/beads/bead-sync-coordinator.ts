@@ -61,7 +61,7 @@ export class BeadSyncCoordinator {
       beadThreadCache.invalidate();
       this.opts.forumCountSync?.requestUpdate();
       if (result.closesDeferred && result.closesDeferred > 0) {
-        this.opts.log?.info({ closesDeferred: result.closesDeferred }, 'beads:coordinator scheduling retry for deferred closes');
+        this.opts.log?.info({ closesDeferred: result.closesDeferred }, 'tasks:coordinator scheduling retry for deferred closes');
         setTimeout(() => {
           this.sync().catch((err) => {
             this.opts.log?.warn({ err }, 'tasks:coordinator deferred-close retry failed');
