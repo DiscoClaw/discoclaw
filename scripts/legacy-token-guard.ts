@@ -72,6 +72,21 @@ export const DEFAULT_LEGACY_GUARD_RULES: GuardRule[] = [
   },
 ];
 
+DEFAULT_LEGACY_GUARD_RULES.push(
+  {
+    id: 'legacy-plan-header-bead',
+    pattern: /\*\*Bead:\*\*/g,
+    message: 'Use **Task:** plan headers; keep temporary legacy parsing isolated to plan-commands compatibility path.',
+    allowIn: ['src/discord/plan-commands.ts'],
+  },
+  {
+    id: 'legacy-plan-template-bead-id',
+    pattern: /\{\{BEAD_ID\}\}/g,
+    message: 'Use {{TASK_ID}} in templates; keep temporary BEAD_ID placeholder support isolated to plan-commands compatibility path.',
+    allowIn: ['src/discord/plan-commands.ts'],
+  },
+);
+
 function normalizeRelPath(p: string): string {
   return p.split(path.sep).join('/');
 }
