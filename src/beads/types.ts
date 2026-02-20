@@ -4,7 +4,18 @@
 // consumers compile unchanged.
 // ---------------------------------------------------------------------------
 
+export { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 export { TASK_STATUSES as BEAD_STATUSES, isTaskStatus as isBeadStatus } from '../tasks/types.js';
+
+export type {
+  TaskData,
+  TaskStatus,
+  TaskSyncResult,
+  TaskCreateParams,
+  TaskUpdateParams,
+  TaskCloseParams,
+  TaskListParams,
+} from '../tasks/types.js';
 
 export type {
   TaskStatus as BeadStatus,
