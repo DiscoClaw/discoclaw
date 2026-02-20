@@ -1115,13 +1115,13 @@ describe('bead resolution dispatch wiring', () => {
     expect(mockedCacheGet).toHaveBeenCalledWith('bead-thread-plan', expect.any(Object));
     expect(createSpy).not.toHaveBeenCalled();
 
-    // Verify the plan file uses the existing bead ID
+    // Verify the plan file uses the existing task ID.
     const plansDir = path.join(workspaceCwd, 'plans');
     const files = await fs.readdir(plansDir);
     const planFile = files.find((f) => f.endsWith('.md'));
     expect(planFile).toBeTruthy();
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-    expect(content).toContain('**Bead:** existing-bead-42');
+    expect(content).toContain('**Task:** existing-bead-42');
   });
 
   it('!plan create in non-bead-forum thread does NOT resolve — calls store.create', async () => {
@@ -1489,13 +1489,13 @@ describe('bead resolution dispatch wiring', () => {
 
       expect(createSpy).not.toHaveBeenCalled();
 
-      // Verify the plan file uses the deduped bead ID
+      // Verify the plan file uses the deduped task ID.
       const plansDir = path.join(workspaceCwd, 'plans');
       const files = await fs.readdir(plansDir);
       const planFile = files.find((f) => f.endsWith('.md'));
       expect(planFile).toBeTruthy();
       const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-      expect(content).toContain(`**Bead:** ${existingBead.id}`);
+      expect(content).toContain(`**Task:** ${existingBead.id}`);
     });
 
     it('!plan create dedup is case-insensitive and trims whitespace', async () => {
@@ -1521,7 +1521,7 @@ describe('bead resolution dispatch wiring', () => {
       const files = await fs.readdir(plansDir);
       const planFile = files.find((f) => f.endsWith('.md'));
       const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-      expect(content).toContain(`**Bead:** ${existingBead.id}`);
+      expect(content).toContain(`**Task:** ${existingBead.id}`);
     });
 
     it('!plan create does not reuse closed beads with matching title', async () => {
@@ -1589,7 +1589,7 @@ describe('bead resolution dispatch wiring', () => {
       const files = await fs.readdir(plansDir);
       const planFile = files.find((f) => f.endsWith('.md'));
       const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-      expect(content).toContain(`**Bead:** ${inProgressBead.id}`);
+      expect(content).toContain(`**Task:** ${inProgressBead.id}`);
     });
   });
 });

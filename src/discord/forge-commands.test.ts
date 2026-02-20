@@ -1137,7 +1137,7 @@ describe('ForgeOrchestrator', () => {
     const planFile = entries.find((e) => e.startsWith('plan-001') && e.endsWith('.md') && !e.includes('template'));
     expect(planFile).toBeTruthy();
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-    expect(content).toContain('**Bead:** existing-task-42');
+    expect(content).toMatch(/\*\*(Task|Bead):\*\* existing-task-42/);
   });
 });
 
