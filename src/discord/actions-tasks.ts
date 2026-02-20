@@ -22,9 +22,9 @@ import {
   getThreadIdFromTask,
   reloadTagMapInPlace,
   findExistingThreadForTask,
-} from '../beads/discord-sync.js';
-import { autoTagBead } from '../beads/auto-tag.js';
-import { beadThreadCache } from '../beads/bead-thread-cache.js';
+} from '../tasks/discord-sync.js';
+import { autoTagTask } from '../tasks/auto-tag.js';
+import { taskThreadCache } from '../tasks/thread-cache.js';
 
 /** Pre-computed set for filtering status names from tag candidates. */
 const STATUS_NAME_SET = new Set<string>(TASK_STATUSES);
@@ -145,7 +145,7 @@ export async function executeTaskAction(
         const tagNames = Object.keys(taskCtx.tagMap).filter((k) => !STATUS_NAME_SET.has(k));
         if (taskCtx.autoTag && tagNames.length > 0) {
           try {
-            const suggestedTags = await autoTagBead(
+            const suggestedTags = await autoTagTask(
               taskCtx.runtime,
               task.title,
               task.description ?? '',
@@ -213,7 +213,7 @@ export async function executeTaskAction(
         scheduleRepairSync(taskCtx, task.id, ctx);
       }
 
-      beadThreadCache.invalidate();
+      taskThreadCache.invalidate();
       taskCtx.forumCountSync?.requestUpdate();
       const threadNote = threadId ? ' (thread linked)' : '';
       return { ok: true, summary: `Task ${task.id} created: "${task.title}"${threadNote}` };
@@ -268,7 +268,7 @@ export async function executeTaskAction(
         scheduleRepairSync(taskCtx, taskId, ctx);
       }
 
-      beadThreadCache.invalidate();
+      taskThreadCache.invalidate();
       if (action.status) taskCtx.forumCountSync?.requestUpdate();
 
       const changes: string[] = [];
@@ -305,7 +305,7 @@ export async function executeTaskAction(
         scheduleRepairSync(taskCtx, taskId, ctx);
       }
 
-      beadThreadCache.invalidate();
+      taskThreadCache.invalidate();
       taskCtx.forumCountSync?.requestUpdate();
       return { ok: true, summary: `Task ${taskId} closed${action.reason ? `: ${action.reason}` : ''}` };
     }
