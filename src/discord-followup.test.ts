@@ -119,7 +119,7 @@ describe('hasQueryAction', () => {
   it('returns true when a query action type is present', () => {
     expect(hasQueryAction(['channelList'])).toBe(true);
     expect(hasQueryAction(['readMessages', 'sendMessage'])).toBe(true);
-    expect(hasQueryAction(['beadShow'])).toBe(true);
+    expect(hasQueryAction(['taskShow'])).toBe(true);
   });
 
   it('returns false when only mutation types are present', () => {
@@ -138,7 +138,7 @@ describe('QUERY_ACTION_TYPES', () => {
       'channelList', 'channelInfo', 'threadListArchived',
       'readMessages', 'fetchMessage', 'listPins',
       'memberInfo', 'roleInfo', 'searchMessages', 'eventList',
-      'beadList', 'beadShow', 'forgeStatus',
+      'taskList', 'taskShow', 'forgeStatus',
     ];
     for (const t of expected) {
       expect(QUERY_ACTION_TYPES.has(t)).toBe(true);
@@ -146,7 +146,7 @@ describe('QUERY_ACTION_TYPES', () => {
   });
 
   it('does not contain mutation types', () => {
-    const mutations = ['channelCreate', 'channelDelete', 'sendMessage', 'beadCreate', 'beadClose'];
+    const mutations = ['channelCreate', 'channelDelete', 'sendMessage', 'taskCreate', 'taskClose'];
     for (const t of mutations) {
       expect(QUERY_ACTION_TYPES.has(t)).toBe(false);
     }
