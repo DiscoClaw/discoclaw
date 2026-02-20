@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# bead-close-sync.sh — PostToolUse hook: sync Discord thread when `bd close` succeeds.
+# bead-close-sync.sh — PostToolUse hook: sync Discord thread when a bead is closed.
 # Reads Claude Code hook JSON from stdin, fires on-close.sh for each closed bead.
+# NOTE: bd CLI is deprecated. This hook supports the transition period only.
+# The in-process task store emits close events directly; this hook is a no-op
+# once all close paths go through the task store.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -50,11 +53,8 @@ fi
 # Verify hook script exists.
 [[ -x "$HOOK_SCRIPT" ]] || exit 0
 
-# For each bead, verify it's actually closed, then fire the hook.
+# For each bead, fire the hook.
+# No bd CLI re-verification: the task store confirms close before emitting the event.
 for bead_id in "${BEAD_IDS[@]}"; do
-  # Belt-and-suspenders: confirm bead is closed before syncing.
-  STATUS=$(bd show --json "$bead_id" 2>/dev/null | jq -r '.status // ""' || true)
-  [[ "$STATUS" != "closed" ]] && continue
-
   "$HOOK_SCRIPT" "$bead_id" || echo "Warning: bead-close-sync: failed to sync $bead_id" >&2
 done
