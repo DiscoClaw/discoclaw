@@ -291,7 +291,7 @@ describe('handlePlanCommand', () => {
 
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
     expect(content).toContain('**ID:** plan-001');
-    expect(content).toContain(`**Bead:** ${beadId}`);
+    expect(content).toContain(`**Task:** ${beadId}`);
     expect(content).toContain('**Status:** DRAFT');
   });
 
@@ -531,7 +531,7 @@ describe('handlePlanCommand', () => {
     const files = await fs.readdir(plansDir);
     const planFile = files.find((f) => f.startsWith('plan-001'));
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-    expect(content).toContain('**Bead:** bead-abc');
+    expect(content).toContain('**Task:** bead-abc');
   });
 
   it('create — calls addLabel when reusing existing bead', async () => {
@@ -567,7 +567,7 @@ describe('handlePlanCommand', () => {
     const files = await fs.readdir(plansDir);
     const planFile = files.find((f) => f.startsWith('plan-001'));
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-    expect(content).toContain('**Bead:** bead-fail');
+    expect(content).toContain('**Task:** bead-fail');
   });
 
   it('create — reuses existing open bead with matching title instead of creating duplicate', async () => {

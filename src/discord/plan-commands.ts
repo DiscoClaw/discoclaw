@@ -231,7 +231,7 @@ export async function listPlanFiles(plansDir: string): Promise<Array<{ filePath:
 const FALLBACK_TEMPLATE = `# Plan: {{TITLE}}
 
 **ID:** {{PLAN_ID}}
-**Bead:** {{BEAD_ID}}
+**Task:** {{TASK_ID}}
 **Created:** {{DATE}}
 **Status:** DRAFT
 **Project:** {{PROJECT}}
@@ -293,9 +293,9 @@ export async function handlePlanCommand(
         '**!plan commands:**',
         '- `!plan <description>` — create a new plan',
         '- `!plan list` — list active plans',
-        '- `!plan show <plan-id|bead-id>` — show plan details',
-        '- `!plan approve <plan-id|bead-id>` — approve for implementation',
-        '- `!plan close <plan-id|bead-id>` — close/abandon a plan',
+        '- `!plan show <plan-id|task-id>` — show plan details',
+        '- `!plan approve <plan-id|task-id>` — approve for implementation',
+        '- `!plan close <plan-id|task-id>` — close/abandon a plan',
         '- `!plan phases <plan-id>` — show/generate phase checklist',
         '- `!plan run <plan-id>` — execute all remaining phases',
         '- `!plan run-one <plan-id>` — execute next pending phase only',
@@ -425,7 +425,7 @@ export async function handlePlanCommand(
     }
 
     if (cmd.action === 'show') {
-      if (!cmd.args) return 'Usage: `!plan show <plan-id|bead-id>`';
+      if (!cmd.args) return 'Usage: `!plan show <plan-id|task-id>`';
 
       const found = await findPlanFile(plansDir, cmd.args);
       if (!found) return `Plan not found: ${cmd.args}`;
@@ -466,7 +466,7 @@ export async function handlePlanCommand(
     }
 
     if (cmd.action === 'approve') {
-      if (!cmd.args) return 'Usage: `!plan approve <plan-id|bead-id>`';
+      if (!cmd.args) return 'Usage: `!plan approve <plan-id|task-id>`';
 
       const found = await findPlanFile(plansDir, cmd.args);
       if (!found) return `Plan not found: ${cmd.args}`;
@@ -489,7 +489,7 @@ export async function handlePlanCommand(
     }
 
     if (cmd.action === 'close') {
-      if (!cmd.args) return 'Usage: `!plan close <plan-id|bead-id>`';
+      if (!cmd.args) return 'Usage: `!plan close <plan-id|task-id>`';
 
       const found = await findPlanFile(plansDir, cmd.args);
       if (!found) return `Plan not found: ${cmd.args}`;
