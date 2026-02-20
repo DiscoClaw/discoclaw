@@ -1,6 +1,17 @@
 import fs from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import { buildThreadName, buildTaskStarterContent, getThreadIdFromTask, updateTaskStarterMessage, closeTaskThread, isTaskThreadAlreadyClosed, isThreadArchived, reloadTagMapInPlace, getStatusTagIds, buildAppliedTagsWithStatus, updateTaskThreadTags, createTaskThread, shortTaskId, taskIdToken, extractShortIdFromThreadName } from './discord-sync.js';
+import {
+  buildThreadName, buildTaskStarterContent, getThreadIdFromTask, updateTaskStarterMessage,
+  closeTaskThread, isTaskThreadAlreadyClosed, isThreadArchived, reloadTagMapInPlace,
+  getStatusTagIds, buildAppliedTagsWithStatus, updateTaskThreadTags, createTaskThread,
+  shortTaskId, taskIdToken, extractShortIdFromThreadName,
+  resolveTasksForum, findExistingThreadForTask, updateTaskThreadName,
+  // compat re-exports
+  shortBeadId, beadIdToken, resolveBeadsForum, getThreadIdFromBead, buildBeadStarterContent,
+  createBeadThread, findExistingThreadForBead, closeBeadThread, isBeadThreadAlreadyClosed,
+  updateBeadThreadName, updateBeadStarterMessage, updateBeadThreadTags,
+} from './discord-sync.js';
+import { TASK_STATUSES, isTaskStatus, BEAD_STATUSES, isBeadStatus } from './types.js';
 import type { TaskData, TagMap } from '../tasks/types.js';
 
 // ---------------------------------------------------------------------------
@@ -852,5 +863,73 @@ describe('extractShortIdFromThreadName', () => {
   it('roundtrips with buildThreadName', () => {
     const name = buildThreadName('ws-085', 'Plan execution', 'in_progress');
     expect(extractShortIdFromThreadName(name)).toBe('085');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// compat re-exports
+// ---------------------------------------------------------------------------
+
+describe('compat re-exports', () => {
+  it('shortBeadId is shortTaskId', () => {
+    expect(shortBeadId).toBe(shortTaskId);
+  });
+
+  it('beadIdToken is taskIdToken', () => {
+    expect(beadIdToken).toBe(taskIdToken);
+  });
+
+  it('resolveBeadsForum is resolveTasksForum', () => {
+    expect(resolveBeadsForum).toBe(resolveTasksForum);
+  });
+
+  it('getThreadIdFromBead is getThreadIdFromTask', () => {
+    expect(getThreadIdFromBead).toBe(getThreadIdFromTask);
+  });
+
+  it('buildBeadStarterContent is buildTaskStarterContent', () => {
+    expect(buildBeadStarterContent).toBe(buildTaskStarterContent);
+  });
+
+  it('createBeadThread is createTaskThread', () => {
+    expect(createBeadThread).toBe(createTaskThread);
+  });
+
+  it('findExistingThreadForBead is findExistingThreadForTask', () => {
+    expect(findExistingThreadForBead).toBe(findExistingThreadForTask);
+  });
+
+  it('closeBeadThread is closeTaskThread', () => {
+    expect(closeBeadThread).toBe(closeTaskThread);
+  });
+
+  it('isBeadThreadAlreadyClosed is isTaskThreadAlreadyClosed', () => {
+    expect(isBeadThreadAlreadyClosed).toBe(isTaskThreadAlreadyClosed);
+  });
+
+  it('updateBeadThreadName is updateTaskThreadName', () => {
+    expect(updateBeadThreadName).toBe(updateTaskThreadName);
+  });
+
+  it('updateBeadStarterMessage is updateTaskStarterMessage', () => {
+    expect(updateBeadStarterMessage).toBe(updateTaskStarterMessage);
+  });
+
+  it('updateBeadThreadTags is updateTaskThreadTags', () => {
+    expect(updateBeadThreadTags).toBe(updateTaskThreadTags);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// types.ts Task* re-exports
+// ---------------------------------------------------------------------------
+
+describe('types.ts Task* re-exports', () => {
+  it('BEAD_STATUSES is referentially equal to TASK_STATUSES', () => {
+    expect(BEAD_STATUSES).toBe(TASK_STATUSES);
+  });
+
+  it('isBeadStatus is referentially equal to isTaskStatus', () => {
+    expect(isBeadStatus).toBe(isTaskStatus);
   });
 });

@@ -18,9 +18,9 @@ export function shortTaskId(id: string): string {
 }
 
 /** Build a thread name: `{emoji} [{shortId}] {title}`, capped at 100 chars. */
-export function buildThreadName(beadId: string, title: string, status: string): string {
+export function buildThreadName(taskId: string, title: string, status: string): string {
   const emoji = STATUS_EMOJI[status] ?? STATUS_EMOJI.open;
-  const prefix = `${emoji} [${shortTaskId(beadId)}] `;
+  const prefix = `${emoji} [${shortTaskId(taskId)}] `;
   const maxTitle = THREAD_NAME_MAX - prefix.length;
   const trimmedTitle = title.length > maxTitle ? title.slice(0, maxTitle - 1) + '\u2026' : title;
   return `${prefix}${trimmedTitle}`;
