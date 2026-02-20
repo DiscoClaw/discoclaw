@@ -203,3 +203,16 @@ the standard tasks boot sequence.
 The raw `runBd()` helper and `bdCreate`, `bdUpdate`, `bdClose`, `bdAddLabel` functions
 remain in the file but are no longer called by any production path. They are candidates
 for removal once the migration tooling is no longer needed.
+
+---
+
+## 7. Legacy Compatibility Surface (Bridge)
+
+The canonical runtime is now task-named (`src/tasks/*`), but a limited compatibility layer remains:
+
+- `src/beads/*` re-export shims for legacy import paths.
+- `scripts/beads/*` migration/hooks tooling remains for bridge and one-shot migration flows.
+- Task data path resolution prefers `data/tasks/*` with fallback to legacy `data/beads/*` when present.
+- Plan header parsing still accepts legacy `**Bead:**` and maps it to task IDs.
+
+These compatibility paths are scheduled for removal in Phase 5 hard-cut after migration cleanup is complete.

@@ -764,6 +764,16 @@ Status sync:
 
 Task updates are best-effort — failures don't block plan operations.
 
+### Legacy compatibility (bridge phase)
+
+The plan/forge stack is task-first, but a narrow compatibility layer still exists until Phase 5 hard-cut:
+
+- Plan header parsing still accepts legacy `**Bead:**` fields and maps them to `taskId`.
+- Plan templates still support `{{BEAD_ID}}` placeholder replacement for backward compatibility.
+- `findPlanFile()` still resolves by either plan ID or backing task ID.
+
+Planned removal: Phase 5 (final compatibility removal), after migration of remaining historical templates and headers.
+
 ### File storage
 
 Plans live in `workspace/plans/`:
