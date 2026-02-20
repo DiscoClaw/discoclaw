@@ -3,8 +3,6 @@ import {
   TASK_STATUSES,
   isTaskStatus,
   STATUS_EMOJI,
-  BEAD_STATUSES,
-  isBeadStatus,
 } from './types.js';
 import type {
   TaskStatus,
@@ -14,34 +12,19 @@ import type {
   TaskUpdateParams,
   TaskCloseParams,
   TaskListParams,
-  BeadStatus,
-  BeadData,
-  BeadSyncResult,
-  BeadCreateParams,
-  BeadUpdateParams,
-  BeadCloseParams,
-  BeadListParams,
 } from './types.js';
 
-describe('Bead* compatibility aliases', () => {
-  it('BEAD_STATUSES is the same reference as TASK_STATUSES', () => {
-    expect(BEAD_STATUSES).toBe(TASK_STATUSES);
+describe('Task types', () => {
+  it('isTaskStatus accepts valid statuses', () => {
+    expect(isTaskStatus('open')).toBe(true);
+    expect(isTaskStatus('in_progress')).toBe(true);
+    expect(isTaskStatus('blocked')).toBe(true);
+    expect(isTaskStatus('closed')).toBe(true);
   });
 
-  it('isBeadStatus is the same reference as isTaskStatus', () => {
-    expect(isBeadStatus).toBe(isTaskStatus);
-  });
-
-  it('isBeadStatus accepts valid statuses', () => {
-    expect(isBeadStatus('open')).toBe(true);
-    expect(isBeadStatus('in_progress')).toBe(true);
-    expect(isBeadStatus('blocked')).toBe(true);
-    expect(isBeadStatus('closed')).toBe(true);
-  });
-
-  it('isBeadStatus rejects invalid statuses', () => {
-    expect(isBeadStatus('unknown')).toBe(false);
-    expect(isBeadStatus('')).toBe(false);
+  it('isTaskStatus rejects invalid statuses', () => {
+    expect(isTaskStatus('unknown')).toBe(false);
+    expect(isTaskStatus('')).toBe(false);
   });
 
   it('STATUS_EMOJI is indexable with a plain string', () => {
@@ -56,21 +39,19 @@ describe('Bead* compatibility aliases', () => {
     }
   });
 
-  // Type-level assertions: Bead* aliases must be assignable to/from Task* types.
+  // Type-level assertions for canonical task types.
   // These are compile-time checks; if they compile the test passes at runtime.
-  it('Bead* type aliases are structurally identical to Task* types', () => {
+  it('Task types are assignable in expected shapes', () => {
     const taskData: TaskData = {
       id: '1',
       title: 'test',
       status: 'open',
     };
-    const beadData: BeadData = taskData; // BeadData = TaskData
-    const taskData2: TaskData = beadData;
-    expect(taskData2).toBe(beadData);
+    const taskData2: TaskData = taskData;
+    expect(taskData2).toBe(taskData);
 
     const taskStatus: TaskStatus = 'open';
-    const beadStatus: BeadStatus = taskStatus;
-    expect(beadStatus).toBe(taskStatus);
+    expect(taskStatus).toBe('open');
 
     const syncResult: TaskSyncResult = {
       threadsCreated: 0,
@@ -81,23 +62,23 @@ describe('Bead* compatibility aliases', () => {
       tagsUpdated: 0,
       warnings: 0,
     };
-    const beadSyncResult: BeadSyncResult = syncResult;
-    expect(beadSyncResult).toBe(syncResult);
+    const syncResult2: TaskSyncResult = syncResult;
+    expect(syncResult2).toBe(syncResult);
 
     const createParams: TaskCreateParams = { title: 'x' };
-    const beadCreate: BeadCreateParams = createParams;
-    expect(beadCreate).toBe(createParams);
+    const createParams2: TaskCreateParams = createParams;
+    expect(createParams2).toBe(createParams);
 
     const updateParams: TaskUpdateParams = { title: 'y' };
-    const beadUpdate: BeadUpdateParams = updateParams;
-    expect(beadUpdate).toBe(updateParams);
+    const updateParams2: TaskUpdateParams = updateParams;
+    expect(updateParams2).toBe(updateParams);
 
     const closeParams: TaskCloseParams = { reason: 'done' };
-    const beadClose: BeadCloseParams = closeParams;
-    expect(beadClose).toBe(closeParams);
+    const closeParams2: TaskCloseParams = closeParams;
+    expect(closeParams2).toBe(closeParams);
 
     const listParams: TaskListParams = { status: 'open' };
-    const beadList: BeadListParams = listParams;
-    expect(beadList).toBe(listParams);
+    const listParams2: TaskListParams = listParams;
+    expect(listParams2).toBe(listParams);
   });
 });
