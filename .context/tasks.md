@@ -28,6 +28,13 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 
 Legacy compatibility shims remain in `src/beads/*` and re-export task modules.
 
+Bridge compatibility currently retained:
+- `src/beads/*` import-path shims
+- `scripts/beads/*` migration/hooks tooling
+- legacy `data/beads/*` path fallback for task data files
+
+Removal target: Phase 5 hard-cut after migration cleanup.
+
 Primary action trigger is `taskSync` via `src/discord/actions-tasks.ts`.
 
 ## Auto-Tagging
