@@ -9,7 +9,7 @@ export type SystemScaffold = {
   systemCategoryId: string;
   statusChannelId?: string;
   cronsForumId?: string;
-  beadsForumId?: string;
+  tasksForumId?: string;
 };
 
 function norm(s: string): string {
@@ -211,10 +211,10 @@ async function ensureChild(
 }
 
 export async function ensureSystemScaffold(
-  params: { guild: Guild; ensureBeads: boolean; botDisplayName?: string; existingCronsId?: string; existingBeadsId?: string; beadsTagMapPath?: string },
+  params: { guild: Guild; ensureTasks: boolean; botDisplayName?: string; existingCronsId?: string; existingTasksId?: string; tasksTagMapPath?: string },
   log?: LoggerLike,
 ): Promise<SystemScaffold | null> {
-  const { guild, ensureBeads } = params;
+  const { guild, ensureTasks } = params;
 
   const system = await ensureSystemCategory(guild, log);
   if (!system) return null;
@@ -241,24 +241,24 @@ export async function ensureSystemScaffold(
   if (crons.created) created.push('crons');
   if (crons.moved) moved.push('crons');
 
-  let beads: { id?: string; created: boolean; moved: boolean } | null = null;
-  if (ensureBeads) {
-    beads = await ensureChild(
+  let tasks: { id?: string; created: boolean; moved: boolean } | null = null;
+  if (ensureTasks) {
+    tasks = await ensureChild(
       guild,
       system.id,
-      { name: 'tasks', type: ChannelType.GuildForum, topic: 'Tasks are managed by the bot. Use task commands or the bd CLI to create tasks. Do not create threads manually — they will be archived.' },
+      { name: 'tasks', type: ChannelType.GuildForum, topic: 'Tasks are managed by the bot. Use task commands or actions to create tasks. Do not create threads manually — they will be archived.' },
       log,
-      params.existingBeadsId,
+      params.existingTasksId,
     );
-    if (beads.created) created.push('beads');
-    if (beads.moved) moved.push('beads');
+    if (tasks.created) created.push('tasks');
+    if (tasks.moved) moved.push('tasks');
 
-    // Bootstrap status tags on the beads forum.
-    if (beads.id && params.beadsTagMapPath) {
+    // Bootstrap status tags on the tasks forum.
+    if (tasks.id && params.tasksTagMapPath) {
       try {
-        await ensureForumTags(guild, beads.id, params.beadsTagMapPath, { log });
+        await ensureForumTags(guild, tasks.id, params.tasksTagMapPath, { log });
       } catch (err) {
-        log?.warn({ err, forumId: beads.id }, 'system-bootstrap: beads forum tag bootstrap failed');
+        log?.warn({ err, forumId: tasks.id }, 'system-bootstrap: tasks forum tag bootstrap failed');
       }
     }
   }
@@ -281,7 +281,7 @@ export async function ensureSystemScaffold(
   };
   if (status.id) result.statusChannelId = status.id;
   if (crons.id) result.cronsForumId = crons.id;
-  if (beads?.id) result.beadsForumId = beads.id;
+  if (tasks?.id) result.tasksForumId = tasks.id;
   return result;
 }
 

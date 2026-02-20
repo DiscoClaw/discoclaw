@@ -57,7 +57,7 @@ describe('BeadSyncCoordinator', () => {
 
   it('passes statusPoster through to runBeadSync', async () => {
     const { runBeadSync } = await import('./bead-sync.js');
-    const statusPoster = { beadSyncComplete: vi.fn() } as any;
+    const statusPoster = { taskSyncComplete: vi.fn() } as any;
     const coord = new BeadSyncCoordinator(makeOpts());
     await coord.sync(statusPoster);
 
@@ -139,7 +139,7 @@ describe('BeadSyncCoordinator', () => {
     });
 
     const coord = new BeadSyncCoordinator(makeOpts());
-    const statusPoster = { beadSyncComplete: vi.fn() } as any;
+    const statusPoster = { taskSyncComplete: vi.fn() } as any;
 
     // Watcher triggers sync without statusPoster
     const first = coord.sync();

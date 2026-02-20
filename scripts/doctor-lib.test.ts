@@ -17,14 +17,6 @@ describe('doctor-lib: required forums', () => {
     expect(checks.some((c) => c.ok && c.label.includes('DISCOCLAW_TASKS_FORUM is set and valid'))).toBe(true);
   });
 
-  it('accepts legacy DISCOCLAW_BEADS_FORUM for backward compatibility', () => {
-    const checks = checkRequiredForums({
-      DISCOCLAW_CRON_FORUM: '1000000000000000001',
-      DISCOCLAW_BEADS_FORUM: '1000000000000000002',
-    });
-    expect(checks.some((c) => c.ok && c.label.includes('DISCOCLAW_TASKS_FORUM is set and valid'))).toBe(true);
-  });
-
   it('does not require cron forum when cron is disabled', () => {
     const checks = checkRequiredForums({
       DISCOCLAW_CRON_ENABLED: '0',

@@ -335,9 +335,9 @@ describe('runBeadSync', () => {
     expect(result.threadsArchived).toBe(1);
   });
 
-  it('calls statusPoster.beadSyncComplete with the result when provided', async () => {
+  it('calls statusPoster.taskSyncComplete with the result when provided', async () => {
     const store = makeStore([]);
-    const statusPoster = { beadSyncComplete: vi.fn(async () => {}) } as any;
+    const statusPoster = { taskSyncComplete: vi.fn(async () => {}) } as any;
     const result = await runBeadSync({
       client: makeClient(),
       guild: makeGuild(),
@@ -348,8 +348,8 @@ describe('runBeadSync', () => {
       statusPoster,
     } as any);
 
-    expect(statusPoster.beadSyncComplete).toHaveBeenCalledOnce();
-    expect(statusPoster.beadSyncComplete).toHaveBeenCalledWith(result);
+    expect(statusPoster.taskSyncComplete).toHaveBeenCalledOnce();
+    expect(statusPoster.taskSyncComplete).toHaveBeenCalledWith(result);
   });
 
   it('works fine without statusPoster', async () => {
@@ -792,11 +792,11 @@ describe('runBeadSync', () => {
     expect(result.orphanThreadsFound).toBe(0);
   });
 
-  it('calls statusPoster.beadSyncComplete in forum-not-found early return', async () => {
+  it('calls statusPoster.taskSyncComplete in forum-not-found early return', async () => {
     const { resolveBeadsForum } = await import('./discord-sync.js');
     (resolveBeadsForum as any).mockResolvedValueOnce(null);
 
-    const statusPoster = { beadSyncComplete: vi.fn(async () => {}) } as any;
+    const statusPoster = { taskSyncComplete: vi.fn(async () => {}) } as any;
     const result = await runBeadSync({
       client: makeClient(),
       guild: makeGuild(),
@@ -807,8 +807,8 @@ describe('runBeadSync', () => {
       statusPoster,
     } as any);
 
-    expect(statusPoster.beadSyncComplete).toHaveBeenCalledOnce();
-    expect(statusPoster.beadSyncComplete).toHaveBeenCalledWith(result);
+    expect(statusPoster.taskSyncComplete).toHaveBeenCalledOnce();
+    expect(statusPoster.taskSyncComplete).toHaveBeenCalledWith(result);
     expect(result.warnings).toBe(1);
   });
 

@@ -130,7 +130,7 @@ DiscoClaw includes a task tracker backed by in-process `TaskStore` data and sync
 Auto-sync is event-driven from the in-process store and runs a startup reconciliation pass.
 Auto-triggered syncs are silent; explicit `taskSync` can post status output.
 
-Primary env surface is `DISCOCLAW_TASKS_*` (legacy `DISCOCLAW_BEADS_*` remains temporarily supported with deprecation warnings).
+Primary env surface is `DISCOCLAW_TASKS_*`.
 
 ## Discord API Quirks
 

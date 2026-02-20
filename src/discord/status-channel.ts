@@ -69,10 +69,6 @@ export type BootReportData = {
   // Tasks subsystem
   tasksEnabled: boolean;
   tasksDbVersion?: string;
-  /** @deprecated Use tasksEnabled. */
-  beadsEnabled?: boolean;
-  /** @deprecated Use tasksDbVersion. */
-  beadDbVersion?: string;
   forumResolved: boolean;
   // Crons subsystem
   cronsEnabled: boolean;
@@ -98,9 +94,7 @@ export type StatusPoster = {
   runtimeError(context: { sessionKey: string; channelName?: string }, message: string): Promise<void>;
   handlerError(context: { sessionKey: string }, err: unknown): Promise<void>;
   actionFailed(actionType: string, error: string): Promise<void>;
-  taskSyncComplete?(result: TaskSyncResult): Promise<void>;
-  /** @deprecated Prefer taskSyncComplete. */
-  beadSyncComplete(result: TaskSyncResult): Promise<void>;
+  taskSyncComplete(result: TaskSyncResult): Promise<void>;
   bootReport?(data: BootReportData): Promise<void>;
 };
 
@@ -164,10 +158,6 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       await sendTaskSyncComplete(result);
     },
 
-    async beadSyncComplete(result) {
-      await sendTaskSyncComplete(result);
-    },
-
     async bootReport(data) {
       const typeLabel: Record<StartupContext['type'], string> = {
         crash: 'Crash',
@@ -193,8 +183,8 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
         lines.push(`Forge at Shutdown · ${data.activeForge.slice(0, 200)}`);
       }
 
-      const tasksEnabled = data.tasksEnabled ?? data.beadsEnabled ?? false;
-      const tasksDbVersion = data.tasksDbVersion ?? data.beadDbVersion;
+      const tasksEnabled = data.tasksEnabled;
+      const tasksDbVersion = data.tasksDbVersion;
       const tasksStatus = tasksEnabled
         ? `on${tasksDbVersion ? ` · v${tasksDbVersion}` : ''}${data.forumResolved ? ' · forum ok' : ' · forum unresolved'}`
         : 'off';

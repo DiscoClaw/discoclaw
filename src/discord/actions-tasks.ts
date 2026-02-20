@@ -82,8 +82,6 @@ export const TASK_ACTION_TYPES = new Set<string>(Object.keys(TASK_TYPE_MAP));
 
 export type TaskContext = {
   tasksCwd?: string;
-  /** @deprecated Use tasksCwd. */
-  beadsCwd?: string;
   forumId: string;
   tagMap: TagMap;
   tagMapPath?: string;
@@ -140,7 +138,7 @@ export async function executeTaskAction(
             task.title,
             task.description ?? '',
             tagNames,
-            { model: taskCtx.autoTagModel, cwd: taskCtx.tasksCwd || taskCtx.beadsCwd || process.cwd() },
+            { model: taskCtx.autoTagModel, cwd: taskCtx.tasksCwd || process.cwd() },
           );
           for (const tag of suggestedTags) {
             if (!labels.includes(tag)) labels.push(tag);

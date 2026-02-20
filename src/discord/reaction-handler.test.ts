@@ -605,7 +605,7 @@ describe('createReactionAddHandler', () => {
       runtimeError: vi.fn(),
       handlerError: vi.fn(),
       actionFailed: vi.fn(),
-      beadSyncComplete: vi.fn(),
+      taskSyncComplete: vi.fn(),
     };
     const statusRef: StatusRef = { current: statusPoster };
     const params = makeParams({ runtime: makeMockRuntimeError('timeout reached') });
@@ -878,7 +878,7 @@ describe('createReactionAddHandler', () => {
       runtimeError: vi.fn(),
       handlerError: vi.fn(),
       actionFailed: vi.fn(),
-      beadSyncComplete: vi.fn(),
+      taskSyncComplete: vi.fn(),
     };
     const statusRef: StatusRef = { current: statusPoster };
     const params = makeParams();
@@ -1106,7 +1106,7 @@ describe('createReactionAddHandler', () => {
       runtimeError: vi.fn(),
       handlerError: vi.fn(),
       actionFailed: vi.fn(),
-      beadSyncComplete: vi.fn(),
+      taskSyncComplete: vi.fn(),
     };
     const statusRef: StatusRef = { current: statusPoster };
     const params = makeParams();
@@ -1273,7 +1273,7 @@ describe('createReactionRemoveHandler', () => {
       runtimeError: vi.fn(),
       handlerError: vi.fn(),
       actionFailed: vi.fn(),
-      beadSyncComplete: vi.fn(),
+      taskSyncComplete: vi.fn(),
     };
     const statusRef: StatusRef = { current: statusPoster };
     const params = makeParams({ runtime: makeMockRuntimeError('timeout reached') });

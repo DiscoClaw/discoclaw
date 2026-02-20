@@ -70,12 +70,12 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
 describe('ensureSystemScaffold', () => {
   it('creates System category, status text channel, and crons forum', async () => {
     const guild = makeMockGuild([]);
-    const res = await ensureSystemScaffold({ guild, ensureBeads: false });
+    const res = await ensureSystemScaffold({ guild, ensureTasks: false });
     expect(res).not.toBeNull();
     expect(res?.systemCategoryId).toBeTruthy();
     expect(res?.statusChannelId).toBeTruthy();
     expect(res?.cronsForumId).toBeTruthy();
-    expect(res?.beadsForumId).toBeUndefined();
+    expect(res?.tasksForumId).toBeUndefined();
 
     // 3 creates: category + status + crons
     expect(guild.__create).toHaveBeenCalledTimes(3);
@@ -88,7 +88,7 @@ describe('ensureSystemScaffold', () => {
       { id: 'crons-1', name: 'crons', type: ChannelType.GuildForum, parentId: null },
     ]);
 
-    const res = await ensureSystemScaffold({ guild, ensureBeads: false });
+    const res = await ensureSystemScaffold({ guild, ensureTasks: false });
     expect(res?.systemCategoryId).toBeTruthy();
     expect(res?.statusChannelId).toBe('status-1');
     expect(res?.cronsForumId).toBe('crons-1');
@@ -99,26 +99,26 @@ describe('ensureSystemScaffold', () => {
     expect(cronsCh.parentId).toBe(res?.systemCategoryId);
   });
 
-  it('creates beads forum only when ensureBeads is true', async () => {
+  it('creates beads forum only when ensureTasks is true', async () => {
     const guild = makeMockGuild([]);
-    const res = await ensureSystemScaffold({ guild, ensureBeads: true });
-    expect(res?.beadsForumId).toBeTruthy();
+    const res = await ensureSystemScaffold({ guild, ensureTasks: true });
+    expect(res?.tasksForumId).toBeTruthy();
     // 4 creates: category + status + crons + beads
     expect(guild.__create).toHaveBeenCalledTimes(4);
   });
 
-  it('bootstraps bead status tags when beadsTagMapPath is provided', async () => {
+  it('bootstraps bead status tags when tasksTagMapPath is provided', async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bead-tags-'));
     try {
       const tagMapPath = path.join(tmpDir, 'tag-map.json');
       await fs.writeFile(tagMapPath, '{"open": "", "in_progress": "", "blocked": "", "closed": ""}', 'utf8');
 
       const guild = makeMockGuild([]);
-      const res = await ensureSystemScaffold({ guild, ensureBeads: true, beadsTagMapPath: tagMapPath });
-      expect(res?.beadsForumId).toBeTruthy();
+      const res = await ensureSystemScaffold({ guild, ensureTasks: true, tasksTagMapPath: tagMapPath });
+      expect(res?.tasksForumId).toBeTruthy();
 
       // The beads forum should have had edit() called with availableTags.
-      const beadsForum = (guild.__cache as Map<string, any>).get(res!.beadsForumId!);
+      const beadsForum = (guild.__cache as Map<string, any>).get(res!.tasksForumId!);
       expect(beadsForum).toBeDefined();
       expect(beadsForum.edit).toHaveBeenCalledWith(
         expect.objectContaining({ availableTags: expect.any(Array) }),
@@ -136,14 +136,14 @@ describe('ensureSystemScaffold', () => {
     }
   });
 
-  it('skips bead tag bootstrap when beadsTagMapPath is not provided', async () => {
+  it('skips bead tag bootstrap when tasksTagMapPath is not provided', async () => {
     const guild = makeMockGuild([]);
-    const res = await ensureSystemScaffold({ guild, ensureBeads: true });
-    expect(res?.beadsForumId).toBeTruthy();
+    const res = await ensureSystemScaffold({ guild, ensureTasks: true });
+    expect(res?.tasksForumId).toBeTruthy();
 
     // The beads forum edit should NOT have been called with availableTags
     // (only the create call happens, no subsequent tag bootstrap).
-    const beadsForum = (guild.__cache as Map<string, any>).get(res!.beadsForumId!);
+    const beadsForum = (guild.__cache as Map<string, any>).get(res!.tasksForumId!);
     // edit is called 0 times since there's no tag map path to bootstrap from.
     expect(beadsForum.edit).not.toHaveBeenCalled();
   });
@@ -157,13 +157,13 @@ describe('ensureSystemScaffold', () => {
     ]);
     const res = await ensureSystemScaffold({
       guild,
-      ensureBeads: true,
+      ensureTasks: true,
       existingCronsId: '1000000000000000001',
-      existingBeadsId: '1000000000000000002',
+      existingTasksId: '1000000000000000002',
     });
     expect(res).not.toBeNull();
     expect(res?.cronsForumId).toBe('1000000000000000001');
-    expect(res?.beadsForumId).toBe('1000000000000000002');
+    expect(res?.tasksForumId).toBe('1000000000000000002');
     // No new channels should have been created (only category existed already).
     expect(guild.__create).not.toHaveBeenCalled();
   });
@@ -178,7 +178,7 @@ describe('ensureSystemScaffold', () => {
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const res = await ensureSystemScaffold({
       guild,
-      ensureBeads: false,
+      ensureTasks: false,
       existingCronsId: '1000000000000000001',
     }, log as any);
     expect(res).not.toBeNull();
@@ -203,7 +203,7 @@ describe('ensureSystemScaffold', () => {
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const res = await ensureSystemScaffold({
       guild,
-      ensureBeads: false,
+      ensureTasks: false,
       existingCronsId: '9999999999999999999',
     }, log as any);
     expect(res).not.toBeNull();
@@ -243,7 +243,7 @@ describe('ensureSystemScaffold', () => {
 
     const res = await ensureSystemScaffold({
       guild,
-      ensureBeads: false,
+      ensureTasks: false,
       existingCronsId: '1000000000000000001',
     });
     expect(res).not.toBeNull();
@@ -262,7 +262,7 @@ describe('ensureSystemScaffold', () => {
       { id: 'crons-suffixed', name: 'crons ・ 1', type: ChannelType.GuildForum },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
-    const res = await ensureSystemScaffold({ guild, ensureBeads: false });
+    const res = await ensureSystemScaffold({ guild, ensureTasks: false });
     expect(res?.cronsForumId).toBe('crons-exact');
   });
 
@@ -273,7 +273,7 @@ describe('ensureSystemScaffold', () => {
       { id: 'crons-suffixed', name: 'crons ・ 1', type: ChannelType.GuildForum },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
-    const res = await ensureSystemScaffold({ guild, ensureBeads: false });
+    const res = await ensureSystemScaffold({ guild, ensureTasks: false });
     expect(res?.cronsForumId).toBe('crons-suffixed');
     // Should NOT have created a new crons forum.
     const createCalls = guild.__create.mock.calls;
@@ -291,13 +291,13 @@ describe('ensureSystemScaffold', () => {
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const res = await ensureSystemScaffold({
       guild,
-      ensureBeads: true,
+      ensureTasks: true,
       existingCronsId: '1000000000000000001',
-      existingBeadsId: '1000000000000000002',
+      existingTasksId: '1000000000000000002',
     }, log as any);
     expect(res).not.toBeNull();
     expect(res?.cronsForumId).toBe('1000000000000000001');
-    expect(res?.beadsForumId).toBe('1000000000000000002');
+    expect(res?.tasksForumId).toBe('1000000000000000002');
 
     // Names should have been reconciled back to canonical.
     const cronsCh = (guild.__cache as Map<string, any>).get('1000000000000000001');
@@ -323,7 +323,7 @@ describe('ensureSystemScaffold', () => {
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const res = await ensureSystemScaffold({ guild, ensureBeads: false }, log as any);
+    const res = await ensureSystemScaffold({ guild, ensureTasks: false }, log as any);
     expect(res).not.toBeNull();
     expect(res?.cronsForumId).toBe('crons-1');
 
@@ -345,7 +345,7 @@ describe('ensureSystemScaffold', () => {
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     await ensureSystemScaffold({
       guild,
-      ensureBeads: false,
+      ensureTasks: false,
       existingCronsId: '1000000000000000001',
     }, log as any);
 

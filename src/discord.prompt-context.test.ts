@@ -809,7 +809,7 @@ function makeBeadParams(overrides?: Partial<any>) {
     streamStallWarningMs: 0,
     botDisplayName: 'TestBot',
     taskCtx: {
-      beadsCwd: '/tmp/beads',
+      tasksCwd: '/tmp/beads',
       forumId: BEAD_FORUM_ID,
       tagMap: {},
       runtime: {} as any,
@@ -1074,7 +1074,7 @@ describe('bead resolution dispatch wiring', () => {
       botDisplayName: 'TestBot',
       planCommandsEnabled: true,
       taskCtx: {
-        beadsCwd: '/tmp/beads',
+        tasksCwd: '/tmp/beads',
         forumId: BEAD_FORUM_ID,
         tagMap: {},
         store,

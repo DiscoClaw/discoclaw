@@ -17,25 +17,11 @@ export type InitializeBeadsOpts = {
   tasksSidebar?: boolean;
   tasksAutoTag?: boolean;
   tasksAutoTagModel?: string;
-  /** @deprecated Use tasksCwd. */
-  beadsCwd?: string;
-  /** @deprecated Use tasksForum. */
-  beadsForum?: string;
-  /** @deprecated Use tasksTagMapPath. */
-  beadsTagMapPath?: string;
-  /** @deprecated Use tasksMentionUser. */
-  beadsMentionUser?: string;
-  /** @deprecated Use tasksSidebar. */
-  beadsSidebar?: boolean;
-  /** @deprecated Use tasksAutoTag. */
-  beadsAutoTag?: boolean;
-  /** @deprecated Use tasksAutoTagModel. */
-  beadsAutoTagModel?: string;
   runtime: RuntimeAdapter;
   statusPoster?: StatusPoster;
   log: LoggerLike;
   /** Resolved from system bootstrap or config. */
-  systemBeadsForumId?: string;
+  systemTasksForumId?: string;
   /** In-process task store. If not provided, an in-memory store is created. */
   store?: TaskStore;
 };
@@ -61,7 +47,7 @@ export async function initializeBeadsContext(
     return { taskCtx: undefined };
   }
 
-  const effectiveForum = opts.systemBeadsForumId || opts.tasksForum || opts.beadsForum || '';
+  const effectiveForum = opts.systemTasksForumId || opts.tasksForum || '';
   if (!effectiveForum) {
     opts.log.warn(
       'tasks: no forum resolved — set DISCORD_GUILD_ID or DISCOCLAW_TASKS_FORUM ' +
@@ -70,10 +56,10 @@ export async function initializeBeadsContext(
     return { taskCtx: undefined };
   }
 
-  const tagMapPath = opts.tasksTagMapPath || opts.beadsTagMapPath || '';
+  const tagMapPath = opts.tasksTagMapPath || '';
   const tagMap = await loadTagMap(tagMapPath);
-  const tasksSidebar = opts.tasksSidebar ?? opts.beadsSidebar ?? false;
-  const tasksMentionUser = opts.tasksMentionUser ?? opts.beadsMentionUser;
+  const tasksSidebar = opts.tasksSidebar ?? false;
+  const tasksMentionUser = opts.tasksMentionUser;
   const sidebarMentionUserId = tasksSidebar ? tasksMentionUser : undefined;
 
   if (tasksSidebar && !tasksMentionUser) {
@@ -87,15 +73,14 @@ export async function initializeBeadsContext(
   }
 
   const taskCtx: TaskContext = {
-    tasksCwd: opts.tasksCwd || opts.beadsCwd || process.cwd(),
-    beadsCwd: opts.beadsCwd,
+    tasksCwd: opts.tasksCwd || process.cwd(),
     forumId: effectiveForum,
     tagMap,
     tagMapPath,
     store,
     runtime: opts.runtime,
-    autoTag: opts.tasksAutoTag ?? opts.beadsAutoTag ?? true,
-    autoTagModel: opts.tasksAutoTagModel ?? opts.beadsAutoTagModel ?? 'fast',
+    autoTag: opts.tasksAutoTag ?? true,
+    autoTagModel: opts.tasksAutoTagModel ?? 'fast',
     mentionUserId: tasksMentionUser,
     sidebarMentionUserId,
     statusPoster: opts.statusPoster,
@@ -115,8 +100,6 @@ export type WireBeadsSyncOpts = {
   guild: Guild;
   guildId: string;
   tasksCwd?: string;
-  /** @deprecated Use tasksCwd. */
-  beadsCwd?: string;
   sidebarMentionUserId?: string;
   log: LoggerLike;
   forumCountSync?: ForumCountSync;
@@ -174,7 +157,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
   store.on('closed', triggerSync);
   store.on('labeled', triggerSync);
 
-  opts.log.info({ tasksCwd: opts.tasksCwd || opts.beadsCwd }, 'tasks:store-event watcher started');
+  opts.log.info({ tasksCwd: opts.tasksCwd }, 'tasks:store-event watcher started');
 
   return {
     stop() {

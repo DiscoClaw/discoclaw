@@ -19,10 +19,6 @@ export type HealthConfigSnapshot = {
   cronEnabled: boolean;
   tasksEnabled: boolean;
   tasksActive: boolean;
-  /** @deprecated Use tasksEnabled. */
-  beadsEnabled?: boolean;
-  /** @deprecated Use tasksActive. */
-  beadsActive?: boolean;
   requireChannelContext: boolean;
   autoIndexChannelContext: boolean;
 };
@@ -77,8 +73,8 @@ export function renderHealthReport(opts: {
     lines.push(`runtimeSessions=${opts.config.useRuntimeSessions} toolAwareStreaming=${opts.config.toolAwareStreaming} maxConcurrent=${opts.config.maxConcurrentInvocations}`);
     lines.push(`actions=${opts.config.discordActionsEnabled} summary=${opts.config.summaryEnabled} durableMemory=${opts.config.durableMemoryEnabled}`);
     lines.push(`historyBudget=${opts.config.messageHistoryBudget} requireChannelContext=${opts.config.requireChannelContext} autoIndexContext=${opts.config.autoIndexChannelContext}`);
-    const tasksActive = opts.config.tasksActive ?? opts.config.beadsActive ?? false;
-    const tasksEnabled = opts.config.tasksEnabled ?? opts.config.beadsEnabled ?? false;
+    const tasksActive = opts.config.tasksActive;
+    const tasksEnabled = opts.config.tasksEnabled;
     const tasksState = tasksActive ? 'active' : tasksEnabled ? 'degraded' : 'off';
     lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} cron=${opts.config.cronEnabled} tasks=${tasksState}`);
 

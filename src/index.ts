@@ -315,7 +315,7 @@ log.info({ botDisplayName }, 'resolved bot display name');
 
 // --- Load persisted scaffold state (forum IDs created on previous boots) ---
 const scaffoldStatePath = path.join(pidLockDir, 'system-scaffold.json');
-let scaffoldState: { guildId?: string; systemCategoryId?: string; cronsForumId?: string; beadsForumId?: string } = {};
+let scaffoldState: { guildId?: string; systemCategoryId?: string; cronsForumId?: string; tasksForumId?: string } = {};
 try {
   const raw = await fs.readFile(scaffoldStatePath, 'utf8');
   const parsed = JSON.parse(raw);
@@ -326,7 +326,7 @@ try {
     } else {
       if (typeof parsed.systemCategoryId === 'string') scaffoldState.systemCategoryId = parsed.systemCategoryId;
       if (typeof parsed.cronsForumId === 'string') scaffoldState.cronsForumId = parsed.cronsForumId;
-      if (typeof parsed.beadsForumId === 'string') scaffoldState.beadsForumId = parsed.beadsForumId;
+      if (typeof parsed.tasksForumId === 'string') scaffoldState.tasksForumId = parsed.tasksForumId;
     }
   }
 } catch {
@@ -337,7 +337,7 @@ const cronForum = cfg.cronForum || scaffoldState.cronsForumId;
 // --- Tasks subsystem ---
 const tasksEnabled = cfg.tasksEnabled;
 const tasksCwd = cfg.tasksCwdOverride || workspaceCwd;
-const tasksForum = cfg.tasksForum || scaffoldState.beadsForumId || '';
+const tasksForum = cfg.tasksForum || scaffoldState.tasksForumId || '';
 const tasksDataDir = dataDir
   ? path.join(dataDir, 'beads')
   : path.join(__dirname, '..', 'data', 'beads');
@@ -694,9 +694,9 @@ const botParams = {
   shortTermMaxAgeMs,
   shortTermInjectMaxChars,
   statusChannel,
-  bootstrapEnsureBeadsForum: tasksEnabled,
+  bootstrapEnsureTasksForum: tasksEnabled,
   existingCronsId: isSnowflake(cronForum ?? '') ? cronForum : undefined,
-  existingBeadsId: isSnowflake(tasksForum) ? tasksForum : undefined,
+  existingTasksId: isSnowflake(tasksForum) ? tasksForum : undefined,
   toolAwareStreaming,
   streamStallWarningMs,
   actionFollowupDepth,
@@ -923,7 +923,7 @@ if (system) {
   if (resolvedGuild) newState.guildId = resolvedGuild;
   if (system.systemCategoryId) newState.systemCategoryId = system.systemCategoryId;
   if (system.cronsForumId) newState.cronsForumId = system.cronsForumId;
-  if (system.beadsForumId) newState.beadsForumId = system.beadsForumId;
+  if (system.tasksForumId) newState.tasksForumId = system.tasksForumId;
   if (Object.keys(newState).length > 0) {
     try {
       await fs.writeFile(scaffoldStatePath, JSON.stringify(newState, null, 2) + '\n', 'utf8');
@@ -955,7 +955,7 @@ if (tasksEnabled) {
     runtime,
     statusPoster: botStatus ?? undefined,
     log,
-    systemBeadsForumId: system?.beadsForumId,
+    systemTasksForumId: system?.tasksForumId,
     store: sharedTaskStore,
   });
   taskCtx = beadsResult.taskCtx;

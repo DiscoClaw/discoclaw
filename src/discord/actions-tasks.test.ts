@@ -110,7 +110,7 @@ function makeStore() {
 
 function makeTaskCtx(overrides?: Partial<TaskContext>): TaskContext {
   return {
-    beadsCwd: '/tmp/test-beads',
+    tasksCwd: '/tmp/test-beads',
     forumId: 'forum-123',
     tagMap: { feature: 'tag-1', bug: 'tag-2' },
     store: makeStore() as any,
