@@ -146,21 +146,26 @@ describe('migrate — migrateFromBd', () => {
     await cleanup(path);
   });
 
-  it('returns migrated: 0 and writes an empty file when bd has no beads', async () => {
+  it('returns migrated: 0, writes an empty file, and warns when bd has no beads', async () => {
     const path = TMP_PATH('bd-empty');
     await cleanup(path);
 
     vi.mocked(bdList).mockResolvedValueOnce([]);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const result = await migrateFromBd({ cwd: '/tmp/fake-workspace', destPath: path });
+    try {
+      const result = await migrateFromBd({ cwd: '/tmp/fake-workspace', destPath: path });
 
-    expect(result.migrated).toBe(0);
+      expect(result.migrated).toBe(0);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('zero tasks'));
 
-    const { readFile } = await import('node:fs/promises');
-    const content = await readFile(path, 'utf8');
-    expect(content).toBe('');
-
-    await cleanup(path);
+      const { readFile } = await import('node:fs/promises');
+      const content = await readFile(path, 'utf8');
+      expect(content).toBe('');
+    } finally {
+      warnSpy.mockRestore();
+      await cleanup(path);
+    }
   });
 
   it('overwrites an existing JSONL file', async () => {

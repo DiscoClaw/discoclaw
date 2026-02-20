@@ -244,7 +244,32 @@ for (const check of checkRequiredForums(process.env)) {
   else fail(check.label, check.hint);
 }
 
-// 11. Discord connection test (--check-connection only)
+// 11. Task store migration state
+{
+  const beadsCwd = (process.env.DISCOCLAW_BEADS_CWD ?? '').trim() || process.cwd();
+  const dataDir = (process.env.DISCOCLAW_DATA_DIR ?? '').trim();
+  const beadsDataDir = dataDir
+    ? path.join(dataDir, 'beads')
+    : path.join(root, 'data', 'beads');
+  const legacyDbPath = path.join(beadsCwd, '.beads', 'beads.db');
+  const tasksJsonlPath = path.join(beadsDataDir, 'tasks.jsonl');
+  const legacyExists = fs.existsSync(legacyDbPath);
+  const jsonlExists = fs.existsSync(tasksJsonlPath);
+
+  if (!legacyExists && !jsonlExists) {
+    // Fresh install — nothing to check
+  } else if (jsonlExists) {
+    ok('Task store migrated (tasks.jsonl present)');
+  } else {
+    // Legacy DB exists but JSONL is missing
+    fail(
+      'Legacy beads.db found but tasks.jsonl is missing',
+      `Run migration — see docs/tasks-migration.md  (output: ${tasksJsonlPath})`,
+    );
+  }
+}
+
+// 12. Discord connection test (--check-connection only)
 if (checkConnection) {
   console.log('\n  Discord connection test...');
 

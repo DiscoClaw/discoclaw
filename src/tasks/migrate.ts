@@ -46,6 +46,11 @@ export async function writeJsonl(destPath: string, beads: BeadData[]): Promise<v
  */
 export async function migrateFromBd(opts: MigrateOptions): Promise<MigrateResult> {
   const beads = await bdList({ status: 'all', limit: 0 }, opts.cwd);
+  if (beads.length === 0) {
+    console.warn(
+      '[migrate] bd exported zero tasks — if you expected data, check that bd is pointed at the right workspace. Writing empty JSONL.',
+    );
+  }
   await writeJsonl(opts.destPath, beads);
   return { migrated: beads.length };
 }

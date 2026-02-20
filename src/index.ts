@@ -342,7 +342,7 @@ const beadsDataDir = dataDir
   : path.join(__dirname, '..', 'data', 'beads');
 const beadsTagMapPath = cfg.beadsTagMapPathOverride
   || path.join(beadsDataDir, 'tag-map.json');
-const beadsTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'beads', 'bead-hooks', 'tag-map.json');
+const beadsTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'beads', 'tag-map.json');
 const beadsMentionUser = cfg.beadsMentionUser;
 const beadsSidebar = cfg.beadsSidebar;
 const sidebarMentionUserId = beadsSidebar ? beadsMentionUser : undefined;
@@ -354,6 +354,26 @@ const beadsTaskPrefix = cfg.beadsTaskPrefix;
 // Initialize shared task store (used by beads, forge, and plan subsystems).
 // Created unconditionally so forge/plan have a persistent store even when beads are disabled.
 await fs.mkdir(beadsDataDir, { recursive: true });
+
+// Cutover gate: if the legacy bd SQLite DB exists but the JSONL hasn't been
+// written yet, fail fast rather than silently starting with an empty store.
+// Run `pnpm tsx scripts/beads/migrate.ts` to perform the one-time migration.
+{
+  const legacyDbPath = path.join(beadsCwd, '.beads', 'beads.db');
+  const tasksJsonlPath = path.join(beadsDataDir, 'tasks.jsonl');
+  const legacyExists = await fs.access(legacyDbPath).then(() => true).catch(() => false);
+  if (legacyExists) {
+    const jsonlExists = await fs.access(tasksJsonlPath).then(() => true).catch(() => false);
+    if (!jsonlExists) {
+      log.error(
+        { legacyDbPath, tasksJsonlPath },
+        'tasks:cutover-gate: legacy beads.db found but tasks.jsonl is missing — run migration before starting the service',
+      );
+      process.exit(1);
+    }
+  }
+}
+
 const sharedTaskStore = new TaskStore({ prefix: beadsTaskPrefix, persistPath: path.join(beadsDataDir, 'tasks.jsonl') });
 await sharedTaskStore.load();
 log.info({ count: sharedTaskStore.size(), prefix: beadsTaskPrefix }, 'tasks:store loaded');

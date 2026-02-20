@@ -84,7 +84,7 @@ See `dev.md` §Beads for the full env var table. Key vars:
 | `DISCOCLAW_BEADS_DATA_DIR` | `<WORKSPACE_CWD>/.beads` | Task store data directory |
 | `DISCOCLAW_BEADS_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for threads |
 | `DISCOCLAW_BEADS_AUTO_TAG` | `1` | AI tagging on create |
-| `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/bead-hooks/tag-map.json` | Tag-to-forum-tag ID map |
+| `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/tag-map.json` | Tag-to-forum-tag ID map |
 
 ## Implementation
 
@@ -98,5 +98,5 @@ See `dev.md` §Beads for the full env var table. Key vars:
 | Thread cache | `src/beads/bead-thread-cache.ts` |
 | Sync coordinator | `src/beads/bead-sync-coordinator.ts` |
 | Forum guard | `src/beads/forum-guard.ts` |
-| Tag map | `scripts/beads/bead-hooks/tag-map.json` |
+| Tag map | `scripts/beads/tag-map.json` |
 | Discord actions | `src/discord/actions-beads.ts` |

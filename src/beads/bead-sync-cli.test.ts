@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { parseArgInt } from './bead-sync-cli.js';
+import { describe, expect, it, vi } from 'vitest';
+import { parseArgInt, runSyncWithStore } from './bead-sync-cli.js';
+
+vi.mock('./bead-sync.js', () => ({
+  runBeadSync: vi.fn().mockResolvedValue({ created: 0, updated: 0, closed: 0 }),
+}));
 
 // bead-sync-cli.ts uses an import.meta.url guard so that main() does NOT run
 // when the module is imported (only when invoked as a script). This lets us
@@ -53,5 +57,30 @@ describe('parseArgInt', () => {
 
   it('throws when the value is "Infinity"', () => {
     expect(() => parseArgInt(['--limit', 'Infinity'], '--limit')).toThrow('must be a number');
+  });
+});
+
+describe('runSyncWithStore', () => {
+  it('passes store through to runBeadSync', async () => {
+    const { runBeadSync } = await import('./bead-sync.js');
+    const { TaskStore } = await import('../tasks/store.js');
+
+    const store = new TaskStore();
+    const fakeClient = {} as any;
+    const fakeGuild = {} as any;
+
+    await runSyncWithStore({
+      client: fakeClient,
+      guild: fakeGuild,
+      forumId: 'forum-123',
+      tagMap: {},
+      store,
+      throttleMs: 100,
+      archivedDedupeLimit: 50,
+    });
+
+    expect(runBeadSync).toHaveBeenCalledWith(
+      expect.objectContaining({ store }),
+    );
   });
 });

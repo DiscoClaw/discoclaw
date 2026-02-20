@@ -1,7 +1,15 @@
 import path from 'node:path';
-import { Client, GatewayIntentBits } from 'discord.js';
+import type { Client, Guild } from 'discord.js';
+import { Client as DiscordClient, GatewayIntentBits } from 'discord.js';
+import type { TagMap } from './types.js';
 import { loadTagMap } from './discord-sync.js';
+import type { BeadSyncResult } from './bead-sync.js';
 import { runBeadSync } from './bead-sync.js';
+import type { TaskStore } from '../tasks/store.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function env(name: string): string {
   const v = (process.env[name] ?? '').trim();
@@ -24,13 +32,48 @@ export function parseArgInt(args: string[], name: string): number | undefined {
   return n;
 }
 
+// ---------------------------------------------------------------------------
+// Core sync execution (exported for testing)
+// ---------------------------------------------------------------------------
+
+export type RunSyncWithStoreOpts = {
+  client: Client;
+  guild: Guild;
+  forumId: string;
+  tagMap: TagMap;
+  store: TaskStore;
+  throttleMs?: number;
+  archivedDedupeLimit?: number;
+  mentionUserId?: string;
+};
+
+/**
+ * Core sync execution — separated from Discord login/teardown so it can be
+ * unit-tested with mocked dependencies.
+ */
+export async function runSyncWithStore(opts: RunSyncWithStoreOpts): Promise<BeadSyncResult> {
+  return runBeadSync({
+    client: opts.client,
+    guild: opts.guild,
+    forumId: opts.forumId,
+    tagMap: opts.tagMap,
+    store: opts.store,
+    throttleMs: opts.throttleMs ?? 250,
+    archivedDedupeLimit: opts.archivedDedupeLimit ?? 200,
+    mentionUserId: opts.mentionUserId,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Script entrypoint
+// ---------------------------------------------------------------------------
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
   const discordToken = env('DISCORD_TOKEN');
   const guildId = env('DISCORD_GUILD_ID');
   const forumId = env('DISCOCLAW_BEADS_FORUM');
-  const beadsCwd = envOpt('DISCOCLAW_BEADS_CWD') ?? process.cwd();
   const dataDir = envOpt('DISCOCLAW_DATA_DIR');
   const tagMapPath = envOpt('DISCOCLAW_BEADS_TAG_MAP')
     ?? (dataDir ? path.join(dataDir, 'beads', 'tag-map.json') : undefined);
@@ -41,11 +84,11 @@ async function main(): Promise<void> {
   const archivedLimit = parseArgInt(args, '--archived-limit') ?? 200;
 
   // Load in-process task store.
-  const { TaskStore } = await import('../tasks/store.js');
-  const store = new TaskStore(tasksPath ? { persistPath: tasksPath } : {});
+  const { TaskStore: TaskStoreImpl } = await import('../tasks/store.js');
+  const store = new TaskStoreImpl(tasksPath ? { persistPath: tasksPath } : {});
   if (tasksPath) await store.load();
 
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const client = new DiscordClient({ intents: [GatewayIntentBits.Guilds] });
   await client.login(discordToken);
   await new Promise<void>((resolve) => client.once('ready', () => resolve()));
 
@@ -58,7 +101,7 @@ async function main(): Promise<void> {
     const sidebarEnabled = sidebarRaw === '1' || sidebarRaw?.toLowerCase() === 'true';
     const sidebarMentionUserId = sidebarEnabled ? mentionUserId : undefined;
 
-    const result = await runBeadSync({
+    const result = await runSyncWithStore({
       client,
       guild,
       forumId,
