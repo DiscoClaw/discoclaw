@@ -25,7 +25,7 @@ export function buildTaskContextSummary(
   if (!taskId || !store) return undefined;
   const task = store.get(taskId);
   if (!task) return undefined;
-  const lines = ['Bead context for this thread:'];
+  const lines = ['Task context for this thread:'];
   if (task.title) lines.push(`Title: ${task.title}`);
   let description: string | undefined;
   if (task.description) {
