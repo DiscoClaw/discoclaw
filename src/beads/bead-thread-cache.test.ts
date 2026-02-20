@@ -1,6 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { TaskStore } from '../tasks/store.js';
-import { BeadThreadCache } from './bead-thread-cache.js';
+import {
+  TaskThreadCache,
+  taskThreadCache,
+  findTaskByThreadId,
+} from '../tasks/thread-cache.js';
+import {
+  BeadThreadCache,
+  beadThreadCache,
+  findBeadByThreadId,
+} from './bead-thread-cache.js';
 
 function makeStore(tasks: Array<{ externalRef: string; title?: string }>): TaskStore {
   const store = new TaskStore({ prefix: 'ws' });
@@ -11,13 +20,13 @@ function makeStore(tasks: Array<{ externalRef: string; title?: string }>): TaskS
   return store;
 }
 
-describe('BeadThreadCache', () => {
+describe('TaskThreadCache', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('returns cached bead within TTL', async () => {
-    const cache = new BeadThreadCache(60_000);
+    const cache = new TaskThreadCache(60_000);
     const store = makeStore([{ externalRef: 'discord:thread-1' }]);
     const listSpy = vi.spyOn(store, 'list');
 
@@ -32,7 +41,7 @@ describe('BeadThreadCache', () => {
   });
 
   it('refetches after TTL expires', async () => {
-    const cache = new BeadThreadCache(0); // 0ms TTL = always expired
+    const cache = new TaskThreadCache(0); // 0ms TTL = always expired
     const store = makeStore([{ externalRef: 'discord:thread-1' }]);
     const listSpy = vi.spyOn(store, 'list');
 
@@ -45,7 +54,7 @@ describe('BeadThreadCache', () => {
   });
 
   it('invalidate() clears all entries', async () => {
-    const cache = new BeadThreadCache(60_000);
+    const cache = new TaskThreadCache(60_000);
     const store = makeStore([
       { externalRef: 'discord:thread-1' },
       { externalRef: 'discord:thread-2' },
@@ -63,7 +72,7 @@ describe('BeadThreadCache', () => {
   });
 
   it('invalidate(threadId) clears single entry', async () => {
-    const cache = new BeadThreadCache(60_000);
+    const cache = new TaskThreadCache(60_000);
     const store = makeStore([
       { externalRef: 'discord:thread-1' },
       { externalRef: 'discord:thread-2' },
@@ -83,7 +92,7 @@ describe('BeadThreadCache', () => {
   });
 
   it('returns null when no bead matches', async () => {
-    const cache = new BeadThreadCache(60_000);
+    const cache = new TaskThreadCache(60_000);
     const store = new TaskStore();
 
     const result = await cache.get('thread-1', store);
@@ -91,7 +100,7 @@ describe('BeadThreadCache', () => {
   });
 
   it('caches null results (negative cache)', async () => {
-    const cache = new BeadThreadCache(60_000);
+    const cache = new TaskThreadCache(60_000);
     const store = new TaskStore();
     const listSpy = vi.spyOn(store, 'list');
 
@@ -102,5 +111,11 @@ describe('BeadThreadCache', () => {
     expect(second).toBeNull();
     // Only one store.list call — the null was cached.
     expect(listSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps bead compatibility exports aligned to canonical task exports', () => {
+    expect(BeadThreadCache).toBe(TaskThreadCache);
+    expect(beadThreadCache).toBe(taskThreadCache);
+    expect(findBeadByThreadId).toBe(findTaskByThreadId);
   });
 });
