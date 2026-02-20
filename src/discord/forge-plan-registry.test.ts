@@ -8,6 +8,7 @@ import {
   removeRunningPlan,
   isPlanRunning,
   getRunningPlanIds,
+  waitForForgeCompletion,
   _resetForTest,
 } from './forge-plan-registry.js';
 
@@ -143,6 +144,73 @@ describe('running plan IDs', () => {
     addRunningPlan('plan-001');
     addRunningPlan('plan-001');
     expect(getRunningPlanIds().size).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Forge-completion gate
+// ---------------------------------------------------------------------------
+
+describe('waitForForgeCompletion', () => {
+  it('resolves immediately when no forge is active', async () => {
+    await expect(waitForForgeCompletion()).resolves.toBeUndefined();
+  });
+
+  it('waits while a forge is active, resolves on setActiveOrchestrator(null)', async () => {
+    const fake = { activePlanId: 'plan-001' } as any;
+    setActiveOrchestrator(fake);
+
+    let resolved = false;
+    const wait = waitForForgeCompletion().then(() => { resolved = true; });
+
+    await Promise.resolve(); // flush microtasks
+    expect(resolved).toBe(false);
+
+    setActiveOrchestrator(null);
+    await wait;
+    expect(resolved).toBe(true);
+  });
+
+  it('multiple concurrent waiters all resolve on forge completion', async () => {
+    const fake = { activePlanId: 'plan-001' } as any;
+    setActiveOrchestrator(fake);
+
+    const order: number[] = [];
+    const p1 = waitForForgeCompletion().then(() => order.push(1));
+    const p2 = waitForForgeCompletion().then(() => order.push(2));
+
+    setActiveOrchestrator(null);
+    await Promise.all([p1, p2]);
+    expect(order).toEqual([1, 2]);
+  });
+
+  it('resolves immediately when called after forge has already completed', async () => {
+    const fake = { activePlanId: 'plan-001' } as any;
+    setActiveOrchestrator(fake);
+    setActiveOrchestrator(null);
+
+    await expect(waitForForgeCompletion()).resolves.toBeUndefined();
+  });
+
+  it('gates a second forge run independently of the first', async () => {
+    const fake = { activePlanId: 'plan-001' } as any;
+
+    // First forge run.
+    setActiveOrchestrator(fake);
+    setActiveOrchestrator(null);
+
+    // Second forge run.
+    setActiveOrchestrator(fake);
+
+    let resolved = false;
+    const wait = waitForForgeCompletion().then(() => { resolved = true; });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    setActiveOrchestrator(null);
+    await wait;
+    expect(resolved).toBe(true);
   });
 });
 
