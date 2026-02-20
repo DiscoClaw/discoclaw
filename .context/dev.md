@@ -177,8 +177,8 @@ This is especially useful for systemd, where env loading can differ from your sh
 When the bot is running, task changes trigger Discord sync immediately via in-process events:
 
 - **Startup sync:** On boot, a fire-and-forget full sync runs to catch any drift that occurred while the bot was down.
-- **Synchronous events:** The in-process task store emits events on every write (`create`, `update`, `status-change`, `close`). Discord sync subscribers handle each event immediately — no file watcher, no debounce, no subprocess spawning.
-- **Coordinator:** All sync paths (event-driven, startup, manual `taskSync` action) share a `BeadSyncCoordinator` that prevents concurrent syncs and invalidates the thread cache. Auto-triggered syncs are silent; only manual sync posts to the status channel.
+- **Synchronous events:** The in-process task store emits events on every write (`created`, `updated`, `closed`, `labeled`). Discord sync subscribers handle each event immediately — no file watcher, no debounce, no subprocess spawning.
+- **Coordinator:** All sync paths (event-driven, startup, manual `taskSync` action) share a `TaskSyncCoordinator` that prevents concurrent syncs and invalidates the thread cache. Auto-triggered syncs are silent; only manual sync posts to the status channel.
 
 No extra env vars are needed — auto-sync activates whenever `DISCOCLAW_TASKS_ENABLED=1` and a guild is available.
 
