@@ -7,59 +7,66 @@ vi.mock('../discord/inflight-replies.js', () => ({
   hasInFlightForChannel: vi.fn(() => false),
 }));
 
-vi.mock('./discord-sync.js', () => {
-  const resolveTasksForum = vi.fn(async () => ({ threads: { fetchActive: vi.fn(async () => ({ threads: new Map() })), fetchArchived: vi.fn(async () => ({ threads: new Map() })) } }));
-  const createTaskThread = vi.fn(async () => 'thread-new');
-  const closeTaskThread = vi.fn(async () => {});
-  const isThreadArchived = vi.fn(async () => false);
-  const isTaskThreadAlreadyClosed = vi.fn(async () => false);
-  const updateTaskThreadName = vi.fn(async () => true);
-  const updateTaskStarterMessage = vi.fn(async () => true);
-  const updateTaskThreadTags = vi.fn(async () => false);
-  const getThreadIdFromTask = vi.fn((task: any) => {
-    const ref = (task.external_ref ?? '').trim();
-    if (!ref) return null;
-    if (ref.startsWith('discord:')) return ref.slice('discord:'.length);
-    if (/^\\d+$/.test(ref)) return ref;
-    return null;
-  });
-  const ensureUnarchived = vi.fn(async () => {});
-  const findExistingThreadForTask = vi.fn(async () => null);
-  const extractShortIdFromThreadName = vi.fn((name: string) => {
-    const m = name.match(/\[(\d+)\]/);
-    return m ? m[1] : null;
-  });
-  const shortTaskId = vi.fn((id: string) => {
-    const idx = id.indexOf('-');
-    return idx >= 0 ? id.slice(idx + 1) : id;
-  });
+var discordSyncMock: any;
+function makeDiscordSyncMock() {
+  if (!discordSyncMock) {
+    const resolveTasksForum = vi.fn(async () => ({ threads: { fetchActive: vi.fn(async () => ({ threads: new Map() })), fetchArchived: vi.fn(async () => ({ threads: new Map() })) } }));
+    const createTaskThread = vi.fn(async () => 'thread-new');
+    const closeTaskThread = vi.fn(async () => {});
+    const isThreadArchived = vi.fn(async () => false);
+    const isTaskThreadAlreadyClosed = vi.fn(async () => false);
+    const updateTaskThreadName = vi.fn(async () => true);
+    const updateTaskStarterMessage = vi.fn(async () => true);
+    const updateTaskThreadTags = vi.fn(async () => false);
+    const getThreadIdFromTask = vi.fn((task: any) => {
+      const ref = (task.external_ref ?? '').trim();
+      if (!ref) return null;
+      if (ref.startsWith('discord:')) return ref.slice('discord:'.length);
+      if (/^\\d+$/.test(ref)) return ref;
+      return null;
+    });
+    const ensureUnarchived = vi.fn(async () => {});
+    const findExistingThreadForTask = vi.fn(async () => null);
+    const extractShortIdFromThreadName = vi.fn((name: string) => {
+      const m = name.match(/\[(\d+)\]/);
+      return m ? m[1] : null;
+    });
+    const shortTaskId = vi.fn((id: string) => {
+      const idx = id.indexOf('-');
+      return idx >= 0 ? id.slice(idx + 1) : id;
+    });
 
-  return {
-    resolveTasksForum,
-    createTaskThread,
-    closeTaskThread,
-    isThreadArchived,
-    isTaskThreadAlreadyClosed,
-    updateTaskThreadName,
-    updateTaskStarterMessage,
-    updateTaskThreadTags,
-    getThreadIdFromTask,
-    ensureUnarchived,
-    findExistingThreadForTask,
-    extractShortIdFromThreadName,
-    shortTaskId,
-    resolveBeadsForum: resolveTasksForum,
-    createBeadThread: createTaskThread,
-    closeBeadThread: closeTaskThread,
-    isBeadThreadAlreadyClosed: isTaskThreadAlreadyClosed,
-    updateBeadThreadName: updateTaskThreadName,
-    updateBeadStarterMessage: updateTaskStarterMessage,
-    updateBeadThreadTags: updateTaskThreadTags,
-    getThreadIdFromBead: getThreadIdFromTask,
-    findExistingThreadForBead: findExistingThreadForTask,
-    shortBeadId: shortTaskId,
-  };
-});
+    discordSyncMock = {
+      resolveTasksForum,
+      createTaskThread,
+      closeTaskThread,
+      isThreadArchived,
+      isTaskThreadAlreadyClosed,
+      updateTaskThreadName,
+      updateTaskStarterMessage,
+      updateTaskThreadTags,
+      getThreadIdFromTask,
+      ensureUnarchived,
+      findExistingThreadForTask,
+      extractShortIdFromThreadName,
+      shortTaskId,
+      resolveBeadsForum: resolveTasksForum,
+      createBeadThread: createTaskThread,
+      closeBeadThread: closeTaskThread,
+      isBeadThreadAlreadyClosed: isTaskThreadAlreadyClosed,
+      updateBeadThreadName: updateTaskThreadName,
+      updateBeadStarterMessage: updateTaskStarterMessage,
+      updateBeadThreadTags: updateTaskThreadTags,
+      getThreadIdFromBead: getThreadIdFromTask,
+      findExistingThreadForBead: findExistingThreadForTask,
+      shortBeadId: shortTaskId,
+    };
+  }
+  return discordSyncMock;
+}
+
+vi.mock('./discord-sync.js', makeDiscordSyncMock);
+vi.mock('../tasks/discord-sync.js', makeDiscordSyncMock);
 
 function makeStore(tasks: any[] = []): any {
   const byId = new Map<string, any>(tasks.map((task) => [task.id, { ...task }]));
