@@ -5,6 +5,7 @@ import {
   editThenSendChunks,
   replyThenSendChunks,
   sendChunks,
+  shouldSuppressFollowUp,
 } from './output-common.js';
 import type { ImageData } from '../runtime/types.js';
 
@@ -132,6 +133,42 @@ describe('replyThenSendChunks with images', () => {
     await replyThenSendChunks(message, '');
     expect(message.reply).toHaveBeenCalledOnce();
     expect(message.reply.mock.calls[0][0].content).toBe('(no output)');
+  });
+});
+
+describe('shouldSuppressFollowUp', () => {
+  it('suppresses when text is short and all counts are zero', () => {
+    expect(shouldSuppressFollowUp('hi', 0, 0, 0)).toBe(true);
+  });
+
+  it('suppresses when text is empty and all counts are zero', () => {
+    expect(shouldSuppressFollowUp('', 0, 0, 0)).toBe(true);
+  });
+
+  it('suppresses when whitespace-collapsed text is under 50 chars', () => {
+    const text = '   a   b   c   '; // collapses to "a b c" (5 chars)
+    expect(shouldSuppressFollowUp(text, 0, 0, 0)).toBe(true);
+  });
+
+  it('does not suppress when text is 50 chars or more', () => {
+    const text = 'A'.repeat(50);
+    expect(shouldSuppressFollowUp(text, 0, 0, 0)).toBe(false);
+  });
+
+  it('does not suppress when actionsCount > 0', () => {
+    expect(shouldSuppressFollowUp('hi', 1, 0, 0)).toBe(false);
+  });
+
+  it('does not suppress when imagesCount > 0', () => {
+    expect(shouldSuppressFollowUp('hi', 0, 1, 0)).toBe(false);
+  });
+
+  it('does not suppress when strippedUnrecognizedCount > 0, even with short text', () => {
+    expect(shouldSuppressFollowUp('', 0, 0, 1)).toBe(false);
+  });
+
+  it('does not suppress when strippedUnrecognizedCount > 0, even with zero actions and images', () => {
+    expect(shouldSuppressFollowUp('short', 0, 0, 3)).toBe(false);
   });
 });
 

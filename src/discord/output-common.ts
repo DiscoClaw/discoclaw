@@ -139,6 +139,28 @@ export async function replyThenSendChunks(
   }
 }
 
+/**
+ * Decides whether a follow-up placeholder message should be suppressed.
+ *
+ * Suppress when there is effectively no output: no actions, no images, no
+ * stripped-unrecognized blocks, and the cleaned text is under 50 chars.
+ *
+ * Never suppress when strippedUnrecognizedCount > 0 — the AI tried to act
+ * but the action type was unknown/disabled, so the user must see "(no output)"
+ * rather than a silent delete.
+ */
+export function shouldSuppressFollowUp(
+  processedText: string,
+  actionsCount: number,
+  imagesCount: number,
+  strippedUnrecognizedCount: number,
+): boolean {
+  if (strippedUnrecognizedCount > 0) return false;
+  if (actionsCount > 0 || imagesCount > 0) return false;
+  const chars = processedText.replace(/\s+/g, ' ').trim().length;
+  return chars < 50;
+}
+
 export async function sendChunks(
   channel: { send: (opts: SendOpts) => Promise<unknown> },
   text: string,
