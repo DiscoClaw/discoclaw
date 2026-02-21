@@ -355,6 +355,9 @@ const tasksSidebar = cfg.tasksSidebar;
 const sidebarMentionUserId = tasksSidebar ? tasksMentionUser : undefined;
 const tasksAutoTag = cfg.tasksAutoTag;
 let tasksAutoTagModel = cfg.tasksAutoTagModel;
+const tasksSyncFailureRetryEnabled = cfg.tasksSyncFailureRetryEnabled;
+const tasksSyncFailureRetryDelayMs = cfg.tasksSyncFailureRetryDelayMs;
+const tasksSyncDeferredRetryDelayMs = cfg.tasksSyncDeferredRetryDelayMs;
 const discordActionsTasks = cfg.discordActionsTasks;
 const tasksPrefix = cfg.tasksPrefix;
 
@@ -941,6 +944,9 @@ if (tasksEnabled) {
     tasksSidebar,
     tasksAutoTag,
     tasksAutoTagModel,
+    tasksSyncFailureRetryEnabled,
+    tasksSyncFailureRetryDelayMs,
+    tasksSyncDeferredRetryDelayMs,
     runtime,
     statusPoster: botStatus ?? undefined,
     log,

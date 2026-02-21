@@ -27,6 +27,9 @@ describe('parseConfig', () => {
     expect(config.cronModel).toBe('fast');
     expect(config.cronAutoTagModel).toBe('fast');
     expect(config.tasksAutoTagModel).toBe('fast');
+    expect(config.tasksSyncFailureRetryEnabled).toBe(true);
+    expect(config.tasksSyncFailureRetryDelayMs).toBe(30_000);
+    expect(config.tasksSyncDeferredRetryDelayMs).toBe(30_000);
     expect(config.outputFormat).toBe('text');
     expect(warnings.some((w) => w.includes('category flags are ignored'))).toBe(false);
     expect(infos.some((i) => i.includes('category flags are ignored'))).toBe(false);
@@ -476,6 +479,9 @@ describe('parseConfig', () => {
       DISCOCLAW_TASKS_AUTO_TAG_MODEL: 'fast',
       DISCOCLAW_TASKS_PREFIX: 'dev',
       DISCOCLAW_TASKS_SYNC_SKIP_PHASE5: '1',
+      DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_ENABLED: '0',
+      DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_DELAY_MS: '12000',
+      DISCOCLAW_TASKS_SYNC_DEFERRED_RETRY_DELAY_MS: '18000',
     }));
 
     expect(config.tasksEnabled).toBe(false);
@@ -488,6 +494,16 @@ describe('parseConfig', () => {
     expect(config.tasksAutoTagModel).toBe('fast');
     expect(config.tasksPrefix).toBe('dev');
     expect(config.tasksSyncSkipPhase5).toBe(true);
+    expect(config.tasksSyncFailureRetryEnabled).toBe(false);
+    expect(config.tasksSyncFailureRetryDelayMs).toBe(12000);
+    expect(config.tasksSyncDeferredRetryDelayMs).toBe(18000);
+  });
+
+  it('rejects non-positive task sync retry delay values', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_DELAY_MS: '0' })))
+      .toThrow(/DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_DELAY_MS must be a positive number/);
+    expect(() => parseConfig(env({ DISCOCLAW_TASKS_SYNC_DEFERRED_RETRY_DELAY_MS: '-1' })))
+      .toThrow(/DISCOCLAW_TASKS_SYNC_DEFERRED_RETRY_DELAY_MS must be a positive number/);
   });
 
   // --- Verbose CLI flag ---

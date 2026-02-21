@@ -23,6 +23,9 @@ export type InitializeTasksOpts = {
   tasksSidebar?: boolean;
   tasksAutoTag?: boolean;
   tasksAutoTagModel?: string;
+  tasksSyncFailureRetryEnabled?: boolean;
+  tasksSyncFailureRetryDelayMs?: number;
+  tasksSyncDeferredRetryDelayMs?: number;
   runtime: RuntimeAdapter;
   statusPoster?: StatusPoster;
   log: LoggerLike;
@@ -92,6 +95,9 @@ export async function initializeTasksContext(
     sidebarMentionUserId,
     statusPoster: opts.statusPoster,
     log: opts.log,
+    syncFailureRetryEnabled: opts.tasksSyncFailureRetryEnabled,
+    syncFailureRetryDelayMs: opts.tasksSyncFailureRetryDelayMs,
+    syncDeferredRetryDelayMs: opts.tasksSyncDeferredRetryDelayMs,
   };
 
   return { taskCtx };
@@ -114,6 +120,12 @@ export type WireTaskSyncOpts = {
   skipForumGuard?: boolean;
   /** Disable Phase 5 (thread reconciliation) of the task sync cycle. */
   skipPhase5?: boolean;
+  /** Enable/disable failure-triggered retries after sync errors. */
+  syncFailureRetryEnabled?: boolean;
+  /** Delay before retrying after sync failure. */
+  syncFailureRetryDelayMs?: number;
+  /** Delay before retrying deferred closes. */
+  syncDeferredRetryDelayMs?: number;
 };
 
 export type WireTaskSyncResult = {
@@ -134,6 +146,15 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSync
   // Preserve wire-time sidebar mention override for coordinator-triggered syncs.
   if (opts.sidebarMentionUserId !== undefined) {
     opts.taskCtx.sidebarMentionUserId = opts.sidebarMentionUserId;
+  }
+  if (opts.syncFailureRetryEnabled !== undefined) {
+    opts.taskCtx.syncFailureRetryEnabled = opts.syncFailureRetryEnabled;
+  }
+  if (opts.syncFailureRetryDelayMs !== undefined) {
+    opts.taskCtx.syncFailureRetryDelayMs = opts.syncFailureRetryDelayMs;
+  }
+  if (opts.syncDeferredRetryDelayMs !== undefined) {
+    opts.taskCtx.syncDeferredRetryDelayMs = opts.syncDeferredRetryDelayMs;
   }
 
   const syncCoordinator = await ensureTaskSyncCoordinator(

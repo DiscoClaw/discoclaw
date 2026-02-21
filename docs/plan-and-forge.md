@@ -727,6 +727,9 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | Variable | Default | Parser | Description |
 |----------|---------|--------|-------------|
 | `DISCOCLAW_TASKS_SYNC_SKIP_PHASE5` | `false` | `parseBoolean` | Disable Phase 5 (thread reconciliation) of the task sync cycle. When `true`, the sync will not archive orphaned forum threads or reconcile thread state against tasks. Recommended for shared-forum deployments where multiple bot instances or manual Discord activity may create threads that should not be auto-archived. Passed through to sync options in `src/tasks/task-sync-engine.ts`. |
+| `DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_ENABLED` | `true` | `parseBoolean` | Enable/disable failure-triggered retries in `TaskSyncCoordinator` when a sync run throws. |
+| `DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_DELAY_MS` | `30000` | `parsePositiveInt` | Delay before running a failure retry after a sync error. |
+| `DISCOCLAW_TASKS_SYNC_DEFERRED_RETRY_DELAY_MS` | `30000` | `parsePositiveInt` | Delay before running deferred-close retries when sync reports `closesDeferred > 0`. |
 
 ---
 

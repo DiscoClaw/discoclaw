@@ -126,6 +126,9 @@ export type DiscoclawConfig = {
   tasksAutoTag: boolean;
   tasksAutoTagModel: string;
   tasksSyncSkipPhase5: boolean;
+  tasksSyncFailureRetryEnabled: boolean;
+  tasksSyncFailureRetryDelayMs: number;
+  tasksSyncDeferredRetryDelayMs: number;
   tasksPrefix: string;
 
   runtimeFallbackModel?: string;
@@ -431,6 +434,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const tasksAutoTag = parseBoolean(env, 'DISCOCLAW_TASKS_AUTO_TAG', true);
   const tasksAutoTagModel = parseTrimmedString(env, 'DISCOCLAW_TASKS_AUTO_TAG_MODEL') ?? fastModel;
   const tasksSyncSkipPhase5 = parseBoolean(env, 'DISCOCLAW_TASKS_SYNC_SKIP_PHASE5', false);
+  const tasksSyncFailureRetryEnabled = parseBoolean(env, 'DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_ENABLED', true);
+  const tasksSyncFailureRetryDelayMs = parsePositiveInt(env, 'DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_DELAY_MS', 30_000);
+  const tasksSyncDeferredRetryDelayMs = parsePositiveInt(env, 'DISCOCLAW_TASKS_SYNC_DEFERRED_RETRY_DELAY_MS', 30_000);
   const tasksPrefix = parseTrimmedString(env, 'DISCOCLAW_TASKS_PREFIX') ?? 'ws';
 
   return {
@@ -565,6 +571,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       tasksAutoTag,
       tasksAutoTagModel,
       tasksSyncSkipPhase5,
+      tasksSyncFailureRetryEnabled,
+      tasksSyncFailureRetryDelayMs,
+      tasksSyncDeferredRetryDelayMs,
       tasksPrefix,
 
       claudeBin: parseTrimmedString(env, 'CLAUDE_BIN') ?? 'claude',
