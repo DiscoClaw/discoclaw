@@ -33,6 +33,10 @@ export type TaskSyncRunContext = {
   guild: Guild;
 };
 
+export type TaskSyncWiring = {
+  stop(): void;
+};
+
 export async function ensureTaskSyncCoordinator(
   taskCtx: TaskSyncContext,
   runCtx: TaskSyncRunContext,
@@ -74,7 +78,7 @@ export function wireTaskStoreSyncTriggers(
   taskCtx: TaskSyncContext,
   syncCoordinator: TaskSyncCoordinatorLike,
   log: LoggerLike,
-): { stop(): void } {
+): TaskSyncWiring {
   const triggerSync = (eventName: string, taskId?: string) => {
     syncCoordinator.sync().catch((err) => {
       log.warn({ err, eventName, taskId }, 'tasks:store-event sync failed');
