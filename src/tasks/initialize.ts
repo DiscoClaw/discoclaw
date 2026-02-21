@@ -5,7 +5,7 @@ import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
 import { createTaskService } from './service.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
-import type { TaskSyncRunContext, TaskSyncWiring } from './task-sync.js';
+import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './task-sync.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
 import { loadTagMap } from './discord-sync.js';
 
@@ -21,7 +21,7 @@ export type InitializeTasksOpts = {
   tasksSidebar?: boolean;
   tasksAutoTag?: boolean;
   tasksAutoTagModel?: string;
-  tasksSyncSkipPhase5?: boolean;
+  syncRunOptions?: TaskSyncRunOptions;
   tasksSyncFailureRetryEnabled?: boolean;
   tasksSyncFailureRetryDelayMs?: number;
   tasksSyncDeferredRetryDelayMs?: number;
@@ -97,7 +97,7 @@ export async function initializeTasksContext(
     syncFailureRetryEnabled: opts.tasksSyncFailureRetryEnabled,
     syncFailureRetryDelayMs: opts.tasksSyncFailureRetryDelayMs,
     syncDeferredRetryDelayMs: opts.tasksSyncDeferredRetryDelayMs,
-    syncRunOptions: { skipPhase5: opts.tasksSyncSkipPhase5 },
+    syncRunOptions: opts.syncRunOptions,
   };
 
   return { taskCtx };

@@ -947,7 +947,7 @@ if (tasksEnabled) {
     tasksSidebar,
     tasksAutoTag,
     tasksAutoTagModel,
-    tasksSyncSkipPhase5: cfg.tasksSyncSkipPhase5,
+    syncRunOptions: { skipPhase5: cfg.tasksSyncSkipPhase5 },
     tasksSyncFailureRetryEnabled,
     tasksSyncFailureRetryDelayMs,
     tasksSyncDeferredRetryDelayMs,

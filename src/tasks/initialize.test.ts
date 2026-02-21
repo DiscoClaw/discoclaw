@@ -129,7 +129,7 @@ describe('initializeTasksContext', () => {
 
   it('stores sync run options on TaskContext', async () => {
     const result = await initializeTasksContext(baseOpts({
-      tasksSyncSkipPhase5: true,
+      syncRunOptions: { skipPhase5: true },
     }));
     expect(result.taskCtx).toBeDefined();
     expect(result.taskCtx!.syncRunOptions).toEqual({ skipPhase5: true });
