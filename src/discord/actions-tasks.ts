@@ -101,6 +101,9 @@ export type TaskContext = {
   log?: LoggerLike;
   syncCoordinator?: TaskSyncCoordinatorLike;
   forumCountSync?: ForumCountSync;
+  syncFailureRetryEnabled?: boolean;
+  syncFailureRetryDelayMs?: number;
+  syncDeferredRetryDelayMs?: number;
 };
 
 function resolveTaskService(taskCtx: TaskContext): TaskService {

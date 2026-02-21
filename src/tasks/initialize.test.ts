@@ -149,6 +149,9 @@ describe('wireTaskSync', () => {
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       store,
+      syncFailureRetryEnabled: false,
+      syncFailureRetryDelayMs: 12_000,
+      syncDeferredRetryDelayMs: 18_000,
       log,
     } as any;
     const client = {} as any;
@@ -177,6 +180,9 @@ describe('wireTaskSync', () => {
         guild,
         forumId: 'forum-123',
         mentionUserId: 'user-1',
+        enableFailureRetry: false,
+        failureRetryDelayMs: 12_000,
+        deferredRetryDelayMs: 18_000,
       }),
     );
     // The coordinator's sync() should have been called (fire-and-forget startup sync).
@@ -349,6 +355,40 @@ describe('wireTaskSync', () => {
       expect.objectContaining({
         tagMapPath: '/config/tag-map.json',
         tagMap,
+      }),
+    );
+  });
+
+  it('propagates sync retry configuration to CoordinatorOptions', async () => {
+    const log = fakeLog();
+    const store = new TaskStore();
+    const taskCtx = {
+      tasksCwd: '/tmp/tasks',
+      forumId: 'forum-123',
+      tagMap: { bug: '111' },
+      store,
+      log,
+    } as any;
+
+    vi.mocked(TaskSyncCoordinator).mockClear();
+
+    await wireTaskSync({
+      taskCtx,
+      client: {} as any,
+      guild: {} as any,
+      guildId: 'guild-1',
+      tasksCwd: '/tmp/tasks',
+      log,
+      syncFailureRetryEnabled: false,
+      syncFailureRetryDelayMs: 12_000,
+      syncDeferredRetryDelayMs: 18_000,
+    });
+
+    expect(TaskSyncCoordinator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enableFailureRetry: false,
+        failureRetryDelayMs: 12_000,
+        deferredRetryDelayMs: 18_000,
       }),
     );
   });

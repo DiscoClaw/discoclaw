@@ -23,6 +23,9 @@ export type TaskSyncContext = {
   sidebarMentionUserId?: string;
   forumCountSync?: ForumCountSync;
   syncCoordinator?: TaskSyncCoordinatorLike;
+  syncFailureRetryEnabled?: boolean;
+  syncFailureRetryDelayMs?: number;
+  syncDeferredRetryDelayMs?: number;
 };
 
 export type TaskSyncRunContext = {
@@ -49,6 +52,9 @@ export async function ensureTaskSyncCoordinator(
     mentionUserId: taskCtx.sidebarMentionUserId,
     forumCountSync: taskCtx.forumCountSync,
     skipPhase5: opts?.skipPhase5,
+    enableFailureRetry: taskCtx.syncFailureRetryEnabled,
+    failureRetryDelayMs: taskCtx.syncFailureRetryDelayMs,
+    deferredRetryDelayMs: taskCtx.syncDeferredRetryDelayMs,
   });
   taskCtx.syncCoordinator = syncCoordinator;
   return syncCoordinator;

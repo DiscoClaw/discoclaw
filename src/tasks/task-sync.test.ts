@@ -30,6 +30,9 @@ function makeTaskCtx() {
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     sidebarMentionUserId: 'user-123',
     forumCountSync: { requestUpdate: vi.fn(), stop: vi.fn() },
+    syncFailureRetryEnabled: false,
+    syncFailureRetryDelayMs: 12_000,
+    syncDeferredRetryDelayMs: 18_000,
   };
 }
 
@@ -55,6 +58,9 @@ describe('task-sync coordinator helpers', () => {
         tagMapPath: '/tmp/tag-map.json',
         mentionUserId: 'user-123',
         skipPhase5: true,
+        enableFailureRetry: false,
+        failureRetryDelayMs: 12_000,
+        deferredRetryDelayMs: 18_000,
       }),
     );
   });
