@@ -8,17 +8,15 @@ import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import { createTaskService } from './service.js';
 import {
-  ingestTaskThreadSnapshots,
   ingestTaskSyncSnapshot,
   normalizeTaskSyncBuckets,
   planTaskApplyPhases,
-  planTaskReconcileFromSnapshots,
+  planTaskReconcileFromThreadSources,
   planTaskSyncOperations,
   type TaskThreadLike,
   type TaskReconcileAction,
   type TaskReconcileOperation,
   type TaskSyncOperationPhase,
-  type TaskThreadSnapshot,
 } from './task-sync-pipeline.js';
 import { withTaskLifecycleLock } from './task-lifecycle.js';
 import {
@@ -423,15 +421,10 @@ async function applyPhase5ReconcileThreads(
       ctx.counters.warnings++;
     }
 
-    const activeThreadsMap = activeThreads.threads as Map<string, TaskThreadLike>;
-    const threadSnapshots: TaskThreadSnapshot[] = ingestTaskThreadSnapshots(
-      archivedThreads.values(),
-      activeThreadsMap.values(),
-    );
-
-    const plannedReconcileOps = planTaskReconcileFromSnapshots({
+    const plannedReconcileOps = planTaskReconcileFromThreadSources({
       tasks: allTasks,
-      threads: threadSnapshots,
+      archivedThreads: archivedThreads.values(),
+      activeThreads: (activeThreads.threads as Map<string, TaskThreadLike>).values(),
       shortIdOfTaskId: shortTaskId,
       shortIdFromThreadName: extractShortIdFromThreadName,
       threadIdFromTask: getThreadIdFromTask,

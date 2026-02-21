@@ -52,3 +52,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 3 by introducing explicit apply-phase planning (`planTaskApplyPhases`) and refactoring Stage 4 execution to iterate a declarative phase->executor map in `task-sync-engine`.
 - 2026-02-21: Continued Track 3 by extracting Phase 5 thread ingest/merge normalization (`ingestTaskThreadSnapshots`) into `task-sync-pipeline`, keeping active-thread precedence behavior explicit and test-covered.
 - 2026-02-21: Continued Track 3 by extracting Phase 5 reconcile diff planning from the engine into `planTaskReconcileFromSnapshots`, so phase-5 task+thread diff logic is fully pipeline-owned.
+- 2026-02-21: Continued Track 3 by composing phase-5 thread-source ingest + diff planning in pipeline (`planTaskReconcileFromThreadSources`), reducing phase-5 planning glue in `task-sync-engine`.
