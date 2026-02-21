@@ -63,9 +63,13 @@ function makeScheduler(jobs: Array<{ id: string; threadId: string; cronId: strin
       jobMap.set(args[0], newJob);
       return newJob;
     }),
-    unregister: vi.fn((id: string) => { jobMap.delete(id); return true; }),
-    disable: vi.fn(() => true),
-    enable: vi.fn(() => true),
+    unregister: vi.fn((id: string) => {
+      const existed = jobMap.has(id);
+      jobMap.delete(id);
+      return existed;
+    }),
+    disable: vi.fn((id: string) => jobMap.has(id)),
+    enable: vi.fn((id: string) => jobMap.has(id)),
     getJob: (id: string) => jobMap.get(id),
     listJobs: () => Array.from(jobMap.values()).map((j: any) => ({ id: j.id, name: j.name, schedule: j.def.schedule, timezone: j.def.timezone, nextRun: null })),
   } as unknown as CronScheduler;
@@ -191,11 +195,25 @@ describe('executeCronAction', () => {
     expect(cronCtx.scheduler.disable).toHaveBeenCalledWith('thread-1');
   });
 
+  it('cronPause returns error when scheduler job is missing', async () => {
+    const cronCtx = makeCronCtx({ scheduler: makeScheduler([]) });
+    const result = await executeCronAction({ type: 'cronPause', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('not registered in scheduler');
+  });
+
   it('cronResume enables the job', async () => {
     const cronCtx = makeCronCtx();
     const result = await executeCronAction({ type: 'cronResume', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
     expect(result.ok).toBe(true);
     expect(cronCtx.scheduler.enable).toHaveBeenCalledWith('thread-1');
+  });
+
+  it('cronResume returns error when scheduler job is missing', async () => {
+    const cronCtx = makeCronCtx({ scheduler: makeScheduler([]) });
+    const result = await executeCronAction({ type: 'cronResume', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('not registered in scheduler');
   });
 
   it('cronDelete unregisters and archives', async () => {
@@ -302,6 +320,48 @@ describe('executeCronAction', () => {
     if (result.ok) expect(result.summary).toContain('New Cron');
   });
 
+  it('cronCreate rejects invalid schedule before creating a thread', async () => {
+    const invoke = vi.fn(async function* () {
+      yield { type: 'text_final' as const, text: 'monitoring' };
+    });
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke,
+    };
+    const cronCtx = makeCronCtx({ runtime });
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'Bad Cron', schedule: 'not-a-cron', channel: 'general', prompt: 'Do something' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('Invalid cron definition');
+    expect(cronCtx.scheduler.register).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+
+    const forum = (cronCtx.client.channels.cache.get as ReturnType<typeof vi.fn>)('forum-1');
+    expect(forum.threads.create).not.toHaveBeenCalled();
+  });
+
+  it('cronCreate reports timezone validation errors as definition errors', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      {
+        type: 'cronCreate',
+        name: 'TZ Fail',
+        schedule: '0 7 * * *',
+        timezone: 'Not/A_Real_Timezone',
+        channel: 'general',
+        prompt: 'Do something',
+      },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('Invalid cron definition');
+  });
+
   it('cronUpdate returns error for unknown cronId', async () => {
     const cronCtx = makeCronCtx();
     const result = await executeCronAction({ type: 'cronUpdate', cronId: 'cron-nope' }, makeActionCtx(), cronCtx);
@@ -313,6 +373,23 @@ describe('executeCronAction', () => {
     const result = await executeCronAction({ type: 'cronUpdate', cronId: 'cron-test0001', model: 'opus' }, makeActionCtx(), cronCtx);
     expect(result.ok).toBe(true);
     expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith('cron-test0001', 'thread-1', expect.objectContaining({ modelOverride: 'opus' }));
+  });
+
+  it('cronUpdate rejects invalid schedule before thread edits or scheduler mutation', async () => {
+    const cronCtx = makeCronCtx();
+    const thread = (cronCtx.client.channels.cache.get as ReturnType<typeof vi.fn>)('thread-1');
+    const starter = { author: { id: 'bot-user' }, edit: vi.fn() };
+    thread.fetchStarterMessage = vi.fn(async () => starter);
+
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', schedule: 'bad-schedule' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('Invalid cron definition');
+    expect(starter.edit).not.toHaveBeenCalled();
+    expect(cronCtx.scheduler.register).not.toHaveBeenCalled();
   });
 
   it('cronCreate without timezone uses getDefaultTimezone', async () => {

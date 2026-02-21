@@ -66,8 +66,8 @@ function makeScheduler(jobs: Array<{ id: string; threadId: string; cronId: strin
   } as unknown as CronScheduler;
 }
 
-function makeForum(threads: Array<{ id: string; name: string; parentId: string }>) {
-  const threadMap = new Map(threads.map((t) => [t.id, { ...t, edit: vi.fn(), setName: vi.fn() }]));
+function makeForum(threads: Array<{ id: string; name: string; parentId: string; appliedTags?: string[] }>) {
+  const threadMap = new Map(threads.map((t) => [t.id, { ...t, appliedTags: t.appliedTags ?? [], edit: vi.fn(), setName: vi.fn() }]));
   return {
     id: 'forum-1',
     type: ChannelType.GuildForum,
@@ -144,6 +144,37 @@ describe('runCronSync', () => {
     });
 
     expect(result.tagsApplied).toBe(1);
+  });
+
+  it('phase 1: reconciles applied tags when tag-map IDs change', async () => {
+    const forum = makeForum([{ id: 'thread-1', name: 'Test Job', parentId: 'forum-1', appliedTags: ['old-tag', 'daily-old'] }]);
+    const client = makeClient(forum);
+    const record = makeRecord({
+      cronId: 'cron-1',
+      threadId: 'thread-1',
+      cadence: 'daily',
+      purposeTags: ['monitoring'],
+      model: 'fast',
+    });
+    const scheduler = makeScheduler([{ id: 'thread-1', threadId: 'thread-1', cronId: 'cron-1', name: 'Test Job', schedule: '0 7 * * *', prompt: 'Monitor health' }]);
+
+    const result = await runCronSync({
+      client: client as any,
+      forumId: 'forum-1',
+      scheduler,
+      statsStore: makeStatsStore([record]),
+      runtime: makeMockRuntime('monitoring'),
+      tagMap: { ...defaultTagMap },
+      autoTag: true,
+      autoTagModel: 'haiku',
+      cwd: '/tmp',
+      log: mockLog(),
+      throttleMs: 0,
+    });
+
+    expect(result.tagsApplied).toBe(1);
+    const thread = (await forum.threads.fetchActive()).threads.get('thread-1') as any;
+    expect(thread.edit).toHaveBeenCalledWith({ appliedTags: ['tag-1', 'tag-3'] });
   });
 
   it('phase 2: updates thread names with cadence emoji', async () => {
