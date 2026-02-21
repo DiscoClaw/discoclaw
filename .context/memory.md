@@ -109,7 +109,7 @@ Bot:   Cool, platform work! What's your first project?
 `src/discord/shortterm-memory.ts`
 
 Records brief summaries of recent exchanges across public guild channels.
-Entries expire after 6 hours (configurable). Only logs public channels. Off by default.
+Entries expire after 6 hours (configurable). Only logs public channels. On by default.
 
 **What the user sees:**
 - The bot knows what you were just doing in other channels.
@@ -128,7 +128,7 @@ Bot:   Sure — is this related to the auth middleware test you were debugging
        in #dev? The token format issue might be connected to expiry handling.
 ```
 
-**Config:** `DISCOCLAW_SHORTTERM_MEMORY_ENABLED=true` to enable.
+**Config:** `DISCOCLAW_SHORTTERM_MEMORY_ENABLED=false` to disable.
 
 ### 6. Workspace Files — human-curated memory
 
@@ -163,7 +163,7 @@ no separator). The three memory builders run in `Promise.all` so they add no lat
 | Durable memory | 2000 chars | on | Sorts active items by recency, adds one at a time, stops when next line would exceed budget. Older facts silently excluded. |
 | Rolling summary | 2000 chars | on | The `fast`-tier model is prompted with `"Keep the summary under {maxChars} characters"`. Replaces itself each update rather than growing. |
 | Message history | 3000 chars | on | Fetches up to 10 messages, walks backward from newest. Bot messages truncated to fit; user messages that don't fit cause a hard stop. |
-| Short-term memory | 1000 chars | **off** | Filters by max age (default 6h), sorts newest-first, accumulates lines until budget hit. |
+| Short-term memory | 1000 chars | **on** | Filters by max age (default 6h), sorts newest-first, accumulates lines until budget hit. |
 | Auto-extraction | n/a | **off** | Write-side only — extracts facts for future prompts, adds nothing to the current turn. |
 | Workspace files | no budget | on (DMs only) | Loaded as file paths, not inlined. The runtime reads them on demand. |
 
@@ -247,7 +247,7 @@ Short-term entries also store `channelId` alongside the existing `channelName`.
 | `DISCOCLAW_DURABLE_MAX_ITEMS` | `200` | Durable memory |
 | `DISCOCLAW_MEMORY_COMMANDS_ENABLED` | `true` | Memory commands |
 | `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED` | `false` | Auto-extraction |
-| `DISCOCLAW_SHORTTERM_MEMORY_ENABLED` | `false` | Short-term memory |
+| `DISCOCLAW_SHORTTERM_MEMORY_ENABLED` | `true` | Short-term memory |
 | `DISCOCLAW_SHORTTERM_MAX_ENTRIES` | `20` | Short-term memory |
 | `DISCOCLAW_SHORTTERM_MAX_AGE_HOURS` | `6` | Short-term memory |
 | `DISCOCLAW_SHORTTERM_INJECT_MAX_CHARS` | `1000` | Short-term memory |
