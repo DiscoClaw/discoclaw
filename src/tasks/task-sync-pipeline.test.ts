@@ -3,6 +3,7 @@ import type { TaskData } from './types.js';
 import {
   buildTasksByShortIdMap,
   ingestTaskSyncSnapshot,
+  operationTaskIdList,
   normalizeTaskSyncBuckets,
   operationTaskIdSet,
   planTaskSyncOperations,
@@ -71,6 +72,8 @@ describe('task-sync pipeline helpers', () => {
     ]);
     expect(operationTaskIdSet(operations, 'phase1')).toEqual(new Set(['ws-001', 'ws-002']));
     expect(operationTaskIdSet(operations, 'phase4')).toEqual(new Set(['ws-005']));
+    expect(operationTaskIdList(operations, 'phase1')).toEqual(['ws-001', 'ws-002']);
+    expect(operationTaskIdList(operations, 'phase3')).toEqual(['ws-004']);
   });
 
   it('builds a short-id lookup map for reconciliation', () => {

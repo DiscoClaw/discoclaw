@@ -92,6 +92,21 @@ export function operationTaskIdSet(
   return ids;
 }
 
+/**
+ * Stage: apply dispatch
+ * Ordered task IDs for a given phase, preserving diff-plan sequence.
+ */
+export function operationTaskIdList(
+  operations: TaskSyncOperation[],
+  phase: TaskSyncOperationPhase,
+): string[] {
+  const ids: string[] = [];
+  for (const operation of operations) {
+    if (operation.phase === phase) ids.push(operation.taskId);
+  }
+  return ids;
+}
+
 export function buildTasksByShortIdMap(
   allTasks: TaskData[],
   shortIdOf: (taskId: string) => string,

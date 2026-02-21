@@ -11,7 +11,7 @@ import {
   buildTasksByShortIdMap,
   ingestTaskSyncSnapshot,
   normalizeTaskSyncBuckets,
-  operationTaskIdSet,
+  operationTaskIdList,
   planTaskSyncOperations,
 } from './task-sync-pipeline.js';
 import { withTaskLifecycleLock } from './task-lifecycle.js';
@@ -97,11 +97,12 @@ async function sleep(ms: number | undefined): Promise<void> {
 
 async function applyPhase1CreateMissingThreads(
   ctx: TaskSyncApplyContext,
-  tasksMissingRef: TaskData[],
-  plannedTaskIds: Set<string>,
+  tasksById: Map<string, TaskData>,
+  plannedTaskIds: string[],
 ): Promise<void> {
-  for (const task of tasksMissingRef) {
-    if (!plannedTaskIds.has(task.id)) continue;
+  for (const taskId of plannedTaskIds) {
+    const task = tasksById.get(taskId);
+    if (!task) continue;
     await withTaskLifecycleLock(task.id, async () => {
       const latestTask = ctx.store.get(task.id) ?? task;
       if (
@@ -154,11 +155,12 @@ async function applyPhase1CreateMissingThreads(
 
 async function applyPhase2FixBlockedStatus(
   ctx: TaskSyncApplyContext,
-  needsBlockedTasks: TaskData[],
-  plannedTaskIds: Set<string>,
+  tasksById: Map<string, TaskData>,
+  plannedTaskIds: string[],
 ): Promise<void> {
-  for (const task of needsBlockedTasks) {
-    if (!plannedTaskIds.has(task.id)) continue;
+  for (const taskId of plannedTaskIds) {
+    const task = tasksById.get(taskId);
+    if (!task) continue;
     try {
       ctx.taskService.update(task.id, { status: 'blocked' as any });
       task.status = 'blocked';
@@ -174,11 +176,12 @@ async function applyPhase2FixBlockedStatus(
 
 async function applyPhase3SyncActiveThreads(
   ctx: TaskSyncApplyContext,
-  tasksWithRef: TaskData[],
-  plannedTaskIds: Set<string>,
+  tasksById: Map<string, TaskData>,
+  plannedTaskIds: string[],
 ): Promise<void> {
-  for (const task of tasksWithRef) {
-    if (!plannedTaskIds.has(task.id)) continue;
+  for (const taskId of plannedTaskIds) {
+    const task = tasksById.get(taskId);
+    if (!task) continue;
     await withTaskLifecycleLock(task.id, async () => {
       const latestTask = ctx.store.get(task.id) ?? task;
       const threadId = getThreadIdFromTask(latestTask);
@@ -235,11 +238,12 @@ async function applyPhase3SyncActiveThreads(
 
 async function applyPhase4ArchiveClosedThreads(
   ctx: TaskSyncApplyContext,
-  closedTasks: TaskData[],
-  plannedTaskIds: Set<string>,
+  tasksById: Map<string, TaskData>,
+  plannedTaskIds: string[],
 ): Promise<void> {
-  for (const task of closedTasks) {
-    if (!plannedTaskIds.has(task.id)) continue;
+  for (const taskId of plannedTaskIds) {
+    const task = tasksById.get(taskId);
+    if (!task) continue;
     await withTaskLifecycleLock(task.id, async () => {
       const latestTask = ctx.store.get(task.id) ?? task;
       const threadId = getThreadIdFromTask(latestTask);
@@ -413,10 +417,11 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   const normalized = normalizeTaskSyncBuckets(allTasks);
   // Stage 3: diff (idempotent operation plan)
   const plannedOperations = planTaskSyncOperations(normalized);
-  const phase1TaskIds = operationTaskIdSet(plannedOperations, 'phase1');
-  const phase2TaskIds = operationTaskIdSet(plannedOperations, 'phase2');
-  const phase3TaskIds = operationTaskIdSet(plannedOperations, 'phase3');
-  const phase4TaskIds = operationTaskIdSet(plannedOperations, 'phase4');
+  const phase1TaskIds = operationTaskIdList(plannedOperations, 'phase1');
+  const phase2TaskIds = operationTaskIdList(plannedOperations, 'phase2');
+  const phase3TaskIds = operationTaskIdList(plannedOperations, 'phase3');
+  const phase4TaskIds = operationTaskIdList(plannedOperations, 'phase4');
+  const tasksById = new Map(allTasks.map((task) => [task.id, task]));
 
   // Stage 4: apply
   const applyCtx: TaskSyncApplyContext = {
@@ -432,10 +437,10 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
     counters,
   };
 
-  await applyPhase1CreateMissingThreads(applyCtx, normalized.tasksMissingRef, phase1TaskIds);
-  await applyPhase2FixBlockedStatus(applyCtx, normalized.needsBlockedTasks, phase2TaskIds);
-  await applyPhase3SyncActiveThreads(applyCtx, normalized.tasksWithRef, phase3TaskIds);
-  await applyPhase4ArchiveClosedThreads(applyCtx, normalized.closedTasks, phase4TaskIds);
+  await applyPhase1CreateMissingThreads(applyCtx, tasksById, phase1TaskIds);
+  await applyPhase2FixBlockedStatus(applyCtx, tasksById, phase2TaskIds);
+  await applyPhase3SyncActiveThreads(applyCtx, tasksById, phase3TaskIds);
+  await applyPhase4ArchiveClosedThreads(applyCtx, tasksById, phase4TaskIds);
 
   let threadsReconciled = 0;
   let orphanThreadsFound = 0;
