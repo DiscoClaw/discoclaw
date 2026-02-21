@@ -19,7 +19,7 @@ export type MemoryCommand = {
 
 export function parseMemoryCommand(content: string): MemoryCommand | null {
   const trimmed = content.trim();
-  if (!trimmed.startsWith('!memory')) return null;
+  if (!/^!memory(?:\s|$)/.test(trimmed)) return null;
 
   const rest = trimmed.slice('!memory'.length).trim();
   if (!rest || rest === 'show') return { action: 'show', args: '' };

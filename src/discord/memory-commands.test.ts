@@ -28,6 +28,7 @@ describe('parseMemoryCommand', () => {
   it('returns null for non-commands', () => {
     expect(parseMemoryCommand('hello world')).toBeNull();
     expect(parseMemoryCommand('!other command')).toBeNull();
+    expect(parseMemoryCommand('!memoryshow')).toBeNull();
     expect(parseMemoryCommand('')).toBeNull();
   });
 

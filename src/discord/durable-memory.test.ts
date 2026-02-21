@@ -257,6 +257,18 @@ describe('selectItemsForInjection', () => {
     const items = selectItemsForInjection(store, 0);
     expect(items).toHaveLength(0);
   });
+
+  it('skips oversized newest item and still includes smaller older items that fit', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'new-big', text: 'x'.repeat(600), status: 'active', updatedAt: 300 }),
+      makeItem({ id: 'older-small', text: 'small item', status: 'active', updatedAt: 200 }),
+    );
+
+    const items = selectItemsForInjection(store, 120);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe('older-small');
+  });
 });
 
 describe('formatDurableSection', () => {

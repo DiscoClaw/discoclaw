@@ -198,6 +198,29 @@ describe('selectEntriesForInjection', () => {
     expect(entries[0].channelName).toBe('newer');
     expect(entries[1].channelName).toBe('older');
   });
+
+  it('skips oversized newest entry and includes smaller older entries that fit', () => {
+    const now = Date.now();
+    const store: ShortTermStore = {
+      version: 1,
+      entries: [
+        makeEntry({
+          timestamp: now - 1000,
+          channelName: 'newer',
+          summary: 'x'.repeat(600),
+        }),
+        makeEntry({
+          timestamp: now - 2000,
+          channelName: 'older',
+          summary: 'small summary',
+        }),
+      ],
+    };
+
+    const entries = selectEntriesForInjection(store, 120, 3600_000);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].channelName).toBe('older');
+  });
 });
 
 // ---------------------------------------------------------------------------

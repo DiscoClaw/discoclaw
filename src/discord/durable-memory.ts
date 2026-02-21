@@ -162,7 +162,7 @@ export function selectItemsForInjection(
   for (const item of active) {
     const lineLen = formatItemLine(item).length;
     const sep = selected.length > 0 ? 1 : 0; // \n between items
-    if (chars + sep + lineLen > maxChars) break;
+    if (chars + sep + lineLen > maxChars) continue;
     selected.push(item);
     chars += sep + lineLen;
   }
