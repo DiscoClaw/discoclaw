@@ -1,13 +1,25 @@
 {
   "name": "discoclaw",
   "version": "0.1.0",
-  "private": true,
   "description": "Minimal Discord bridge routing messages to AI runtimes",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/DiscoClaw/discoclaw.git"
   },
+  "bin": {
+    "discoclaw": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist/",
+    "templates/",
+    "systemd/",
+    ".context/",
+    ".env.example",
+    ".env.example.full",
+    "scripts/cron/cron-tag-map.json",
+    "scripts/tasks/tag-map.json"
+  ],
   "type": "module",
   "packageManager": "pnpm@10.28.2",
   "engines": {
@@ -29,7 +41,8 @@
     "doctor": "tsx scripts/doctor.ts",
     "doctor:online": "tsx scripts/doctor.ts --check-connection",
     "setup": "tsx scripts/setup.ts",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "prepublishOnly": "pnpm build && pnpm test"
   },
   "dependencies": {
     "croner": "^10.0.1",
