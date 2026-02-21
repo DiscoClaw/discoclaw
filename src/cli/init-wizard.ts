@@ -382,16 +382,16 @@ export async function runInitWizard(): Promise<void> {
   console.log('Configuration complete!\n');
   console.log('Next steps:');
   if (values.PRIMARY_RUNTIME === 'claude') {
-    console.log('  pnpm build && pnpm dev');
+    console.log('  discoclaw install-daemon');
   } else if (values.PRIMARY_RUNTIME === 'gemini') {
     console.log('  1. Authenticate: run `gemini` and follow the prompts.');
-    console.log('  2. pnpm build && pnpm dev');
+    console.log('  2. discoclaw install-daemon');
   } else if (values.PRIMARY_RUNTIME === 'openai') {
     console.log('  1. Verify your OPENAI_API_KEY is correct.');
-    console.log('  2. pnpm build && pnpm dev');
+    console.log('  2. discoclaw install-daemon');
   } else if (values.PRIMARY_RUNTIME === 'codex') {
     console.log('  1. Ensure the Codex binary is installed and accessible.');
-    console.log('  2. pnpm build && pnpm dev');
+    console.log('  2. discoclaw install-daemon');
   }
   console.log('');
 
