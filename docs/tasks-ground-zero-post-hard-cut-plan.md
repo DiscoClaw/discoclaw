@@ -44,3 +44,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Completed Track 1 with a canonical architecture contract and baseline characterization tests.
 - 2026-02-21: Completed Track 2 with `TaskService` extraction and migration of all non-test mutation callsites (`actions-tasks`, `task-sync-engine`, `task-cli`).
 - 2026-02-21: Started Track 3 by extracting sync pipeline helpers (`ingest -> normalize -> diff`) in `src/tasks/task-sync-pipeline.ts` and wiring operation planning into `runTaskSync`.
+- 2026-02-21: Continued Track 3 by extracting Stage 4 apply-phase executors in `task-sync-engine` (Phase 1-4) with shared counter state, preserving current sync behavior while making apply flow explicit.
