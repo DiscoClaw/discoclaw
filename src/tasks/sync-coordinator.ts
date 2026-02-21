@@ -195,6 +195,7 @@ export class TaskSyncCoordinator {
       return result;
     } catch (err) {
       recordSyncFailureMetrics(metrics, err, Date.now() - startedAtMs);
+      this.cancelDeferredCloseRetry(metrics);
       this.scheduleFailureRetry(metrics);
       throw err;
     } finally {

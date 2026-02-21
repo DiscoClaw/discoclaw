@@ -65,3 +65,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 4 by guarding deferred-close retry scheduling in `TaskSyncCoordinator` (single pending timer + `tasks.sync.retry.coalesced` metric) and surfacing that coalescing signal in `!health verbose`.
 - 2026-02-21: Continued Track 4 by adding `tasks.sync.failure_retry.coalesced` when failure retries are already pending and surfacing that signal in `!health verbose`.
 - 2026-02-21: Continued Track 4 by canceling stale pending retry timers on recovery (`tasks.sync.retry.canceled`, `tasks.sync.failure_retry.canceled`) and surfacing canceled counts in `!health verbose`.
+- 2026-02-21: Continued Track 4 by canceling pending deferred-close retries when sync failures occur, so failure-retry becomes the single active retry path during error recovery.
