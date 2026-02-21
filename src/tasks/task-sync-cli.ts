@@ -1,7 +1,7 @@
 import type { TaskDiscordClient, TaskDiscordGuild } from './discord-types.js';
 import { TaskDiscordClientCtor, TaskDiscordGatewayIntentBits } from './discord-types.js';
 import type { TagMap, TaskSyncResult } from './types.js';
-import { loadTagMap } from './discord-sync.js';
+import { loadTagMap } from './tag-map.js';
 import { runTaskSync } from './task-sync-engine.js';
 import type { TaskStore } from './store.js';
 import { resolveTaskDataPath } from './path-defaults.js';

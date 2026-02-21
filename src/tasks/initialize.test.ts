@@ -5,7 +5,7 @@ import type { InitializeTasksOpts } from './initialize.js';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('./discord-sync.js', () => ({
+vi.mock('./tag-map.js', () => ({
   loadTagMap: vi.fn().mockResolvedValue({ bug: '111', feature: '222' }),
 }));
 

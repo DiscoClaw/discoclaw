@@ -21,9 +21,9 @@ import {
   updateTaskThreadTags,
   ensureUnarchived,
   getThreadIdFromTask,
-  reloadTagMapInPlace,
   findExistingThreadForTask,
 } from './discord-sync.js';
+import { reloadTagMapInPlace } from './tag-map.js';
 import { autoTagTask } from './auto-tag.js';
 import { taskThreadCache } from './thread-cache.js';
 

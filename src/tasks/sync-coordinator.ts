@@ -7,7 +7,7 @@ import type { TaskForumCountSync, TaskInFlightChecker, TaskStatusPoster } from '
 import { noopTaskMetrics, type TaskMetrics } from './metrics-types.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { runTaskSync } from './task-sync-engine.js';
-import { reloadTagMapInPlace } from './discord-sync.js';
+import { reloadTagMapInPlace } from './tag-map.js';
 import { taskThreadCache } from './thread-cache.js';
 
 /**
