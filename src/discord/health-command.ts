@@ -39,6 +39,38 @@ function formatUptime(ms: number): string {
   return `${h}h ${m}m ${s}s`;
 }
 
+function asCount(counters: Record<string, number>, name: string): number {
+  return Number(counters[name] ?? 0);
+}
+
+function formatTaskSyncVerboseLines(counters: Record<string, number>): string[] {
+  const started = asCount(counters, 'tasks.sync.started');
+  const succeeded = asCount(counters, 'tasks.sync.succeeded');
+  const failed = asCount(counters, 'tasks.sync.failed');
+  const coalesced = asCount(counters, 'tasks.sync.coalesced');
+  const durationTotalMs = asCount(counters, 'tasks.sync.duration_ms.total');
+  const durationSamples = asCount(counters, 'tasks.sync.duration_ms.samples');
+  const avgMs = durationSamples > 0
+    ? Math.round((durationTotalMs / durationSamples) * 100) / 100
+    : 0;
+
+  if (started === 0 && coalesced === 0) {
+    return ['Task sync: no runs yet'];
+  }
+
+  const lines: string[] = [];
+  lines.push(
+    `Task sync: started=${started} ok=${succeeded} failed=${failed} coalesced=${coalesced} avgMs=${avgMs}`,
+  );
+  lines.push(
+    `Task sync transitions: created=${asCount(counters, 'tasks.sync.transition.threads_created')} archived=${asCount(counters, 'tasks.sync.transition.threads_archived')} reconciled=${asCount(counters, 'tasks.sync.transition.threads_reconciled')} orphans=${asCount(counters, 'tasks.sync.transition.orphan_threads_found')} deferred=${asCount(counters, 'tasks.sync.transition.closes_deferred')} warnings=${asCount(counters, 'tasks.sync.transition.warnings')}`,
+  );
+  lines.push(
+    `Task sync follow-up/retry: followUp=${asCount(counters, 'tasks.sync.follow_up.scheduled')}/${asCount(counters, 'tasks.sync.follow_up.failed')} retry=${asCount(counters, 'tasks.sync.retry.scheduled')}/${asCount(counters, 'tasks.sync.retry.failed')}`,
+  );
+  return lines;
+}
+
 export function renderHealthReport(opts: {
   metrics: MetricsRegistry;
   queueDepth: number;
@@ -77,6 +109,7 @@ export function renderHealthReport(opts: {
     const tasksEnabled = opts.config.tasksEnabled;
     const tasksState = tasksActive ? 'active' : tasksEnabled ? 'degraded' : 'off';
     lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} cron=${opts.config.cronEnabled} tasks=${tasksState}`);
+    lines.push(...formatTaskSyncVerboseLines(counters));
 
     if (snap.memory) {
       lines.push(renderMemoryLine(snap.memory));
