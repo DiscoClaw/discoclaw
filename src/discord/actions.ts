@@ -9,10 +9,13 @@ import { MODERATION_ACTION_TYPES, executeModerationAction, moderationActionsProm
 import type { ModerationActionRequest } from './actions-moderation.js';
 import { POLL_ACTION_TYPES, executePollAction, pollActionsPromptSection } from './actions-poll.js';
 import type { PollActionRequest } from './actions-poll.js';
-import { executeTaskAction } from '../tasks/task-action-executor.js';
-import type { TaskActionRequest } from '../tasks/task-action-contract.js';
-import { TASK_ACTION_TYPES, isTaskActionRequest } from '../tasks/task-action-contract.js';
-import { taskActionsPromptSection } from '../tasks/task-action-prompt.js';
+import {
+  executeTaskAction,
+  TASK_ACTION_TYPES,
+  isTaskActionRequest,
+  taskActionsPromptSection,
+} from '../tasks/task-actions.js';
+import type { TaskActionRequest } from '../tasks/task-actions.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import { CRON_ACTION_TYPES, executeCronAction, cronActionsPromptSection } from './actions-crons.js';
 import type { CronActionRequest, CronContext } from './actions-crons.js';
