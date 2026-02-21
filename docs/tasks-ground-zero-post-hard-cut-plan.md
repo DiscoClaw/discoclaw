@@ -62,3 +62,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Started Track 4 by adding task-sync coordinator metrics for run lifecycle (`started/coalesced/succeeded/failed`), duration totals, transition counters, and retry/follow-up failure signals with coverage in `src/tasks/sync-coordinator.test.ts`.
 - 2026-02-21: Continued Track 4 by surfacing `tasks.sync.*` lifecycle/transition/retry counters in `!health verbose` with focused coverage in `src/discord/health-command.test.ts`.
 - 2026-02-21: Continued Track 4 by surfacing `tasks.sync.failure_retry.*` counters in `!health verbose` so scheduled/failed post-failure retries are operator-visible.
+- 2026-02-21: Continued Track 4 by guarding deferred-close retry scheduling in `TaskSyncCoordinator` (single pending timer + `tasks.sync.retry.coalesced` metric) and surfacing that coalescing signal in `!health verbose`.

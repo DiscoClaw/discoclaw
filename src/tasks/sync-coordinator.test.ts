@@ -367,6 +367,40 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
     expect((runTaskSync as any).mock.calls.length).toBe(2);
   });
 
+  it('coalesces deferred-close retry scheduling while a retry is pending', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any)
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+        closesDeferred: 1,
+      })
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+        closesDeferred: 1,
+      })
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+        closesDeferred: 0,
+      });
+
+    const opts = makeOpts();
+    opts.deferredRetryDelayMs = 1_000;
+    const coord = new TaskSyncCoordinator(opts);
+    await coord.sync();
+    await coord.sync();
+
+    const scheduledCalls = (opts.metrics.increment as any).mock.calls
+      .filter(([name]: [string]) => name === 'tasks.sync.retry.scheduled');
+    expect(scheduledCalls).toHaveLength(1);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.coalesced');
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(runTaskSync).toHaveBeenCalledTimes(3);
+  });
+
   it('deferred-close retry failure is logged', async () => {
     const { runTaskSync } = await import('./task-sync-engine.js');
     (runTaskSync as any)
