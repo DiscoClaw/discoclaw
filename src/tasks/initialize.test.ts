@@ -161,7 +161,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client,
       guild,
-      guildId: 'guild-1',
       tasksCwd: '/tmp/tasks',
       sidebarMentionUserId: 'user-1',
       log,
@@ -214,7 +213,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      guildId: 'guild-1',
       tasksCwd: '/tmp/tasks',
       log,
     });
@@ -250,7 +248,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      guildId: 'guild-1',
       tasksCwd: '/tmp/tasks',
       log,
     });
@@ -284,7 +281,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      guildId: 'guild-1',
       tasksCwd: '/tmp/tasks',
       log,
     });
@@ -318,7 +314,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      guildId: 'guild-1',
       tasksCwd: '/tmp/tasks',
       log,
       skipForumGuard: true,
@@ -346,7 +341,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      guildId: 'guild-1',
       tasksCwd: '/tmp/tasks',
       log,
     });
@@ -376,7 +370,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      guildId: 'guild-1',
       tasksCwd: '/tmp/tasks',
       log,
       syncFailureRetryEnabled: false,

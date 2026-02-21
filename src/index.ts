@@ -968,7 +968,7 @@ if (taskCtx) {
   botParams.discordActionsTasks = discordActionsTasks && tasksEnabled;
   botParams.healthConfigSnapshot.tasksActive = true;
 
-  // Wire coordinator + watcher + startup sync
+  // Wire coordinator + sync triggers + startup sync
   const resolvedGuildId = guildId || system?.guildId || '';
   const guild = resolvedGuildId ? client.guilds.cache.get(resolvedGuildId) : undefined;
   if (guild) {
@@ -1007,12 +1007,11 @@ if (taskCtx) {
       }
     }
 
-    // Wire coordinator + watcher + startup sync (now uses correct tag map).
+    // Wire coordinator + sync triggers + startup sync (now uses correct tag map).
     const wired = await wireTaskSync({
       taskCtx,
       client,
       guild,
-      guildId: resolvedGuildId,
       tasksCwd,
       sidebarMentionUserId,
       log,

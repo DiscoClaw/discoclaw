@@ -111,7 +111,6 @@ export type WireTaskSyncOpts = {
   taskCtx: TaskContext;
   client: Client;
   guild: Guild;
-  guildId: string;
   tasksCwd?: string;
   sidebarMentionUserId?: string;
   log: LoggerLike;

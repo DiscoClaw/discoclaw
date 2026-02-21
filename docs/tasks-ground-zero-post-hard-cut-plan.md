@@ -79,3 +79,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Closed out Track 4 and marked Performance + Operability as DONE.
 - 2026-02-21: Started post-Track-4 architecture cleanup by removing unused `src/tasks/sync-watcher.ts` and consolidating on canonical store-event sync triggers in `src/tasks/task-sync.ts`.
 - 2026-02-21: Continued post-Track-4 cleanup by removing unused `src/tasks/bead-sync.ts` and normalizing remaining runtime log/comment wording from watcher terms to sync-trigger terminology.
+- 2026-02-21: Continued post-Track-4 cleanup by removing unused `guildId` from `wireTaskSync` options/callers and tightening task sync wiring terminology in runtime comments.
