@@ -46,7 +46,7 @@ export type InitializeTasksResult = {
 /**
  * Build a TaskContext if prerequisites are met, or return undefined with
  * appropriate log warnings. This covers the "pre-bot" phase — before the
- * Discord client is available. Forum guard and sync watcher are wired
+ * Discord client is available. Forum guard and sync trigger subscriptions are wired
  * separately after the bot connects.
  */
 export async function initializeTasksContext(
@@ -172,7 +172,7 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSync
 
   opts.log.info(
     { tasksCwd: opts.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
-    'tasks:store-event watcher started',
+    'tasks:store-event sync triggers started',
   );
 
   return {

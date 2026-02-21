@@ -192,7 +192,7 @@ describe('wireTaskSync', () => {
     expect(result).toHaveProperty('stop');
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({ tasksCwd: '/tmp/tasks' }),
-      'tasks:store-event watcher started',
+      'tasks:store-event sync triggers started',
     );
   });
 
