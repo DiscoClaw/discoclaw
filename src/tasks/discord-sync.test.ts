@@ -6,24 +6,14 @@ import {
   getStatusTagIds, buildAppliedTagsWithStatus, updateTaskThreadTags, createTaskThread,
   shortTaskId, taskIdToken, extractShortIdFromThreadName,
   resolveTasksForum, findExistingThreadForTask, updateTaskThreadName,
-  // compat re-exports
-  shortBeadId, beadIdToken, resolveBeadsForum, getThreadIdFromBead, buildBeadStarterContent,
-  createBeadThread, findExistingThreadForBead, closeBeadThread, isBeadThreadAlreadyClosed,
-  updateBeadThreadName, updateBeadStarterMessage, updateBeadThreadTags,
 } from './discord-sync.js';
-import { buildThreadName as buildTaskModuleThreadName } from '../tasks/discord-sync.js';
-import { TASK_STATUSES, isTaskStatus, BEAD_STATUSES, isBeadStatus } from './types.js';
-import type { TaskData, TagMap } from '../tasks/types.js';
+import type { TaskData, TagMap } from './types.js';
 
 // ---------------------------------------------------------------------------
 // buildThreadName
 // ---------------------------------------------------------------------------
 
 describe('buildThreadName', () => {
-  it('keeps compatibility export aligned to canonical tasks module', () => {
-    expect(buildThreadName).toBe(buildTaskModuleThreadName);
-  });
-
   it('builds name with emoji prefix and ID', () => {
     const name = buildThreadName('ws-001', 'Fix login bug', 'open');
     expect(name).toBe('\u{1F7E2} [001] Fix login bug');
@@ -65,7 +55,7 @@ describe('buildTaskStarterContent', () => {
   const makeTask = (overrides?: Partial<TaskData>): TaskData => ({
     id: 'ws-001',
     title: 'Test',
-    description: 'A test bead',
+    description: 'A test task',
     status: 'open',
     priority: 2,
     issue_type: 'task',
@@ -81,7 +71,7 @@ describe('buildTaskStarterContent', () => {
 
   it('produces correct format with description, ID, priority, status', () => {
     const content = buildTaskStarterContent(makeTask());
-    expect(content).toContain('A test bead');
+    expect(content).toContain('A test task');
     expect(content).toContain('**ID:** `ws-001`');
     expect(content).toContain('**Priority:** P2');
     expect(content).toContain('**Status:** open');
@@ -163,7 +153,7 @@ describe('updateTaskStarterMessage', () => {
   const task: TaskData = {
     id: 'ws-001',
     title: 'Test',
-    description: 'A test bead',
+    description: 'A test task',
     status: 'open',
     priority: 2,
     issue_type: 'task',
@@ -260,7 +250,7 @@ describe('closeTaskThread', () => {
   const task: TaskData = {
     id: 'ws-001',
     title: 'Test',
-    description: 'A test bead',
+    description: 'A test task',
     status: 'closed',
     priority: 2,
     issue_type: 'task',
@@ -484,7 +474,7 @@ describe('buildAppliedTagsWithStatus', () => {
 describe('createTaskThread', () => {
   const makeTask = (overrides?: Partial<TaskData>): TaskData => ({
     id: 'ws-001',
-    title: 'Test bead',
+    title: 'Test task',
     description: 'A test',
     status: 'open',
     priority: 2,
@@ -775,7 +765,7 @@ describe('isThreadArchived', () => {
 
   it('returns true for archived thread regardless of name/tag metadata', async () => {
     // isThreadArchived only checks archived state, not name or tags.
-    // Phase 4 of bead-sync uses isTaskThreadAlreadyClosed instead, which
+    // Phase 4 of task-sync uses isTaskThreadAlreadyClosed instead, which
     // checks all three (archived + name + tags) for proper recovery.
     const thread = {
       isThread: () => true,
@@ -841,7 +831,7 @@ describe('extractShortIdFromThreadName', () => {
     expect(extractShortIdFromThreadName('\u2611\uFE0F [123] Done task')).toBe('123');
   });
 
-  it('returns null for non-bead thread name', () => {
+  it('returns null for non-task thread name', () => {
     expect(extractShortIdFromThreadName('Bug [123] some issue')).toBeNull();
   });
 
@@ -868,73 +858,5 @@ describe('extractShortIdFromThreadName', () => {
   it('roundtrips with buildThreadName', () => {
     const name = buildThreadName('ws-085', 'Plan execution', 'in_progress');
     expect(extractShortIdFromThreadName(name)).toBe('085');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// compat re-exports
-// ---------------------------------------------------------------------------
-
-describe('compat re-exports', () => {
-  it('shortBeadId is shortTaskId', () => {
-    expect(shortBeadId).toBe(shortTaskId);
-  });
-
-  it('beadIdToken is taskIdToken', () => {
-    expect(beadIdToken).toBe(taskIdToken);
-  });
-
-  it('resolveBeadsForum is resolveTasksForum', () => {
-    expect(resolveBeadsForum).toBe(resolveTasksForum);
-  });
-
-  it('getThreadIdFromBead is getThreadIdFromTask', () => {
-    expect(getThreadIdFromBead).toBe(getThreadIdFromTask);
-  });
-
-  it('buildBeadStarterContent is buildTaskStarterContent', () => {
-    expect(buildBeadStarterContent).toBe(buildTaskStarterContent);
-  });
-
-  it('createBeadThread is createTaskThread', () => {
-    expect(createBeadThread).toBe(createTaskThread);
-  });
-
-  it('findExistingThreadForBead is findExistingThreadForTask', () => {
-    expect(findExistingThreadForBead).toBe(findExistingThreadForTask);
-  });
-
-  it('closeBeadThread is closeTaskThread', () => {
-    expect(closeBeadThread).toBe(closeTaskThread);
-  });
-
-  it('isBeadThreadAlreadyClosed is isTaskThreadAlreadyClosed', () => {
-    expect(isBeadThreadAlreadyClosed).toBe(isTaskThreadAlreadyClosed);
-  });
-
-  it('updateBeadThreadName is updateTaskThreadName', () => {
-    expect(updateBeadThreadName).toBe(updateTaskThreadName);
-  });
-
-  it('updateBeadStarterMessage is updateTaskStarterMessage', () => {
-    expect(updateBeadStarterMessage).toBe(updateTaskStarterMessage);
-  });
-
-  it('updateBeadThreadTags is updateTaskThreadTags', () => {
-    expect(updateBeadThreadTags).toBe(updateTaskThreadTags);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// types.ts Task* re-exports
-// ---------------------------------------------------------------------------
-
-describe('types.ts Task* re-exports', () => {
-  it('BEAD_STATUSES is referentially equal to TASK_STATUSES', () => {
-    expect(BEAD_STATUSES).toBe(TASK_STATUSES);
-  });
-
-  it('isBeadStatus is referentially equal to isTaskStatus', () => {
-    expect(isBeadStatus).toBe(isTaskStatus);
   });
 });

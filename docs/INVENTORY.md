@@ -98,8 +98,6 @@ All actions are gated by category env flags (off by default except channels).
 |-----------|---------|--------|
 | Task compatibility types/shims | `src/beads/types.ts` | **done** |
 | `bd` CLI compatibility shim (preflight + migration only) | `src/beads/bd-cli.ts` | **done** |
-| Task sync compatibility exports | `src/beads/bead-sync.ts` | **done** |
-| Discord sync compatibility exports | `src/beads/discord-sync.ts` | **done** |
 | Hook scripts (on-create, on-update, etc.) | `scripts/beads/` | **done** |
 
 ## 9. Task Store + Migration (`src/tasks/`)
