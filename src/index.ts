@@ -1009,8 +1009,7 @@ if (taskCtx) {
     // Wire coordinator + sync triggers + startup sync (now uses correct tag map).
     const wired = await wireTaskSync({
       taskCtx,
-      client,
-      guild,
+      runCtx: { client, guild },
       skipPhase5: cfg.tasksSyncSkipPhase5,
     });
     taskSyncWiring = wired;

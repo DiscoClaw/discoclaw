@@ -155,8 +155,7 @@ describe('wireTaskSync', () => {
 
     const result = await wireTaskSync({
       taskCtx,
-      client,
-      guild,
+      runCtx: { client, guild },
     });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
@@ -197,8 +196,7 @@ describe('wireTaskSync', () => {
 
     await wireTaskSync({
       taskCtx,
-      client: {} as any,
-      guild: {} as any,
+      runCtx: { client: {} as any, guild: {} as any },
     });
 
     const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
@@ -230,8 +228,7 @@ describe('wireTaskSync', () => {
 
     await wireTaskSync({
       taskCtx,
-      client: {} as any,
-      guild: {} as any,
+      runCtx: { client: {} as any, guild: {} as any },
     });
 
     const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
@@ -261,8 +258,7 @@ describe('wireTaskSync', () => {
 
     const result = await wireTaskSync({
       taskCtx,
-      client: {} as any,
-      guild: {} as any,
+      runCtx: { client: {} as any, guild: {} as any },
     });
 
     result.stop();
@@ -291,8 +287,7 @@ describe('wireTaskSync', () => {
 
     await wireTaskSync({
       taskCtx,
-      client: {} as any,
-      guild: {} as any,
+      runCtx: { client: {} as any, guild: {} as any },
     });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
@@ -321,8 +316,7 @@ describe('wireTaskSync', () => {
 
     await wireTaskSync({
       taskCtx,
-      client: {} as any,
-      guild: {} as any,
+      runCtx: { client: {} as any, guild: {} as any },
     });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
