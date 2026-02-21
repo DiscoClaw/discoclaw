@@ -27,6 +27,8 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 
 - `src/tasks/task-sync-engine.ts`
 - `src/tasks/task-sync-pipeline.ts`
+- `src/tasks/task-sync-apply-plan.ts`
+- `src/tasks/task-sync-reconcile-plan.ts`
 - `src/tasks/task-sync-apply-types.ts`
 - `src/tasks/task-sync-phase-apply.ts`
 - `src/tasks/task-sync-reconcile.ts`
