@@ -1,8 +1,8 @@
-import type { Client, Guild } from 'discord.js';
+import type { TaskDiscordClient, TaskDiscordGuild } from './discord-types.js';
 
 export type TaskSyncRunContext = {
-  client: Client;
-  guild: Guild;
+  client: TaskDiscordClient;
+  guild: TaskDiscordGuild;
 };
 
 export type TaskSyncRunOptions = {

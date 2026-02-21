@@ -1,7 +1,7 @@
-import type { Client, Guild } from 'discord.js';
 import type { TagMap, TaskData, TaskSyncResult } from './types.js';
 export type { TaskSyncResult } from './types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
+import type { TaskDiscordClient, TaskDiscordGuild } from './discord-types.js';
 import type { TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
@@ -35,8 +35,8 @@ import {
 } from './discord-sync.js';
 
 type TaskSyncCoreOptions = {
-  client: Client;
-  guild: Guild;
+  client: TaskDiscordClient;
+  guild: TaskDiscordGuild;
   forumId: string;
   tagMap: TagMap;
   store: TaskStore;
@@ -63,7 +63,7 @@ type TaskSyncApplyCounters = {
 };
 
 type TaskSyncApplyContext = {
-  client: Client;
+  client: TaskDiscordClient;
   forum: any;
   tagMap: TagMap;
   store: TaskStore;

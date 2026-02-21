@@ -1,6 +1,10 @@
-import type { Client, ForumChannel, Guild } from 'discord.js';
 import type { TaskContext } from './task-context.js';
 import type { TaskActionRequest } from './task-action-contract.js';
+import type {
+  TaskDiscordClient,
+  TaskDiscordForumChannel,
+  TaskDiscordGuild,
+} from './discord-types.js';
 import type { TaskData, TaskStatus } from './types.js';
 import { TASK_STATUSES, isTaskStatus } from './types.js';
 import { shouldActionUseDirectThreadLifecycle } from './sync-contract.js';
@@ -27,8 +31,8 @@ import { taskThreadCache } from './thread-cache.js';
 const STATUS_NAME_SET = new Set<string>(TASK_STATUSES);
 
 export type TaskActionRunContext = {
-  client: Client;
-  guild: Guild;
+  client: TaskDiscordClient;
+  guild: TaskDiscordGuild;
 };
 
 export type TaskActionResult =
@@ -128,12 +132,17 @@ export async function executeTaskAction(
           if (!forum) return;
 
           // Prefer an existing thread if one is already present for this task.
-          const existing = await findExistingThreadForTask(forum as ForumChannel, task.id);
+          const existing = await findExistingThreadForTask(forum as TaskDiscordForumChannel, task.id);
           if (existing) {
             threadId = existing;
           } else {
             const taskForThread: TaskData = { ...latest, labels };
-            threadId = await createTaskThread(forum as ForumChannel, taskForThread, taskCtx.tagMap, taskCtx.mentionUserId);
+            threadId = await createTaskThread(
+              forum as TaskDiscordForumChannel,
+              taskForThread,
+              taskCtx.tagMap,
+              taskCtx.mentionUserId,
+            );
           }
 
           // Backfill thread link if needed. Re-check store for concurrent updates.

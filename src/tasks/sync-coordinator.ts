@@ -1,8 +1,8 @@
-import type { Client, Guild } from 'discord.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { globalMetrics, type MetricsRegistry } from '../observability/metrics.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
+import type { TaskDiscordClient, TaskDiscordGuild } from './discord-types.js';
 import type { TaskSyncRunOptions } from './sync-types.js';
 import type { TaskForumCountSync, TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
 import type { TagMap, TaskSyncResult } from './types.js';
@@ -14,8 +14,8 @@ import { taskThreadCache } from './thread-cache.js';
  * Canonical task-named sync coordinator implementation.
  */
 type TaskSyncCoordinatorCoreOptions = {
-  client: Client;
-  guild: Guild;
+  client: TaskDiscordClient;
+  guild: TaskDiscordGuild;
   forumId: string;
   tagMap: TagMap;
   tagMapPath?: string;
