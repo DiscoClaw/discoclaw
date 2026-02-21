@@ -195,7 +195,13 @@ export async function startWebhookServer(opts: WebhookServerOptions): Promise<We
       return;
     }
 
-    const source = decodeURIComponent(match[1]);
+    let source: string;
+    try {
+      source = decodeURIComponent(match[1]);
+    } catch {
+      respond(res, 400, 'Bad request');
+      return;
+    }
     const src = config[source];
     if (!src) {
       log?.warn({ source }, 'webhook:unknown source');
