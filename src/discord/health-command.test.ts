@@ -34,6 +34,9 @@ describe('renderHealthReport', () => {
       cronEnabled: true,
       tasksEnabled: false,
       tasksActive: false,
+      tasksSyncFailureRetryEnabled: true,
+      tasksSyncFailureRetryDelayMs: 30000,
+      tasksSyncDeferredRetryDelayMs: 30000,
       requireChannelContext: true,
       autoIndexChannelContext: true,
     } as const;
@@ -66,6 +69,7 @@ describe('renderHealthReport', () => {
         discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
         messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
         cronEnabled: true, tasksEnabled: true, tasksActive: true,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
         requireChannelContext: true, autoIndexChannelContext: true,
       },
       mode: 'verbose',
@@ -84,6 +88,7 @@ describe('renderHealthReport', () => {
         discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
         messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
         cronEnabled: true, tasksEnabled: true, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
         requireChannelContext: true, autoIndexChannelContext: true,
       },
       mode: 'verbose',
@@ -102,6 +107,7 @@ describe('renderHealthReport', () => {
         discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
         messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
         cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
         requireChannelContext: true, autoIndexChannelContext: true,
       },
       mode: 'verbose',
@@ -120,6 +126,7 @@ describe('renderHealthReport', () => {
         discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
         messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
         cronEnabled: true, tasksEnabled: true, tasksActive: true,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
         requireChannelContext: true, autoIndexChannelContext: true,
       },
       mode: 'verbose',
@@ -161,6 +168,7 @@ describe('renderHealthReport', () => {
         discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
         messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
         cronEnabled: true, tasksEnabled: true, tasksActive: true,
+        tasksSyncFailureRetryEnabled: false, tasksSyncFailureRetryDelayMs: 12000, tasksSyncDeferredRetryDelayMs: 18000,
         requireChannelContext: true, autoIndexChannelContext: true,
       },
       mode: 'verbose',
@@ -168,6 +176,7 @@ describe('renderHealthReport', () => {
 
     expect(verbose).toContain('Task sync: started=4 ok=3 failed=1 coalesced=2 avgMs=275');
     expect(verbose).toContain('Task sync transitions: created=5 archived=6 reconciled=7 orphans=8 deferred=9 warnings=10');
+    expect(verbose).toContain('taskSyncPolicy: failureRetry=off failureDelayMs=12000 deferredDelayMs=18000');
     expect(verbose).toContain('Task sync follow-up/retry: followUp=2/1 retry=3/1 (coalesced=5 canceled=2) failureRetry=4/2 (coalesced=6 canceled=1)');
   });
 
