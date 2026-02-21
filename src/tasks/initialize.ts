@@ -109,7 +109,6 @@ export type WireTaskSyncOpts = {
   taskCtx: TaskContext;
   client: Client;
   guild: Guild;
-  log: LoggerLike;
   /** Disable Phase 5 (thread reconciliation) of the task sync cycle. */
   skipPhase5?: boolean;
 };
@@ -119,6 +118,11 @@ export type WireTaskSyncResult = {
 };
 
 export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSyncResult> {
+  const log = opts.taskCtx.log;
+  if (!log) {
+    throw new Error('wireTaskSync requires taskCtx.log');
+  }
+
   const syncCoordinator = await ensureTaskSyncCoordinator(
     opts.taskCtx,
     { client: opts.client, guild: opts.guild },
@@ -127,12 +131,12 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSync
 
   // Startup sync: fire-and-forget to avoid blocking cron init
   syncCoordinator.sync().catch((err) => {
-    opts.log.warn({ err }, 'tasks:startup-sync failed');
+    log.warn({ err }, 'tasks:startup-sync failed');
   });
 
-  const subscriptions = wireTaskStoreSyncTriggers(opts.taskCtx, syncCoordinator, opts.log);
+  const subscriptions = wireTaskStoreSyncTriggers(opts.taskCtx, syncCoordinator, log);
 
-  opts.log.info(
+  log.info(
     { tasksCwd: opts.taskCtx.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
     'tasks:store-event sync triggers started',
   );
