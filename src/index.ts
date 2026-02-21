@@ -1022,7 +1022,7 @@ if (taskCtx) {
     });
     taskSyncWatcher = wired;
   } else {
-    log.warn({ resolvedGuildId }, 'tasks:sync-watcher skipped; guild not in cache');
+    log.warn({ resolvedGuildId }, 'tasks:sync wiring skipped; guild not in cache');
   }
 
   log.info(
