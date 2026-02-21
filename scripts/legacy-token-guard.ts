@@ -76,6 +76,12 @@ export const DEFAULT_LEGACY_GUARD_RULES: GuardRule[] = [
     message: 'Use canonical scripts/tasks paths in runtime code.',
     allowIn: [],
   },
+  {
+    id: 'legacy-beads-db-path',
+    pattern: /\.beads\/beads\.db/g,
+    message: 'Legacy bd DB paths are retired from runtime/preflight code.',
+    allowIn: ['src/tasks/bd-cli.ts'],
+  },
 ];
 
 DEFAULT_LEGACY_GUARD_RULES.push(
