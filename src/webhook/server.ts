@@ -113,6 +113,7 @@ function buildWebhookJob(source: string, src: WebhookSourceConfig, bodyText: str
       timezone: 'UTC',
       channel: src.channel,
       prompt,
+      triggerType: 'webhook',
     },
     cron: null,
     running: false,

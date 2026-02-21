@@ -376,6 +376,14 @@ describe('startWebhookServer dispatch', () => {
     expect(job.def.timezone).toBe('UTC');
   });
 
+  it('sets triggerType to webhook on the synthetic job', async () => {
+    await postValid('github');
+    await tick();
+
+    const [job] = vi.mocked(executeCronJob).mock.calls[0] as [any, any];
+    expect(job.def.triggerType).toBe('webhook');
+  });
+
   it('decodes a valid percent-encoded source name before looking it up', async () => {
     // 'alerts' with the first character 'a' encoded as %61
     const body = '{}';
