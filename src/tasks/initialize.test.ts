@@ -148,6 +148,7 @@ describe('wireTaskSync', () => {
       tasksCwd: '/tmp/tasks',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
+      sidebarMentionUserId: 'user-1',
       store,
       syncFailureRetryEnabled: false,
       syncFailureRetryDelayMs: 12_000,
@@ -161,7 +162,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client,
       guild,
-      sidebarMentionUserId: 'user-1',
       log,
     });
 

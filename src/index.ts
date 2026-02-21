@@ -352,7 +352,6 @@ const tasksTagMapPath = cfg.tasksTagMapPathOverride
 const tasksTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'tasks', 'tag-map.json');
 const tasksMentionUser = cfg.tasksMentionUser;
 const tasksSidebar = cfg.tasksSidebar;
-const sidebarMentionUserId = tasksSidebar ? tasksMentionUser : undefined;
 const tasksAutoTag = cfg.tasksAutoTag;
 let tasksAutoTagModel = cfg.tasksAutoTagModel;
 const tasksSyncFailureRetryEnabled = cfg.tasksSyncFailureRetryEnabled;
@@ -1012,7 +1011,6 @@ if (taskCtx) {
       taskCtx,
       client,
       guild,
-      sidebarMentionUserId,
       log,
       skipForumGuard: true,
       skipPhase5: cfg.tasksSyncSkipPhase5,
