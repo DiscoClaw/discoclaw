@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { autoTagTask } from './auto-tag.js';
-import type { RuntimeAdapter } from '../runtime/types.js';
+import type { TaskRuntimeAdapter } from './runtime-types.js';
 
-function makeMockRuntime(output: string): RuntimeAdapter {
+function makeMockRuntime(output: string): TaskRuntimeAdapter {
   return {
     id: 'other',
     capabilities: new Set(),
@@ -12,7 +12,7 @@ function makeMockRuntime(output: string): RuntimeAdapter {
   };
 }
 
-function makeMockErrorRuntime(): RuntimeAdapter {
+function makeMockErrorRuntime(): TaskRuntimeAdapter {
   return {
     id: 'other',
     capabilities: new Set(),
@@ -65,5 +65,12 @@ describe('autoTagTask', () => {
     const runtime = makeMockRuntime('');
     const result = await autoTagTask(runtime, 'Test', '', TAGS);
     expect(result).toEqual([]);
+  });
+
+  it('uses injected model resolver when provided', async () => {
+    const runtime = makeMockRuntime('feature');
+    const resolve = vi.fn((model: string) => `resolved-${model}`);
+    await autoTagTask(runtime, 'Test', '', TAGS, { model: 'fast', modelResolver: resolve });
+    expect(resolve).toHaveBeenCalledWith('fast', runtime.id);
   });
 });

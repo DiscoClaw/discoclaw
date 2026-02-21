@@ -1,10 +1,11 @@
-import type { RuntimeAdapter } from '../runtime/types.js';
-import { resolveModel } from '../runtime/model-tiers.js';
+import type { TaskModelResolver, TaskRuntimeAdapter } from './runtime-types.js';
+import { resolveTaskRuntimeModel } from './runtime-types.js';
 
 export type AutoTagOptions = {
   model?: string;
   cwd?: string;
   timeoutMs?: number;
+  modelResolver?: TaskModelResolver;
 };
 
 /**
@@ -12,7 +13,7 @@ export type AutoTagOptions = {
  * set. Returns an array of valid tag names (silently drops unknown ones).
  */
 export async function autoTagTask(
-  runtime: RuntimeAdapter,
+  runtime: TaskRuntimeAdapter,
   title: string,
   description: string,
   availableTags: string[],
@@ -31,9 +32,11 @@ export async function autoTagTask(
   let finalText = '';
   let deltaText = '';
 
+  const modelResolver = opts?.modelResolver ?? resolveTaskRuntimeModel;
+
   for await (const evt of runtime.invoke({
     prompt,
-    model: resolveModel(opts?.model ?? 'fast', runtime.id),
+    model: modelResolver(opts?.model ?? 'fast', runtime.id),
     cwd: opts?.cwd ?? '.',
     timeoutMs: opts?.timeoutMs ?? 15_000,
     tools: [],

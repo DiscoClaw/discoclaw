@@ -97,7 +97,11 @@ export async function executeTaskAction(
               task.title,
               task.description ?? '',
               tagNames,
-              { model: taskCtx.autoTagModel, cwd: taskCtx.tasksCwd || process.cwd() },
+              {
+                model: taskCtx.autoTagModel,
+                cwd: taskCtx.tasksCwd || process.cwd(),
+                modelResolver: taskCtx.resolveModel,
+              },
             );
             for (const tag of suggestedTags) {
               if (!labels.includes(tag)) labels.push(tag);
