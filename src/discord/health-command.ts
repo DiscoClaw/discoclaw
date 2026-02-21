@@ -19,6 +19,9 @@ export type HealthConfigSnapshot = {
   cronEnabled: boolean;
   tasksEnabled: boolean;
   tasksActive: boolean;
+  tasksSyncFailureRetryEnabled: boolean;
+  tasksSyncFailureRetryDelayMs: number;
+  tasksSyncDeferredRetryDelayMs: number;
   requireChannelContext: boolean;
   autoIndexChannelContext: boolean;
 };
@@ -109,6 +112,9 @@ export function renderHealthReport(opts: {
     const tasksEnabled = opts.config.tasksEnabled;
     const tasksState = tasksActive ? 'active' : tasksEnabled ? 'degraded' : 'off';
     lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} cron=${opts.config.cronEnabled} tasks=${tasksState}`);
+    lines.push(
+      `taskSyncPolicy: failureRetry=${opts.config.tasksSyncFailureRetryEnabled ? 'on' : 'off'} failureDelayMs=${opts.config.tasksSyncFailureRetryDelayMs} deferredDelayMs=${opts.config.tasksSyncDeferredRetryDelayMs}`,
+    );
     lines.push(...formatTaskSyncVerboseLines(counters));
 
     if (snap.memory) {

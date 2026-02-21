@@ -490,6 +490,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           cronEnabled: Boolean(params.cronCtx),
           tasksEnabled: Boolean(params.taskCtx),
           tasksActive: Boolean(params.taskCtx),
+          tasksSyncFailureRetryEnabled: true,
+          tasksSyncFailureRetryDelayMs: 30_000,
+          tasksSyncDeferredRetryDelayMs: 30_000,
           requireChannelContext: params.requireChannelContext,
           autoIndexChannelContext: params.autoIndexChannelContext,
         };
