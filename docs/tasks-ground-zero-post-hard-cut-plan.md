@@ -18,7 +18,7 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 | 1 | Contract + Characterization | DONE | Canonical contract file and baseline characterization tests landed in `src/tasks/`. |
 | 2 | Core Service Extraction | DONE | `TaskService` introduced in `src/tasks/service.ts`; mutation callsites migrated from adapters/sync engine/CLI. |
 | 3 | Sync Pipeline Rebuild | DONE | Sync flow now runs through explicit ingest/normalize/diff/apply helpers with phase-5 fetch/plan/apply boundaries and characterization coverage. |
-| 4 | Performance + Operability | IN_PROGRESS | Added coordinator-level sync lifecycle/transition metrics and surfaced sync operability counters in `!health verbose`. |
+| 4 | Performance + Operability | DONE | Coordinator-level sync lifecycle/transition/retry/tag-map metrics are instrumented and surfaced in `!health verbose` with coverage. |
 
 ## Track 1 Scope (Complete)
 
@@ -76,3 +76,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 4 by adding `tasks.sync.follow_up.succeeded` and surfacing follow-up scheduled/triggered/succeeded/failed visibility in `!health verbose`.
 - 2026-02-21: Continued Track 4 by surfacing full transition counters in `!health verbose` (`renamed`, `starter`, `statuses`, `tags`) to match coordinator metrics coverage.
 - 2026-02-21: Continued Track 4 by adding tag-map reload metrics (`tasks.sync.tag_map_reload.{attempted,succeeded,failed}`) and surfacing reload outcomes in `!health verbose`.
+- 2026-02-21: Closed out Track 4 and marked Performance + Operability as DONE.
