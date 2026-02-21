@@ -19,10 +19,9 @@ describe('writeWorkspaceFiles', () => {
   });
 
   const baseValues: OnboardingValues = {
-    botName: 'Weston',
     userName: 'David',
-    purpose: 'dev',
-    workingDirs: '~/code/project',
+    timezone: 'America/New_York',
+    morningCheckin: false,
   };
 
   it('writes IDENTITY.md and USER.md with correct content', async () => {
@@ -36,12 +35,13 @@ describe('writeWorkspaceFiles', () => {
     expect(result.errors).toHaveLength(0);
 
     const identity = await fs.readFile(path.join(workspace, 'IDENTITY.md'), 'utf-8');
-    expect(identity).toContain('Weston');
+    expect(identity).toContain('Discoclaw');
     expect(identity).not.toContain('*(pick something you like)*');
 
     const user = await fs.readFile(path.join(workspace, 'USER.md'), 'utf-8');
     expect(user).toContain('David');
-    expect(user).toContain('~/code/project');
+    expect(user).toContain('America/New_York');
+    expect(user).toContain('**Morning check-in:** No');
   });
 
   it('passes isOnboardingComplete after writing', async () => {
@@ -60,76 +60,22 @@ describe('writeWorkspaceFiles', () => {
     expect(result.warnings).toHaveLength(0);
   });
 
-  it('handles pa purpose correctly', async () => {
+  it('writes morning check-in preference correctly', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-writer-'));
     dirs.push(workspace);
 
     const values: OnboardingValues = {
-      botName: 'Claw',
       userName: 'Dave',
-      purpose: 'pa',
-      personality: 'snarky but helpful',
+      timezone: 'Europe/London',
+      morningCheckin: true,
     };
 
     const result = await writeWorkspaceFiles(values, workspace);
     expect(result.errors).toHaveLength(0);
 
     const user = await fs.readFile(path.join(workspace, 'USER.md'), 'utf-8');
-    expect(user).toContain('snarky but helpful');
-    expect(user).not.toContain('Working directories');
-  });
-
-  it('handles both purpose correctly', async () => {
-    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-writer-'));
-    dirs.push(workspace);
-
-    const values: OnboardingValues = {
-      botName: 'Bot',
-      userName: 'User',
-      purpose: 'both',
-      workingDirs: '~/projects',
-      personality: 'calm and thorough',
-    };
-
-    const result = await writeWorkspaceFiles(values, workspace);
-    expect(result.errors).toHaveLength(0);
-
-    const user = await fs.readFile(path.join(workspace, 'USER.md'), 'utf-8');
-    expect(user).toContain('~/projects');
-    expect(user).toContain('calm and thorough');
-  });
-
-  it('handles optional fields being undefined', async () => {
-    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-writer-'));
-    dirs.push(workspace);
-
-    const values: OnboardingValues = {
-      botName: 'Bot',
-      userName: 'User',
-      purpose: 'dev',
-      // workingDirs undefined
-    };
-
-    const result = await writeWorkspaceFiles(values, workspace);
-    expect(result.errors).toHaveLength(0);
-    expect(await isOnboardingComplete(workspace)).toBe(true);
-  });
-
-  it('user value containing {{USER_NAME}} is not double-substituted', async () => {
-    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-writer-'));
-    dirs.push(workspace);
-
-    const values: OnboardingValues = {
-      botName: '{{USER_NAME}} Bot',
-      userName: 'David',
-      purpose: 'dev',
-    };
-
-    const result = await writeWorkspaceFiles(values, workspace);
-    const identity = await fs.readFile(path.join(workspace, 'IDENTITY.md'), 'utf-8');
-    // The bot name should be literally "{{USER_NAME}} Bot", not "David Bot"
-    // (single-pass substitution means the generated content isn't re-scanned)
-    expect(identity).toContain('{{USER_NAME}} Bot');
+    expect(user).toContain('Europe/London');
+    expect(user).toContain('**Morning check-in:** Yes');
   });
 
   it('deletes BOOTSTRAP.md on successful onboarding', async () => {
@@ -166,17 +112,17 @@ describe('writeWorkspaceFiles', () => {
 
     // Second write with different values
     const newValues: OnboardingValues = {
-      botName: 'NewBot',
       userName: 'NewUser',
-      purpose: 'pa',
-      personality: 'warm',
+      timezone: 'Asia/Tokyo',
+      morningCheckin: true,
     };
     const result = await writeWorkspaceFiles(newValues, workspace);
     expect(result.errors).toHaveLength(0);
 
-    const identity = await fs.readFile(path.join(workspace, 'IDENTITY.md'), 'utf-8');
-    expect(identity).toContain('NewBot');
-    expect(identity).not.toContain('Weston');
+    const user = await fs.readFile(path.join(workspace, 'USER.md'), 'utf-8');
+    expect(user).toContain('NewUser');
+    expect(user).toContain('Asia/Tokyo');
+    expect(user).not.toContain('America/New_York');
   });
 });
 
@@ -191,10 +137,9 @@ describe('writeWorkspaceFiles — BOOTSTRAP.md cleanup', () => {
   });
 
   const baseValues: OnboardingValues = {
-    botName: 'Weston',
     userName: 'David',
-    purpose: 'dev',
-    workingDirs: '~/code/project',
+    timezone: 'America/New_York',
+    morningCheckin: false,
   };
 
   it('preserves BOOTSTRAP.md when post-write validation fails', async () => {

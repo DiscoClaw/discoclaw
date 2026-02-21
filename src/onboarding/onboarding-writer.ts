@@ -1,5 +1,5 @@
 /**
- * Onboarding writer — reads templates, substitutes placeholders, writes files.
+ * Onboarding writer — generates workspace files from collected onboarding values.
  */
 
 import fs from 'node:fs/promises';
@@ -16,39 +16,17 @@ export interface WriteResult {
 const PLACEHOLDER_RE = /\{\{[^}]+\}\}/g;
 
 /**
- * Build substitution map from collected onboarding values.
- * Placeholders not covered by the values get sensible defaults.
+ * Generate IDENTITY.md content using the default bot name "Discoclaw".
+ * No template markers — ensures isOnboardingComplete() returns true.
  */
-function buildPlaceholders(values: OnboardingValues): Record<string, string> {
-  const purposeLabel =
-    values.purpose === 'dev' ? 'Development / coding'
-    : values.purpose === 'pa' ? 'Personal assistant'
-    : 'Development + personal assistant';
-
-  return {
-    '{{BOT_NAME}}': values.botName,
-    '{{USER_NAME}}': values.userName,
-    '{{PURPOSE}}': purposeLabel,
-    '{{WORKING_DIRS}}': values.workingDirs || '(not specified)',
-    '{{PERSONALITY}}': values.personality || 'Direct, competent, concise.',
-    '{{CREATURE}}': 'Familiar — a persistent presence that lives in the tools, remembers the work, and shows up ready.',
-    '{{VIBE}}': values.personality || 'Direct, competent, dry. Concise when the moment calls for it, thorough when it matters.',
-    '{{EMOJI}}': 'None',
-  };
-}
-
-/**
- * Generate IDENTITY.md content from values (not from template file).
- * This produces a clean, filled-in identity file without template markers.
- */
-function generateIdentityContent(values: OnboardingValues, placeholders: Record<string, string>): string {
+function generateIdentityContent(): string {
   return [
     `# IDENTITY.md - Who Am I?`,
     ``,
-    `- **Name:** ${values.botName}`,
-    `- **Creature:** ${placeholders['{{CREATURE}}']}`,
-    `- **Vibe:** ${placeholders['{{VIBE}}']}`,
-    `- **Emoji:** ${placeholders['{{EMOJI}}']}`,
+    `- **Name:** Discoclaw`,
+    `- **Creature:** Familiar — a persistent presence that lives in the tools, remembers the work, and shows up ready.`,
+    `- **Vibe:** Direct, competent, dry. Concise when the moment calls for it, thorough when it matters.`,
+    `- **Emoji:** None`,
     ``,
     `---`,
     ``,
@@ -57,38 +35,21 @@ function generateIdentityContent(values: OnboardingValues, placeholders: Record<
 }
 
 /**
- * Generate USER.md content from values.
+ * Generate USER.md content from onboarding values.
  */
 function generateUserContent(values: OnboardingValues): string {
-  const sections: string[] = [
+  return [
     `# USER.md - About Your Human`,
     ``,
     `- **Name:** ${values.userName}`,
     `- **What to call them:** ${values.userName}`,
-  ];
-
-  if (values.purpose === 'dev' || values.purpose === 'both') {
-    sections.push(``);
-    sections.push(`## Work`);
-    if (values.workingDirs) {
-      sections.push(`- **Working directories:** ${values.workingDirs}`);
-    }
-  }
-
-  if (values.purpose === 'pa' || values.purpose === 'both') {
-    sections.push(``);
-    sections.push(`## Preferences`);
-    if (values.personality) {
-      sections.push(`- **Communication style:** ${values.personality}`);
-    }
-  }
-
-  sections.push(``);
-  sections.push(`---`);
-  sections.push(``);
-  sections.push(`The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.`);
-
-  return sections.join('\n') + '\n';
+    `- **Timezone:** ${values.timezone}`,
+    `- **Morning check-in:** ${values.morningCheckin ? 'Yes' : 'No'}`,
+    ``,
+    `---`,
+    ``,
+    `The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.`,
+  ].join('\n') + '\n';
 }
 
 /**
@@ -100,10 +61,9 @@ export async function writeWorkspaceFiles(
   workspaceCwd: string,
 ): Promise<WriteResult> {
   const result: WriteResult = { written: [], errors: [], warnings: [] };
-  const placeholders = buildPlaceholders(values);
 
   // Generate IDENTITY.md
-  const identityContent = generateIdentityContent(values, placeholders);
+  const identityContent = generateIdentityContent();
   const identityPath = path.join(workspaceCwd, 'IDENTITY.md');
   try {
     await fs.writeFile(identityPath, identityContent, 'utf-8');
