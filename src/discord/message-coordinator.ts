@@ -34,6 +34,7 @@ import type { PreparePlanRunResult } from './plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './forge-commands.js';
 import type { ForgeOrchestratorOpts, ForgeResult } from './forge-commands.js';
 import { runNextPhase, resolveProjectCwd, deserializePhases, buildPostRunSummary } from './plan-manager.js';
+import type { PlanRunEvent } from './plan-manager.js';
 import {
   acquireWriterLock as registryAcquireWriterLock,
   setActiveOrchestrator,
@@ -1073,6 +1074,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     progressReply,
                     params.forgeProgressThrottleMs ?? 3000,
                   );
+                  const postedPhaseStarts = new Set<string>();
+
+                  const postPhaseStart = async (event: PlanRunEvent) => {
+                    if (event.type !== 'phase_start') return;
+                    if (postedPhaseStarts.has(event.phase.id)) return;
+                    postedPhaseStarts.add(event.phase.id);
+                    try {
+                      await msg.channel.send({
+                        content: `Starting phase **${event.phase.id}**: ${event.phase.title}`,
+                        allowedMentions: NO_MENTIONS,
+                      });
+                    } catch (err) {
+                      params.log?.warn({ err, planId, phaseId: event.phase.id }, 'plan-run: phase-start post failed');
+                    }
+                  };
 
                   const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
                     // Always force so phase-start/boundary messages are never throttled away
@@ -1097,6 +1113,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     log: params.log,
                     maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
                     onEvent: onPlanRunEvent,
+                    onPlanEvent: postPhaseStart,
                     signal: planAbort.signal,
                   };
 

@@ -42,6 +42,16 @@ export type PlanPhases = {
   updatedAt: string;
 };
 
+export type PlanRunEvent = {
+  type: 'phase_start';
+  planId: string;
+  phase: {
+    id: string;
+    title: string;
+    kind: PhaseKind;
+  };
+};
+
 export type PhaseExecutionOpts = {
   runtime: RuntimeAdapter;
   model: string;
@@ -54,6 +64,8 @@ export type PhaseExecutionOpts = {
   maxAuditFixAttempts?: number;
   /** Optional streaming event callback for live Discord progress previews. */
   onEvent?: (evt: EngineEvent) => void;
+  /** Optional typed plan-run event callback (phase lifecycle boundaries). */
+  onPlanEvent?: (evt: PlanRunEvent) => Promise<void> | void;
   /** AbortSignal — when fired, kills the runtime subprocess and breaks the phase loop. */
   signal?: AbortSignal;
 };
@@ -1169,6 +1181,25 @@ export async function runNextPhase(
       }
     }
     // Non-git: proceed unconditionally
+  }
+
+  if (opts.onPlanEvent) {
+    try {
+      await opts.onPlanEvent({
+        type: 'phase_start',
+        planId: allPhases.planId,
+        phase: {
+          id: phase.id,
+          title: phase.title,
+          kind: phase.kind,
+        },
+      });
+    } catch (err) {
+      opts.log?.warn(
+        { err, planId: allPhases.planId, phaseId: phase.id },
+        'plan-manager: onPlanEvent callback failed',
+      );
+    }
   }
 
   // 5. Write in-progress status to disk

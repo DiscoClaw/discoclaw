@@ -14,6 +14,7 @@ import {
 } from './plan-commands.js';
 import type { HandlePlanCommandOpts, PlanFileHeader } from './plan-commands.js';
 import { runNextPhase, resolveProjectCwd, deserializePhases, buildPostRunSummary } from './plan-manager.js';
+import type { PlanRunEvent } from './plan-manager.js';
 import type { TaskStore } from '../tasks/store.js';
 import {
   acquireWriterLock,
@@ -234,6 +235,7 @@ export async function executePlanAction(
       if (isPlanRunning(action.planId)) {
         return { ok: false, error: `A multi-phase run is already in progress for ${action.planId}.` };
       }
+      const runPlanId = action.planId;
 
       const planOpts: HandlePlanCommandOpts = {
         workspaceCwd: planCtx.workspaceCwd,
@@ -266,6 +268,26 @@ export async function executePlanAction(
 
       // Fire and forget — plan run executes asynchronously.
       void (async () => {
+        // Send initial status message and set up live edits (best-effort).
+        let runChannel: { send: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> } | undefined;
+        let statusMsg: { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> } | undefined;
+        let lastStatusEditAt = 0;
+
+        const postedPhaseStarts = new Set<string>();
+        const onPlanEvent = async (event: PlanRunEvent): Promise<void> => {
+          if (event.type !== 'phase_start') return;
+          if (postedPhaseStarts.has(event.phase.id) || !runChannel) return;
+          postedPhaseStarts.add(event.phase.id);
+          try {
+            await runChannel.send({
+              content: `Starting phase **${event.phase.id}**: ${event.phase.title}`,
+              allowedMentions: NO_MENTIONS,
+            });
+          } catch (err) {
+            planCtx.log?.warn({ err, planId: runPlanId, phaseId: event.phase.id }, 'plan:action:run phase-start post failed');
+          }
+        };
+
         const phaseOpts = {
           runtime: planCtx.runtime!,
           model: planCtx.model!,
@@ -275,20 +297,26 @@ export async function executePlanAction(
           workspaceCwd: planCtx.workspaceCwd,
           log: planCtx.log,
           maxAuditFixAttempts: planCtx.maxAuditFixAttempts,
+          onPlanEvent,
         };
 
-        // Send initial status message and set up live edits (best-effort).
-        let statusMsg: { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> } | undefined;
-        let lastStatusEditAt = 0;
+        try {
+          const channel = await ctx.client.channels.fetch(ctx.channelId);
+          if (channel && 'send' in channel) {
+            runChannel = channel as any;
+          }
+        } catch {
+          // best-effort — phase-start posts and completion fall back gracefully
+        }
 
-        if (!planCtx.skipCompletionNotify) {
+        if (!planCtx.skipCompletionNotify && runChannel) {
           try {
-            const channel = await ctx.client.channels.fetch(ctx.channelId);
-            if (channel && 'send' in channel) {
-              statusMsg = await (channel as any).send({
-                content: `**Plan run started:** \`${action.planId}\` — starting phase ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}`,
-                allowedMentions: NO_MENTIONS,
-              });
+            const sent = await runChannel.send({
+              content: `**Plan run started:** \`${runPlanId}\` — starting phase ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}`,
+              allowedMentions: NO_MENTIONS,
+            });
+            if (sent && typeof (sent as any).edit === 'function') {
+              statusMsg = sent as any;
             }
           } catch {
             // best-effort — missing status message is non-fatal
@@ -339,9 +367,9 @@ export async function executePlanAction(
             // Any error/stale/corrupt/audit_failed/retry_blocked stops the loop.
             stopReason = phaseResult.result;
             stopMessage = (phaseResult as any).error ?? (phaseResult as any).message ?? phaseResult.result;
-            planCtx.log?.warn({ planId: action.planId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
+            planCtx.log?.warn({ planId: runPlanId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
             // Force-edit to reflect stop.
-            await editStatus(`**Plan run stopped:** \`${action.planId}\` — ${stopMessage ?? stopReason}`, true);
+            await editStatus(`**Plan run stopped:** \`${runPlanId}\` — ${stopMessage ?? stopReason}`, true);
             break;
           }
 
@@ -352,7 +380,7 @@ export async function executePlanAction(
           // Yield between phases.
           await new Promise(resolve => setImmediate(resolve));
         }
-        planCtx.log?.info({ planId: action.planId, phasesRun }, 'plan:action:run complete');
+        planCtx.log?.info({ planId: runPlanId, phasesRun }, 'plan:action:run complete');
 
         // Auto-close plan if all phases are terminal
         let autoClosed = false;
@@ -368,12 +396,12 @@ export async function executePlanAction(
           autoClosed = closeResult.closed;
         } catch (err) {
           runError = err;
-          planCtx.log?.error({ err, planId: action.planId }, 'plan:action:run failed');
+          planCtx.log?.error({ err, planId: runPlanId }, 'plan:action:run failed');
         }
 
         // Build the final outcome content — always, so onRunComplete can use it even when skipCompletionNotify is set.
         const lines: string[] = [
-          `**Plan run complete:** \`${action.planId}\``,
+          `**Plan run complete:** \`${runPlanId}\``,
           `Phases run: ${phasesRun}`,
         ];
         if (hitMaxPhases && !stopReason) {
@@ -397,7 +425,7 @@ export async function executePlanAction(
             lines.push(summary);
           }
         } catch (summaryErr) {
-          planCtx.log?.error({ err: summaryErr, planId: action.planId }, 'plan:action:run summary failed');
+          planCtx.log?.error({ err: summaryErr, planId: runPlanId }, 'plan:action:run summary failed');
         }
         const finalContent = lines.join('\n');
 
@@ -413,9 +441,13 @@ export async function executePlanAction(
               }
             } else {
               // Fall back to sending a new message if we never got a statusMsg.
-              const channel = await ctx.client.channels.fetch(ctx.channelId);
-              if (channel && 'send' in channel) {
-                await (channel as any).send({ content: finalContent, allowedMentions: NO_MENTIONS });
+              if (runChannel) {
+                await runChannel.send({ content: finalContent, allowedMentions: NO_MENTIONS });
+              } else {
+                const channel = await ctx.client.channels.fetch(ctx.channelId);
+                if (channel && 'send' in channel) {
+                  await (channel as any).send({ content: finalContent, allowedMentions: NO_MENTIONS });
+                }
               }
             }
           } catch {
@@ -430,9 +462,9 @@ export async function executePlanAction(
           // best-effort
         }
       })().catch((err) => {
-        planCtx.log?.error({ err, planId: action.planId }, 'plan:action:run failed');
+        planCtx.log?.error({ err, planId: runPlanId }, 'plan:action:run failed');
       }).finally(() => {
-        removeRunningPlan(action.planId);
+        removeRunningPlan(runPlanId);
       });
 
       return { ok: true, summary: `Plan run started for **${action.planId}** — starting phase ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}` };
