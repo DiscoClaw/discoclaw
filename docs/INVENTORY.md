@@ -99,7 +99,7 @@ All actions are gated by category env flags (off by default except channels).
 | Task compatibility types/shims | `src/beads/types.ts` | **done** |
 | `bd` CLI compatibility shim (preflight + migration only) | `src/beads/bd-cli.ts` | **done** |
 | Task sync compatibility exports | `src/beads/bead-sync.ts` | **done** |
-| Discord sync compatibility exports | `src/beads/discord-sync.ts`, `src/beads/forum-guard.ts`, `src/beads/initialize.ts`, `src/beads/auto-tag.ts` | **done** |
+| Discord sync compatibility exports | `src/beads/discord-sync.ts` | **done** |
 | Hook scripts (on-create, on-update, etc.) | `scripts/beads/` | **done** |
 
 ## 9. Task Store + Migration (`src/tasks/`)
@@ -154,7 +154,7 @@ path. See `docs/tasks-migration.md` for migration details.
 | Core (pidlock, bootstrap, permissions) | 3 tests | **done** |
 | Discord subsystem | 14 tests | **done** |
 | Runtime adapters (Claude CLI + OpenAI-compat + Codex CLI + registry) | 4 tests | **done** |
-| Beads subsystem | 11 test files | **done** |
+| Beads subsystem | 3 test files | **done** |
 | Tasks subsystem (`TaskStore`, migration) | 2 test files | **done** |
 | Cron subsystem | 3 tests | **done** |
 | Integration (fail-closed, prompt-context, status, channel-context) | 4 tests | **done** |

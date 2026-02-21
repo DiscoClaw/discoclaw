@@ -1,30 +1,29 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { InitializeBeadsOpts } from './initialize.js';
+import type { InitializeTasksOpts } from './initialize.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../tasks/discord-sync.js', () => ({
+vi.mock('./discord-sync.js', () => ({
   loadTagMap: vi.fn().mockResolvedValue({ bug: '111', feature: '222' }),
 }));
 
-vi.mock('../tasks/forum-guard.js', () => ({
+vi.mock('./forum-guard.js', () => ({
   initTasksForumGuard: vi.fn(),
 }));
 
-vi.mock('../tasks/sync-coordinator.js', () => ({
+vi.mock('./sync-coordinator.js', () => ({
   TaskSyncCoordinator: vi.fn().mockImplementation(() => ({
     sync: vi.fn().mockResolvedValue(undefined),
   })),
 }));
 
-import { initTasksForumGuard } from '../tasks/forum-guard.js';
-import { TaskSyncCoordinator } from '../tasks/sync-coordinator.js';
-import { initializeBeadsContext, wireBeadsSync } from './initialize.js';
-import { initializeTasksContext, wireTaskSync } from '../tasks/initialize.js';
-import { TaskStore } from '../tasks/store.js';
-import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
+import { initTasksForumGuard } from './forum-guard.js';
+import { TaskSyncCoordinator } from './sync-coordinator.js';
+import { initializeTasksContext, wireTaskSync } from './initialize.js';
+import { TaskStore } from './store.js';
+import { withDirectTaskLifecycle } from './task-lifecycle.js';
 
 function fakeLog() {
   return {
@@ -34,10 +33,10 @@ function fakeLog() {
   };
 }
 
-function baseOpts(overrides: Partial<InitializeBeadsOpts> = {}): InitializeBeadsOpts {
+function baseOpts(overrides: Partial<InitializeTasksOpts> = {}): InitializeTasksOpts {
   return {
     enabled: true,
-    tasksCwd: '/tmp/beads',
+    tasksCwd: '/tmp/tasks',
     tasksForum: 'forum-123',
     tasksTagMapPath: '/tmp/tag-map.json',
     tasksSidebar: false,
@@ -49,22 +48,17 @@ function baseOpts(overrides: Partial<InitializeBeadsOpts> = {}): InitializeBeads
   };
 }
 
-describe('initializeBeadsContext', () => {
-  it('keeps compatibility exports aligned to canonical task initialize helpers', () => {
-    expect(initializeBeadsContext).toBe(initializeTasksContext);
-    expect(wireBeadsSync).toBe(wireTaskSync);
-  });
-
+describe('initializeTasksContext', () => {
   it('returns undefined with no warnings when disabled', async () => {
     const log = fakeLog();
-    const result = await initializeBeadsContext(baseOpts({ enabled: false, log }));
+    const result = await initializeTasksContext(baseOpts({ enabled: false, log }));
     expect(result.taskCtx).toBeUndefined();
     expect(log.warn).not.toHaveBeenCalled();
   });
 
   it('returns undefined and warns when no forum resolved', async () => {
     const log = fakeLog();
-    const result = await initializeBeadsContext(baseOpts({
+    const result = await initializeTasksContext(baseOpts({
       tasksForum: '',
       systemTasksForumId: undefined,
       log,
@@ -77,14 +71,14 @@ describe('initializeBeadsContext', () => {
 
   it('returns TaskContext when all prerequisites met', async () => {
     const log = fakeLog();
-    const result = await initializeBeadsContext(baseOpts({ log }));
+    const result = await initializeTasksContext(baseOpts({ log }));
     expect(result.taskCtx).toBeDefined();
     expect(result.taskCtx!.forumId).toBe('forum-123');
     expect(result.taskCtx!.autoTag).toBe(true);
   });
 
   it('resolves forum from systemTasksForumId when tasksForum is empty', async () => {
-    const result = await initializeBeadsContext(baseOpts({
+    const result = await initializeTasksContext(baseOpts({
       tasksForum: '',
       systemTasksForumId: 'system-forum-456',
     }));
@@ -94,7 +88,7 @@ describe('initializeBeadsContext', () => {
 
   it('sets sidebarMentionUserId when sidebar enabled with mention user', async () => {
     const log = fakeLog();
-    const result = await initializeBeadsContext(baseOpts({
+    const result = await initializeTasksContext(baseOpts({
       tasksSidebar: true,
       tasksMentionUser: 'user-789',
       log,
@@ -106,7 +100,7 @@ describe('initializeBeadsContext', () => {
 
   it('warns when sidebar enabled but mention user not set', async () => {
     const log = fakeLog();
-    const result = await initializeBeadsContext(baseOpts({
+    const result = await initializeTasksContext(baseOpts({
       tasksSidebar: true,
       tasksMentionUser: undefined,
       log,
@@ -120,7 +114,7 @@ describe('initializeBeadsContext', () => {
 
   it('does not set sidebarMentionUserId when sidebar disabled', async () => {
     const log = fakeLog();
-    const result = await initializeBeadsContext(baseOpts({
+    const result = await initializeTasksContext(baseOpts({
       tasksSidebar: false,
       tasksMentionUser: 'user-789',
       log,
@@ -131,7 +125,7 @@ describe('initializeBeadsContext', () => {
   });
 
   it('propagates tagMapPath to TaskContext', async () => {
-    const result = await initializeBeadsContext(baseOpts({
+    const result = await initializeTasksContext(baseOpts({
       tasksTagMapPath: '/my/custom/tag-map.json',
     }));
     expect(result.taskCtx).toBeDefined();
@@ -140,18 +134,18 @@ describe('initializeBeadsContext', () => {
 
   it('uses provided store instead of creating a new one', async () => {
     const store = new TaskStore();
-    const result = await initializeBeadsContext(baseOpts({ store }));
+    const result = await initializeTasksContext(baseOpts({ store }));
     expect(result.taskCtx).toBeDefined();
     expect(result.taskCtx!.store).toBe(store);
   });
 });
 
-describe('wireBeadsSync', () => {
+describe('wireTaskSync', () => {
   it('wires forum guard, coordinator, and store event listeners', async () => {
     const log = fakeLog();
     const store = new TaskStore();
     const taskCtx = {
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       store,
@@ -160,12 +154,12 @@ describe('wireBeadsSync', () => {
     const client = {} as any;
     const guild = {} as any;
 
-    const result = await wireBeadsSync({
+    const result = await wireTaskSync({
       taskCtx,
       client,
       guild,
       guildId: 'guild-1',
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       sidebarMentionUserId: 'user-1',
       log,
     });
@@ -191,7 +185,7 @@ describe('wireBeadsSync', () => {
     expect(taskCtx.syncCoordinator).toBeDefined();
     expect(result).toHaveProperty('stop');
     expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ tasksCwd: '/tmp/beads' }),
+      expect.objectContaining({ tasksCwd: '/tmp/tasks' }),
       'tasks:store-event watcher started',
     );
   });
@@ -200,7 +194,7 @@ describe('wireBeadsSync', () => {
     const log = fakeLog();
     const store = new TaskStore({ prefix: 'test' });
     const taskCtx = {
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       tagMapPath: '/tmp/tag-map.json',
@@ -210,25 +204,25 @@ describe('wireBeadsSync', () => {
 
     vi.mocked(TaskSyncCoordinator).mockClear();
 
-    await wireBeadsSync({
+    await wireTaskSync({
       taskCtx,
       client: {} as any,
       guild: {} as any,
       guildId: 'guild-1',
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       log,
     });
 
     const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
 
-    // 'created' is intentionally NOT wired — beadCreate handles thread creation directly.
+    // 'created' is intentionally NOT wired — taskCreate handles thread creation directly.
     const callsBeforeCreate = coordinatorInstance.sync.mock.calls.length;
-    const bead = store.create({ title: 'Test task' });
+    const task = store.create({ title: 'Test task' });
     expect(coordinatorInstance.sync.mock.calls.length).toBe(callsBeforeCreate);
 
     // 'updated' IS wired — should trigger sync.
     const callsBeforeUpdate = coordinatorInstance.sync.mock.calls.length;
-    store.update(bead.id, { title: 'Updated task' });
+    store.update(task.id, { title: 'Updated task' });
     expect(coordinatorInstance.sync.mock.calls.length).toBeGreaterThan(callsBeforeUpdate);
   });
 
@@ -236,7 +230,7 @@ describe('wireBeadsSync', () => {
     const log = fakeLog();
     const store = new TaskStore({ prefix: 'test' });
     const taskCtx = {
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       tagMapPath: '/tmp/tag-map.json',
@@ -246,12 +240,12 @@ describe('wireBeadsSync', () => {
 
     vi.mocked(TaskSyncCoordinator).mockClear();
 
-    await wireBeadsSync({
+    await wireTaskSync({
       taskCtx,
       client: {} as any,
       guild: {} as any,
       guildId: 'guild-1',
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       log,
     });
 
@@ -270,7 +264,7 @@ describe('wireBeadsSync', () => {
     const log = fakeLog();
     const store = new TaskStore({ prefix: 'test' });
     const taskCtx = {
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       tagMapPath: '/tmp/tag-map.json',
@@ -280,12 +274,12 @@ describe('wireBeadsSync', () => {
 
     vi.mocked(TaskSyncCoordinator).mockClear();
 
-    const result = await wireBeadsSync({
+    const result = await wireTaskSync({
       taskCtx,
       client: {} as any,
       guild: {} as any,
       guildId: 'guild-1',
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       log,
     });
 
@@ -295,8 +289,8 @@ describe('wireBeadsSync', () => {
     const callsAfterStop = coordinatorInstance.sync.mock.calls.length;
 
     // After stop(), store mutations should NOT trigger additional syncs
-    const bead = store.create({ title: 'Another task' });
-    store.update(bead.id, { title: 'Modified' });
+    const task = store.create({ title: 'Another task' });
+    store.update(task.id, { title: 'Modified' });
     expect(coordinatorInstance.sync.mock.calls.length).toBe(callsAfterStop);
   });
 
@@ -304,7 +298,7 @@ describe('wireBeadsSync', () => {
     const log = fakeLog();
     const store = new TaskStore();
     const taskCtx = {
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
       tagMapPath: '/tmp/tag-map.json',
@@ -314,12 +308,12 @@ describe('wireBeadsSync', () => {
 
     vi.mocked(initTasksForumGuard).mockClear();
 
-    await wireBeadsSync({
+    await wireTaskSync({
       taskCtx,
       client: {} as any,
       guild: {} as any,
       guildId: 'guild-1',
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       log,
       skipForumGuard: true,
     });
@@ -334,7 +328,7 @@ describe('wireBeadsSync', () => {
     const tagMap = { bug: '111' };
     const store = new TaskStore();
     const taskCtx = {
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       forumId: 'forum-123',
       tagMap,
       tagMapPath: '/config/tag-map.json',
@@ -342,12 +336,12 @@ describe('wireBeadsSync', () => {
       log,
     } as any;
 
-    await wireBeadsSync({
+    await wireTaskSync({
       taskCtx,
       client: {} as any,
       guild: {} as any,
       guildId: 'guild-1',
-      tasksCwd: '/tmp/beads',
+      tasksCwd: '/tmp/tasks',
       log,
     });
 
