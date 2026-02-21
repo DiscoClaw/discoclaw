@@ -107,6 +107,7 @@ export class TaskSyncCoordinator {
     this.failureRetryTimeout = setTimeout(() => {
       this.failureRetryPending = false;
       this.failureRetryTimeout = null;
+      metrics.increment('tasks.sync.failure_retry.triggered');
       this.sync().catch((err) => {
         metrics.increment('tasks.sync.failure_retry.failed');
         this.opts.log?.warn({ err }, 'tasks:coordinator failure retry sync failed');
@@ -142,6 +143,7 @@ export class TaskSyncCoordinator {
     this.deferredCloseRetryTimeout = setTimeout(() => {
       this.deferredCloseRetryPending = false;
       this.deferredCloseRetryTimeout = null;
+      metrics.increment('tasks.sync.retry.triggered');
       this.sync().catch((err) => {
         metrics.increment('tasks.sync.retry.failed');
         this.opts.log?.warn({ err }, 'tasks:coordinator deferred-close retry failed');

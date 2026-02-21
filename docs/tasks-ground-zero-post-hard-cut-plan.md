@@ -68,3 +68,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 4 by canceling pending deferred-close retries when sync failures occur, so failure-retry becomes the single active retry path during error recovery.
 - 2026-02-21: Continued Track 4 by wiring sync retry policy into config/env (`DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_*`, `DISCOCLAW_TASKS_SYNC_DEFERRED_RETRY_DELAY_MS`) and plumbing those values through task initialization into `TaskSyncCoordinator`.
 - 2026-02-21: Continued Track 4 by surfacing configured task sync retry policy (`failureRetry on/off`, failure/deferred retry delays) in `!health verbose` configuration output.
+- 2026-02-21: Continued Track 4 by adding retry execution counters (`tasks.sync.retry.triggered`, `tasks.sync.failure_retry.triggered`) and surfacing scheduled/triggered/failed triples in `!health verbose`.

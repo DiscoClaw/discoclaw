@@ -365,6 +365,7 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
 
     // Retry should have fired.
     expect((runTaskSync as any).mock.calls.length).toBe(2);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.triggered');
   });
 
   it('coalesces deferred-close retry scheduling while a retry is pending', async () => {
@@ -399,6 +400,9 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(3);
+    const triggeredCalls = (opts.metrics.increment as any).mock.calls
+      .filter(([name]: [string]) => name === 'tasks.sync.retry.triggered');
+    expect(triggeredCalls).toHaveLength(1);
   });
 
   it('cancels pending deferred-close retry after a successful no-deferred sync', async () => {
@@ -425,6 +429,7 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(2);
+    expect(opts.metrics.increment).not.toHaveBeenCalledWith('tasks.sync.retry.triggered');
   });
 
   it('deferred-close retry failure is logged', async () => {
@@ -447,6 +452,7 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
       expect.objectContaining({ err: expect.any(Error) }),
       'tasks:coordinator deferred-close retry failed',
     );
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.triggered');
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.failed');
   });
 });
@@ -480,6 +486,7 @@ describe('TaskSyncCoordinator failure retry', () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(2);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.triggered');
   });
 
   it('logs and increments metrics when failure retry also fails', async () => {
@@ -495,6 +502,7 @@ describe('TaskSyncCoordinator failure retry', () => {
     await expect(coord.sync()).rejects.toThrow('primary boom');
     await vi.advanceTimersByTimeAsync(1_000);
 
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.triggered');
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.failed');
     expect(opts.log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
@@ -526,6 +534,9 @@ describe('TaskSyncCoordinator failure retry', () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(3);
+    const triggeredCalls = (opts.metrics.increment as any).mock.calls
+      .filter(([name]: [string]) => name === 'tasks.sync.failure_retry.triggered');
+    expect(triggeredCalls).toHaveLength(1);
   });
 
   it('cancels pending failure retry after a successful sync before retry fires', async () => {
@@ -548,6 +559,7 @@ describe('TaskSyncCoordinator failure retry', () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(2);
+    expect(opts.metrics.increment).not.toHaveBeenCalledWith('tasks.sync.failure_retry.triggered');
   });
 
   it('cancels pending deferred-close retry when failure retry path takes over', async () => {
@@ -578,6 +590,8 @@ describe('TaskSyncCoordinator failure retry', () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(3);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.triggered');
+    expect(opts.metrics.increment).not.toHaveBeenCalledWith('tasks.sync.retry.triggered');
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(3);
