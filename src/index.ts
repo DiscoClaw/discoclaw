@@ -1011,7 +1011,6 @@ if (taskCtx) {
       taskCtx,
       client,
       guild,
-      log,
       skipPhase5: cfg.tasksSyncSkipPhase5,
     });
     taskSyncWiring = wired;

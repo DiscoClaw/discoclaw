@@ -157,7 +157,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client,
       guild,
-      log,
     });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
@@ -200,7 +199,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      log,
     });
 
     const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
@@ -234,7 +232,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      log,
     });
 
     const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
@@ -266,7 +263,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      log,
     });
 
     result.stop();
@@ -297,7 +293,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      log,
     });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
@@ -328,7 +323,6 @@ describe('wireTaskSync', () => {
       taskCtx,
       client: {} as any,
       guild: {} as any,
-      log,
     });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
