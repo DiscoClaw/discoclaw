@@ -42,10 +42,10 @@ describe('legacy-token-guard: unit', () => {
     expect(blockedMatches[0]?.ruleId).toBe('legacy-bead-context');
   });
 
-  it('allows beads import-path references inside compatibility shim files', () => {
+  it('blocks beads import-path references everywhere after shim retirement', () => {
     const input = "export * from '../beads/bead-sync.js';";
     const matches = scanFileContent('src/beads/compat-shim.ts', input, DEFAULT_LEGACY_GUARD_RULES);
-    expect(matches.some((m) => m.ruleId === 'legacy-beads-import-path')).toBe(false);
+    expect(matches.some((m) => m.ruleId === 'legacy-beads-import-path')).toBe(true);
   });
 
   it('allows legacy plan header/token compatibility only in plan-commands', () => {

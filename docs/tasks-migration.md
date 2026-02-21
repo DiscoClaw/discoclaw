@@ -50,9 +50,8 @@ The `bd` CLI integration had several structural problems:
 
 ### Compatibility layer: `src/beads/`
 
-Legacy runtime sync shims have been removed. Remaining bridge files are:
-- `src/beads/bd-cli.ts` for migration/preflight helpers
-- `src/beads/types.ts` for temporary type alias compatibility
+Legacy runtime sync shims have been removed from `src/beads/`.
+Migration and preflight helpers now live in canonical task modules (`src/tasks/bd-cli.ts`).
 
 ### Updated: `src/discord/`
 
@@ -191,14 +190,14 @@ the standard tasks boot sequence.
 
 ## 6. bd-cli.ts Retained Functions
 
-`src/beads/bd-cli.ts` is kept for functions still needed outside the live task path:
+`src/tasks/bd-cli.ts` is retained for migration/preflight functions still needed outside the live task path:
 
 | Function | Why retained |
 |----------|-------------|
-| `buildBeadContextSummary(beadId, store)` | Builds the bead context block injected into AI prompts; now uses `TaskStore` directly |
+| `buildTaskContextSummary(taskId, store)` | Builds the task context block injected into AI prompts; uses `TaskStore` directly |
 | `checkBdAvailable()` | Used by `pnpm preflight` / setup wizard to verify the bd CLI is installed |
 | `ensureBdDatabaseReady(cwd)` | Used by `pnpm preflight` to check the db prefix is configured |
-| `normalizeBeadData(bead)` | Normalizes legacy `done`/`tombstone` statuses; used by `migrateFromBd` |
+| `normalizeTaskData(task)` | Normalizes legacy `done`/`tombstone` statuses; used by `migrateFromBd` |
 | `parseBdJson<T>(stdout)` | JSON parser for bd CLI output; used by `migrateFromBd` and bd-cli tests |
 
 The raw `runBd()` helper and `bdCreate`, `bdUpdate`, `bdClose`, `bdAddLabel` functions
@@ -209,9 +208,8 @@ for removal once the migration tooling is no longer needed.
 
 ## 7. Legacy Compatibility Surface (Bridge)
 
-The canonical runtime is now task-named (`src/tasks/*`), but a limited compatibility layer remains:
+The canonical runtime is task-named (`src/tasks/*`). Remaining bridge surface is limited to:
 
-- `src/beads/*` re-export shims for legacy import paths.
 - `scripts/beads/*` migration/hooks tooling remains for bridge and one-shot migration flows.
 - Task data path resolution prefers `data/tasks/*` with fallback to legacy `data/beads/*` when present.
 - Plan header parsing still accepts legacy `**Bead:**` and maps it to task IDs.

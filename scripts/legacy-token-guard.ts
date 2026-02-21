@@ -67,8 +67,8 @@ export const DEFAULT_LEGACY_GUARD_RULES: GuardRule[] = [
   {
     id: 'legacy-beads-import-path',
     pattern: /\bfrom\s+['"][^'"]*\/beads\/[^'"]*['"]/g,
-    message: 'Import canonical task modules; keep beads path usage isolated to src/beads compatibility shims.',
-    allowIn: ['src/beads/**'],
+    message: 'Import canonical task modules; src/beads import paths are retired.',
+    allowIn: [],
   },
 ];
 

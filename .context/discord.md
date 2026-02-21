@@ -126,7 +126,7 @@ DiscoClaw includes a task tracker backed by in-process `TaskStore` data and sync
 - Data model/store: `src/tasks/types.ts`, `src/tasks/store.ts`
 - Discord action path: `src/discord/actions-tasks.ts` (`taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`)
 - Canonical sync modules: `src/tasks/task-sync-engine.ts`, `src/tasks/sync-coordinator.ts`, `src/tasks/discord-sync.ts`
-- Compatibility shims: `src/beads/types.ts`, `src/beads/bd-cli.ts`
+- Runtime shim status: `src/beads/*` compatibility modules removed in hard-cut phase
 
 Auto-sync is event-driven from the in-process store and runs a startup reconciliation pass.
 Auto-triggered syncs are silent; explicit `taskSync` can post status output.
