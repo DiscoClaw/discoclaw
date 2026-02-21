@@ -31,3 +31,4 @@ plans/community/*
 recipes/community/*
 !recipes/community/.gitkeep
 .beads/
+website/
