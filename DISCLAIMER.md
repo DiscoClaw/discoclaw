@@ -2,6 +2,8 @@
 
 ## Important usage terms
 
+> **Warning:** DiscoClaw is **not containerized or sandboxed**. It runs directly on your host machine and has the potential capability to read, modify, or delete critical files. **Do not install this on a production or critical system.** Use a dedicated machine or VM, and understand the risks before running.
+
 DiscoClaw is an **orchestration layer** that coordinates between Discord and AI runtimes (Claude Code by default, with OpenAI and Codex adapters available). It is a coordination layer, not a safety layer. Using DiscoClaw does not add guardrails beyond what the underlying runtimes already provide.
 
 - The AI runtimes have full tool access to your local system — the Discord interface doesn't change that.

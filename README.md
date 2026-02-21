@@ -155,6 +155,8 @@ systemctl --user restart discoclaw.service
 
 ## Safety
 
+> **Warning:** DiscoClaw is **not containerized or sandboxed**. It runs directly on your host machine and has the potential capability to read, modify, or delete critical files. **Do not install this on a production or critical system.** Use a dedicated machine or VM, and understand the risks before running.
+
 DiscoClaw orchestrates powerful local tooling via AI runtimes, often with elevated permissions. Treat it like a local automation system connected to Discord.
 
 - Use a **private Discord server** — don't start in a shared or public server
