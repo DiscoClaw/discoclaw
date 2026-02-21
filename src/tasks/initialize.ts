@@ -105,23 +105,20 @@ export async function initializeTasksContext(
 // Post-connect wiring (store event subscriptions + startup sync)
 // ---------------------------------------------------------------------------
 
-type WireTaskSyncOpts = {
-  taskCtx: TaskContext;
-  runCtx: TaskSyncRunContext;
-  /** Disable Phase 5 (thread reconciliation) of the task sync cycle. */
-  skipPhase5?: boolean;
-};
-
-export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<TaskSyncWiring> {
-  const log = opts.taskCtx.log;
+export async function wireTaskSync(
+  taskCtx: TaskContext,
+  runCtx: TaskSyncRunContext,
+  opts?: { skipPhase5?: boolean },
+): Promise<TaskSyncWiring> {
+  const log = taskCtx.log;
   if (!log) {
     throw new Error('wireTaskSync requires taskCtx.log');
   }
 
   const syncCoordinator = await ensureTaskSyncCoordinator(
-    opts.taskCtx,
-    opts.runCtx,
-    { skipPhase5: opts.skipPhase5 },
+    taskCtx,
+    runCtx,
+    { skipPhase5: opts?.skipPhase5 },
   );
 
   // Startup sync: fire-and-forget to avoid blocking cron init
@@ -129,10 +126,10 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<TaskSyncWiri
     log.warn({ err }, 'tasks:startup-sync failed');
   });
 
-  const wiring = wireTaskStoreSyncTriggers(opts.taskCtx, syncCoordinator, log);
+  const wiring = wireTaskStoreSyncTriggers(taskCtx, syncCoordinator, log);
 
   log.info(
-    { tasksCwd: opts.taskCtx.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
+    { tasksCwd: taskCtx.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
     'tasks:store-event sync triggers started',
   );
 

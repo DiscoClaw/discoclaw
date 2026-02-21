@@ -88,3 +88,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued post-Track-4 cleanup by internalizing `wireTaskSync` options/result types in `initialize.ts` now that they are no longer consumed outside the module.
 - 2026-02-21: Continued post-Track-4 cleanup by introducing canonical `TaskSyncWiring` type in `task-sync.ts` and adopting it in task initialization/bootstrap wiring surfaces.
 - 2026-02-21: Continued post-Track-4 cleanup by returning store-trigger wiring directly from `wireTaskSync` (removing an unnecessary wrapper around `TaskSyncWiring.stop()`).
+- 2026-02-21: Continued post-Track-4 cleanup by simplifying `wireTaskSync` to positional args (`taskCtx`, `runCtx`, `opts`) and removing its dedicated options object type.
