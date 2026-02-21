@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
-import { parseBdJson, normalizeTaskData, bdShow, bdList, bdFindByTitle, ensureBdDatabaseReady, buildTaskContextSummary } from './bd-cli.js';
+import { parseBdJson, normalizeTaskData, bdList, ensureBdDatabaseReady, buildTaskContextSummary } from './bd-cli.js';
 import { TaskStore } from './store.js';
 import type { TaskData } from './types.js';
 
@@ -110,60 +110,7 @@ describe('normalizeTaskData', () => {
 });
 
 // ---------------------------------------------------------------------------
-// bdShow — "not found" error handling
-// ---------------------------------------------------------------------------
-
-describe('bdShow', () => {
-  it('returns null for "not found" errors', async () => {
-    const { execa } = await import('execa');
-    (execa as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: not found',
-    });
-
-    const result = await bdShow('ws-999', '/tmp');
-    expect(result).toBeNull();
-  });
-
-  it('returns null for "no issue found matching" errors (bd resolve failure)', async () => {
-    const { execa } = await import('execa');
-    (execa as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: resolving ID ws-007: operation failed: failed to resolve ID: no issue found matching "ws-007"',
-    });
-
-    const result = await bdShow('ws-007', '/tmp');
-    expect(result).toBeNull();
-  });
-
-  it('returns task data on success', async () => {
-    const { execa } = await import('execa');
-    (execa as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: JSON.stringify([{ id: 'ws-001', title: 'Test', status: 'open' }]),
-      stderr: '',
-    });
-
-    const result = await bdShow('ws-001', '/tmp');
-    expect(result).toEqual({ id: 'ws-001', title: 'Test', status: 'open' });
-  });
-
-  it('throws on unexpected errors', async () => {
-    const { execa } = await import('execa');
-    (execa as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'Error: database corruption detected',
-    });
-
-    await expect(bdShow('ws-001', '/tmp')).rejects.toThrow('database corruption');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// runBd — argument construction (--db, --no-daemon pinning)
+// runBd (via bdList) — argument construction (--db, --no-daemon pinning)
 // ---------------------------------------------------------------------------
 
 describe('runBd argument construction', () => {
@@ -257,106 +204,6 @@ describe('runBd argument construction', () => {
     const listIdx = calledArgs.indexOf('list');
     expect(dbIdx).toBeLessThan(listIdx);
     expect(noDaemonIdx).toBeLessThan(listIdx);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// bdFindByTitle — title-match dedup
-// ---------------------------------------------------------------------------
-
-describe('bdFindByTitle', () => {
-  let mockExeca: ReturnType<typeof vi.fn>;
-
-  beforeEach(async () => {
-    const mod = await import('execa');
-    mockExeca = mod.execa as unknown as ReturnType<typeof vi.fn>;
-    mockExeca.mockReset();
-  });
-
-  it('returns matching open task (case-insensitive, trimmed)', async () => {
-    mockExeca.mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: JSON.stringify([
-        { id: 'ws-001', title: '  Fix The Bug  ', status: 'open' },
-      ]),
-      stderr: '',
-    });
-
-    const result = await bdFindByTitle('fix the bug', '/tmp');
-    expect(result).toEqual({ id: 'ws-001', title: '  Fix The Bug  ', status: 'open' });
-  });
-
-  it('returns null when no title matches', async () => {
-    mockExeca.mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: JSON.stringify([
-        { id: 'ws-001', title: 'Something else', status: 'open' },
-      ]),
-      stderr: '',
-    });
-
-    const result = await bdFindByTitle('Fix the bug', '/tmp');
-    expect(result).toBeNull();
-  });
-
-  it('skips closed tasks with matching title', async () => {
-    mockExeca.mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: JSON.stringify([
-        { id: 'ws-001', title: 'Fix the bug', status: 'closed' },
-      ]),
-      stderr: '',
-    });
-
-    const result = await bdFindByTitle('Fix the bug', '/tmp');
-    expect(result).toBeNull();
-  });
-
-  it('matches in_progress tasks', async () => {
-    mockExeca.mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: JSON.stringify([
-        { id: 'ws-002', title: 'Add auth', status: 'in_progress' },
-      ]),
-      stderr: '',
-    });
-
-    const result = await bdFindByTitle('Add auth', '/tmp');
-    expect(result).toEqual({ id: 'ws-002', title: 'Add auth', status: 'in_progress' });
-  });
-
-  it('returns null for empty/whitespace title without calling bd', async () => {
-    const result = await bdFindByTitle('   ', '/tmp');
-    expect(result).toBeNull();
-    expect(mockExeca).not.toHaveBeenCalled();
-  });
-
-  it('passes label filter to bdList when provided', async () => {
-    mockExeca.mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: JSON.stringify([]),
-      stderr: '',
-    });
-
-    await bdFindByTitle('Some title', '/tmp', { label: 'plan' });
-
-    const calledArgs = mockExeca.mock.calls[0][1] as string[];
-    expect(calledArgs).toContain('--label');
-    expect(calledArgs).toContain('plan');
-  });
-
-  it('returns first match when multiple tasks match', async () => {
-    mockExeca.mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: JSON.stringify([
-        { id: 'ws-001', title: 'Fix the bug', status: 'open' },
-        { id: 'ws-002', title: 'Fix the bug', status: 'in_progress' },
-      ]),
-      stderr: '',
-    });
-
-    const result = await bdFindByTitle('Fix the bug', '/tmp');
-    expect(result?.id).toBe('ws-001');
   });
 });
 
