@@ -167,6 +167,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Context modules | `.context/*.md` | **done** |
 | Token usage & efficiency | `docs/token-efficiency.md` | **done** |
 | Plan & Forge reference | `docs/plan-and-forge.md` | **done** |
+| Post-hard-cut tasks refactor plan | `docs/tasks-ground-zero-post-hard-cut-plan.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
 

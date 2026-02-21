@@ -2,6 +2,8 @@
 
 Tasks are backed by an in-process `TaskStore` and synced to Discord forum threads.
 
+Ground-zero post-hard-cut refactor tracker: `docs/tasks-ground-zero-post-hard-cut-plan.md`
+
 ## Data Model
 
 Canonical type: `TaskData` in `src/tasks/types.ts`.
@@ -11,6 +13,8 @@ Statuses: `open` | `in_progress` | `blocked` | `closed`
 ## Task Store
 
 Implementation: `src/tasks/store.ts`
+
+Architecture contract: `src/tasks/architecture-contract.ts`
 
 - Synchronous in-memory writes
 - Event emission on mutations (`created`, `updated`, `closed`, `labeled`)
