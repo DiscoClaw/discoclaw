@@ -17,7 +17,7 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 | --- | --- | --- | --- |
 | 1 | Contract + Characterization | DONE | Canonical contract file and baseline characterization tests landed in `src/tasks/`. |
 | 2 | Core Service Extraction | DONE | `TaskService` introduced in `src/tasks/service.ts`; mutation callsites migrated from adapters/sync engine/CLI. |
-| 3 | Sync Pipeline Rebuild | TODO | Move to explicit ingest -> normalize -> diff -> apply stages with idempotency keys. |
+| 3 | Sync Pipeline Rebuild | IN_PROGRESS | Stage scaffolding started with explicit ingest/normalize/diff helpers and idempotent operation planning in sync engine. |
 | 4 | Performance + Operability | TODO | Optimize hot paths and add transition-level metrics/failure handling. |
 
 ## Track 1 Scope (Complete)
@@ -43,3 +43,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Created this post-hard-cut ground-zero plan.
 - 2026-02-21: Completed Track 1 with a canonical architecture contract and baseline characterization tests.
 - 2026-02-21: Completed Track 2 with `TaskService` extraction and migration of all non-test mutation callsites (`actions-tasks`, `task-sync-engine`, `task-cli`).
+- 2026-02-21: Started Track 3 by extracting sync pipeline helpers (`ingest -> normalize -> diff`) in `src/tasks/task-sync-pipeline.ts` and wiring operation planning into `runTaskSync`.
