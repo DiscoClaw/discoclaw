@@ -192,17 +192,29 @@ It exercises `RuntimeAdapter.invoke()` → `EngineEvent` pipeline with a curated
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SMOKE_TEST_TIERS` | *(unset — skips smoke tests)* | Comma-separated list of tier names (`fast`, `capable`) or literal model IDs to test (e.g. `fast,capable` or `claude-haiku-4-5-20251001`) |
-| `SMOKE_TEST_TIMEOUT_MS` | `60000` | Per-invocation timeout for each smoke-test prompt, in milliseconds |
+| `SMOKE_TEST_TIERS` | *(unset — skips smoke tests)* | Comma-separated list of tier names (`fast`, `capable`) or literal model IDs to test for Claude Code (e.g. `fast,capable` or `claude-haiku-4-5-20251001`) |
+| `GEMINI_SMOKE_TEST_TIERS` | *(unset — skips Gemini smoke tests)* | Comma-separated tier names or model IDs for Gemini smoke tests (requires `GEMINI_API_KEY`) |
+| `OPENAI_SMOKE_TEST_TIERS` | *(unset — skips OpenAI smoke tests)* | Comma-separated tier names or model IDs for OpenAI smoke tests (requires `OPENAI_API_KEY`) |
+| `CODEX_SMOKE_TEST_TIERS` | *(unset — skips Codex smoke tests)* | Comma-separated tier names or model IDs for Codex smoke tests (requires `codex` binary on `PATH`) |
+| `SMOKE_TEST_TIMEOUT_MS` | `60000` | Per-invocation timeout for each smoke-test prompt, in milliseconds (applies to all providers) |
 
 ### Usage
 
 ```bash
-# Run smoke tests against the fast and capable tiers
+# Run Claude Code smoke tests against the fast and capable tiers
 SMOKE_TEST_TIERS=fast,capable pnpm test
 
-# Run against a specific model ID
+# Run against a specific Claude model ID
 SMOKE_TEST_TIERS=claude-sonnet-4-6 pnpm test
+
+# Run Gemini smoke tests for the fast tier
+GEMINI_SMOKE_TEST_TIERS=fast pnpm test
+
+# Run OpenAI smoke tests (requires OPENAI_API_KEY)
+OPENAI_SMOKE_TEST_TIERS=fast pnpm test
+
+# Run Codex smoke tests (requires codex binary on PATH)
+CODEX_SMOKE_TEST_TIERS=fast pnpm test
 
 # Adjust timeout (e.g. slower network)
 SMOKE_TEST_TIERS=fast SMOKE_TEST_TIMEOUT_MS=120000 pnpm test
