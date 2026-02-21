@@ -3,6 +3,7 @@ import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { TaskStore } from './store.js';
+import type { TaskService } from './service.js';
 import type { TaskSyncResult, TagMap } from './types.js';
 import { TaskSyncCoordinator } from './sync-coordinator.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
@@ -17,6 +18,7 @@ export type TaskSyncContext = {
   tagMap: TagMap;
   tagMapPath?: string;
   store: TaskStore;
+  taskService?: TaskService;
   log?: LoggerLike;
   sidebarMentionUserId?: string;
   forumCountSync?: ForumCountSync;
@@ -42,6 +44,7 @@ export async function ensureTaskSyncCoordinator(
     tagMap: taskCtx.tagMap,
     tagMapPath: taskCtx.tagMapPath,
     store: taskCtx.store,
+    taskService: taskCtx.taskService,
     log: taskCtx.log,
     mentionUserId: taskCtx.sidebarMentionUserId,
     forumCountSync: taskCtx.forumCountSync,

@@ -1,4 +1,5 @@
 import { TaskStore } from './store.js';
+import { createTaskService } from './service.js';
 import { isTaskStatus, type TaskStatus } from './types.js';
 import { resolveTaskDataPath } from './path-defaults.js';
 
@@ -117,7 +118,8 @@ async function main(): Promise<void> {
       const priority = priorityStr != null ? Number(priorityStr) : undefined;
 
       const store = await getStore();
-      const task = store.create({
+      const taskService = createTaskService(store);
+      const task = taskService.create({
         title,
         ...(description !== undefined && { description }),
         ...(priority != null && Number.isFinite(priority) && { priority }),
@@ -136,7 +138,8 @@ async function main(): Promise<void> {
       if (!title || title.startsWith('-')) throw new Error('quick requires a title');
 
       const store = await getStore();
-      const task = store.create({ title });
+      const taskService = createTaskService(store);
+      const task = taskService.create({ title });
       await store.flush();
       process.stdout.write(task.id + '\n');
       break;
@@ -198,7 +201,8 @@ async function main(): Promise<void> {
       const validStatus: TaskStatus | undefined = status && isTaskStatus(status) ? status : undefined;
 
       const store = await getStore();
-      store.update(id, {
+      const taskService = createTaskService(store);
+      taskService.update(id, {
         ...(title !== undefined && { title }),
         ...(description !== undefined && { description }),
         ...(priority != null && Number.isFinite(priority) && { priority }),
@@ -219,7 +223,8 @@ async function main(): Promise<void> {
 
       const reason = argValue(rest, '--reason', '-r');
       const store = await getStore();
-      store.close(id, reason ?? undefined);
+      const taskService = createTaskService(store);
+      taskService.close(id, reason ?? undefined);
       await store.flush();
       process.stdout.write(JSON.stringify(store.get(id)) + '\n');
       break;
@@ -231,7 +236,8 @@ async function main(): Promise<void> {
       if (!id || !label) throw new Error('label-add requires an id and a label');
 
       const store = await getStore();
-      store.addLabel(id, label);
+      const taskService = createTaskService(store);
+      taskService.addLabel(id, label);
       await store.flush();
       process.stdout.write(JSON.stringify(store.get(id)) + '\n');
       break;

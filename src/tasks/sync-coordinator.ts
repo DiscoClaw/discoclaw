@@ -3,6 +3,7 @@ import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { TaskStore } from './store.js';
+import type { TaskService } from './service.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { runTaskSync } from './task-sync-engine.js';
 import { reloadTagMapInPlace } from './discord-sync.js';
@@ -18,6 +19,7 @@ export type TaskSyncCoordinatorOptions = {
   tagMap: TagMap;
   tagMapPath?: string;
   store: TaskStore;
+  taskService?: TaskService;
   log?: LoggerLike;
   mentionUserId?: string;
   forumCountSync?: ForumCountSync;

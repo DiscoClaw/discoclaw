@@ -15,6 +15,7 @@ Statuses: `open` | `in_progress` | `blocked` | `closed`
 Implementation: `src/tasks/store.ts`
 
 Architecture contract: `src/tasks/architecture-contract.ts`
+Mutation entrypoint service: `src/tasks/service.ts`
 
 - Synchronous in-memory writes
 - Event emission on mutations (`created`, `updated`, `closed`, `labeled`)
