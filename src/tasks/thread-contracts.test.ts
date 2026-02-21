@@ -1,11 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  buildThreadName, buildTaskStarterContent, getThreadIdFromTask, updateTaskStarterMessage,
-  closeTaskThread, isTaskThreadAlreadyClosed, isThreadArchived,
-  getStatusTagIds, buildAppliedTagsWithStatus, updateTaskThreadTags, createTaskThread,
-  shortTaskId, taskIdToken, extractShortIdFromThreadName,
-  resolveTasksForum, findExistingThreadForTask, updateTaskThreadName,
-} from './discord-sync.js';
+  buildThreadName,
+  buildTaskStarterContent,
+  getThreadIdFromTask,
+  getStatusTagIds,
+  buildAppliedTagsWithStatus,
+  shortTaskId,
+  taskIdToken,
+  extractShortIdFromThreadName,
+} from './thread-helpers.js';
+import {
+  updateTaskStarterMessage,
+  closeTaskThread,
+  isTaskThreadAlreadyClosed,
+  isThreadArchived,
+  updateTaskThreadTags,
+  createTaskThread,
+  resolveTasksForum,
+  findExistingThreadForTask,
+  updateTaskThreadName,
+} from './thread-ops.js';
 import type { TaskData, TagMap } from './types.js';
 
 // ---------------------------------------------------------------------------

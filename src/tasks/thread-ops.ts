@@ -6,17 +6,6 @@ import {
   type TaskDiscordThreadChannel,
 } from './discord-types.js';
 import type { TaskData, TagMap } from './types.js';
-export { loadTagMap, reloadTagMapInPlace } from './tag-map.js';
-export {
-  buildAppliedTagsWithStatus,
-  buildTaskStarterContent,
-  buildThreadName,
-  extractShortIdFromThreadName,
-  getStatusTagIds,
-  getThreadIdFromTask,
-  shortTaskId,
-  taskIdToken,
-} from './thread-helpers.js';
 import {
   buildAppliedTagsWithStatus,
   buildTaskStarterContent,

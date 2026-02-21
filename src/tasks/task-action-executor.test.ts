@@ -6,10 +6,10 @@ import type { TaskActionRunContext } from './task-action-executor.js';
 import type { TaskContext } from './task-context.js';
 
 // ---------------------------------------------------------------------------
-// Mocks — override discord-sync and related modules
+// Mocks — override thread ops and related modules
 // ---------------------------------------------------------------------------
 
-vi.mock('./discord-sync.js', () => ({
+vi.mock('./thread-ops.js', () => ({
   resolveTasksForum: vi.fn(() => ({
     threads: {
       create: vi.fn(async () => ({ id: 'thread-new' })),
@@ -180,7 +180,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskCreate honors no-thread by skipping thread creation', async () => {
-    const { createTaskThread } = await import('./discord-sync.js');
+    const { createTaskThread } = await import('./thread-ops.js');
     (createTaskThread as any).mockClear?.();
 
     const result = await executeTaskAction(
@@ -193,7 +193,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskCreate skips thread creation when task is already linked before direct lifecycle step', async () => {
-    const { createTaskThread } = await import('./discord-sync.js');
+    const { createTaskThread } = await import('./thread-ops.js');
     (createTaskThread as any).mockClear?.();
 
     const store = makeStore();
@@ -263,7 +263,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskUpdate calls updateTaskStarterMessage when task has a linked thread', async () => {
-    const { updateTaskStarterMessage } = await import('./discord-sync.js');
+    const { updateTaskStarterMessage } = await import('./thread-ops.js');
     (updateTaskStarterMessage as any).mockClear();
 
     await executeTaskAction(
@@ -280,7 +280,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskUpdate passes sidebarMentionUserId to updateTaskStarterMessage', async () => {
-    const { updateTaskStarterMessage } = await import('./discord-sync.js');
+    const { updateTaskStarterMessage } = await import('./thread-ops.js');
     (updateTaskStarterMessage as any).mockClear();
 
     await executeTaskAction(
@@ -297,7 +297,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskUpdate succeeds even if updateTaskStarterMessage throws', async () => {
-    const { updateTaskStarterMessage } = await import('./discord-sync.js');
+    const { updateTaskStarterMessage } = await import('./thread-ops.js');
     (updateTaskStarterMessage as any).mockRejectedValueOnce(new Error('Discord API error'));
 
     const result = await executeTaskAction(
@@ -309,7 +309,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskUpdate calls updateTaskThreadTags when task has a linked thread', async () => {
-    const { updateTaskThreadTags } = await import('./discord-sync.js');
+    const { updateTaskThreadTags } = await import('./thread-ops.js');
     (updateTaskThreadTags as any).mockClear();
 
     await executeTaskAction(
@@ -326,7 +326,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskClose passes tagMap to closeTaskThread', async () => {
-    const { closeTaskThread } = await import('./discord-sync.js');
+    const { closeTaskThread } = await import('./thread-ops.js');
     (closeTaskThread as any).mockClear();
 
     const taskCtx = makeTaskCtx();
@@ -502,7 +502,7 @@ describe('executeTaskAction', () => {
 
   it('taskUpdate schedules repair sync after thread lifecycle failure without prewired coordinator', async () => {
     const { runTaskSync } = await import('./task-sync-engine.js');
-    const { updateTaskThreadName } = await import('./discord-sync.js');
+    const { updateTaskThreadName } = await import('./thread-ops.js');
     (runTaskSync as any).mockClear();
     (updateTaskThreadName as any).mockRejectedValueOnce(new Error('rename failed'));
 

@@ -35,7 +35,7 @@ import { ForgeOrchestrator } from './discord/forge-commands.js';
 import { initializeTasksContext, wireTaskSync } from './tasks/initialize.js';
 import type { TaskSyncWiring } from './tasks/sync-types.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
-import { resolveTasksForum } from './tasks/discord-sync.js';
+import { resolveTasksForum } from './tasks/thread-ops.js';
 import { initTasksForumGuard } from './tasks/forum-guard.js';
 import { reloadTagMapInPlace } from './tasks/tag-map.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
