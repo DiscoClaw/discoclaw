@@ -489,6 +489,24 @@ describe('TaskSyncCoordinator failure retry', () => {
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.triggered');
   });
 
+  it('does not schedule failure retry when disabled', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any).mockRejectedValueOnce(new Error('primary boom'));
+
+    const opts = makeOpts();
+    opts.enableFailureRetry = false;
+    opts.failureRetryDelayMs = 1_000;
+    const coord = new TaskSyncCoordinator(opts);
+
+    await expect(coord.sync()).rejects.toThrow('primary boom');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.disabled');
+    expect(opts.metrics.increment).not.toHaveBeenCalledWith('tasks.sync.failure_retry.scheduled');
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(runTaskSync).toHaveBeenCalledTimes(1);
+    expect(opts.metrics.increment).not.toHaveBeenCalledWith('tasks.sync.failure_retry.triggered');
+  });
+
   it('logs and increments metrics when failure retry also fails', async () => {
     const { runTaskSync } = await import('./task-sync-engine.js');
     (runTaskSync as any)
