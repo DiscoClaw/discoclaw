@@ -124,7 +124,7 @@ Implementation: `src/cron/`
 DiscoClaw includes a task tracker backed by in-process `TaskStore` data and synced to Discord forum threads.
 
 - Data model/store: `src/tasks/types.ts`, `src/tasks/store.ts`
-- Discord action path: `src/discord/actions-tasks.ts` (`taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`)
+- Discord task action path: `src/tasks/task-action-executor.ts` (`taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`)
 - Canonical sync modules: `src/tasks/task-sync-engine.ts`, `src/tasks/sync-coordinator.ts`, `src/tasks/discord-sync.ts`
 - Runtime shim status: `src/beads/*` compatibility modules removed in hard-cut phase
 

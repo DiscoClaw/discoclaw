@@ -34,7 +34,7 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 
 Legacy runtime compatibility shims under `src/beads/` have been removed.
 
-Primary action trigger is `taskSync` via `src/discord/actions-tasks.ts`.
+Primary action trigger is `taskSync` via `src/tasks/task-action-executor.ts`.
 
 ## Auto-Tagging
 
