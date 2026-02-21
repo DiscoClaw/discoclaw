@@ -152,6 +152,31 @@ describe('runPipeline', () => {
     expect(capturedPrompts[2]).toBe('result=r:alpha');
   });
 
+  it('interpolates {{steps.<id>.output}} when step id contains hyphens', async () => {
+    const capturedPrompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        capturedPrompts.push(params.prompt);
+        yield { type: 'text_final', text: `r:${params.prompt}` };
+        yield { type: 'done' };
+      },
+    };
+
+    await runPipeline(
+      baseParams({
+        steps: [
+          step('artifact', { id: 'build-artifact' }),
+          step('deploy={{steps.build-artifact.output}}'),
+        ],
+        runtime,
+      }),
+    );
+
+    expect(capturedPrompts[1]).toBe('deploy=r:artifact');
+  });
+
   it('leaves unresolvable {{steps.nonexistent.output}} as literal text', async () => {
     const capturedPrompts: string[] = [];
     const runtime: RuntimeAdapter = {
@@ -643,6 +668,30 @@ describe('runPipeline', () => {
 
       expect(messages[0]).toContain('git');
       expect(messages[0]).toContain('3'); // 3 args
+    });
+
+    it('throws a validation error when shell command executable is missing', async () => {
+      await expect(
+        runPipeline(baseParams({ steps: [shellStep([])] })),
+      ).rejects.toThrow('command must include a non-empty executable');
+
+      expect(vi.mocked(execa)).not.toHaveBeenCalled();
+    });
+
+    it('throws a validation error when interpolated executable resolves to empty', async () => {
+      await expect(
+        runPipeline(
+          baseParams({
+            steps: [
+              step(''),
+              shellStep(['{{prev.output}}']),
+            ],
+            runtime: makeRuntime([{ type: 'text_final', text: '' }, { type: 'done' }]),
+          }),
+        ),
+      ).rejects.toThrow('command resolved to an empty executable');
+
+      expect(vi.mocked(execa)).not.toHaveBeenCalled();
     });
 
     it('confirm=true without confirmAllowed throws before execution', async () => {

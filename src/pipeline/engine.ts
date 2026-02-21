@@ -102,11 +102,12 @@ function interpolateTemplate(
   steps: readonly PipelineStep[],
   outputs: string[],
 ): string {
-  return template.replace(/\{\{([\w.]+)\}\}/g, (match, key: string) => {
+  return template.replace(/\{\{([^{}]+)\}\}/g, (match, keyRaw: string) => {
+    const key = keyRaw.trim();
     if (key === 'prev.output') {
       return stepIndex > 0 ? (outputs[stepIndex - 1] ?? '') : '';
     }
-    const stepRef = /^steps\.(\w+)\.output$/.exec(key);
+    const stepRef = /^steps\.(.+)\.output$/.exec(key);
     if (stepRef) {
       const refId = stepRef[1];
       const refIdx = steps.findIndex((s, idx) => s.id === refId && idx < stepIndex);
@@ -191,15 +192,19 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
 
     // --- Shell step ---
     if (step.kind === 'shell') {
+      const shellBinary = step.command[0];
+      if (!shellBinary || shellBinary.trim() === '') {
+        throw new Error(`Pipeline step ${i} failed: shell: command must include a non-empty executable`);
+      }
+
       if (step.confirm && !confirmAllowed) {
         throw new Error(`Pipeline step ${i}: confirm=true requires confirmAllowed on the pipeline`);
       }
 
       if (step.dryRun) {
         outputs.push('');
-        const binary = step.command[0] ?? '';
         const argCount = step.command.length - 1;
-        onProgress?.(`step ${stepId}: dry-run (${binary}, ${argCount} arg${argCount !== 1 ? 's' : ''})`);
+        onProgress?.(`step ${stepId}: dry-run (${shellBinary}, ${argCount} arg${argCount !== 1 ? 's' : ''})`);
         continue;
       }
 
@@ -207,6 +212,9 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
       const interpolatedCommand = step.command.map((arg) =>
         interpolateTemplate(arg, i, steps, outputs)
       );
+      if (!interpolatedCommand[0] || interpolatedCommand[0].trim() === '') {
+        throw new Error(`Pipeline step ${i} failed: shell: command resolved to an empty executable`);
+      }
 
       let text: string;
       try {
