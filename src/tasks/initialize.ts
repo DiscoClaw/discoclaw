@@ -115,12 +115,6 @@ export type WireTaskSyncOpts = {
   skipForumGuard?: boolean;
   /** Disable Phase 5 (thread reconciliation) of the task sync cycle. */
   skipPhase5?: boolean;
-  /** Enable/disable failure-triggered retries after sync errors. */
-  syncFailureRetryEnabled?: boolean;
-  /** Delay before retrying after sync failure. */
-  syncFailureRetryDelayMs?: number;
-  /** Delay before retrying deferred closes. */
-  syncDeferredRetryDelayMs?: number;
 };
 
 export type WireTaskSyncResult = {
@@ -136,16 +130,6 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSync
       store: opts.taskCtx.store,
       tagMap: opts.taskCtx.tagMap,
     });
-  }
-
-  if (opts.syncFailureRetryEnabled !== undefined) {
-    opts.taskCtx.syncFailureRetryEnabled = opts.syncFailureRetryEnabled;
-  }
-  if (opts.syncFailureRetryDelayMs !== undefined) {
-    opts.taskCtx.syncFailureRetryDelayMs = opts.syncFailureRetryDelayMs;
-  }
-  if (opts.syncDeferredRetryDelayMs !== undefined) {
-    opts.taskCtx.syncDeferredRetryDelayMs = opts.syncDeferredRetryDelayMs;
   }
 
   const syncCoordinator = await ensureTaskSyncCoordinator(

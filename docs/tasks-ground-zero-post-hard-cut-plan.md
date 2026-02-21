@@ -81,3 +81,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued post-Track-4 cleanup by removing unused `src/tasks/bead-sync.ts` and normalizing remaining runtime log/comment wording from watcher terms to sync-trigger terminology.
 - 2026-02-21: Continued post-Track-4 cleanup by removing unused `tasksCwd` from `wireTaskSync` options/callers and deriving sync-wiring log context from `taskCtx`.
 - 2026-02-21: Continued post-Track-4 cleanup by removing unused `sidebarMentionUserId` wire-time override from `wireTaskSync`; coordinator mention behavior is now sourced only from initialized `taskCtx`.
+- 2026-02-21: Continued post-Track-4 cleanup by removing unused sync-retry wire-time override options from `wireTaskSync`; retry policy now flows only from initialized `taskCtx`.

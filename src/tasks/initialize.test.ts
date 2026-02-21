@@ -347,13 +347,16 @@ describe('wireTaskSync', () => {
     );
   });
 
-  it('propagates sync retry configuration to CoordinatorOptions', async () => {
+  it('uses TaskContext sync retry configuration in CoordinatorOptions', async () => {
     const log = fakeLog();
     const store = new TaskStore();
     const taskCtx = {
       tasksCwd: '/tmp/tasks',
       forumId: 'forum-123',
       tagMap: { bug: '111' },
+      syncFailureRetryEnabled: false,
+      syncFailureRetryDelayMs: 12_000,
+      syncDeferredRetryDelayMs: 18_000,
       store,
       log,
     } as any;
@@ -365,9 +368,6 @@ describe('wireTaskSync', () => {
       client: {} as any,
       guild: {} as any,
       log,
-      syncFailureRetryEnabled: false,
-      syncFailureRetryDelayMs: 12_000,
-      syncDeferredRetryDelayMs: 18_000,
     });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
