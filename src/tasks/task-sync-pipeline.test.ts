@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TaskData } from './types.js';
 import {
   buildTasksByShortIdMap,
+  ingestTaskThreadSnapshots,
   ingestTaskSyncSnapshot,
   planTaskReconcileOperations,
   planTaskApplyPhases,
@@ -119,6 +120,25 @@ describe('task-sync pipeline helpers', () => {
 
     expect(map.get('001')?.map((t) => t.id)).toEqual(['ws-001', 'dev-001']);
     expect(map.get('002')?.map((t) => t.id)).toEqual(['ws-002']);
+  });
+
+  it('normalizes and merges phase5 thread snapshots with active-over-archived precedence', () => {
+    const snapshots = ingestTaskThreadSnapshots(
+      [
+        { id: 'thread-1', name: 'Archived One', archived: true },
+        { id: 'shared', name: 'Archived Shared', archived: true },
+      ],
+      [
+        { id: 'shared', name: 'Active Shared', archived: false },
+        { id: 2, name: null, archived: null },
+      ],
+    );
+
+    expect(snapshots).toEqual([
+      { id: 'thread-1', name: 'Archived One', archived: true },
+      { id: 'shared', name: 'Active Shared', archived: false },
+      { id: '2', name: '', archived: false },
+    ]);
   });
 
   it('plans phase5 reconcile operations from thread snapshots', () => {
