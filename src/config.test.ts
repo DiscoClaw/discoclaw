@@ -199,6 +199,11 @@ describe('parseConfig', () => {
     expect(config.discordActionsBotProfile).toBe(false);
   });
 
+  it('defaults discordActionsPlan to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsPlan).toBe(true);
+  });
+
   it('reports ignored bot profile action flag when master actions off', () => {
     const { infos } = parseConfig(env({
       DISCOCLAW_DISCORD_ACTIONS: '0',

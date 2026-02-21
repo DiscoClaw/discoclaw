@@ -91,7 +91,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1; also requires cron subsystem enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 0)
   - `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 0; also requires forge commands enabled)
-  - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 0; also requires plan commands enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1; also requires plan commands enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 0; also requires durable memory enabled)
 
 Those env vars get translated into an `ActionCategoryFlags` object (see `src/discord/actions.ts`) and passed down from `src/index.ts` into the Discord handler and cron executor.
@@ -160,7 +160,7 @@ Allow the model to create, inspect, approve, and close plans without a human `!p
 | `planClose` | Set plan status to CLOSED, close backing task | Yes |
 | `planRun` | Execute all remaining phases of a plan (fire-and-forget); posts a live-updating status message to the channel reflecting the current phase and final outcome (unless `skipCompletionNotify` is set) | Yes |
 
-Env: `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 0, requires `DISCOCLAW_PLAN_COMMANDS_ENABLED`).
+Env: `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1, requires `DISCOCLAW_PLAN_COMMANDS_ENABLED`).
 Context: Requires `PlanContext` with plans directory, workspace CWD, runtime, and model.
 
 Note: `planApprove` and `planClose` are blocked while a plan is `IMPLEMENTING`.
