@@ -12,6 +12,7 @@ import { executeCronAction } from './actions-crons.js';
 import type { CronContext } from './actions-crons.js';
 import type { ActionContext, DiscordActionResult } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
+import { NO_MENTIONS } from './allowed-mentions.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,7 +20,7 @@ import type { LoggerLike } from '../logging/logger-like.js';
 
 /** Minimal send interface — matches both DM User and guild TextBasedChannel. */
 export type SendTarget = {
-  send(options: { content: string; allowedMentions?: { parse: string[] } }): Promise<unknown>;
+  send(options: { content: string; allowedMentions?: { parse: readonly string[] } }): Promise<unknown>;
 };
 
 /** Config required to dispatch the morning check-in cron after onboarding. */
@@ -37,8 +38,6 @@ export type CompleteOnboardingResult = {
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
-
-const NO_MENTIONS = { parse: [] as string[] };
 
 /**
  * Complete the onboarding flow: write workspace files, optionally create the

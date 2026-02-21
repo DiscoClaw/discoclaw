@@ -133,14 +133,17 @@ describe('completeOnboarding', () => {
     writeWorkspaceFiles.mockResolvedValue(
       makeWriteResult({ written: [], errors: ['Failed to write IDENTITY.md: EACCES'] }),
     );
+    const executeCronAction = await getExecuteCronAction();
 
     const { send, asSendTarget } = makeSendTarget();
-    const result = await completeOnboarding(baseValues, '/workspace', asSendTarget);
+    const cronDispatch = makeCronDispatch();
+    const result = await completeOnboarding(checkinValues, '/workspace', asSendTarget, cronDispatch);
 
     expect(send).toHaveBeenCalledOnce();
     expect(send.mock.calls[0][0].content).toContain('went wrong');
     expect(send.mock.calls[0][0].content).toContain('EACCES');
     expect(result.cronResult).toBeUndefined();
+    expect(executeCronAction).not.toHaveBeenCalled();
   });
 
   it('does not dispatch cron when morningCheckin is false', async () => {
