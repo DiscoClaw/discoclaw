@@ -215,12 +215,16 @@ export class TaskSyncCoordinator {
         // Fire-and-forget follow-up for coalesced triggers.
         metrics.increment('tasks.sync.follow_up.scheduled');
         metrics.increment('tasks.sync.follow_up.triggered');
-        this.sync(pendingPoster).catch((err) => {
-          metrics.increment('tasks.sync.follow_up.failed');
-          const message = err instanceof Error ? err.message : String(err ?? '');
-          metrics.increment(`tasks.sync.follow_up.error_class.${classifySyncError(message)}`);
-          this.opts.log?.warn({ err }, 'tasks:coordinator follow-up sync failed');
-        });
+        this.sync(pendingPoster)
+          .then(() => {
+            metrics.increment('tasks.sync.follow_up.succeeded');
+          })
+          .catch((err) => {
+            metrics.increment('tasks.sync.follow_up.failed');
+            const message = err instanceof Error ? err.message : String(err ?? '');
+            metrics.increment(`tasks.sync.follow_up.error_class.${classifySyncError(message)}`);
+            this.opts.log?.warn({ err }, 'tasks:coordinator follow-up sync failed');
+          });
       }
     }
   }

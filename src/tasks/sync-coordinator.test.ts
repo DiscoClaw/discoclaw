@@ -155,6 +155,7 @@ describe('TaskSyncCoordinator', () => {
     expect((runTaskSync as any).mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.scheduled');
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.triggered');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.succeeded');
   });
 
   it('propagates runTaskSync errors and remains usable', async () => {
