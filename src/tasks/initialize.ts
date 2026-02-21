@@ -110,7 +110,6 @@ export type WireTaskSyncOpts = {
   taskCtx: TaskContext;
   client: Client;
   guild: Guild;
-  sidebarMentionUserId?: string;
   log: LoggerLike;
   /** Skip forum guard installation (caller already installed it). */
   skipForumGuard?: boolean;
@@ -139,10 +138,6 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSync
     });
   }
 
-  // Preserve wire-time sidebar mention override for coordinator-triggered syncs.
-  if (opts.sidebarMentionUserId !== undefined) {
-    opts.taskCtx.sidebarMentionUserId = opts.sidebarMentionUserId;
-  }
   if (opts.syncFailureRetryEnabled !== undefined) {
     opts.taskCtx.syncFailureRetryEnabled = opts.syncFailureRetryEnabled;
   }
