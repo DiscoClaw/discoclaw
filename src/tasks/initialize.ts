@@ -105,14 +105,14 @@ export async function initializeTasksContext(
 // Post-connect wiring (store event subscriptions + startup sync)
 // ---------------------------------------------------------------------------
 
-export type WireTaskSyncOpts = {
+type WireTaskSyncOpts = {
   taskCtx: TaskContext;
   runCtx: TaskSyncRunContext;
   /** Disable Phase 5 (thread reconciliation) of the task sync cycle. */
   skipPhase5?: boolean;
 };
 
-export type WireTaskSyncResult = {
+type WireTaskSyncResult = {
   stop(): void;
 };
 

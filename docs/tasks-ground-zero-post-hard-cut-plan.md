@@ -85,3 +85,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued post-Track-4 cleanup by removing forum-guard installation and `skipForumGuard` from `wireTaskSync`; forum guard is now explicitly installed at bootstrap before sync wiring.
 - 2026-02-21: Continued post-Track-4 cleanup by removing redundant `log` option from `wireTaskSync`; sync wiring now uses `taskCtx.log` as the single logger source.
 - 2026-02-21: Continued post-Track-4 cleanup by replacing separate `client`/`guild` `wireTaskSync` options with a single `runCtx` object to match task-sync coordinator contracts.
+- 2026-02-21: Continued post-Track-4 cleanup by internalizing `wireTaskSync` options/result types in `initialize.ts` now that they are no longer consumed outside the module.
