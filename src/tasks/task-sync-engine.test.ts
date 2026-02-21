@@ -39,7 +39,7 @@ function makeDiscordSyncMock() {
   return discordSyncMock;
 }
 
-vi.mock('./discord-sync.js', makeDiscordSyncMock);
+vi.mock('./thread-ops.js', makeDiscordSyncMock);
 
 function makeThreadHelpersMock() {
   const discordSync = makeDiscordSyncMock();
@@ -89,7 +89,7 @@ describe('runTaskSync', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('skips no-thread tasks in phase 1', async () => {
-    const { createTaskThread } = await import('./discord-sync.js');
+    const { createTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'A', status: 'open', labels: ['no-thread'], external_ref: '' },
     ]);
@@ -108,7 +108,7 @@ describe('runTaskSync', () => {
   });
 
   it('dedupes by backfilling external_ref when a matching thread exists', async () => {
-    const { createTaskThread, findExistingThreadForTask } = await import('./discord-sync.js');
+    const { createTaskThread, findExistingThreadForTask } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-002', title: 'B', status: 'open', labels: [], external_ref: '' },
     ]);
@@ -129,7 +129,7 @@ describe('runTaskSync', () => {
   });
 
   it('re-checks latest phase 1 task state after lock wait and skips create when already linked', async () => {
-    const { createTaskThread } = await import('./discord-sync.js');
+    const { createTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-014', title: 'N', status: 'open', labels: [], external_ref: '' },
     ]);
@@ -211,7 +211,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 3 skips tasks whose thread is already archived', async () => {
-    const { isThreadArchived, ensureUnarchived, updateTaskThreadName } = await import('./discord-sync.js');
+    const { isThreadArchived, ensureUnarchived, updateTaskThreadName } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-030', title: 'Archived active', status: 'in_progress', labels: [], external_ref: 'discord:300' },
     ]);
@@ -233,7 +233,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 3 processes non-archived tasks through the guard', async () => {
-    const { isThreadArchived, ensureUnarchived, updateTaskThreadName } = await import('./discord-sync.js');
+    const { isThreadArchived, ensureUnarchived, updateTaskThreadName } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-031', title: 'Active task', status: 'open', labels: [], external_ref: 'discord:301' },
     ]);
@@ -256,7 +256,7 @@ describe('runTaskSync', () => {
   });
 
   it('renames threads for active tasks in phase 3 and counts changes', async () => {
-    const { ensureUnarchived, updateTaskThreadName } = await import('./discord-sync.js');
+    const { ensureUnarchived, updateTaskThreadName } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-004', title: 'D', status: 'in_progress', labels: [], external_ref: 'discord:123' },
     ]);
@@ -277,7 +277,7 @@ describe('runTaskSync', () => {
   });
 
   it('calls updateTaskStarterMessage for active tasks with threads in phase 3', async () => {
-    const { updateTaskStarterMessage } = await import('./discord-sync.js');
+    const { updateTaskStarterMessage } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-010', title: 'J', status: 'in_progress', labels: [], external_ref: 'discord:456' },
     ]);
@@ -297,7 +297,7 @@ describe('runTaskSync', () => {
   });
 
   it('passes mentionUserId through to updateTaskStarterMessage in phase 3', async () => {
-    const { updateTaskStarterMessage } = await import('./discord-sync.js');
+    const { updateTaskStarterMessage } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-012', title: 'L', status: 'in_progress', labels: [], external_ref: 'discord:456' },
     ]);
@@ -317,7 +317,7 @@ describe('runTaskSync', () => {
   });
 
   it('passes mentionUserId through to createTaskThread in phase 1', async () => {
-    const { createTaskThread } = await import('./discord-sync.js');
+    const { createTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-013', title: 'M', status: 'open', labels: [], external_ref: '' },
     ]);
@@ -336,7 +336,7 @@ describe('runTaskSync', () => {
   });
 
   it('starterMessagesUpdated stays 0 when updateTaskStarterMessage returns false', async () => {
-    const { updateTaskStarterMessage } = await import('./discord-sync.js');
+    const { updateTaskStarterMessage } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-011', title: 'K', status: 'open', labels: [], external_ref: 'discord:789' },
     ]);
@@ -355,7 +355,7 @@ describe('runTaskSync', () => {
   });
 
   it('archives threads for closed tasks in phase 4', async () => {
-    const { closeTaskThread } = await import('./discord-sync.js');
+    const { closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
     ]);
@@ -374,7 +374,7 @@ describe('runTaskSync', () => {
   });
 
   it('skips fully-closed task threads in phase 4', async () => {
-    const { closeTaskThread, isTaskThreadAlreadyClosed } = await import('./discord-sync.js');
+    const { closeTaskThread, isTaskThreadAlreadyClosed } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-006', title: 'F', status: 'closed', labels: [], external_ref: 'discord:888' },
     ]);
@@ -395,7 +395,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 4 uses isTaskThreadAlreadyClosed for full state check', async () => {
-    const { isTaskThreadAlreadyClosed, closeTaskThread } = await import('./discord-sync.js');
+    const { isTaskThreadAlreadyClosed, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-040', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:400' },
     ]);
@@ -415,7 +415,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 4 recovers archived thread with wrong name/tags', async () => {
-    const { isTaskThreadAlreadyClosed, closeTaskThread } = await import('./discord-sync.js');
+    const { isTaskThreadAlreadyClosed, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-050', title: 'Stale name', status: 'closed', labels: [], external_ref: 'discord:500' },
     ]);
@@ -469,7 +469,7 @@ describe('runTaskSync', () => {
   });
 
   it('tagsUpdated counter increments when updateTaskThreadTags returns true', async () => {
-    const { updateTaskThreadTags } = await import('./discord-sync.js');
+    const { updateTaskThreadTags } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-020', title: 'T', status: 'open', labels: [], external_ref: 'discord:777' },
     ]);
@@ -489,7 +489,7 @@ describe('runTaskSync', () => {
   });
 
   it('warnings increment when updateTaskThreadTags throws', async () => {
-    const { updateTaskThreadTags } = await import('./discord-sync.js');
+    const { updateTaskThreadTags } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-021', title: 'U', status: 'open', labels: [], external_ref: 'discord:888' },
     ]);
@@ -508,7 +508,7 @@ describe('runTaskSync', () => {
   });
 
   it('increments warnings counter on phase failures', async () => {
-    const { updateTaskThreadName } = await import('./discord-sync.js');
+    const { updateTaskThreadName } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-008', title: 'H', status: 'in_progress', labels: [], external_ref: 'discord:555' },
     ]);
@@ -527,7 +527,7 @@ describe('runTaskSync', () => {
   });
 
   it('warnings counter increments when forum is not found', async () => {
-    const { resolveTasksForum } = await import('./discord-sync.js');
+    const { resolveTasksForum } = await import('./thread-ops.js');
     (resolveTasksForum as any).mockResolvedValueOnce(null);
 
     const result = await runTaskSync({
@@ -562,7 +562,7 @@ describe('runTaskSync', () => {
   });
 
   it('skipPhase5 does not fetch phase5 thread sources', async () => {
-    const { resolveTasksForum } = await import('./discord-sync.js');
+    const { resolveTasksForum } = await import('./thread-ops.js');
     const store = makeStore([]);
     const fetchActive = vi.fn(async () => ({ threads: new Map() }));
     const fetchArchived = vi.fn(async () => ({ threads: new Map() }));
@@ -593,7 +593,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 archives non-archived thread for closed task and backfills external_ref', async () => {
-    const { resolveTasksForum, closeTaskThread } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: '' },
     ]);
@@ -626,7 +626,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 detects orphan threads with no matching task', async () => {
-    const { resolveTasksForum } = await import('./discord-sync.js');
+    const { resolveTasksForum } = await import('./thread-ops.js');
     const store = makeStore([]);
 
     const mockForum = {
@@ -656,7 +656,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 skips threads with short-id collision (multiple tasks)', async () => {
-    const { resolveTasksForum, closeTaskThread } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'First', status: 'closed', labels: [], external_ref: '' },
       { id: 'other-001', title: 'Second', status: 'open', labels: [], external_ref: '' },
@@ -691,7 +691,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 skips thread when task external_ref points to a different thread', async () => {
-    const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:thread-OTHER' },
     ]);
@@ -727,7 +727,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 archives thread when task external_ref matches this thread', async () => {
-    const { resolveTasksForum, closeTaskThread } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
@@ -761,7 +761,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 still archives thread when external_ref backfill fails', async () => {
-    const { resolveTasksForum, closeTaskThread } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: '' },
     ]);
@@ -796,7 +796,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 skips already-archived thread for closed task when fully reconciled', async () => {
-    const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
@@ -833,7 +833,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 reconciles stale archived thread for closed task via unarchive→edit→re-archive', async () => {
-    const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
@@ -870,7 +870,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 no-ops gracefully when forum has 0 threads', async () => {
-    const { resolveTasksForum } = await import('./discord-sync.js');
+    const { resolveTasksForum } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Some task', status: 'open', labels: [], external_ref: '' },
     ]);
@@ -898,7 +898,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 handles fetchActive API error gracefully', async () => {
-    const { resolveTasksForum } = await import('./discord-sync.js');
+    const { resolveTasksForum } = await import('./thread-ops.js');
     const store = makeStore([]);
 
     const mockForum = {
@@ -925,7 +925,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 continues using active threads when fetchArchived fails', async () => {
-    const { resolveTasksForum, closeTaskThread } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: '' },
     ]);
@@ -958,7 +958,7 @@ describe('runTaskSync', () => {
   });
 
   it('calls statusPoster.taskSyncComplete in forum-not-found early return', async () => {
-    const { resolveTasksForum } = await import('./discord-sync.js');
+    const { resolveTasksForum } = await import('./thread-ops.js');
     (resolveTasksForum as any).mockResolvedValueOnce(null);
 
     const statusPoster = { taskSyncComplete: vi.fn(async () => {}) } as any;
@@ -978,7 +978,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 4 defers close when in-flight reply is active for that thread', async () => {
-    const { closeTaskThread } = await import('./discord-sync.js');
+    const { closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
     ]);
@@ -999,7 +999,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 defers close when in-flight reply is active for non-archived thread', async () => {
-    const { resolveTasksForum, closeTaskThread } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: '' },
     ]);
@@ -1035,7 +1035,7 @@ describe('runTaskSync', () => {
   });
 
   it('phase 5 defers close when in-flight reply is active for archived stale thread', async () => {
-    const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./discord-sync.js');
+    const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);

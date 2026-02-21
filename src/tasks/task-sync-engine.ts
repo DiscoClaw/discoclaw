@@ -29,7 +29,7 @@ import {
   updateTaskThreadTags,
   ensureUnarchived,
   findExistingThreadForTask,
-} from './discord-sync.js';
+} from './thread-ops.js';
 import {
   extractShortIdFromThreadName,
   getThreadIdFromTask,
