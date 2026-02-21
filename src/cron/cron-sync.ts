@@ -1,5 +1,5 @@
 import type { Client } from 'discord.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import { CADENCE_TAGS } from './run-stats.js';
 import type { CronRunStats } from './run-stats.js';

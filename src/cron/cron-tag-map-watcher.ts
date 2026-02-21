@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { CronSyncCoordinator } from './cron-sync-coordinator.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 
 export type CronTagMapWatcherOptions = {
   coordinator: CronSyncCoordinator;

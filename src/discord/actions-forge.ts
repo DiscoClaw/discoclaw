@@ -1,5 +1,5 @@
 import type { DiscordActionResult, ActionContext } from './actions.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { ForgeOrchestrator } from './forge-commands.js';
 import type { TaskStore } from '../tasks/store.js';
 import { looksLikePlanId, findPlanFile, listPlanFiles } from './plan-commands.js';

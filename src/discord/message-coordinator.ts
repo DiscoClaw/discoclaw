@@ -23,7 +23,7 @@ import type { MemoryContext } from './actions-memory.js';
 import type { ConfigContext } from './actions-config.js';
 import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import { fetchMessageHistory } from './message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';

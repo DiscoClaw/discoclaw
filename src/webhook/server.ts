@@ -23,7 +23,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { CronJob } from '../cron/types.js';
 import { executeCronJob, type CronExecutorContext } from '../cron/executor.js';
 

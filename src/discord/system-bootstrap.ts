@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import { ChannelType } from 'discord.js';
 import type { CategoryChannel, Client, ForumChannel, Guild, GuildBasedChannel } from 'discord.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import { stripCountSuffix } from './forum-count-sync.js';
 
 export type SystemScaffold = {

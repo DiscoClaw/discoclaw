@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import type { DiscordActionResult, ActionContext } from './actions.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import {
   findPlanFile,

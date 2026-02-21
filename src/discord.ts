@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { ActivityType, Client, GatewayIntentBits, Partials } from 'discord.js';
 import type { PresenceData } from 'discord.js';
 import { KeyedQueue } from './group-queue.js';
-import type { LoggerLike } from './discord/action-types.js';
+import type { LoggerLike } from './logging/logger-like.js';
 import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { createStatusPoster } from './discord/status-channel.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';

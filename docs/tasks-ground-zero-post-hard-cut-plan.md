@@ -109,3 +109,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued post-Track-4 cleanup by injecting task sync in-flight reply checks via task context/options (`TaskInFlightChecker`) so `task-sync-engine` no longer imports Discord in-flight state directly.
 - 2026-02-21: Continued post-Track-4 cleanup by introducing canonical task Discord boundary aliases in `src/tasks/discord-types.ts` and repointing core task runtime modules to those aliases.
 - 2026-02-21: Continued post-Track-4 cleanup by completing task-side `discord.js` boundary aliasing in `discord-sync` and `task-sync-cli`, so direct Discord imports in `src/tasks/*` are centralized in `discord-types.ts`.
+- 2026-02-21: Continued post-Track-4 cleanup by removing the `src/discord/action-types.ts` shim and repointing all remaining `LoggerLike` imports to canonical `src/logging/logger-like.ts`.

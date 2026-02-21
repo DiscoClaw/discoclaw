@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 
 type DiscordMessage = {

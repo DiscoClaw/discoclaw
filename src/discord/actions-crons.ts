@@ -1,6 +1,6 @@
 import type { Client } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { CronRunStats } from '../cron/run-stats.js';
 import type { CronScheduler } from '../cron/scheduler.js';

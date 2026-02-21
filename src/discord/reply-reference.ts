@@ -2,7 +2,7 @@ import type { ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import type { AttachmentLike } from './image-download.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 
 export type ReplyReferenceResult = {
   section: string;

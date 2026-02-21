@@ -84,7 +84,7 @@ export type DiscordActionResult =
   | { ok: true; summary: string }
   | { ok: false; error: string };
 
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 
 export type SubsystemContexts = {
   taskCtx?: TaskContext;

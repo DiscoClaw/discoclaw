@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import { writeShutdownContext } from './shutdown-context.js';
 
 export type RestartCommand = {
