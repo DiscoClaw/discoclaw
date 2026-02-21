@@ -190,19 +190,19 @@ the standard tasks boot sequence.
 
 ## 6. bd-cli.ts Retained Functions
 
-`src/tasks/bd-cli.ts` is retained for migration/preflight functions still needed outside the live task path:
+`src/tasks/bd-cli.ts` is retained for optional migration helper functions outside
+the live task runtime path:
 
 | Function | Why retained |
 |----------|-------------|
 | `buildTaskContextSummary(taskId, store)` | Builds the task context block injected into AI prompts; uses `TaskStore` directly |
-| `checkBdAvailable()` | Used by `pnpm preflight` / setup wizard to verify the bd CLI is installed |
-| `ensureBdDatabaseReady(cwd)` | Used by `pnpm preflight` to check the db prefix is configured |
+| `checkBdAvailable()` | Optional helper for bd binary availability checks in migration tooling |
+| `ensureBdDatabaseReady(cwd)` | Optional helper for legacy bd database prefix initialization |
 | `normalizeTaskData(task)` | Normalizes legacy `done`/`tombstone` statuses; used by `migrateFromBd` |
 | `parseBdJson<T>(stdout)` | JSON parser for bd CLI output; used by `migrateFromBd` and bd-cli tests |
 
 The raw `runBd()` helper and `bdCreate`, `bdUpdate`, `bdClose`, `bdAddLabel` functions
-remain in the file but are no longer called by any production path. They are candidates
-for removal once the migration tooling is no longer needed.
+remain in the file but are not called by production runtime paths.
 
 ---
 

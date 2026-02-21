@@ -364,25 +364,6 @@ for (const dir of new Set([path.dirname(tasksPersistPath), path.dirname(tasksTag
   await fs.mkdir(dir, { recursive: true });
 }
 
-// Cutover gate: if the legacy bd SQLite DB exists but the JSONL hasn't been
-// written yet, fail fast rather than silently starting with an empty store.
-// See docs/tasks-migration.md for one-time migration instructions.
-{
-  const legacyDbPath = path.join(tasksCwd, '.beads', 'beads.db');
-  const tasksJsonlPath = tasksPersistPath;
-  const legacyExists = await fs.access(legacyDbPath).then(() => true).catch(() => false);
-  if (legacyExists) {
-    const jsonlExists = await fs.access(tasksJsonlPath).then(() => true).catch(() => false);
-    if (!jsonlExists) {
-      log.error(
-        { legacyDbPath, tasksJsonlPath },
-        'tasks:cutover-gate: legacy bd database found but tasks.jsonl is missing — run migration before starting the service',
-      );
-      process.exit(1);
-    }
-  }
-}
-
 const sharedTaskStore = new TaskStore({ prefix: tasksPrefix, persistPath: tasksPersistPath });
 await sharedTaskStore.load();
 log.info({ count: sharedTaskStore.size(), prefix: tasksPrefix }, 'tasks:store loaded');
