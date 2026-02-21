@@ -92,12 +92,11 @@ All actions are gated by category env flags (off by default except channels).
 | Auto-tag (AI classification) | `src/tasks/auto-tag.ts` | **done** |
 | Task sync CLI entrypoint | `src/tasks/task-sync-cli.ts` | **done** |
 
-## 8. Compatibility Shims (`src/beads/`)
+## 8. Legacy Bridge Artifacts
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| Task compatibility types/shims | `src/beads/types.ts` | **done** |
-| `bd` CLI compatibility shim (preflight + migration only) | `src/beads/bd-cli.ts` | **done** |
+| Runtime compatibility shims (`src/beads/*`) | removed | **done** |
 | Hook scripts (on-create, on-update, etc.) | `scripts/beads/` | **done** |
 
 ## 9. Task Store + Migration (`src/tasks/`)
