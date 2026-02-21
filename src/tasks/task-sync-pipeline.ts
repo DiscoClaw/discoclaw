@@ -107,6 +107,31 @@ export function operationTaskIdList(
   return ids;
 }
 
+export type TaskSyncApplyPhasePlan = {
+  phase: TaskSyncOperationPhase;
+  taskIds: string[];
+};
+
+const DEFAULT_PHASE_ORDER: TaskSyncOperationPhase[] = ['phase1', 'phase2', 'phase3', 'phase4'];
+
+/**
+ * Stage: apply plan
+ * Build ordered phase dispatch inputs directly from diff-plan operations.
+ */
+export function planTaskApplyPhases(
+  operations: TaskSyncOperation[],
+  phaseOrder: TaskSyncOperationPhase[] = DEFAULT_PHASE_ORDER,
+): TaskSyncApplyPhasePlan[] {
+  const phases: TaskSyncApplyPhasePlan[] = [];
+  for (const phase of phaseOrder) {
+    phases.push({
+      phase,
+      taskIds: operationTaskIdList(operations, phase),
+    });
+  }
+  return phases;
+}
+
 export function buildTasksByShortIdMap(
   allTasks: TaskData[],
   shortIdOf: (taskId: string) => string,

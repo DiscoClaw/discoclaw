@@ -11,9 +11,10 @@ import {
   buildTasksByShortIdMap,
   ingestTaskSyncSnapshot,
   normalizeTaskSyncBuckets,
-  operationTaskIdList,
+  planTaskApplyPhases,
   planTaskReconcileOperations,
   planTaskSyncOperations,
+  type TaskSyncOperationPhase,
   type TaskThreadSnapshot,
 } from './task-sync-pipeline.js';
 import { withTaskLifecycleLock } from './task-lifecycle.js';
@@ -274,6 +275,19 @@ async function applyPhase4ArchiveClosedThreads(
   }
 }
 
+type TaskSyncPhaseExecutor = (
+  ctx: TaskSyncApplyContext,
+  tasksById: Map<string, TaskData>,
+  plannedTaskIds: string[],
+) => Promise<void>;
+
+const PHASE_EXECUTORS: Record<TaskSyncOperationPhase, TaskSyncPhaseExecutor> = {
+  phase1: applyPhase1CreateMissingThreads,
+  phase2: applyPhase2FixBlockedStatus,
+  phase3: applyPhase3SyncActiveThreads,
+  phase4: applyPhase4ArchiveClosedThreads,
+};
+
 async function applyPhase5ReconcileThreads(
   ctx: TaskSyncApplyContext,
   allTasks: TaskData[],
@@ -447,10 +461,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   const normalized = normalizeTaskSyncBuckets(allTasks);
   // Stage 3: diff (idempotent operation plan)
   const plannedOperations = planTaskSyncOperations(normalized);
-  const phase1TaskIds = operationTaskIdList(plannedOperations, 'phase1');
-  const phase2TaskIds = operationTaskIdList(plannedOperations, 'phase2');
-  const phase3TaskIds = operationTaskIdList(plannedOperations, 'phase3');
-  const phase4TaskIds = operationTaskIdList(plannedOperations, 'phase4');
+  const phasePlans = planTaskApplyPhases(plannedOperations);
   const tasksById = new Map(allTasks.map((task) => [task.id, task]));
 
   // Stage 4: apply
@@ -467,10 +478,10 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
     counters,
   };
 
-  await applyPhase1CreateMissingThreads(applyCtx, tasksById, phase1TaskIds);
-  await applyPhase2FixBlockedStatus(applyCtx, tasksById, phase2TaskIds);
-  await applyPhase3SyncActiveThreads(applyCtx, tasksById, phase3TaskIds);
-  await applyPhase4ArchiveClosedThreads(applyCtx, tasksById, phase4TaskIds);
+  for (const phasePlan of phasePlans) {
+    if (phasePlan.taskIds.length === 0) continue;
+    await PHASE_EXECUTORS[phasePlan.phase](applyCtx, tasksById, phasePlan.taskIds);
+  }
 
   let threadsReconciled = 0;
   let orphanThreadsFound = 0;

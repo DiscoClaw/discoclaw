@@ -4,6 +4,7 @@ import {
   buildTasksByShortIdMap,
   ingestTaskSyncSnapshot,
   planTaskReconcileOperations,
+  planTaskApplyPhases,
   type TaskSyncOperation,
   operationTaskIdList,
   normalizeTaskSyncBuckets,
@@ -87,6 +88,23 @@ describe('task-sync pipeline helpers', () => {
     ];
 
     expect(operationTaskIdList(operations, 'phase1')).toEqual(['ws-001', 'ws-002']);
+  });
+
+  it('builds ordered apply-phase plans from the diff operation list', () => {
+    const operations: TaskSyncOperation[] = [
+      { phase: 'phase3', taskId: 'ws-020', key: 'task-sync:phase3:ws-020' },
+      { phase: 'phase1', taskId: 'ws-001', key: 'task-sync:phase1:ws-001' },
+      { phase: 'phase4', taskId: 'ws-030', key: 'task-sync:phase4:ws-030' },
+      { phase: 'phase1', taskId: 'ws-002', key: 'task-sync:phase1:ws-002' },
+    ];
+
+    const phasePlans = planTaskApplyPhases(operations);
+    expect(phasePlans).toEqual([
+      { phase: 'phase1', taskIds: ['ws-001', 'ws-002'] },
+      { phase: 'phase2', taskIds: [] },
+      { phase: 'phase3', taskIds: ['ws-020'] },
+      { phase: 'phase4', taskIds: ['ws-030'] },
+    ]);
   });
 
   it('builds a short-id lookup map for reconciliation', () => {
