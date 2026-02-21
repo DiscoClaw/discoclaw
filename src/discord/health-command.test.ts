@@ -168,6 +168,9 @@ describe('renderHealthReport', () => {
     metrics.increment('tasks.sync.failure_retry.coalesced', 6);
     metrics.increment('tasks.sync.failure_retry.canceled', 1);
     metrics.increment('tasks.sync.failure_retry.disabled', 7);
+    metrics.increment('tasks.sync.tag_map_reload.attempted', 9);
+    metrics.increment('tasks.sync.tag_map_reload.succeeded', 8);
+    metrics.increment('tasks.sync.tag_map_reload.failed', 1);
 
     const verbose = renderHealthReport({
       metrics,
@@ -188,6 +191,7 @@ describe('renderHealthReport', () => {
     expect(verbose).toContain('Task sync transitions: created=5 renamed=11 starter=12 statuses=13 tags=14 archived=6 reconciled=7 orphans=8 deferred=9 warnings=10');
     expect(verbose).toContain('taskSyncPolicy: failureRetry=off failureDelayMs=12000 deferredDelayMs=18000');
     expect(verbose).toContain('Task sync follow-up/retry: followUp=2/2/1/1 retry=3/2/1 (coalesced=5 canceled=2) failureRetry=4/3/2 (coalesced=6 canceled=1 disabled=7)');
+    expect(verbose).toContain('Task sync tag-map reload: attempts=9 ok=8 failed=1');
     expect(verbose).toContain('- tasks.sync.follow_up.error_class.other=1');
   });
 

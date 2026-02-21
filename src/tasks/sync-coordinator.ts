@@ -183,9 +183,12 @@ export class TaskSyncCoordinator {
     try {
       // Reload tag map if path is configured
       if (this.opts.tagMapPath) {
+        metrics.increment('tasks.sync.tag_map_reload.attempted');
         try {
           await reloadTagMapInPlace(this.opts.tagMapPath, this.opts.tagMap);
+          metrics.increment('tasks.sync.tag_map_reload.succeeded');
         } catch (err) {
+          metrics.increment('tasks.sync.tag_map_reload.failed');
           this.opts.log?.warn({ err, tagMapPath: this.opts.tagMapPath }, 'tasks:tag-map reload failed; using cached map');
         }
       }
