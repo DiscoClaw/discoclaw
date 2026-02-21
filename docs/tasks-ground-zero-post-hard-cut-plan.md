@@ -61,3 +61,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Closed out Track 3 by adding characterization coverage for cross-phase apply ordering (phase1 external-ref link before phase2 blocked-status fix) and marking Sync Pipeline Rebuild as DONE.
 - 2026-02-21: Started Track 4 by adding task-sync coordinator metrics for run lifecycle (`started/coalesced/succeeded/failed`), duration totals, transition counters, and retry/follow-up failure signals with coverage in `src/tasks/sync-coordinator.test.ts`.
 - 2026-02-21: Continued Track 4 by surfacing `tasks.sync.*` lifecycle/transition/retry counters in `!health verbose` with focused coverage in `src/discord/health-command.test.ts`.
+- 2026-02-21: Continued Track 4 by surfacing `tasks.sync.failure_retry.*` counters in `!health verbose` so scheduled/failed post-failure retries are operator-visible.
