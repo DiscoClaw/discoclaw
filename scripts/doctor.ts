@@ -248,11 +248,11 @@ for (const check of checkRequiredForums(process.env)) {
 {
   const tasksCwd = (process.env.DISCOCLAW_TASKS_CWD ?? '').trim() || process.cwd();
   const dataDir = (process.env.DISCOCLAW_DATA_DIR ?? '').trim();
-  const beadsDataDir = dataDir
-    ? path.join(dataDir, 'beads')
-    : path.join(root, 'data', 'beads');
+  const tasksDataDir = dataDir
+    ? path.join(dataDir, 'tasks')
+    : path.join(root, 'data', 'tasks');
   const legacyDbPath = path.join(tasksCwd, '.beads', 'beads.db');
-  const tasksJsonlPath = path.join(beadsDataDir, 'tasks.jsonl');
+  const tasksJsonlPath = path.join(tasksDataDir, 'tasks.jsonl');
   const legacyExists = fs.existsSync(legacyDbPath);
   const jsonlExists = fs.existsSync(tasksJsonlPath);
 
@@ -263,7 +263,7 @@ for (const check of checkRequiredForums(process.env)) {
   } else {
     // Legacy DB exists but JSONL is missing
     fail(
-      'Legacy beads.db found but tasks.jsonl is missing',
+      'Legacy bd database found but tasks.jsonl is missing',
       `Run migration — see docs/tasks-migration.md  (output: ${tasksJsonlPath})`,
     );
   }

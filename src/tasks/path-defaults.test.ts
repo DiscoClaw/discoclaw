@@ -7,35 +7,16 @@ describe('resolveTaskDataPath', () => {
     expect(resolveTaskDataPath(undefined, 'tasks.jsonl')).toBeUndefined();
   });
 
-  it('returns canonical path when no files exist', () => {
+  it('returns canonical path for tasks.jsonl', () => {
     const dataDir = '/tmp/discoclaw-data';
-    const result = resolveTaskDataPath(dataDir, 'tasks.jsonl', () => false);
+    const result = resolveTaskDataPath(dataDir, 'tasks.jsonl');
     expect(result).toBe(path.join(dataDir, 'tasks', 'tasks.jsonl'));
   });
 
-  it('falls back to legacy path when only legacy exists', () => {
-    const dataDir = '/tmp/discoclaw-data';
-    const canonical = path.join(dataDir, 'tasks', 'tasks.jsonl');
-    const legacy = path.join(dataDir, 'beads', 'tasks.jsonl');
-    const result = resolveTaskDataPath(
-      dataDir,
-      'tasks.jsonl',
-      (candidate) => candidate === legacy && candidate !== canonical,
-    );
-    expect(result).toBe(legacy);
-  });
-
-  it('prefers canonical path when both canonical and legacy exist', () => {
-    const dataDir = '/tmp/discoclaw-data';
-    const canonical = path.join(dataDir, 'tasks', 'tasks.jsonl');
-    const result = resolveTaskDataPath(dataDir, 'tasks.jsonl', () => true);
-    expect(result).toBe(canonical);
-  });
-
-  it('resolves tag-map path with same rules', () => {
+  it('returns canonical path for tag-map.json', () => {
     const dataDir = '/tmp/discoclaw-data';
     const canonical = path.join(dataDir, 'tasks', 'tag-map.json');
-    const result = resolveTaskDataPath(dataDir, 'tag-map.json', (candidate) => candidate === canonical);
+    const result = resolveTaskDataPath(dataDir, 'tag-map.json');
     expect(result).toBe(canonical);
   });
 });

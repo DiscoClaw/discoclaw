@@ -30,7 +30,6 @@ Legacy runtime compatibility shims under `src/beads/` have been removed.
 
 Bridge compatibility currently retained:
 - `scripts/beads/*` migration/hooks tooling
-- legacy `data/beads/*` path fallback for task data files
 
 Removal target: Phase 5 hard-cut after migration cleanup.
 

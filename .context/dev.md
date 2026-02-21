@@ -96,7 +96,7 @@ Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for 
 | `DISCOCLAW_TASKS_ENABLED` | `1` | Master switch — loads tasks subsystem |
 | `DISCOCLAW_TASKS_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for task threads |
 | `DISCOCLAW_TASKS_CWD` | `<WORKSPACE_CWD>` | Tasks workspace override (legacy import/migration path) |
-| `DISCOCLAW_TASKS_TAG_MAP` | `data/tasks/tag-map.json` | Path to task forum tag map (falls back to legacy `data/beads/tag-map.json` if present) |
+| `DISCOCLAW_TASKS_TAG_MAP` | `data/tasks/tag-map.json` | Path to task forum tag map |
 | `DISCOCLAW_TASKS_MENTION_USER` | *(empty)* | User ID to @mention in new task threads |
 | `DISCOCLAW_TASKS_SIDEBAR` | `0` | When `1` + `MENTION_USER` set, persists @mention in open task starters for sidebar visibility |
 | `DISCOCLAW_TASKS_AUTO_TAG` | `1` | Enable AI auto-tagging |

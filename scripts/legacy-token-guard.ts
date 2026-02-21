@@ -70,6 +70,12 @@ export const DEFAULT_LEGACY_GUARD_RULES: GuardRule[] = [
     message: 'Import canonical task modules; src/beads import paths are retired.',
     allowIn: [],
   },
+  {
+    id: 'legacy-beads-script-path',
+    pattern: /scripts\/beads\//g,
+    message: 'Use canonical scripts/tasks paths in runtime code.',
+    allowIn: ['scripts/beads/**'],
+  },
 ];
 
 DEFAULT_LEGACY_GUARD_RULES.push(

@@ -349,7 +349,7 @@ const tasksTagMapDefaultPath =
   ?? path.join(tasksDataDir, 'tag-map.json');
 const tasksTagMapPath = cfg.tasksTagMapPathOverride
   || tasksTagMapDefaultPath;
-const tasksTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'beads', 'tag-map.json');
+const tasksTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'tasks', 'tag-map.json');
 const tasksMentionUser = cfg.tasksMentionUser;
 const tasksSidebar = cfg.tasksSidebar;
 const sidebarMentionUserId = tasksSidebar ? tasksMentionUser : undefined;
@@ -366,7 +366,7 @@ for (const dir of new Set([path.dirname(tasksPersistPath), path.dirname(tasksTag
 
 // Cutover gate: if the legacy bd SQLite DB exists but the JSONL hasn't been
 // written yet, fail fast rather than silently starting with an empty store.
-// Run `pnpm tsx scripts/beads/migrate.ts` to perform the one-time migration.
+// See docs/tasks-migration.md for one-time migration instructions.
 {
   const legacyDbPath = path.join(tasksCwd, '.beads', 'beads.db');
   const tasksJsonlPath = tasksPersistPath;
@@ -376,7 +376,7 @@ for (const dir of new Set([path.dirname(tasksPersistPath), path.dirname(tasksTag
     if (!jsonlExists) {
       log.error(
         { legacyDbPath, tasksJsonlPath },
-        'tasks:cutover-gate: legacy beads.db found but tasks.jsonl is missing — run migration before starting the service',
+        'tasks:cutover-gate: legacy bd database found but tasks.jsonl is missing — run migration before starting the service',
       );
       process.exit(1);
     }

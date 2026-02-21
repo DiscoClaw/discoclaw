@@ -14,14 +14,16 @@ describe('legacy-token-guard: unit', () => {
       "const mod = './actions-beads.js';",
       'const beadCtx = {};',
       "import { runBeadSync } from '../beads/bead-sync.js';",
+      "const seed = 'scripts/beads/tag-map.json';",
     ].join('\n');
 
     const matches = scanFileContent('src/example.ts', input, DEFAULT_LEGACY_GUARD_RULES);
-    expect(matches.length).toBeGreaterThanOrEqual(4);
+    expect(matches.length).toBeGreaterThanOrEqual(5);
     expect(matches.some((m) => m.ruleId === 'legacy-env-beads')).toBe(true);
     expect(matches.some((m) => m.ruleId === 'legacy-action-module')).toBe(true);
     expect(matches.some((m) => m.ruleId === 'legacy-bead-context')).toBe(true);
     expect(matches.some((m) => m.ruleId === 'legacy-beads-import-path')).toBe(true);
+    expect(matches.some((m) => m.ruleId === 'legacy-beads-script-path')).toBe(true);
   });
 
   it('respects per-rule allowlist globs', () => {
@@ -46,6 +48,15 @@ describe('legacy-token-guard: unit', () => {
     const input = "export * from '../beads/bead-sync.js';";
     const matches = scanFileContent('src/beads/compat-shim.ts', input, DEFAULT_LEGACY_GUARD_RULES);
     expect(matches.some((m) => m.ruleId === 'legacy-beads-import-path')).toBe(true);
+  });
+
+  it('allows scripts/beads references only inside scripts/beads files', () => {
+    const input = "const seed = 'scripts/beads/tag-map.json';";
+    const allowed = scanFileContent('scripts/beads/bd-wrapper.sh', input, DEFAULT_LEGACY_GUARD_RULES);
+    const blocked = scanFileContent('src/index.ts', input, DEFAULT_LEGACY_GUARD_RULES);
+
+    expect(allowed.some((m) => m.ruleId === 'legacy-beads-script-path')).toBe(false);
+    expect(blocked.some((m) => m.ruleId === 'legacy-beads-script-path')).toBe(true);
   });
 
   it('blocks legacy plan header/token compatibility everywhere after hard-cut', () => {
