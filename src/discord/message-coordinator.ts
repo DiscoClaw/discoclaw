@@ -1996,9 +1996,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     ? '*(Response aborted.)*'
                     : mapRuntimeErrorToUserMessage(evt.message);
                   await maybeEdit(true);
-                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                  statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
-                  params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                  if (!abortSignal.aborted) {
+                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                    statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                    params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                  }
                 } else if (evt.type === 'log_line') {
                   // Bypass queue for log lines.
                   const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
@@ -2020,9 +2022,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     ? '*(Response aborted.)*'
                     : mapRuntimeErrorToUserMessage(evt.message);
                   await maybeEdit(true);
-                  // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                  statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
-                  params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                  if (!abortSignal.aborted) {
+                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                    statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                    params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                  }
                 } else if (evt.type === 'text_delta') {
                   deltaText += evt.text;
                   await maybeEdit(false);
