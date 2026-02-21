@@ -3,6 +3,8 @@ import type { TaskData } from './types.js';
 import {
   buildTasksByShortIdMap,
   ingestTaskSyncSnapshot,
+  planTaskReconcileOperations,
+  type TaskSyncOperation,
   operationTaskIdList,
   normalizeTaskSyncBuckets,
   operationTaskIdSet,
@@ -76,6 +78,17 @@ describe('task-sync pipeline helpers', () => {
     expect(operationTaskIdList(operations, 'phase3')).toEqual(['ws-004']);
   });
 
+  it('operationTaskIdList preserves in-plan order for the selected phase', () => {
+    const operations: TaskSyncOperation[] = [
+      { phase: 'phase2', taskId: 'ws-010', key: 'task-sync:phase2:ws-010' },
+      { phase: 'phase1', taskId: 'ws-001', key: 'task-sync:phase1:ws-001' },
+      { phase: 'phase3', taskId: 'ws-020', key: 'task-sync:phase3:ws-020' },
+      { phase: 'phase1', taskId: 'ws-002', key: 'task-sync:phase1:ws-002' },
+    ];
+
+    expect(operationTaskIdList(operations, 'phase1')).toEqual(['ws-001', 'ws-002']);
+  });
+
   it('builds a short-id lookup map for reconciliation', () => {
     const map = buildTasksByShortIdMap(
       [
@@ -88,5 +101,44 @@ describe('task-sync pipeline helpers', () => {
 
     expect(map.get('001')?.map((t) => t.id)).toEqual(['ws-001', 'dev-001']);
     expect(map.get('002')?.map((t) => t.id)).toEqual(['ws-002']);
+  });
+
+  it('plans phase5 reconcile operations from thread snapshots', () => {
+    const tasksByShortId = buildTasksByShortIdMap(
+      [
+        task({ id: 'ws-001', title: 'Closed A', status: 'closed', external_ref: 'discord:thread-001' }),
+        task({ id: 'ws-002', title: 'Closed B', status: 'closed' }),
+        task({ id: 'ws-777', title: 'Collision A', status: 'open' }),
+        task({ id: 'dev-777', title: 'Collision B', status: 'open' }),
+      ],
+      (id) => id.split('-')[1] ?? id,
+    );
+
+    const ops = planTaskReconcileOperations({
+      threads: [
+        { id: 'thread-orphan', name: '🟢 [999] Orphan', archived: false },
+        { id: 'thread-collision', name: '🟢 [777] Collision', archived: false },
+        { id: 'thread-mismatch', name: '🟢 [001] Mismatch', archived: false },
+        { id: 'thread-archive', name: '🟢 [002] Closed active', archived: false },
+        { id: 'thread-reconcile', name: '☑️ [002] Closed archived', archived: true },
+      ],
+      tasksByShortId,
+      shortIdFromThreadName: (name) => {
+        const match = name.match(/\[(\d+)\]/);
+        return match ? match[1] : null;
+      },
+      threadIdFromTask: (t) => {
+        const ref = t.external_ref ?? '';
+        return ref.startsWith('discord:') ? ref.slice('discord:'.length) : null;
+      },
+    });
+
+    expect(ops.map((op) => op.action)).toEqual([
+      'orphan',
+      'collision',
+      'skip_external_ref_mismatch',
+      'archive_active_closed',
+      'reconcile_archived_closed',
+    ]);
   });
 });

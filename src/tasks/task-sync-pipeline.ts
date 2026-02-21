@@ -120,3 +120,107 @@ export function buildTasksByShortIdMap(
   }
   return tasksByShortId;
 }
+
+export type TaskThreadSnapshot = {
+  id: string;
+  name: string;
+  archived: boolean;
+};
+
+export type TaskReconcileAction =
+  | 'orphan'
+  | 'collision'
+  | 'skip_external_ref_mismatch'
+  | 'archive_active_closed'
+  | 'reconcile_archived_closed';
+
+export type TaskReconcileOperation = {
+  action: TaskReconcileAction;
+  key: string;
+  thread: TaskThreadSnapshot;
+  shortId: string;
+  task?: TaskData;
+  collisionCount?: number;
+  existingThreadId?: string;
+};
+
+export type TaskReconcilePlanOptions = {
+  threads: TaskThreadSnapshot[];
+  tasksByShortId: Map<string, TaskData[]>;
+  shortIdFromThreadName: (threadName: string) => string | null;
+  threadIdFromTask: (task: TaskData) => string | null;
+};
+
+/**
+ * Stage: diff (phase 5)
+ * Plan reconciliation operations for forum threads vs local task snapshot.
+ */
+export function planTaskReconcileOperations(opts: TaskReconcilePlanOptions): TaskReconcileOperation[] {
+  const operations: TaskReconcileOperation[] = [];
+
+  for (const thread of opts.threads) {
+    const shortId = opts.shortIdFromThreadName(thread.name);
+    if (!shortId) continue;
+
+    const tasks = opts.tasksByShortId.get(shortId);
+    if (!tasks || tasks.length === 0) {
+      operations.push({
+        action: 'orphan',
+        key: `task-sync:phase5:orphan:${thread.id}`,
+        thread,
+        shortId,
+      });
+      continue;
+    }
+
+    if (tasks.length > 1) {
+      operations.push({
+        action: 'collision',
+        key: `task-sync:phase5:collision:${thread.id}`,
+        thread,
+        shortId,
+        collisionCount: tasks.length,
+      });
+      continue;
+    }
+
+    const task = tasks[0]!;
+    const existingThreadId = opts.threadIdFromTask(task);
+    if (existingThreadId && existingThreadId !== thread.id) {
+      operations.push({
+        action: 'skip_external_ref_mismatch',
+        key: `task-sync:phase5:skip-mismatch:${thread.id}`,
+        thread,
+        shortId,
+        task,
+        existingThreadId,
+      });
+      continue;
+    }
+
+    if (task.status === 'closed' && !thread.archived) {
+      operations.push({
+        action: 'archive_active_closed',
+        key: `task-sync:phase5:archive:${thread.id}`,
+        thread,
+        shortId,
+        task,
+        existingThreadId: existingThreadId ?? undefined,
+      });
+      continue;
+    }
+
+    if (task.status === 'closed' && thread.archived) {
+      operations.push({
+        action: 'reconcile_archived_closed',
+        key: `task-sync:phase5:reconcile:${thread.id}`,
+        thread,
+        shortId,
+        task,
+        existingThreadId: existingThreadId ?? undefined,
+      });
+    }
+  }
+
+  return operations;
+}
