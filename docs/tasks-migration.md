@@ -211,6 +211,5 @@ for removal once the migration tooling is no longer needed.
 The canonical runtime is task-named (`src/tasks/*`). Remaining bridge surface is limited to:
 
 - `scripts/beads/*` migration/hooks tooling remains for bridge and one-shot migration flows.
-- Task data path resolution prefers `data/tasks/*` with fallback to legacy `data/beads/*` when present.
 
-These compatibility paths are scheduled for removal in Phase 5 hard-cut after migration cleanup is complete.
+This compatibility path is scheduled for removal in Phase 5 hard-cut after migration cleanup is complete.
