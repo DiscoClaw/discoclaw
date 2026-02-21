@@ -26,6 +26,8 @@ export type TaskSyncCoordinatorOptions = {
   forumCountSync?: ForumCountSync;
   skipPhase5?: boolean;
   metrics?: Pick<MetricsRegistry, 'increment'>;
+  enableFailureRetry?: boolean;
+  failureRetryDelayMs?: number;
 };
 
 function classifySyncError(message?: string): string {
@@ -82,8 +84,27 @@ function recordSyncFailureMetrics(
 export class TaskSyncCoordinator {
   private syncing = false;
   private pendingStatusPoster: StatusPoster | undefined | false = false;
+  private failureRetryPending = false;
 
   constructor(private readonly opts: TaskSyncCoordinatorOptions) {}
+
+  private scheduleFailureRetry(metrics: Pick<MetricsRegistry, 'increment'>): void {
+    if (this.opts.enableFailureRetry === false) return;
+    if (this.failureRetryPending) return;
+
+    this.failureRetryPending = true;
+    const delayMs = this.opts.failureRetryDelayMs ?? 30_000;
+    metrics.increment('tasks.sync.failure_retry.scheduled');
+    this.opts.log?.info({ delayMs }, 'tasks:coordinator scheduling retry after sync failure');
+
+    setTimeout(() => {
+      this.failureRetryPending = false;
+      this.sync().catch((err) => {
+        metrics.increment('tasks.sync.failure_retry.failed');
+        this.opts.log?.warn({ err }, 'tasks:coordinator failure retry sync failed');
+      });
+    }, delayMs);
+  }
 
   async sync(statusPoster?: StatusPoster): Promise<TaskSyncResult | null> {
     const metrics = this.opts.metrics ?? globalMetrics;
@@ -127,6 +148,7 @@ export class TaskSyncCoordinator {
       return result;
     } catch (err) {
       recordSyncFailureMetrics(metrics, err, Date.now() - startedAtMs);
+      this.scheduleFailureRetry(metrics);
       throw err;
     } finally {
       this.syncing = false;
