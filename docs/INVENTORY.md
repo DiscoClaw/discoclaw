@@ -85,6 +85,7 @@ All actions are gated by category env flags (off by default except channels).
 |-----------|---------|--------|
 | Discord forum thread sync helpers | `src/tasks/discord-sync.ts` | **done** |
 | Full task ↔ thread sync engine | `src/tasks/task-sync-engine.ts` | **done** |
+| Sync pipeline stage helpers (ingest/normalize/diff planning) | `src/tasks/task-sync-pipeline.ts` | **done** |
 | Sync coordinator (concurrency guard + cache) | `src/tasks/sync-coordinator.ts` | **done** |
 | Store-event watcher (triggers sync on every `TaskStore` mutation) | `src/tasks/sync-watcher.ts` | **done** |
 | Task thread cache | `src/tasks/thread-cache.ts` | **done** |

@@ -1,5 +1,5 @@
 import type { Client, Guild } from 'discord.js';
-import type { TagMap, TaskData, TaskSyncResult } from './types.js';
+import type { TagMap, TaskSyncResult } from './types.js';
 import { hasInFlightForChannel } from '../discord/inflight-replies.js';
 export type { TaskSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
@@ -7,6 +7,13 @@ import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import { createTaskService } from './service.js';
+import {
+  buildTasksByShortIdMap,
+  ingestTaskSyncSnapshot,
+  normalizeTaskSyncBuckets,
+  operationTaskIdSet,
+  planTaskSyncOperations,
+} from './task-sync-pipeline.js';
 import { withTaskLifecycleLock } from './task-lifecycle.js';
 import {
   resolveTasksForum,
@@ -39,10 +46,6 @@ export type TaskSyncOptions = {
   /** Disable Phase 5 (thread reconciliation). Useful for shared-forum deployments. */
   skipPhase5?: boolean;
 };
-
-function hasLabel(task: TaskData, label: string): boolean {
-  return (task.labels ?? []).includes(label);
-}
 
 async function sleep(ms: number | undefined): Promise<void> {
   const n = ms ?? 0;
@@ -82,22 +85,27 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   let warnings = 0;
   let closesDeferred = 0;
 
-  // Load all tasks (including closed for Phase 4).
-  const allTasks = opts.store.list({ status: 'all' });
+  // Stage 1: ingest
+  const allTasks = ingestTaskSyncSnapshot(opts.store.list({ status: 'all' }));
+  // Stage 2: normalize
+  const normalized = normalizeTaskSyncBuckets(allTasks);
+  // Stage 3: diff (idempotent operation plan)
+  const plannedOperations = planTaskSyncOperations(normalized);
+  const phase1TaskIds = operationTaskIdSet(plannedOperations, 'phase1');
+  const phase2TaskIds = operationTaskIdSet(plannedOperations, 'phase2');
+  const phase3TaskIds = operationTaskIdSet(plannedOperations, 'phase3');
+  const phase4TaskIds = operationTaskIdSet(plannedOperations, 'phase4');
 
+  // Stage 4: apply
   // Phase 1: Create threads for tasks missing external_ref.
-  const tasksMissingRef = allTasks.filter((task) =>
-    !getThreadIdFromTask(task) &&
-    task.status !== 'closed' &&
-    !hasLabel(task, 'no-thread'),
-  );
-  for (const task of tasksMissingRef) {
+  for (const task of normalized.tasksMissingRef) {
+    if (!phase1TaskIds.has(task.id)) continue;
     await withTaskLifecycleLock(task.id, async () => {
       const latestTask = opts.store.get(task.id) ?? task;
       if (
         getThreadIdFromTask(latestTask) ||
         latestTask.status === 'closed' ||
-        hasLabel(latestTask, 'no-thread')
+        (latestTask.labels ?? []).includes('no-thread')
       ) {
         return;
       }
@@ -135,10 +143,8 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   }
 
   // Phase 2: Fix status/label mismatches (matches legacy shell behavior).
-  const needsBlockedTasks = allTasks.filter((task) =>
-    task.status === 'open' && (task.labels ?? []).some((l) => /^(waiting|blocked)-/.test(l)),
-  );
-  for (const task of needsBlockedTasks) {
+  for (const task of normalized.needsBlockedTasks) {
+    if (!phase2TaskIds.has(task.id)) continue;
     try {
       taskService.update(task.id, { status: 'blocked' as any });
       task.status = 'blocked'; // keep in-memory copy current for Phase 3
@@ -152,8 +158,8 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   }
 
   // Phase 3: Sync emoji/names for existing threads.
-  const tasksWithRef = allTasks.filter((task) => getThreadIdFromTask(task) && task.status !== 'closed');
-  for (const task of tasksWithRef) {
+  for (const task of normalized.tasksWithRef) {
+    if (!phase3TaskIds.has(task.id)) continue;
     await withTaskLifecycleLock(task.id, async () => {
       const latestTask = opts.store.get(task.id) ?? task;
       const threadId = getThreadIdFromTask(latestTask);
@@ -207,10 +213,8 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   }
 
   // Phase 4: Archive threads for closed tasks.
-  const closedTasks = allTasks.filter((task) =>
-    task.status === 'closed' && getThreadIdFromTask(task),
-  );
-  for (const task of closedTasks) {
+  for (const task of normalized.closedTasks) {
+    if (!phase4TaskIds.has(task.id)) continue;
     await withTaskLifecycleLock(task.id, async () => {
       const latestTask = opts.store.get(task.id) ?? task;
       const threadId = getThreadIdFromTask(latestTask);
@@ -246,14 +250,8 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   let orphanThreadsFound = 0;
 
   if (!opts.skipPhase5) {
-    // Build a map of short task IDs → tasks for quick lookup.
-    const tasksByShortId = new Map<string, TaskData[]>();
-    for (const task of allTasks) {
-      const sid = shortTaskId(task.id);
-      const arr = tasksByShortId.get(sid);
-      if (arr) arr.push(task);
-      else tasksByShortId.set(sid, [task]);
-    }
+    // Build a map of short task IDs → tasks for reconciliation lookup.
+    const tasksByShortId = buildTasksByShortIdMap(allTasks, shortTaskId);
 
     // Fetch active + archived forum threads.
     try {

@@ -26,6 +26,7 @@ Mutation entrypoint service: `src/tasks/service.ts`
 Canonical runtime sync implementation lives in `src/tasks/*`:
 
 - `src/tasks/task-sync-engine.ts`
+- `src/tasks/task-sync-pipeline.ts`
 - `src/tasks/sync-coordinator.ts`
 - `src/tasks/discord-sync.ts`
 - `src/tasks/thread-cache.ts`
