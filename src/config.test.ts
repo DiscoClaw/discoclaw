@@ -256,9 +256,9 @@ describe('parseConfig', () => {
   });
 
   // --- Short-term memory ---
-  it('defaults shortTermMemoryEnabled to false', () => {
+  it('defaults shortTermMemoryEnabled to true', () => {
     const { config } = parseConfig(env());
-    expect(config.shortTermMemoryEnabled).toBe(false);
+    expect(config.shortTermMemoryEnabled).toBe(true);
   });
 
   it('parses short-term memory config fields', () => {
@@ -272,6 +272,11 @@ describe('parseConfig', () => {
     expect(config.shortTermMaxEntries).toBe(10);
     expect(config.shortTermMaxAgeHours).toBe(12);
     expect(config.shortTermInjectMaxChars).toBe(500);
+  });
+
+  it('parses DISCOCLAW_SHORTTERM_MEMORY_ENABLED=0 as false', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_SHORTTERM_MEMORY_ENABLED: '0' }));
+    expect(config.shortTermMemoryEnabled).toBe(false);
   });
 
   it('uses default values for short-term memory fields', () => {
