@@ -97,7 +97,8 @@ All actions are gated by category env flags (off by default except channels).
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | Runtime compatibility shims (`src/beads/*`) | removed | **done** |
-| Hook scripts (on-create, on-update, etc.) | `scripts/beads/` | **done** |
+| Legacy bridge scripts (`scripts/beads/*`) | removed | **done** |
+| Canonical task wrapper scripts | `scripts/tasks/` | **done** |
 
 ## 9. Task Store + Migration (`src/tasks/`)
 

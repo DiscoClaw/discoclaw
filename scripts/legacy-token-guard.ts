@@ -74,7 +74,7 @@ export const DEFAULT_LEGACY_GUARD_RULES: GuardRule[] = [
     id: 'legacy-beads-script-path',
     pattern: /scripts\/beads\//g,
     message: 'Use canonical scripts/tasks paths in runtime code.',
-    allowIn: ['scripts/beads/**'],
+    allowIn: [],
   },
 ];
 

@@ -1,10 +1,10 @@
-#!/bin/bash
-# bd-new.sh — Create a bead in the task store and queue its Discord thread.
-# Usage: bd-new.sh <title> [--description <d>] [--priority <n>] [--type <t>]
+#!/usr/bin/env bash
+# task-new.sh — Create a task in the task store and queue its Discord thread.
+# Usage: task-new.sh <title> [--description <d>] [--priority <n>] [--type <t>]
 #                          [--owner <o>] [--labels <l1,l2>] [--tags tag1,tag2]
 #
-# Discord sync is handled in-process by BeadSyncWatcher when the bot is running.
-# To trigger a manual sync: bd sync  (or: scripts/beads/bead-thread-sync.sh)
+# Discord sync is handled in-process by the task sync watcher when the bot is
+# running. To trigger a manual sync: task sync
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -33,10 +33,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 output=$(run_task_cli create "${cli_args[@]}" 2>&1)
-bead_id=$(echo "$output" | jq -r ".id // empty" 2>/dev/null | head -1)
+task_id=$(echo "$output" | jq -r ".id // empty" 2>/dev/null | head -1)
 
-if [[ -z "$bead_id" ]]; then
-  echo "Failed to create bead or parse bead ID" >&2
+if [[ -z "$task_id" ]]; then
+  echo "Failed to create task or parse task ID" >&2
   echo "$output" >&2
   exit 1
 fi
@@ -48,19 +48,19 @@ if [[ -n "$tags_arg" ]]; then
   IFS=',' read -ra tag_list <<< "$tags_arg"
   for tag in "${tag_list[@]}"; do
     tag="${tag// /}"
-    [[ -n "$tag" ]] && run_task_cli label-add "$bead_id" "tag:$tag" >/dev/null 2>&1 || true
+    [[ -n "$tag" ]] && run_task_cli label-add "$task_id" "tag:$tag" >/dev/null 2>&1 || true
   done
 fi
 
-thread_ref=$(run_task_cli get "$bead_id" 2>/dev/null | jq -r '.[0].external_ref // empty')
+thread_ref=$(run_task_cli get "$task_id" 2>/dev/null | jq -r '.[0].external_ref // empty')
 if [[ "$thread_ref" =~ ^discord:([0-9]+)$ && -n "$GUILD_ID" ]]; then
   thread_id="${BASH_REMATCH[1]}"
-  echo "Created bead $bead_id with Discord thread"
+  echo "Created task $task_id with Discord thread"
   echo "  Title: $title"
   [[ -n "$tags_arg" ]] && echo "  Tags: $tags_arg"
   echo "  Thread: https://discord.com/channels/$GUILD_ID/$thread_id"
 else
-  echo "Created bead $bead_id (Discord sync pending — run: bd sync)"
+  echo "Created task $task_id (Discord sync pending — run: task sync)"
   echo "  Title: $title"
   [[ -n "$tags_arg" ]] && echo "  Tags: $tags_arg"
 fi
