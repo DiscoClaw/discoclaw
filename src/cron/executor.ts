@@ -4,7 +4,7 @@ import type { CronJob } from './types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { ActionCategoryFlags, ActionContext } from '../discord/actions.js';
-import type { TaskContext } from '../discord/actions-tasks.js';
+import type { TaskContext } from '../tasks/task-context.js';
 import type { CronContext } from '../discord/actions-crons.js';
 import type { ForgeContext } from '../discord/actions-forge.js';
 import type { PlanContext } from '../discord/actions-plan.js';

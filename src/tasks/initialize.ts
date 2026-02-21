@@ -1,4 +1,4 @@
-import type { TaskContext } from '../discord/actions-tasks.js';
+import type { TaskContext } from './task-context.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { StatusPoster } from '../discord/status-channel.js';

@@ -7,7 +7,7 @@ import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions
 import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import type { LoggerLike } from './action-types.js';
 import type { TaskData } from '../tasks/types.js';
-import type { TaskContext } from './actions-tasks.js';
+import type { TaskContext } from '../tasks/task-context.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import type { RuntimeCapability } from '../runtime/types.js';
 import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';

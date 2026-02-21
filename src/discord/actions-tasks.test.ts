@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TASK_ACTION_TYPES, executeTaskAction, taskActionsPromptSection } from './actions-tasks.js';
-import type { TaskContext } from './actions-tasks.js';
+import type { TaskContext } from '../tasks/task-context.js';
 import type { ActionContext } from './actions.js';
 
 // ---------------------------------------------------------------------------

@@ -26,7 +26,7 @@ import { CronScheduler } from './cron/scheduler.js';
 import { executeCronJob } from './cron/executor.js';
 import { initCronForum } from './cron/forum-sync.js';
 import { CronRunControl } from './cron/run-control.js';
-import type { TaskContext } from './discord/actions-tasks.js';
+import type { TaskContext } from './tasks/task-context.js';
 import type { CronContext } from './discord/actions-crons.js';
 import type { ForgeContext } from './discord/actions-forge.js';
 import type { PlanContext } from './discord/actions-plan.js';
