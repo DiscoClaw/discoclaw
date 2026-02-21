@@ -80,7 +80,7 @@ export const DEFAULT_LEGACY_GUARD_RULES: GuardRule[] = [
     id: 'legacy-beads-db-path',
     pattern: /\.beads\/beads\.db/g,
     message: 'Legacy bd DB paths are retired from runtime/preflight code.',
-    allowIn: ['src/tasks/bd-cli.ts'],
+    allowIn: [],
   },
 ];
 
