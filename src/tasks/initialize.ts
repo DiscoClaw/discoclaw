@@ -1,6 +1,7 @@
 import type { TaskContext } from './task-context.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
+import type { TaskMetrics } from './metrics-types.js';
 import type { TaskStore } from './store.js';
 import {
   type TaskModelResolver,
@@ -30,6 +31,7 @@ export type InitializeTasksOpts = {
   tasksSyncDeferredRetryDelayMs?: number;
   runtime: TaskRuntimeAdapter;
   resolveModel: TaskModelResolver;
+  metrics?: TaskMetrics;
   statusPoster?: TaskStatusPoster;
   hasInFlightForChannel?: TaskInFlightChecker;
   log: LoggerLike;
@@ -100,6 +102,7 @@ export async function initializeTasksContext(
     sidebarMentionUserId,
     statusPoster: opts.statusPoster,
     hasInFlightForChannel: opts.hasInFlightForChannel,
+    metrics: opts.metrics,
     log: opts.log,
     syncFailureRetryEnabled: opts.tasksSyncFailureRetryEnabled,
     syncFailureRetryDelayMs: opts.tasksSyncFailureRetryDelayMs,
