@@ -9,10 +9,8 @@ import type { TaskService } from './service.js';
 import { createTaskService } from './service.js';
 import {
   ingestTaskSyncSnapshot,
-  normalizeTaskSyncBuckets,
-  planTaskApplyPhases,
+  planTaskSyncApplyExecution,
   planTaskReconcileFromThreadSources,
-  planTaskSyncOperations,
   type TaskThreadLike,
   type TaskReconcileAction,
   type TaskReconcileOperation,
@@ -503,12 +501,8 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
 
   // Stage 1: ingest
   const allTasks = ingestTaskSyncSnapshot(opts.store.list({ status: 'all' }));
-  // Stage 2: normalize
-  const normalized = normalizeTaskSyncBuckets(allTasks);
-  // Stage 3: diff (idempotent operation plan)
-  const plannedOperations = planTaskSyncOperations(normalized);
-  const phasePlans = planTaskApplyPhases(plannedOperations);
-  const tasksById = new Map(allTasks.map((task) => [task.id, task]));
+  // Stage 2-4: compose normalize+diff+apply plan
+  const applyPlan = planTaskSyncApplyExecution(allTasks);
 
   // Stage 4: apply
   const applyCtx: TaskSyncApplyContext = {
@@ -524,9 +518,9 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
     counters,
   };
 
-  for (const phasePlan of phasePlans) {
+  for (const phasePlan of applyPlan.phasePlans) {
     if (phasePlan.taskIds.length === 0) continue;
-    await PHASE_EXECUTORS[phasePlan.phase](applyCtx, tasksById, phasePlan.taskIds);
+    await PHASE_EXECUTORS[phasePlan.phase](applyCtx, applyPlan.tasksById, phasePlan.taskIds);
   }
 
   let threadsReconciled = 0;

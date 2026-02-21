@@ -4,6 +4,7 @@ import {
   buildTasksByShortIdMap,
   ingestTaskThreadSnapshots,
   ingestTaskSyncSnapshot,
+  planTaskSyncApplyExecution,
   planTaskReconcileFromThreadSources,
   planTaskReconcileFromSnapshots,
   planTaskReconcileOperations,
@@ -108,6 +109,31 @@ describe('task-sync pipeline helpers', () => {
       { phase: 'phase3', taskIds: ['ws-020'] },
       { phase: 'phase4', taskIds: ['ws-030'] },
     ]);
+  });
+
+  it('composes stage2-4 apply execution plan from a task snapshot', () => {
+    const allTasks = [
+      task({ id: 'ws-001', title: 'Missing ref', status: 'open' }),
+      task({ id: 'ws-003', title: 'Blocked label', status: 'open', labels: ['blocked-api'] }),
+      task({ id: 'ws-004', title: 'Has ref', status: 'in_progress', external_ref: 'discord:123' }),
+      task({ id: 'ws-005', title: 'Closed ref', status: 'closed', external_ref: 'discord:124' }),
+    ];
+
+    const plan = planTaskSyncApplyExecution(allTasks);
+    expect(plan.operations.map((op) => op.key)).toEqual([
+      'task-sync:phase1:ws-001',
+      'task-sync:phase1:ws-003',
+      'task-sync:phase2:ws-003',
+      'task-sync:phase3:ws-004',
+      'task-sync:phase4:ws-005',
+    ]);
+    expect(plan.phasePlans).toEqual([
+      { phase: 'phase1', taskIds: ['ws-001', 'ws-003'] },
+      { phase: 'phase2', taskIds: ['ws-003'] },
+      { phase: 'phase3', taskIds: ['ws-004'] },
+      { phase: 'phase4', taskIds: ['ws-005'] },
+    ]);
+    expect(plan.tasksById.get('ws-004')).toBe(allTasks[2]);
   });
 
   it('builds a short-id lookup map for reconciliation', () => {

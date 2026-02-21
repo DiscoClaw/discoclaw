@@ -132,6 +132,24 @@ export function planTaskApplyPhases(
   return phases;
 }
 
+export type TaskSyncApplyExecutionPlan = {
+  tasksById: Map<string, TaskData>;
+  operations: TaskSyncOperation[];
+  phasePlans: TaskSyncApplyPhasePlan[];
+};
+
+/**
+ * Stage: compose (stages 2-4)
+ * Build diff operations, phase dispatch plans, and task lookup from a task snapshot.
+ */
+export function planTaskSyncApplyExecution(allTasks: TaskData[]): TaskSyncApplyExecutionPlan {
+  const normalized = normalizeTaskSyncBuckets(allTasks);
+  const operations = planTaskSyncOperations(normalized);
+  const phasePlans = planTaskApplyPhases(operations);
+  const tasksById = new Map(allTasks.map((task) => [task.id, task]));
+  return { tasksById, operations, phasePlans };
+}
+
 export function buildTasksByShortIdMap(
   allTasks: TaskData[],
   shortIdOf: (taskId: string) => string,
