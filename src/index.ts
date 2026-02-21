@@ -65,7 +65,7 @@ import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { appendUnavailableActionTypesNotice } from './discord/output-common.js';
 import { TaskStore } from './tasks/store.js';
-import { resolveTaskDataPath } from './tasks/path-defaults.js';
+import { migrateLegacyTaskDataFile, resolveTaskDataPath } from './tasks/path-defaults.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -371,6 +371,14 @@ const tasksPrefix = cfg.tasksPrefix;
 // Created unconditionally so forge/plan have a persistent store even when tasks are disabled.
 for (const dir of new Set([path.dirname(tasksPersistPath), path.dirname(tasksTagMapPath)])) {
   await fs.mkdir(dir, { recursive: true });
+}
+
+const tasksMigration = await migrateLegacyTaskDataFile(tasksDataRoot, 'tasks.jsonl');
+if (tasksMigration.migrated) {
+  log.warn(
+    { from: tasksMigration.fromPath, to: tasksMigration.toPath },
+    'tasks: migrated legacy beads task store to canonical path',
+  );
 }
 
 const sharedTaskStore = new TaskStore({ prefix: tasksPrefix, persistPath: tasksPersistPath });

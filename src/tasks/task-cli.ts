@@ -1,7 +1,7 @@
 import { TaskStore } from './store.js';
 import { createTaskService } from './service.js';
 import { isTaskStatus, type TaskStatus } from './types.js';
-import { resolveTaskDataPath } from './path-defaults.js';
+import { resolveTaskDataLoadPath, resolveTaskDataPath } from './path-defaults.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,10 +55,11 @@ function positional(args: string[]): string[] {
 // ---------------------------------------------------------------------------
 
 async function getStore(): Promise<TaskStore> {
+  const explicitPath = envOpt('DISCOCLAW_TASKS_PATH');
   const dataDir = envOpt('DISCOCLAW_DATA_DIR');
-  const tasksPath =
-    envOpt('DISCOCLAW_TASKS_PATH') ??
-    resolveTaskDataPath(dataDir, 'tasks.jsonl');
+  const tasksPath = explicitPath
+    ?? await resolveTaskDataLoadPath(dataDir, 'tasks.jsonl')
+    ?? resolveTaskDataPath(dataDir, 'tasks.jsonl');
 
   if (!tasksPath) {
     throw new Error('DISCOCLAW_TASKS_PATH or DISCOCLAW_DATA_DIR is required');

@@ -4,7 +4,7 @@ import type { TagMap, TaskSyncResult } from './types.js';
 import { loadTagMap } from './tag-map.js';
 import { runTaskSync } from './task-sync-engine.js';
 import type { TaskStore } from './store.js';
-import { resolveTaskDataPath } from './path-defaults.js';
+import { resolveTaskDataLoadPath, resolveTaskDataPath } from './path-defaults.js';
 
 function env(name: string): string {
   const v = (process.env[name] ?? '').trim();
@@ -65,6 +65,7 @@ export async function runTaskSyncCliMain(): Promise<void> {
   const tagMapPath = envOpt('DISCOCLAW_TASKS_TAG_MAP')
     ?? resolveTaskDataPath(dataDir, 'tag-map.json');
   const tasksPath = envOpt('DISCOCLAW_TASKS_PATH')
+    ?? await resolveTaskDataLoadPath(dataDir, 'tasks.jsonl')
     ?? resolveTaskDataPath(dataDir, 'tasks.jsonl');
 
   const throttleMs = parseArgInt(args, '--throttle-ms') ?? 250;
