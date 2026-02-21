@@ -957,6 +957,7 @@ if (tasksEnabled) {
     tasksSyncFailureRetryDelayMs,
     tasksSyncDeferredRetryDelayMs,
     runtime,
+    resolveModel,
     statusPoster: botStatus ?? undefined,
     hasInFlightForChannel,
     log,
