@@ -947,6 +947,7 @@ if (tasksEnabled) {
     tasksSidebar,
     tasksAutoTag,
     tasksAutoTagModel,
+    tasksSyncSkipPhase5: cfg.tasksSyncSkipPhase5,
     tasksSyncFailureRetryEnabled,
     tasksSyncFailureRetryDelayMs,
     tasksSyncDeferredRetryDelayMs,
@@ -1008,7 +1009,7 @@ if (taskCtx) {
     }
 
     // Wire coordinator + sync triggers + startup sync (now uses correct tag map).
-    const wired = await wireTaskSync(taskCtx, { client, guild }, { skipPhase5: cfg.tasksSyncSkipPhase5 });
+    const wired = await wireTaskSync(taskCtx, { client, guild });
     taskSyncWiring = wired;
   } else {
     log.warn({ resolvedGuildId }, 'tasks:sync wiring skipped; guild not in cache');

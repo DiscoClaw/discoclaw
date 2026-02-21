@@ -92,3 +92,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued post-Track-4 cleanup by introducing shared `TaskSyncRunOptions` in `task-sync.ts` and using it across coordinator, run, and wire entry points.
 - 2026-02-21: Continued post-Track-4 cleanup by reusing shared `TaskSyncRunOptions` directly in coordinator and sync-engine option contracts, removing duplicated `skipPhase5` option declarations.
 - 2026-02-21: Continued post-Track-4 cleanup by threading shared `TaskSyncRunOptions` through helper boundaries (coordinator construction + phase-5 dispatch) instead of ad-hoc boolean plumbing.
+- 2026-02-21: Continued post-Track-4 cleanup by persisting sync run options in `TaskContext` at initialization, removing separate run-option parameters from sync wiring and coordinator helper entry points.

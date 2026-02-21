@@ -26,6 +26,7 @@ export type TaskSyncContext = {
   syncFailureRetryEnabled?: boolean;
   syncFailureRetryDelayMs?: number;
   syncDeferredRetryDelayMs?: number;
+  syncRunOptions?: TaskSyncRunOptions;
 };
 
 export type TaskSyncRunContext = {
@@ -44,7 +45,6 @@ export type TaskSyncWiring = {
 export async function ensureTaskSyncCoordinator(
   taskCtx: TaskSyncContext,
   runCtx: TaskSyncRunContext,
-  opts?: TaskSyncRunOptions,
 ): Promise<TaskSyncCoordinatorLike> {
   if (taskCtx.syncCoordinator) return taskCtx.syncCoordinator;
 
@@ -59,7 +59,7 @@ export async function ensureTaskSyncCoordinator(
     log: taskCtx.log,
     mentionUserId: taskCtx.sidebarMentionUserId,
     forumCountSync: taskCtx.forumCountSync,
-    ...opts,
+    ...(taskCtx.syncRunOptions ?? {}),
     enableFailureRetry: taskCtx.syncFailureRetryEnabled,
     failureRetryDelayMs: taskCtx.syncFailureRetryDelayMs,
     deferredRetryDelayMs: taskCtx.syncDeferredRetryDelayMs,
@@ -72,9 +72,8 @@ export async function runTaskSync(
   taskCtx: TaskSyncContext,
   runCtx: TaskSyncRunContext,
   statusPoster?: StatusPoster,
-  opts?: TaskSyncRunOptions,
 ): Promise<TaskSyncResult | null> {
-  const syncCoordinator = await ensureTaskSyncCoordinator(taskCtx, runCtx, opts);
+  const syncCoordinator = await ensureTaskSyncCoordinator(taskCtx, runCtx);
   return syncCoordinator.sync(statusPoster);
 }
 
