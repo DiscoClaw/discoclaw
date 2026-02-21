@@ -18,7 +18,7 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 | 1 | Contract + Characterization | DONE | Canonical contract file and baseline characterization tests landed in `src/tasks/`. |
 | 2 | Core Service Extraction | DONE | `TaskService` introduced in `src/tasks/service.ts`; mutation callsites migrated from adapters/sync engine/CLI. |
 | 3 | Sync Pipeline Rebuild | DONE | Sync flow now runs through explicit ingest/normalize/diff/apply helpers with phase-5 fetch/plan/apply boundaries and characterization coverage. |
-| 4 | Performance + Operability | IN_PROGRESS | Added coordinator-level sync lifecycle/transition metrics and surfaced sync operability counters in `!health verbose`. |
+| 4 | Performance + Operability | IN_PROGRESS | Added sync metrics + health visibility, and failure-retry handling for transient task-sync errors in coordinator. |
 
 ## Track 1 Scope (Complete)
 
@@ -61,3 +61,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Closed out Track 3 by adding characterization coverage for cross-phase apply ordering (phase1 external-ref link before phase2 blocked-status fix) and marking Sync Pipeline Rebuild as DONE.
 - 2026-02-21: Started Track 4 by adding task-sync coordinator metrics for run lifecycle (`started/coalesced/succeeded/failed`), duration totals, transition counters, and retry/follow-up failure signals with coverage in `src/tasks/sync-coordinator.test.ts`.
 - 2026-02-21: Continued Track 4 by surfacing `tasks.sync.*` lifecycle/transition/retry counters in `!health verbose` with focused coverage in `src/discord/health-command.test.ts`.
+- 2026-02-21: Continued Track 4 by adding guarded failure-retry scheduling in `TaskSyncCoordinator` (`tasks.sync.failure_retry.*`) and surfacing those counters in `!health verbose`, with coverage in `src/tasks/sync-coordinator.test.ts`.
