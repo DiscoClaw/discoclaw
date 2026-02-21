@@ -143,6 +143,10 @@ describe('renderHealthReport', () => {
     metrics.increment('tasks.sync.duration_ms.total', 1100);
     metrics.increment('tasks.sync.duration_ms.samples', 4);
     metrics.increment('tasks.sync.transition.threads_created', 5);
+    metrics.increment('tasks.sync.transition.thread_names_updated', 11);
+    metrics.increment('tasks.sync.transition.starter_messages_updated', 12);
+    metrics.increment('tasks.sync.transition.statuses_updated', 13);
+    metrics.increment('tasks.sync.transition.tags_updated', 14);
     metrics.increment('tasks.sync.transition.threads_archived', 6);
     metrics.increment('tasks.sync.transition.threads_reconciled', 7);
     metrics.increment('tasks.sync.transition.orphan_threads_found', 8);
@@ -181,7 +185,7 @@ describe('renderHealthReport', () => {
     });
 
     expect(verbose).toContain('Task sync: started=4 ok=3 failed=1 coalesced=2 avgMs=275');
-    expect(verbose).toContain('Task sync transitions: created=5 archived=6 reconciled=7 orphans=8 deferred=9 warnings=10');
+    expect(verbose).toContain('Task sync transitions: created=5 renamed=11 starter=12 statuses=13 tags=14 archived=6 reconciled=7 orphans=8 deferred=9 warnings=10');
     expect(verbose).toContain('taskSyncPolicy: failureRetry=off failureDelayMs=12000 deferredDelayMs=18000');
     expect(verbose).toContain('Task sync follow-up/retry: followUp=2/2/1/1 retry=3/2/1 (coalesced=5 canceled=2) failureRetry=4/3/2 (coalesced=6 canceled=1 disabled=7)');
     expect(verbose).toContain('- tasks.sync.follow_up.error_class.other=1');
