@@ -18,12 +18,12 @@ vi.mock('./thread-cache.js', () => ({
   taskThreadCache: { invalidate: vi.fn() },
 }));
 
-vi.mock('./discord-sync.js', () => ({
+vi.mock('./tag-map.js', () => ({
   reloadTagMapInPlace: vi.fn(async () => 2),
 }));
 
 import { TaskSyncCoordinator } from './sync-coordinator.js';
-import { reloadTagMapInPlace } from './discord-sync.js';
+import { reloadTagMapInPlace } from './tag-map.js';
 
 function makeOpts(): any {
   return {

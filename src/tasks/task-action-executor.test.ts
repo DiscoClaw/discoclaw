@@ -27,6 +27,9 @@ vi.mock('./discord-sync.js', () => ({
     return null;
   }),
   findExistingThreadForTask: vi.fn(async () => null),
+}));
+
+vi.mock('./tag-map.js', () => ({
   reloadTagMapInPlace: vi.fn(async () => 2),
 }));
 
@@ -514,7 +517,7 @@ describe('executeTaskAction', () => {
 
 describe('tagMapReload action', () => {
   it('success: returns old/new count with tag names', async () => {
-    const { reloadTagMapInPlace } = await import('./discord-sync.js');
+    const { reloadTagMapInPlace } = await import('./tag-map.js');
     (reloadTagMapInPlace as any).mockClear();
     (reloadTagMapInPlace as any).mockImplementationOnce(async (_path: string, tagMap: any) => {
       // Simulate reload: clear and add new tags
@@ -536,7 +539,7 @@ describe('tagMapReload action', () => {
   });
 
   it('success with >10 tags: truncates tag list display', async () => {
-    const { reloadTagMapInPlace } = await import('./discord-sync.js');
+    const { reloadTagMapInPlace } = await import('./tag-map.js');
     (reloadTagMapInPlace as any).mockClear();
     (reloadTagMapInPlace as any).mockImplementationOnce(async (_path: string, tagMap: any) => {
       for (const k of Object.keys(tagMap)) delete tagMap[k];
@@ -554,7 +557,7 @@ describe('tagMapReload action', () => {
   });
 
   it('failure: returns error with message, map preserved', async () => {
-    const { reloadTagMapInPlace } = await import('./discord-sync.js');
+    const { reloadTagMapInPlace } = await import('./tag-map.js');
     (reloadTagMapInPlace as any).mockClear();
     (reloadTagMapInPlace as any).mockRejectedValueOnce(new Error('ENOENT: file not found'));
 
@@ -582,7 +585,7 @@ describe('tagMapReload action', () => {
 
 describe('taskSync coordinator tagMap reload behavior', () => {
   it('reloads tag map before runTaskSync when tagMapPath is configured', async () => {
-    const { reloadTagMapInPlace } = await import('./discord-sync.js');
+    const { reloadTagMapInPlace } = await import('./tag-map.js');
     const { runTaskSync } = await import('./task-sync-engine.js');
     (reloadTagMapInPlace as any).mockClear();
     (runTaskSync as any).mockClear();
@@ -598,7 +601,7 @@ describe('taskSync coordinator tagMap reload behavior', () => {
   });
 
   it('does not attempt reload without tagMapPath', async () => {
-    const { reloadTagMapInPlace } = await import('./discord-sync.js');
+    const { reloadTagMapInPlace } = await import('./tag-map.js');
     (reloadTagMapInPlace as any).mockClear();
 
     await executeTaskAction(

@@ -11,7 +11,7 @@ import { createTaskService } from './service.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
 import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
-import { loadTagMap } from './discord-sync.js';
+import { loadTagMap } from './tag-map.js';
 
 /**
  * Canonical task namespace for task-context initialization and sync wiring.
