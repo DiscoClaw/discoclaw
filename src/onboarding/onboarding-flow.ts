@@ -21,6 +21,7 @@ type Step =
   | 'NAME'
   | 'TIMEZONE'
   | 'CHECKIN'
+  | 'CONFIRM'
   | 'WRITING'
   | 'WRITE_ERROR'
   | 'DONE';

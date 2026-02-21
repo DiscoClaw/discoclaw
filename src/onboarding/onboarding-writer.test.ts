@@ -41,6 +41,7 @@ describe('writeWorkspaceFiles', () => {
     const user = await fs.readFile(path.join(workspace, 'USER.md'), 'utf-8');
     expect(user).toContain('David');
     expect(user).toContain('America/New_York');
+    expect(user).toContain('**Morning check-in:** No');
   });
 
   it('passes isOnboardingComplete after writing', async () => {

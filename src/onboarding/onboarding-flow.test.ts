@@ -48,7 +48,7 @@ describe('OnboardingFlow', () => {
     // Should show confirmation
     expect(r.reply).toContain('David');
     expect(r.reply).toContain('America/Chicago');
-    expect(r.reply).toContain('yes');
+    expect(r.reply).toContain('Morning check-in');
   });
 
   // --- Confirmation → write ---
