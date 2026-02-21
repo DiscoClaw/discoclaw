@@ -36,7 +36,9 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 - `src/tasks/sync-coordinator-metrics.ts`
 - `src/tasks/sync-coordinator-retries.ts`
 - `src/tasks/thread-helpers.ts`
-- `src/tasks/thread-ops.ts`
+- `src/tasks/thread-forum-ops.ts`
+- `src/tasks/thread-lifecycle-ops.ts`
+- `src/tasks/thread-ops.ts` (facade)
 - `src/tasks/tag-map.ts`
 - `src/tasks/thread-cache.ts`
 - `src/tasks/forum-guard.ts`
