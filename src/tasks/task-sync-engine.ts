@@ -5,6 +5,8 @@ export type { TaskSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
+import type { TaskService } from './service.js';
+import { createTaskService } from './service.js';
 import { withTaskLifecycleLock } from './task-lifecycle.js';
 import {
   resolveTasksForum,
@@ -28,6 +30,7 @@ export type TaskSyncOptions = {
   forumId: string;
   tagMap: TagMap;
   store: TaskStore;
+  taskService?: TaskService;
   log?: LoggerLike;
   throttleMs?: number;
   archivedDedupeLimit?: number;
@@ -59,6 +62,7 @@ async function sleep(ms: number | undefined): Promise<void> {
  */
 export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult> {
   const { client, guild, forumId, tagMap, log } = opts;
+  const taskService = opts.taskService ?? createTaskService(opts.store);
   const throttleMs = opts.throttleMs ?? 250;
 
   const forum = await resolveTasksForum(guild, forumId);
@@ -103,7 +107,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
         const existing = await findExistingThreadForTask(forum, latestTask.id, { archivedLimit: opts.archivedDedupeLimit });
         if (existing) {
           try {
-            opts.store.update(latestTask.id, { externalRef: `discord:${existing}` });
+            taskService.update(latestTask.id, { externalRef: `discord:${existing}` });
             log?.info({ taskId: latestTask.id, threadId: existing }, 'task-sync:phase1 external-ref backfilled');
           } catch (err) {
             log?.warn({ err, taskId: latestTask.id, threadId: existing }, 'task-sync:phase1 external-ref backfill failed');
@@ -115,7 +119,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
         const threadId = await createTaskThread(forum, latestTask, tagMap, opts.mentionUserId);
         // Link back via external_ref.
         try {
-          opts.store.update(latestTask.id, { externalRef: `discord:${threadId}` });
+          taskService.update(latestTask.id, { externalRef: `discord:${threadId}` });
         } catch (err) {
           log?.warn({ err, taskId: latestTask.id }, 'task-sync:phase1 external-ref update failed');
           warnings++;
@@ -136,7 +140,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   );
   for (const task of needsBlockedTasks) {
     try {
-      opts.store.update(task.id, { status: 'blocked' as any });
+      taskService.update(task.id, { status: 'blocked' as any });
       task.status = 'blocked'; // keep in-memory copy current for Phase 3
       statusesUpdated++;
       log?.info({ taskId: task.id }, 'task-sync:phase2 status updated to blocked');
@@ -308,7 +312,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
           // Backfill external_ref if missing so Phase 4 can track this thread.
           if (!existingThreadId) {
             try {
-              opts.store.update(task.id, { externalRef: `discord:${thread.id}` });
+              taskService.update(task.id, { externalRef: `discord:${thread.id}` });
               log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 external_ref backfilled');
             } catch (err) {
               log?.warn({ err, taskId: task.id, threadId: thread.id }, 'task-sync:phase5 external_ref backfill failed');

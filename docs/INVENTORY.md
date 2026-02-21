@@ -108,6 +108,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 |-----------|---------|--------|
 | Task types (`TaskData`, `TaskStatus`, `STATUS_EMOJI`, param types) | `src/tasks/types.ts` | **done** |
 | `TaskStore` (EventEmitter-backed Map, JSONL persistence) | `src/tasks/store.ts` | **done** |
+| `TaskService` mutation facade | `src/tasks/service.ts` | **done** |
 
 ## 10. Cron Subsystem (`src/cron/`)
 

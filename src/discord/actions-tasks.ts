@@ -11,6 +11,8 @@ import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
 import type { TaskSyncCoordinatorLike } from '../tasks/task-sync.js';
 import { runTaskSync } from '../tasks/task-sync.js';
 import type { TaskStore } from '../tasks/store.js';
+import type { TaskService } from '../tasks/service.js';
+import { createTaskService } from '../tasks/service.js';
 import {
   resolveTasksForum,
   createTaskThread,
@@ -89,6 +91,7 @@ export type TaskContext = {
   tagMap: TagMap;
   tagMapPath?: string;
   store: TaskStore;
+  taskService?: TaskService;
   runtime: RuntimeAdapter;
   autoTag: boolean;
   autoTagModel: string;
@@ -99,6 +102,13 @@ export type TaskContext = {
   syncCoordinator?: TaskSyncCoordinatorLike;
   forumCountSync?: ForumCountSync;
 };
+
+function resolveTaskService(taskCtx: TaskContext): TaskService {
+  if (taskCtx.taskService) return taskCtx.taskService;
+  const taskService = createTaskService(taskCtx.store);
+  taskCtx.taskService = taskService;
+  return taskService;
+}
 
 function resolveTaskId(action: { taskId?: string }): string {
   return (action.taskId ?? '').trim();
@@ -131,7 +141,8 @@ export async function executeTaskAction(
         labels.push(...action.tags.split(',').map((t) => t.trim()).filter(Boolean));
       }
 
-      const task = taskCtx.store.create({
+      const taskService = resolveTaskService(taskCtx);
+      const task = taskService.create({
         title: action.title,
         description: action.description,
         priority: action.priority,
@@ -157,7 +168,7 @@ export async function executeTaskAction(
             }
             for (const tag of suggestedTags) {
               try {
-                taskCtx.store.addLabel(task.id, `tag:${tag}`);
+                taskService.addLabel(task.id, `tag:${tag}`);
               } catch {
                 // best-effort
               }
@@ -198,7 +209,7 @@ export async function executeTaskAction(
             const newest = taskCtx.store.get(task.id) ?? task;
             const newestThreadId = getThreadIdFromTask(newest);
             if (newestThreadId !== threadId) {
-              taskCtx.store.update(task.id, { externalRef: `discord:${threadId}` });
+              taskService.update(task.id, { externalRef: `discord:${threadId}` });
             }
           } catch (err) {
             taskCtx.log?.warn({ err, taskId: task.id, threadId }, 'tasks:external-ref update failed');
@@ -230,8 +241,9 @@ export async function executeTaskAction(
       }
 
       let needsRepairSync = false;
+      const taskService = resolveTaskService(taskCtx);
       await withDirectTaskLifecycle(taskId, async () => {
-        const updatedTask = taskCtx.store.update(taskId, {
+        const updatedTask = taskService.update(taskId, {
           title: action.title,
           description: action.description,
           priority: action.priority,
@@ -285,8 +297,9 @@ export async function executeTaskAction(
       }
 
       let needsRepairSync = false;
+      const taskService = resolveTaskService(taskCtx);
       await withDirectTaskLifecycle(taskId, async () => {
-        const closedTask = taskCtx.store.close(taskId, action.reason);
+        const closedTask = taskService.close(taskId, action.reason);
 
         const threadId = getThreadIdFromTask(closedTask);
         if (threadId && shouldActionUseDirectThreadLifecycle(action.type)) {
