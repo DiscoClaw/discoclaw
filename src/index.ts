@@ -52,6 +52,7 @@ import type { WebhookServer } from './webhook/server.js';
 import { resolveModel } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
+import { MemorySampler } from './observability/memory-sampler.js';
 import {
   setDataFilePath,
   drainInFlightReplies,
@@ -159,6 +160,13 @@ let taskForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
 let webhookServer: WebhookServer | null = null;
 let savedCronExecCtx: import('./cron/executor.js').CronExecutorContext | null = null;
+const memorySampler = new MemorySampler();
+globalMetrics.setMemorySampler(memorySampler);
+memorySampler.sample();
+const memorySamplerInterval = setInterval(() => {
+  memorySampler.sample();
+}, 30_000);
+memorySamplerInterval.unref?.();
 const shutdown = async () => {
   // Write default shutdown context (skip if !restart already wrote a richer one).
   try {
@@ -185,6 +193,7 @@ const shutdown = async () => {
   taskSyncWiring?.stop();
   cronTagMapWatcher?.stop();
   cronScheduler?.stopAll();
+  clearInterval(memorySamplerInterval);
   if (webhookServer) {
     await webhookServer.close().catch((err) => log.warn({ err }, 'webhook:close error'));
   }

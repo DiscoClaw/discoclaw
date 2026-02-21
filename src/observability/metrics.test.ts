@@ -25,4 +25,24 @@ describe('MetricsRegistry', () => {
     const snap = m.snapshot();
     expect(snap.counters['invoke.message.error_class.stream_stall']).toBe(1);
   });
+
+  it('includes memory stats when a memory sampler is configured', () => {
+    const m = new MetricsRegistry();
+    m.setMemorySampler({
+      peek: () => ({
+        rssBytes: 1,
+        heapUsedBytes: 2,
+        heapTotalBytes: 3,
+        externalBytes: 4,
+        rssHwmBytes: 5,
+        heapUsedHwmBytes: 6,
+        sampleCount: 7,
+      }),
+    } as any);
+
+    const snap = m.snapshot();
+    expect(snap.memory).toBeDefined();
+    expect(snap.memory?.rssBytes).toBe(1);
+    expect(snap.memory?.sampleCount).toBe(7);
+  });
 });

@@ -192,6 +192,8 @@ export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 export type StatusRef = { current: StatusPoster | null };
 
 const turnCounters = new Map<string, number>();
+const summaryWorkQueue = new KeyedQueue();
+const latestSummarySequence = new Map<string, number>();
 
 const acquireWriterLock = registryAcquireWriterLock;
 const MAX_PLAN_RUN_PHASES = 50;
@@ -949,7 +951,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         threadId: threadId || null,
       });
 
-      type SummaryWork = { existingSummary: string | null; exchange: string };
+      type SummaryWork = { existingSummary: string | null; exchange: string; summarySeq: number };
       let pendingSummaryWork: SummaryWork | null = null as SummaryWork | null;
       type ShortTermAppend = { userContent: string; botResponse: string; channelName: string; channelId: string };
       let pendingShortTermAppend: ShortTermAppend | null = null as ShortTermAppend | null;
@@ -976,6 +978,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 guildId: msg.guildId ?? undefined,
                 channelName: channelName || undefined,
               });
+              if (cmd.action === 'reset-rolling') {
+                turnCounters.delete(sessionKey);
+              }
               await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
               return;
             }
@@ -2302,7 +2307,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
             if (count >= params.summaryEveryNTurns) {
               turnCounters.set(sessionKey, 0);
+              const summarySeq = (latestSummarySequence.get(sessionKey) ?? 0) + 1;
+              latestSummarySequence.set(sessionKey, summarySeq);
               pendingSummaryWork = {
+                summarySeq,
                 existingSummary: summarySection || null,
                 exchange:
                   (historySection ? historySection + '\n' : '') +
@@ -2355,38 +2363,43 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       if (pendingSummaryWork) {
         const work = pendingSummaryWork;
         // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        generateSummary(params.runtime, {
-          previousSummary: work.existingSummary,
-          recentExchange: work.exchange,
-          model: resolveModel(params.summaryModel, params.runtime.id),
-          cwd: params.workspaceCwd,
-          maxChars: params.summaryMaxChars,
-          timeoutMs: 30_000,
+        summaryWorkQueue.run(sessionKey, async () => {
+          if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
+
+          const newSummary = await generateSummary(params.runtime, {
+            previousSummary: work.existingSummary,
+            recentExchange: work.exchange,
+            model: resolveModel(params.summaryModel, params.runtime.id),
+            cwd: params.workspaceCwd,
+            maxChars: params.summaryMaxChars,
+            timeoutMs: 30_000,
+          });
+
+          if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
+
+          await saveSummary(params.summaryDataDir, sessionKey, {
+            summary: newSummary,
+            updatedAt: Date.now(),
+            turnsSinceUpdate: 0,
+          });
+
+          if (params.summaryToDurableEnabled) {
+            const ch: any = msg.channel as any;
+            await applyUserTurnToDurable({
+              runtime: params.runtime,
+              userMessageText: String(msg.content ?? ''),
+              userId: msg.author.id,
+              durableDataDir: params.durableDataDir,
+              durableMaxItems: params.durableMaxItems,
+              model: resolveModel(params.summaryModel, params.runtime.id),
+              cwd: params.workspaceCwd,
+              channelId: msg.channelId,
+              messageId: msg.id,
+              guildId: msg.guildId ?? undefined,
+              channelName: String(ch?.name ?? '') || undefined,
+            });
+          }
         })
-          .then((newSummary) =>
-            saveSummary(params.summaryDataDir, sessionKey, {
-              summary: newSummary,
-              updatedAt: Date.now(),
-              turnsSinceUpdate: 0,
-            }).then(() => {
-              if (params.summaryToDurableEnabled) {
-                const ch: any = msg.channel as any;
-                return applyUserTurnToDurable({
-                  runtime: params.runtime,
-                  userMessageText: String(msg.content ?? ''),
-                  userId: msg.author.id,
-                  durableDataDir: params.durableDataDir,
-                  durableMaxItems: params.durableMaxItems,
-                  model: resolveModel(params.summaryModel, params.runtime.id),
-                  cwd: params.workspaceCwd,
-                  channelId: msg.channelId,
-                  messageId: msg.id,
-                  guildId: msg.guildId ?? undefined,
-                  channelName: String(ch?.name ?? '') || undefined,
-                });
-              }
-            }),
-          )
           .catch((err) => {
             params.log?.warn({ err, sessionKey }, 'discord:summary/durable-extraction failed');
           });

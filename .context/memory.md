@@ -83,8 +83,9 @@ Bot:   Deprecated 1 item matching "Acme"
 
 `src/discord/user-turn-to-durable.ts`
 
-After each bot response, fires a separate `fast`-tier call to extract up to 3 notable
-facts from the user's message and writes them to durable memory. Off by default.
+After summary refreshes (default every 5 turns), fires a separate `fast`-tier call to
+extract up to 3 notable facts from the user's message and writes them to durable memory.
+Enabled by default.
 
 **What the user sees:**
 - The bot passively picks up on things you mention without being asked.
@@ -102,7 +103,7 @@ Bot:   Cool, platform work! What's your first project?
   [tool]  Works with Kubernetes and Terraform
 ```
 
-**Config:** `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED=true` to enable.
+**Config:** `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED=false` to disable.
 
 ### 5. Short-Term Memory — cross-channel awareness
 
@@ -246,7 +247,7 @@ Short-term entries also store `channelId` alongside the existing `channelName`.
 | `DISCOCLAW_DURABLE_INJECT_MAX_CHARS` | `2000` | Durable memory |
 | `DISCOCLAW_DURABLE_MAX_ITEMS` | `200` | Durable memory |
 | `DISCOCLAW_MEMORY_COMMANDS_ENABLED` | `true` | Memory commands |
-| `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED` | `false` | Auto-extraction |
+| `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED` | `true` | Auto-extraction |
 | `DISCOCLAW_SHORTTERM_MEMORY_ENABLED` | `true` | Short-term memory |
 | `DISCOCLAW_SHORTTERM_MAX_ENTRIES` | `20` | Short-term memory |
 | `DISCOCLAW_SHORTTERM_MAX_AGE_HOURS` | `6` | Short-term memory |

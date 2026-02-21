@@ -126,7 +126,7 @@ export function selectEntriesForInjection(
   for (const entry of recent) {
     const line = formatEntryLine(entry);
     const sep = selected.length > 0 ? 1 : 0;
-    if (chars + sep + line.length > maxChars) break;
+    if (chars + sep + line.length > maxChars) continue;
     selected.push(entry);
     chars += sep + line.length;
   }
