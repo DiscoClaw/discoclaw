@@ -151,10 +151,12 @@ describe('renderHealthReport', () => {
     metrics.increment('tasks.sync.follow_up.scheduled', 2);
     metrics.increment('tasks.sync.follow_up.failed', 1);
     metrics.increment('tasks.sync.retry.scheduled', 3);
+    metrics.increment('tasks.sync.retry.triggered', 2);
     metrics.increment('tasks.sync.retry.failed', 1);
     metrics.increment('tasks.sync.retry.coalesced', 5);
     metrics.increment('tasks.sync.retry.canceled', 2);
     metrics.increment('tasks.sync.failure_retry.scheduled', 4);
+    metrics.increment('tasks.sync.failure_retry.triggered', 3);
     metrics.increment('tasks.sync.failure_retry.failed', 2);
     metrics.increment('tasks.sync.failure_retry.coalesced', 6);
     metrics.increment('tasks.sync.failure_retry.canceled', 1);
@@ -177,7 +179,7 @@ describe('renderHealthReport', () => {
     expect(verbose).toContain('Task sync: started=4 ok=3 failed=1 coalesced=2 avgMs=275');
     expect(verbose).toContain('Task sync transitions: created=5 archived=6 reconciled=7 orphans=8 deferred=9 warnings=10');
     expect(verbose).toContain('taskSyncPolicy: failureRetry=off failureDelayMs=12000 deferredDelayMs=18000');
-    expect(verbose).toContain('Task sync follow-up/retry: followUp=2/1 retry=3/1 (coalesced=5 canceled=2) failureRetry=4/2 (coalesced=6 canceled=1)');
+    expect(verbose).toContain('Task sync follow-up/retry: followUp=2/1 retry=3/2/1 (coalesced=5 canceled=2) failureRetry=4/3/2 (coalesced=6 canceled=1)');
   });
 
   it('renders tools report', () => {
