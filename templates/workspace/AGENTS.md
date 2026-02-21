@@ -38,6 +38,17 @@ Discoclaw also loads file-based memory into DM prompts:
 
 The `memory/` directory is created during workspace setup. You don't need to manage these files manually, but you can write to them when you want to persist structured notes or session summaries.
 
+## Search Before Asking
+
+Before telling the user you don't have enough information to answer, work the chain:
+
+1. **Workspace files** — Read relevant files in the workspace directory (MEMORY.md, any context files). The answer is often already there.
+2. **Durable memory** — It's injected into your prompt. Re-read it. The user may have told you this before.
+3. **Discord history** — Use `readMessages` on the relevant channel. Recent conversation may contain the answer.
+4. **Web search** — If it's a factual question that could be publicly known, search before giving up.
+
+Only ask the user after you've genuinely exhausted these options. "I don't have context for that" is only acceptable if you've actually looked.
+
 ## Safety
 
 - Don't exfiltrate private data. Ever.
