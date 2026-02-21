@@ -100,16 +100,14 @@ All actions are gated by category env flags (off by default except channels).
 | Legacy bridge scripts (`scripts/beads/*`) | removed | **done** |
 | Canonical task wrapper scripts | `scripts/tasks/` | **done** |
 
-## 9. Task Store + Migration (`src/tasks/`)
+## 9. Task Store (`src/tasks/`)
 
-In-process task store that replaces the external `bd` CLI dependency for the read/write
-path. See `docs/tasks-migration.md` for migration details.
+In-process task store that replaced the external `bd` CLI dependency for the read/write path.
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | Task types (`TaskData`, `TaskStatus`, `STATUS_EMOJI`, param types) | `src/tasks/types.ts` | **done** |
 | `TaskStore` (EventEmitter-backed Map, JSONL persistence) | `src/tasks/store.ts` | **done** |
-| One-shot bd → JSONL migration helper | `src/tasks/migrate.ts` | **done** |
 
 ## 10. Cron Subsystem (`src/cron/`)
 
@@ -169,7 +167,6 @@ path. See `docs/tasks-migration.md` for migration details.
 | Context modules | `.context/*.md` | **done** |
 | Token usage & efficiency | `docs/token-efficiency.md` | **done** |
 | Plan & Forge reference | `docs/plan-and-forge.md` | **done** |
-| Tasks migration (bd CLI → TaskStore) | `docs/tasks-migration.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
 

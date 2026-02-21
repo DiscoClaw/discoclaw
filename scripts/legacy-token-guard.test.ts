@@ -61,13 +61,13 @@ describe('legacy-token-guard: unit', () => {
     expect(blockedInScripts.some((m) => m.ruleId === 'legacy-beads-script-path')).toBe(true);
   });
 
-  it('allows legacy bd DB path only in migration adapter', () => {
+  it('blocks legacy bd DB path everywhere after migration-tooling retirement', () => {
     const input = "const dbPath = '/tmp/.beads/beads.db';";
-    const allowed = scanFileContent('src/tasks/bd-cli.ts', input, DEFAULT_LEGACY_GUARD_RULES);
     const blocked = scanFileContent('src/index.ts', input, DEFAULT_LEGACY_GUARD_RULES);
+    const blockedInTasks = scanFileContent('src/tasks/store.ts', input, DEFAULT_LEGACY_GUARD_RULES);
 
-    expect(allowed.some((m) => m.ruleId === 'legacy-beads-db-path')).toBe(false);
     expect(blocked.some((m) => m.ruleId === 'legacy-beads-db-path')).toBe(true);
+    expect(blockedInTasks.some((m) => m.ruleId === 'legacy-beads-db-path')).toBe(true);
   });
 
   it('blocks legacy plan header/token compatibility everywhere after hard-cut', () => {
