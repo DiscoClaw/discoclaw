@@ -200,6 +200,40 @@ describe('runCronSync', () => {
     expect(result.namesUpdated).toBe(1);
   });
 
+  it('continues with metadata/status phases when fetchActive fails', async () => {
+    const forum = makeForum([]);
+    (forum.threads.fetchActive as any).mockRejectedValueOnce(new Error('Discord API failure'));
+    const client = makeClient(forum);
+    const log = mockLog();
+    const record = makeRecord({ cronId: 'cron-3', threadId: 'thread-3', cadence: 'daily', model: 'haiku' });
+    const scheduler = makeScheduler([
+      { id: 'thread-3', threadId: 'thread-3', cronId: 'cron-3', name: 'Daily Check', schedule: '0 7 * * *', prompt: 'Check things' },
+    ]);
+
+    const result = await runCronSync({
+      client: client as any,
+      forumId: 'forum-1',
+      scheduler,
+      statsStore: makeStatsStore([record]),
+      runtime: makeMockRuntime('monitoring'),
+      tagMap: { ...defaultTagMap },
+      autoTag: false,
+      autoTagModel: 'haiku',
+      cwd: '/tmp',
+      log,
+      throttleMs: 0,
+    });
+
+    expect(result.tagsApplied).toBe(0);
+    expect(result.namesUpdated).toBe(0);
+    expect(result.statusMessagesUpdated).toBe(1);
+    expect(result.orphansDetected).toBe(0);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error), forumId: 'forum-1' }),
+      expect.stringContaining('failed to fetch active threads'),
+    );
+  });
+
   it('phase 4: detects orphan threads', async () => {
     const forum = makeForum([{ id: 'thread-orphan', name: 'Orphan', parentId: 'forum-1' }]);
     const client = makeClient(forum);
