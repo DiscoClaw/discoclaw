@@ -72,3 +72,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 4 by adding `tasks.sync.failure_retry.disabled` for explicit no-retry operation when failure retries are turned off, and surfacing that counter in `!health verbose`.
 - 2026-02-21: Continued Track 4 by attributing retry-failure cause classes (`tasks.sync.retry.error_class.*`, `tasks.sync.failure_retry.error_class.*`) for deferred and failure-retry paths.
 - 2026-02-21: Continued Track 4 by adding `tasks.sync.follow_up.triggered` and surfacing follow-up scheduled/triggered/failed triples in `!health verbose`.
+- 2026-02-21: Continued Track 4 by attributing follow-up failure cause classes (`tasks.sync.follow_up.error_class.*`) with coordinator and health-output coverage.
