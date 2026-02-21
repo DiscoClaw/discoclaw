@@ -186,6 +186,28 @@ describe('runTaskSync', () => {
     expect(store.update).toHaveBeenCalledWith('ws-003', { status: 'blocked' });
   });
 
+  it('applies phase1 thread-link mutation before phase2 blocked-status mutation for the same task', async () => {
+    const store = makeStore([
+      { id: 'ws-041', title: 'Order test', status: 'open', labels: ['blocked-api'], external_ref: '' },
+    ]);
+
+    const result = await runTaskSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      store,
+      throttleMs: 0,
+      skipPhase5: true,
+    } as any);
+
+    expect(result.threadsCreated).toBe(1);
+    expect(result.statusesUpdated).toBe(1);
+    expect(store.update).toHaveBeenCalledTimes(2);
+    expect(store.update.mock.calls[0]).toEqual(['ws-041', { externalRef: 'discord:thread-new' }]);
+    expect(store.update.mock.calls[1]).toEqual(['ws-041', { status: 'blocked' }]);
+  });
+
   it('phase 3 skips tasks whose thread is already archived', async () => {
     const { isThreadArchived, ensureUnarchived, updateTaskThreadName } = await import('./discord-sync.js');
     const store = makeStore([

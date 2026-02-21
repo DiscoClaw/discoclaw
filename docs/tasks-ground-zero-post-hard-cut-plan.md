@@ -17,8 +17,8 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 | --- | --- | --- | --- |
 | 1 | Contract + Characterization | DONE | Canonical contract file and baseline characterization tests landed in `src/tasks/`. |
 | 2 | Core Service Extraction | DONE | `TaskService` introduced in `src/tasks/service.ts`; mutation callsites migrated from adapters/sync engine/CLI. |
-| 3 | Sync Pipeline Rebuild | IN_PROGRESS | Stage scaffolding started with explicit ingest/normalize/diff helpers and idempotent operation planning in sync engine. |
-| 4 | Performance + Operability | TODO | Optimize hot paths and add transition-level metrics/failure handling. |
+| 3 | Sync Pipeline Rebuild | DONE | Sync flow now runs through explicit ingest/normalize/diff/apply helpers with phase-5 fetch/plan/apply boundaries and characterization coverage. |
+| 4 | Performance + Operability | IN_PROGRESS | Added coordinator-level sync lifecycle/transition metrics and failure classification wiring in `src/tasks/sync-coordinator.ts`. |
 
 ## Track 1 Scope (Complete)
 
@@ -26,7 +26,7 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - Freeze current `TaskStore` behavior with characterization tests.
 - Freeze current store-event -> sync trigger behavior with characterization tests.
 
-## Track 2 Scope (Next)
+## Track 2 Scope (Complete)
 
 - Add `TaskService` interface and concrete implementation.
 - Route action handlers through `TaskService` only.
@@ -58,3 +58,5 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 3 by splitting phase-5 execution into explicit plan/apply steps in engine (`applyPhase5ReconcileOperations`) and adding a guard test ensuring `skipPhase5` avoids thread-source fetches.
 - 2026-02-21: Continued Track 3 by extracting phase-5 reconcile planning in engine into `planPhase5ReconcileOperations`, making phase-5 fetch/plan/apply boundaries explicit.
 - 2026-02-21: Continued Track 3 by extracting stage dispatch helpers in engine (`applyPlannedSyncPhases`, `runPhase5IfEnabled`) so `runTaskSync` reads as explicit stage orchestration.
+- 2026-02-21: Closed out Track 3 by adding characterization coverage for cross-phase apply ordering (phase1 external-ref link before phase2 blocked-status fix) and marking Sync Pipeline Rebuild as DONE.
+- 2026-02-21: Started Track 4 by adding task-sync coordinator metrics for run lifecycle (`started/coalesced/succeeded/failed`), duration totals, transition counters, and retry/follow-up failure signals with coverage in `src/tasks/sync-coordinator.test.ts`.

@@ -33,6 +33,7 @@ function makeOpts(): any {
     tagMap: {},
     store: {},
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    metrics: { increment: vi.fn() },
   };
 }
 
@@ -41,16 +42,57 @@ describe('TaskSyncCoordinator', () => {
 
   it('calls runTaskSync and returns result', async () => {
     const { runTaskSync } = await import('./task-sync-engine.js');
-    const coord = new TaskSyncCoordinator(makeOpts());
+    const opts = makeOpts();
+    const coord = new TaskSyncCoordinator(opts);
     const result = await coord.sync();
 
     expect(runTaskSync).toHaveBeenCalledOnce();
     expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
   });
 
+  it('records success metrics and transition counters', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any).mockResolvedValueOnce({
+      threadsCreated: 2,
+      emojisUpdated: 3,
+      starterMessagesUpdated: 4,
+      threadsArchived: 5,
+      statusesUpdated: 6,
+      tagsUpdated: 7,
+      warnings: 1,
+      threadsReconciled: 8,
+      orphanThreadsFound: 9,
+      closesDeferred: 10,
+    });
+
+    const opts = makeOpts();
+    const coord = new TaskSyncCoordinator(opts);
+    await coord.sync();
+
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.started');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.succeeded');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.duration_ms.samples');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.threads_created', 2);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.thread_names_updated', 3);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.starter_messages_updated', 4);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.threads_archived', 5);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.statuses_updated', 6);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.tags_updated', 7);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.warnings', 1);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.threads_reconciled', 8);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.orphan_threads_found', 9);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.transition.closes_deferred', 10);
+    const durationCall = (opts.metrics.increment as any).mock.calls.find(
+      ([name]: [string]) => name === 'tasks.sync.duration_ms.total',
+    );
+    expect(durationCall).toBeTruthy();
+    expect(typeof durationCall[1]).toBe('number');
+  });
+
   it('invalidates cache after sync', async () => {
     const { taskThreadCache } = await import('./thread-cache.js');
-    const coord = new TaskSyncCoordinator(makeOpts());
+    const opts = makeOpts();
+    const coord = new TaskSyncCoordinator(opts);
     await coord.sync();
 
     expect(taskThreadCache.invalidate).toHaveBeenCalledOnce();
@@ -59,7 +101,8 @@ describe('TaskSyncCoordinator', () => {
   it('passes statusPoster through to runTaskSync', async () => {
     const { runTaskSync } = await import('./task-sync-engine.js');
     const statusPoster = { taskSyncComplete: vi.fn() } as any;
-    const coord = new TaskSyncCoordinator(makeOpts());
+    const opts = makeOpts();
+    const coord = new TaskSyncCoordinator(opts);
     await coord.sync(statusPoster);
 
     expect(runTaskSync).toHaveBeenCalledWith(
@@ -69,7 +112,8 @@ describe('TaskSyncCoordinator', () => {
 
   it('omits statusPoster when not provided', async () => {
     const { runTaskSync } = await import('./task-sync-engine.js');
-    const coord = new TaskSyncCoordinator(makeOpts());
+    const opts = makeOpts();
+    const coord = new TaskSyncCoordinator(opts);
     await coord.sync();
 
     expect(runTaskSync).toHaveBeenCalledWith(
@@ -88,7 +132,8 @@ describe('TaskSyncCoordinator', () => {
       return { threadsCreated: 1, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0 };
     });
 
-    const coord = new TaskSyncCoordinator(makeOpts());
+    const opts = makeOpts();
+    const coord = new TaskSyncCoordinator(opts);
 
     // Start first sync (will block)
     const first = coord.sync();
@@ -96,6 +141,7 @@ describe('TaskSyncCoordinator', () => {
     // Second call while first is running should return null
     const second = await coord.sync();
     expect(second).toBeNull();
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.coalesced');
 
     // Complete the first sync
     resolveFirst();
@@ -107,6 +153,7 @@ describe('TaskSyncCoordinator', () => {
 
     // runTaskSync should have been called at least twice (first + follow-up)
     expect((runTaskSync as any).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.scheduled');
   });
 
   it('propagates runTaskSync errors and remains usable', async () => {
@@ -115,10 +162,13 @@ describe('TaskSyncCoordinator', () => {
 
     (runTaskSync as any).mockRejectedValueOnce(new Error('Discord API down'));
 
-    const coord = new TaskSyncCoordinator(makeOpts());
+    const opts = makeOpts();
+    const coord = new TaskSyncCoordinator(opts);
 
     // First call should throw
     await expect(coord.sync()).rejects.toThrow('Discord API down');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failed');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.error_class.other');
 
     // Cache should not be invalidated on failure
     expect(taskThreadCache.invalidate).not.toHaveBeenCalled();
@@ -189,6 +239,19 @@ describe('TaskSyncCoordinator', () => {
       expect.objectContaining({ err: expect.any(Error) }),
       'tasks:coordinator follow-up sync failed',
     );
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.failed');
+  });
+
+  it('classifies sync failure metrics', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any).mockRejectedValueOnce(new Error('missing permissions on thread close'));
+
+    const opts = makeOpts();
+    const coord = new TaskSyncCoordinator(opts);
+
+    await expect(coord.sync()).rejects.toThrow('missing permissions on thread close');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failed');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.error_class.discord_permissions');
   });
 
   it('reloads tag map before runTaskSync when tagMapPath is set', async () => {
@@ -290,8 +353,10 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
       closesDeferred: 1,
     });
 
-    const coord = new TaskSyncCoordinator(makeOpts());
+    const opts = makeOpts();
+    const coord = new TaskSyncCoordinator(opts);
     await coord.sync();
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.scheduled');
 
     expect(runTaskSync).toHaveBeenCalledOnce();
 
@@ -321,5 +386,6 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
       expect.objectContaining({ err: expect.any(Error) }),
       'tasks:coordinator deferred-close retry failed',
     );
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.failed');
   });
 });
