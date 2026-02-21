@@ -113,6 +113,8 @@ export class TaskSyncCoordinator {
       metrics.increment('tasks.sync.failure_retry.triggered');
       this.sync().catch((err) => {
         metrics.increment('tasks.sync.failure_retry.failed');
+        const message = err instanceof Error ? err.message : String(err ?? '');
+        metrics.increment(`tasks.sync.failure_retry.error_class.${classifySyncError(message)}`);
         this.opts.log?.warn({ err }, 'tasks:coordinator failure retry sync failed');
       });
     }, delayMs);
@@ -149,6 +151,8 @@ export class TaskSyncCoordinator {
       metrics.increment('tasks.sync.retry.triggered');
       this.sync().catch((err) => {
         metrics.increment('tasks.sync.retry.failed');
+        const message = err instanceof Error ? err.message : String(err ?? '');
+        metrics.increment(`tasks.sync.retry.error_class.${classifySyncError(message)}`);
         this.opts.log?.warn({ err }, 'tasks:coordinator deferred-close retry failed');
       });
     }, delayMs);

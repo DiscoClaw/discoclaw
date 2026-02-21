@@ -454,6 +454,7 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
     );
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.triggered');
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.failed');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.error_class.other');
   });
 });
 
@@ -522,6 +523,7 @@ describe('TaskSyncCoordinator failure retry', () => {
 
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.triggered');
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.failed');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.error_class.other');
     expect(opts.log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
       'tasks:coordinator failure retry sync failed',
