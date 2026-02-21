@@ -1,5 +1,5 @@
 import type { TaskData } from './types.js';
-import { getThreadIdFromTask } from './discord-sync.js';
+import { getThreadIdFromTask } from './thread-helpers.js';
 
 export type TaskSyncNormalizedBuckets = {
   tasksMissingRef: TaskData[];

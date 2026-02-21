@@ -21,12 +21,15 @@ vi.mock('./discord-sync.js', () => ({
   updateTaskStarterMessage: vi.fn(async () => true),
   updateTaskThreadTags: vi.fn(async () => false),
   ensureUnarchived: vi.fn(async () => {}),
+  findExistingThreadForTask: vi.fn(async () => null),
+}));
+
+vi.mock('./thread-helpers.js', () => ({
   getThreadIdFromTask: vi.fn((task: any) => {
     const ref = task.externalRef ?? task.external_ref ?? '';
     if (ref.startsWith('discord:')) return ref.slice('discord:'.length);
     return null;
   }),
-  findExistingThreadForTask: vi.fn(async () => null),
 }));
 
 vi.mock('./tag-map.js', () => ({

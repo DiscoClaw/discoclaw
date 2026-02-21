@@ -27,12 +27,14 @@ import {
   updateTaskThreadName,
   updateTaskStarterMessage,
   updateTaskThreadTags,
-  getThreadIdFromTask,
   ensureUnarchived,
   findExistingThreadForTask,
-  extractShortIdFromThreadName,
-  shortTaskId,
 } from './discord-sync.js';
+import {
+  extractShortIdFromThreadName,
+  getThreadIdFromTask,
+  shortTaskId,
+} from './thread-helpers.js';
 
 type TaskSyncCoreOptions = {
   client: TaskDiscordClient;
