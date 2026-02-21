@@ -401,6 +401,32 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
     expect(runTaskSync).toHaveBeenCalledTimes(3);
   });
 
+  it('cancels pending deferred-close retry after a successful no-deferred sync', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any)
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+        closesDeferred: 1,
+      })
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+        closesDeferred: 0,
+      });
+
+    const opts = makeOpts();
+    opts.deferredRetryDelayMs = 1_000;
+    const coord = new TaskSyncCoordinator(opts);
+    await coord.sync();
+    await coord.sync();
+
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.canceled');
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(runTaskSync).toHaveBeenCalledTimes(2);
+  });
+
   it('deferred-close retry failure is logged', async () => {
     const { runTaskSync } = await import('./task-sync-engine.js');
     (runTaskSync as any)
@@ -500,5 +526,27 @@ describe('TaskSyncCoordinator failure retry', () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(3);
+  });
+
+  it('cancels pending failure retry after a successful sync before retry fires', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any)
+      .mockRejectedValueOnce(new Error('primary boom'))
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+      });
+
+    const opts = makeOpts();
+    opts.failureRetryDelayMs = 1_000;
+    const coord = new TaskSyncCoordinator(opts);
+
+    await expect(coord.sync()).rejects.toThrow('primary boom');
+    await coord.sync();
+
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.canceled');
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(runTaskSync).toHaveBeenCalledTimes(2);
   });
 });

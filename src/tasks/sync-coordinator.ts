@@ -87,6 +87,8 @@ export class TaskSyncCoordinator {
   private pendingStatusPoster: StatusPoster | undefined | false = false;
   private failureRetryPending = false;
   private deferredCloseRetryPending = false;
+  private failureRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private deferredCloseRetryTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly opts: TaskSyncCoordinatorOptions) {}
 
@@ -102,13 +104,22 @@ export class TaskSyncCoordinator {
     metrics.increment('tasks.sync.failure_retry.scheduled');
     this.opts.log?.info({ delayMs }, 'tasks:coordinator scheduling retry after sync failure');
 
-    setTimeout(() => {
+    this.failureRetryTimeout = setTimeout(() => {
       this.failureRetryPending = false;
+      this.failureRetryTimeout = null;
       this.sync().catch((err) => {
         metrics.increment('tasks.sync.failure_retry.failed');
         this.opts.log?.warn({ err }, 'tasks:coordinator failure retry sync failed');
       });
     }, delayMs);
+  }
+
+  private cancelFailureRetry(metrics: Pick<MetricsRegistry, 'increment'>): void {
+    if (!this.failureRetryPending || !this.failureRetryTimeout) return;
+    clearTimeout(this.failureRetryTimeout);
+    this.failureRetryTimeout = null;
+    this.failureRetryPending = false;
+    metrics.increment('tasks.sync.failure_retry.canceled');
   }
 
   private scheduleDeferredCloseRetry(
@@ -128,13 +139,22 @@ export class TaskSyncCoordinator {
       'tasks:coordinator scheduling retry for deferred closes',
     );
 
-    setTimeout(() => {
+    this.deferredCloseRetryTimeout = setTimeout(() => {
       this.deferredCloseRetryPending = false;
+      this.deferredCloseRetryTimeout = null;
       this.sync().catch((err) => {
         metrics.increment('tasks.sync.retry.failed');
         this.opts.log?.warn({ err }, 'tasks:coordinator deferred-close retry failed');
       });
     }, delayMs);
+  }
+
+  private cancelDeferredCloseRetry(metrics: Pick<MetricsRegistry, 'increment'>): void {
+    if (!this.deferredCloseRetryPending || !this.deferredCloseRetryTimeout) return;
+    clearTimeout(this.deferredCloseRetryTimeout);
+    this.deferredCloseRetryTimeout = null;
+    this.deferredCloseRetryPending = false;
+    metrics.increment('tasks.sync.retry.canceled');
   }
 
   async sync(statusPoster?: StatusPoster): Promise<TaskSyncResult | null> {
@@ -166,8 +186,11 @@ export class TaskSyncCoordinator {
       taskThreadCache.invalidate();
       this.opts.forumCountSync?.requestUpdate();
       recordSyncSuccessMetrics(metrics, result, Date.now() - startedAtMs);
+      this.cancelFailureRetry(metrics);
       if (result.closesDeferred && result.closesDeferred > 0) {
         this.scheduleDeferredCloseRetry(metrics, result.closesDeferred);
+      } else {
+        this.cancelDeferredCloseRetry(metrics);
       }
       return result;
     } catch (err) {

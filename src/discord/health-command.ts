@@ -66,7 +66,7 @@ function formatTaskSyncVerboseLines(counters: Record<string, number>): string[] 
     `Task sync transitions: created=${asCount(counters, 'tasks.sync.transition.threads_created')} archived=${asCount(counters, 'tasks.sync.transition.threads_archived')} reconciled=${asCount(counters, 'tasks.sync.transition.threads_reconciled')} orphans=${asCount(counters, 'tasks.sync.transition.orphan_threads_found')} deferred=${asCount(counters, 'tasks.sync.transition.closes_deferred')} warnings=${asCount(counters, 'tasks.sync.transition.warnings')}`,
   );
   lines.push(
-    `Task sync follow-up/retry: followUp=${asCount(counters, 'tasks.sync.follow_up.scheduled')}/${asCount(counters, 'tasks.sync.follow_up.failed')} retry=${asCount(counters, 'tasks.sync.retry.scheduled')}/${asCount(counters, 'tasks.sync.retry.failed')} (coalesced=${asCount(counters, 'tasks.sync.retry.coalesced')}) failureRetry=${asCount(counters, 'tasks.sync.failure_retry.scheduled')}/${asCount(counters, 'tasks.sync.failure_retry.failed')} (coalesced=${asCount(counters, 'tasks.sync.failure_retry.coalesced')})`,
+    `Task sync follow-up/retry: followUp=${asCount(counters, 'tasks.sync.follow_up.scheduled')}/${asCount(counters, 'tasks.sync.follow_up.failed')} retry=${asCount(counters, 'tasks.sync.retry.scheduled')}/${asCount(counters, 'tasks.sync.retry.failed')} (coalesced=${asCount(counters, 'tasks.sync.retry.coalesced')} canceled=${asCount(counters, 'tasks.sync.retry.canceled')}) failureRetry=${asCount(counters, 'tasks.sync.failure_retry.scheduled')}/${asCount(counters, 'tasks.sync.failure_retry.failed')} (coalesced=${asCount(counters, 'tasks.sync.failure_retry.coalesced')} canceled=${asCount(counters, 'tasks.sync.failure_retry.canceled')})`,
   );
   return lines;
 }
