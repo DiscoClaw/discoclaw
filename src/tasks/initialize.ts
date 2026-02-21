@@ -1,5 +1,5 @@
 import type { TaskContext } from './task-context.js';
-import type { LoggerLike } from '../logging/logger-like.js';
+import type { LoggerLike } from './logger-types.js';
 import type { TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
 import type { TaskMetrics } from './metrics-types.js';
 import type { TaskStore } from './store.js';
