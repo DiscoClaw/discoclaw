@@ -429,6 +429,23 @@ async function fetchPhase5ThreadSources(
   return { activeThreads, archivedThreads };
 }
 
+async function planPhase5ReconcileOperations(
+  ctx: TaskSyncApplyContext,
+  allTasks: TaskData[],
+): Promise<TaskReconcileOperation[] | null> {
+  const threadSources = await fetchPhase5ThreadSources(ctx);
+  if (!threadSources) return null;
+
+  return planTaskReconcileFromThreadSources({
+    tasks: allTasks,
+    archivedThreads: threadSources.archivedThreads.values(),
+    activeThreads: threadSources.activeThreads.values(),
+    shortIdOfTaskId: shortTaskId,
+    shortIdFromThreadName: extractShortIdFromThreadName,
+    threadIdFromTask: getThreadIdFromTask,
+  });
+}
+
 async function applyPhase5ReconcileOperations(
   ctx: TaskSyncApplyContext,
   operations: TaskReconcileOperation[],
@@ -449,22 +466,13 @@ async function applyPhase5ReconcileThreads(
     orphanThreadsFound: 0,
   };
 
-  const threadSources = await fetchPhase5ThreadSources(ctx);
-  if (!threadSources) {
+  const plannedReconcileOps = await planPhase5ReconcileOperations(ctx, allTasks);
+  if (!plannedReconcileOps) {
     return {
       threadsReconciled: reconcileState.threadsReconciled,
       orphanThreadsFound: reconcileState.orphanThreadsFound,
     };
   }
-
-  const plannedReconcileOps = planTaskReconcileFromThreadSources({
-    tasks: allTasks,
-    archivedThreads: threadSources.archivedThreads.values(),
-    activeThreads: threadSources.activeThreads.values(),
-    shortIdOfTaskId: shortTaskId,
-    shortIdFromThreadName: extractShortIdFromThreadName,
-    threadIdFromTask: getThreadIdFromTask,
-  });
 
   await applyPhase5ReconcileOperations(ctx, plannedReconcileOps, reconcileState);
 
