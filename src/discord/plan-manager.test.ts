@@ -235,10 +235,10 @@ describe('extractFilePaths', () => {
   });
 
   it('extracts bold-wrapped backtick paths in list items', () => {
-    const section = '- **`src/index.ts`** (lines ~622–691) — Reorder\n- **`src/beads/initialize.ts`** — Two options';
+    const section = '- **`src/index.ts`** (lines ~622–691) — Reorder\n- **`src/tasks/initialize.ts`** — Two options';
     expect(extractFilePaths(section)).toEqual([
       'src/index.ts',
-      'src/beads/initialize.ts',
+      'src/tasks/initialize.ts',
     ]);
   });
 

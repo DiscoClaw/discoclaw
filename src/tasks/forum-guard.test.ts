@@ -1,17 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TaskStore } from '../tasks/store.js';
-import { initBeadsForumGuard } from './forum-guard.js';
-import { initTasksForumGuard } from '../tasks/forum-guard.js';
+import { TaskStore } from './store.js';
+import { initTasksForumGuard } from './forum-guard.js';
 
-vi.mock('../tasks/thread-cache.js', () => ({
+vi.mock('./thread-cache.js', () => ({
   findTaskByThreadId: vi.fn(),
 }));
-vi.mock('../tasks/discord-sync.js', () => ({
+vi.mock('./discord-sync.js', () => ({
   buildAppliedTagsWithStatus: vi.fn(() => ['tag-closed']),
-  buildThreadName: vi.fn(() => '✅ [001] My Bead'),
+  buildThreadName: vi.fn(() => '✅ [001] My Task'),
 }));
 
-import { findTaskByThreadId } from '../tasks/thread-cache.js';
+import { findTaskByThreadId } from './thread-cache.js';
 
 function makeClient(botUserId = 'bot-user-1') {
   const listeners: Record<string, Function[]> = {};
@@ -27,8 +26,8 @@ function makeClient(botUserId = 'bot-user-1') {
 function makeThread(overrides?: Partial<any>) {
   return {
     id: 'thread-1',
-    name: 'Bead 1',
-    parentId: 'beads-forum-1',
+    name: 'Task 1',
+    parentId: 'tasks-forum-1',
     ownerId: 'bot-user-1',
     appliedTags: [],
     send: vi.fn().mockResolvedValue(undefined),
@@ -40,17 +39,13 @@ function makeThread(overrides?: Partial<any>) {
   };
 }
 
-const MOCK_BEAD = { id: 'ws-001', title: 'My Bead', status: 'closed' };
+const MOCK_TASK = { id: 'ws-001', title: 'My Task', status: 'closed' };
 
-describe('initBeadsForumGuard', () => {
-  it('keeps compatibility export aligned to canonical task guard', () => {
-    expect(initBeadsForumGuard).toBe(initTasksForumGuard);
-  });
-
+describe('initTasksForumGuard', () => {
   function setup(botUserId = 'bot-user-1') {
     const client = makeClient(botUserId);
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    initBeadsForumGuard({ client: client as any, forumId: 'beads-forum-1', log });
+    initTasksForumGuard({ client: client as any, forumId: 'tasks-forum-1', log });
     const listeners = client._listeners['threadCreate'] ?? [];
     expect(listeners.length).toBeGreaterThan(0);
     return { listener: listeners[0], log };
@@ -93,11 +88,11 @@ describe('initBeadsForumGuard', () => {
   });
 });
 
-describe('initBeadsForumGuard threadUpdate', () => {
+describe('initTasksForumGuard threadUpdate', () => {
   function setup(botUserId = 'bot-user-1') {
     const client = makeClient(botUserId);
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    initBeadsForumGuard({ client: client as any, forumId: 'beads-forum-1', log });
+    initTasksForumGuard({ client: client as any, forumId: 'tasks-forum-1', log });
     const listeners = client._listeners['threadUpdate'] ?? [];
     expect(listeners.length).toBeGreaterThan(0);
     return { listener: listeners[0], log };
@@ -133,13 +128,13 @@ describe('initBeadsForumGuard threadUpdate', () => {
   });
 });
 
-describe('initBeadsForumGuard bead-aware re-archive (threadCreate)', () => {
+describe('initTasksForumGuard task-aware re-archive (threadCreate)', () => {
   function setup() {
     const client = makeClient();
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    initBeadsForumGuard({
+    initTasksForumGuard({
       client: client as any,
-      forumId: 'beads-forum-1',
+      forumId: 'tasks-forum-1',
       log,
       store: new TaskStore(),
       tagMap: { closed: 'tag-closed' },
@@ -148,19 +143,19 @@ describe('initBeadsForumGuard bead-aware re-archive (threadCreate)', () => {
     return { listener, log };
   }
 
-  it('re-archives known bead thread without sending rejection message', async () => {
-    vi.mocked(findTaskByThreadId).mockReturnValue(MOCK_BEAD as any);
+  it('re-archives known task thread without sending rejection message', async () => {
+    vi.mocked(findTaskByThreadId).mockReturnValue(MOCK_TASK as any);
     const { listener } = setup();
     const thread = makeThread({ ownerId: 'some-user' });
     await listener(thread);
 
     expect(thread.send).not.toHaveBeenCalled();
     expect(thread.edit).toHaveBeenCalled();
-    expect(thread.setName).toHaveBeenCalledWith('✅ [001] My Bead');
+    expect(thread.setName).toHaveBeenCalledWith('✅ [001] My Task');
     expect(thread.setArchived).toHaveBeenCalledWith(true);
   });
 
-  it('falls through to rejection when bead lookup returns null', async () => {
+  it('falls through to rejection when task lookup returns null', async () => {
     vi.mocked(findTaskByThreadId).mockReturnValue(null);
     const { listener } = setup();
     const thread = makeThread({ ownerId: 'some-user' });
@@ -170,7 +165,7 @@ describe('initBeadsForumGuard bead-aware re-archive (threadCreate)', () => {
     expect(thread.setArchived).toHaveBeenCalledWith(true);
   });
 
-  it('falls through to rejection when bead lookup throws', async () => {
+  it('falls through to rejection when task lookup throws', async () => {
     vi.mocked(findTaskByThreadId).mockImplementation(() => { throw new Error('fs error'); });
     const { listener } = setup();
     const thread = makeThread({ ownerId: 'some-user' });
@@ -181,7 +176,7 @@ describe('initBeadsForumGuard bead-aware re-archive (threadCreate)', () => {
   });
 
   it('still archives even when edit throws', async () => {
-    vi.mocked(findTaskByThreadId).mockReturnValue(MOCK_BEAD as any);
+    vi.mocked(findTaskByThreadId).mockReturnValue(MOCK_TASK as any);
     const { listener } = setup();
     const thread = makeThread({ ownerId: 'some-user' });
     thread.edit.mockRejectedValue(new Error('edit failed'));
@@ -191,7 +186,7 @@ describe('initBeadsForumGuard bead-aware re-archive (threadCreate)', () => {
   });
 
   it('still archives even when setName throws', async () => {
-    vi.mocked(findTaskByThreadId).mockReturnValue(MOCK_BEAD as any);
+    vi.mocked(findTaskByThreadId).mockReturnValue(MOCK_TASK as any);
     const { listener } = setup();
     const thread = makeThread({ ownerId: 'some-user' });
     thread.setName.mockRejectedValue(new Error('setName failed'));
@@ -201,13 +196,13 @@ describe('initBeadsForumGuard bead-aware re-archive (threadCreate)', () => {
   });
 });
 
-describe('initBeadsForumGuard bead-aware re-archive (threadUpdate)', () => {
+describe('initTasksForumGuard task-aware re-archive (threadUpdate)', () => {
   function setup() {
     const client = makeClient();
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    initBeadsForumGuard({
+    initTasksForumGuard({
       client: client as any,
-      forumId: 'beads-forum-1',
+      forumId: 'tasks-forum-1',
       log,
       store: new TaskStore(),
       tagMap: { closed: 'tag-closed' },
@@ -216,8 +211,8 @@ describe('initBeadsForumGuard bead-aware re-archive (threadUpdate)', () => {
     return { listener, log };
   }
 
-  it('re-archives known bead thread on unarchive without rejection message', async () => {
-    vi.mocked(findTaskByThreadId).mockReturnValue(MOCK_BEAD as any);
+  it('re-archives known task thread on unarchive without rejection message', async () => {
+    vi.mocked(findTaskByThreadId).mockReturnValue(MOCK_TASK as any);
     const { listener } = setup();
     const oldThread = makeThread({ ownerId: 'some-user', archived: true });
     const newThread = makeThread({ ownerId: 'some-user', archived: false });
@@ -225,11 +220,11 @@ describe('initBeadsForumGuard bead-aware re-archive (threadUpdate)', () => {
 
     expect(newThread.send).not.toHaveBeenCalled();
     expect(newThread.edit).toHaveBeenCalled();
-    expect(newThread.setName).toHaveBeenCalledWith('✅ [001] My Bead');
+    expect(newThread.setName).toHaveBeenCalledWith('✅ [001] My Task');
     expect(newThread.setArchived).toHaveBeenCalledWith(true);
   });
 
-  it('falls through to rejection when bead not found on threadUpdate', async () => {
+  it('falls through to rejection when task not found on threadUpdate', async () => {
     vi.mocked(findTaskByThreadId).mockReturnValue(null);
     const { listener } = setup();
     const oldThread = makeThread({ ownerId: 'some-user', archived: true });

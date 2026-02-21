@@ -26,7 +26,7 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 - `src/tasks/thread-cache.ts`
 - `src/tasks/forum-guard.ts`
 
-Legacy compatibility shims remain in `src/beads/*` and re-export task modules.
+Legacy compatibility shims remain in `src/beads/*` for transitional entrypoints.
 
 Bridge compatibility currently retained:
 - `src/beads/*` import-path shims
@@ -39,7 +39,7 @@ Primary action trigger is `taskSync` via `src/discord/actions-tasks.ts`.
 
 ## Auto-Tagging
 
-Auto-tagging runs through `src/tasks/auto-tag.ts` (with a compatibility shim at `src/beads/auto-tag.ts`) and is controlled by the tasks env surface:
+Auto-tagging runs through `src/tasks/auto-tag.ts` and is controlled by the tasks env surface:
 
 - `DISCOCLAW_TASKS_AUTO_TAG`
 - `DISCOCLAW_TASKS_AUTO_TAG_MODEL`
