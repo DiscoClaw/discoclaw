@@ -2,7 +2,7 @@ import type { Client, Guild } from 'discord.js';
 import type { TagMap, TaskData, TaskSyncResult } from './types.js';
 import { hasInFlightForChannel } from '../discord/inflight-replies.js';
 export type { TaskSyncResult } from './types.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskStatusPoster } from './sync-context.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';

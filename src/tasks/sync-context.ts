@@ -1,4 +1,4 @@
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import type { TaskSyncResult, TagMap } from './types.js';

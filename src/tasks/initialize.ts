@@ -1,5 +1,5 @@
 import type { TaskContext } from './task-context.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { TaskStatusPoster } from './sync-context.js';
 import type { TaskStore } from './store.js';
