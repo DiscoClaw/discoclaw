@@ -29,6 +29,8 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/tasks/task-action-contract.ts` (task action request/type set)
 - `src/tasks/task-action-executor.ts` (task action dispatcher)
 - `src/tasks/task-action-mutations.ts` (task create/update/close handlers)
+- `src/tasks/task-action-thread-sync.ts` (task thread lifecycle helpers for mutation handlers)
+- `src/tasks/task-action-mutation-helpers.ts` (shared mutation helpers)
 - `src/tasks/task-action-read-ops.ts` (task show/list/sync/tag-map handlers)
 - `src/tasks/task-action-runner-types.ts` (shared task action runner contracts)
 - `src/tasks/task-action-prompt.ts` (task action prompt section)

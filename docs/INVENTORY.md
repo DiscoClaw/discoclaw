@@ -72,7 +72,7 @@ All actions are gated by category env flags (off by default except channels).
 | Guild/server | roles, members | `actions-guild.ts` | **done** |
 | Moderation | kick, ban, timeout, warn | `actions-moderation.ts` | **done** |
 | Polls | create, manage | `actions-poll.ts` | **done** |
-| Tasks (task tracking) | create, update, close, show, list, sync | `task-action-contract.ts`, `task-action-executor.ts`, `task-action-mutations.ts`, `task-action-read-ops.ts`, `task-action-runner-types.ts`, `task-action-prompt.ts` | **done** |
+| Tasks (task tracking) | create, update, close, show, list, sync | `task-action-contract.ts`, `task-action-executor.ts`, `task-action-mutations.ts`, `task-action-thread-sync.ts`, `task-action-mutation-helpers.ts`, `task-action-read-ops.ts`, `task-action-runner-types.ts`, `task-action-prompt.ts` | **done** |
 | Crons (scheduled tasks) | create, update, list, show, pause, resume, delete, trigger, sync, tagMapReload | `actions-crons.ts` | **done** |
 | Bot profile | setStatus, setActivity, setNickname | `actions-bot-profile.ts` | **done** |
 | Forge (autonomous plan drafting) | create, resume, status, cancel | `actions-forge.ts` | **done** |

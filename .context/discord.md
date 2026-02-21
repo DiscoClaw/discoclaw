@@ -124,7 +124,7 @@ Implementation: `src/cron/`
 DiscoClaw includes a task tracker backed by in-process `TaskStore` data and synced to Discord forum threads.
 
 - Data model/store: `src/tasks/types.ts`, `src/tasks/store.ts`
-- Discord task action path: `src/tasks/task-action-executor.ts` (dispatch), `src/tasks/task-action-mutations.ts` (create/update/close), `src/tasks/task-action-read-ops.ts` (show/list/sync/reload), `src/tasks/task-action-contract.ts` (request types)
+- Discord task action path: `src/tasks/task-action-executor.ts` (dispatch), `src/tasks/task-action-mutations.ts` (create/update/close), `src/tasks/task-action-thread-sync.ts` (thread lifecycle helpers), `src/tasks/task-action-mutation-helpers.ts` (shared mutation helpers), `src/tasks/task-action-read-ops.ts` (show/list/sync/reload), `src/tasks/task-action-contract.ts` (request types)
 - Canonical sync modules: `src/tasks/task-sync-engine.ts`, `src/tasks/task-sync-pipeline.ts`, `src/tasks/task-sync-apply-types.ts`, `src/tasks/task-sync-phase-apply.ts`, `src/tasks/task-sync-reconcile.ts`, `src/tasks/sync-coordinator.ts`, `src/tasks/sync-coordinator-metrics.ts`, `src/tasks/sync-coordinator-retries.ts`, `src/tasks/thread-helpers.ts`, `src/tasks/thread-ops.ts`, `src/tasks/tag-map.ts`
 - Runtime shim status: `src/beads/*` compatibility modules removed in hard-cut phase
 
