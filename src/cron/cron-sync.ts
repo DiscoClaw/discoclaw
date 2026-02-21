@@ -72,10 +72,10 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
   let orphansDetected = 0;
 
   // Get all active threads in the forum.
-  let threads: Map<string, any> = new Map();
+  let threads: ReadonlyMap<string, any> = new Map();
   try {
     const fetched = await forum.threads.fetchActive();
-    threads = fetched.threads as Map<string, any>;
+    threads = fetched.threads;
   } catch (err) {
     log?.warn({ err, forumId }, 'cron-sync: failed to fetch active threads; continuing with metadata/status phases only');
   }
