@@ -3,6 +3,7 @@
 Tasks are backed by an in-process `TaskStore` and synced to Discord forum threads.
 
 Ground-zero post-hard-cut refactor tracker: `docs/tasks-ground-zero-post-hard-cut-plan.md`
+Ground-zero task architecture refactor status: COMPLETE (FROZEN), verified on 2026-02-21.
 
 ## Data Model
 
