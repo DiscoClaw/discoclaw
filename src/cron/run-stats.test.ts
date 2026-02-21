@@ -85,6 +85,14 @@ describe('CronRunStats', () => {
     expect(rec!.cronId).toBe('cron-a');
   });
 
+  it('retrieves records by statusMessageId', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-b', 'thread-200', { statusMessageId: 'status-1' });
+    const rec = stats.getRecordByStatusMessageId('status-1');
+    expect(rec).toBeDefined();
+    expect(rec!.cronId).toBe('cron-b');
+  });
+
   it('returns undefined for unknown cronId', async () => {
     const stats = await loadRunStats(statsPath);
     expect(stats.getRecord('nonexistent')).toBeUndefined();
@@ -93,6 +101,11 @@ describe('CronRunStats', () => {
   it('returns undefined for unknown threadId', async () => {
     const stats = await loadRunStats(statsPath);
     expect(stats.getRecordByThreadId('nonexistent')).toBeUndefined();
+  });
+
+  it('returns undefined for unknown statusMessageId', async () => {
+    const stats = await loadRunStats(statsPath);
+    expect(stats.getRecordByStatusMessageId('missing')).toBeUndefined();
   });
 
   it('records successful runs', async () => {

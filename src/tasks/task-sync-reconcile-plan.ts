@@ -14,6 +14,21 @@ export function buildTasksByShortIdMap(
   return tasksByShortId;
 }
 
+export function buildTasksByThreadIdMap(
+  allTasks: TaskData[],
+  threadIdFromTask: (task: TaskData) => string | null,
+): Map<string, TaskData[]> {
+  const tasksByThreadId = new Map<string, TaskData[]>();
+  for (const task of allTasks) {
+    const threadId = threadIdFromTask(task);
+    if (!threadId) continue;
+    const existing = tasksByThreadId.get(threadId);
+    if (existing) existing.push(task);
+    else tasksByThreadId.set(threadId, [task]);
+  }
+  return tasksByThreadId;
+}
+
 export type TaskThreadSnapshot = {
   id: string;
   name: string;
@@ -72,6 +87,7 @@ export type TaskReconcileOperation = {
 export type TaskReconcilePlanOptions = {
   threads: TaskThreadSnapshot[];
   tasksByShortId: Map<string, TaskData[]>;
+  tasksByThreadId?: Map<string, TaskData[]>;
   shortIdFromThreadName: (threadName: string) => string | null;
   threadIdFromTask: (task: TaskData) => string | null;
 };
@@ -99,8 +115,49 @@ export type TaskReconcilePlanFromThreadSourcesOptions = {
  */
 export function planTaskReconcileOperations(opts: TaskReconcilePlanOptions): TaskReconcileOperation[] {
   const operations: TaskReconcileOperation[] = [];
+  const tasksByThreadId = opts.tasksByThreadId ?? new Map<string, TaskData[]>();
 
   for (const thread of opts.threads) {
+    const linkedTasks = tasksByThreadId.get(thread.id) ?? [];
+    if (linkedTasks.length > 1) {
+      operations.push({
+        action: 'collision',
+        key: `task-sync:phase5:collision:${thread.id}`,
+        thread,
+        shortId: opts.shortIdFromThreadName(thread.name) ?? '',
+        collisionCount: linkedTasks.length,
+      });
+      continue;
+    }
+
+    if (linkedTasks.length === 1) {
+      const task = linkedTasks[0]!;
+      const existingThreadId = opts.threadIdFromTask(task);
+      if (task.status === 'closed' && !thread.archived) {
+        operations.push({
+          action: 'archive_active_closed',
+          key: `task-sync:phase5:archive:${thread.id}`,
+          thread,
+          shortId: opts.shortIdFromThreadName(thread.name) ?? '',
+          task,
+          existingThreadId: existingThreadId ?? undefined,
+        });
+        continue;
+      }
+      if (task.status === 'closed' && thread.archived) {
+        operations.push({
+          action: 'reconcile_archived_closed',
+          key: `task-sync:phase5:reconcile:${thread.id}`,
+          thread,
+          shortId: opts.shortIdFromThreadName(thread.name) ?? '',
+          task,
+          existingThreadId: existingThreadId ?? undefined,
+        });
+      }
+      continue;
+    }
+
+    // Fallback for legacy threads missing task external_ref mapping.
     const shortId = opts.shortIdFromThreadName(thread.name);
     if (!shortId) continue;
 
@@ -175,9 +232,11 @@ export function planTaskReconcileFromSnapshots(
   opts: TaskReconcilePlanFromSnapshotOptions,
 ): TaskReconcileOperation[] {
   const tasksByShortId = buildTasksByShortIdMap(opts.tasks, opts.shortIdOfTaskId);
+  const tasksByThreadId = buildTasksByThreadIdMap(opts.tasks, opts.threadIdFromTask);
   return planTaskReconcileOperations({
     threads: opts.threads,
     tasksByShortId,
+    tasksByThreadId,
     shortIdFromThreadName: opts.shortIdFromThreadName,
     threadIdFromTask: opts.threadIdFromTask,
   });

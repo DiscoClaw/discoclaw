@@ -84,6 +84,8 @@ describe('parseModelsCommand', () => {
   it('returns null for unknown subcommands', () => {
     expect(parseModelsCommand('!models bogus')).toBeNull();
     expect(parseModelsCommand('!models set')).toBeNull();
+    expect(parseModelsCommand('!models show now')).toBeNull();
+    expect(parseModelsCommand('!models set chat sonnet extra')).toBeNull();
   });
 
   it('parses all valid roles', () => {

@@ -4,8 +4,7 @@ import path from 'node:path';
 import type { TaskStore } from '../tasks/store.js';
 import {
   decomposePlan,
-  serializePhases,
-  deserializePhases,
+  readPhasesFile,
   getNextPhase,
   updatePhaseStatus,
   checkStaleness,
@@ -13,6 +12,7 @@ import {
 } from './plan-manager.js';
 import type { PlanPhase, PlanPhases } from './plan-manager.js';
 import type { LoggerLike } from '../logging/logger-like.js';
+import { getLatestAuditVerdictFromSection, getSection, parsePlan } from './plan-parser.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,23 +80,18 @@ export function toSlug(description: string): string {
 // ---------------------------------------------------------------------------
 
 export function parsePlanFileHeader(content: string): PlanFileHeader | null {
-  const titleMatch = content.match(/^# Plan:\s*(.+)$/m);
-  const idMatch = content.match(/^\*\*ID:\*\*\s*(.+)$/m);
-  const taskMatch = content.match(/^\*\*Task:\*\*\s*(.+)$/m);
-  const statusMatch = content.match(/^\*\*Status:\*\*\s*(.+)$/m);
-  const projectMatch = content.match(/^\*\*Project:\*\*\s*(.+)$/m);
-  const createdMatch = content.match(/^\*\*Created:\*\*\s*(.+)$/m);
-
-  if (!idMatch) return null;
-  const taskId = taskMatch?.[1]?.trim() ?? '';
+  const parsed = parsePlan(content);
+  const planId = parsed.metadata.get('ID')?.trim() ?? '';
+  if (!planId) return null;
+  const taskId = parsed.metadata.get('Task')?.trim() ?? '';
 
   return {
-    planId: idMatch[1]!.trim(),
+    planId,
     taskId,
-    status: statusMatch?.[1]?.trim() ?? '',
-    title: titleMatch?.[1]?.trim() ?? '',
-    project: projectMatch?.[1]?.trim() ?? '',
-    created: createdMatch?.[1]?.trim() ?? '',
+    status: parsed.metadata.get('Status')?.trim() ?? '',
+    title: parsed.title.trim(),
+    project: parsed.metadata.get('Project')?.trim() ?? '',
+    created: parsed.metadata.get('Created')?.trim() ?? '',
   };
 }
 
@@ -272,14 +267,126 @@ _Filled in during/after implementation._
 export type HandlePlanCommandOpts = {
   workspaceCwd: string;
   taskStore: TaskStore;
+  plansDir?: string;
   maxContextFiles?: number;
 };
+
+export type CreatePlanOpts = {
+  description: string;
+  context?: string;
+  existingTaskId?: string;
+};
+
+export type CreatePlanResult = {
+  planId: string;
+  taskId: string;
+  filePath: string;
+  fileName: string;
+  description: string;
+  displayMessage: string;
+};
+
+function resolvePlansDir(opts: HandlePlanCommandOpts): string {
+  return opts.plansDir ?? path.join(opts.workspaceCwd, 'plans');
+}
+
+export async function createPlan(
+  createOpts: CreatePlanOpts,
+  opts: HandlePlanCommandOpts,
+): Promise<CreatePlanResult> {
+  const description = createOpts.description.trim();
+  if (!description) throw new Error('Usage: `!plan <description>`');
+
+  const plansDir = resolvePlansDir(opts);
+  await ensurePlansDir(plansDir);
+
+  const num = await getNextPlanNumber(plansDir);
+  const planId = `plan-${String(num).padStart(3, '0')}`;
+  const slug = toSlug(description);
+  const fileName = `${planId}-${slug}.md`;
+  const filePath = path.join(plansDir, fileName);
+  const date = new Date().toISOString().split('T')[0]!;
+  const trimmedContext = createOpts.context?.trim();
+
+  // Create backing task — or reuse existing one from task thread context.
+  let taskId: string;
+  const existingTaskId = createOpts.existingTaskId;
+  if (existingTaskId) {
+    taskId = existingTaskId;
+    // Ensure the reused task has the 'plan' label for label-based filtering.
+    try {
+      opts.taskStore.addLabel(taskId, 'plan');
+    } catch {
+      // best-effort — label addition failure shouldn't block plan creation.
+    }
+  } else {
+    try {
+      // Dedup: if an open task with a matching title already exists, reuse it.
+      const normalizedTitle = description.toLowerCase();
+      const existingTasks = opts.taskStore.list({ label: 'plan' });
+      const match = existingTasks.find(
+        (task) => task.status !== 'closed' && task.title.trim().toLowerCase() === normalizedTitle,
+      );
+
+      if (match) {
+        taskId = match.id;
+      } else {
+        const task = opts.taskStore.create(
+          {
+            title: description,
+            labels: ['plan'],
+            ...(trimmedContext ? { description: trimmedContext.slice(0, 1800) } : {}),
+          },
+        );
+        taskId = task.id;
+      }
+    } catch (err) {
+      throw new Error(`Failed to create backing task: ${String(err)}`);
+    }
+  }
+
+  // Load template or use fallback
+  let template: string;
+  const templatePath = path.join(plansDir, '.plan-template.md');
+  try {
+    template = await fs.readFile(templatePath, 'utf-8');
+  } catch {
+    template = FALLBACK_TEMPLATE;
+  }
+
+  // Fill template
+  const content = template
+    .replace(/\{\{TITLE\}\}/g, description)
+    .replace(/\{\{PLAN_ID\}\}/g, planId)
+    .replace(/\{\{TASK_ID\}\}/g, taskId)
+    .replace(/\{\{DATE\}\}/g, date)
+    .replace(/\{\{PROJECT\}\}/g, 'discoclaw')
+    // Set status to DRAFT (remove the options list)
+    .replace(
+      /\*\*Status:\*\*\s*DRAFT\s*\|[^\n]*/,
+      '**Status:** DRAFT',
+    );
+
+  // Append reply context below the template body (keeps slug/task/title clean).
+  const contextSection = trimmedContext ? `\n## Context\n\n${trimmedContext}\n` : '';
+  const finalContent = content + contextSection;
+
+  await fs.writeFile(filePath, finalContent, 'utf-8');
+
+  const displayMessage = [
+    `Plan created: **${planId}** (task: \`${taskId}\`)`,
+    `File: \`workspace/plans/${fileName}\``,
+    `Description: ${description}`,
+  ].join('\n');
+
+  return { planId, taskId, filePath, fileName, description, displayMessage };
+}
 
 export async function handlePlanCommand(
   cmd: PlanCommand,
   opts: HandlePlanCommandOpts,
 ): Promise<string> {
-  const plansDir = path.join(opts.workspaceCwd, 'plans');
+  const plansDir = resolvePlansDir(opts);
 
   try {
     if (cmd.action === 'help') {
@@ -299,88 +406,19 @@ export async function handlePlanCommand(
     }
 
     if (cmd.action === 'create') {
-      if (!cmd.args) return 'Usage: `!plan <description>`';
-
-      await ensurePlansDir(plansDir);
-
-      const num = await getNextPlanNumber(plansDir);
-      const planId = `plan-${String(num).padStart(3, '0')}`;
-      const slug = toSlug(cmd.args);
-      const fileName = `${planId}-${slug}.md`;
-      const filePath = path.join(plansDir, fileName);
-      const date = new Date().toISOString().split('T')[0]!;
-      const trimmedContext = cmd.context?.trim();
-
-      // Create backing task — or reuse existing one from task thread context.
-      let taskId: string;
-      const existingTaskId = cmd.existingTaskId;
-      if (existingTaskId) {
-        taskId = existingTaskId;
-        // Ensure the reused task has the 'plan' label for label-based filtering.
-        try {
-          opts.taskStore.addLabel(taskId, 'plan');
-        } catch {
-          // best-effort — label addition failure shouldn't block plan creation.
-        }
-      } else {
-        try {
-          // Dedup: if an open task with a matching title already exists, reuse it.
-          const normalizedTitle = cmd.args.trim().toLowerCase();
-          const existingTasks = opts.taskStore.list({ label: 'plan' });
-          const match = existingTasks.find(
-            (task) => task.status !== 'closed' && task.title.trim().toLowerCase() === normalizedTitle,
-          );
-
-          if (match) {
-            taskId = match.id;
-          } else {
-            const task = opts.taskStore.create(
-              {
-                title: cmd.args,
-                labels: ['plan'],
-                ...(trimmedContext ? { description: trimmedContext.slice(0, 1800) } : {}),
-              },
-            );
-            taskId = task.id;
-          }
-        } catch (err) {
-          return `Failed to create backing task: ${String(err)}`;
-        }
-      }
-
-      // Load template or use fallback
-      let template: string;
-      const templatePath = path.join(plansDir, '.plan-template.md');
       try {
-        template = await fs.readFile(templatePath, 'utf-8');
-      } catch {
-        template = FALLBACK_TEMPLATE;
-      }
-
-      // Fill template
-      const content = template
-        .replace(/\{\{TITLE\}\}/g, cmd.args)
-        .replace(/\{\{PLAN_ID\}\}/g, planId)
-        .replace(/\{\{TASK_ID\}\}/g, taskId)
-        .replace(/\{\{DATE\}\}/g, date)
-        .replace(/\{\{PROJECT\}\}/g, 'discoclaw')
-        // Set status to DRAFT (remove the options list)
-        .replace(
-          /\*\*Status:\*\*\s*DRAFT\s*\|[^\n]*/,
-          '**Status:** DRAFT',
+        const created = await createPlan(
+          {
+            description: cmd.args,
+            context: cmd.context,
+            existingTaskId: cmd.existingTaskId,
+          },
+          opts,
         );
-
-      // Append reply context below the template body (keeps slug/task/title clean).
-      const contextSection = trimmedContext ? `\n## Context\n\n${trimmedContext}\n` : '';
-      const finalContent = content + contextSection;
-
-      await fs.writeFile(filePath, finalContent, 'utf-8');
-
-      return [
-        `Plan created: **${planId}** (task: \`${taskId}\`)`,
-        `File: \`workspace/plans/${fileName}\``,
-        `Description: ${cmd.args}`,
-      ].join('\n');
+        return created.displayMessage;
+      } catch (err) {
+        return String(err instanceof Error ? err.message : err);
+      }
     }
 
     if (cmd.action === 'list') {
@@ -424,26 +462,12 @@ export async function handlePlanCommand(
       if (!found) return `Plan not found: ${cmd.args}`;
 
       const content = await fs.readFile(found.filePath, 'utf-8');
+      const parsedPlan = parsePlan(content);
 
-      // Extract objective section
-      const objMatch = content.match(/## Objective\s*\n([\s\S]*?)(?=\n## |\n---)/);
-      const objective = objMatch?.[1]?.trim() || '(no objective)';
+      const objective = getSection(parsedPlan, 'Objective') || '(no objective)';
 
-      // Extract latest audit verdict — scope to the Audit Log section to
-      // avoid false positives from **Verdict:** appearing in plan body prose.
-      const auditLogMatch = content.match(/## Audit Log\s*\n([\s\S]*?)(?=\n## [^#]|\n---\s*\n## |$)/);
-      // Strip fenced code blocks so **Verdict:** inside examples/snippets isn't matched.
-      const auditSection = (auditLogMatch?.[1] ?? '').replace(/```[\s\S]*?```/g, '');
-
-      // Current format: **Verdict:** <text> on the same line, anchored to line start
-      const boldVerdicts = [...auditSection.matchAll(/^\*\*Verdict:\*\*\s*(.+)/gm)];
-      // Legacy format (older plans): #### Verdict heading with text on next line(s)
-      const headingVerdicts = [...auditSection.matchAll(/#### Verdict\s*\n+([\s\S]*?)(?=\n###|\n---|\n$)/g)];
-
-      const allVerdicts = [...boldVerdicts, ...headingVerdicts];
-      const latestVerdict = allVerdicts.length > 0
-        ? allVerdicts.reduce((a, b) => (a.index! > b.index! ? a : b))[1]!.trim()
-        : '(no audit yet)';
+      const auditSection = getSection(parsedPlan, 'Audit Log');
+      const latestVerdict = getLatestAuditVerdictFromSection(auditSection) ?? '(no audit yet)';
 
       return [
         `**${found.header.planId}** — ${found.header.title}`,
@@ -528,9 +552,7 @@ export async function handlePlanCommand(
         phases = decomposePlan(planContent, found.header.planId, planRelPath, opts.maxContextFiles);
         writePhasesFile(phasesFilePath, phases);
       } else {
-        // Read existing phases
-        const content = fsSync.readFileSync(phasesFilePath, 'utf-8');
-        phases = deserializePhases(content);
+        phases = readPhasesFile(phasesFilePath);
       }
 
       // Format checklist
@@ -581,7 +603,7 @@ export async function handlePlanSkip(
   planId: string,
   opts: HandlePlanCommandOpts,
 ): Promise<string> {
-  const plansDir = path.join(opts.workspaceCwd, 'plans');
+  const plansDir = resolvePlansDir(opts);
   const found = await findPlanFile(plansDir, planId);
   if (!found) return `Plan not found: ${planId}`;
 
@@ -592,10 +614,9 @@ export async function handlePlanSkip(
     return `No phases file found for ${planId}. Run \`!plan phases ${planId}\` first.`;
   }
 
-  const content = fsSync.readFileSync(phasesFilePath, 'utf-8');
   let phases: PlanPhases;
   try {
-    phases = deserializePhases(content);
+    phases = readPhasesFile(phasesFilePath);
   } catch (err) {
     return `Failed to read phases file: ${String(err)}`;
   }
@@ -622,7 +643,7 @@ export async function preparePlanRun(
   planId: string,
   opts: HandlePlanCommandOpts,
 ): Promise<PreparePlanRunResult> {
-  const plansDir = path.join(opts.workspaceCwd, 'plans');
+  const plansDir = resolvePlansDir(opts);
   const found = await findPlanFile(plansDir, planId);
   if (!found) return { error: `Plan not found: ${planId}` };
 
@@ -645,8 +666,7 @@ export async function preparePlanRun(
   // Read and validate
   let phases: PlanPhases;
   try {
-    const phasesContent = fsSync.readFileSync(phasesFilePath, 'utf-8');
-    phases = deserializePhases(phasesContent);
+    phases = readPhasesFile(phasesFilePath);
   } catch (err) {
     return { error: `Failed to read phases file: ${String(err)}` };
   }
@@ -688,20 +708,11 @@ export async function closePlanIfComplete(
   let taskId: string | undefined;
   const releaseLock = await acquireLock();
   try {
-    // Read and deserialize phases
-    let phasesContent: string;
-    try {
-      phasesContent = await fs.readFile(phasesFilePath, 'utf-8');
-    } catch (err) {
-      log?.warn({ err, phasesFilePath }, 'closePlanIfComplete: failed to read phases file');
-      return { closed: false, reason: 'read_error' };
-    }
-
     let phases: PlanPhases;
     try {
-      phases = deserializePhases(phasesContent);
+      phases = readPhasesFile(phasesFilePath, { log });
     } catch (err) {
-      log?.warn({ err, phasesFilePath }, 'closePlanIfComplete: failed to deserialize phases');
+      log?.warn({ err, phasesFilePath }, 'closePlanIfComplete: failed to read phases state');
       return { closed: false, reason: 'read_error' };
     }
 

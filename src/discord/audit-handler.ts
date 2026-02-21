@@ -4,10 +4,12 @@ import {
   findPlanFile,
   parsePlanFileHeader,
 } from './plan-commands.js';
-import { appendAuditRound, buildAuditorPrompt, parseAuditVerdict } from './forge-commands.js';
-import type { AuditVerdict } from './forge-commands.js';
+import { appendAuditRound, buildAuditorPrompt } from './forge-commands.js';
+import { parseAuditVerdict } from './forge-audit-verdict.js';
+import type { AuditVerdict } from './forge-audit-verdict.js';
 import { collectRuntimeText } from './runtime-utils.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import { getSection, parsePlan } from './plan-parser.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,11 +45,12 @@ const REQUIRED_SECTIONS = ['Objective', 'Scope', 'Changes', 'Risks', 'Testing'];
 
 export function auditPlanStructure(content: string): AuditConcern[] {
   const concerns: AuditConcern[] = [];
+  const parsed = parsePlan(content);
 
   // Check for required sections
   for (const section of REQUIRED_SECTIONS) {
-    const pattern = new RegExp(`^## ${section}\\b`, 'm');
-    if (!pattern.test(content)) {
+    const hasSection = parsed.sections.has(section);
+    if (!hasSection) {
       concerns.push({
         title: `Missing section: ${section}`,
         description: `The plan is missing the required "## ${section}" section.`,
@@ -56,13 +59,8 @@ export function auditPlanStructure(content: string): AuditConcern[] {
       continue;
     }
 
+    const body = getSection(parsed, section).trim();
     // Check if the section has meaningful content (not just placeholder text)
-    // Note: no 'm' flag — we need $ to match end-of-string, not end-of-line,
-    // so the lazy [\s\S]*? doesn't stop at the first newline.
-    const sectionMatch = content.match(
-      new RegExp(`## ${section}\\s*\\n([\\s\\S]*?)(?=\\n## |\\n---\\n|$)`),
-    );
-    const body = sectionMatch?.[1]?.trim() ?? '';
     if (!body || /^_.*_$/.test(body) || body.startsWith('(') || body.length < 10) {
       concerns.push({
         title: `Empty or placeholder: ${section}`,
@@ -73,9 +71,8 @@ export function auditPlanStructure(content: string): AuditConcern[] {
   }
 
   // Check for a Changes section with file paths
-  const changesMatch = content.match(/## Changes\s*\n([\s\S]*?)(?=\n## |\n---\n|$)/);
-  if (changesMatch) {
-    const changesBody = changesMatch[1]!.trim();
+  const changesBody = getSection(parsed, 'Changes').trim();
+  if (changesBody) {
     const hasFilePaths = /`[^`]+\.[a-z]+`/.test(changesBody);
     if (changesBody.length > 10 && !hasFilePaths) {
       concerns.push({

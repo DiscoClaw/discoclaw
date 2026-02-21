@@ -7,8 +7,9 @@ import os from 'node:os';
 import { collectRuntimeText } from './runtime-utils.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
-import { parseAuditVerdict } from './forge-commands.js';
-import type { AuditVerdict } from './forge-commands.js';
+import { parseAuditVerdict } from './forge-audit-verdict.js';
+import type { AuditVerdict } from './forge-audit-verdict.js';
+import { extractFirstJsonValue } from './json-extract.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +41,10 @@ export type PlanPhases = {
   phases: PlanPhase[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type PlanPhasesStateV1 = PlanPhases & {
+  version: 1;
 };
 
 export type PlanRunEvent = {
@@ -96,6 +101,7 @@ function isRolloutPathMissingError(error?: string): boolean {
 
 const VALID_STATUSES: Set<string> = new Set(['pending', 'in-progress', 'done', 'failed', 'skipped']);
 const VALID_KINDS: Set<string> = new Set(['implement', 'read', 'audit']);
+const PHASES_STATE_VERSION = 1;
 
 /** Known workspace filenames that should be normalized to workspace/ prefix. */
 const KNOWN_WORKSPACE_FILES = new Set([
@@ -117,16 +123,54 @@ export function computePlanHash(planContent: string): string {
 }
 
 export function extractFilePaths(changesSection: string): string[] {
+  const deterministic = extractFilePathsDeterministic(changesSection);
+  const legacy = extractFilePathsLegacy(changesSection);
+  const merged: string[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of [...deterministic, ...legacy]) {
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    merged.push(candidate);
+  }
+
+  return merged;
+}
+
+function extractFilePathsDeterministic(changesSection: string): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  let inFence = false;
+  for (const line of changesSection.split('\n')) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+
+    const isHeading = /^#{1,6}\s+/.test(trimmed);
+    const isList = /^[-*+]\s+/.test(trimmed);
+    const isBoldEntry = /^\*{2,3}`[^`]+`\*{2,3}/.test(trimmed);
+    if (!isHeading && !isList && !isBoldEntry) continue;
+
+    for (const token of extractBacktickTokens(line)) {
+      if (!isLikelyFilePath(token)) continue;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      paths.push(token);
+    }
+  }
+  return paths;
+}
+
+function extractFilePathsLegacy(changesSection: string): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
 
-  // Match backtick-wrapped paths in list items: ` - `path/to/file` `
-  // and in headings: `#### `path/to/file` `
-  // Also handles bold/italic markdown around the backticks: ` - **`path`** `
   const regexes = [
     /^[\s]*-\s+(?:\*{1,3})?`([^`]+)`(?:\*{1,3})?/gm,
     /^#{1,6}\s+(?:\*{1,3})?`([^`]+)`(?:\*{1,3})?/gm,
-    // Standalone bolded entries like "**`src/foo.ts`**" used in the file-by-file breakdown.
     /^\s*\*{2,3}`([^`]+)`\*{2,3}(?:\s*[—–:-].*)?$/gm,
   ];
 
@@ -142,6 +186,21 @@ export function extractFilePaths(changesSection: string): string[] {
   }
 
   return paths;
+}
+
+function extractBacktickTokens(line: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < line.length) {
+    const start = line.indexOf('`', i);
+    if (start === -1) break;
+    const end = line.indexOf('`', start + 1);
+    if (end === -1) break;
+    const token = line.slice(start + 1, end).trim();
+    if (token) out.push(token);
+    i = end + 1;
+  }
+  return out;
 }
 
 function isLikelyFilePath(s: string): boolean {
@@ -287,12 +346,12 @@ export function decomposePlan(planContent: string, planId: string, planFile: str
   const hash = computePlanHash(planContent);
   const now = new Date().toISOString().split('T')[0]!;
 
-  // Extract Changes section
-  const changesMatch = planContent.match(/## Changes\s*\n([\s\S]*?)(?=\n## (?!#)|$)/);
-  const changesSection = changesMatch?.[1] ?? '';
-
-  // Extract file paths
-  const filePaths = extractFilePaths(changesSection);
+  const changesSection = extractTopLevelSection(planContent, 'Changes');
+  const manifestSection = extractTopLevelSection(planContent, 'Change Manifest');
+  const manifestPaths = parseChangeManifest(manifestSection);
+  const filePaths = manifestPaths.length > 0
+    ? manifestPaths
+    : extractFilePaths(changesSection);
 
   const phases: PlanPhase[] = [];
 
@@ -373,6 +432,61 @@ export function decomposePlan(planContent: string, planId: string, planFile: str
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function extractTopLevelSection(planContent: string, sectionName: string): string {
+  const lines = planContent.split('\n');
+  const target = sectionName.trim().toLowerCase();
+  let inFence = false;
+  let capturing = false;
+  const body: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith('```')) {
+      inFence = !inFence;
+    }
+
+    if (!inFence) {
+      const headingMatch = line.match(/^##\s+(.+)$/);
+      if (headingMatch) {
+        const heading = headingMatch[1]!.trim().toLowerCase();
+        if (!capturing && heading === target) {
+          capturing = true;
+          continue;
+        }
+        if (capturing) break;
+      }
+    }
+
+    if (capturing) body.push(line);
+  }
+
+  return body.join('\n').trim();
+}
+
+function parseChangeManifest(section: string): string[] {
+  if (!section) return [];
+  const json = extractFirstJsonValue(section, { arrayOnly: true });
+  if (!json) return [];
+
+  try {
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    const paths: string[] = [];
+    const seen = new Set<string>();
+    for (const value of parsed) {
+      if (typeof value !== 'string') continue;
+      const candidate = value.trim();
+      if (!isLikelyFilePath(candidate)) continue;
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      paths.push(candidate);
+    }
+    return paths;
+  } catch {
+    return [];
+  }
 }
 
 function normalizeWorkspacePath(fp: string): string {
@@ -1011,7 +1125,66 @@ function safeRealpathWalkUp(p: string): string {
 // ---------------------------------------------------------------------------
 
 export function writePhasesFile(filePath: string, phases: PlanPhases): void {
+  const jsonPath = phasesJsonPath(filePath);
+  const jsonContent = serializePhasesStateJson(phases);
+  writeTextAtomically(jsonPath, jsonContent);
+
   const content = serializePhases(phases);
+  writeTextAtomically(filePath, content);
+}
+
+export function readPhasesFile(
+  filePath: string,
+  opts?: { backfillJson?: boolean; log?: LoggerLike },
+): PlanPhases {
+  const jsonPath = phasesJsonPath(filePath);
+  let jsonErr: unknown;
+
+  if (fsSync.existsSync(jsonPath)) {
+    try {
+      const jsonContent = fsSync.readFileSync(jsonPath, 'utf-8');
+      return deserializePhasesStateJson(jsonContent);
+    } catch (err) {
+      jsonErr = err;
+      opts?.log?.warn(
+        { err, jsonPath },
+        'plan-manager: phases json invalid, falling back to markdown',
+      );
+    }
+  }
+
+  try {
+    const content = fsSync.readFileSync(filePath, 'utf-8');
+    const phases = deserializePhases(content);
+
+    if (opts?.backfillJson ?? true) {
+      try {
+        const jsonContent = serializePhasesStateJson(phases);
+        writeTextAtomically(jsonPath, jsonContent);
+      } catch (backfillErr) {
+        opts?.log?.warn(
+          { err: backfillErr, jsonPath },
+          'plan-manager: failed to backfill phases json from markdown',
+        );
+      }
+    }
+
+    return phases;
+  } catch (mdErr) {
+    if (!jsonErr) throw mdErr;
+    throw new Error(
+      `Failed to read phases state. JSON error: ${String(jsonErr)}. Markdown error: ${String(mdErr)}`,
+    );
+  }
+}
+
+function phasesJsonPath(markdownPath: string): string {
+  return markdownPath.endsWith('.md')
+    ? markdownPath.slice(0, -'.md'.length) + '.json'
+    : `${markdownPath}.json`;
+}
+
+function writeTextAtomically(filePath: string, content: string): void {
   const tmpPath = filePath + '.tmp';
   fsSync.writeFileSync(tmpPath, content, 'utf-8');
   try {
@@ -1020,6 +1193,106 @@ export function writePhasesFile(filePath: string, phases: PlanPhases): void {
     try { fsSync.unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
     throw err;
   }
+}
+
+function serializePhasesStateJson(phases: PlanPhases): string {
+  const state: PlanPhasesStateV1 = {
+    version: PHASES_STATE_VERSION,
+    ...phases,
+  };
+  return JSON.stringify(state, null, 2) + '\n';
+}
+
+function asString(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`Malformed phases json: ${field} must be a string`);
+  }
+  return value;
+}
+
+function asStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+    throw new Error(`Malformed phases json: ${field} must be string[]`);
+  }
+  return value;
+}
+
+function asFailureHashes(value: unknown, field: string): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Malformed phases json: ${field} must be Record<string,string>`);
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v !== 'string') {
+      throw new Error(`Malformed phases json: ${field}.${k} must be a string`);
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+function deserializePhasesStateJson(raw: string): PlanPhases {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('Malformed phases json: invalid JSON');
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Malformed phases json: expected object');
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (obj.version !== PHASES_STATE_VERSION) {
+    throw new Error(`Malformed phases json: unsupported version '${String(obj.version)}'`);
+  }
+
+  const phasesRaw = obj.phases;
+  if (!Array.isArray(phasesRaw)) {
+    throw new Error('Malformed phases json: phases must be an array');
+  }
+
+  const phases: PlanPhase[] = phasesRaw.map((phaseRaw, idx) => {
+    if (!phaseRaw || typeof phaseRaw !== 'object' || Array.isArray(phaseRaw)) {
+      throw new Error(`Malformed phases json: phases[${idx}] must be an object`);
+    }
+    const p = phaseRaw as Record<string, unknown>;
+    const kind = asString(p.kind, `phases[${idx}].kind`);
+    const status = asString(p.status, `phases[${idx}].status`);
+    if (!VALID_KINDS.has(kind)) throw new Error(`Unknown phase kind: '${kind}' in phases[${idx}]`);
+    if (!VALID_STATUSES.has(status)) throw new Error(`Unknown phase status: '${status}' in phases[${idx}]`);
+
+    const phase: PlanPhase = {
+      id: asString(p.id, `phases[${idx}].id`),
+      title: asString(p.title, `phases[${idx}].title`),
+      kind: kind as PhaseKind,
+      description: asString(p.description, `phases[${idx}].description`),
+      status: status as PhaseStatus,
+      dependsOn: asStringArray(p.dependsOn, `phases[${idx}].dependsOn`),
+      contextFiles: asStringArray(p.contextFiles, `phases[${idx}].contextFiles`),
+    };
+
+    if (typeof p.changeSpec === 'string') phase.changeSpec = p.changeSpec;
+    if (typeof p.output === 'string') phase.output = p.output;
+    if (typeof p.error === 'string') phase.error = p.error;
+    if (typeof p.gitCommit === 'string') phase.gitCommit = p.gitCommit;
+    if (p.modifiedFiles !== undefined) {
+      phase.modifiedFiles = asStringArray(p.modifiedFiles, `phases[${idx}].modifiedFiles`);
+    }
+    if (p.failureHashes !== undefined) {
+      phase.failureHashes = asFailureHashes(p.failureHashes, `phases[${idx}].failureHashes`);
+    }
+    return phase;
+  });
+
+  return {
+    planId: asString(obj.planId, 'planId'),
+    planFile: asString(obj.planFile, 'planFile'),
+    planContentHash: asString(obj.planContentHash, 'planContentHash'),
+    phases,
+    createdAt: asString(obj.createdAt, 'createdAt'),
+    updatedAt: asString(obj.updatedAt, 'updatedAt'),
+  };
 }
 
 export async function executePhase(
@@ -1134,8 +1407,7 @@ export async function runNextPhase(
   // 1. Read and deserialize phases file
   let allPhases: PlanPhases;
   try {
-    const content = fsSync.readFileSync(phasesFilePath, 'utf-8');
-    allPhases = deserializePhases(content);
+    allPhases = readPhasesFile(phasesFilePath, { backfillJson: true, log: opts.log });
   } catch (err) {
     return { result: 'corrupt', message: `Failed to read phases file: ${String(err)}` };
   }

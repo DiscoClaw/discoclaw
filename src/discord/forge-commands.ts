@@ -1,12 +1,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { handlePlanCommand, parsePlanFileHeader, resolvePlanHeaderTaskId } from './plan-commands.js';
+import { createPlan, parsePlanFileHeader, resolvePlanHeaderTaskId } from './plan-commands.js';
 import type { TaskStore } from '../tasks/store.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { runPipeline } from '../pipeline/engine.js';
 import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import { parseAuditVerdict } from './forge-audit-verdict.js';
+import type { AuditVerdict } from './forge-audit-verdict.js';
+import { getSection, parsePlan } from './plan-parser.js';
+export { parseAuditVerdict };
+export type { AuditVerdict };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,86 +83,6 @@ export function parseForgeCommand(content: string): ForgeCommand | null {
   }
 
   return { action: 'create', args: rest };
-}
-
-// ---------------------------------------------------------------------------
-// Audit verdict parsing
-// ---------------------------------------------------------------------------
-
-export type AuditVerdict = {
-  maxSeverity: 'blocking' | 'medium' | 'minor' | 'suggestion' | 'none';
-  shouldLoop: boolean;
-};
-
-export function parseAuditVerdict(auditText: string): AuditVerdict {
-  if (!auditText || !auditText.trim()) {
-    return { maxSeverity: 'none', shouldLoop: false };
-  }
-
-  const lower = auditText.toLowerCase();
-
-  // --- Severity detection ---
-  // Primary: "Severity: blocking" or "Severity: **high**" (structured format we ask for)
-  // Secondary: table cells like "| **blocking** |" or "| medium |".
-  // Tertiary: parenthesized severity like "Concern 1 (high)" or "(medium)".
-  // We intentionally avoid matching free-form bold words in prose to prevent
-  // false positives like "the impact is **high**" in a description paragraph.
-  const severityLabel = /\bseverity\b[:\s]*\**\s*(blocking|high|medium|minor|low|suggestion)\b/gi;
-  const tableCellSeverity = /\|\s*\**\s*(blocking|high|medium|minor|low|suggestion)\s*\**\s*\|/gi;
-  const bareSeverity = /\((blocking|high|medium|minor|low|suggestion)\)/gi;
-
-  // Collect all severity mentions from all patterns
-  const found = new Set<string>();
-  for (const re of [severityLabel, tableCellSeverity, bareSeverity]) {
-    let m;
-    while ((m = re.exec(auditText)) !== null) {
-      found.add(m[1]!.toLowerCase());
-    }
-  }
-
-  // Normalize backward-compat aliases: high -> blocking, low -> minor
-  if (found.has('high')) {
-    found.delete('high');
-    found.add('blocking');
-  }
-  if (found.has('low')) {
-    found.delete('low');
-    found.add('minor');
-  }
-
-  // Determine max severity from markers (blocking > medium > minor > suggestion)
-  const markerSeverity: AuditVerdict['maxSeverity'] = found.has('blocking')
-    ? 'blocking'
-    : found.has('medium')
-      ? 'medium'
-      : found.has('minor')
-        ? 'minor'
-        : found.has('suggestion')
-          ? 'suggestion'
-          : 'none';
-
-  // Determine verdict from text
-  const needsRevision = lower.includes('needs revision');
-  const readyToApprove = lower.includes('ready to approve');
-
-  // Severity markers win over verdict text when they disagree.
-  // A "Ready to approve" verdict with blocking-severity findings is contradictory —
-  // trust the severity markers.
-  if (markerSeverity !== 'none') {
-    const shouldLoop = markerSeverity === 'blocking';
-    return { maxSeverity: markerSeverity, shouldLoop };
-  }
-
-  // No severity markers found — fall back to verdict text
-  if (needsRevision) {
-    return { maxSeverity: 'blocking', shouldLoop: true };
-  }
-  if (readyToApprove) {
-    return { maxSeverity: 'minor', shouldLoop: false };
-  }
-
-  // Malformed output — stop and let the human review
-  return { maxSeverity: 'none', shouldLoop: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +218,17 @@ export function buildAuditorPrompt(
   instructions.push(
     '## Output Format',
     '',
+    'Start with a fenced JSON verdict block (this is required):',
+    '```json',
+    '{"maxSeverity":"blocking|medium|minor|suggestion|none","shouldLoop":true|false,"summary":"brief summary","concerns":[{"title":"...","severity":"blocking|medium|minor|suggestion"}]}',
+    '```',
+    'Rules:',
+    '- `maxSeverity` must reflect the highest severity in the concerns list.',
+    '- `shouldLoop` must be true only when `maxSeverity` is `blocking`.',
+    '- Keep `summary` concise and factual.',
+    '',
+    'After the JSON block, include human-readable notes.',
+    '',
     'For each concern, use this EXACT format:',
     '',
     '**Concern N: [title]**',
@@ -314,7 +250,7 @@ export function buildAuditorPrompt(
     '- "Ready to approve." — if no blocking concerns (medium/minor/suggestion are fine)',
     '',
     'Be thorough but fair. Don\'t nitpick style — focus on correctness, safety, and completeness.',
-    'Output only the audit notes and verdict. No preamble.',
+    'Output only the JSON block plus audit notes and verdict. No preamble.',
   );
 
   return instructions.join('\n');
@@ -377,25 +313,24 @@ export function buildRevisionPrompt(
 
 export function buildPlanSummary(planContent: string): string {
   const header = parsePlanFileHeader(planContent);
+  const parsedPlan = parsePlan(planContent);
 
-  // Extract objective (match content between ## Objective and next ## heading)
-  const objMatch = planContent.match(/## Objective\n([\s\S]*?)(?=\n## )/);
-  const objective = objMatch?.[1]?.trim() || '(no objective)';
+  const objective = getSection(parsedPlan, 'Objective') || '(no objective)';
 
   // Extract scope (just the "In:" section if present, otherwise the whole scope block)
-  const scopeMatch = planContent.match(/## Scope\s*\n([\s\S]*?)(?=\n## )/);
+  const scopeBlock = getSection(parsedPlan, 'Scope');
   let scope = '';
-  if (scopeMatch) {
-    const scopeText = scopeMatch[1]!.trim();
+  if (scopeBlock) {
+    const scopeText = scopeBlock.trim();
     const inMatch = scopeText.match(/\*\*In:\*\*\s*\n([\s\S]*?)(?=\n\*\*Out:\*\*|$)/);
     scope = inMatch?.[1]?.trim() || scopeText;
   }
 
   // Extract changed files (look for file paths in the Changes section)
-  const changesMatch = planContent.match(/## Changes\s*\n([\s\S]*?)(?=\n## )/);
+  const changesBlock = getSection(parsedPlan, 'Changes');
   const files: string[] = [];
-  if (changesMatch) {
-    const fileMatches = changesMatch[1]!.matchAll(/####\s+`([^`]+)`/g);
+  if (changesBlock) {
+    const fileMatches = changesBlock.matchAll(/####\s+`([^`]+)`/g);
     for (const m of fileMatches) {
       files.push(m[1]!);
     }
@@ -536,31 +471,25 @@ export class ForgeOrchestrator {
     let filePath = '';
 
     try {
-      // 1. Create the plan file via handlePlanCommand
+      // 1. Create the plan file with a typed response.
       // Pass context separately so task title/slug stay clean (context goes in plan body).
-      const existingTaskId = this.opts.existingTaskId;
-      const createResult = await handlePlanCommand(
-        { action: 'create', args: description, context, existingTaskId },
-        { workspaceCwd: this.opts.workspaceCwd, taskStore: this.opts.taskStore },
+      const created = await createPlan(
+        {
+          description,
+          context,
+          existingTaskId: this.opts.existingTaskId,
+        },
+        {
+          workspaceCwd: this.opts.workspaceCwd,
+          taskStore: this.opts.taskStore,
+          plansDir: this.opts.plansDir,
+        },
       );
-
-      // Extract plan ID from the response
-      const idMatch = createResult.match(/\*\*(plan-\d+)\*\*/);
-      planId = idMatch?.[1] ?? '';
-
-      if (!planId) {
-        throw new Error(`Failed to create plan: ${createResult}`);
-      }
+      planId = created.planId;
+      filePath = created.filePath;
       this.currentPlanId = planId;
 
-      // Find the plan file
       const plansDir = this.opts.plansDir;
-      const entries = await fs.readdir(plansDir);
-      const planFile = entries.find((e) => e.startsWith(planId));
-      if (!planFile) {
-        throw new Error(`Plan file not found for ${planId}`);
-      }
-      filePath = path.join(plansDir, planFile);
 
       // Load the template for the drafter prompt
       let templateContent: string;

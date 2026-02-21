@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   parsePlanCommand,
   handlePlanCommand,
+  createPlan,
   parsePlanFileHeader,
   toSlug,
   handlePlanSkip,
@@ -292,6 +293,23 @@ describe('handlePlanCommand', () => {
     expect(content).toContain('**ID:** plan-001');
     expect(content).toContain(`**Task:** ${beadId}`);
     expect(content).toContain('**Status:** DRAFT');
+  });
+
+  it('createPlan — returns typed metadata for forge callers', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = makeStore();
+    const opts = baseOpts({ workspaceCwd: tmpDir, taskStore: store });
+
+    const created = await createPlan(
+      { description: 'Create typed result plan', context: 'thread context' },
+      opts,
+    );
+
+    expect(created.planId).toBe('plan-001');
+    expect(created.fileName).toContain('create-typed-result-plan');
+    expect(created.filePath).toContain(path.join(tmpDir, 'plans', created.fileName));
+    expect(created.taskId).toMatch(/^ws-/);
+    expect(created.displayMessage).toContain('Plan created: **plan-001**');
   });
 
   it('create — increments plan number based on existing files', async () => {
@@ -1413,9 +1431,14 @@ describe('handlePlanSkip', () => {
 
     // Manually edit phases file to mark phase-1 as failed
     const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const phasesJsonPath = path.join(plansDir, 'plan-001-phases.json');
     let phasesContent = await fs.readFile(phasesPath, 'utf-8');
     phasesContent = phasesContent.replace('**Status:** pending', '**Status:** failed');
     await fs.writeFile(phasesPath, phasesContent);
+    const phasesJson = JSON.parse(await fs.readFile(phasesJsonPath, 'utf-8'));
+    const firstPending = phasesJson.phases.find((p: any) => p.status === 'pending');
+    if (firstPending) firstPending.status = 'failed';
+    await fs.writeFile(phasesJsonPath, JSON.stringify(phasesJson, null, 2) + '\n', 'utf-8');
 
     const result = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
     expect(result).toContain('Skipped');
@@ -1644,9 +1667,15 @@ describe('preparePlanRun', () => {
     // Generate phases then mark them all done
     await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
     const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const phasesJsonPath = path.join(plansDir, 'plan-001-phases.json');
     let content = await fs.readFile(phasesPath, 'utf-8');
     content = content.replace(/\*\*Status:\*\* pending/g, '**Status:** done');
     await fs.writeFile(phasesPath, content);
+    const phasesJson = JSON.parse(await fs.readFile(phasesJsonPath, 'utf-8'));
+    for (const phase of phasesJson.phases) {
+      phase.status = 'done';
+    }
+    await fs.writeFile(phasesJsonPath, JSON.stringify(phasesJson, null, 2) + '\n', 'utf-8');
 
     const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
     expect('error' in result).toBe(true);

@@ -156,6 +156,16 @@ describe('auditPlanStructure', () => {
     expect(concerns.some((c) => c.title === 'Empty or placeholder: Risks')).toBe(true);
   });
 
+  it('treats present-but-empty required sections as placeholder, not missing', () => {
+    const content = MINIMAL_PLAN.replace(
+      '## Risks\n\n- Widget might conflict with existing gizmo module.',
+      '## Risks\n',
+    );
+    const concerns = auditPlanStructure(content);
+    expect(concerns.some((c) => c.title === 'Empty or placeholder: Risks')).toBe(true);
+    expect(concerns.some((c) => c.title === 'Missing section: Risks')).toBe(false);
+  });
+
   it('flags Changes section without file paths', () => {
     const content = MINIMAL_PLAN.replace(
       /## Changes[\s\S]*?## Risks/m,

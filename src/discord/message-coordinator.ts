@@ -33,7 +33,7 @@ import type { PlanAuditResult } from './audit-handler.js';
 import type { PreparePlanRunResult } from './plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './forge-commands.js';
 import type { ForgeOrchestratorOpts, ForgeResult } from './forge-commands.js';
-import { runNextPhase, resolveProjectCwd, deserializePhases, buildPostRunSummary } from './plan-manager.js';
+import { runNextPhase, resolveProjectCwd, readPhasesFile, buildPostRunSummary } from './plan-manager.js';
 import type { PlanRunEvent } from './plan-manager.js';
 import {
   acquireWriterLock as registryAcquireWriterLock,
@@ -1237,8 +1237,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                     if (!isRunOne && (phasesRun > 0 || stopReason === null)) {
                       try {
-                        const phasesContent = await fs.readFile(phasesFilePath, 'utf-8');
-                        const phases = deserializePhases(phasesContent);
+                        const phases = readPhasesFile(phasesFilePath, { log: params.log });
                         const budget = 2000 - summaryMsg.length - 50;
                         const postRunSummary = buildPostRunSummary(phases, budget);
                         if (postRunSummary) {

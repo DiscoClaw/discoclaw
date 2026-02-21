@@ -102,11 +102,18 @@ async function recoverCronId(
     if (record) return record.cronId;
   }
 
-  // 2. Look for bot status messages with [cronId:...] token.
+  // 2. Look for bot status messages and recover by metadata index first.
+  // Keep content-token parse as legacy fallback.
   try {
     const messages = await thread.messages.fetch({ limit: 20 });
     for (const msg of messages.values()) {
       if (!msg.author.bot) continue;
+      if (statsStore) {
+        const byStatusMessage = statsStore.getRecordByStatusMessageId(msg.id);
+        if (byStatusMessage && byStatusMessage.threadId === thread.id) {
+          return byStatusMessage.cronId;
+        }
+      }
       const cronId = parseCronIdFromContent(msg.content);
       if (cronId) return cronId;
     }

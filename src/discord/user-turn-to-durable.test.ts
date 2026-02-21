@@ -72,6 +72,18 @@ describe('parseExtractionResult', () => {
     const items = parseExtractionResult(raw);
     expect(items).toEqual([{ kind: 'fact', text: 'ok' }]);
   });
+
+  it('skips non-array json values and finds the first valid array', () => {
+    const raw = '{"note":"not an array"}\n[{"kind":"fact","text":"kept"}]';
+    const items = parseExtractionResult(raw);
+    expect(items).toEqual([{ kind: 'fact', text: 'kept' }]);
+  });
+
+  it('parses array from json fence with surrounding prose', () => {
+    const raw = 'Result below:\n```json\n[{"kind":"workflow","text":"Use squash merges"}]\n```\nThanks!';
+    const items = parseExtractionResult(raw);
+    expect(items).toEqual([{ kind: 'workflow', text: 'Use squash merges' }]);
+  });
 });
 
 describe('EXTRACTION_PROMPT', () => {
