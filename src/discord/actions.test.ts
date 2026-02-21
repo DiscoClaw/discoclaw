@@ -186,6 +186,26 @@ describe('parseDiscordActions', () => {
     const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, tasks: true });
     expect(actions).toEqual([{ type: 'taskList' }]);
   });
+
+  it('rewrites planClose to taskClose when plan actions are disabled and tasks are enabled', () => {
+    const input = '<discord-action>{"type":"planClose","planId":"dev-uqy"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, { ...ALL_FLAGS, tasks: true, plan: false });
+    expect(actions).toEqual([{ type: 'taskClose', taskId: 'dev-uqy' }]);
+    expect(strippedUnrecognizedTypes).toEqual([]);
+  });
+
+  it('does not rewrite planClose when planId looks like a plan identifier', () => {
+    const input = '<discord-action>{"type":"planClose","planId":"plan-042"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, { ...ALL_FLAGS, tasks: true, plan: false });
+    expect(actions).toEqual([]);
+    expect(strippedUnrecognizedTypes).toEqual(['planClose']);
+  });
+
+  it('does not rewrite planClose when plan actions are enabled', () => {
+    const input = '<discord-action>{"type":"planClose","planId":"dev-uqy"}</discord-action>';
+    const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, tasks: true, plan: true });
+    expect(actions).toEqual([{ type: 'planClose', planId: 'dev-uqy' }]);
+  });
 });
 
 // ---------------------------------------------------------------------------

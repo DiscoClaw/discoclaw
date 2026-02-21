@@ -118,6 +118,23 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   return types;
 }
 
+function rewriteLegacyPlanCloseToTaskClose(
+  parsed: { type?: unknown; planId?: unknown },
+  flags: ActionCategoryFlags,
+): TaskActionRequest | null {
+  if (parsed.type !== 'planClose') return null;
+  if (flags.plan || !flags.tasks) return null;
+  if (typeof parsed.planId !== 'string') return null;
+
+  const id = parsed.planId.trim();
+  if (!id) return null;
+
+  // Keep true plan IDs untouched; only recover task-like IDs.
+  if (/^plan-\d+$/i.test(id)) return null;
+
+  return { type: 'taskClose', taskId: id };
+}
+
 // ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
@@ -157,6 +174,7 @@ function extractJsonObject(text: string, start: number): string | null {
  */
 function stripMalformedActions(
   text: string,
+  flags: ActionCategoryFlags,
   validTypes: Set<string>,
   actions: DiscordActionRequest[],
   strippedUnrecognizedTypes: string[],
@@ -197,7 +215,10 @@ function stripMalformedActions(
     // Try to parse and collect the action.
     try {
       const parsed = JSON.parse(jsonStr);
-      if (parsed && typeof parsed.type === 'string') {
+      const rewritten = rewriteLegacyPlanCloseToTaskClose(parsed, flags);
+      if (rewritten) {
+        actions.push(rewritten);
+      } else if (parsed && typeof parsed.type === 'string') {
         if (validTypes.has(parsed.type)) {
           actions.push(parsed as DiscordActionRequest);
         } else {
@@ -229,7 +250,10 @@ export function parseDiscordActions(
   let cleaned = text.replace(ACTION_RE, (_match, json: string) => {
     try {
       const parsed = JSON.parse(json.trim());
-      if (parsed && typeof parsed.type === 'string') {
+      const rewritten = rewriteLegacyPlanCloseToTaskClose(parsed, flags);
+      if (rewritten) {
+        actions.push(rewritten);
+      } else if (parsed && typeof parsed.type === 'string') {
         if (validTypes.has(parsed.type)) {
           actions.push(parsed as DiscordActionRequest);
         } else {
@@ -243,7 +267,7 @@ export function parseDiscordActions(
   });
 
   // Second pass: malformed blocks (wrong closing tag or no closing tag).
-  cleaned = stripMalformedActions(cleaned, validTypes, actions, strippedUnrecognizedTypes);
+  cleaned = stripMalformedActions(cleaned, flags, validTypes, actions, strippedUnrecognizedTypes);
 
   const cleanText = cleaned.replace(/\n{3,}/g, '\n\n').trim();
 
