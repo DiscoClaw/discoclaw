@@ -93,7 +93,10 @@ export class TaskSyncCoordinator {
   constructor(private readonly opts: TaskSyncCoordinatorOptions) {}
 
   private scheduleFailureRetry(metrics: Pick<MetricsRegistry, 'increment'>): void {
-    if (this.opts.enableFailureRetry === false) return;
+    if (this.opts.enableFailureRetry === false) {
+      metrics.increment('tasks.sync.failure_retry.disabled');
+      return;
+    }
     if (this.failureRetryPending) {
       metrics.increment('tasks.sync.failure_retry.coalesced');
       return;
