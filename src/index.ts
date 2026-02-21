@@ -33,7 +33,7 @@ import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
 import { initializeTasksContext, wireTaskSync } from './tasks/initialize.js';
-import type { TaskSyncWiring } from './tasks/task-sync.js';
+import type { TaskSyncWiring } from './tasks/sync-types.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
 import { resolveTasksForum, reloadTagMapInPlace } from './tasks/discord-sync.js';
 import { initTasksForumGuard } from './tasks/forum-guard.js';

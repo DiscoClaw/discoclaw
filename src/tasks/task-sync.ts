@@ -1,34 +1,13 @@
 import type { LoggerLike } from '../discord/action-types.js';
-import type { StatusPoster } from '../discord/status-channel.js';
-import type { ForumCountSync } from '../discord/forum-count-sync.js';
-import type { TaskStore } from './store.js';
-import type { TaskService } from './service.js';
-import type { TaskSyncResult, TagMap } from './types.js';
 import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
+import type { TaskSyncResult } from './types.js';
+import type { TaskSyncContext, TaskSyncCoordinatorLike } from './sync-context.js';
 import { TaskSyncCoordinator } from './sync-coordinator.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
 import { isDirectTaskLifecycleActive } from './task-lifecycle.js';
+import type { StatusPoster } from '../discord/status-channel.js';
 
-export type TaskSyncCoordinatorLike = {
-  sync(statusPoster?: StatusPoster): Promise<TaskSyncResult | null>;
-};
-
-export type TaskSyncContext = {
-  forumId: string;
-  tagMap: TagMap;
-  tagMapPath?: string;
-  store: TaskStore;
-  taskService?: TaskService;
-  log?: LoggerLike;
-  sidebarMentionUserId?: string;
-  forumCountSync?: ForumCountSync;
-  syncCoordinator?: TaskSyncCoordinatorLike;
-  syncFailureRetryEnabled?: boolean;
-  syncFailureRetryDelayMs?: number;
-  syncDeferredRetryDelayMs?: number;
-  syncRunOptions?: TaskSyncRunOptions;
-};
-
+export type { TaskSyncContext, TaskSyncCoordinatorLike } from './sync-context.js';
 export type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
 
 export async function ensureTaskSyncCoordinator(

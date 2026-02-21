@@ -6,7 +6,7 @@ import type { TaskData, TaskStatus } from '../tasks/types.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 import { shouldActionUseDirectThreadLifecycle } from '../tasks/sync-contract.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
-import type { TaskSyncContext } from '../tasks/task-sync.js';
+import type { TaskSyncContext } from '../tasks/sync-context.js';
 import { runTaskSync } from '../tasks/task-sync.js';
 import type { TaskService } from '../tasks/service.js';
 import { createTaskService } from '../tasks/service.js';
