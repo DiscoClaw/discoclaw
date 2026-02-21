@@ -1,4 +1,4 @@
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
 import type { TaskSyncResult } from './types.js';
 import type { TaskSyncContext, TaskSyncCoordinatorLike, TaskStatusPoster } from './sync-context.js';

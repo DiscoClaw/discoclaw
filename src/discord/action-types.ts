@@ -1,5 +1,1 @@
-export type LoggerLike = {
-  info(obj: unknown, msg?: string): void;
-  warn(obj: unknown, msg?: string): void;
-  error(obj: unknown, msg?: string): void;
-};
+export type { LoggerLike } from '../logging/logger-like.js';

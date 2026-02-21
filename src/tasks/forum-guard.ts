@@ -1,5 +1,5 @@
 import type { AnyThreadChannel, Client } from 'discord.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskStore } from './store.js';
 import type { TagMap } from './types.js';
 import { findTaskByThreadId } from './thread-cache.js';

@@ -1,5 +1,5 @@
 import type { Client, Guild } from 'discord.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import { globalMetrics, type MetricsRegistry } from '../observability/metrics.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
