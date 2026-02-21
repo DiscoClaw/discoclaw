@@ -153,10 +153,7 @@ describe('wireTaskSync', () => {
     const client = {} as any;
     const guild = {} as any;
 
-    const result = await wireTaskSync({
-      taskCtx,
-      runCtx: { client, guild },
-    });
+    const result = await wireTaskSync(taskCtx, { client, guild });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -194,10 +191,7 @@ describe('wireTaskSync', () => {
 
     vi.mocked(TaskSyncCoordinator).mockClear();
 
-    await wireTaskSync({
-      taskCtx,
-      runCtx: { client: {} as any, guild: {} as any },
-    });
+    await wireTaskSync(taskCtx, { client: {} as any, guild: {} as any });
 
     const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
 
@@ -226,10 +220,7 @@ describe('wireTaskSync', () => {
 
     vi.mocked(TaskSyncCoordinator).mockClear();
 
-    await wireTaskSync({
-      taskCtx,
-      runCtx: { client: {} as any, guild: {} as any },
-    });
+    await wireTaskSync(taskCtx, { client: {} as any, guild: {} as any });
 
     const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
     const task = store.create({ title: 'Owned lifecycle task' });
@@ -256,10 +247,7 @@ describe('wireTaskSync', () => {
 
     vi.mocked(TaskSyncCoordinator).mockClear();
 
-    const result = await wireTaskSync({
-      taskCtx,
-      runCtx: { client: {} as any, guild: {} as any },
-    });
+    const result = await wireTaskSync(taskCtx, { client: {} as any, guild: {} as any });
 
     result.stop();
 
@@ -285,10 +273,7 @@ describe('wireTaskSync', () => {
       log,
     } as any;
 
-    await wireTaskSync({
-      taskCtx,
-      runCtx: { client: {} as any, guild: {} as any },
-    });
+    await wireTaskSync(taskCtx, { client: {} as any, guild: {} as any });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -314,10 +299,7 @@ describe('wireTaskSync', () => {
 
     vi.mocked(TaskSyncCoordinator).mockClear();
 
-    await wireTaskSync({
-      taskCtx,
-      runCtx: { client: {} as any, guild: {} as any },
-    });
+    await wireTaskSync(taskCtx, { client: {} as any, guild: {} as any });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
       expect.objectContaining({
