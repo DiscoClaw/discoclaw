@@ -89,45 +89,55 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
     const needsCadence = !record.cadence;
     const needsTags = autoTag && record.purposeTags.length === 0 && purposeTags.length > 0;
     const needsModel = !record.model;
-
-    if (!needsCadence && !needsTags && !needsModel) continue;
+    const needsMetadataUpdate = needsCadence || needsTags || needsModel;
 
     try {
       const updates: Partial<typeof record> = {};
 
-      if (needsCadence) {
-        const cadence = detectCadence(fullJob.def.schedule);
-        updates.cadence = cadence;
-      }
+      if (needsMetadataUpdate) {
+        if (needsCadence) {
+          const cadence = detectCadence(fullJob.def.schedule);
+          updates.cadence = cadence;
+        }
 
-      if (needsTags) {
-        const classified = await autoTagCron(runtime, fullJob.name, fullJob.def.prompt, purposeTags, { model: autoTagModel, cwd });
-        if (classified.length > 0) updates.purposeTags = classified;
-      }
+        if (needsTags) {
+          const classified = await autoTagCron(runtime, fullJob.name, fullJob.def.prompt, purposeTags, { model: autoTagModel, cwd });
+          if (classified.length > 0) updates.purposeTags = classified;
+        }
 
-      if (needsModel) {
-        const cadence = updates.cadence ?? record.cadence ?? detectCadence(fullJob.def.schedule);
-        const model = await classifyCronModel(runtime, fullJob.name, fullJob.def.prompt, cadence, { model: autoTagModel, cwd });
-        updates.model = model;
-      }
+        if (needsModel) {
+          const cadence = updates.cadence ?? record.cadence ?? detectCadence(fullJob.def.schedule);
+          const model = await classifyCronModel(runtime, fullJob.name, fullJob.def.prompt, cadence, { model: autoTagModel, cwd });
+          updates.model = model;
+        }
 
-      await statsStore.upsertRecord(record.cronId, record.threadId, updates);
+        await statsStore.upsertRecord(record.cronId, record.threadId, updates);
+      }
 
       // Apply tags to Discord thread.
       const thread = threads.get(fullJob.threadId);
       if (thread) {
+        const desiredPurposeTags = updates.purposeTags ?? record.purposeTags;
+        const desiredCadence = updates.cadence ?? record.cadence;
         const allTags: string[] = [
-          ...(updates.purposeTags ?? record.purposeTags),
+          ...desiredPurposeTags,
         ];
-        const cadence = updates.cadence ?? record.cadence;
-        if (cadence) allTags.push(cadence);
+        if (desiredCadence) allTags.push(desiredCadence);
 
-        const tagIds = allTags
+        const desiredTagIds = allTags
           .map((t) => tagMap[t])
           .filter((id): id is string => Boolean(id));
-        const uniqueTagIds = [...new Set(tagIds)].slice(0, 5);
+        const uniqueTagIds = [...new Set(desiredTagIds)].slice(0, 5);
 
-        if (uniqueTagIds.length > 0) {
+        const currentTagIds: string[] = Array.isArray((thread as any).appliedTags)
+          ? (thread as any).appliedTags.filter((id: unknown): id is string => typeof id === 'string')
+          : [];
+        const desiredSet = new Set(uniqueTagIds);
+        const tagsOutOfSync =
+          currentTagIds.length !== uniqueTagIds.length
+          || currentTagIds.some((id) => !desiredSet.has(id));
+
+        if (tagsOutOfSync) {
           try {
             await (thread as any).edit({ appliedTags: uniqueTagIds });
             tagsApplied++;

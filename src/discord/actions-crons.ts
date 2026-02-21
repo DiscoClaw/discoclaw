@@ -1,4 +1,5 @@
 import type { Client } from 'discord.js';
+import { Cron } from 'croner';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
@@ -79,6 +80,26 @@ function buildStarterContent(schedule: string, timezone: string, channel: string
   return `**Schedule:** \`${schedule}\` (${timezone})\n**Channel:** #${channel}\n\n${prompt}`;
 }
 
+function validateCronDefinition(def: { schedule: string; timezone: string }): string | null {
+  const timezone = String(def.timezone ?? '').trim();
+  if (!timezone) {
+    return 'timezone is required';
+  }
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: timezone });
+  } catch {
+    return `invalid timezone "${def.timezone}"`;
+  }
+
+  try {
+    new Cron(def.schedule, { timezone }).stop();
+    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return msg || 'invalid schedule';
+  }
+}
+
 function requestRunningJobCancel(cronCtx: CronContext, threadId: string, cronId: string): boolean {
   const canceled = cronCtx.executorCtx?.runControl?.requestCancel(threadId) ?? false;
   if (canceled) {
@@ -104,7 +125,12 @@ export async function executeCronAction(
 
       const cronId = generateCronId();
       const timezone = action.timezone ?? getDefaultTimezone();
-      const cadence = detectCadence(action.schedule);
+      const def = { schedule: action.schedule, timezone, channel: action.channel, prompt: action.prompt };
+      const validationError = validateCronDefinition(def);
+      if (validationError) {
+        return { ok: false, error: `Invalid cron definition: ${validationError}` };
+      }
+      const cadence = detectCadence(def.schedule);
 
       // Create forum thread.
       const forum = await resolveForumChannel(cronCtx.client, cronCtx.forumId);
@@ -156,9 +182,6 @@ export async function executeCronAction(
       const threadName = buildCronThreadName(action.name, cadence);
       const starterContent = buildStarterContent(action.schedule, timezone, action.channel, action.prompt);
 
-      // Validate the schedule before creating the thread to avoid orphaned threads.
-      const def = { schedule: action.schedule, timezone, channel: action.channel, prompt: action.prompt };
-
       let thread;
       try {
         thread = await forum.threads.create({
@@ -181,7 +204,8 @@ export async function executeCronAction(
       try {
         cronCtx.scheduler.register(thread.id, thread.id, ctx.guild.id, action.name, def, cronId);
       } catch (err) {
-        return { ok: false, error: `Invalid cron schedule: ${action.schedule}` };
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `Invalid cron definition: ${msg}` };
       } finally {
         cronCtx.pendingThreadIds.delete(thread.id);
       }
@@ -238,10 +262,16 @@ export async function executeCronAction(
       const newTimezone = action.timezone ?? job.def.timezone;
       const newChannel = action.channel ?? job.def.channel;
       const newPrompt = action.prompt ?? job.def.prompt;
+      const newDef = { schedule: newSchedule, timezone: newTimezone, channel: newChannel, prompt: newPrompt };
 
       const defChanged = action.schedule !== undefined || action.timezone !== undefined || action.channel !== undefined || action.prompt !== undefined;
 
       if (defChanged) {
+        const validationError = validateCronDefinition(newDef);
+        if (validationError) {
+          return { ok: false, error: `Invalid cron definition: ${validationError}` };
+        }
+
         // Update cadence if schedule changed.
         if (action.schedule) {
           updates.cadence = detectCadence(action.schedule);
@@ -270,11 +300,11 @@ export async function executeCronAction(
         }
 
         // Reload scheduler.
-        const newDef = { schedule: newSchedule, timezone: newTimezone, channel: newChannel, prompt: newPrompt };
         try {
           cronCtx.scheduler.register(record.threadId, record.threadId, job.guildId, job.name, newDef, action.cronId);
         } catch (err) {
-          return { ok: false, error: `Invalid cron schedule: ${newSchedule}` };
+          const msg = err instanceof Error ? err.message : String(err);
+          return { ok: false, error: `Invalid cron definition: ${msg}` };
         }
       }
 
@@ -380,7 +410,10 @@ export async function executeCronAction(
         return { ok: false, error: `Cron "${action.cronId}" not found` };
       }
 
-      cronCtx.scheduler.disable(record.threadId);
+      const disabled = cronCtx.scheduler.disable(record.threadId);
+      if (!disabled) {
+        return { ok: false, error: `Cron "${action.cronId}" not registered in scheduler` };
+      }
       const canceled = requestRunningJobCancel(cronCtx, record.threadId, action.cronId);
       await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { disabled: true });
 
@@ -405,7 +438,10 @@ export async function executeCronAction(
         return { ok: false, error: `Cron "${action.cronId}" not found` };
       }
 
-      cronCtx.scheduler.enable(record.threadId);
+      const enabled = cronCtx.scheduler.enable(record.threadId);
+      if (!enabled) {
+        return { ok: false, error: `Cron "${action.cronId}" not registered in scheduler` };
+      }
       await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { disabled: false });
 
       // Post notification.
