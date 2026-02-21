@@ -1,6 +1,8 @@
 import type { ForumChannel } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { TaskContext } from '../tasks/task-context.js';
+import type { TaskActionRequest } from '../tasks/task-action-contract.js';
+import { TASK_ACTION_TYPES } from '../tasks/task-action-contract.js';
 import type { TaskData, TaskStatus } from '../tasks/types.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 import { shouldActionUseDirectThreadLifecycle } from '../tasks/sync-contract.js';
@@ -26,59 +28,8 @@ import { taskThreadCache } from '../tasks/thread-cache.js';
 /** Pre-computed set for filtering status names from tag candidates. */
 const STATUS_NAME_SET = new Set<string>(TASK_STATUSES);
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type TaskCreatePayload = {
-  title: string;
-  description?: string;
-  priority?: number;
-  tags?: string;
-};
-
-type TaskUpdatePayload = {
-  taskId?: string;
-  title?: string;
-  description?: string;
-  priority?: number;
-  status?: string;
-};
-
-type TaskClosePayload = {
-  taskId?: string;
-  reason?: string;
-};
-
-type TaskShowPayload = {
-  taskId?: string;
-};
-
-type TaskListPayload = {
-  status?: string;
-  label?: string;
-  limit?: number;
-};
-
-export type TaskActionRequest =
-  | ({ type: 'taskCreate' } & TaskCreatePayload)
-  | ({ type: 'taskUpdate' } & TaskUpdatePayload)
-  | ({ type: 'taskClose' } & TaskClosePayload)
-  | ({ type: 'taskShow' } & TaskShowPayload)
-  | ({ type: 'taskList' } & TaskListPayload)
-  | { type: 'taskSync' }
-  | { type: 'tagMapReload' };
-
-const TASK_TYPE_MAP: Record<TaskActionRequest['type'], true> = {
-  taskCreate: true,
-  taskUpdate: true,
-  taskClose: true,
-  taskShow: true,
-  taskList: true,
-  taskSync: true,
-  tagMapReload: true,
-};
-export const TASK_ACTION_TYPES = new Set<string>(Object.keys(TASK_TYPE_MAP));
+export type { TaskActionRequest } from '../tasks/task-action-contract.js';
+export { TASK_ACTION_TYPES } from '../tasks/task-action-contract.js';
 
 function resolveTaskService(taskCtx: TaskContext): TaskService {
   if (taskCtx.taskService) return taskCtx.taskService;
