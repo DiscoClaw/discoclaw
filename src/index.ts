@@ -1012,7 +1012,6 @@ if (taskCtx) {
       taskCtx,
       client,
       guild,
-      tasksCwd,
       sidebarMentionUserId,
       log,
       forumCountSync: taskForumCountSync,
