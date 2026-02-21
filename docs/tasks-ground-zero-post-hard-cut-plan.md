@@ -70,3 +70,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 4 by surfacing configured task sync retry policy (`failureRetry on/off`, failure/deferred retry delays) in `!health verbose` configuration output.
 - 2026-02-21: Continued Track 4 by adding retry execution counters (`tasks.sync.retry.triggered`, `tasks.sync.failure_retry.triggered`) and surfacing scheduled/triggered/failed triples in `!health verbose`.
 - 2026-02-21: Continued Track 4 by adding `tasks.sync.failure_retry.disabled` for explicit no-retry operation when failure retries are turned off, and surfacing that counter in `!health verbose`.
+- 2026-02-21: Continued Track 4 by attributing retry-failure cause classes (`tasks.sync.retry.error_class.*`, `tasks.sync.failure_retry.error_class.*`) for deferred and failure-retry paths.
