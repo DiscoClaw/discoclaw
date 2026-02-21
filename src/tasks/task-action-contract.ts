@@ -48,3 +48,11 @@ const TASK_TYPE_MAP: Record<TaskActionRequest['type'], true> = {
 };
 
 export const TASK_ACTION_TYPES = new Set<string>(Object.keys(TASK_TYPE_MAP));
+
+export function isTaskActionType(type: string): type is TaskActionRequest['type'] {
+  return TASK_ACTION_TYPES.has(type);
+}
+
+export function isTaskActionRequest(action: { type?: unknown }): action is TaskActionRequest {
+  return typeof action.type === 'string' && isTaskActionType(action.type);
+}
