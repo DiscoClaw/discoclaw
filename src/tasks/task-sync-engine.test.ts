@@ -537,6 +537,37 @@ describe('runTaskSync', () => {
     expect(result.orphanThreadsFound).toBe(0);
   });
 
+  it('skipPhase5 does not fetch phase5 thread sources', async () => {
+    const { resolveTasksForum } = await import('./discord-sync.js');
+    const store = makeStore([]);
+    const fetchActive = vi.fn(async () => ({ threads: new Map() }));
+    const fetchArchived = vi.fn(async () => ({ threads: new Map() }));
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive,
+        fetchArchived,
+      },
+    };
+    (resolveTasksForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runTaskSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      store,
+      throttleMs: 0,
+      skipPhase5: true,
+    } as any);
+
+    expect(result.threadsReconciled).toBe(0);
+    expect(result.orphanThreadsFound).toBe(0);
+    expect(fetchActive).not.toHaveBeenCalled();
+    expect(fetchArchived).not.toHaveBeenCalled();
+  });
+
   it('phase 5 archives non-archived thread for closed task and backfills external_ref', async () => {
     const { resolveTasksForum, closeTaskThread } = await import('./discord-sync.js');
     const store = makeStore([

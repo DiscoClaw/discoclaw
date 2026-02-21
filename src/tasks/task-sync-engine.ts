@@ -429,6 +429,17 @@ async function fetchPhase5ThreadSources(
   return { activeThreads, archivedThreads };
 }
 
+async function applyPhase5ReconcileOperations(
+  ctx: TaskSyncApplyContext,
+  operations: TaskReconcileOperation[],
+  state: TaskSyncReconcileApplyState,
+): Promise<void> {
+  for (const operation of operations) {
+    await RECONCILE_EXECUTORS[operation.action](ctx, operation, state);
+    await sleep(ctx.throttleMs);
+  }
+}
+
 async function applyPhase5ReconcileThreads(
   ctx: TaskSyncApplyContext,
   allTasks: TaskData[],
@@ -455,10 +466,7 @@ async function applyPhase5ReconcileThreads(
     threadIdFromTask: getThreadIdFromTask,
   });
 
-  for (const op of plannedReconcileOps) {
-    await RECONCILE_EXECUTORS[op.action](ctx, op, reconcileState);
-    await sleep(ctx.throttleMs);
-  }
+  await applyPhase5ReconcileOperations(ctx, plannedReconcileOps, reconcileState);
 
   return {
     threadsReconciled: reconcileState.threadsReconciled,

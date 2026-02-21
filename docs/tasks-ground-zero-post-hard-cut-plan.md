@@ -55,3 +55,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 3 by composing phase-5 thread-source ingest + diff planning in pipeline (`planTaskReconcileFromThreadSources`), reducing phase-5 planning glue in `task-sync-engine`.
 - 2026-02-21: Continued Track 3 by extracting phase-5 thread-source fetch behavior into `fetchPhase5ThreadSources` in `task-sync-engine` and adding characterization coverage for archived-fetch fallback behavior.
 - 2026-02-21: Continued Track 3 by adding `planTaskSyncApplyExecution` in pipeline to compose Stage 2-4 normalize/diff/apply planning, reducing planning glue in `runTaskSync`.
+- 2026-02-21: Continued Track 3 by splitting phase-5 execution into explicit plan/apply steps in engine (`applyPhase5ReconcileOperations`) and adding a guard test ensuring `skipPhase5` avoids thread-source fetches.
