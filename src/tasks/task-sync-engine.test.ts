@@ -869,6 +869,39 @@ describe('runTaskSync', () => {
     expect(result.orphanThreadsFound).toBe(0);
   });
 
+  it('phase 5 continues using active threads when fetchArchived fails', async () => {
+    const { resolveTasksForum, closeTaskThread } = await import('./discord-sync.js');
+    const store = makeStore([
+      { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: '' },
+    ]);
+
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['thread-100', { id: 'thread-100', name: '\u{1F7E2} [001] Closed task', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => { throw new Error('archived fetch failed'); }),
+      },
+    };
+    (resolveTasksForum as any).mockResolvedValueOnce(mockForum);
+
+    const result = await runTaskSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      store,
+      throttleMs: 0,
+    } as any);
+
+    expect(result.warnings).toBeGreaterThanOrEqual(1);
+    expect(result.threadsReconciled).toBe(1);
+    expect(closeTaskThread).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {}, undefined);
+  });
+
   it('calls statusPoster.taskSyncComplete in forum-not-found early return', async () => {
     const { resolveTasksForum } = await import('./discord-sync.js');
     (resolveTasksForum as any).mockResolvedValueOnce(null);

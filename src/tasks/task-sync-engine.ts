@@ -80,6 +80,11 @@ type TaskSyncReconcileResult = {
   orphanThreadsFound: number;
 };
 
+type TaskSyncReconcileThreadSources = {
+  activeThreads: Map<string, TaskThreadLike>;
+  archivedThreads: Map<string, TaskThreadLike>;
+};
+
 function createApplyCounters(): TaskSyncApplyCounters {
   return {
     threadsCreated: 0,
@@ -401,6 +406,31 @@ const RECONCILE_EXECUTORS: Record<TaskReconcileAction, TaskSyncReconcileExecutor
   reconcile_archived_closed: applyReconcileArchivedClosed,
 };
 
+async function fetchPhase5ThreadSources(
+  ctx: TaskSyncApplyContext,
+): Promise<TaskSyncReconcileThreadSources | null> {
+  let activeThreads: Map<string, TaskThreadLike>;
+  try {
+    const fetchedActive = await ctx.forum.threads.fetchActive();
+    activeThreads = fetchedActive.threads as Map<string, TaskThreadLike>;
+  } catch (err) {
+    ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch active threads');
+    ctx.counters.warnings++;
+    return null;
+  }
+
+  let archivedThreads: Map<string, TaskThreadLike> = new Map();
+  try {
+    const fetchedArchived = await ctx.forum.threads.fetchArchived();
+    archivedThreads = new Map(fetchedArchived.threads as Map<string, TaskThreadLike>);
+  } catch (err) {
+    ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch archived threads');
+    ctx.counters.warnings++;
+  }
+
+  return { activeThreads, archivedThreads };
+}
+
 async function applyPhase5ReconcileThreads(
   ctx: TaskSyncApplyContext,
   allTasks: TaskData[],
@@ -410,33 +440,26 @@ async function applyPhase5ReconcileThreads(
     orphanThreadsFound: 0,
   };
 
-  try {
-    const activeThreads = await ctx.forum.threads.fetchActive();
-    let archivedThreads: Map<string, TaskThreadLike> = new Map();
-    try {
-      const fetched = await ctx.forum.threads.fetchArchived();
-      archivedThreads = new Map(fetched.threads as Map<string, TaskThreadLike>);
-    } catch (err) {
-      ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch archived threads');
-      ctx.counters.warnings++;
-    }
+  const threadSources = await fetchPhase5ThreadSources(ctx);
+  if (!threadSources) {
+    return {
+      threadsReconciled: reconcileState.threadsReconciled,
+      orphanThreadsFound: reconcileState.orphanThreadsFound,
+    };
+  }
 
-    const plannedReconcileOps = planTaskReconcileFromThreadSources({
-      tasks: allTasks,
-      archivedThreads: archivedThreads.values(),
-      activeThreads: (activeThreads.threads as Map<string, TaskThreadLike>).values(),
-      shortIdOfTaskId: shortTaskId,
-      shortIdFromThreadName: extractShortIdFromThreadName,
-      threadIdFromTask: getThreadIdFromTask,
-    });
+  const plannedReconcileOps = planTaskReconcileFromThreadSources({
+    tasks: allTasks,
+    archivedThreads: threadSources.archivedThreads.values(),
+    activeThreads: threadSources.activeThreads.values(),
+    shortIdOfTaskId: shortTaskId,
+    shortIdFromThreadName: extractShortIdFromThreadName,
+    threadIdFromTask: getThreadIdFromTask,
+  });
 
-    for (const op of plannedReconcileOps) {
-      await RECONCILE_EXECUTORS[op.action](ctx, op, reconcileState);
-      await sleep(ctx.throttleMs);
-    }
-  } catch (err) {
-    ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch active threads');
-    ctx.counters.warnings++;
+  for (const op of plannedReconcileOps) {
+    await RECONCILE_EXECUTORS[op.action](ctx, op, reconcileState);
+    await sleep(ctx.throttleMs);
   }
 
   return {
