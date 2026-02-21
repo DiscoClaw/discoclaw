@@ -15,6 +15,7 @@ import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
 import type { TaskContext } from '../tasks/task-context.js';
+import { executeCronAction } from './actions-crons.js';
 import type { CronContext } from './actions-crons.js';
 import type { ForgeContext } from './actions-forge.js';
 import { executePlanAction } from './actions-plan.js';
@@ -74,6 +75,7 @@ import { OnboardingFlow } from '../onboarding/onboarding-flow.js';
 import { writeWorkspaceFiles } from '../onboarding/onboarding-writer.js';
 import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import { getDefaultTimezone } from '../cron/default-timezone.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed };
@@ -349,12 +351,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
   let onboardingSession: OnboardingFlow | null = null;
   let activeOnboardingUserId: string | null = null;
   const sessionCreationGuards = new Map<string, Promise<void>>();
-  const ONBOARDING_TIMEOUT_MS = 15 * 60 * 1000;
+  const ONBOARDING_TIMEOUT_MS = 24 * 60 * 60 * 1000;
   let onboardingTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  let onboardingDisplayName: string | null = null;
+  let onboardingCtxRef: { guild: any; client: any; channelId: string; messageId: string; channelName: string } | null = null;
 
   function destroyOnboardingSession() {
     onboardingSession = null;
     activeOnboardingUserId = null;
+    onboardingDisplayName = null;
+    onboardingCtxRef = null;
     if (onboardingTimeoutHandle) {
       clearTimeout(onboardingTimeoutHandle);
       onboardingTimeoutHandle = null;
@@ -364,7 +370,28 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
   function resetOnboardingTimeout() {
     if (onboardingTimeoutHandle) clearTimeout(onboardingTimeoutHandle);
     onboardingTimeoutHandle = setTimeout(() => {
+      const session = onboardingSession;
+      const displayName = onboardingDisplayName ?? 'there';
+      const ctxRef = onboardingCtxRef;
       destroyOnboardingSession();
+      if (!session) return;
+      const values = session.getValuesWithDefaults(displayName, getDefaultTimezone());
+      writeWorkspaceFiles(values, params.workspaceCwd).then(() => {
+        params.log?.info({ workspaceCwd: params.workspaceCwd }, 'onboarding:timeout-defaults:complete');
+        if (values.morningCheckin && params.cronCtx && ctxRef?.guild) {
+          const actionCtx: ActionContext = {
+            guild: ctxRef.guild,
+            client: ctxRef.client,
+            channelId: ctxRef.channelId,
+            messageId: ctxRef.messageId,
+          };
+          executeCronAction(
+            { type: 'cronCreate', name: 'Morning Check-in', schedule: '0 9 * * *', timezone: values.timezone, channel: ctxRef.channelName, prompt: 'Good morning! How are things going today?' },
+            actionCtx,
+            params.cronCtx,
+          ).catch((err) => params.log?.warn({ err }, 'onboarding:timeout:morning-cron-create failed'));
+        }
+      }).catch((err) => params.log?.warn({ err }, 'onboarding:timeout-defaults:write failed'));
     }, ONBOARDING_TIMEOUT_MS);
   }
 
@@ -571,79 +598,95 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             return;
           }
 
-          // Route: only accept input from the correct channel
+          // Route: only accept input from the correct channel.
+          // If the message is in the wrong channel, send a one-time redirect notice
+          // and fall through to normal bot operation (non-blocking passthrough).
+          let passThroughToNormal = false;
           if (onboardingSession.channelMode === 'dm' && !isDm) {
             // Message is in a guild channel but onboarding is in DMs
             if (!onboardingSession.hasRedirected) {
               onboardingSession.hasRedirected = true;
               await msg.reply({ content: 'I\'m setting things up with you in DMs — check your messages!', allowedMentions: NO_MENTIONS });
             }
-            return;
-          }
-          if (onboardingSession.channelMode === 'guild' && msg.channelId !== onboardingSession.channelId) {
+            passThroughToNormal = true;
+          } else if (onboardingSession.channelMode === 'guild' && msg.channelId !== onboardingSession.channelId) {
             // Message is in a different guild channel than where onboarding is happening
             if (!onboardingSession.hasRedirected) {
               onboardingSession.hasRedirected = true;
               await msg.reply({ content: `I'm setting things up with you in <#${onboardingSession.channelId}> — head over there to continue!`, allowedMentions: NO_MENTIONS });
             }
+            passThroughToNormal = true;
+          }
+
+          if (!passThroughToNormal) {
+            // Forward to flow
+            resetOnboardingTimeout();
+            const result = onboardingSession.handleInput(messageText);
+
+            if (result.writeResult === 'pending') {
+              // Send the "writing..." message first
+              await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
+
+              // Call the writer
+              try {
+                const values = onboardingSession.getValues();
+                const writeResult = await writeWorkspaceFiles(values, params.workspaceCwd);
+
+                if (writeResult.errors.length > 0) {
+                  const errorSummary = writeResult.errors.join('; ');
+                  onboardingSession.markWriteFailed(errorSummary);
+                  const sendTarget = onboardingSession.channelMode === 'dm' ? msg.author : msg.channel;
+                  await sendTarget.send({
+                    content: `Something went wrong writing your files: ${errorSummary}\nType **retry** to try again, pick a number to edit a field, or \`!cancel\` to give up.`,
+                    allowedMentions: NO_MENTIONS,
+                  });
+                } else {
+                  onboardingSession.markWriteComplete();
+                  const warnings = writeResult.warnings.length > 0
+                    ? `\n\n${writeResult.warnings.join('\n')}`
+                    : '';
+                  const sendTarget = onboardingSession.channelMode === 'dm' ? msg.author : msg.channel;
+                  await sendTarget.send({
+                    content: `All set! I've written your **IDENTITY.md** and **USER.md**. I'm ready to go.${warnings}`,
+                    allowedMentions: NO_MENTIONS,
+                  });
+                  destroyOnboardingSession();
+                  params.log?.info({ workspaceCwd: params.workspaceCwd }, 'onboarding:complete');
+                  // Morning cron dispatch on user-confirmed completion
+                  if (values.morningCheckin && params.cronCtx && msg.guild) {
+                    const actionCtx: ActionContext = {
+                      guild: msg.guild,
+                      client: msg.client,
+                      channelId: msg.channelId,
+                      messageId: msg.id,
+                    };
+                    executeCronAction(
+                      { type: 'cronCreate', name: 'Morning Check-in', schedule: '0 9 * * *', timezone: values.timezone, channel: (msg.channel as any)?.name ?? msg.channelId, prompt: 'Good morning! How are things going today?' },
+                      actionCtx,
+                      params.cronCtx,
+                    ).catch((err) => params.log?.warn({ err }, 'onboarding:morning-cron-create failed'));
+                  }
+                }
+              } catch (err) {
+                params.log?.error({ err }, 'onboarding:write failed');
+                onboardingSession.markWriteFailed(String(err));
+                const sendTarget = onboardingSession.channelMode === 'dm' ? msg.author : msg.channel;
+                try {
+                  await sendTarget.send({
+                    content: `Something went wrong writing your files: ${String(err)}\nType **retry** to try again or \`!cancel\` to give up.`,
+                    allowedMentions: NO_MENTIONS,
+                  });
+                } catch {
+                  // If we can't even send the error, destroy the session
+                  destroyOnboardingSession();
+                }
+              }
+            } else if (result.reply) {
+              // Normal flow step — send the reply (guard against empty content from DONE state)
+              await msg.channel.send({ content: result.reply, allowedMentions: NO_MENTIONS });
+            }
             return;
           }
-
-          // Forward to flow
-          resetOnboardingTimeout();
-          const result = onboardingSession.handleInput(messageText);
-
-          if (result.writeResult === 'pending') {
-            // Send the "writing..." message first
-            await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
-
-            // Call the writer
-            try {
-              const writeResult = await writeWorkspaceFiles(
-                onboardingSession.getValues(),
-                params.workspaceCwd,
-              );
-
-              if (writeResult.errors.length > 0) {
-                const errorSummary = writeResult.errors.join('; ');
-                onboardingSession.markWriteFailed(errorSummary);
-                const sendTarget = onboardingSession.channelMode === 'dm' ? msg.author : msg.channel;
-                await sendTarget.send({
-                  content: `Something went wrong writing your files: ${errorSummary}\nType **retry** to try again, pick a number to edit a field, or \`!cancel\` to give up.`,
-                  allowedMentions: NO_MENTIONS,
-                });
-              } else {
-                onboardingSession.markWriteComplete();
-                const warnings = writeResult.warnings.length > 0
-                  ? `\n\n${writeResult.warnings.join('\n')}`
-                  : '';
-                const sendTarget = onboardingSession.channelMode === 'dm' ? msg.author : msg.channel;
-                await sendTarget.send({
-                  content: `All set! I've written your **IDENTITY.md** and **USER.md**. I'm ready to go.${warnings}`,
-                  allowedMentions: NO_MENTIONS,
-                });
-                destroyOnboardingSession();
-                params.log?.info({ workspaceCwd: params.workspaceCwd }, 'onboarding:complete');
-              }
-            } catch (err) {
-              params.log?.error({ err }, 'onboarding:write failed');
-              onboardingSession.markWriteFailed(String(err));
-              const sendTarget = onboardingSession.channelMode === 'dm' ? msg.author : msg.channel;
-              try {
-                await sendTarget.send({
-                  content: `Something went wrong writing your files: ${String(err)}\nType **retry** to try again or \`!cancel\` to give up.`,
-                  allowedMentions: NO_MENTIONS,
-                });
-              } catch {
-                // If we can't even send the error, destroy the session
-                destroyOnboardingSession();
-              }
-            }
-          } else if (result.reply) {
-            // Normal flow step — send the reply (guard against empty content from DONE state)
-            await msg.channel.send({ content: result.reply, allowedMentions: NO_MENTIONS });
-          }
-          return;
         }
 
         // 3. Active session for a different user → tell them to wait
@@ -684,9 +727,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
               activeOnboardingUserId = userId;
               onboardingSession = new OnboardingFlow();
+              const displayName = msg.author.displayName || msg.author.username || 'there';
+              onboardingDisplayName = displayName;
+              onboardingCtxRef = {
+                guild: msg.guild,
+                client: msg.client,
+                channelId: msg.channelId,
+                messageId: msg.id,
+                channelName: (msg.channel as any)?.name ?? msg.channelId,
+              };
               resetOnboardingTimeout();
 
-              const displayName = msg.author.displayName || msg.author.username || 'there';
               const startResult = onboardingSession.start(displayName);
 
               if (isDm) {
