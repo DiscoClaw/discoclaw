@@ -78,3 +78,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 4 by adding tag-map reload metrics (`tasks.sync.tag_map_reload.{attempted,succeeded,failed}`) and surfacing reload outcomes in `!health verbose`.
 - 2026-02-21: Closed out Track 4 and marked Performance + Operability as DONE.
 - 2026-02-21: Started post-Track-4 architecture cleanup by removing unused `src/tasks/sync-watcher.ts` and consolidating on canonical store-event sync triggers in `src/tasks/task-sync.ts`.
+- 2026-02-21: Continued post-Track-4 cleanup by removing unused `src/tasks/bead-sync.ts` and normalizing remaining runtime log/comment wording from watcher terms to sync-trigger terminology.

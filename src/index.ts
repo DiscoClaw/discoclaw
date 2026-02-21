@@ -146,7 +146,7 @@ let startupCtx: Awaited<ReturnType<typeof readAndClearShutdownContext>>;
 
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
-let taskSyncWatcher: { stop(): void } | null = null;
+let taskSyncWiring: { stop(): void } | null = null;
 let cronTagMapWatcher: { stop(): void } | null = null;
 let taskForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
@@ -175,7 +175,7 @@ const shutdown = async () => {
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
   taskForumCountSync?.stop();
   cronForumCountSync?.stop();
-  taskSyncWatcher?.stop();
+  taskSyncWiring?.stop();
   cronTagMapWatcher?.stop();
   cronScheduler?.stopAll();
   if (webhookServer) {
@@ -1020,7 +1020,7 @@ if (taskCtx) {
       skipForumGuard: true,
       skipPhase5: cfg.tasksSyncSkipPhase5,
     });
-    taskSyncWatcher = wired;
+    taskSyncWiring = wired;
   } else {
     log.warn({ resolvedGuildId }, 'tasks:sync wiring skipped; guild not in cache');
   }
