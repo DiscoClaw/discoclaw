@@ -103,6 +103,13 @@ describe('doctor-lib: checkRuntimeBinaries', () => {
     expect(c?.info).toBeFalsy();
   });
 
+  it('requires codex binary when FORGE_AUDITOR_RUNTIME=codex', () => {
+    const checks = checkRuntimeBinaries({ FORGE_AUDITOR_RUNTIME: 'codex' }, notFound);
+    const c = checks.find((r) => r.label.includes('Codex CLI'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
   it('normalizes PRIMARY_RUNTIME=claude_code to claude', () => {
     const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'claude_code' }, (bin) => bin === 'claude' ? '/usr/bin/claude' : null);
     const c = checks.find((r) => r.label.includes('Claude CLI'));
@@ -212,6 +219,13 @@ describe('doctor-lib: checkRuntimeBinaries', () => {
 
   it('requires OPENAI_API_KEY when FORGE_DRAFTER_RUNTIME=openai', () => {
     const checks = checkRuntimeBinaries({ FORGE_DRAFTER_RUNTIME: 'openai' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENAI_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('requires OPENAI_API_KEY when FORGE_AUDITOR_RUNTIME=openai', () => {
+    const checks = checkRuntimeBinaries({ FORGE_AUDITOR_RUNTIME: 'openai' }, notFound);
     const c = checks.find((r) => r.label.includes('OPENAI_API_KEY'));
     expect(c?.ok).toBe(false);
     expect(c?.info).toBeFalsy();
