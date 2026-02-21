@@ -28,7 +28,9 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 - `src/tasks/task-sync-engine.ts`
 - `src/tasks/task-sync-pipeline.ts`
 - `src/tasks/sync-coordinator.ts`
-- `src/tasks/discord-sync.ts`
+- `src/tasks/thread-helpers.ts`
+- `src/tasks/thread-ops.ts`
+- `src/tasks/tag-map.ts`
 - `src/tasks/thread-cache.ts`
 - `src/tasks/forum-guard.ts`
 

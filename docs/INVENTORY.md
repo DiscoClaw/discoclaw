@@ -83,7 +83,7 @@ All actions are gated by category env flags (off by default except channels).
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
-| Discord forum thread sync helpers | `src/tasks/discord-sync.ts` | **done** |
+| Discord forum thread sync helpers | `src/tasks/thread-helpers.ts`, `src/tasks/thread-ops.ts`, `src/tasks/tag-map.ts` | **done** |
 | Full task ↔ thread sync engine | `src/tasks/task-sync-engine.ts` | **done** |
 | Sync pipeline stage helpers (ingest/normalize/diff planning) | `src/tasks/task-sync-pipeline.ts` | **done** |
 | Sync coordinator (concurrency guard + cache) | `src/tasks/sync-coordinator.ts` | **done** |
