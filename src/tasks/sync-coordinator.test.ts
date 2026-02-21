@@ -549,4 +549,37 @@ describe('TaskSyncCoordinator failure retry', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(2);
   });
+
+  it('cancels pending deferred-close retry when failure retry path takes over', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any)
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+        closesDeferred: 1,
+      })
+      .mockRejectedValueOnce(new Error('boom after deferred retry scheduled'))
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+        closesDeferred: 0,
+      });
+
+    const opts = makeOpts();
+    opts.deferredRetryDelayMs = 2_000;
+    opts.failureRetryDelayMs = 1_000;
+    const coord = new TaskSyncCoordinator(opts);
+
+    await coord.sync();
+    await expect(coord.sync()).rejects.toThrow('boom after deferred retry scheduled');
+
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.canceled');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.scheduled');
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(runTaskSync).toHaveBeenCalledTimes(3);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(runTaskSync).toHaveBeenCalledTimes(3);
+  });
 });
