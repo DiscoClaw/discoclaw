@@ -7,14 +7,12 @@ function startFlow(displayName = 'TestUser') {
   return { flow, greeting };
 }
 
-/** Run a flow through the full dev path and return at CONFIRM. */
+/** Run a flow to CONFIRM step. */
 function flowToConfirm() {
   const { flow } = startFlow();
-  flow.handleInput('Weston');          // BOT_NAME
-  flow.handleInput('David');           // USER_NAME
-  flow.handleInput('1');               // PURPOSE → dev
-  flow.handleInput('~/code/project');  // WORKING_DIRS
-  // Now at CONFIRM
+  flow.handleInput('David');            // NAME
+  flow.handleInput('America/New_York'); // TIMEZONE
+  flow.handleInput('yes');              // CHECKIN → CONFIRM
   return flow;
 }
 
@@ -23,7 +21,7 @@ describe('OnboardingFlow', () => {
     const { greeting } = startFlow('Dave');
     expect(greeting.done).toBe(false);
     expect(greeting.reply).toContain('Dave');
-    expect(greeting.reply).toContain('call myself');
+    expect(greeting.reply).toContain('name');
   });
 
   it('updates lastActivityTimestamp on start and handleInput', () => {
@@ -31,63 +29,26 @@ describe('OnboardingFlow', () => {
     const t1 = flow.lastActivityTimestamp;
     expect(t1).toBeGreaterThan(0);
 
-    // Small delay to ensure timestamp changes
-    flow.handleInput('Weston');
+    flow.handleInput('David');
     expect(flow.lastActivityTimestamp).toBeGreaterThanOrEqual(t1);
   });
 
-  // --- Happy path: dev purpose ---
-  it('full flow through dev purpose', () => {
+  // --- Happy path ---
+  it('full flow: name → timezone → check-in → confirm', () => {
     const { flow } = startFlow();
 
-    let r = flow.handleInput('Weston');
-    expect(r.reply).toContain('Weston');
+    let r = flow.handleInput('David');
+    expect(r.reply).toContain('David');
     expect(r.done).toBe(false);
 
-    r = flow.handleInput('David');
-    expect(r.reply).toContain('David');
-    expect(r.reply).toContain('mainly use me for');
+    r = flow.handleInput('America/Chicago');
+    expect(r.reply).toContain('morning');
 
-    r = flow.handleInput('1');
-    expect(r.reply).toContain('directories');
-
-    r = flow.handleInput('~/code/project');
+    r = flow.handleInput('yes');
     // Should show confirmation
-    expect(r.reply).toContain('Bot name');
-    expect(r.reply).toContain('Weston');
     expect(r.reply).toContain('David');
+    expect(r.reply).toContain('America/Chicago');
     expect(r.reply).toContain('yes');
-  });
-
-  // --- Happy path: pa purpose ---
-  it('full flow through pa purpose', () => {
-    const { flow } = startFlow();
-    flow.handleInput('Claw');
-    flow.handleInput('Dave');
-    let r = flow.handleInput('2');
-    expect(r.reply).toContain('personality');
-
-    r = flow.handleInput('snarky but helpful');
-    expect(r.reply).toContain('Claw');
-    expect(r.reply).toContain('Dave');
-    expect(r.reply).toContain('snarky but helpful');
-  });
-
-  // --- Happy path: both purpose ---
-  it('full flow through both purpose', () => {
-    const { flow } = startFlow();
-    flow.handleInput('Bot');
-    flow.handleInput('User');
-    let r = flow.handleInput('3');
-    expect(r.reply).toContain('directories');
-
-    r = flow.handleInput('~/projects');
-    expect(r.reply).toContain('personality');
-
-    r = flow.handleInput('dry and competent');
-    expect(r.reply).toContain('Bot');
-    expect(r.reply).toContain('~/projects');
-    expect(r.reply).toContain('dry and competent');
   });
 
   // --- Confirmation → write ---
@@ -108,14 +69,33 @@ describe('OnboardingFlow', () => {
   });
 
   // --- Editing a field ---
-  it('editing field at confirmation returns to confirm with updated value', () => {
+  it('editing field 1 (name) at confirmation returns to confirm with updated value', () => {
     const flow = flowToConfirm();
-    let r = flow.handleInput('1'); // Edit bot name
-    expect(r.reply).toContain('call myself');
+    let r = flow.handleInput('1'); // Edit name
+    expect(r.reply).toContain('name');
 
-    r = flow.handleInput('NewBot');
-    // Should return to confirmation with updated name
-    expect(r.reply).toContain('NewBot');
+    r = flow.handleInput('NewName');
+    expect(r.reply).toContain('NewName');
+    expect(r.reply).toContain('yes');
+  });
+
+  it('editing field 2 (timezone) at confirmation returns to confirm with updated value', () => {
+    const flow = flowToConfirm();
+    let r = flow.handleInput('2'); // Edit timezone
+    expect(r.reply).toContain('timezone');
+
+    r = flow.handleInput('Europe/London');
+    expect(r.reply).toContain('Europe/London');
+    expect(r.reply).toContain('yes');
+  });
+
+  it('editing field 3 (check-in) at confirmation returns to confirm with updated value', () => {
+    const flow = flowToConfirm();
+    let r = flow.handleInput('3'); // Edit check-in
+    expect(r.reply).toContain('morning');
+
+    r = flow.handleInput('no');
+    expect(r.reply).toContain('No');
     expect(r.reply).toContain('yes');
   });
 
@@ -158,10 +138,10 @@ describe('OnboardingFlow', () => {
     const flow = flowToConfirm();
     flow.handleInput('yes');
     flow.markWriteFailed('oops');
-    let r = flow.handleInput('1'); // Edit bot name
-    expect(r.reply).toContain('call myself');
-    r = flow.handleInput('FixedBot');
-    expect(r.reply).toContain('FixedBot'); // Confirmation
+    let r = flow.handleInput('1'); // Edit name
+    expect(r.reply).toContain('name');
+    r = flow.handleInput('FixedName');
+    expect(r.reply).toContain('FixedName'); // Confirmation
     r = flow.handleInput('yes');
     expect(r.writeResult).toBe('pending');
   });
@@ -191,82 +171,110 @@ describe('OnboardingFlow', () => {
     expect(r.reply).toContain('pick a number');
   });
 
-  // --- Purpose parsing ---
+  // --- Timezone validation ---
   it.each([
-    ['1', 'dev'],
-    ['dev', 'dev'],
-    ['development', 'dev'],
-    ['coding', 'dev'],
-    ['2', 'pa'],
-    ['personal assistant', 'pa'],
-    ['assistant', 'pa'],
-    ['3', 'both'],
-    ['both', 'both'],
-  ])('purpose input "%s" maps to %s', (input, expected) => {
+    ['PST', 'America/Los_Angeles'],
+    ['PDT', 'America/Los_Angeles'],
+    ['EST', 'America/New_York'],
+    ['EDT', 'America/New_York'],
+    ['CST', 'America/Chicago'],
+    ['MST', 'America/Denver'],
+    ['GMT', 'Etc/GMT'],
+    ['UTC', 'UTC'],
+    ['CET', 'Europe/Paris'],
+    ['BST', 'Europe/London'],
+    ['IST', 'Asia/Kolkata'],
+    ['JST', 'Asia/Tokyo'],
+  ])('timezone abbreviation %s maps to %s', (abbr, expected) => {
     const { flow } = startFlow();
-    flow.handleInput('Bot');
-    flow.handleInput('User');
-    flow.handleInput(input);
+    flow.handleInput('David');
+    flow.handleInput(abbr);
     const vals = flow.getValues();
-    expect(vals.purpose).toBe(expected);
+    expect(vals.timezone).toBe(expected);
   });
 
-  it('unrecognized purpose input re-prompts', () => {
+  it('IANA timezone name is accepted as-is', () => {
     const { flow } = startFlow();
-    flow.handleInput('Bot');
-    flow.handleInput('User');
-    const r = flow.handleInput('idk');
-    expect(r.reply).toContain('pick 1, 2, or 3');
+    flow.handleInput('David');
+    const r = flow.handleInput('Europe/Berlin');
+    expect(r.reply).toContain('morning'); // advanced to CHECKIN
+    expect(flow.getValues().timezone).toBe('Europe/Berlin');
   });
 
-  // --- Optional fields ---
-  it('empty working dirs is accepted as skip', () => {
+  it('invalid timezone re-prompts', () => {
     const { flow } = startFlow();
-    flow.handleInput('Bot');
-    flow.handleInput('User');
-    flow.handleInput('1'); // dev
-    const r = flow.handleInput(''); // skip working dirs
-    expect(r.reply).toContain('yes'); // Confirmation
-    expect(r.reply).toContain('(skipped)');
+    flow.handleInput('David');
+    const r = flow.handleInput('NotATimezone');
+    expect(r.done).toBe(false);
+    expect(r.reply).toContain('recognize');
   });
 
-  it('empty personality is accepted as skip', () => {
-    const { flow } = startFlow();
-    flow.handleInput('Bot');
-    flow.handleInput('User');
-    flow.handleInput('2'); // pa
-    const r = flow.handleInput(''); // skip personality
-    expect(r.reply).toContain('yes'); // Confirmation
-    expect(r.reply).toContain('(skipped)');
-  });
+  // --- Morning check-in parsing ---
+  it.each(['yes', 'y', 'yeah', 'yep', 'sure', 'ok', '1', 'true'])(
+    'checkin "%s" is treated as yes',
+    (input) => {
+      const { flow } = startFlow();
+      flow.handleInput('David');
+      flow.handleInput('UTC');
+      flow.handleInput(input);
+      expect(flow.getValues().morningCheckin).toBe(true);
+    },
+  );
 
-  it.each(['skip', 'Skip', '-', 'none', 'n/a'])('working dirs skip word "%s" is treated as skip', (word) => {
-    const { flow } = startFlow();
-    flow.handleInput('Bot');
-    flow.handleInput('User');
-    flow.handleInput('1'); // dev
-    const r = flow.handleInput(word);
-    expect(r.reply).toContain('yes'); // Confirmation
-    expect(r.reply).toContain('(skipped)');
-  });
+  it.each(['no', 'n', 'nope', 'nah', '0', 'false'])(
+    'checkin "%s" is treated as no',
+    (input) => {
+      const { flow } = startFlow();
+      flow.handleInput('David');
+      flow.handleInput('UTC');
+      flow.handleInput(input);
+      expect(flow.getValues().morningCheckin).toBe(false);
+    },
+  );
 
-  it.each(['skip', 'Skip', '-', 'none', 'n/a'])('personality skip word "%s" is treated as skip', (word) => {
+  it('invalid check-in input re-prompts', () => {
     const { flow } = startFlow();
-    flow.handleInput('Bot');
-    flow.handleInput('User');
-    flow.handleInput('2'); // pa
-    const r = flow.handleInput(word);
-    expect(r.reply).toContain('yes'); // Confirmation
-    expect(r.reply).toContain('(skipped)');
+    flow.handleInput('David');
+    flow.handleInput('UTC');
+    const r = flow.handleInput('maybe');
+    expect(r.done).toBe(false);
+    expect(r.reply).toContain('yes or no');
   });
 
   // --- Getters ---
   it('getValues returns collected values', () => {
     const flow = flowToConfirm();
     const vals = flow.getValues();
-    expect(vals.botName).toBe('Weston');
     expect(vals.userName).toBe('David');
-    expect(vals.purpose).toBe('dev');
-    expect(vals.workingDirs).toBe('~/code/project');
+    expect(vals.timezone).toBe('America/New_York');
+    expect(vals.morningCheckin).toBe(true);
+  });
+
+  it('getValuesWithDefaults fills missing fields with defaults', () => {
+    const flow = new OnboardingFlow();
+    flow.start('Dave');
+    // No questions answered
+    const vals = flow.getValuesWithDefaults('Dave', 'America/Chicago');
+    expect(vals.userName).toBe('Dave');
+    expect(vals.timezone).toBe('America/Chicago');
+    expect(vals.morningCheckin).toBe(false);
+  });
+
+  it('getValuesWithDefaults preserves answered fields', () => {
+    const { flow } = startFlow();
+    flow.handleInput('David'); // userName answered, timezone/checkin not yet
+    const vals = flow.getValuesWithDefaults('Dave', 'UTC');
+    expect(vals.userName).toBe('David'); // answered value kept
+    expect(vals.timezone).toBe('UTC');   // default used
+    expect(vals.morningCheckin).toBe(false); // default used
+  });
+
+  // --- Public API surface ---
+  it('public properties exist', () => {
+    const flow = new OnboardingFlow();
+    expect(typeof flow.lastActivityTimestamp).toBe('number');
+    expect(flow.channelMode).toBe('dm');
+    expect(flow.hasRedirected).toBe(false);
+    expect(flow.channelId).toBeUndefined();
   });
 });
