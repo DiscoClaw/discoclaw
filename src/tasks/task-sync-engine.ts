@@ -6,6 +6,7 @@ import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
+import type { TaskSyncRunOptions } from './task-sync.js';
 import { createTaskService } from './service.js';
 import {
   ingestTaskSyncSnapshot,
@@ -34,7 +35,7 @@ import {
   shortTaskId,
 } from './discord-sync.js';
 
-export type TaskSyncOptions = {
+type TaskSyncCoreOptions = {
   client: Client;
   guild: Guild;
   forumId: string;
@@ -46,9 +47,9 @@ export type TaskSyncOptions = {
   archivedDedupeLimit?: number;
   statusPoster?: StatusPoster;
   mentionUserId?: string;
-  /** Disable Phase 5 (thread reconciliation). Useful for shared-forum deployments. */
-  skipPhase5?: boolean;
 };
+
+export type TaskSyncOptions = TaskSyncCoreOptions & TaskSyncRunOptions;
 
 type TaskSyncApplyCounters = {
   threadsCreated: number;
