@@ -1014,7 +1014,6 @@ if (taskCtx) {
       guild,
       sidebarMentionUserId,
       log,
-      forumCountSync: taskForumCountSync,
       skipForumGuard: true,
       skipPhase5: cfg.tasksSyncSkipPhase5,
     });

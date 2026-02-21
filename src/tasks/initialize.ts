@@ -3,7 +3,6 @@ import type { TaskContext } from '../discord/actions-tasks.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
-import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { TaskStore } from './store.js';
 import { createTaskService } from './service.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
@@ -113,7 +112,6 @@ export type WireTaskSyncOpts = {
   guild: Guild;
   sidebarMentionUserId?: string;
   log: LoggerLike;
-  forumCountSync?: ForumCountSync;
   /** Skip forum guard installation (caller already installed it). */
   skipForumGuard?: boolean;
   /** Disable Phase 5 (thread reconciliation) of the task sync cycle. */
