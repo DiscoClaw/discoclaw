@@ -71,6 +71,11 @@ type TaskSyncApplyContext = {
   counters: TaskSyncApplyCounters;
 };
 
+type TaskSyncReconcileResult = {
+  threadsReconciled: number;
+  orphanThreadsFound: number;
+};
+
 function createApplyCounters(): TaskSyncApplyCounters {
   return {
     threadsCreated: 0,
@@ -263,6 +268,112 @@ async function applyPhase4ArchiveClosedThreads(
   }
 }
 
+async function applyPhase5ReconcileThreads(
+  ctx: TaskSyncApplyContext,
+  allTasks: TaskData[],
+): Promise<TaskSyncReconcileResult> {
+  let threadsReconciled = 0;
+  let orphanThreadsFound = 0;
+
+  const tasksByShortId = buildTasksByShortIdMap(allTasks, shortTaskId);
+
+  try {
+    const activeThreads = await ctx.forum.threads.fetchActive();
+    let archivedThreads: Map<string, any> = new Map();
+    try {
+      const fetched = await ctx.forum.threads.fetchArchived();
+      archivedThreads = new Map(fetched.threads);
+    } catch (err) {
+      ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch archived threads');
+      ctx.counters.warnings++;
+    }
+
+    const allThreads = new Map<string, any>([
+      ...archivedThreads,
+      ...(activeThreads.threads as Map<string, any>),
+    ]);
+    for (const thread of allThreads.values()) {
+      const sid = extractShortIdFromThreadName(thread.name);
+      if (!sid) continue;
+
+      const tasks = tasksByShortId.get(sid);
+      if (!tasks || tasks.length === 0) {
+        orphanThreadsFound++;
+        ctx.log?.info({ threadId: thread.id, threadName: thread.name, shortId: sid }, 'task-sync:phase5 orphan thread detected');
+        await sleep(ctx.throttleMs);
+        continue;
+      }
+
+      if (tasks.length > 1) {
+        ctx.log?.info({ threadId: thread.id, shortId: sid, count: tasks.length }, 'task-sync:phase5 short-id collision, skipping');
+        await sleep(ctx.throttleMs);
+        continue;
+      }
+
+      const task = tasks[0]!;
+      const existingThreadId = getThreadIdFromTask(task);
+      if (existingThreadId && existingThreadId !== thread.id) {
+        ctx.log?.info({ taskId: task.id, threadId: thread.id, existingThreadId }, 'task-sync:phase5 external_ref points to different thread, skipping');
+        await sleep(ctx.throttleMs);
+        continue;
+      }
+
+      if (task.status === 'closed' && !thread.archived) {
+        if (hasInFlightForChannel(thread.id)) {
+          ctx.counters.closesDeferred++;
+          ctx.log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
+          await sleep(ctx.throttleMs);
+          continue;
+        }
+
+        if (!existingThreadId) {
+          try {
+            ctx.taskService.update(task.id, { externalRef: `discord:${thread.id}` });
+            ctx.log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 external_ref backfilled');
+          } catch (err) {
+            ctx.log?.warn({ err, taskId: task.id, threadId: thread.id }, 'task-sync:phase5 external_ref backfill failed');
+            ctx.counters.warnings++;
+          }
+        }
+
+        try {
+          await closeTaskThread(ctx.client, thread.id, task, ctx.tagMap, ctx.log);
+          threadsReconciled++;
+          ctx.log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 reconciled (archived)');
+        } catch (err) {
+          ctx.log?.warn({ err, taskId: task.id, threadId: thread.id }, 'task-sync:phase5 archive failed');
+          ctx.counters.warnings++;
+        }
+        await sleep(ctx.throttleMs);
+      } else if (task.status === 'closed' && thread.archived) {
+        try {
+          const alreadyClosed = await isTaskThreadAlreadyClosed(ctx.client, thread.id, task, ctx.tagMap);
+          if (!alreadyClosed) {
+            if (hasInFlightForChannel(thread.id)) {
+              ctx.counters.closesDeferred++;
+              ctx.log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
+            } else {
+              ctx.log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 archived thread is stale, unarchiving to reconcile');
+              await closeTaskThread(ctx.client, thread.id, task, ctx.tagMap, ctx.log);
+              threadsReconciled++;
+              ctx.log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 reconciled (re-archived)');
+            }
+          }
+        } catch (err) {
+          ctx.log?.warn({ err, taskId: task.id, threadId: thread.id }, 'task-sync:phase5 archived reconcile failed');
+          ctx.counters.warnings++;
+        }
+        await sleep(ctx.throttleMs);
+      }
+    }
+  } catch (err) {
+    ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch active threads');
+    ctx.counters.warnings++;
+  }
+
+  return { threadsReconciled, orphanThreadsFound };
+}
+
 /**
  * 5-phase safety-net sync between tasks DB and Discord forum threads.
  *
@@ -326,106 +437,12 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   await applyPhase3SyncActiveThreads(applyCtx, normalized.tasksWithRef, phase3TaskIds);
   await applyPhase4ArchiveClosedThreads(applyCtx, normalized.closedTasks, phase4TaskIds);
 
-  // Phase 5: Reconcile forum threads against tasks.
   let threadsReconciled = 0;
   let orphanThreadsFound = 0;
-
   if (!opts.skipPhase5) {
-    // Build a map of short task IDs -> tasks for reconciliation lookup.
-    const tasksByShortId = buildTasksByShortIdMap(allTasks, shortTaskId);
-
-    // Fetch active + archived forum threads.
-    try {
-      const activeThreads = await forum.threads.fetchActive();
-      let archivedThreads: Map<string, any> = new Map();
-      try {
-        const fetched = await forum.threads.fetchArchived();
-        archivedThreads = new Map(fetched.threads);
-      } catch (err) {
-        log?.warn({ err }, 'task-sync:phase5 failed to fetch archived threads');
-        counters.warnings++;
-      }
-
-      // Combine both sets — active threads take priority for duplicates.
-      const allThreads = new Map([...archivedThreads, ...activeThreads.threads]);
-      for (const thread of allThreads.values()) {
-        const sid = extractShortIdFromThreadName(thread.name);
-        if (!sid) continue;
-
-        const tasks = tasksByShortId.get(sid);
-        if (!tasks || tasks.length === 0) {
-          orphanThreadsFound++;
-          log?.info({ threadId: thread.id, threadName: thread.name, shortId: sid }, 'task-sync:phase5 orphan thread detected');
-          await sleep(throttleMs);
-          continue;
-        }
-
-        if (tasks.length > 1) {
-          log?.info({ threadId: thread.id, shortId: sid, count: tasks.length }, 'task-sync:phase5 short-id collision, skipping');
-          await sleep(throttleMs);
-          continue;
-        }
-
-        const task = tasks[0]!;
-        const existingThreadId = getThreadIdFromTask(task);
-        if (existingThreadId && existingThreadId !== thread.id) {
-          log?.info({ taskId: task.id, threadId: thread.id, existingThreadId }, 'task-sync:phase5 external_ref points to different thread, skipping');
-          await sleep(throttleMs);
-          continue;
-        }
-
-        if (task.status === 'closed' && !thread.archived) {
-          if (hasInFlightForChannel(thread.id)) {
-            counters.closesDeferred++;
-            log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
-            await sleep(throttleMs);
-            continue;
-          }
-
-          if (!existingThreadId) {
-            try {
-              taskService.update(task.id, { externalRef: `discord:${thread.id}` });
-              log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 external_ref backfilled');
-            } catch (err) {
-              log?.warn({ err, taskId: task.id, threadId: thread.id }, 'task-sync:phase5 external_ref backfill failed');
-              counters.warnings++;
-            }
-          }
-
-          try {
-            await closeTaskThread(client, thread.id, task, tagMap, log);
-            threadsReconciled++;
-            log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 reconciled (archived)');
-          } catch (err) {
-            log?.warn({ err, taskId: task.id, threadId: thread.id }, 'task-sync:phase5 archive failed');
-            counters.warnings++;
-          }
-          await sleep(throttleMs);
-        } else if (task.status === 'closed' && thread.archived) {
-          try {
-            const alreadyClosed = await isTaskThreadAlreadyClosed(client, thread.id, task, tagMap);
-            if (!alreadyClosed) {
-              if (hasInFlightForChannel(thread.id)) {
-                counters.closesDeferred++;
-                log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
-              } else {
-                log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 archived thread is stale, unarchiving to reconcile');
-                await closeTaskThread(client, thread.id, task, tagMap, log);
-                threadsReconciled++;
-                log?.info({ taskId: task.id, threadId: thread.id }, 'task-sync:phase5 reconciled (re-archived)');
-              }
-            }
-          } catch (err) {
-            log?.warn({ err, taskId: task.id, threadId: thread.id }, 'task-sync:phase5 archived reconcile failed');
-            counters.warnings++;
-          }
-          await sleep(throttleMs);
-        }
-      }
-    } catch (err) {
-      log?.warn({ err }, 'task-sync:phase5 failed to fetch active threads');
-      counters.warnings++;
-    }
+    const phase5 = await applyPhase5ReconcileThreads(applyCtx, allTasks);
+    threadsReconciled = phase5.threadsReconciled;
+    orphanThreadsFound = phase5.orphanThreadsFound;
   }
 
   log?.info({
