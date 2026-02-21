@@ -1,13 +1,20 @@
 import type { LoggerLike } from '../discord/action-types.js';
-import type { StatusPoster } from '../discord/status-channel.js';
-import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import type { TaskSyncResult, TagMap } from './types.js';
 import type { TaskSyncRunOptions } from './sync-types.js';
 
+export type TaskStatusPoster = {
+  taskSyncComplete(result: TaskSyncResult): Promise<void>;
+};
+
+export type TaskForumCountSync = {
+  requestUpdate(): void;
+  stop(): void;
+};
+
 export type TaskSyncCoordinatorLike = {
-  sync(statusPoster?: StatusPoster): Promise<TaskSyncResult | null>;
+  sync(statusPoster?: TaskStatusPoster): Promise<TaskSyncResult | null>;
 };
 
 export type TaskSyncContext = {
@@ -18,7 +25,7 @@ export type TaskSyncContext = {
   taskService?: TaskService;
   log?: LoggerLike;
   sidebarMentionUserId?: string;
-  forumCountSync?: ForumCountSync;
+  forumCountSync?: TaskForumCountSync;
   syncCoordinator?: TaskSyncCoordinatorLike;
   syncFailureRetryEnabled?: boolean;
   syncFailureRetryDelayMs?: number;

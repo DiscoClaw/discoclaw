@@ -1,6 +1,5 @@
-import type { StatusPoster } from '../discord/status-channel.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { TaskSyncContext } from './sync-context.js';
+import type { TaskSyncContext, TaskStatusPoster } from './sync-context.js';
 
 export type TaskContext = TaskSyncContext & {
   tasksCwd?: string;
@@ -8,5 +7,5 @@ export type TaskContext = TaskSyncContext & {
   autoTag: boolean;
   autoTagModel: string;
   mentionUserId?: string;
-  statusPoster?: StatusPoster;
+  statusPoster?: TaskStatusPoster;
 };

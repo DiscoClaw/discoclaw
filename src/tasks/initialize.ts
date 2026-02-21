@@ -1,7 +1,7 @@
 import type { TaskContext } from './task-context.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { StatusPoster } from '../discord/status-channel.js';
+import type { TaskStatusPoster } from './sync-context.js';
 import type { TaskStore } from './store.js';
 import { createTaskService } from './service.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
@@ -26,7 +26,7 @@ export type InitializeTasksOpts = {
   tasksSyncFailureRetryDelayMs?: number;
   tasksSyncDeferredRetryDelayMs?: number;
   runtime: RuntimeAdapter;
-  statusPoster?: StatusPoster;
+  statusPoster?: TaskStatusPoster;
   log: LoggerLike;
   /** Resolved from system bootstrap or config. */
   systemTasksForumId?: string;
