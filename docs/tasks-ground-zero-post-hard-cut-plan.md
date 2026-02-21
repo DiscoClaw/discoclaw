@@ -57,3 +57,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 3 by adding `planTaskSyncApplyExecution` in pipeline to compose Stage 2-4 normalize/diff/apply planning, reducing planning glue in `runTaskSync`.
 - 2026-02-21: Continued Track 3 by splitting phase-5 execution into explicit plan/apply steps in engine (`applyPhase5ReconcileOperations`) and adding a guard test ensuring `skipPhase5` avoids thread-source fetches.
 - 2026-02-21: Continued Track 3 by extracting phase-5 reconcile planning in engine into `planPhase5ReconcileOperations`, making phase-5 fetch/plan/apply boundaries explicit.
+- 2026-02-21: Continued Track 3 by extracting stage dispatch helpers in engine (`applyPlannedSyncPhases`, `runPhase5IfEnabled`) so `runTaskSync` reads as explicit stage orchestration.

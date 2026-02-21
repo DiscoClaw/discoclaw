@@ -14,6 +14,7 @@ import {
   type TaskThreadLike,
   type TaskReconcileAction,
   type TaskReconcileOperation,
+  type TaskSyncApplyExecutionPlan,
   type TaskSyncOperationPhase,
 } from './task-sync-pipeline.js';
 import { withTaskLifecycleLock } from './task-lifecycle.js';
@@ -482,6 +483,27 @@ async function applyPhase5ReconcileThreads(
   };
 }
 
+async function applyPlannedSyncPhases(
+  ctx: TaskSyncApplyContext,
+  applyPlan: TaskSyncApplyExecutionPlan,
+): Promise<void> {
+  for (const phasePlan of applyPlan.phasePlans) {
+    if (phasePlan.taskIds.length === 0) continue;
+    await PHASE_EXECUTORS[phasePlan.phase](ctx, applyPlan.tasksById, phasePlan.taskIds);
+  }
+}
+
+async function runPhase5IfEnabled(
+  ctx: TaskSyncApplyContext,
+  allTasks: TaskData[],
+  skipPhase5?: boolean,
+): Promise<TaskSyncReconcileResult> {
+  if (skipPhase5) {
+    return { threadsReconciled: 0, orphanThreadsFound: 0 };
+  }
+  return applyPhase5ReconcileThreads(ctx, allTasks);
+}
+
 /**
  * 5-phase safety-net sync between tasks DB and Discord forum threads.
  *
@@ -534,18 +556,11 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
     counters,
   };
 
-  for (const phasePlan of applyPlan.phasePlans) {
-    if (phasePlan.taskIds.length === 0) continue;
-    await PHASE_EXECUTORS[phasePlan.phase](applyCtx, applyPlan.tasksById, phasePlan.taskIds);
-  }
+  await applyPlannedSyncPhases(applyCtx, applyPlan);
 
-  let threadsReconciled = 0;
-  let orphanThreadsFound = 0;
-  if (!opts.skipPhase5) {
-    const phase5 = await applyPhase5ReconcileThreads(applyCtx, allTasks);
-    threadsReconciled = phase5.threadsReconciled;
-    orphanThreadsFound = phase5.orphanThreadsFound;
-  }
+  const phase5 = await runPhase5IfEnabled(applyCtx, allTasks, opts.skipPhase5);
+  const threadsReconciled = phase5.threadsReconciled;
+  const orphanThreadsFound = phase5.orphanThreadsFound;
 
   log?.info({
     threadsCreated: counters.threadsCreated,
