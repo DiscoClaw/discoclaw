@@ -217,6 +217,8 @@ export class TaskSyncCoordinator {
         metrics.increment('tasks.sync.follow_up.triggered');
         this.sync(pendingPoster).catch((err) => {
           metrics.increment('tasks.sync.follow_up.failed');
+          const message = err instanceof Error ? err.message : String(err ?? '');
+          metrics.increment(`tasks.sync.follow_up.error_class.${classifySyncError(message)}`);
           this.opts.log?.warn({ err }, 'tasks:coordinator follow-up sync failed');
         });
       }

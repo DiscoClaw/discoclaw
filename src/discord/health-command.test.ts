@@ -151,6 +151,7 @@ describe('renderHealthReport', () => {
     metrics.increment('tasks.sync.follow_up.scheduled', 2);
     metrics.increment('tasks.sync.follow_up.triggered', 2);
     metrics.increment('tasks.sync.follow_up.failed', 1);
+    metrics.increment('tasks.sync.follow_up.error_class.other', 1);
     metrics.increment('tasks.sync.retry.scheduled', 3);
     metrics.increment('tasks.sync.retry.triggered', 2);
     metrics.increment('tasks.sync.retry.failed', 1);
@@ -182,6 +183,7 @@ describe('renderHealthReport', () => {
     expect(verbose).toContain('Task sync transitions: created=5 archived=6 reconciled=7 orphans=8 deferred=9 warnings=10');
     expect(verbose).toContain('taskSyncPolicy: failureRetry=off failureDelayMs=12000 deferredDelayMs=18000');
     expect(verbose).toContain('Task sync follow-up/retry: followUp=2/2/1 retry=3/2/1 (coalesced=5 canceled=2) failureRetry=4/3/2 (coalesced=6 canceled=1 disabled=7)');
+    expect(verbose).toContain('- tasks.sync.follow_up.error_class.other=1');
   });
 
   it('renders tools report', () => {

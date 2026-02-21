@@ -243,6 +243,7 @@ describe('TaskSyncCoordinator', () => {
     );
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.triggered');
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.failed');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.error_class.other');
   });
 
   it('classifies sync failure metrics', async () => {
