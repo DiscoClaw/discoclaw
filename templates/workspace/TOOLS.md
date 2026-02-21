@@ -2,7 +2,18 @@
 
 ## Browser Automation (agent-browser)
 
-`agent-browser` is available via Bash for browsing, form filling, and scraping.
+`agent-browser` is an optional tool for browsing, form filling, and scraping. It requires a separate install (`npm install -g @anthropic/agent-browser`) and is not bundled with discoclaw.
+
+### RSS First
+
+Before using browser automation or WebFetch for any recurring or structured data need, check if the site has an RSS/Atom feed. Feeds are more stable than scraped HTML, don't trigger bot detection, and are already structured.
+
+**How to check:**
+- Common paths: `/feed`, `/rss`, `/feed.xml`, `/atom.xml`, `/rss.xml`, `/index.xml`
+- Look for `<link rel="alternate" type="application/rss+xml">` in the page's `<head>` via WebFetch
+- Many CMSes (WordPress, Ghost, Substack, etc.) expose feeds automatically
+
+If a feed covers the needed data, use it. Only fall back to scraping if no feed exists or the feed is too limited.
 
 ### Which mode to use
 
@@ -129,6 +140,10 @@ These commands are handled directly by discoclaw (no AI invocation):
 - `!restart` — restart the discoclaw service (checks status before/after, reports outcome)
 - `!restart status` — show current service status
 - `!restart logs` — show recent service logs (last 30 lines)
+- `!stop` — abort all active AI streams and cancel any running forge
+- `!models` — show current model assignments for all roles
+- `!models set <role> <model>` — change the model for a role at runtime
+- `!models help` — show available roles and usage
 
 ### Guardrails
 
@@ -137,6 +152,20 @@ These commands are handled directly by discoclaw (no AI invocation):
 - **Only discoclaw.** This authorization covers the discoclaw service specifically. Other user services require asking first.
 - **Report, don't hide.** Always tell the user the outcome, even if it's routine.
 - **If restart fails twice, stop and diagnose.** Don't loop. Check logs, report the error, suggest next steps.
+
+### Rebuild & Restart Workflow
+
+When the user asks for "a rebuild," follow a consistent sequence and wait for confirmation before touching services.
+
+1. Switch to the real repo: `cd ~/code/discoclaw`.
+2. Run `git pull` to sync with origin.
+3. Run `pnpm install` (it can't hurt even if dependencies are already satisfied).
+4. Run `pnpm build` and treat any non‑zero exit as a failure; capture the stdout/stderr snippet that proves the build finished.
+5. Offer to run `pnpm preflight` only if the user explicitly asks for it.
+6. Report back with the command outputs and explicitly state "build succeeded" or where it failed.
+7. Wait for the user to acknowledge the rebuild succeeded before proposing or executing any restart.
+
+If the user separately asks for a restart, only then execute `systemctl --user restart discoclaw`, following the existing restart procedure (status → restart → status/logs). Never restart before the rebuild workflow has succeeded and been confirmed; the rebuild must be confirmed first, then the restart follows as a distinct, second step.
 
 ## Plan-Audit-Implement Workflow
 
@@ -240,3 +269,36 @@ Use planList to check existing plans before creating duplicates. Use forgeCreate
 ```
 
 Use memoryRemember to proactively store important facts (preferences, projects, tools, constraints). Pick the most specific `kind` that fits. Memory items persist across sessions, channels, and restarts.
+
+### Model Configuration
+
+**modelShow** — Show current model assignments for all roles:
+```
+<discord-action>{"type":"modelShow"}</discord-action>
+```
+
+**modelSet** — Change the model for a role at runtime:
+```
+<discord-action>{"type":"modelSet","role":"chat","model":"sonnet"}</discord-action>
+<discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
+```
+- `role` (required): One of `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`.
+- `model` (required): Model tier (`fast`, `capable`), concrete model name (`haiku`, `sonnet`, `opus`), or `default` (for cron-exec only, to revert to following chat).
+
+**Roles:**
+| Role | What it controls |
+|------|-----------------|
+| `chat` | Discord messages, plan runs, deferred runs, forge fallback |
+| `fast` | All small/fast tasks (summary, cron auto-tag, beads auto-tag) |
+| `forge-drafter` | Forge plan drafting/revision |
+| `forge-auditor` | Forge plan auditing |
+| `summary` | Rolling summaries only (overrides fast) |
+| `cron` | Cron auto-tagging and model classification (overrides fast) |
+| `cron-exec` | Default model for cron job execution (overridden by per-job settings) |
+
+Changes are **ephemeral** -- they take effect immediately but revert on restart. Use env vars (`RUNTIME_MODEL`, `DISCOCLAW_FAST_MODEL`, etc.) for persistent configuration.
+
+**Cron model priority:** per-job override (cronUpdate) > AI-classified model > cron-exec default > chat fallback.
+Set `cron-exec` to `default` to clear the override and fall back to the chat model.
+
+Note: The `cron` role controls auto-tagging only. Use `cron-exec` to set the default execution model for all cron jobs.
