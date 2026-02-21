@@ -300,7 +300,27 @@ export async function executeChannelAction(
           const fetched = await ctx.client.channels.fetch(action.threadId);
           if (fetched && fetched.isThread()) thread = fetched as ThreadChannel;
         } catch {
-          // fall through to null check below
+          // fall through to forum-channel fallback below
+        }
+      }
+
+      // Fallback: search guild forum channels for the thread.
+      // client.channels.fetch() can miss archived forum threads that have
+      // been evicted from the gateway cache after archiving.
+      // Check archived first (the common case for this fallback), then active.
+      if (!thread) {
+        for (const ch of guild.channels.cache.values()) {
+          if (ch.type !== ChannelType.GuildForum) continue;
+          try {
+            const archived = await (ch as ForumChannel).threads.fetchArchived({ limit: 100 });
+            const archivedMatch = archived.threads.get(action.threadId);
+            if (archivedMatch?.isThread()) { thread = archivedMatch as ThreadChannel; break; }
+            const active = await (ch as ForumChannel).threads.fetchActive();
+            const activeMatch = active.threads.get(action.threadId);
+            if (activeMatch?.isThread()) { thread = activeMatch as ThreadChannel; break; }
+          } catch {
+            // skip forums we can't access
+          }
         }
       }
 
@@ -320,16 +340,29 @@ export async function executeChannelAction(
         }
       }
 
+      // Unarchive before editing — Discord rejects edits on archived threads.
+      const wasArchived = (thread as any).archived === true;
+      if (wasArchived) {
+        try { await (thread as any).setArchived(false); } catch { /* proceed — edit may still work */ }
+      }
+
       const edits: { appliedTags?: string[]; name?: string } = {};
       if (action.appliedTags != null) edits.appliedTags = action.appliedTags;
       if (action.name != null) edits.name = action.name;
 
       await (thread as any).edit(edits);
 
+      // Re-archive if the thread was archived before we touched it.
+      let rearchiveFailed = false;
+      if (wasArchived) {
+        try { await (thread as any).setArchived(true); } catch { rearchiveFailed = true; }
+      }
+
       const parts: string[] = [];
       if (action.name != null) parts.push(`name → ${action.name}`);
       if (action.appliedTags != null) parts.push(`appliedTags → [${action.appliedTags.join(', ')}]`);
-      return { ok: true, summary: `Edited thread "${thread.name}" (id:${thread.id}): ${parts.join(', ')}` };
+      const warning = rearchiveFailed ? ' (warning: failed to re-archive)' : '';
+      return { ok: true, summary: `Edited thread "${thread.name}" (id:${thread.id}): ${parts.join(', ')}${warning}` };
     }
   }
 }
