@@ -1,9 +1,9 @@
-#!/bin/bash
-# bd-quick.sh — Quick-capture a bead in the task store.
-# Usage: bd-quick.sh "title" [--tags tag1,tag2]
+#!/usr/bin/env bash
+# task-quick.sh — Quick-capture a task in the task store.
+# Usage: task-quick.sh "title" [--tags tag1,tag2]
 #
-# Outputs only the new bead ID. Discord sync is handled in-process by
-# BeadSyncWatcher when the bot is running. To trigger a manual sync: bd sync
+# Outputs only the new task ID. Discord sync is handled in-process by the task
+# sync watcher when the bot is running. To trigger a manual sync: task sync
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -29,20 +29,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-bead_id=$(run_task_cli quick "${title_args[@]}" 2>&1)
+task_id=$(run_task_cli quick "${title_args[@]}" 2>&1)
 
-if [[ ! "$bead_id" =~ ^[a-z]+-[a-z0-9]+$ ]]; then
-  echo "$bead_id" >&2
+if [[ ! "$task_id" =~ ^[a-z]+-[a-z0-9]+$ ]]; then
+  echo "$task_id" >&2
   exit 1
 fi
 
-echo "$bead_id"
+echo "$task_id"
 
 # Apply tags as labels (tag:<name>) so Discord sync can map them to forum tags.
 if [[ -n "$tags_arg" ]]; then
   IFS=',' read -ra tag_list <<< "$tags_arg"
   for tag in "${tag_list[@]}"; do
     tag="${tag// /}"
-    [[ -n "$tag" ]] && run_task_cli label-add "$bead_id" "tag:$tag" >/dev/null 2>&1 || true
+    [[ -n "$tag" ]] && run_task_cli label-add "$task_id" "tag:$tag" >/dev/null 2>&1 || true
   done
 fi

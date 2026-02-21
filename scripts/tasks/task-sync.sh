@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bead-thread-sync.sh — Canonical sync wrapper (delegates to task sync CLI).
+# task-sync.sh — Canonical sync wrapper (delegates to task sync CLI).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

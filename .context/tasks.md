@@ -29,9 +29,7 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 Legacy runtime compatibility shims under `src/beads/` have been removed.
 
 Bridge compatibility currently retained:
-- `scripts/beads/*` migration/hooks tooling
-
-Removal target: Phase 5 hard-cut after migration cleanup.
+- Legacy bd database migration path (`.beads/beads.db` -> `data/tasks/tasks.jsonl`) via `src/tasks/migrate.ts`
 
 Primary action trigger is `taskSync` via `src/discord/actions-tasks.ts`.
 

@@ -210,6 +210,7 @@ for removal once the migration tooling is no longer needed.
 
 The canonical runtime is task-named (`src/tasks/*`). Remaining bridge surface is limited to:
 
-- `scripts/beads/*` migration/hooks tooling remains for bridge and one-shot migration flows.
+- Legacy bd database migration compatibility (`.beads/beads.db`) for one-shot export into
+  canonical `data/tasks/tasks.jsonl`.
 
-This compatibility path is scheduled for removal in Phase 5 hard-cut after migration cleanup is complete.
+Legacy script wrappers and hook scripts under `scripts/beads/*` were removed in Phase 5.
