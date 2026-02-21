@@ -25,6 +25,7 @@ import {
   resolveProjectCwd,
   resolveContextFilePath,
   writePhasesFile,
+  readPhasesFile,
   executePhase,
   runNextPhase,
 } from './plan-manager.js';
@@ -425,6 +426,99 @@ describe('decomposePlan', () => {
     // The original TOOLS.md should not appear without prefix
     const hasBare = allContextFiles.some((f) => f === 'TOOLS.md');
     expect(hasNormalized || !hasBare).toBe(true);
+  });
+
+  it('prefers Change Manifest file list over Changes heuristics', () => {
+    const plan = [
+      '# Plan: Manifest test',
+      '',
+      '**ID:** plan-011',
+      '**Task:** ws-test',
+      '**Created:** 2026-02-12',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '',
+      '## Objective',
+      '',
+      'Test manifest.',
+      '',
+      '## Changes',
+      '',
+      '- `src/from-changes.ts` — would be used without manifest',
+      '',
+      '## Change Manifest',
+      '',
+      '```json',
+      '["src/from-manifest.ts"]',
+      '```',
+    ].join('\n');
+
+    const phases = decomposePlan(plan, 'plan-011', 'workspace/plans/plan-011.md');
+    const allContextFiles = phases.phases.flatMap((p) => p.contextFiles);
+    expect(allContextFiles.some((f) => f.includes('from-manifest.ts'))).toBe(true);
+    expect(allContextFiles.some((f) => f.includes('from-changes.ts'))).toBe(false);
+  });
+
+  it('falls back to Changes parsing when Change Manifest is invalid', () => {
+    const plan = [
+      '# Plan: Manifest fallback test',
+      '',
+      '**ID:** plan-011',
+      '**Task:** ws-test',
+      '**Created:** 2026-02-12',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '',
+      '## Objective',
+      '',
+      'Test manifest fallback.',
+      '',
+      '## Changes',
+      '',
+      '- `src/fallback-file.ts` — should be picked',
+      '',
+      '## Change Manifest',
+      '',
+      '```json',
+      '[{"not":"an array of paths"}]',
+      '```',
+    ].join('\n');
+
+    const phases = decomposePlan(plan, 'plan-011', 'workspace/plans/plan-011.md');
+    const allContextFiles = phases.phases.flatMap((p) => p.contextFiles);
+    expect(allContextFiles.some((f) => f.includes('fallback-file.ts'))).toBe(true);
+  });
+
+  it('ignores top-level heading markers inside code fences while scanning sections', () => {
+    const plan = [
+      '# Plan: Fence test',
+      '',
+      '**ID:** plan-011',
+      '**Task:** ws-test',
+      '**Created:** 2026-02-12',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '',
+      '## Objective',
+      '',
+      'Section scanner should ignore headings in code fences.',
+      '',
+      '## Changes',
+      '',
+      '```md',
+      '## Not really a top-level section',
+      '```',
+      '',
+      '- `src/fence-safe.ts` — file entry',
+      '',
+      '## Risks',
+      '',
+      '- none',
+    ].join('\n');
+
+    const phases = decomposePlan(plan, 'plan-011', 'workspace/plans/plan-011.md');
+    const allContextFiles = phases.phases.flatMap((p) => p.contextFiles);
+    expect(allContextFiles.some((f) => f.includes('fence-safe.ts'))).toBe(true);
   });
 });
 
@@ -867,14 +961,20 @@ describe('writePhasesFile', () => {
   it('writes serialized data and no .tmp remains', () => {
     const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'test.md');
     const filePath = path.join(tmpDir, 'phases.md');
+    const jsonPath = path.join(tmpDir, 'phases.json');
 
     writePhasesFile(filePath, phases);
 
     expect(fsSync.existsSync(filePath)).toBe(true);
+    expect(fsSync.existsSync(jsonPath)).toBe(true);
     expect(fsSync.existsSync(filePath + '.tmp')).toBe(false);
+    expect(fsSync.existsSync(jsonPath + '.tmp')).toBe(false);
 
     const content = fsSync.readFileSync(filePath, 'utf-8');
     expect(content).toContain('plan-011');
+    const json = JSON.parse(fsSync.readFileSync(jsonPath, 'utf-8'));
+    expect(json.version).toBe(1);
+    expect(json.planId).toBe('plan-011');
   });
 
   it('overwrites existing file atomically', () => {
@@ -888,6 +988,31 @@ describe('writePhasesFile', () => {
 
     const content = fsSync.readFileSync(filePath, 'utf-8');
     expect(content).toContain('2026-12-31');
+  });
+
+  it('readPhasesFile prefers json and falls back to markdown with backfill', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'test.md');
+    const filePath = path.join(tmpDir, 'phases.md');
+    const jsonPath = path.join(tmpDir, 'phases.json');
+
+    writePhasesFile(filePath, phases);
+
+    // Mutate json state so we can verify json-first reads.
+    const json = JSON.parse(fsSync.readFileSync(jsonPath, 'utf-8'));
+    json.updatedAt = '2099-01-01';
+    fsSync.writeFileSync(jsonPath, JSON.stringify(json, null, 2) + '\n', 'utf-8');
+
+    const fromJson = readPhasesFile(filePath);
+    expect(fromJson.updatedAt).toBe('2099-01-01');
+
+    // Corrupt json; reader should fall back to markdown and backfill json.
+    fsSync.writeFileSync(jsonPath, '{"version":1,"bad":', 'utf-8');
+    const fromMd = readPhasesFile(filePath);
+    expect(fromMd.planId).toBe('plan-011');
+
+    const backfilled = JSON.parse(fsSync.readFileSync(jsonPath, 'utf-8'));
+    expect(backfilled.planId).toBe('plan-011');
+    expect(backfilled.version).toBe(1);
   });
 });
 

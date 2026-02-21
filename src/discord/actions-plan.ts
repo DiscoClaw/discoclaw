@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
@@ -13,7 +12,7 @@ import {
   NO_PHASES_SENTINEL,
 } from './plan-commands.js';
 import type { HandlePlanCommandOpts, PlanFileHeader } from './plan-commands.js';
-import { runNextPhase, resolveProjectCwd, deserializePhases, buildPostRunSummary } from './plan-manager.js';
+import { runNextPhase, resolveProjectCwd, readPhasesFile, buildPostRunSummary } from './plan-manager.js';
 import type { PlanRunEvent } from './plan-manager.js';
 import type { TaskStore } from '../tasks/store.js';
 import {
@@ -417,8 +416,7 @@ export async function executePlanAction(
           lines.push('Plan auto-closed — all phases terminal.');
         }
         try {
-          const phasesContent = await fs.readFile(prepResult.phasesFilePath, 'utf-8');
-          const phases = deserializePhases(phasesContent);
+          const phases = readPhasesFile(prepResult.phasesFilePath, { log: planCtx.log });
           const budget = Math.max(0, 2000 - lines.join('\n').length - 50);
           const summary = buildPostRunSummary(phases, budget);
           if (summary) {

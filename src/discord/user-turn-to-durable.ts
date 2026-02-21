@@ -2,6 +2,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { DurableItem } from './durable-memory.js';
 import { loadDurableMemory, saveDurableMemory, addItem } from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
+import { extractFirstJsonValue } from './json-extract.js';
 
 const VALID_KINDS = new Set<DurableItem['kind']>([
   'preference', 'fact', 'project', 'constraint', 'person', 'tool', 'workflow',
@@ -73,11 +74,9 @@ export async function extractFromUserTurn(
 
 export function parseExtractionResult(raw: string): ExtractedItem[] {
   try {
-    // Try to find the JSON array in the response (may have markdown fences).
-    const match = raw.match(/\[[\s\S]*?\]/);
-    if (!match) return [];
-
-    const parsed = JSON.parse(match[0]);
+    const jsonArray = extractFirstJsonValue(raw, { arrayOnly: true });
+    if (!jsonArray) return [];
+    const parsed = JSON.parse(jsonArray);
     if (!Array.isArray(parsed)) return [];
 
     return parsed

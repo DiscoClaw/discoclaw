@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TaskData } from './types.js';
 import {
   buildTasksByShortIdMap,
+  buildTasksByThreadIdMap,
   ingestTaskThreadSnapshots,
   ingestTaskSyncSnapshot,
   planTaskSyncApplyExecution,
@@ -150,6 +151,24 @@ describe('task-sync pipeline helpers', () => {
     expect(map.get('002')?.map((t) => t.id)).toEqual(['ws-002']);
   });
 
+  it('builds a thread-id lookup map for reconciliation', () => {
+    const map = buildTasksByThreadIdMap(
+      [
+        task({ id: 'ws-001', title: 'A', status: 'closed', external_ref: 'discord:thread-1' }),
+        task({ id: 'ws-002', title: 'B', status: 'open', external_ref: 'discord:thread-2' }),
+        task({ id: 'ws-003', title: 'C', status: 'open' }),
+      ],
+      (t) => {
+        const ref = t.external_ref ?? '';
+        return ref.startsWith('discord:') ? ref.slice('discord:'.length) : null;
+      },
+    );
+
+    expect(map.get('thread-1')?.map((t) => t.id)).toEqual(['ws-001']);
+    expect(map.get('thread-2')?.map((t) => t.id)).toEqual(['ws-002']);
+    expect(map.get('thread-3')).toBeUndefined();
+  });
+
   it('normalizes and merges phase5 thread snapshots with active-over-archived precedence', () => {
     const snapshots = ingestTaskThreadSnapshots(
       [
@@ -241,6 +260,26 @@ describe('task-sync pipeline helpers', () => {
       'archive_active_closed',
       'reconcile_archived_closed',
     ]);
+  });
+
+  it('prefers thread-id mapping before thread-name parsing in reconcile planning', () => {
+    const ops = planTaskReconcileFromSnapshots({
+      tasks: [
+        task({ id: 'ws-010', title: 'Closed mapped', status: 'closed', external_ref: 'discord:thread-linked' }),
+      ],
+      threads: [
+        { id: 'thread-linked', name: 'General thread without token', archived: false },
+      ],
+      shortIdOfTaskId: (id) => id.split('-')[1] ?? id,
+      shortIdFromThreadName: () => null,
+      threadIdFromTask: (t) => {
+        const ref = t.external_ref ?? '';
+        return ref.startsWith('discord:') ? ref.slice('discord:'.length) : null;
+      },
+    });
+
+    expect(ops.map((op) => op.action)).toEqual(['archive_active_closed']);
+    expect(ops[0]?.task?.id).toBe('ws-010');
   });
 
   it('plans phase5 reconcile operations directly from archived and active thread sources', () => {

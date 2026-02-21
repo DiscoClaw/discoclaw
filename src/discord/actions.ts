@@ -140,6 +140,8 @@ function rewriteLegacyPlanCloseToTaskClose(
 // ---------------------------------------------------------------------------
 
 const ACTION_RE = /<discord-action>([\s\S]*?)<\/discord-action>/g;
+const ACTION_OPEN = '<discord-action>';
+const ACTION_CLOSE = '</discord-action>';
 
 // Trailing XML closing tags left by garbled AI output (e.g. </parameter>\n</invoke>).
 const TRAILING_XML_RE = /^(?:\s*<\/[a-z-]+>)+/;
@@ -166,39 +168,74 @@ function extractJsonObject(text: string, start: number): string | null {
 }
 
 /**
- * Second-pass scanner for malformed `<discord-action>` blocks whose closing
- * tag is wrong or missing (e.g. `</parameter>\n</invoke>` instead of
- * `</discord-action>`).  Uses brace-counting to reliably extract the JSON
- * object regardless of nested braces in string values, then consumes any
- * trailing XML-like closing tags.
+ * Primary scanner for `<discord-action>` blocks.
+ * Handles well-formed blocks and malformed variants where the closing tag is
+ * wrong/missing (e.g. `</parameter>\n</invoke>`), using brace counting for the
+ * JSON payload and then consuming trailing XML-like tags.
  */
-function stripMalformedActions(
+function collectParsedAction(
+  parsed: unknown,
+  flags: ActionCategoryFlags,
+  validTypes: Set<string>,
+  actions: DiscordActionRequest[],
+  strippedUnrecognizedTypes: string[],
+): void {
+  if (!parsed || typeof parsed !== 'object') return;
+  const rewritten = rewriteLegacyPlanCloseToTaskClose(parsed as { type?: unknown; planId?: unknown }, flags);
+  if (rewritten) {
+    actions.push(rewritten);
+    return;
+  }
+  if (typeof (parsed as { type?: unknown }).type !== 'string') return;
+  const type = (parsed as { type: string }).type;
+  if (validTypes.has(type)) {
+    actions.push(parsed as DiscordActionRequest);
+  } else {
+    strippedUnrecognizedTypes.push(type);
+  }
+}
+
+function parseActionJson(
+  jsonStr: string,
+  flags: ActionCategoryFlags,
+  validTypes: Set<string>,
+  actions: DiscordActionRequest[],
+  strippedUnrecognizedTypes: string[],
+): void {
+  try {
+    const parsed = JSON.parse(jsonStr);
+    collectParsedAction(parsed, flags, validTypes, actions, strippedUnrecognizedTypes);
+  } catch {
+    // Malformed JSON — skip silently.
+  }
+}
+
+function stripActionsWithScanner(
   text: string,
   flags: ActionCategoryFlags,
   validTypes: Set<string>,
   actions: DiscordActionRequest[],
   strippedUnrecognizedTypes: string[],
 ): string {
-  const MARKER = '<discord-action>';
   let result = '';
   let cursor = 0;
 
   while (cursor < text.length) {
-    const idx = text.indexOf(MARKER, cursor);
+    const idx = text.indexOf(ACTION_OPEN, cursor);
     if (idx === -1) { result += text.slice(cursor); break; }
 
     // Copy text before the marker.
     result += text.slice(cursor, idx);
 
     // Find the opening brace after the marker.
-    let afterMarker = idx + MARKER.length;
+    let afterMarker = idx + ACTION_OPEN.length;
     // Skip whitespace between marker and brace.
     while (afterMarker < text.length && /\s/.test(text[afterMarker])) afterMarker++;
 
     if (afterMarker >= text.length || text[afterMarker] !== '{') {
       // No JSON object follows — keep the marker text as-is and move on.
-      result += MARKER;
-      cursor = idx + MARKER.length;
+      result += ACTION_OPEN;
+      cursor = idx + ACTION_OPEN.length;
       continue;
     }
 
@@ -212,30 +249,38 @@ function stripMalformedActions(
       continue;
     }
 
-    // Try to parse and collect the action.
-    try {
-      const parsed = JSON.parse(jsonStr);
-      const rewritten = rewriteLegacyPlanCloseToTaskClose(parsed, flags);
-      if (rewritten) {
-        actions.push(rewritten);
-      } else if (parsed && typeof parsed.type === 'string') {
-        if (validTypes.has(parsed.type)) {
-          actions.push(parsed as DiscordActionRequest);
-        } else {
-          strippedUnrecognizedTypes.push(parsed.type);
-        }
-      }
-    } catch {
-      // Malformed JSON — strip it from display anyway.
-    }
+    parseActionJson(jsonStr, flags, validTypes, actions, strippedUnrecognizedTypes);
 
     // Advance past the JSON object and consume any trailing XML closing tags.
     cursor = afterMarker + jsonStr.length;
-    const trailing = text.slice(cursor).match(TRAILING_XML_RE);
+    const remaining = text.slice(cursor);
+    if (remaining.startsWith(ACTION_CLOSE)) {
+      cursor += ACTION_CLOSE.length;
+      continue;
+    }
+    const trailing = remaining.match(TRAILING_XML_RE);
     if (trailing) cursor += trailing[0].length;
   }
 
   return result;
+}
+
+function parseWithRegexFallback(
+  text: string,
+  flags: ActionCategoryFlags,
+  validTypes: Set<string>,
+): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[] } {
+  const actions: DiscordActionRequest[] = [];
+  const strippedUnrecognizedTypes: string[] = [];
+  const cleaned = text.replace(ACTION_RE, (_match, json: string) => {
+    parseActionJson(json.trim(), flags, validTypes, actions, strippedUnrecognizedTypes);
+    return '';
+  });
+  return {
+    cleanText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+    actions,
+    strippedUnrecognizedTypes,
+  };
 }
 
 export function parseDiscordActions(
@@ -246,32 +291,27 @@ export function parseDiscordActions(
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
 
-  // First pass: well-formed <discord-action>...</discord-action> blocks.
-  let cleaned = text.replace(ACTION_RE, (_match, json: string) => {
-    try {
-      const parsed = JSON.parse(json.trim());
-      const rewritten = rewriteLegacyPlanCloseToTaskClose(parsed, flags);
-      if (rewritten) {
-        actions.push(rewritten);
-      } else if (parsed && typeof parsed.type === 'string') {
-        if (validTypes.has(parsed.type)) {
-          actions.push(parsed as DiscordActionRequest);
-        } else {
-          strippedUnrecognizedTypes.push(parsed.type);
-        }
+  const cleaned = stripActionsWithScanner(text, flags, validTypes, actions, strippedUnrecognizedTypes);
+  const scanned = {
+    cleanText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+    actions,
+    strippedUnrecognizedTypes,
+  };
+
+  // Compatibility fallback: if scanner leaves markers behind or extracts nothing,
+  // run the legacy regex parser and prefer it when it captures more actions.
+  if (text.includes(ACTION_OPEN)) {
+    const markerLeft = scanned.cleanText.includes(ACTION_OPEN) || scanned.cleanText.includes(ACTION_CLOSE);
+    if (markerLeft || scanned.actions.length === 0) {
+      const legacy = parseWithRegexFallback(text, flags, validTypes);
+      if (legacy.actions.length > scanned.actions.length) return legacy;
+      if (markerLeft && legacy.actions.length === scanned.actions.length && legacy.cleanText.length < scanned.cleanText.length) {
+        return legacy;
       }
-    } catch {
-      // Malformed JSON — skip silently.
     }
-    return '';
-  });
+  }
 
-  // Second pass: malformed blocks (wrong closing tag or no closing tag).
-  cleaned = stripMalformedActions(cleaned, flags, validTypes, actions, strippedUnrecognizedTypes);
-
-  const cleanText = cleaned.replace(/\n{3,}/g, '\n\n').trim();
-
-  return { cleanText, actions, strippedUnrecognizedTypes };
+  return scanned;
 }
 
 // ---------------------------------------------------------------------------

@@ -150,6 +150,64 @@ describe('parseForgeCommand', () => {
 // ---------------------------------------------------------------------------
 
 describe('parseAuditVerdict', () => {
+  it('parses json verdict payload from fenced block', () => {
+    const text = [
+      '```json',
+      '{"maxSeverity":"blocking","shouldLoop":true,"summary":"Critical issue","concerns":[{"title":"SQL injection","severity":"blocking"}]}',
+      '```',
+      '',
+      '**Concern 1: SQL injection**',
+      '**Severity: blocking**',
+      '',
+      '**Verdict:** Needs revision.',
+    ].join('\n');
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('json verdict wins over contradictory prose verdict', () => {
+    const text = [
+      '```json',
+      '{"maxSeverity":"medium","shouldLoop":false,"summary":"Non-blocking concerns"}',
+      '```',
+      '',
+      '**Verdict:** Needs revision.',
+    ].join('\n');
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
+  });
+
+  it('falls back to legacy parser when json is malformed', () => {
+    const text = [
+      '```json',
+      '{"maxSeverity":"blocking","shouldLoop":true',
+      '```',
+      '',
+      '**Severity: medium**',
+      '**Verdict:** Needs revision.',
+    ].join('\n');
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: false });
+  });
+
+  it('ignores unrelated json objects and falls back to severity markers', () => {
+    const text = [
+      '```json',
+      '{"note":"example payload"}',
+      '```',
+      '',
+      '**Severity: blocking**',
+      '**Verdict:** Needs revision.',
+    ].join('\n');
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
+  it('supports high/low aliases in json payload', () => {
+    const text = [
+      '```json',
+      '{"maxSeverity":"high","shouldLoop":true}',
+      '```',
+    ].join('\n');
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
+  });
+
   it('text containing "Severity: blocking" -> blocking, shouldLoop', () => {
     const text = '**Concern 1: Missing error handling**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
     expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
@@ -351,6 +409,13 @@ describe('buildAuditorPrompt', () => {
     expect(prompt).toContain('blocking | medium | minor | suggestion');
     expect(prompt).not.toContain('Severity: high | medium | low');
     expect(prompt).toContain('audit round 1');
+  });
+
+  it('requires a json verdict block in output format', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    expect(prompt).toContain('Start with a fenced JSON verdict block');
+    expect(prompt).toContain('"maxSeverity":"blocking|medium|minor|suggestion|none"');
+    expect(prompt).toContain('`shouldLoop` must be true only when `maxSeverity` is `blocking`');
   });
 
   it('includes severity level definitions', () => {

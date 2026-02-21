@@ -305,6 +305,58 @@ describe('initCronForum', () => {
     );
   });
 
+  it('recovers cronId from statusMessageId metadata before content token parsing', async () => {
+    const thread = makeThread();
+    thread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: 'every day at 7am post to #general say hello',
+      author: { id: 'u-allowed' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    const statusMsg = { id: 'status-msg-123', author: { bot: true }, content: '📊 **Cron Status** no token' };
+    thread.messages.fetch = vi.fn().mockResolvedValue(new Map([[statusMsg.id, statusMsg]]));
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      schedule: '0 7 * * *',
+      timezone: 'UTC',
+      channel: 'general',
+      prompt: 'Say hello.',
+    });
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue(undefined),
+      getRecordByStatusMessageId: vi.fn().mockImplementation((id: string) => {
+        if (id === 'status-msg-123') return { cronId: 'cron-from-status-id', threadId: 'thread-1', disabled: false };
+        return undefined;
+      }),
+      getRecord: vi.fn().mockReturnValue({ cronId: 'cron-from-status-id', threadId: 'thread-1', disabled: false }),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statsStore: statsStore as any,
+    });
+
+    expect(scheduler.register).toHaveBeenCalledWith(
+      'thread-1', 'thread-1', 'guild-1', 'Job 1',
+      expect.objectContaining({ schedule: '0 7 * * *' }),
+      'cron-from-status-id',
+    );
+  });
+
 	  it('restores disabled state from stats store', async () => {
 	    const thread = makeThread();
 	    thread.fetchStarterMessage.mockResolvedValue({

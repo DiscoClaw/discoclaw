@@ -103,6 +103,8 @@ export class CronRunStats {
   private mutex = new WriteMutex();
   // Secondary index: threadId → cronId for O(1) lookups.
   private threadIndex = new Map<string, string>();
+  // Secondary index: statusMessageId → cronId for O(1) recovery lookups.
+  private statusMessageIndex = new Map<string, string>();
 
   constructor(store: CronRunStatsStore, filePath: string) {
     this.store = store;
@@ -112,8 +114,12 @@ export class CronRunStats {
 
   private rebuildThreadIndex(): void {
     this.threadIndex.clear();
+    this.statusMessageIndex.clear();
     for (const rec of Object.values(this.store.jobs)) {
       this.threadIndex.set(rec.threadId, rec.cronId);
+      if (rec.statusMessageId) {
+        this.statusMessageIndex.set(rec.statusMessageId, rec.cronId);
+      }
     }
   }
 
@@ -130,23 +136,35 @@ export class CronRunStats {
     return cronId ? this.store.jobs[cronId] : undefined;
   }
 
+  getRecordByStatusMessageId(statusMessageId: string): CronRunRecord | undefined {
+    const cronId = this.statusMessageIndex.get(statusMessageId);
+    return cronId ? this.store.jobs[cronId] : undefined;
+  }
+
   async upsertRecord(cronId: string, threadId: string, updates?: Partial<CronRunRecord>): Promise<CronRunRecord> {
     let record: CronRunRecord;
     await this.mutex.run(async () => {
       const existing = this.store.jobs[cronId];
       if (existing) {
+        const prevStatusMessageId = existing.statusMessageId;
         // If threadId changed, remove old index entry.
         if (existing.threadId !== threadId) {
           this.threadIndex.delete(existing.threadId);
         }
         if (updates) Object.assign(existing, updates);
         existing.threadId = threadId;
+        if (prevStatusMessageId && prevStatusMessageId !== existing.statusMessageId) {
+          this.statusMessageIndex.delete(prevStatusMessageId);
+        }
         record = existing;
       } else {
         record = { ...emptyRecord(cronId, threadId), ...updates };
         this.store.jobs[cronId] = record;
       }
       this.threadIndex.set(threadId, cronId);
+      if (record.statusMessageId) {
+        this.statusMessageIndex.set(record.statusMessageId, cronId);
+      }
       this.store.updatedAt = Date.now();
       await this.flush();
     });
@@ -176,6 +194,7 @@ export class CronRunStats {
       const rec = this.store.jobs[cronId];
       if (rec) {
         this.threadIndex.delete(rec.threadId);
+        if (rec.statusMessageId) this.statusMessageIndex.delete(rec.statusMessageId);
         delete this.store.jobs[cronId];
         this.store.updatedAt = Date.now();
         removed = true;
@@ -191,6 +210,7 @@ export class CronRunStats {
       for (const [cronId, rec] of Object.entries(this.store.jobs)) {
         if (rec.threadId === threadId) {
           this.threadIndex.delete(threadId);
+          if (rec.statusMessageId) this.statusMessageIndex.delete(rec.statusMessageId);
           delete this.store.jobs[cronId];
           removed = true;
         }

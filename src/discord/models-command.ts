@@ -17,22 +17,22 @@ export type ModelsCommand =
 const VALID_ROLES = new Set<string>(['chat', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec']);
 
 export function parseModelsCommand(content: string): ModelsCommand | null {
-  const raw = String(content ?? '').trim().replace(/\s+/g, ' ');
-  const normalized = raw.toLowerCase();
-  if (normalized === '!models' || normalized === '!models show') return { action: 'show' };
-  if (normalized === '!models help') return { action: 'help' };
+  const tokens = String(content ?? '').trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return null;
+  if (tokens[0]!.toLowerCase() !== '!models') return null;
 
-  const setMatch = normalized.match(/^!models set (\S+) \S+$/);
-  if (setMatch) {
-    const role = setMatch[1];
-    if (!VALID_ROLES.has(role)) return null;
-    // Preserve original case for the model token — model IDs may be case-sensitive.
-    const originalModel = raw.split(/\s+/)[3];
-    return { action: 'set', role: role as ModelRole, model: originalModel };
-  }
+  if (tokens.length === 1) return { action: 'show' };
 
-  // Unknown subcommand (e.g. "!models bogus") or unrelated message ("!modelsxyz")
-  return null;
+  const subcommand = tokens[1]!.toLowerCase();
+  if (subcommand === 'show' && tokens.length === 2) return { action: 'show' };
+  if (subcommand === 'help' && tokens.length === 2) return { action: 'help' };
+  if (subcommand !== 'set' || tokens.length !== 4) return null;
+
+  const role = tokens[2]!.toLowerCase();
+  if (!VALID_ROLES.has(role)) return null;
+
+  // Preserve original case for model IDs.
+  return { action: 'set', role: role as ModelRole, model: tokens[3]! };
 }
 
 // ---------------------------------------------------------------------------
