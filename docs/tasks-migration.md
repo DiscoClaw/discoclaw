@@ -50,8 +50,9 @@ The `bd` CLI integration had several structural problems:
 
 ### Compatibility layer: `src/beads/`
 
-Legacy `src/beads/*` files remain as task-backed compatibility shims and aliases.
-`src/beads/bd-cli.ts` is also retained for migration/preflight helper functions.
+Legacy runtime sync shims have been removed. Remaining bridge files are:
+- `src/beads/bd-cli.ts` for migration/preflight helpers
+- `src/beads/types.ts` for temporary type alias compatibility
 
 ### Updated: `src/discord/`
 

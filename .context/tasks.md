@@ -26,10 +26,13 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 - `src/tasks/thread-cache.ts`
 - `src/tasks/forum-guard.ts`
 
-Legacy compatibility shims remain in `src/beads/*` for transitional entrypoints.
+Legacy compatibility shims remain only for migration/preflight/type bridges:
+
+- `src/beads/bd-cli.ts`
+- `src/beads/types.ts`
 
 Bridge compatibility currently retained:
-- `src/beads/*` import-path shims
+- targeted `src/beads/*` migration/type shims
 - `scripts/beads/*` migration/hooks tooling
 - legacy `data/beads/*` path fallback for task data files
 
