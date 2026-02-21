@@ -816,4 +816,202 @@ describe('threadEdit', () => {
 
     expect(result).toEqual({ ok: false, error: 'threadEdit requires at least one of appliedTags or name' });
   });
+
+  it('finds archived thread via forum-channel fallback', async () => {
+    const thread = {
+      id: 't1',
+      name: 'Old Name',
+      guildId: 'g1',
+      archived: true,
+      isThread: () => true,
+      parent: { type: ChannelType.GuildForum },
+      appliedTags: [],
+      edit: vi.fn(async () => {}),
+      setArchived: vi.fn(async () => {}),
+    };
+
+    const forumChannel = {
+      id: 'forum1',
+      name: 'tasks',
+      type: ChannelType.GuildForum,
+      threads: {
+        fetchActive: vi.fn(async () => ({ threads: new Map() })),
+        fetchArchived: vi.fn(async () => ({
+          threads: new Map([['t1', thread]]),
+        })),
+      },
+    };
+
+    const guildChannelsCache = new Map<string, any>([['forum1', forumChannel]]);
+    const guild = {
+      id: 'g1',
+      channels: {
+        cache: {
+          get: (id: string) => guildChannelsCache.get(id),
+          find: () => undefined,
+          values: () => guildChannelsCache.values(),
+          size: guildChannelsCache.size,
+        },
+        create: vi.fn(),
+      },
+    } as any;
+
+    const client = {
+      channels: {
+        cache: { get: () => undefined },
+        fetch: vi.fn(async () => { throw new Error('Unknown'); }),
+      },
+    } as any;
+
+    const ctx = { ...makeCtx(guild), client } as any;
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', name: 'New Name' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(thread.setArchived).toHaveBeenCalledWith(false);
+    expect(thread.edit).toHaveBeenCalledWith({ name: 'New Name' });
+    expect(thread.setArchived).toHaveBeenCalledWith(true);
+    // Archived checked before active (the common case for this fallback).
+    expect(forumChannel.threads.fetchArchived).toHaveBeenCalled();
+  });
+
+  it('finds active thread via forum-channel fallback', async () => {
+    const thread = {
+      id: 't1',
+      name: 'Old Name',
+      guildId: 'g1',
+      archived: false,
+      isThread: () => true,
+      parent: { type: ChannelType.GuildForum },
+      appliedTags: [],
+      edit: vi.fn(async () => {}),
+      setArchived: vi.fn(async () => {}),
+    };
+
+    const forumChannel = {
+      id: 'forum1',
+      name: 'tasks',
+      type: ChannelType.GuildForum,
+      threads: {
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([['t1', thread]]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+
+    const guildChannelsCache = new Map<string, any>([['forum1', forumChannel]]);
+    const guild = {
+      id: 'g1',
+      channels: {
+        cache: {
+          get: (id: string) => guildChannelsCache.get(id),
+          find: () => undefined,
+          values: () => guildChannelsCache.values(),
+          size: guildChannelsCache.size,
+        },
+        create: vi.fn(),
+      },
+    } as any;
+
+    const client = {
+      channels: {
+        cache: { get: () => undefined },
+        fetch: vi.fn(async () => { throw new Error('Unknown'); }),
+      },
+    } as any;
+
+    const ctx = { ...makeCtx(guild), client } as any;
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', name: 'New Name' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(thread.edit).toHaveBeenCalledWith({ name: 'New Name' });
+    // Should NOT have called setArchived since the thread was active
+    expect(thread.setArchived).not.toHaveBeenCalled();
+    // fetchArchived checked first (archived is the common case), then active
+    expect(forumChannel.threads.fetchArchived).toHaveBeenCalled();
+    expect(forumChannel.threads.fetchActive).toHaveBeenCalled();
+  });
+
+  it('unarchives before editing and re-archives after', async () => {
+    const { thread, ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'Old Name', guildId: 'g1',
+      parentType: ChannelType.GuildForum, inCache: true,
+    });
+    (thread as any).archived = true;
+    (thread as any).setArchived = vi.fn(async () => {});
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', name: 'New Name' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((thread as any).setArchived).toHaveBeenCalledWith(false);
+    expect(thread.edit).toHaveBeenCalledWith({ name: 'New Name' });
+    expect((thread as any).setArchived).toHaveBeenCalledWith(true);
+  });
+
+  it('does not re-archive a non-archived thread after editing', async () => {
+    const { thread, ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'Old Name', guildId: 'g1',
+      parentType: ChannelType.GuildForum, inCache: true,
+    });
+    (thread as any).archived = false;
+    (thread as any).setArchived = vi.fn(async () => {});
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', name: 'New Name' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(thread.edit).toHaveBeenCalledWith({ name: 'New Name' });
+    expect((thread as any).setArchived).not.toHaveBeenCalled();
+  });
+
+  it('still edits when setArchived(false) throws', async () => {
+    const { thread, ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'Old Name', guildId: 'g1',
+      parentType: ChannelType.GuildForum, inCache: true,
+    });
+    (thread as any).archived = true;
+    (thread as any).setArchived = vi.fn(async (v: boolean) => {
+      if (!v) throw new Error('MANAGE_THREADS required');
+    });
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', name: 'New Name' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(thread.edit).toHaveBeenCalledWith({ name: 'New Name' });
+  });
+
+  it('reports warning when re-archive fails', async () => {
+    const { thread, ctx } = makeThreadCtx({
+      threadId: 't1', threadName: 'Old Name', guildId: 'g1',
+      parentType: ChannelType.GuildForum, inCache: true,
+    });
+    (thread as any).archived = true;
+    (thread as any).setArchived = vi.fn(async (v: boolean) => {
+      if (v) throw new Error('rate limited');
+    });
+
+    const result = await executeChannelAction(
+      { type: 'threadEdit', threadId: 't1', name: 'New Name' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('warning: failed to re-archive');
+  });
 });
