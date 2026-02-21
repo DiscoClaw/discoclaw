@@ -214,6 +214,7 @@ export class TaskSyncCoordinator {
         this.pendingStatusPoster = false;
         // Fire-and-forget follow-up for coalesced triggers.
         metrics.increment('tasks.sync.follow_up.scheduled');
+        metrics.increment('tasks.sync.follow_up.triggered');
         this.sync(pendingPoster).catch((err) => {
           metrics.increment('tasks.sync.follow_up.failed');
           this.opts.log?.warn({ err }, 'tasks:coordinator follow-up sync failed');

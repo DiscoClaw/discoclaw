@@ -154,6 +154,7 @@ describe('TaskSyncCoordinator', () => {
     // runTaskSync should have been called at least twice (first + follow-up)
     expect((runTaskSync as any).mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.scheduled');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.triggered');
   });
 
   it('propagates runTaskSync errors and remains usable', async () => {
@@ -240,6 +241,7 @@ describe('TaskSyncCoordinator', () => {
       expect.objectContaining({ err: expect.any(Error) }),
       'tasks:coordinator follow-up sync failed',
     );
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.triggered');
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.follow_up.failed');
   });
 
