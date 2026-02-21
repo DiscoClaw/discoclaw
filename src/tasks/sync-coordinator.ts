@@ -28,6 +28,7 @@ export type TaskSyncCoordinatorOptions = {
   metrics?: Pick<MetricsRegistry, 'increment'>;
   enableFailureRetry?: boolean;
   failureRetryDelayMs?: number;
+  deferredRetryDelayMs?: number;
 };
 
 function classifySyncError(message?: string): string {
@@ -85,6 +86,7 @@ export class TaskSyncCoordinator {
   private syncing = false;
   private pendingStatusPoster: StatusPoster | undefined | false = false;
   private failureRetryPending = false;
+  private deferredCloseRetryPending = false;
 
   constructor(private readonly opts: TaskSyncCoordinatorOptions) {}
 
@@ -102,6 +104,32 @@ export class TaskSyncCoordinator {
       this.sync().catch((err) => {
         metrics.increment('tasks.sync.failure_retry.failed');
         this.opts.log?.warn({ err }, 'tasks:coordinator failure retry sync failed');
+      });
+    }, delayMs);
+  }
+
+  private scheduleDeferredCloseRetry(
+    metrics: Pick<MetricsRegistry, 'increment'>,
+    closesDeferred: number,
+  ): void {
+    if (this.deferredCloseRetryPending) {
+      metrics.increment('tasks.sync.retry.coalesced');
+      return;
+    }
+
+    this.deferredCloseRetryPending = true;
+    const delayMs = this.opts.deferredRetryDelayMs ?? 30_000;
+    metrics.increment('tasks.sync.retry.scheduled');
+    this.opts.log?.info(
+      { closesDeferred, delayMs },
+      'tasks:coordinator scheduling retry for deferred closes',
+    );
+
+    setTimeout(() => {
+      this.deferredCloseRetryPending = false;
+      this.sync().catch((err) => {
+        metrics.increment('tasks.sync.retry.failed');
+        this.opts.log?.warn({ err }, 'tasks:coordinator deferred-close retry failed');
       });
     }, delayMs);
   }
@@ -136,14 +164,7 @@ export class TaskSyncCoordinator {
       this.opts.forumCountSync?.requestUpdate();
       recordSyncSuccessMetrics(metrics, result, Date.now() - startedAtMs);
       if (result.closesDeferred && result.closesDeferred > 0) {
-        metrics.increment('tasks.sync.retry.scheduled');
-        this.opts.log?.info({ closesDeferred: result.closesDeferred }, 'tasks:coordinator scheduling retry for deferred closes');
-        setTimeout(() => {
-          this.sync().catch((err) => {
-            metrics.increment('tasks.sync.retry.failed');
-            this.opts.log?.warn({ err }, 'tasks:coordinator deferred-close retry failed');
-          });
-        }, 30_000);
+        this.scheduleDeferredCloseRetry(metrics, result.closesDeferred);
       }
       return result;
     } catch (err) {
