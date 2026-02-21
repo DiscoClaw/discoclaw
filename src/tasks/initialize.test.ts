@@ -38,6 +38,7 @@ function baseOpts(overrides: Partial<InitializeTasksOpts> = {}): InitializeTasks
     tasksAutoTag: true,
     tasksAutoTagModel: 'haiku',
     runtime: {} as any,
+    resolveModel: (model) => model,
     log: fakeLog(),
     ...overrides,
   };

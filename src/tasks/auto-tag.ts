@@ -1,5 +1,4 @@
 import type { TaskModelResolver, TaskRuntimeAdapter } from './runtime-types.js';
-import { resolveTaskRuntimeModel } from './runtime-types.js';
 
 export type AutoTagOptions = {
   model?: string;
@@ -32,7 +31,7 @@ export async function autoTagTask(
   let finalText = '';
   let deltaText = '';
 
-  const modelResolver = opts?.modelResolver ?? resolveTaskRuntimeModel;
+  const modelResolver = opts?.modelResolver ?? ((model: string) => model);
 
   for await (const evt of runtime.invoke({
     prompt,
@@ -41,9 +40,9 @@ export async function autoTagTask(
     timeoutMs: opts?.timeoutMs ?? 15_000,
     tools: [],
   })) {
-    if (evt.type === 'text_final') {
+    if (evt.type === 'text_final' && typeof evt.text === 'string') {
       finalText = evt.text;
-    } else if (evt.type === 'text_delta') {
+    } else if (evt.type === 'text_delta' && typeof evt.text === 'string') {
       deltaText += evt.text;
     } else if (evt.type === 'error') {
       return [];

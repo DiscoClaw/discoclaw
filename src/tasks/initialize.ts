@@ -3,7 +3,6 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
 import type { TaskStore } from './store.js';
 import {
-  resolveTaskRuntimeModel,
   type TaskModelResolver,
   type TaskRuntimeAdapter,
 } from './runtime-types.js';
@@ -30,7 +29,7 @@ export type InitializeTasksOpts = {
   tasksSyncFailureRetryDelayMs?: number;
   tasksSyncDeferredRetryDelayMs?: number;
   runtime: TaskRuntimeAdapter;
-  resolveModel?: TaskModelResolver;
+  resolveModel: TaskModelResolver;
   statusPoster?: TaskStatusPoster;
   hasInFlightForChannel?: TaskInFlightChecker;
   log: LoggerLike;
@@ -94,7 +93,7 @@ export async function initializeTasksContext(
     store,
     taskService: createTaskService(store),
     runtime: opts.runtime,
-    resolveModel: opts.resolveModel ?? resolveTaskRuntimeModel,
+    resolveModel: opts.resolveModel,
     autoTag: opts.tasksAutoTag ?? true,
     autoTagModel: opts.tasksAutoTagModel ?? 'fast',
     mentionUserId: tasksMentionUser,

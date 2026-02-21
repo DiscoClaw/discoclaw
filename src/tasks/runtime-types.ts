@@ -1,8 +1,24 @@
-import type { RuntimeAdapter, RuntimeId } from '../runtime/types.js';
-import { resolveModel } from '../runtime/model-tiers.js';
-
-export type TaskRuntimeAdapter = RuntimeAdapter;
-export type TaskRuntimeId = RuntimeId;
+export type TaskRuntimeId = 'claude_code' | 'openai' | 'codex' | 'gemini' | 'other';
 export type TaskModelResolver = (model: string, runtimeId: TaskRuntimeId) => string;
 
-export const resolveTaskRuntimeModel: TaskModelResolver = resolveModel;
+export type TaskRuntimeInvokeParams = {
+  prompt: string;
+  model: string;
+  cwd: string;
+  tools?: string[];
+  timeoutMs?: number;
+};
+
+export type TaskRuntimeEvent = {
+  type: string;
+  text?: string;
+  message?: string;
+  [key: string]: unknown;
+};
+
+export interface TaskRuntimeAdapter {
+  id: TaskRuntimeId;
+  capabilities?: ReadonlySet<string>;
+  defaultModel?: string;
+  invoke(params: TaskRuntimeInvokeParams): AsyncIterable<TaskRuntimeEvent>;
+}
