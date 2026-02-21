@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { execa } from 'execa';
-import type { TaskData, TaskCreateParams, TaskUpdateParams, TaskListParams } from './types.js';
+import type { TaskData, TaskListParams } from './types.js';
 export { buildTaskContextSummary } from './context-summary.js';
 
 // ---------------------------------------------------------------------------
@@ -148,22 +148,6 @@ async function runBd(args: string[], cwd: string): Promise<string> {
   return result.stdout;
 }
 
-/** Show a single task item by ID. Returns null if not found. */
-export async function bdShow(id: string, cwd: string): Promise<TaskData | null> {
-  try {
-    const stdout = await runBd(['show', '--json', id], cwd);
-    const items = parseBdJson<TaskData>(stdout);
-    return items[0] ? normalizeTaskData(items[0]) : null;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // Known "not found" variants from the bd CLI:
-    //   - "not found" (standard)
-    //   - "no issue found matching" (resolve-by-prefix failure)
-    if (/not found|no issue found/i.test(msg)) return null;
-    throw err;
-  }
-}
-
 /** List task items matching the given filters. */
 export async function bdList(params: TaskListParams, cwd: string): Promise<TaskData[]> {
   const args = ['list', '--json'];
@@ -182,64 +166,4 @@ export async function bdList(params: TaskListParams, cwd: string): Promise<TaskD
   const items = parseBdJson<TaskData>(stdout);
 
   return items.map(normalizeTaskData);
-}
-
-/**
- * Find a non-closed task whose title matches the given string
- * (case-insensitive, trimmed). Optionally filter by label.
- * Returns the first match, or null if none found.
- */
-export async function bdFindByTitle(
-  title: string,
-  cwd: string,
-  opts?: { label?: string },
-): Promise<TaskData | null> {
-  const normalizedTitle = title.trim().toLowerCase();
-  if (!normalizedTitle) return null;
-
-  const tasks = await bdList(opts?.label ? { label: opts.label } : {}, cwd);
-  const match = tasks.find(
-    (task) => task.status !== 'closed' && task.title.trim().toLowerCase() === normalizedTitle,
-  );
-  return match ?? null;
-}
-
-/** Create a new task item. Returns the created task data. */
-export async function bdCreate(params: TaskCreateParams, cwd: string): Promise<TaskData> {
-  const args = ['create', '--json', params.title];
-  if (params.description) args.push('--description', params.description);
-  if (params.priority != null) args.push('--priority', String(params.priority));
-  if (params.issueType) args.push('--type', params.issueType);
-  if (params.owner) args.push('--assignee', params.owner);
-  if (params.labels?.length) args.push('--labels', params.labels.join(','));
-
-  const stdout = await runBd(args, cwd);
-  const items = parseBdJson<TaskData>(stdout);
-  if (!items[0]) throw new Error('bd create returned no data');
-  return items[0];
-}
-
-/** Update a task item's fields. */
-export async function bdUpdate(id: string, params: TaskUpdateParams, cwd: string): Promise<void> {
-  const args = ['update', id];
-  if (params.title) args.push('--title', params.title);
-  if (params.description) args.push('--description', params.description);
-  if (params.priority != null) args.push('--priority', String(params.priority));
-  if (params.status) args.push('--status', params.status);
-  if (params.owner) args.push('--assignee', params.owner);
-  if (params.externalRef) args.push('--external-ref', params.externalRef);
-
-  await runBd(args, cwd);
-}
-
-/** Close a task item. */
-export async function bdClose(id: string, reason: string | undefined, cwd: string): Promise<void> {
-  const args = ['close', id];
-  if (reason) args.push('--reason', reason);
-  await runBd(args, cwd);
-}
-
-/** Add a label to a task item. */
-export async function bdAddLabel(id: string, label: string, cwd: string): Promise<void> {
-  await runBd(['label', 'add', id, label], cwd);
 }

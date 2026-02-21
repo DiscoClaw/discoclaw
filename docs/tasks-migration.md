@@ -201,8 +201,8 @@ the live task runtime path:
 | `normalizeTaskData(task)` | Normalizes legacy `done`/`tombstone` statuses; used by `migrateFromBd` |
 | `parseBdJson<T>(stdout)` | JSON parser for bd CLI output; used by `migrateFromBd` and bd-cli tests |
 
-The raw `runBd()` helper and `bdCreate`, `bdUpdate`, `bdClose`, `bdAddLabel` functions
-remain in the file but are not called by production runtime paths.
+`runBd()` and `bdList()` remain in the file for migration/export flows and are not
+used by production runtime task mutation paths.
 
 ---
 
