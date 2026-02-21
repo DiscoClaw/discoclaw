@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TASK_ACTION_TYPES } from '../tasks/task-action-contract.js';
-import { executeTaskAction } from '../tasks/task-action-executor.js';
-import { taskActionsPromptSection } from '../tasks/task-action-prompt.js';
-import type { TaskContext } from '../tasks/task-context.js';
-import type { ActionContext } from './actions.js';
+import { TASK_ACTION_TYPES } from './task-action-contract.js';
+import { executeTaskAction } from './task-action-executor.js';
+import { taskActionsPromptSection } from './task-action-prompt.js';
+import type { TaskActionRunContext } from './task-action-executor.js';
+import type { TaskContext } from './task-context.js';
 
 // ---------------------------------------------------------------------------
 // Mocks — override discord-sync and related modules
 // ---------------------------------------------------------------------------
 
-vi.mock('../tasks/discord-sync.js', () => ({
+vi.mock('./discord-sync.js', () => ({
   resolveTasksForum: vi.fn(() => ({
     threads: {
       create: vi.fn(async () => ({ id: 'thread-new' })),
@@ -30,11 +30,11 @@ vi.mock('../tasks/discord-sync.js', () => ({
   reloadTagMapInPlace: vi.fn(async () => 2),
 }));
 
-vi.mock('../tasks/auto-tag.js', () => ({
+vi.mock('./auto-tag.js', () => ({
   autoTagTask: vi.fn(async () => ['feature']),
 }));
 
-vi.mock('../tasks/task-sync-engine.js', () => {
+vi.mock('./task-sync-engine.js', () => {
   const runTaskSync = vi.fn(async () => ({
     threadsCreated: 1,
     emojisUpdated: 2,
@@ -51,7 +51,7 @@ vi.mock('../tasks/task-sync-engine.js', () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeCtx(): ActionContext {
+function makeCtx(): TaskActionRunContext {
   return {
     guild: {} as any,
     client: {
@@ -61,15 +61,13 @@ function makeCtx(): ActionContext {
         },
       },
     } as any,
-    channelId: 'test-channel',
-    messageId: 'test-message',
   };
 }
 
 function makeStore() {
-  const defaultBead = (id: string) => ({
+  const defaultTask = (id: string) => ({
     id,
-    title: 'Test bead',
+    title: 'Test task',
     description: 'A test',
     status: 'open' as const,
     priority: 2,
@@ -85,7 +83,7 @@ function makeStore() {
   return {
     get: vi.fn((id: string) => {
       if (id === 'ws-notfound') return undefined;
-      return defaultBead(id);
+      return defaultTask(id);
     }),
     list: vi.fn(() => [
       { id: 'ws-001', title: 'First', status: 'open', priority: 2 },
@@ -105,15 +103,15 @@ function makeStore() {
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     })),
-    update: vi.fn((id: string) => defaultBead(id)),
-    close: vi.fn((id: string) => ({ ...defaultBead(id), status: 'closed' as const })),
-    addLabel: vi.fn((id: string) => defaultBead(id)),
+    update: vi.fn((id: string) => defaultTask(id)),
+    close: vi.fn((id: string) => ({ ...defaultTask(id), status: 'closed' as const })),
+    addLabel: vi.fn((id: string) => defaultTask(id)),
   };
 }
 
 function makeTaskCtx(overrides?: Partial<TaskContext>): TaskContext {
   return {
-    tasksCwd: '/tmp/test-beads',
+    tasksCwd: '/tmp/test-tasks',
     forumId: 'forum-123',
     tagMap: { feature: 'tag-1', bug: 'tag-2' },
     store: makeStore() as any,
@@ -145,7 +143,7 @@ describe('TASK_ACTION_TYPES', () => {
 });
 
 describe('executeTaskAction', () => {
-  it('taskCreate returns created bead summary', async () => {
+  it('taskCreate returns created task summary', async () => {
     const result = await executeTaskAction(
       { type: 'taskCreate', title: 'New task', priority: 1 },
       makeCtx(),
@@ -176,7 +174,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskCreate honors no-thread by skipping thread creation', async () => {
-    const { createTaskThread } = await import('../tasks/discord-sync.js');
+    const { createTaskThread } = await import('./discord-sync.js');
     (createTaskThread as any).mockClear?.();
 
     const result = await executeTaskAction(
@@ -189,7 +187,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskCreate skips thread creation when task is already linked before direct lifecycle step', async () => {
-    const { createTaskThread } = await import('../tasks/discord-sync.js');
+    const { createTaskThread } = await import('./discord-sync.js');
     (createTaskThread as any).mockClear?.();
 
     const store = makeStore();
@@ -258,8 +256,8 @@ describe('executeTaskAction', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('taskUpdate calls updateBeadStarterMessage when bead has a linked thread', async () => {
-    const { updateTaskStarterMessage } = await import('../tasks/discord-sync.js');
+  it('taskUpdate calls updateTaskStarterMessage when task has a linked thread', async () => {
+    const { updateTaskStarterMessage } = await import('./discord-sync.js');
     (updateTaskStarterMessage as any).mockClear();
 
     await executeTaskAction(
@@ -275,8 +273,8 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('taskUpdate passes sidebarMentionUserId to updateBeadStarterMessage', async () => {
-    const { updateTaskStarterMessage } = await import('../tasks/discord-sync.js');
+  it('taskUpdate passes sidebarMentionUserId to updateTaskStarterMessage', async () => {
+    const { updateTaskStarterMessage } = await import('./discord-sync.js');
     (updateTaskStarterMessage as any).mockClear();
 
     await executeTaskAction(
@@ -292,8 +290,8 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('taskUpdate succeeds even if updateBeadStarterMessage throws', async () => {
-    const { updateTaskStarterMessage } = await import('../tasks/discord-sync.js');
+  it('taskUpdate succeeds even if updateTaskStarterMessage throws', async () => {
+    const { updateTaskStarterMessage } = await import('./discord-sync.js');
     (updateTaskStarterMessage as any).mockRejectedValueOnce(new Error('Discord API error'));
 
     const result = await executeTaskAction(
@@ -304,8 +302,8 @@ describe('executeTaskAction', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('taskUpdate calls updateBeadThreadTags when bead has a linked thread', async () => {
-    const { updateTaskThreadTags } = await import('../tasks/discord-sync.js');
+  it('taskUpdate calls updateTaskThreadTags when task has a linked thread', async () => {
+    const { updateTaskThreadTags } = await import('./discord-sync.js');
     (updateTaskThreadTags as any).mockClear();
 
     await executeTaskAction(
@@ -321,8 +319,8 @@ describe('executeTaskAction', () => {
     );
   });
 
-  it('taskClose passes tagMap to closeBeadThread', async () => {
-    const { closeTaskThread } = await import('../tasks/discord-sync.js');
+  it('taskClose passes tagMap to closeTaskThread', async () => {
+    const { closeTaskThread } = await import('./discord-sync.js');
     (closeTaskThread as any).mockClear();
 
     const taskCtx = makeTaskCtx();
@@ -371,18 +369,18 @@ describe('executeTaskAction', () => {
     expect(mockSync.requestUpdate).toHaveBeenCalled();
   });
 
-  it('taskShow returns bead details', async () => {
+  it('taskShow returns task details', async () => {
     const result = await executeTaskAction(
       { type: 'taskShow', taskId: 'ws-001' },
       makeCtx(),
       makeTaskCtx(),
     );
     expect(result.ok).toBe(true);
-    expect((result as any).summary).toContain('Test bead');
+    expect((result as any).summary).toContain('Test task');
     expect((result as any).summary).toContain('ws-001');
   });
 
-  it('taskShow fails for unknown bead', async () => {
+  it('taskShow fails for unknown task', async () => {
     const result = await executeTaskAction(
       { type: 'taskShow', taskId: 'ws-notfound' },
       makeCtx(),
@@ -392,7 +390,7 @@ describe('executeTaskAction', () => {
     expect((result as any).error).toContain('not found');
   });
 
-  it('taskList returns bead list', async () => {
+  it('taskList returns task list', async () => {
     const result = await executeTaskAction(
       { type: 'taskList', status: 'open', limit: 10 },
       makeCtx(),
@@ -441,7 +439,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskSync passes statusPoster through to runTaskSync', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     (runTaskSync as any).mockClear();
 
     const mockPoster = { taskSyncComplete: vi.fn() } as any;
@@ -457,7 +455,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskSync passes sidebarMentionUserId as mentionUserId to runTaskSync', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     (runTaskSync as any).mockClear();
 
     await executeTaskAction(
@@ -472,7 +470,7 @@ describe('executeTaskAction', () => {
   });
 
   it('taskSync lazily creates and reuses syncCoordinator when missing', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     (runTaskSync as any).mockClear();
 
     const taskCtx = makeTaskCtx();
@@ -497,8 +495,8 @@ describe('executeTaskAction', () => {
   });
 
   it('taskUpdate schedules repair sync after thread lifecycle failure without prewired coordinator', async () => {
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
-    const { updateTaskThreadName } = await import('../tasks/discord-sync.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    const { updateTaskThreadName } = await import('./discord-sync.js');
     (runTaskSync as any).mockClear();
     (updateTaskThreadName as any).mockRejectedValueOnce(new Error('rename failed'));
 
@@ -516,7 +514,7 @@ describe('executeTaskAction', () => {
 
 describe('tagMapReload action', () => {
   it('success: returns old/new count with tag names', async () => {
-    const { reloadTagMapInPlace } = await import('../tasks/discord-sync.js');
+    const { reloadTagMapInPlace } = await import('./discord-sync.js');
     (reloadTagMapInPlace as any).mockClear();
     (reloadTagMapInPlace as any).mockImplementationOnce(async (_path: string, tagMap: any) => {
       // Simulate reload: clear and add new tags
@@ -538,7 +536,7 @@ describe('tagMapReload action', () => {
   });
 
   it('success with >10 tags: truncates tag list display', async () => {
-    const { reloadTagMapInPlace } = await import('../tasks/discord-sync.js');
+    const { reloadTagMapInPlace } = await import('./discord-sync.js');
     (reloadTagMapInPlace as any).mockClear();
     (reloadTagMapInPlace as any).mockImplementationOnce(async (_path: string, tagMap: any) => {
       for (const k of Object.keys(tagMap)) delete tagMap[k];
@@ -556,7 +554,7 @@ describe('tagMapReload action', () => {
   });
 
   it('failure: returns error with message, map preserved', async () => {
-    const { reloadTagMapInPlace } = await import('../tasks/discord-sync.js');
+    const { reloadTagMapInPlace } = await import('./discord-sync.js');
     (reloadTagMapInPlace as any).mockClear();
     (reloadTagMapInPlace as any).mockRejectedValueOnce(new Error('ENOENT: file not found'));
 
@@ -584,8 +582,8 @@ describe('tagMapReload action', () => {
 
 describe('taskSync coordinator tagMap reload behavior', () => {
   it('reloads tag map before runTaskSync when tagMapPath is configured', async () => {
-    const { reloadTagMapInPlace } = await import('../tasks/discord-sync.js');
-    const { runTaskSync } = await import('../tasks/task-sync-engine.js');
+    const { reloadTagMapInPlace } = await import('./discord-sync.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
     (reloadTagMapInPlace as any).mockClear();
     (runTaskSync as any).mockClear();
 
@@ -600,7 +598,7 @@ describe('taskSync coordinator tagMap reload behavior', () => {
   });
 
   it('does not attempt reload without tagMapPath', async () => {
-    const { reloadTagMapInPlace } = await import('../tasks/discord-sync.js');
+    const { reloadTagMapInPlace } = await import('./discord-sync.js');
     (reloadTagMapInPlace as any).mockClear();
 
     await executeTaskAction(
