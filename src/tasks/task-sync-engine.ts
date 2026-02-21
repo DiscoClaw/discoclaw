@@ -8,12 +8,11 @@ import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import { createTaskService } from './service.js';
 import {
-  buildTasksByShortIdMap,
   ingestTaskThreadSnapshots,
   ingestTaskSyncSnapshot,
   normalizeTaskSyncBuckets,
   planTaskApplyPhases,
-  planTaskReconcileOperations,
+  planTaskReconcileFromSnapshots,
   planTaskSyncOperations,
   type TaskThreadLike,
   type TaskReconcileAction,
@@ -413,8 +412,6 @@ async function applyPhase5ReconcileThreads(
     orphanThreadsFound: 0,
   };
 
-  const tasksByShortId = buildTasksByShortIdMap(allTasks, shortTaskId);
-
   try {
     const activeThreads = await ctx.forum.threads.fetchActive();
     let archivedThreads: Map<string, TaskThreadLike> = new Map();
@@ -432,9 +429,10 @@ async function applyPhase5ReconcileThreads(
       activeThreadsMap.values(),
     );
 
-    const plannedReconcileOps = planTaskReconcileOperations({
+    const plannedReconcileOps = planTaskReconcileFromSnapshots({
+      tasks: allTasks,
       threads: threadSnapshots,
-      tasksByShortId,
+      shortIdOfTaskId: shortTaskId,
       shortIdFromThreadName: extractShortIdFromThreadName,
       threadIdFromTask: getThreadIdFromTask,
     });

@@ -208,6 +208,14 @@ export type TaskReconcilePlanOptions = {
   threadIdFromTask: (task: TaskData) => string | null;
 };
 
+export type TaskReconcilePlanFromSnapshotOptions = {
+  tasks: TaskData[];
+  threads: TaskThreadSnapshot[];
+  shortIdOfTaskId: (taskId: string) => string;
+  shortIdFromThreadName: (threadName: string) => string | null;
+  threadIdFromTask: (task: TaskData) => string | null;
+};
+
 /**
  * Stage: diff (phase 5)
  * Plan reconciliation operations for forum threads vs local task snapshot.
@@ -280,4 +288,20 @@ export function planTaskReconcileOperations(opts: TaskReconcilePlanOptions): Tas
   }
 
   return operations;
+}
+
+/**
+ * Stage: diff (phase 5)
+ * Build phase-5 reconcile operations directly from task+thread snapshots.
+ */
+export function planTaskReconcileFromSnapshots(
+  opts: TaskReconcilePlanFromSnapshotOptions,
+): TaskReconcileOperation[] {
+  const tasksByShortId = buildTasksByShortIdMap(opts.tasks, opts.shortIdOfTaskId);
+  return planTaskReconcileOperations({
+    threads: opts.threads,
+    tasksByShortId,
+    shortIdFromThreadName: opts.shortIdFromThreadName,
+    threadIdFromTask: opts.threadIdFromTask,
+  });
 }
