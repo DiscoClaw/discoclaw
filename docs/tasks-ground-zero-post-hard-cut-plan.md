@@ -107,3 +107,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued post-Track-4 cleanup by introducing task-local sync contracts (`TaskStatusPoster`, `TaskForumCountSync`) in `sync-context` and repointing task sync/context modules away from Discord implementation type imports.
 - 2026-02-21: Continued post-Track-4 cleanup by moving `LoggerLike` to shared logging namespace (`src/logging/logger-like.ts`) and repointing task sync/initialize/forum-guard modules away from `discord/action-types` path coupling.
 - 2026-02-21: Continued post-Track-4 cleanup by injecting task sync in-flight reply checks via task context/options (`TaskInFlightChecker`) so `task-sync-engine` no longer imports Discord in-flight state directly.
+- 2026-02-21: Continued post-Track-4 cleanup by introducing canonical task Discord boundary aliases in `src/tasks/discord-types.ts` and repointing core task runtime modules to those aliases.

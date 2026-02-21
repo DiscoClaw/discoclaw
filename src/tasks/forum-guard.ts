@@ -1,5 +1,5 @@
-import type { AnyThreadChannel, Client } from 'discord.js';
 import type { LoggerLike } from '../logging/logger-like.js';
+import type { TaskDiscordAnyThreadChannel, TaskDiscordClient } from './discord-types.js';
 import type { TaskStore } from './store.js';
 import type { TagMap } from './types.js';
 import { findTaskByThreadId } from './thread-cache.js';
@@ -9,20 +9,20 @@ import { buildAppliedTagsWithStatus, buildThreadName } from './discord-sync.js';
  * Canonical task namespace for forum guard wiring.
  */
 export type TasksForumGuardOptions = {
-  client: Client;
+  client: TaskDiscordClient;
   forumId: string;
   log?: LoggerLike;
   store?: TaskStore;
   tagMap?: TagMap;
 };
 
-function isBotOwned(thread: AnyThreadChannel): boolean {
+function isBotOwned(thread: TaskDiscordAnyThreadChannel): boolean {
   const botUserId = thread.client?.user?.id ?? '';
   return botUserId !== '' && thread.ownerId === botUserId;
 }
 
 async function rejectManualThread(
-  thread: AnyThreadChannel,
+  thread: TaskDiscordAnyThreadChannel,
   log?: LoggerLike,
 ): Promise<void> {
   log?.info({ threadId: thread.id, name: thread.name, ownerId: thread.ownerId }, 'tasks:forum rejected manual thread');
@@ -39,7 +39,7 @@ async function rejectManualThread(
 }
 
 async function reArchiveTaskThread(
-  thread: AnyThreadChannel,
+  thread: TaskDiscordAnyThreadChannel,
   store: TaskStore,
   tagMap: TagMap,
   log?: LoggerLike,
@@ -75,7 +75,7 @@ async function reArchiveTaskThread(
 export function initTasksForumGuard(opts: TasksForumGuardOptions): void {
   const { client, forumId, log, store, tagMap } = opts;
 
-  client.on('threadCreate', async (thread: AnyThreadChannel) => {
+  client.on('threadCreate', async (thread: TaskDiscordAnyThreadChannel) => {
     try {
       if (thread.parentId !== forumId) return;
       if (isBotOwned(thread)) return;
@@ -88,7 +88,9 @@ export function initTasksForumGuard(opts: TasksForumGuardOptions): void {
     }
   });
 
-  client.on('threadUpdate', async (_oldThread: AnyThreadChannel, newThread: AnyThreadChannel) => {
+  client.on(
+    'threadUpdate',
+    async (_oldThread: TaskDiscordAnyThreadChannel, newThread: TaskDiscordAnyThreadChannel) => {
     try {
       if (newThread.parentId !== forumId) return;
       // Only act on unarchive transitions.
@@ -101,5 +103,6 @@ export function initTasksForumGuard(opts: TasksForumGuardOptions): void {
     } catch (err) {
       log?.error({ err, threadId: newThread.id }, 'tasks:forum threadUpdate guard failed');
     }
-  });
+    },
+  );
 }
