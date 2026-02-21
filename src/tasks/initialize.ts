@@ -8,7 +8,6 @@ import { createTaskService } from './service.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
 import { loadTagMap } from './discord-sync.js';
-import { initTasksForumGuard } from './forum-guard.js';
 
 /**
  * Canonical task namespace for task-context initialization and sync wiring.
@@ -103,7 +102,7 @@ export async function initializeTasksContext(
 }
 
 // ---------------------------------------------------------------------------
-// Post-connect wiring (forum guard + store event subscriptions + startup sync)
+// Post-connect wiring (store event subscriptions + startup sync)
 // ---------------------------------------------------------------------------
 
 export type WireTaskSyncOpts = {
@@ -111,8 +110,6 @@ export type WireTaskSyncOpts = {
   client: Client;
   guild: Guild;
   log: LoggerLike;
-  /** Skip forum guard installation (caller already installed it). */
-  skipForumGuard?: boolean;
   /** Disable Phase 5 (thread reconciliation) of the task sync cycle. */
   skipPhase5?: boolean;
 };
@@ -122,16 +119,6 @@ export type WireTaskSyncResult = {
 };
 
 export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSyncResult> {
-  if (!opts.skipForumGuard) {
-    initTasksForumGuard({
-      client: opts.client,
-      forumId: opts.taskCtx.forumId,
-      log: opts.log,
-      store: opts.taskCtx.store,
-      tagMap: opts.taskCtx.tagMap,
-    });
-  }
-
   const syncCoordinator = await ensureTaskSyncCoordinator(
     opts.taskCtx,
     { client: opts.client, guild: opts.guild },

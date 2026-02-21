@@ -9,17 +9,12 @@ vi.mock('./discord-sync.js', () => ({
   loadTagMap: vi.fn().mockResolvedValue({ bug: '111', feature: '222' }),
 }));
 
-vi.mock('./forum-guard.js', () => ({
-  initTasksForumGuard: vi.fn(),
-}));
-
 vi.mock('./sync-coordinator.js', () => ({
   TaskSyncCoordinator: vi.fn().mockImplementation(() => ({
     sync: vi.fn().mockResolvedValue(undefined),
   })),
 }));
 
-import { initTasksForumGuard } from './forum-guard.js';
 import { TaskSyncCoordinator } from './sync-coordinator.js';
 import { initializeTasksContext, wireTaskSync } from './initialize.js';
 import { TaskStore } from './store.js';
@@ -141,7 +136,7 @@ describe('initializeTasksContext', () => {
 });
 
 describe('wireTaskSync', () => {
-  it('wires forum guard, coordinator, and store event listeners', async () => {
+  it('wires coordinator and store event listeners', async () => {
     const log = fakeLog();
     const store = new TaskStore();
     const taskCtx = {
@@ -165,13 +160,6 @@ describe('wireTaskSync', () => {
       log,
     });
 
-    expect(initTasksForumGuard).toHaveBeenCalledWith({
-      client,
-      forumId: 'forum-123',
-      log,
-      store,
-      tagMap: { bug: '111' },
-    });
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
       expect.objectContaining({
         client,
@@ -290,33 +278,6 @@ describe('wireTaskSync', () => {
     const task = store.create({ title: 'Another task' });
     store.update(task.id, { title: 'Modified' });
     expect(coordinatorInstance.sync.mock.calls.length).toBe(callsAfterStop);
-  });
-
-  it('skips forum guard when skipForumGuard is true', async () => {
-    const log = fakeLog();
-    const store = new TaskStore();
-    const taskCtx = {
-      tasksCwd: '/tmp/tasks',
-      forumId: 'forum-123',
-      tagMap: { bug: '111' },
-      tagMapPath: '/tmp/tag-map.json',
-      store,
-      log,
-    } as any;
-
-    vi.mocked(initTasksForumGuard).mockClear();
-
-    await wireTaskSync({
-      taskCtx,
-      client: {} as any,
-      guild: {} as any,
-      log,
-      skipForumGuard: true,
-    });
-
-    expect(initTasksForumGuard).not.toHaveBeenCalled();
-    // Coordinator should still be wired
-    expect(TaskSyncCoordinator).toHaveBeenCalled();
   });
 
   it('propagates tagMapPath to CoordinatorOptions', async () => {
