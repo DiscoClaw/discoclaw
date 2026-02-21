@@ -3,7 +3,7 @@ import path from 'node:path';
 import { handlePlanCommand, parsePlanFileHeader, resolvePlanHeaderTaskId } from './plan-commands.js';
 import type { TaskStore } from '../tasks/store.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import { runPipeline } from '../pipeline/engine.js';
 import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
 import { resolveModel } from '../runtime/model-tiers.js';

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { ChannelType } from 'discord.js';
 import type { Client, ForumChannel, ThreadChannel } from 'discord.js';
 import type { CronRunRecord, CronRunStats, CadenceTag } from './run-stats.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 
 // ---------------------------------------------------------------------------
 // Shared types

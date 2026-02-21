@@ -1,7 +1,7 @@
 import { ChannelType, EmbedBuilder } from 'discord.js';
 import type { Client, ForumChannel, AnyThreadChannel, Message } from 'discord.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import { CronScheduler } from './scheduler.js';
 import { parseCronDefinition } from './parser.js';
 import type { ParsedCronDef } from './types.js';

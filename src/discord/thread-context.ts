@@ -1,4 +1,4 @@
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 
 // ---------------------------------------------------------------------------
 // Types

@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { collectRuntimeText } from './runtime-utils.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import { parseAuditVerdict } from './forge-commands.js';
 import type { AuditVerdict } from './forge-commands.js';
 

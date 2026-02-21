@@ -1,5 +1,5 @@
 import type { MessageMentionOptions } from 'discord.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskSyncResult } from '../tasks/types.js';
 import type { StartupContext } from './shutdown-context.js';
 import { NO_MENTIONS } from './allowed-mentions.js';

@@ -5,7 +5,7 @@ import { formatDurableSection, loadDurableMemory, selectItemsForInjection } from
 import { buildShortTermMemorySection } from './shortterm-memory.js';
 import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
 import { isOnboardingComplete } from '../workspace-bootstrap.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskData } from '../tasks/types.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';

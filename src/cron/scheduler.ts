@@ -1,6 +1,6 @@
 import { Cron } from 'croner';
 import type { CronJob, ParsedCronDef } from './types.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 
 export type CronTickHandler = (job: CronJob) => void | Promise<void>;
 

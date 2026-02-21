@@ -1,6 +1,11 @@
 import fs from 'node:fs/promises';
-import { ChannelType } from 'discord.js';
-import type { Client, ForumChannel, Guild, ThreadChannel } from 'discord.js';
+import {
+  TaskDiscordChannelType,
+  type TaskDiscordClient,
+  type TaskDiscordForumChannel,
+  type TaskDiscordGuild,
+  type TaskDiscordThreadChannel,
+} from './discord-types.js';
 import type { TaskData, TagMap } from './types.js';
 import { TASK_STATUSES } from './types.js';
 import { STATUS_EMOJI } from './types.js';
@@ -52,24 +57,27 @@ export function extractShortIdFromThreadName(name: string): string | null {
 // ---------------------------------------------------------------------------
 
 /** Resolve a forum channel by name or ID in a specific guild (multi-guild safe). */
-export async function resolveTasksForum(guild: Guild, nameOrId: string): Promise<ForumChannel | null> {
+export async function resolveTasksForum(
+  guild: TaskDiscordGuild,
+  nameOrId: string,
+): Promise<TaskDiscordForumChannel | null> {
   // Fast path: cached by ID.
   const byId = guild.channels.cache.get(nameOrId);
-  if (byId && byId.type === ChannelType.GuildForum) return byId as ForumChannel;
+  if (byId && byId.type === TaskDiscordChannelType.GuildForum) return byId as TaskDiscordForumChannel;
 
   // If it's an ID, try fetching directly (covers cache misses).
   try {
     const fetched = await guild.channels.fetch(nameOrId);
-    if (fetched && fetched.type === ChannelType.GuildForum) return fetched as ForumChannel;
+    if (fetched && fetched.type === TaskDiscordChannelType.GuildForum) return fetched as TaskDiscordForumChannel;
   } catch {
     // Not an ID or fetch failed; fall through to name lookup.
   }
 
   const want = nameOrId.toLowerCase();
   const ch = guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildForum && c.name.toLowerCase() === want,
+    (c) => c.type === TaskDiscordChannelType.GuildForum && c.name.toLowerCase() === want,
   );
-  return (ch as ForumChannel) ?? null;
+  return (ch as TaskDiscordForumChannel) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,12 +99,15 @@ export function getThreadIdFromTask(task: TaskData): string | null {
   return null;
 }
 
-async function fetchThreadChannel(client: Client, threadId: string): Promise<ThreadChannel | null> {
+async function fetchThreadChannel(
+  client: TaskDiscordClient,
+  threadId: string,
+): Promise<TaskDiscordThreadChannel | null> {
   const cached = client.channels.cache.get(threadId);
-  if (cached && cached.isThread()) return cached as ThreadChannel;
+  if (cached && cached.isThread()) return cached as TaskDiscordThreadChannel;
   try {
     const fetched = await client.channels.fetch(threadId);
-    if (fetched && fetched.isThread()) return fetched as ThreadChannel;
+    if (fetched && fetched.isThread()) return fetched as TaskDiscordThreadChannel;
     return null;
   } catch {
     return null;
@@ -208,7 +219,7 @@ export function buildTaskStarterContent(task: TaskData, mentionUserId?: string):
 
 /** Create a new forum thread for a task. Returns the thread ID. */
 export async function createTaskThread(
-  forum: ForumChannel,
+  forum: TaskDiscordForumChannel,
   task: TaskData,
   tagMap: TagMap,
   mentionUserId?: string,
@@ -245,7 +256,7 @@ export async function createTaskThread(
 }
 
 export async function findExistingThreadForTask(
-  forum: ForumChannel,
+  forum: TaskDiscordForumChannel,
   taskId: string,
   opts?: { archivedLimit?: number },
 ): Promise<string | null> {
@@ -270,7 +281,7 @@ export async function findExistingThreadForTask(
 
 /** Post a close summary, rename with checkmark, and archive the thread. */
 export async function closeTaskThread(
-  client: Client,
+  client: TaskDiscordClient,
   threadId: string,
   task: TaskData,
   tagMap?: TagMap,
@@ -339,7 +350,7 @@ export async function closeTaskThread(
 }
 
 /** Check if a thread is archived. Returns true if the thread is archived or doesn't exist. */
-export async function isThreadArchived(client: Client, threadId: string): Promise<boolean> {
+export async function isThreadArchived(client: TaskDiscordClient, threadId: string): Promise<boolean> {
   const thread = await fetchThreadChannel(client, threadId);
   if (!thread) return true; // Thread doesn't exist — treat as archived.
   return thread.archived === true;
@@ -347,7 +358,7 @@ export async function isThreadArchived(client: Client, threadId: string): Promis
 
 /** Check if a task thread is already in its final closed state (archived + correct name + correct tags). */
 export async function isTaskThreadAlreadyClosed(
-  client: Client,
+  client: TaskDiscordClient,
   threadId: string,
   task: TaskData,
   tagMap?: TagMap,
@@ -367,7 +378,7 @@ export async function isTaskThreadAlreadyClosed(
 
 /** Update a thread's name to reflect current task state. */
 export async function updateTaskThreadName(
-  client: Client,
+  client: TaskDiscordClient,
   threadId: string,
   task: TaskData,
 ): Promise<boolean> {
@@ -384,7 +395,7 @@ export async function updateTaskThreadName(
 
 /** Update a thread's starter message to reflect current task state. When mentionUserId is provided, the mention is included for sidebar visibility. */
 export async function updateTaskStarterMessage(
-  client: Client,
+  client: TaskDiscordClient,
   threadId: string,
   task: TaskData,
   mentionUserId?: string,
@@ -415,7 +426,7 @@ export async function updateTaskStarterMessage(
 
 /** Update a thread's forum tags to reflect current task status. */
 export async function updateTaskThreadTags(
-  client: Client,
+  client: TaskDiscordClient,
   threadId: string,
   task: TaskData,
   tagMap: TagMap,
@@ -430,7 +441,7 @@ export async function updateTaskThreadTags(
 }
 
 /** Unarchive a thread if it's currently archived. */
-export async function ensureUnarchived(client: Client, threadId: string): Promise<void> {
+export async function ensureUnarchived(client: TaskDiscordClient, threadId: string): Promise<void> {
   const thread = await fetchThreadChannel(client, threadId);
   if (!thread) return;
   if (thread.archived) {

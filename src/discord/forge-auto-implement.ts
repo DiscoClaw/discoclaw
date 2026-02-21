@@ -1,5 +1,5 @@
 import type { ForgeResult } from './forge-commands.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 
 export type ForgeAutoImplementRunSummary = {
   summary: string;

@@ -1,5 +1,5 @@
 import type { DiscordActionResult, ActionContext } from './actions.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import {
   loadDurableMemory,
   saveDurableMemory,

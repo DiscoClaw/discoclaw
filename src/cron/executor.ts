@@ -2,7 +2,7 @@ import type { Client } from 'discord.js';
 import type { RuntimeAdapter, ImageData, EngineEvent } from '../runtime/types.js';
 import type { CronJob } from './types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
-import type { LoggerLike } from '../discord/action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { ActionCategoryFlags, ActionContext } from '../discord/actions.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { CronContext } from '../discord/actions-crons.js';

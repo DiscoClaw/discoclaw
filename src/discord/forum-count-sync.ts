@@ -1,5 +1,5 @@
 import { ChannelType, type Client } from 'discord.js';
-import type { LoggerLike } from './action-types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
