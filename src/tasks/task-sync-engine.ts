@@ -6,7 +6,7 @@ import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
-import type { TaskSyncRunOptions } from './task-sync.js';
+import type { TaskSyncRunOptions } from './sync-types.js';
 import { createTaskService } from './service.js';
 import {
   ingestTaskSyncSnapshot,

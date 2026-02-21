@@ -1,10 +1,10 @@
-import type { Client, Guild } from 'discord.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import type { TaskSyncResult, TagMap } from './types.js';
+import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
 import { TaskSyncCoordinator } from './sync-coordinator.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
 import { isDirectTaskLifecycleActive } from './task-lifecycle.js';
@@ -29,18 +29,7 @@ export type TaskSyncContext = {
   syncRunOptions?: TaskSyncRunOptions;
 };
 
-export type TaskSyncRunContext = {
-  client: Client;
-  guild: Guild;
-};
-
-export type TaskSyncRunOptions = {
-  skipPhase5?: boolean;
-};
-
-export type TaskSyncWiring = {
-  stop(): void;
-};
+export type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
 
 export async function ensureTaskSyncCoordinator(
   taskCtx: TaskSyncContext,

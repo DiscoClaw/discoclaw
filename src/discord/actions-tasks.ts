@@ -1,16 +1,13 @@
 import type { ForumChannel } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
-import type { LoggerLike } from './action-types.js';
 import type { StatusPoster } from './status-channel.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { TagMap, TaskData, TaskStatus } from '../tasks/types.js';
-import type { ForumCountSync } from './forum-count-sync.js';
+import type { TaskData, TaskStatus } from '../tasks/types.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 import { shouldActionUseDirectThreadLifecycle } from '../tasks/sync-contract.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
-import type { TaskSyncCoordinatorLike, TaskSyncRunOptions } from '../tasks/task-sync.js';
+import type { TaskSyncContext } from '../tasks/task-sync.js';
 import { runTaskSync } from '../tasks/task-sync.js';
-import type { TaskStore } from '../tasks/store.js';
 import type { TaskService } from '../tasks/service.js';
 import { createTaskService } from '../tasks/service.js';
 import {
@@ -85,26 +82,13 @@ const TASK_TYPE_MAP: Record<TaskActionRequest['type'], true> = {
 };
 export const TASK_ACTION_TYPES = new Set<string>(Object.keys(TASK_TYPE_MAP));
 
-export type TaskContext = {
+export type TaskContext = TaskSyncContext & {
   tasksCwd?: string;
-  forumId: string;
-  tagMap: TagMap;
-  tagMapPath?: string;
-  store: TaskStore;
-  taskService?: TaskService;
   runtime: RuntimeAdapter;
   autoTag: boolean;
   autoTagModel: string;
   mentionUserId?: string;
-  sidebarMentionUserId?: string;
   statusPoster?: StatusPoster;
-  log?: LoggerLike;
-  syncCoordinator?: TaskSyncCoordinatorLike;
-  forumCountSync?: ForumCountSync;
-  syncFailureRetryEnabled?: boolean;
-  syncFailureRetryDelayMs?: number;
-  syncDeferredRetryDelayMs?: number;
-  syncRunOptions?: TaskSyncRunOptions;
 };
 
 function resolveTaskService(taskCtx: TaskContext): TaskService {

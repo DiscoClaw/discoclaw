@@ -5,7 +5,7 @@ import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
 import { createTaskService } from './service.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
-import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './task-sync.js';
+import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
 import { loadTagMap } from './discord-sync.js';
 

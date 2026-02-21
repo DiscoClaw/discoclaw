@@ -5,7 +5,7 @@ import type { LoggerLike } from '../discord/action-types.js';
 import { globalMetrics, type MetricsRegistry } from '../observability/metrics.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
-import type { TaskSyncRunOptions } from './task-sync.js';
+import type { TaskSyncRunOptions } from './sync-types.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { runTaskSync } from './task-sync-engine.js';
 import { reloadTagMapInPlace } from './discord-sync.js';
