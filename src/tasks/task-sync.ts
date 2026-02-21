@@ -59,7 +59,7 @@ export async function ensureTaskSyncCoordinator(
     log: taskCtx.log,
     mentionUserId: taskCtx.sidebarMentionUserId,
     forumCountSync: taskCtx.forumCountSync,
-    skipPhase5: opts?.skipPhase5,
+    ...opts,
     enableFailureRetry: taskCtx.syncFailureRetryEnabled,
     failureRetryDelayMs: taskCtx.syncFailureRetryDelayMs,
     deferredRetryDelayMs: taskCtx.syncDeferredRetryDelayMs,

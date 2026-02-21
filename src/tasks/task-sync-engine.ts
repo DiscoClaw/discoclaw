@@ -497,9 +497,9 @@ async function applyPlannedSyncPhases(
 async function runPhase5IfEnabled(
   ctx: TaskSyncApplyContext,
   allTasks: TaskData[],
-  skipPhase5?: boolean,
+  opts?: TaskSyncRunOptions,
 ): Promise<TaskSyncReconcileResult> {
-  if (skipPhase5) {
+  if (opts?.skipPhase5) {
     return { threadsReconciled: 0, orphanThreadsFound: 0 };
   }
   return applyPhase5ReconcileThreads(ctx, allTasks);
@@ -559,7 +559,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
 
   await applyPlannedSyncPhases(applyCtx, applyPlan);
 
-  const phase5 = await runPhase5IfEnabled(applyCtx, allTasks, opts.skipPhase5);
+  const phase5 = await runPhase5IfEnabled(applyCtx, allTasks, opts);
   const threadsReconciled = phase5.threadsReconciled;
   const orphanThreadsFound = phase5.orphanThreadsFound;
 
