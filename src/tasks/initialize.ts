@@ -129,16 +129,12 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<TaskSyncWiri
     log.warn({ err }, 'tasks:startup-sync failed');
   });
 
-  const subscriptions = wireTaskStoreSyncTriggers(opts.taskCtx, syncCoordinator, log);
+  const wiring = wireTaskStoreSyncTriggers(opts.taskCtx, syncCoordinator, log);
 
   log.info(
     { tasksCwd: opts.taskCtx.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
     'tasks:store-event sync triggers started',
   );
 
-  return {
-    stop() {
-      subscriptions.stop();
-    },
-  };
+  return wiring;
 }
