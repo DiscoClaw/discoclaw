@@ -1,5 +1,5 @@
-import type { Client, Guild } from 'discord.js';
-import { Client as DiscordClient, GatewayIntentBits } from 'discord.js';
+import type { TaskDiscordClient, TaskDiscordGuild } from './discord-types.js';
+import { TaskDiscordClientCtor, TaskDiscordGatewayIntentBits } from './discord-types.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { loadTagMap } from './discord-sync.js';
 import { runTaskSync } from './task-sync-engine.js';
@@ -28,8 +28,8 @@ export function parseArgInt(args: string[], name: string): number | undefined {
 }
 
 export type RunTaskSyncWithStoreOpts = {
-  client: Client;
-  guild: Guild;
+  client: TaskDiscordClient;
+  guild: TaskDiscordGuild;
   forumId: string;
   tagMap: TagMap;
   store: TaskStore;
@@ -74,7 +74,7 @@ export async function runTaskSyncCliMain(): Promise<void> {
   const store = new TaskStoreImpl(tasksPath ? { persistPath: tasksPath } : {});
   if (tasksPath) await store.load();
 
-  const client = new DiscordClient({ intents: [GatewayIntentBits.Guilds] });
+  const client = new TaskDiscordClientCtor({ intents: [TaskDiscordGatewayIntentBits.Guilds] });
   await client.login(discordToken);
   await new Promise<void>((resolve) => client.once('ready', () => resolve()));
 
