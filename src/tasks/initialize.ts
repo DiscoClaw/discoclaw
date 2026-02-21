@@ -111,7 +111,6 @@ export type WireTaskSyncOpts = {
   taskCtx: TaskContext;
   client: Client;
   guild: Guild;
-  tasksCwd?: string;
   sidebarMentionUserId?: string;
   log: LoggerLike;
   forumCountSync?: ForumCountSync;
@@ -170,7 +169,7 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSync
   const subscriptions = wireTaskStoreSyncTriggers(opts.taskCtx, syncCoordinator, opts.log);
 
   opts.log.info(
-    { tasksCwd: opts.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
+    { tasksCwd: opts.taskCtx.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
     'tasks:store-event sync triggers started',
   );
 
