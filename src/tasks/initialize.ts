@@ -1,4 +1,3 @@
-import type { Client, Guild } from 'discord.js';
 import type { TaskContext } from '../discord/actions-tasks.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
@@ -6,6 +5,7 @@ import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
 import { createTaskService } from './service.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
+import type { TaskSyncRunContext } from './task-sync.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
 import { loadTagMap } from './discord-sync.js';
 
@@ -107,8 +107,7 @@ export async function initializeTasksContext(
 
 export type WireTaskSyncOpts = {
   taskCtx: TaskContext;
-  client: Client;
-  guild: Guild;
+  runCtx: TaskSyncRunContext;
   /** Disable Phase 5 (thread reconciliation) of the task sync cycle. */
   skipPhase5?: boolean;
 };
@@ -125,7 +124,7 @@ export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSync
 
   const syncCoordinator = await ensureTaskSyncCoordinator(
     opts.taskCtx,
-    { client: opts.client, guild: opts.guild },
+    opts.runCtx,
     { skipPhase5: opts.skipPhase5 },
   );
 
