@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import type { LoggerLike } from '../logging/logger-like.js';
 
 const PA_CONTEXT_MODULES = ['pa.md', 'pa-safety.md'] as const;
 
@@ -17,12 +18,6 @@ export type DiscordChannelContext = {
   channelsDir: string;
   byChannelId: Map<string, ChannelContextEntry>;
   dmContextPath: string;
-};
-
-type LoggerLike = {
-  info(obj: unknown, msg?: string): void;
-  warn(obj: unknown, msg?: string): void;
-  error(obj: unknown, msg?: string): void;
 };
 
 function parseChannelIndexMarkdown(md: string, channelsDir: string): Map<string, ChannelContextEntry> {
