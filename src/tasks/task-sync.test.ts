@@ -44,8 +44,9 @@ describe('task-sync coordinator helpers', () => {
   it('creates and reuses coordinator on task context', async () => {
     const { TaskSyncCoordinator } = await import('./sync-coordinator.js');
     const taskCtx = makeTaskCtx();
+    (taskCtx as any).syncRunOptions = { skipPhase5: true };
 
-    const first = await ensureTaskSyncCoordinator(taskCtx as any, makeRunCtx(), { skipPhase5: true });
+    const first = await ensureTaskSyncCoordinator(taskCtx as any, makeRunCtx());
     const second = await ensureTaskSyncCoordinator(taskCtx as any, makeRunCtx());
 
     expect(first).toBe(second);

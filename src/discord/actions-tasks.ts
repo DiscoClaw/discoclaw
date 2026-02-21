@@ -8,7 +8,7 @@ import type { ForumCountSync } from './forum-count-sync.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 import { shouldActionUseDirectThreadLifecycle } from '../tasks/sync-contract.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
-import type { TaskSyncCoordinatorLike } from '../tasks/task-sync.js';
+import type { TaskSyncCoordinatorLike, TaskSyncRunOptions } from '../tasks/task-sync.js';
 import { runTaskSync } from '../tasks/task-sync.js';
 import type { TaskStore } from '../tasks/store.js';
 import type { TaskService } from '../tasks/service.js';
@@ -104,6 +104,7 @@ export type TaskContext = {
   syncFailureRetryEnabled?: boolean;
   syncFailureRetryDelayMs?: number;
   syncDeferredRetryDelayMs?: number;
+  syncRunOptions?: TaskSyncRunOptions;
 };
 
 function resolveTaskService(taskCtx: TaskContext): TaskService {

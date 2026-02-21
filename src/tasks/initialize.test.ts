@@ -127,6 +127,14 @@ describe('initializeTasksContext', () => {
     expect(result.taskCtx!.tagMapPath).toBe('/my/custom/tag-map.json');
   });
 
+  it('stores sync run options on TaskContext', async () => {
+    const result = await initializeTasksContext(baseOpts({
+      tasksSyncSkipPhase5: true,
+    }));
+    expect(result.taskCtx).toBeDefined();
+    expect(result.taskCtx!.syncRunOptions).toEqual({ skipPhase5: true });
+  });
+
   it('uses provided store instead of creating a new one', async () => {
     const store = new TaskStore();
     const result = await initializeTasksContext(baseOpts({ store }));
