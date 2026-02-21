@@ -66,7 +66,7 @@ async function baseOpts(
   // Write a minimal template
   await fs.writeFile(
     path.join(plansDir, '.plan-template.md'),
-    `# Plan: {{TITLE}}\n\n**ID:** {{PLAN_ID}}\n**Bead:** {{BEAD_ID}}\n**Created:** {{DATE}}\n**Status:** DRAFT\n**Project:** {{PROJECT}}\n\n---\n\n## Objective\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`,
+    `# Plan: {{TITLE}}\n\n**ID:** {{PLAN_ID}}\n**Task:** {{TASK_ID}}\n**Created:** {{DATE}}\n**Status:** DRAFT\n**Project:** {{PROJECT}}\n\n---\n\n## Objective\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`,
   );
   return {
     runtime,
@@ -437,7 +437,7 @@ describe('buildPlanSummary', () => {
       '# Plan: Add rate limiting',
       '',
       '**ID:** plan-010',
-      '**Bead:** ws-abc',
+      '**Task:** ws-abc',
       '**Created:** 2026-02-12',
       '**Status:** REVIEW',
       '**Project:** discoclaw',
@@ -491,7 +491,7 @@ describe('buildPlanSummary', () => {
       '# Plan: Simple fix',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Created:** 2026-01-01',
       '**Status:** DRAFT',
       '**Project:** test',
@@ -521,7 +521,7 @@ describe('buildPlanSummary', () => {
       '# Plan: Empty',
       '',
       '**ID:** plan-002',
-      '**Bead:** ws-002',
+      '**Task:** ws-002',
       '**Created:** 2026-01-01',
       '**Status:** DRAFT',
       '**Project:** test',
@@ -583,7 +583,7 @@ describe('appendAuditRound', () => {
 describe('ForgeOrchestrator', () => {
   it('completes in 1 round when audit returns clean', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Concern 1: Minor naming**\n**Severity: low**\n\n**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -607,7 +607,7 @@ describe('ForgeOrchestrator', () => {
 
   it('completes in 2 rounds when first audit has blocking concerns', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditBlocking = '**Concern 1: Missing details**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
     const revisedPlan = draftPlan; // Same structure, orchestrator handles merge
     const auditClean = '**Verdict:** Ready to approve.';
@@ -630,7 +630,7 @@ describe('ForgeOrchestrator', () => {
 
   it('medium severity auto-approves without revision', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditMedium = '**Concern 1: Missing details**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
 
     // Draft -> Audit (medium) -> should auto-approve (no revision)
@@ -652,7 +652,7 @@ describe('ForgeOrchestrator', () => {
 
   it('stops at max rounds when audit always returns blocking concerns', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditHigh = '**Concern 1: Fundamental flaw**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
 
     // 3 rounds max: draft, audit, revise, audit, revise, audit = 6 runtime calls
@@ -691,7 +691,7 @@ describe('ForgeOrchestrator', () => {
 
   it('reports error when audit phase fails but preserves draft', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     // Draft succeeds, audit errors
     const runtime = makeMockRuntimeWithError(1, [draftPlan]);
     const opts = await baseOpts(tmpDir, runtime);
@@ -710,7 +710,7 @@ describe('ForgeOrchestrator', () => {
 
   it('progress callback receives round numbers in format "Audit round N/M"', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -727,7 +727,7 @@ describe('ForgeOrchestrator', () => {
 
   it('terminal messages pass force: true', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -746,7 +746,7 @@ describe('ForgeOrchestrator', () => {
 
   it('isRunning reflects orchestrator state', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -763,7 +763,7 @@ describe('ForgeOrchestrator', () => {
 
   it('cancel stops the forge between phases', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditBlocking = '**Concern 1: Issue**\n**Severity: blocking**\n**Verdict:** Needs revision.';
     const revisedPlan = draftPlan;
     const auditClean = '**Verdict:** Ready to approve.';
@@ -830,7 +830,7 @@ describe('ForgeOrchestrator', () => {
       'Single-user system. No concurrency guards needed.',
     );
 
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     // Capture the prompts sent to the runtime
@@ -870,7 +870,7 @@ describe('ForgeOrchestrator', () => {
       'Browser escalation: WebFetch → Playwright → CDP',
     );
 
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     // Capture the prompts sent to the runtime
@@ -903,7 +903,7 @@ describe('ForgeOrchestrator', () => {
   it('passes read-only tools to auditor invoke call', async () => {
     const tmpDir = await makeTmpDir();
 
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     // Capture invoke params for each call
@@ -937,7 +937,7 @@ describe('ForgeOrchestrator', () => {
   it('updates bead title when drafter produces a different title than raw description', async () => {
     const tmpDir = await makeTmpDir();
     // Drafter returns a clean title ("Add webhook retry logic") different from raw input
-    const draftPlan = `# Plan: Add webhook retry logic\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nAdd retry logic.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Add webhook retry logic\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nAdd retry logic.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -956,7 +956,7 @@ describe('ForgeOrchestrator', () => {
 
   it('skips bead title update when drafter title matches description', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild it.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild it.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -972,7 +972,7 @@ describe('ForgeOrchestrator', () => {
 
   it('reuses existing open bead with matching title instead of creating duplicate', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -995,12 +995,12 @@ describe('ForgeOrchestrator', () => {
     const planFile = entries.find((e) => e.startsWith('plan-001') && e.endsWith('.md') && !e.includes('template'));
     expect(planFile).toBeTruthy();
     const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
-    expect(content).toContain(`**Bead:** ${existingBead.id}`);
+    expect(content).toContain(`**Task:** ${existingBead.id}`);
   });
 
   it('dedup is case-insensitive and trims whitespace', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -1019,7 +1019,7 @@ describe('ForgeOrchestrator', () => {
 
   it('does not reuse closed beads with matching title', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -1040,7 +1040,7 @@ describe('ForgeOrchestrator', () => {
 
   it('creates new bead when no title match exists', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -1060,7 +1060,7 @@ describe('ForgeOrchestrator', () => {
 
   it('cancel mid-phase (post-return guard): pipeline returns normally but cancel is set', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
 
     let orchestrator!: ForgeOrchestrator;
     const runtime: RuntimeAdapter = {
@@ -1113,7 +1113,7 @@ describe('ForgeOrchestrator', () => {
 
   it('passes existingTaskId through to handlePlanCommand (skips create)', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);
@@ -1156,7 +1156,7 @@ function makePlanContent(overrides: { status?: string; title?: string; planId?: 
     `# Plan: ${title}`,
     '',
     `**ID:** ${planId}`,
-    `**Bead:** ws-test-001`,
+    `**Task:** ws-test-001`,
     `**Created:** 2026-01-01`,
     `**Status:** ${status}`,
     `**Project:** discoclaw`,
@@ -1335,7 +1335,7 @@ describe('ForgeOrchestrator.resume()', () => {
       '# Plan: Incomplete Plan',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-test-001',
+      '**Task:** ws-test-001',
       '**Created:** 2026-01-01',
       '**Status:** REVIEW',
       '**Project:** discoclaw',
@@ -1385,7 +1385,7 @@ describe('ForgeOrchestrator.resume()', () => {
       '# Plan: Placeholder Plan',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-test-001',
+      '**Task:** ws-test-001',
       '**Created:** 2026-01-01',
       '**Status:** REVIEW',
       '**Project:** discoclaw',
@@ -1462,7 +1462,7 @@ function makeCaptureRuntime(responses: string[]): {
 describe('Forge session keys', () => {
   it('passes distinct sessionKey for drafter and auditor calls', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const { runtime, invocations } = makeCaptureRuntime([draftPlan, auditClean]);
@@ -1481,7 +1481,7 @@ describe('Forge session keys', () => {
 
   it('session key includes model to prevent mismatch', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const { runtime, invocations } = makeCaptureRuntime([draftPlan, auditClean]);
@@ -1501,7 +1501,7 @@ describe('Forge session keys', () => {
 
   it('session key includes planId for uniqueness', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const { runtime, invocations } = makeCaptureRuntime([draftPlan, auditClean]);
@@ -1517,7 +1517,7 @@ describe('Forge session keys', () => {
 
   it('revision step reuses drafter session key', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditBlocking = '**Concern 1: Missing details**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
     const revisedPlan = draftPlan;
     const auditClean = '**Verdict:** Ready to approve.';
@@ -1565,7 +1565,7 @@ describe('Forge session keys', () => {
 describe('auditorRuntime support', () => {
   it('auditorRuntime is used for audit calls when set', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const drafterRuntime = makeMockRuntime([draftPlan]);
@@ -1596,7 +1596,7 @@ describe('auditorRuntime support', () => {
 
   it('falls back to default runtime when auditorRuntime is undefined', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const { runtime, invocations } = makeCaptureRuntime([draftPlan, auditClean]);
@@ -1611,7 +1611,7 @@ describe('auditorRuntime support', () => {
 
   it('non-Claude auditor runtime receives empty model string when auditorModel not set', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const drafterRuntime = makeMockRuntime([draftPlan]);
@@ -1640,7 +1640,7 @@ describe('auditorRuntime support', () => {
 
   it('non-Claude auditor receives no tools, addDirs, or sessionKey', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const drafterRuntime = makeMockRuntime([draftPlan]);
@@ -1693,7 +1693,7 @@ describe('buildAuditorPrompt hasTools option', () => {
 // Drafter runtime tests
 // ---------------------------------------------------------------------------
 
-const MINIMAL_DRAFT_PLAN = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+const MINIMAL_DRAFT_PLAN = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
 
 describe('drafterRuntime support', () => {
   it('drafterRuntime is used for draft calls when set', async () => {
@@ -1837,7 +1837,7 @@ function makeMockRuntimeWithEvents(responseMap: Array<{ text: string; events?: E
 describe('ForgeOrchestrator onEvent threading', () => {
   it('onEvent spy receives events during draft phase', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntimeWithEvents([
@@ -1857,7 +1857,7 @@ describe('ForgeOrchestrator onEvent threading', () => {
 
   it('onEvent spy receives events during audit phase', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntimeWithEvents([
@@ -1876,7 +1876,7 @@ describe('ForgeOrchestrator onEvent threading', () => {
 
   it('throwing onEvent does not abort forge execution', async () => {
     const tmpDir = await makeTmpDir();
-    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditClean]);

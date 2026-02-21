@@ -203,7 +203,7 @@ describe('parsePlanFileHeader', () => {
     const content = `# Plan: Add the plan command
 
 **ID:** plan-001
-**Bead:** ws-test-001
+**Task:** ws-test-001
 **Created:** 2026-02-12
 **Status:** DRAFT
 **Project:** discoclaw
@@ -667,11 +667,11 @@ describe('handlePlanCommand', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-alpha.md'),
-      '# Plan: Alpha\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Alpha\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
     );
     await fs.writeFile(
       path.join(plansDir, 'plan-002-beta.md'),
-      '# Plan: Beta\n\n**ID:** plan-002\n**Bead:** ws-002\n**Status:** APPROVED\n**Project:** test\n**Created:** 2026-01-02\n',
+      '# Plan: Beta\n\n**ID:** plan-002\n**Task:** ws-002\n**Status:** APPROVED\n**Project:** test\n**Created:** 2026-01-02\n',
     );
 
     const result = await handlePlanCommand(
@@ -719,7 +719,7 @@ describe('handlePlanCommand', () => {
         '# Plan: Test feature',
         '',
         '**ID:** plan-001',
-        '**Bead:** ws-001',
+        '**Task:** ws-001',
         '**Status:** DRAFT',
         '**Project:** discoclaw',
         '**Created:** 2026-02-12',
@@ -765,7 +765,7 @@ describe('handlePlanCommand', () => {
         '# Plan: Test feature',
         '',
         '**ID:** plan-001',
-        '**Bead:** ws-001',
+        '**Task:** ws-001',
         '**Status:** DRAFT',
         '**Project:** discoclaw',
         '**Created:** 2026-02-12',
@@ -808,7 +808,7 @@ describe('handlePlanCommand', () => {
         '# Plan: Test feature',
         '',
         '**ID:** plan-001',
-        '**Bead:** ws-001',
+        '**Task:** ws-001',
         '**Status:** DRAFT',
         '**Project:** discoclaw',
         '**Created:** 2026-02-12',
@@ -853,7 +853,7 @@ describe('handlePlanCommand', () => {
         '# Plan: Test feature',
         '',
         '**ID:** plan-001',
-        '**Bead:** ws-001',
+        '**Task:** ws-001',
         '**Status:** DRAFT',
         '**Project:** discoclaw',
         '**Created:** 2026-02-12',
@@ -900,7 +900,7 @@ describe('handlePlanCommand', () => {
         '# Plan: Test feature',
         '',
         '**ID:** plan-001',
-        '**Bead:** ws-001',
+        '**Task:** ws-001',
         '**Status:** DRAFT',
         '**Project:** discoclaw',
         '**Created:** 2026-02-12',
@@ -938,7 +938,7 @@ describe('handlePlanCommand', () => {
         '# Plan: Test feature',
         '',
         '**ID:** plan-001',
-        '**Bead:** ws-001',
+        '**Task:** ws-001',
         '**Status:** DRAFT',
         '**Project:** discoclaw',
         '**Created:** 2026-02-12',
@@ -985,7 +985,7 @@ describe('handlePlanCommand', () => {
         '# Plan: Test feature',
         '',
         '**ID:** plan-001',
-        '**Bead:** ws-001',
+        '**Task:** ws-001',
         '**Status:** DRAFT',
         '**Project:** discoclaw',
         '**Created:** 2026-02-12',
@@ -1028,7 +1028,7 @@ describe('handlePlanCommand', () => {
         '# Plan: Test feature',
         '',
         '**ID:** plan-001',
-        '**Bead:** ws-001',
+        '**Task:** ws-001',
         '**Status:** DRAFT',
         '**Project:** discoclaw',
         '**Created:** 2026-02-12',
@@ -1066,7 +1066,7 @@ describe('handlePlanCommand', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-test.md'),
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-abc-123\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n\n---\n\n## Objective\n\nSome objective.\n\n## Risks\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-abc-123\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n\n---\n\n## Objective\n\nSome objective.\n\n## Risks\n',
     );
 
     const result = await handlePlanCommand(
@@ -1105,7 +1105,7 @@ describe('handlePlanCommand', () => {
     const filePath = path.join(plansDir, 'plan-001-test.md');
     await fs.writeFile(
       filePath,
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const store = makeStore();
@@ -1142,7 +1142,7 @@ describe('handlePlanCommand', () => {
     const filePath = path.join(plansDir, 'plan-001-test.md');
     await fs.writeFile(
       filePath,
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** APPROVED\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** APPROVED\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const store = makeStore();
@@ -1209,7 +1209,7 @@ describe('handlePlanCommand', () => {
       '# Plan: Test phases',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Status:** APPROVED',
       '**Project:** discoclaw',
       '**Created:** 2026-02-12',
@@ -1245,7 +1245,7 @@ describe('handlePlanCommand', () => {
       '# Plan: Test',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Status:** APPROVED',
       '**Project:** discoclaw',
       '**Created:** 2026-02-12',
@@ -1293,7 +1293,7 @@ describe('handlePlanCommand', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-test.md'),
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const result = await handlePlanCommand(
@@ -1312,7 +1312,7 @@ describe('handlePlanCommand', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-test.md'),
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const result = await handlePlanCommand(
@@ -1345,7 +1345,7 @@ describe('handlePlanSkip', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-test.md'),
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** APPROVED\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** APPROVED\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
     );
 
     const result = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
@@ -1361,7 +1361,7 @@ describe('handlePlanSkip', () => {
       '# Plan: Test',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Status:** APPROVED',
       '**Project:** discoclaw',
       '**Created:** 2026-02-12',
@@ -1392,7 +1392,7 @@ describe('handlePlanSkip', () => {
       '# Plan: Test',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Status:** APPROVED',
       '**Project:** discoclaw',
       '**Created:** 2026-02-12',
@@ -1450,7 +1450,7 @@ describe('preparePlanRun', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-test.md'),
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** DRAFT\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
     );
 
     const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
@@ -1468,7 +1468,7 @@ describe('preparePlanRun', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-test.md'),
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** REVIEW\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
     );
 
     const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
@@ -1485,7 +1485,7 @@ describe('preparePlanRun', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-test.md'),
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** CLOSED\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** CLOSED\n**Project:** discoclaw\n**Created:** 2026-02-12\n',
     );
 
     const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
@@ -1504,7 +1504,7 @@ describe('preparePlanRun', () => {
       '# Plan: Test',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Status:** IMPLEMENTING',
       '**Project:** discoclaw',
       '**Created:** 2026-02-12',
@@ -1529,7 +1529,7 @@ describe('preparePlanRun', () => {
       '# Plan: Test',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Status:** APPROVED',
       '**Project:** discoclaw',
       '**Created:** 2026-02-12',
@@ -1563,7 +1563,7 @@ describe('preparePlanRun', () => {
       '# Plan: Test',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Status:** APPROVED',
       '**Project:** discoclaw',
       '**Created:** 2026-02-12',
@@ -1598,7 +1598,7 @@ describe('preparePlanRun', () => {
       '# Plan: Test',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Status:** APPROVED',
       '**Project:** discoclaw',
       '**Created:** 2026-02-12',
@@ -1629,7 +1629,7 @@ describe('preparePlanRun', () => {
       '# Plan: Test',
       '',
       '**ID:** plan-001',
-      '**Bead:** ws-001',
+      '**Task:** ws-001',
       '**Status:** APPROVED',
       '**Project:** discoclaw',
       '**Created:** 2026-02-12',
@@ -1667,7 +1667,7 @@ describe('updatePlanFileStatus', () => {
     const filePath = path.join(tmpDir, 'plan-001-test.md');
     await fs.writeFile(
       filePath,
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     await updatePlanFileStatus(filePath, 'APPROVED');
@@ -1690,11 +1690,11 @@ describe('listPlanFiles', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-alpha.md'),
-      '# Plan: Alpha\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Alpha\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
     );
     await fs.writeFile(
       path.join(plansDir, 'plan-002-beta.md'),
-      '# Plan: Beta\n\n**ID:** plan-002\n**Bead:** ws-002\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-02\n',
+      '# Plan: Beta\n\n**ID:** plan-002\n**Task:** ws-002\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-02\n',
     );
 
     const results = await listPlanFiles(plansDir);
@@ -1820,7 +1820,7 @@ describe('findPlanFile — bare-number resolution', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-031-test.md'),
-      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-031\n**Task:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const result = await findPlanFile(plansDir, '031');
@@ -1835,7 +1835,7 @@ describe('findPlanFile — bare-number resolution', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-031-test.md'),
-      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-031\n**Task:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const result = await findPlanFile(plansDir, '31');
@@ -1850,7 +1850,7 @@ describe('findPlanFile — bare-number resolution', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-031-test.md'),
-      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-031\n**Task:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const result = await findPlanFile(plansDir, 'plan-31');
@@ -1865,7 +1865,7 @@ describe('findPlanFile — bare-number resolution', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-031-test.md'),
-      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-031\n**Task:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const result = await findPlanFile(plansDir, 'plan-031');
@@ -1880,7 +1880,7 @@ describe('findPlanFile — bare-number resolution', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-031-test.md'),
-      '# Plan: Test\n\n**ID:** plan-031\n**Bead:** ws-special-bead\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-031\n**Task:** ws-special-bead\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const result = await findPlanFile(plansDir, 'ws-special-bead');
@@ -1895,7 +1895,7 @@ describe('findPlanFile — bare-number resolution', () => {
 
     await fs.writeFile(
       path.join(plansDir, 'plan-001-test.md'),
-      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
+      '# Plan: Test\n\n**ID:** plan-001\n**Task:** ws-001\n**Status:** REVIEW\n**Project:** test\n**Created:** 2026-01-01\n',
     );
 
     const result = await findPlanFile(plansDir, '999');
@@ -1936,9 +1936,9 @@ function makePlanFile(opts: { status: string; beadId?: string }): string {
     '**ID:** plan-001',
   ];
   // Only include Bead line if beadId is provided (non-empty).
-  // parsePlanFileHeader's regex misbehaves on empty **Bead:** lines.
+  // parsePlanFileHeader's regex misbehaves on empty **Task:** lines.
   const beadId = opts.beadId ?? 'ws-001';
-  if (beadId) lines.push(`**Bead:** ${beadId}`);
+  if (beadId) lines.push(`**Task:** ${beadId}`);
   lines.push(`**Status:** ${opts.status}`);
   lines.push('**Project:** discoclaw');
   lines.push('**Created:** 2026-02-12');
