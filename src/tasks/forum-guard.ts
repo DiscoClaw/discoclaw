@@ -3,7 +3,7 @@ import type { TaskDiscordAnyThreadChannel, TaskDiscordClient } from './discord-t
 import type { TaskStore } from './store.js';
 import type { TagMap } from './types.js';
 import { findTaskByThreadId } from './thread-cache.js';
-import { buildAppliedTagsWithStatus, buildThreadName } from './discord-sync.js';
+import { buildAppliedTagsWithStatus, buildThreadName } from './thread-helpers.js';
 
 /**
  * Canonical task namespace for forum guard wiring.

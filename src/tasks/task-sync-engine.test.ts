@@ -22,15 +22,6 @@ function makeDiscordSyncMock() {
     });
     const ensureUnarchived = vi.fn(async () => {});
     const findExistingThreadForTask = vi.fn(async () => null);
-    const extractShortIdFromThreadName = vi.fn((name: string) => {
-      const m = name.match(/\[(\d+)\]/);
-      return m ? m[1] : null;
-    });
-    const shortTaskId = vi.fn((id: string) => {
-      const idx = id.indexOf('-');
-      return idx >= 0 ? id.slice(idx + 1) : id;
-    });
-
     discordSyncMock = {
       resolveTasksForum,
       createTaskThread,
@@ -43,14 +34,29 @@ function makeDiscordSyncMock() {
       getThreadIdFromTask,
       ensureUnarchived,
       findExistingThreadForTask,
-      extractShortIdFromThreadName,
-      shortTaskId,
     };
   }
   return discordSyncMock;
 }
 
 vi.mock('./discord-sync.js', makeDiscordSyncMock);
+
+function makeThreadHelpersMock() {
+  const discordSync = makeDiscordSyncMock();
+  return {
+    getThreadIdFromTask: discordSync.getThreadIdFromTask,
+    extractShortIdFromThreadName: vi.fn((name: string) => {
+      const m = name.match(/\[(\d+)\]/);
+      return m ? m[1] : null;
+    }),
+    shortTaskId: vi.fn((id: string) => {
+      const idx = id.indexOf('-');
+      return idx >= 0 ? id.slice(idx + 1) : id;
+    }),
+  };
+}
+
+vi.mock('./thread-helpers.js', makeThreadHelpersMock);
 
 function makeStore(tasks: any[] = []): any {
   const byId = new Map<string, any>(tasks.map((task) => [task.id, { ...task }]));

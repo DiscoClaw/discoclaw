@@ -5,7 +5,7 @@ import { initTasksForumGuard } from './forum-guard.js';
 vi.mock('./thread-cache.js', () => ({
   findTaskByThreadId: vi.fn(),
 }));
-vi.mock('./discord-sync.js', () => ({
+vi.mock('./thread-helpers.js', () => ({
   buildAppliedTagsWithStatus: vi.fn(() => ['tag-closed']),
   buildThreadName: vi.fn(() => '✅ [001] My Task'),
 }));
