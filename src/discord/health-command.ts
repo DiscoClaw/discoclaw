@@ -71,6 +71,14 @@ function formatTaskSyncVerboseLines(counters: Record<string, number>): string[] 
   lines.push(
     `Task sync follow-up/retry: followUp=${asCount(counters, 'tasks.sync.follow_up.scheduled')}/${asCount(counters, 'tasks.sync.follow_up.triggered')}/${asCount(counters, 'tasks.sync.follow_up.succeeded')}/${asCount(counters, 'tasks.sync.follow_up.failed')} retry=${asCount(counters, 'tasks.sync.retry.scheduled')}/${asCount(counters, 'tasks.sync.retry.triggered')}/${asCount(counters, 'tasks.sync.retry.failed')} (coalesced=${asCount(counters, 'tasks.sync.retry.coalesced')} canceled=${asCount(counters, 'tasks.sync.retry.canceled')}) failureRetry=${asCount(counters, 'tasks.sync.failure_retry.scheduled')}/${asCount(counters, 'tasks.sync.failure_retry.triggered')}/${asCount(counters, 'tasks.sync.failure_retry.failed')} (coalesced=${asCount(counters, 'tasks.sync.failure_retry.coalesced')} canceled=${asCount(counters, 'tasks.sync.failure_retry.canceled')} disabled=${asCount(counters, 'tasks.sync.failure_retry.disabled')})`,
   );
+  const tagMapReloadAttempts = asCount(counters, 'tasks.sync.tag_map_reload.attempted');
+  const tagMapReloadSucceeded = asCount(counters, 'tasks.sync.tag_map_reload.succeeded');
+  const tagMapReloadFailed = asCount(counters, 'tasks.sync.tag_map_reload.failed');
+  if (tagMapReloadAttempts > 0 || tagMapReloadSucceeded > 0 || tagMapReloadFailed > 0) {
+    lines.push(
+      `Task sync tag-map reload: attempts=${tagMapReloadAttempts} ok=${tagMapReloadSucceeded} failed=${tagMapReloadFailed}`,
+    );
+  }
   return lines;
 }
 

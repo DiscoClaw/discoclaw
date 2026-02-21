@@ -270,6 +270,8 @@ describe('TaskSyncCoordinator', () => {
     const coord = new TaskSyncCoordinator(opts);
     await coord.sync();
 
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.tag_map_reload.attempted');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.tag_map_reload.succeeded');
     expect(reloadTagMapInPlace).toHaveBeenCalledWith('/tmp/tag-map.json', opts.tagMap);
     // reloadTagMapInPlace called before runTaskSync
     const reloadOrder = (reloadTagMapInPlace as any).mock.invocationCallOrder[0];
@@ -290,6 +292,8 @@ describe('TaskSyncCoordinator', () => {
 
     // Sync still runs despite reload failure
     expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.tag_map_reload.attempted');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.tag_map_reload.failed');
     expect(runTaskSync).toHaveBeenCalled();
     expect(opts.log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error), tagMapPath: '/tmp/tag-map.json' }),
