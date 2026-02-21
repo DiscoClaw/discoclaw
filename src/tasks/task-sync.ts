@@ -33,6 +33,10 @@ export type TaskSyncRunContext = {
   guild: Guild;
 };
 
+export type TaskSyncRunOptions = {
+  skipPhase5?: boolean;
+};
+
 export type TaskSyncWiring = {
   stop(): void;
 };
@@ -40,7 +44,7 @@ export type TaskSyncWiring = {
 export async function ensureTaskSyncCoordinator(
   taskCtx: TaskSyncContext,
   runCtx: TaskSyncRunContext,
-  opts?: { skipPhase5?: boolean },
+  opts?: TaskSyncRunOptions,
 ): Promise<TaskSyncCoordinatorLike> {
   if (taskCtx.syncCoordinator) return taskCtx.syncCoordinator;
 
@@ -68,7 +72,7 @@ export async function runTaskSync(
   taskCtx: TaskSyncContext,
   runCtx: TaskSyncRunContext,
   statusPoster?: StatusPoster,
-  opts?: { skipPhase5?: boolean },
+  opts?: TaskSyncRunOptions,
 ): Promise<TaskSyncResult | null> {
   const syncCoordinator = await ensureTaskSyncCoordinator(taskCtx, runCtx, opts);
   return syncCoordinator.sync(statusPoster);
