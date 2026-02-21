@@ -1015,7 +1015,6 @@ if (taskCtx) {
       tasksCwd,
       sidebarMentionUserId,
       log,
-      forumCountSync: taskForumCountSync,
       skipForumGuard: true,
       skipPhase5: cfg.tasksSyncSkipPhase5,
     });
