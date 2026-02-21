@@ -1,12 +1,10 @@
 import type { ForumChannel } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
-import type { StatusPoster } from './status-channel.js';
-import type { RuntimeAdapter } from '../runtime/types.js';
+import type { TaskContext } from '../tasks/task-context.js';
 import type { TaskData, TaskStatus } from '../tasks/types.js';
 import { TASK_STATUSES, isTaskStatus } from '../tasks/types.js';
 import { shouldActionUseDirectThreadLifecycle } from '../tasks/sync-contract.js';
 import { withDirectTaskLifecycle } from '../tasks/task-lifecycle.js';
-import type { TaskSyncContext } from '../tasks/sync-context.js';
 import { runTaskSync } from '../tasks/task-sync.js';
 import type { TaskService } from '../tasks/service.js';
 import { createTaskService } from '../tasks/service.js';
@@ -81,15 +79,6 @@ const TASK_TYPE_MAP: Record<TaskActionRequest['type'], true> = {
   tagMapReload: true,
 };
 export const TASK_ACTION_TYPES = new Set<string>(Object.keys(TASK_TYPE_MAP));
-
-export type TaskContext = TaskSyncContext & {
-  tasksCwd?: string;
-  runtime: RuntimeAdapter;
-  autoTag: boolean;
-  autoTagModel: string;
-  mentionUserId?: string;
-  statusPoster?: StatusPoster;
-};
 
 function resolveTaskService(taskCtx: TaskContext): TaskService {
   if (taskCtx.taskService) return taskCtx.taskService;

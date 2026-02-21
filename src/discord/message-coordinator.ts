@@ -14,7 +14,7 @@ import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
-import type { TaskContext } from './actions-tasks.js';
+import type { TaskContext } from '../tasks/task-context.js';
 import type { CronContext } from './actions-crons.js';
 import type { ForgeContext } from './actions-forge.js';
 import { executePlanAction } from './actions-plan.js';
