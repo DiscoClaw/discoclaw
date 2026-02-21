@@ -169,6 +169,7 @@ describe('TaskSyncCoordinator', () => {
     await expect(coord.sync()).rejects.toThrow('Discord API down');
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failed');
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.error_class.other');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.scheduled');
 
     // Cache should not be invalidated on failure
     expect(taskThreadCache.invalidate).not.toHaveBeenCalled();
@@ -387,5 +388,82 @@ describe('TaskSyncCoordinator deferred-close retry', () => {
       'tasks:coordinator deferred-close retry failed',
     );
     expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.retry.failed');
+  });
+});
+
+describe('TaskSyncCoordinator failure retry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('schedules a retry after sync failure', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any)
+      .mockRejectedValueOnce(new Error('primary boom'))
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+      });
+
+    const opts = makeOpts();
+    opts.failureRetryDelayMs = 1_000;
+    const coord = new TaskSyncCoordinator(opts);
+
+    await expect(coord.sync()).rejects.toThrow('primary boom');
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.scheduled');
+    expect(runTaskSync).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(runTaskSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs and increments metrics when failure retry also fails', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any)
+      .mockRejectedValueOnce(new Error('primary boom'))
+      .mockRejectedValueOnce(new Error('retry boom'));
+
+    const opts = makeOpts();
+    opts.failureRetryDelayMs = 1_000;
+    const coord = new TaskSyncCoordinator(opts);
+
+    await expect(coord.sync()).rejects.toThrow('primary boom');
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.failed');
+    expect(opts.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      'tasks:coordinator failure retry sync failed',
+    );
+  });
+
+  it('does not schedule duplicate failure retries while one is pending', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (runTaskSync as any)
+      .mockRejectedValueOnce(new Error('boom 1'))
+      .mockRejectedValueOnce(new Error('boom 2'))
+      .mockResolvedValueOnce({
+        threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0,
+        threadsArchived: 0, statusesUpdated: 0, tagsUpdated: 0, warnings: 0,
+      });
+
+    const opts = makeOpts();
+    opts.failureRetryDelayMs = 1_000;
+    const coord = new TaskSyncCoordinator(opts);
+
+    await expect(coord.sync()).rejects.toThrow('boom 1');
+    await expect(coord.sync()).rejects.toThrow('boom 2');
+
+    const scheduledCalls = (opts.metrics.increment as any).mock.calls
+      .filter(([name]: [string]) => name === 'tasks.sync.failure_retry.scheduled');
+    expect(scheduledCalls).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(runTaskSync).toHaveBeenCalledTimes(3);
   });
 });
