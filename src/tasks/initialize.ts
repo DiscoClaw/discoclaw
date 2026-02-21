@@ -1,7 +1,7 @@
 import type { TaskContext } from './task-context.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { TaskStatusPoster } from './sync-context.js';
+import type { TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
 import type { TaskStore } from './store.js';
 import { createTaskService } from './service.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
@@ -27,6 +27,7 @@ export type InitializeTasksOpts = {
   tasksSyncDeferredRetryDelayMs?: number;
   runtime: RuntimeAdapter;
   statusPoster?: TaskStatusPoster;
+  hasInFlightForChannel?: TaskInFlightChecker;
   log: LoggerLike;
   /** Resolved from system bootstrap or config. */
   systemTasksForumId?: string;
@@ -93,6 +94,7 @@ export async function initializeTasksContext(
     mentionUserId: tasksMentionUser,
     sidebarMentionUserId,
     statusPoster: opts.statusPoster,
+    hasInFlightForChannel: opts.hasInFlightForChannel,
     log: opts.log,
     syncFailureRetryEnabled: opts.tasksSyncFailureRetryEnabled,
     syncFailureRetryDelayMs: opts.tasksSyncFailureRetryDelayMs,

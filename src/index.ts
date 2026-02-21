@@ -51,7 +51,12 @@ import type { WebhookServer } from './webhook/server.js';
 import { resolveModel } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
-import { setDataFilePath, drainInFlightReplies, cleanupOrphanedReplies } from './discord/inflight-replies.js';
+import {
+  setDataFilePath,
+  drainInFlightReplies,
+  cleanupOrphanedReplies,
+  hasInFlightForChannel,
+} from './discord/inflight-replies.js';
 import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 import { getGitHash } from './version.js';
 import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
@@ -953,6 +958,7 @@ if (tasksEnabled) {
     tasksSyncDeferredRetryDelayMs,
     runtime,
     statusPoster: botStatus ?? undefined,
+    hasInFlightForChannel,
     log,
     systemTasksForumId: system?.tasksForumId,
     store: sharedTaskStore,

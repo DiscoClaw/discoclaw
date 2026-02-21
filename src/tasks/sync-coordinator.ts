@@ -4,7 +4,7 @@ import { globalMetrics, type MetricsRegistry } from '../observability/metrics.js
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import type { TaskSyncRunOptions } from './sync-types.js';
-import type { TaskForumCountSync, TaskStatusPoster } from './sync-context.js';
+import type { TaskForumCountSync, TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { runTaskSync } from './task-sync-engine.js';
 import { reloadTagMapInPlace } from './discord-sync.js';
@@ -24,6 +24,7 @@ type TaskSyncCoordinatorCoreOptions = {
   log?: LoggerLike;
   mentionUserId?: string;
   forumCountSync?: TaskForumCountSync;
+  hasInFlightForChannel?: TaskInFlightChecker;
   metrics?: Pick<MetricsRegistry, 'increment'>;
   enableFailureRetry?: boolean;
   failureRetryDelayMs?: number;

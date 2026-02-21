@@ -13,6 +13,8 @@ export type TaskForumCountSync = {
   stop(): void;
 };
 
+export type TaskInFlightChecker = (channelId: string) => boolean;
+
 export type TaskSyncCoordinatorLike = {
   sync(statusPoster?: TaskStatusPoster): Promise<TaskSyncResult | null>;
 };
@@ -26,6 +28,7 @@ export type TaskSyncContext = {
   log?: LoggerLike;
   sidebarMentionUserId?: string;
   forumCountSync?: TaskForumCountSync;
+  hasInFlightForChannel?: TaskInFlightChecker;
   syncCoordinator?: TaskSyncCoordinatorLike;
   syncFailureRetryEnabled?: boolean;
   syncFailureRetryDelayMs?: number;
