@@ -48,16 +48,10 @@ describe('legacy-token-guard: unit', () => {
     expect(matches.some((m) => m.ruleId === 'legacy-beads-import-path')).toBe(true);
   });
 
-  it('allows legacy plan header/token compatibility only in plan-commands', () => {
+  it('blocks legacy plan header/token compatibility everywhere after hard-cut', () => {
     const input = ['**Bead:** ws-001', '{{BEAD_ID}}'].join('\n');
-    const hit = scanFileContent('src/discord/other.ts', input, DEFAULT_LEGACY_GUARD_RULES);
-    const allowed = scanFileContent('src/discord/plan-commands.ts', input, DEFAULT_LEGACY_GUARD_RULES);
-    const blocked = scanFileContent('src/discord/other.ts', input, DEFAULT_LEGACY_GUARD_RULES);
+    const blocked = scanFileContent('src/discord/plan-commands.ts', input, DEFAULT_LEGACY_GUARD_RULES);
 
-    expect(hit.some((m) => m.ruleId === 'legacy-plan-header-bead')).toBe(true);
-    expect(hit.some((m) => m.ruleId === 'legacy-plan-template-bead-id')).toBe(true);
-    expect(allowed.some((m) => m.ruleId === 'legacy-plan-header-bead')).toBe(false);
-    expect(allowed.some((m) => m.ruleId === 'legacy-plan-template-bead-id')).toBe(false);
     expect(blocked.some((m) => m.ruleId === 'legacy-plan-header-bead')).toBe(true);
     expect(blocked.some((m) => m.ruleId === 'legacy-plan-template-bead-id')).toBe(true);
   });

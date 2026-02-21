@@ -28,10 +28,7 @@ export type PlanCommand = {
 
 export type PlanFileHeader = {
   planId: string;
-  /**
-   * Canonical backing task identifier.
-   * Legacy `**Bead:**` headers are parsed into this field for compatibility.
-   */
+  /** Canonical backing task identifier. */
   taskId?: string;
   status: string;
   title: string;
@@ -86,13 +83,12 @@ export function parsePlanFileHeader(content: string): PlanFileHeader | null {
   const titleMatch = content.match(/^# Plan:\s*(.+)$/m);
   const idMatch = content.match(/^\*\*ID:\*\*\s*(.+)$/m);
   const taskMatch = content.match(/^\*\*Task:\*\*\s*(.+)$/m);
-  const legacyTaskMatch = content.match(/^\*\*Bead:\*\*\s*(.+)$/m);
   const statusMatch = content.match(/^\*\*Status:\*\*\s*(.+)$/m);
   const projectMatch = content.match(/^\*\*Project:\*\*\s*(.+)$/m);
   const createdMatch = content.match(/^\*\*Created:\*\*\s*(.+)$/m);
 
   if (!idMatch) return null;
-  const taskId = taskMatch?.[1]?.trim() ?? legacyTaskMatch?.[1]?.trim() ?? '';
+  const taskId = taskMatch?.[1]?.trim() ?? '';
 
   return {
     planId: idMatch[1]!.trim(),
@@ -365,7 +361,6 @@ export async function handlePlanCommand(
       const content = template
         .replace(/\{\{TITLE\}\}/g, cmd.args)
         .replace(/\{\{PLAN_ID\}\}/g, planId)
-        .replace(/\{\{BEAD_ID\}\}/g, taskId)
         .replace(/\{\{TASK_ID\}\}/g, taskId)
         .replace(/\{\{DATE\}\}/g, date)
         .replace(/\{\{PROJECT\}\}/g, 'discoclaw')

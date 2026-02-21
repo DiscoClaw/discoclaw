@@ -212,6 +212,5 @@ The canonical runtime is task-named (`src/tasks/*`). Remaining bridge surface is
 
 - `scripts/beads/*` migration/hooks tooling remains for bridge and one-shot migration flows.
 - Task data path resolution prefers `data/tasks/*` with fallback to legacy `data/beads/*` when present.
-- Plan header parsing still accepts legacy `**Bead:**` and maps it to task IDs.
 
 These compatibility paths are scheduled for removal in Phase 5 hard-cut after migration cleanup is complete.

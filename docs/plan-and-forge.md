@@ -585,8 +585,6 @@ Plans are markdown files in `workspace/plans/` named `plan-NNN-slug.md`.
 
 **Status updates:** `updatePlanFileStatus()` in `plan-commands.ts` regex-replaces the `**Status:**` line.
 
-**Legacy compatibility:** During the bridge/hard-cut tail, the parser still accepts legacy `**Bead:**` headers and maps them to `taskId`.
-
 ### Template
 
 The plan template source is `workspace/plans/.plan-template.md` (tried first). If the file is missing or unreadable, the inline `FALLBACK_TEMPLATE` in `plan-commands.ts` is used. As of this writing, the on-disk template does not exist — only the fallback is active. To customize, place a `.plan-template.md` file in `workspace/plans/`.
@@ -597,7 +595,7 @@ The plan template source is `workspace/plans/.plan-template.md` (tried first). I
 |-------|---------------|
 | `{{TITLE}}` | Plan description |
 | `{{PLAN_ID}}` | Generated plan ID (e.g., `plan-017`) |
-| `{{BEAD_ID}}` | Backing task ID (legacy placeholder name kept for template compatibility) |
+| `{{TASK_ID}}` | Backing task ID |
 | `{{DATE}}` | ISO date (YYYY-MM-DD) |
 | `{{PROJECT}}` | Hardcoded to `discoclaw` |
 
@@ -764,15 +762,9 @@ Status sync:
 
 Task updates are best-effort — failures don't block plan operations.
 
-### Legacy compatibility (bridge phase)
+### Lookup behavior
 
-The plan/forge stack is task-first, but a narrow compatibility layer still exists until Phase 5 hard-cut:
-
-- Plan header parsing still accepts legacy `**Bead:**` fields and maps them to `taskId`.
-- Plan templates still support `{{BEAD_ID}}` placeholder replacement for backward compatibility.
-- `findPlanFile()` still resolves by either plan ID or backing task ID.
-
-Planned removal: Phase 5 (final compatibility removal), after migration of remaining historical templates and headers.
+`findPlanFile()` resolves by either plan ID or backing task ID.
 
 ### File storage
 

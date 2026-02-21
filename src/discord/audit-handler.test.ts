@@ -42,7 +42,7 @@ function makeMockRuntimeError(message: string): RuntimeAdapter {
 const MINIMAL_PLAN = `# Plan: Test plan
 
 **ID:** plan-099
-**Bead:** workspace-test
+**Task:** workspace-test
 **Created:** 2026-02-13
 **Status:** APPROVED
 **Project:** discoclaw
@@ -247,7 +247,7 @@ describe('handlePlanAudit', () => {
     const badPlan = `# Plan: Bad plan
 
 **ID:** plan-099
-**Bead:** workspace-test
+**Task:** workspace-test
 **Created:** 2026-02-13
 **Status:** DRAFT
 **Project:** discoclaw

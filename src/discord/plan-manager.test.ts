@@ -64,7 +64,7 @@ function makeErrorRuntime(msg: string): RuntimeAdapter {
 const SAMPLE_PLAN = `# Plan: Add phase manager
 
 **ID:** plan-011
-**Bead:** ws-test
+**Task:** ws-test
 **Created:** 2026-02-12
 **Status:** APPROVED
 **Project:** discoclaw
@@ -114,7 +114,7 @@ Unit tests for all functions.
 const SAMPLE_PLAN_NO_CHANGES = `# Plan: Audit plan-010
 
 **ID:** plan-010
-**Bead:** ws-audit
+**Task:** ws-audit
 **Created:** 2026-02-12
 **Status:** REVIEW
 **Project:** discoclaw
