@@ -26,7 +26,9 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-guild.ts`
 - `src/discord/actions-moderation.ts`
 - `src/discord/actions-poll.ts`
-- `src/discord/actions-tasks.ts`
+- `src/tasks/task-action-contract.ts` (task action request/type set)
+- `src/tasks/task-action-executor.ts` (task action executor)
+- `src/tasks/task-action-prompt.ts` (task action prompt section)
 - `src/discord/actions-crons.ts`
 - `src/discord/actions-bot-profile.ts`
 - `src/discord/actions-forge.ts`
@@ -53,7 +55,7 @@ Plan action types (in `src/discord/actions-plan.ts`):
 Memory action types (in `src/discord/actions-memory.ts`):
 - `memoryRemember`, `memoryForget`, `memoryShow`
 
-Task action types (in `src/discord/actions-tasks.ts`):
+Task action types (in `src/tasks/task-action-contract.ts`):
 - `taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`, `tagMapReload`
 
 > **Task References:** Task IDs are the stable identifier for cross-task interaction. When interacting with another task (e.g. reading its content, posting an update, or closing it), always use `taskShow`/`taskUpdate`/etc. with the task ID. Do not use channel-name based messaging actions for task threads.
