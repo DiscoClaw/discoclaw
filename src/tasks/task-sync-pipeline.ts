@@ -216,6 +216,15 @@ export type TaskReconcilePlanFromSnapshotOptions = {
   threadIdFromTask: (task: TaskData) => string | null;
 };
 
+export type TaskReconcilePlanFromThreadSourcesOptions = {
+  tasks: TaskData[];
+  archivedThreads: Iterable<TaskThreadLike>;
+  activeThreads: Iterable<TaskThreadLike>;
+  shortIdOfTaskId: (taskId: string) => string;
+  shortIdFromThreadName: (threadName: string) => string | null;
+  threadIdFromTask: (task: TaskData) => string | null;
+};
+
 /**
  * Stage: diff (phase 5)
  * Plan reconciliation operations for forum threads vs local task snapshot.
@@ -301,6 +310,23 @@ export function planTaskReconcileFromSnapshots(
   return planTaskReconcileOperations({
     threads: opts.threads,
     tasksByShortId,
+    shortIdFromThreadName: opts.shortIdFromThreadName,
+    threadIdFromTask: opts.threadIdFromTask,
+  });
+}
+
+/**
+ * Stage: diff (phase 5)
+ * Compose thread-source ingest + reconcile diff planning.
+ */
+export function planTaskReconcileFromThreadSources(
+  opts: TaskReconcilePlanFromThreadSourcesOptions,
+): TaskReconcileOperation[] {
+  const threads = ingestTaskThreadSnapshots(opts.archivedThreads, opts.activeThreads);
+  return planTaskReconcileFromSnapshots({
+    tasks: opts.tasks,
+    threads,
+    shortIdOfTaskId: opts.shortIdOfTaskId,
     shortIdFromThreadName: opts.shortIdFromThreadName,
     threadIdFromTask: opts.threadIdFromTask,
   });

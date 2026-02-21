@@ -4,6 +4,7 @@ import {
   buildTasksByShortIdMap,
   ingestTaskThreadSnapshots,
   ingestTaskSyncSnapshot,
+  planTaskReconcileFromThreadSources,
   planTaskReconcileFromSnapshots,
   planTaskReconcileOperations,
   planTaskApplyPhases,
@@ -213,6 +214,43 @@ describe('task-sync pipeline helpers', () => {
       'skip_external_ref_mismatch',
       'archive_active_closed',
       'reconcile_archived_closed',
+    ]);
+  });
+
+  it('plans phase5 reconcile operations directly from archived and active thread sources', () => {
+    const ops = planTaskReconcileFromThreadSources({
+      tasks: [
+        task({ id: 'ws-001', title: 'Closed A', status: 'closed', external_ref: 'discord:thread-001' }),
+        task({ id: 'ws-002', title: 'Closed B', status: 'closed' }),
+        task({ id: 'ws-777', title: 'Collision A', status: 'open' }),
+        task({ id: 'dev-777', title: 'Collision B', status: 'open' }),
+      ],
+      archivedThreads: [
+        { id: 'thread-reconcile', name: '☑️ [002] Closed archived', archived: true },
+      ],
+      activeThreads: [
+        { id: 'thread-orphan', name: '🟢 [999] Orphan', archived: false },
+        { id: 'thread-collision', name: '🟢 [777] Collision', archived: false },
+        { id: 'thread-mismatch', name: '🟢 [001] Mismatch', archived: false },
+        { id: 'thread-archive', name: '🟢 [002] Closed active', archived: false },
+      ],
+      shortIdOfTaskId: (id) => id.split('-')[1] ?? id,
+      shortIdFromThreadName: (name) => {
+        const match = name.match(/\[(\d+)\]/);
+        return match ? match[1] : null;
+      },
+      threadIdFromTask: (t) => {
+        const ref = t.external_ref ?? '';
+        return ref.startsWith('discord:') ? ref.slice('discord:'.length) : null;
+      },
+    });
+
+    expect(ops.map((op) => op.action)).toEqual([
+      'reconcile_archived_closed',
+      'orphan',
+      'collision',
+      'skip_external_ref_mismatch',
+      'archive_active_closed',
     ]);
   });
 });
