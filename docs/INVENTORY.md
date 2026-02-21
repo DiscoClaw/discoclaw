@@ -87,7 +87,7 @@ All actions are gated by category env flags (off by default except channels).
 | Full task ↔ thread sync engine | `src/tasks/task-sync-engine.ts` | **done** |
 | Sync pipeline stage helpers (ingest/normalize/diff planning) | `src/tasks/task-sync-pipeline.ts` | **done** |
 | Sync apply/reconcile phase executors | `src/tasks/task-sync-apply-types.ts`, `src/tasks/task-sync-phase-apply.ts`, `src/tasks/task-sync-reconcile.ts` | **done** |
-| Sync coordinator (concurrency guard + cache) | `src/tasks/sync-coordinator.ts` | **done** |
+| Sync coordinator (concurrency guard + cache) | `src/tasks/sync-coordinator.ts`, `src/tasks/sync-coordinator-metrics.ts`, `src/tasks/sync-coordinator-retries.ts` | **done** |
 | Store-event sync triggers (subscribes to contract-defined `TaskStore` mutation events) | `src/tasks/task-sync.ts` | **done** |
 | Task thread cache | `src/tasks/thread-cache.ts` | **done** |
 | Forum guard + startup checks | `src/tasks/forum-guard.ts`, `src/tasks/initialize.ts` | **done** |

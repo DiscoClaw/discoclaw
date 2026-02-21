@@ -9,6 +9,19 @@ import type { TagMap, TaskSyncResult } from './types.js';
 import { runTaskSync } from './task-sync-engine.js';
 import { reloadTagMapInPlace } from './tag-map.js';
 import { taskThreadCache } from './thread-cache.js';
+import {
+  classifySyncError,
+  recordSyncFailureMetrics,
+  recordSyncSuccessMetrics,
+} from './sync-coordinator-metrics.js';
+import {
+  cancelDeferredCloseRetry,
+  cancelFailureRetry,
+  createTaskSyncRetryState,
+  scheduleDeferredCloseRetry,
+  scheduleFailureRetry,
+  type TaskSyncRetryControls,
+} from './sync-coordinator-retries.js';
 
 /**
  * Canonical task-named sync coordinator implementation.
@@ -33,143 +46,29 @@ type TaskSyncCoordinatorCoreOptions = {
 
 export type TaskSyncCoordinatorOptions = TaskSyncCoordinatorCoreOptions & TaskSyncRunOptions;
 
-function classifySyncError(message?: string): string {
-  const msg = String(message ?? '').toLowerCase();
-  if (!msg) return 'unknown';
-  if (msg.includes('timed out')) return 'timeout';
-  if (msg.includes('missing permissions') || msg.includes('missing access')) return 'discord_permissions';
-  if (msg.includes('unauthorized') || msg.includes('auth')) return 'auth';
-  if (msg.includes('stream stall')) return 'stream_stall';
-  return 'other';
-}
-
-function incrementIfPositive(
-  metrics: TaskMetrics,
-  name: string,
-  value?: number,
-): void {
-  const count = Number(value ?? 0);
-  if (count > 0) metrics.increment(name, count);
-}
-
-function recordSyncSuccessMetrics(
-  metrics: TaskMetrics,
-  result: TaskSyncResult,
-  durationMs: number,
-): void {
-  metrics.increment('tasks.sync.succeeded');
-  metrics.increment('tasks.sync.duration_ms.total', Math.max(0, durationMs));
-  metrics.increment('tasks.sync.duration_ms.samples');
-  incrementIfPositive(metrics, 'tasks.sync.transition.threads_created', result.threadsCreated);
-  incrementIfPositive(metrics, 'tasks.sync.transition.thread_names_updated', result.emojisUpdated);
-  incrementIfPositive(metrics, 'tasks.sync.transition.starter_messages_updated', result.starterMessagesUpdated);
-  incrementIfPositive(metrics, 'tasks.sync.transition.threads_archived', result.threadsArchived);
-  incrementIfPositive(metrics, 'tasks.sync.transition.statuses_updated', result.statusesUpdated);
-  incrementIfPositive(metrics, 'tasks.sync.transition.tags_updated', result.tagsUpdated);
-  incrementIfPositive(metrics, 'tasks.sync.transition.threads_reconciled', result.threadsReconciled);
-  incrementIfPositive(metrics, 'tasks.sync.transition.orphan_threads_found', result.orphanThreadsFound);
-  incrementIfPositive(metrics, 'tasks.sync.transition.closes_deferred', result.closesDeferred);
-  incrementIfPositive(metrics, 'tasks.sync.transition.warnings', result.warnings);
-}
-
-function recordSyncFailureMetrics(
-  metrics: TaskMetrics,
-  error: unknown,
-  durationMs: number,
-): void {
-  metrics.increment('tasks.sync.failed');
-  metrics.increment('tasks.sync.duration_ms.total', Math.max(0, durationMs));
-  metrics.increment('tasks.sync.duration_ms.samples');
-  const message = error instanceof Error ? error.message : String(error ?? '');
-  metrics.increment(`tasks.sync.error_class.${classifySyncError(message)}`);
-}
-
 export class TaskSyncCoordinator {
   private syncing = false;
   private pendingStatusPoster: TaskStatusPoster | undefined | false = false;
-  private failureRetryPending = false;
-  private deferredCloseRetryPending = false;
-  private failureRetryTimeout: ReturnType<typeof setTimeout> | null = null;
-  private deferredCloseRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private readonly retryState = createTaskSyncRetryState();
 
   constructor(private readonly opts: TaskSyncCoordinatorOptions) {}
 
-  private scheduleFailureRetry(metrics: TaskMetrics): void {
-    if (this.opts.enableFailureRetry === false) {
-      metrics.increment('tasks.sync.failure_retry.disabled');
-      return;
-    }
-    if (this.failureRetryPending) {
-      metrics.increment('tasks.sync.failure_retry.coalesced');
-      return;
-    }
-
-    this.failureRetryPending = true;
-    const delayMs = this.opts.failureRetryDelayMs ?? 30_000;
-    metrics.increment('tasks.sync.failure_retry.scheduled');
-    this.opts.log?.info({ delayMs }, 'tasks:coordinator scheduling retry after sync failure');
-
-    this.failureRetryTimeout = setTimeout(() => {
-      this.failureRetryPending = false;
-      this.failureRetryTimeout = null;
-      metrics.increment('tasks.sync.failure_retry.triggered');
-      this.sync().catch((err) => {
-        metrics.increment('tasks.sync.failure_retry.failed');
-        const message = err instanceof Error ? err.message : String(err ?? '');
-        metrics.increment(`tasks.sync.failure_retry.error_class.${classifySyncError(message)}`);
-        this.opts.log?.warn({ err }, 'tasks:coordinator failure retry sync failed');
-      });
-    }, delayMs);
-  }
-
-  private cancelFailureRetry(metrics: TaskMetrics): void {
-    if (!this.failureRetryPending || !this.failureRetryTimeout) return;
-    clearTimeout(this.failureRetryTimeout);
-    this.failureRetryTimeout = null;
-    this.failureRetryPending = false;
-    metrics.increment('tasks.sync.failure_retry.canceled');
-  }
-
-  private scheduleDeferredCloseRetry(
-    metrics: TaskMetrics,
-    closesDeferred: number,
-  ): void {
-    if (this.deferredCloseRetryPending) {
-      metrics.increment('tasks.sync.retry.coalesced');
-      return;
-    }
-
-    this.deferredCloseRetryPending = true;
-    const delayMs = this.opts.deferredRetryDelayMs ?? 30_000;
-    metrics.increment('tasks.sync.retry.scheduled');
-    this.opts.log?.info(
-      { closesDeferred, delayMs },
-      'tasks:coordinator scheduling retry for deferred closes',
-    );
-
-    this.deferredCloseRetryTimeout = setTimeout(() => {
-      this.deferredCloseRetryPending = false;
-      this.deferredCloseRetryTimeout = null;
-      metrics.increment('tasks.sync.retry.triggered');
-      this.sync().catch((err) => {
-        metrics.increment('tasks.sync.retry.failed');
-        const message = err instanceof Error ? err.message : String(err ?? '');
-        metrics.increment(`tasks.sync.retry.error_class.${classifySyncError(message)}`);
-        this.opts.log?.warn({ err }, 'tasks:coordinator deferred-close retry failed');
-      });
-    }, delayMs);
-  }
-
-  private cancelDeferredCloseRetry(metrics: TaskMetrics): void {
-    if (!this.deferredCloseRetryPending || !this.deferredCloseRetryTimeout) return;
-    clearTimeout(this.deferredCloseRetryTimeout);
-    this.deferredCloseRetryTimeout = null;
-    this.deferredCloseRetryPending = false;
-    metrics.increment('tasks.sync.retry.canceled');
+  private retryControls(metrics: TaskMetrics): TaskSyncRetryControls {
+    return {
+      state: this.retryState,
+      metrics,
+      log: this.opts.log,
+      runSync: () => this.sync(),
+      enableFailureRetry: this.opts.enableFailureRetry,
+      failureRetryDelayMs: this.opts.failureRetryDelayMs,
+      deferredRetryDelayMs: this.opts.deferredRetryDelayMs,
+    };
   }
 
   async sync(statusPoster?: TaskStatusPoster): Promise<TaskSyncResult | null> {
     const metrics = this.opts.metrics ?? noopTaskMetrics;
+    const retries = this.retryControls(metrics);
+
     if (this.syncing) {
       metrics.increment('tasks.sync.coalesced');
       // Preserve the most specific statusPoster from coalesced callers:
@@ -194,23 +93,24 @@ export class TaskSyncCoordinator {
           this.opts.log?.warn({ err, tagMapPath: this.opts.tagMapPath }, 'tasks:tag-map reload failed; using cached map');
         }
       }
+
       // Snapshot tagMap for deterministic behavior within this sync run
       const tagMapSnapshot = { ...this.opts.tagMap };
       const result = await runTaskSync({ ...this.opts, tagMap: tagMapSnapshot, statusPoster });
       taskThreadCache.invalidate();
       this.opts.forumCountSync?.requestUpdate();
       recordSyncSuccessMetrics(metrics, result, Date.now() - startedAtMs);
-      this.cancelFailureRetry(metrics);
+      cancelFailureRetry(retries);
       if (result.closesDeferred && result.closesDeferred > 0) {
-        this.scheduleDeferredCloseRetry(metrics, result.closesDeferred);
+        scheduleDeferredCloseRetry(retries, result.closesDeferred);
       } else {
-        this.cancelDeferredCloseRetry(metrics);
+        cancelDeferredCloseRetry(retries);
       }
       return result;
     } catch (err) {
       recordSyncFailureMetrics(metrics, err, Date.now() - startedAtMs);
-      this.cancelDeferredCloseRetry(metrics);
-      this.scheduleFailureRetry(metrics);
+      cancelDeferredCloseRetry(retries);
+      scheduleFailureRetry(retries);
       throw err;
     } finally {
       this.syncing = false;
