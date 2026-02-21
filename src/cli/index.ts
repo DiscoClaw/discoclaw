@@ -6,6 +6,7 @@
 
 import { createRequire } from 'node:module';
 import { runInitWizard } from './init-wizard.js';
+import { runDaemonInstaller } from './daemon-installer.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json') as { version: string };
@@ -15,6 +16,9 @@ const [, , command] = process.argv;
 switch (command) {
   case 'init':
     await runInitWizard();
+    break;
+  case 'install-daemon':
+    await runDaemonInstaller();
     break;
   case '--version':
   case '-v':
@@ -36,7 +40,8 @@ function printHelp(ver: string): void {
     `discoclaw v${ver} — Personal AI orchestrator\n` +
       `\nUsage: discoclaw <command>\n` +
       `\nCommands:\n` +
-      `  init      Interactive setup wizard — creates .env and workspace/\n` +
+      `  init              Interactive setup wizard — creates .env and workspace/\n` +
+      `  install-daemon    Register discoclaw as a persistent background service\n` +
       `\nOptions:\n` +
       `  -v, --version   Print version\n` +
       `  -h, --help      Print this help\n`,
