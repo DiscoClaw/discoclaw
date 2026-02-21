@@ -109,6 +109,62 @@ describe('renderHealthReport', () => {
     expect(verbose).toContain('tasks=off');
   });
 
+  it('shows task sync no-runs message in verbose mode before first sync', () => {
+    const metrics = new MetricsRegistry();
+    const verbose = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: true, tasksActive: true,
+        requireChannelContext: true, autoIndexChannelContext: true,
+      },
+      mode: 'verbose',
+    });
+    expect(verbose).toContain('Task sync: no runs yet');
+  });
+
+  it('shows task sync lifecycle, transition, and retry metrics in verbose mode', () => {
+    const metrics = new MetricsRegistry();
+    metrics.increment('tasks.sync.started', 4);
+    metrics.increment('tasks.sync.succeeded', 3);
+    metrics.increment('tasks.sync.failed', 1);
+    metrics.increment('tasks.sync.coalesced', 2);
+    metrics.increment('tasks.sync.duration_ms.total', 1100);
+    metrics.increment('tasks.sync.duration_ms.samples', 4);
+    metrics.increment('tasks.sync.transition.threads_created', 5);
+    metrics.increment('tasks.sync.transition.threads_archived', 6);
+    metrics.increment('tasks.sync.transition.threads_reconciled', 7);
+    metrics.increment('tasks.sync.transition.orphan_threads_found', 8);
+    metrics.increment('tasks.sync.transition.closes_deferred', 9);
+    metrics.increment('tasks.sync.transition.warnings', 10);
+    metrics.increment('tasks.sync.follow_up.scheduled', 2);
+    metrics.increment('tasks.sync.follow_up.failed', 1);
+    metrics.increment('tasks.sync.retry.scheduled', 3);
+    metrics.increment('tasks.sync.retry.failed', 1);
+
+    const verbose = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: true, tasksActive: true,
+        requireChannelContext: true, autoIndexChannelContext: true,
+      },
+      mode: 'verbose',
+    });
+
+    expect(verbose).toContain('Task sync: started=4 ok=3 failed=1 coalesced=2 avgMs=275');
+    expect(verbose).toContain('Task sync transitions: created=5 archived=6 reconciled=7 orphans=8 deferred=9 warnings=10');
+    expect(verbose).toContain('Task sync follow-up/retry: followUp=2/1 retry=3/1');
+  });
+
   it('renders tools report', () => {
     const out = renderHealthToolsReport({
       permissionTier: 'standard',
