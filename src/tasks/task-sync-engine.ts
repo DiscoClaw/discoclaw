@@ -1,9 +1,8 @@
 import type { Client, Guild } from 'discord.js';
 import type { TagMap, TaskData, TaskSyncResult } from './types.js';
-import { hasInFlightForChannel } from '../discord/inflight-replies.js';
 export type { TaskSyncResult } from './types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
-import type { TaskStatusPoster } from './sync-context.js';
+import type { TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import type { TaskSyncRunOptions } from './sync-types.js';
@@ -47,6 +46,7 @@ type TaskSyncCoreOptions = {
   archivedDedupeLimit?: number;
   statusPoster?: TaskStatusPoster;
   mentionUserId?: string;
+  hasInFlightForChannel?: TaskInFlightChecker;
 };
 
 export type TaskSyncOptions = TaskSyncCoreOptions & TaskSyncRunOptions;
@@ -73,6 +73,7 @@ type TaskSyncApplyContext = {
   archivedDedupeLimit?: number;
   mentionUserId?: string;
   counters: TaskSyncApplyCounters;
+  hasInFlightForChannel: TaskInFlightChecker;
 };
 
 type TaskSyncReconcileResult = {
@@ -264,7 +265,7 @@ async function applyPhase4ArchiveClosedThreads(
         if (await isTaskThreadAlreadyClosed(ctx.client, threadId, latestTask, ctx.tagMap)) {
           return;
         }
-        if (hasInFlightForChannel(threadId)) {
+        if (ctx.hasInFlightForChannel(threadId)) {
           ctx.counters.closesDeferred++;
           ctx.log?.info({ taskId: latestTask.id, threadId }, 'task-sync:phase4 close deferred (in-flight reply active)');
           return;
@@ -345,7 +346,7 @@ async function applyReconcileArchiveActiveClosed(
   const task = operation.task;
   if (!task) return;
 
-  if (hasInFlightForChannel(operation.thread.id)) {
+  if (ctx.hasInFlightForChannel(operation.thread.id)) {
     ctx.counters.closesDeferred++;
     ctx.log?.info({ taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
     return;
@@ -382,7 +383,7 @@ async function applyReconcileArchivedClosed(
   try {
     const alreadyClosed = await isTaskThreadAlreadyClosed(ctx.client, operation.thread.id, task, ctx.tagMap);
     if (!alreadyClosed) {
-      if (hasInFlightForChannel(operation.thread.id)) {
+      if (ctx.hasInFlightForChannel(operation.thread.id)) {
         ctx.counters.closesDeferred++;
         ctx.log?.info({ taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
       } else {
@@ -519,6 +520,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
   const { client, guild, forumId, tagMap, log } = opts;
   const taskService = opts.taskService ?? createTaskService(opts.store);
   const throttleMs = opts.throttleMs ?? 250;
+  const hasInFlightForChannel = opts.hasInFlightForChannel ?? (() => false);
 
   const forum = await resolveTasksForum(guild, forumId);
   if (!forum) {
@@ -554,6 +556,7 @@ export async function runTaskSync(opts: TaskSyncOptions): Promise<TaskSyncResult
     throttleMs,
     archivedDedupeLimit: opts.archivedDedupeLimit,
     mentionUserId: opts.mentionUserId,
+    hasInFlightForChannel,
     counters,
   };
 

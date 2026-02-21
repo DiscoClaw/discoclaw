@@ -2,10 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runTaskSync } from './task-sync-engine.js';
 import { withDirectTaskLifecycle } from './task-lifecycle.js';
 
-vi.mock('../discord/inflight-replies.js', () => ({
-  hasInFlightForChannel: vi.fn(() => false),
-}));
-
 var discordSyncMock: any;
 function makeDiscordSyncMock() {
   if (!discordSyncMock) {
@@ -977,11 +973,9 @@ describe('runTaskSync', () => {
 
   it('phase 4 defers close when in-flight reply is active for that thread', async () => {
     const { closeTaskThread } = await import('./discord-sync.js');
-    const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
     const store = makeStore([
       { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
     ]);
-    (hasInFlightForChannel as any).mockReturnValueOnce(true);
 
     const result = await runTaskSync({
       client: makeClient(),
@@ -990,6 +984,7 @@ describe('runTaskSync', () => {
       tagMap: {},
       store,
       throttleMs: 0,
+      hasInFlightForChannel: () => true,
     } as any);
 
     expect(closeTaskThread).not.toHaveBeenCalled();
@@ -999,13 +994,11 @@ describe('runTaskSync', () => {
 
   it('phase 5 defers close when in-flight reply is active for non-archived thread', async () => {
     const { resolveTasksForum, closeTaskThread } = await import('./discord-sync.js');
-    const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: '' },
     ]);
     // Phase 4 sees no thread (no external_ref), so hasInFlightForChannel is not called there.
     // Phase 5 finds the thread and checks in-flight.
-    (hasInFlightForChannel as any).mockReturnValue(true);
 
     const mockForum = {
       threads: {
@@ -1027,24 +1020,21 @@ describe('runTaskSync', () => {
       tagMap: {},
       store,
       throttleMs: 0,
+      hasInFlightForChannel: () => true,
     } as any);
 
     expect(closeTaskThread).not.toHaveBeenCalled();
     expect(result.threadsReconciled).toBe(0);
     expect(result.closesDeferred).toBeGreaterThanOrEqual(1);
-
-    (hasInFlightForChannel as any).mockReturnValue(false);
   });
 
   it('phase 5 defers close when in-flight reply is active for archived stale thread', async () => {
     const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./discord-sync.js');
-    const { hasInFlightForChannel } = await import('../discord/inflight-replies.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
     // Phase 4: already closed → skip (no hasInFlightForChannel call). Phase 5: stale → in-flight → defer.
     (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-    (hasInFlightForChannel as any).mockReturnValueOnce(true);
 
     const mockForum = {
       threads: {
@@ -1066,6 +1056,7 @@ describe('runTaskSync', () => {
       tagMap: {},
       store,
       throttleMs: 0,
+      hasInFlightForChannel: () => true,
     } as any);
 
     expect(closeTaskThread).not.toHaveBeenCalled();

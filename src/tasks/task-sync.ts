@@ -26,6 +26,7 @@ export async function ensureTaskSyncCoordinator(
     log: taskCtx.log,
     mentionUserId: taskCtx.sidebarMentionUserId,
     forumCountSync: taskCtx.forumCountSync,
+    hasInFlightForChannel: taskCtx.hasInFlightForChannel,
     ...(taskCtx.syncRunOptions ?? {}),
     enableFailureRetry: taskCtx.syncFailureRetryEnabled,
     failureRetryDelayMs: taskCtx.syncFailureRetryDelayMs,
