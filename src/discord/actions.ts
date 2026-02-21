@@ -11,7 +11,7 @@ import { POLL_ACTION_TYPES, executePollAction, pollActionsPromptSection } from '
 import type { PollActionRequest } from './actions-poll.js';
 import { executeTaskAction } from '../tasks/task-action-executor.js';
 import type { TaskActionRequest } from '../tasks/task-action-contract.js';
-import { TASK_ACTION_TYPES } from '../tasks/task-action-contract.js';
+import { TASK_ACTION_TYPES, isTaskActionRequest } from '../tasks/task-action-contract.js';
 import { taskActionsPromptSection } from '../tasks/task-action-prompt.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import { CRON_ACTION_TYPES, executeCronAction, cronActionsPromptSection } from './actions-crons.js';
@@ -277,12 +277,12 @@ export async function executeDiscordActions(
         result = await executeModerationAction(action as ModerationActionRequest, ctx);
       } else if (POLL_ACTION_TYPES.has(action.type)) {
         result = await executePollAction(action as PollActionRequest, ctx);
-      } else if (TASK_ACTION_TYPES.has(action.type)) {
+      } else if (isTaskActionRequest(action)) {
         const taskCtx = effectiveSubs.taskCtx;
         if (!taskCtx) {
           result = { ok: false, error: 'Tasks subsystem not configured' };
         } else {
-          result = await executeTaskAction(action as TaskActionRequest, ctx, taskCtx);
+          result = await executeTaskAction(action, ctx, taskCtx);
         }
       } else if (CRON_ACTION_TYPES.has(action.type)) {
         if (!effectiveSubs.cronCtx) {
