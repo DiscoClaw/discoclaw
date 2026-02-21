@@ -5,7 +5,7 @@ import type { StatusPoster } from '../discord/status-channel.js';
 import type { TaskStore } from './store.js';
 import { createTaskService } from './service.js';
 import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
-import type { TaskSyncRunContext } from './task-sync.js';
+import type { TaskSyncRunContext, TaskSyncWiring } from './task-sync.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
 import { loadTagMap } from './discord-sync.js';
 
@@ -112,11 +112,7 @@ type WireTaskSyncOpts = {
   skipPhase5?: boolean;
 };
 
-type WireTaskSyncResult = {
-  stop(): void;
-};
-
-export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<WireTaskSyncResult> {
+export async function wireTaskSync(opts: WireTaskSyncOpts): Promise<TaskSyncWiring> {
   const log = opts.taskCtx.log;
   if (!log) {
     throw new Error('wireTaskSync requires taskCtx.log');
