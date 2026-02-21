@@ -1,9 +1,10 @@
-import type { RuntimeAdapter } from '../runtime/types.js';
 import type { TaskSyncContext, TaskStatusPoster } from './sync-context.js';
+import type { TaskModelResolver, TaskRuntimeAdapter } from './runtime-types.js';
 
 export type TaskContext = TaskSyncContext & {
   tasksCwd?: string;
-  runtime: RuntimeAdapter;
+  runtime: TaskRuntimeAdapter;
+  resolveModel?: TaskModelResolver;
   autoTag: boolean;
   autoTagModel: string;
   mentionUserId?: string;
