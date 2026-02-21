@@ -525,6 +525,62 @@ describe('executePlanAction', () => {
       expect(lastEdit.allowedMentions).toEqual({ parse: [] });
     });
 
+    it('posts a new message when a phase starts', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        return { result: 'nothing_to_run' };
+      });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const contents = setup.fn.mock.calls.map((call) => String(call[0]!.content));
+      expect(contents.some((text) => text.includes('Starting phase **phase-1**: First phase'))).toBe(true);
+    });
+
+    it('deduplicates phase-start posts for repeated progress lines in the same run', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        const event = {
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        };
+        await opts.onPlanEvent?.(event);
+        await opts.onPlanEvent?.(event);
+        return { result: 'nothing_to_run' };
+      });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const phaseStartMessages = setup.fn.mock.calls
+        .map((call) => String(call[0]!.content))
+        .filter((content) => content.includes('Starting phase **phase-1**: First phase'));
+      expect(phaseStartMessages).toHaveLength(1);
+    });
+
     it('skips completion notification when skipCompletionNotify is true', async () => {
       const setup = makeSendFn();
       const ctx = makeCtx(setup);
@@ -538,6 +594,34 @@ describe('executePlanAction', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(setup.fn).not.toHaveBeenCalled();
+      expect(setup.msg.edit).not.toHaveBeenCalled();
+    });
+
+    it('posts phase-start updates even when skipCompletionNotify is true', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        return { result: 'nothing_to_run' };
+      });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus', skipCompletionNotify: true }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(setup.fn).toHaveBeenCalledOnce();
+      const sent = String(setup.fn.mock.calls[0]![0]!.content);
+      expect(sent).toContain('Starting phase **phase-1**: First phase');
       expect(setup.msg.edit).not.toHaveBeenCalled();
     });
 

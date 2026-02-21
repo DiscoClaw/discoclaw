@@ -28,7 +28,7 @@ import {
   executePhase,
   runNextPhase,
 } from './plan-manager.js';
-import type { PlanPhases, PlanPhase, PhaseExecutionOpts } from './plan-manager.js';
+import type { PlanPhases, PlanPhase, PhaseExecutionOpts, PlanRunEvent } from './plan-manager.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1187,6 +1187,35 @@ describe('runNextPhase', () => {
     expect(updated.phases[0]!.status).toBe('done');
   });
 
+  it('emits a typed phase_start event before execution', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const events: PlanRunEvent[] = [];
+    const opts = makeOpts(makeSuccessRuntime('Phase done!'));
+    opts.onPlanEvent = (evt) => {
+      events.push(evt);
+    };
+
+    const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
+    expect(result.result).toBe('done');
+    expect(events).toEqual([
+      {
+        type: 'phase_start',
+        planId: 'plan-011',
+        phase: {
+          id: phases.phases[0]!.id,
+          title: phases.phases[0]!.title,
+          kind: phases.phases[0]!.kind,
+        },
+      },
+    ]);
+  });
+
   it('stale plan → returns stale', async () => {
     const planPath = path.join(plansDir, 'plan-011-test.md');
     await fs.writeFile(planPath, SAMPLE_PLAN);
@@ -1257,11 +1286,18 @@ describe('runNextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    const phaseEvents: PlanRunEvent[] = [];
+    const opts = makeOpts(makeSuccessRuntime('ok'));
+    opts.onPlanEvent = (evt) => {
+      phaseEvents.push(evt);
+    };
+
+    const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
     expect(result.result).toBe('retry_blocked');
     if (result.result === 'retry_blocked') {
       expect(result.message).toContain('modifiedFiles');
     }
+    expect(phaseEvents).toEqual([]);
 
     // Verify status is still failed on disk (not changed to in-progress)
     const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
