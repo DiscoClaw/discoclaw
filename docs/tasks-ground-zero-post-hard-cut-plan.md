@@ -90,3 +90,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued post-Track-4 cleanup by returning store-trigger wiring directly from `wireTaskSync` (removing an unnecessary wrapper around `TaskSyncWiring.stop()`).
 - 2026-02-21: Continued post-Track-4 cleanup by simplifying `wireTaskSync` to positional args (`taskCtx`, `runCtx`, `opts`) and removing its dedicated options object type.
 - 2026-02-21: Continued post-Track-4 cleanup by introducing shared `TaskSyncRunOptions` in `task-sync.ts` and using it across coordinator, run, and wire entry points.
+- 2026-02-21: Continued post-Track-4 cleanup by reusing shared `TaskSyncRunOptions` directly in coordinator and sync-engine option contracts, removing duplicated `skipPhase5` option declarations.
