@@ -16,14 +16,18 @@ export class CronScheduler {
 
   register(id: string, threadId: string, guildId: string, name: string, def: ParsedCronDef, cronId?: string): CronJob {
     const existing = this.jobs.get(id);
+    const isScheduled = !def.triggerType || def.triggerType === 'schedule';
 
-    // Create the cron instance first so invalid schedules don't clobber an existing job.
+    // Create the job shell first; create the cron timer only for schedule-type agents.
     const job: CronJob = { id, cronId: cronId ?? existing?.cronId ?? '', threadId, guildId, name, def, cron: null, running: false };
-    const cron = new Cron(def.schedule, { timezone: def.timezone }, () => {
-      // Fire-and-forget: errors handled inside the handler.
-      void this.handler(job);
-    });
-    job.cron = cron;
+    if (isScheduled) {
+      // Construct timer first so invalid schedules don't clobber an existing job.
+      const cron = new Cron(def.schedule, { timezone: def.timezone }, () => {
+        // Fire-and-forget: errors handled inside the handler.
+        void this.handler(job);
+      });
+      job.cron = cron;
+    }
 
     if (existing) {
       existing.cron?.stop();
@@ -32,7 +36,7 @@ export class CronScheduler {
     }
 
     this.jobs.set(id, job);
-    this.log?.info({ jobId: id, schedule: def.schedule, timezone: def.timezone }, 'cron:registered');
+    this.log?.info({ jobId: id, triggerType: def.triggerType ?? 'schedule', schedule: def.schedule, timezone: def.timezone }, 'cron:registered');
     return job;
   }
 
@@ -58,11 +62,16 @@ export class CronScheduler {
   enable(id: string): boolean {
     const job = this.jobs.get(id);
     if (!job) return false;
-    // Recreate the cron instance to (re)start scheduling.
+    const isScheduled = !job.def.triggerType || job.def.triggerType === 'schedule';
     job.cron?.stop();
-    job.cron = new Cron(job.def.schedule, { timezone: job.def.timezone }, () => {
-      void this.handler(job);
-    });
+    if (isScheduled) {
+      // Recreate the cron instance to (re)start scheduling.
+      job.cron = new Cron(job.def.schedule, { timezone: job.def.timezone }, () => {
+        void this.handler(job);
+      });
+    } else {
+      job.cron = null;
+    }
     this.log?.info({ jobId: id }, 'cron:enabled');
     return true;
   }

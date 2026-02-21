@@ -22,10 +22,13 @@ export type CronRunRecord = {
   disabled: boolean;
   model: string | null;
   modelOverride?: string;
+  triggerType?: 'schedule' | 'webhook' | 'manual';  // defaults to 'schedule'
+  webhookSourceId?: string;   // URL path segment for /webhook/:source routing
+  webhookSecret?: string;     // HMAC-SHA256 secret for signature verification
 };
 
 export type CronRunStatsStore = {
-  version: 1;
+  version: 1 | 2;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
@@ -80,7 +83,7 @@ class WriteMutex {
 // ---------------------------------------------------------------------------
 
 export function emptyStore(): CronRunStatsStore {
-  return { version: 1, updatedAt: Date.now(), jobs: {} };
+  return { version: 2, updatedAt: Date.now(), jobs: {} };
 }
 
 function emptyRecord(cronId: string, threadId: string): CronRunRecord {
@@ -105,6 +108,8 @@ export class CronRunStats {
   private threadIndex = new Map<string, string>();
   // Secondary index: statusMessageId → cronId for O(1) recovery lookups.
   private statusMessageIndex = new Map<string, string>();
+  // Secondary index: webhookSourceId → cronId for O(1) webhook routing.
+  private sourceIndex = new Map<string, string>();
 
   constructor(store: CronRunStatsStore, filePath: string) {
     this.store = store;
@@ -115,10 +120,14 @@ export class CronRunStats {
   private rebuildThreadIndex(): void {
     this.threadIndex.clear();
     this.statusMessageIndex.clear();
+    this.sourceIndex.clear();
     for (const rec of Object.values(this.store.jobs)) {
       this.threadIndex.set(rec.threadId, rec.cronId);
       if (rec.statusMessageId) {
         this.statusMessageIndex.set(rec.statusMessageId, rec.cronId);
+      }
+      if (rec.webhookSourceId) {
+        this.sourceIndex.set(rec.webhookSourceId, rec.cronId);
       }
     }
   }
@@ -141,12 +150,27 @@ export class CronRunStats {
     return cronId ? this.store.jobs[cronId] : undefined;
   }
 
+  getRecordBySourceId(sourceId: string): CronRunRecord | undefined {
+    const cronId = this.sourceIndex.get(sourceId);
+    return cronId ? this.store.jobs[cronId] : undefined;
+  }
+
   async upsertRecord(cronId: string, threadId: string, updates?: Partial<CronRunRecord>): Promise<CronRunRecord> {
     let record: CronRunRecord;
     await this.mutex.run(async () => {
+      // Enforce sourceId uniqueness before mutating state.
+      const incomingSourceId = updates?.webhookSourceId;
+      if (incomingSourceId !== undefined) {
+        const claimant = this.sourceIndex.get(incomingSourceId);
+        if (claimant && claimant !== cronId) {
+          throw new Error(`webhookSourceId "${incomingSourceId}" is already claimed by cronId "${claimant}"`);
+        }
+      }
+
       const existing = this.store.jobs[cronId];
       if (existing) {
         const prevStatusMessageId = existing.statusMessageId;
+        const prevSourceId = existing.webhookSourceId;
         // If threadId changed, remove old index entry.
         if (existing.threadId !== threadId) {
           this.threadIndex.delete(existing.threadId);
@@ -156,6 +180,9 @@ export class CronRunStats {
         if (prevStatusMessageId && prevStatusMessageId !== existing.statusMessageId) {
           this.statusMessageIndex.delete(prevStatusMessageId);
         }
+        if (prevSourceId && prevSourceId !== existing.webhookSourceId) {
+          this.sourceIndex.delete(prevSourceId);
+        }
         record = existing;
       } else {
         record = { ...emptyRecord(cronId, threadId), ...updates };
@@ -164,6 +191,9 @@ export class CronRunStats {
       this.threadIndex.set(threadId, cronId);
       if (record.statusMessageId) {
         this.statusMessageIndex.set(record.statusMessageId, cronId);
+      }
+      if (record.webhookSourceId) {
+        this.sourceIndex.set(record.webhookSourceId, cronId);
       }
       this.store.updatedAt = Date.now();
       await this.flush();
@@ -195,6 +225,7 @@ export class CronRunStats {
       if (rec) {
         this.threadIndex.delete(rec.threadId);
         if (rec.statusMessageId) this.statusMessageIndex.delete(rec.statusMessageId);
+        if (rec.webhookSourceId) this.sourceIndex.delete(rec.webhookSourceId);
         delete this.store.jobs[cronId];
         this.store.updatedAt = Date.now();
         removed = true;
@@ -211,6 +242,7 @@ export class CronRunStats {
         if (rec.threadId === threadId) {
           this.threadIndex.delete(threadId);
           if (rec.statusMessageId) this.statusMessageIndex.delete(rec.statusMessageId);
+          if (rec.webhookSourceId) this.sourceIndex.delete(rec.webhookSourceId);
           delete this.store.jobs[cronId];
           removed = true;
         }
@@ -254,6 +286,13 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
     }
   } catch {
     store = emptyStore();
+  }
+  // Migrate v1 → v2: backfill triggerType on existing records (additive, no data loss).
+  if (store.version === 1) {
+    for (const rec of Object.values(store.jobs)) {
+      if (!rec.triggerType) rec.triggerType = 'schedule';
+    }
+    store.version = 2;
   }
   return new CronRunStats(store, filePath);
 }
