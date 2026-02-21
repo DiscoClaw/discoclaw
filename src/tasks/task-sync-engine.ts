@@ -9,11 +9,13 @@ import type { TaskService } from './service.js';
 import { createTaskService } from './service.js';
 import {
   buildTasksByShortIdMap,
+  ingestTaskThreadSnapshots,
   ingestTaskSyncSnapshot,
   normalizeTaskSyncBuckets,
   planTaskApplyPhases,
   planTaskReconcileOperations,
   planTaskSyncOperations,
+  type TaskThreadLike,
   type TaskReconcileAction,
   type TaskReconcileOperation,
   type TaskSyncOperationPhase,
@@ -415,27 +417,20 @@ async function applyPhase5ReconcileThreads(
 
   try {
     const activeThreads = await ctx.forum.threads.fetchActive();
-    let archivedThreads: Map<string, any> = new Map();
+    let archivedThreads: Map<string, TaskThreadLike> = new Map();
     try {
       const fetched = await ctx.forum.threads.fetchArchived();
-      archivedThreads = new Map(fetched.threads);
+      archivedThreads = new Map(fetched.threads as Map<string, TaskThreadLike>);
     } catch (err) {
       ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch archived threads');
       ctx.counters.warnings++;
     }
 
-    const allThreadsMap = new Map<string, any>([
-      ...archivedThreads,
-      ...(activeThreads.threads as Map<string, any>),
-    ]);
-    const threadSnapshots: TaskThreadSnapshot[] = [];
-    for (const thread of allThreadsMap.values()) {
-      threadSnapshots.push({
-        id: String(thread.id),
-        name: String(thread.name ?? ''),
-        archived: Boolean(thread.archived),
-      });
-    }
+    const activeThreadsMap = activeThreads.threads as Map<string, TaskThreadLike>;
+    const threadSnapshots: TaskThreadSnapshot[] = ingestTaskThreadSnapshots(
+      archivedThreads.values(),
+      activeThreadsMap.values(),
+    );
 
     const plannedReconcileOps = planTaskReconcileOperations({
       threads: threadSnapshots,

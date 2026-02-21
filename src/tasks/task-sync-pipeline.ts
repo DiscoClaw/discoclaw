@@ -152,6 +152,38 @@ export type TaskThreadSnapshot = {
   archived: boolean;
 };
 
+export type TaskThreadLike = {
+  id: string | number;
+  name?: string | null;
+  archived?: boolean | null;
+};
+
+/**
+ * Stage: ingest (phase 5)
+ * Merge archived+active thread sources into a normalized snapshot list.
+ * When a thread ID appears in both sources, the active source wins.
+ */
+export function ingestTaskThreadSnapshots(
+  archivedThreads: Iterable<TaskThreadLike>,
+  activeThreads: Iterable<TaskThreadLike>,
+): TaskThreadSnapshot[] {
+  const byThreadId = new Map<string, TaskThreadSnapshot>();
+
+  const push = (thread: TaskThreadLike) => {
+    const id = String(thread.id);
+    byThreadId.set(id, {
+      id,
+      name: String(thread.name ?? ''),
+      archived: Boolean(thread.archived),
+    });
+  };
+
+  for (const thread of archivedThreads) push(thread);
+  for (const thread of activeThreads) push(thread);
+
+  return [...byThreadId.values()];
+}
+
 export type TaskReconcileAction =
   | 'orphan'
   | 'collision'
