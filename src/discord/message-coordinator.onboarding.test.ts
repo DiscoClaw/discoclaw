@@ -179,7 +179,9 @@ describe('message coordinator onboarding', () => {
     await handler(wrongChannelMsg1);
 
     expect(wrongChannelMsg1.reply).toHaveBeenCalledTimes(1);
-    expect(wrongChannelMsg1.reply.mock.calls[0][0].content).toContain('setting things up with you in DMs');
+    expect(wrongChannelMsg1.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('setting things up with you in DMs'),
+    }));
     expect(queue.run).toHaveBeenCalledTimes(1);
 
     const wrongChannelMsg2 = makeMessage({

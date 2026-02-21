@@ -96,9 +96,9 @@ describe('runInitWizard', () => {
   it('rejects non-interactive terminals', async () => {
     (process.stdin as any).isTTY = false;
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: string | number | null) => {
       throw new Error(`exit:${code ?? 0}`);
-    }) as (code?: number) => never);
+    }) as any);
 
     await expect(runInitWizard()).rejects.toThrow('exit:1');
     expect(errSpy).toHaveBeenCalledWith('discoclaw init requires an interactive terminal.\n');
