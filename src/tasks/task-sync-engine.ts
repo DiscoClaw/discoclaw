@@ -3,7 +3,7 @@ import type { TagMap, TaskData, TaskSyncResult } from './types.js';
 import { hasInFlightForChannel } from '../discord/inflight-replies.js';
 export type { TaskSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
-import type { StatusPoster } from '../discord/status-channel.js';
+import type { TaskStatusPoster } from './sync-context.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import type { TaskSyncRunOptions } from './sync-types.js';
@@ -45,7 +45,7 @@ type TaskSyncCoreOptions = {
   log?: LoggerLike;
   throttleMs?: number;
   archivedDedupeLimit?: number;
-  statusPoster?: StatusPoster;
+  statusPoster?: TaskStatusPoster;
   mentionUserId?: string;
 };
 

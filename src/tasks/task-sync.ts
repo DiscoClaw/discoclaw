@@ -1,11 +1,10 @@
 import type { LoggerLike } from '../discord/action-types.js';
 import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
 import type { TaskSyncResult } from './types.js';
-import type { TaskSyncContext, TaskSyncCoordinatorLike } from './sync-context.js';
+import type { TaskSyncContext, TaskSyncCoordinatorLike, TaskStatusPoster } from './sync-context.js';
 import { TaskSyncCoordinator } from './sync-coordinator.js';
 import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
 import { isDirectTaskLifecycleActive } from './task-lifecycle.js';
-import type { StatusPoster } from '../discord/status-channel.js';
 
 export type { TaskSyncContext, TaskSyncCoordinatorLike } from './sync-context.js';
 export type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
@@ -39,7 +38,7 @@ export async function ensureTaskSyncCoordinator(
 export async function runTaskSync(
   taskCtx: TaskSyncContext,
   runCtx: TaskSyncRunContext,
-  statusPoster?: StatusPoster,
+  statusPoster?: TaskStatusPoster,
 ): Promise<TaskSyncResult | null> {
   const syncCoordinator = await ensureTaskSyncCoordinator(taskCtx, runCtx);
   return syncCoordinator.sync(statusPoster);

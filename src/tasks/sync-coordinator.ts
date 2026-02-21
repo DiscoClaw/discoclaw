@@ -1,11 +1,10 @@
 import type { Client, Guild } from 'discord.js';
-import type { StatusPoster } from '../discord/status-channel.js';
-import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import { globalMetrics, type MetricsRegistry } from '../observability/metrics.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import type { TaskSyncRunOptions } from './sync-types.js';
+import type { TaskForumCountSync, TaskStatusPoster } from './sync-context.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { runTaskSync } from './task-sync-engine.js';
 import { reloadTagMapInPlace } from './discord-sync.js';
@@ -24,7 +23,7 @@ type TaskSyncCoordinatorCoreOptions = {
   taskService?: TaskService;
   log?: LoggerLike;
   mentionUserId?: string;
-  forumCountSync?: ForumCountSync;
+  forumCountSync?: TaskForumCountSync;
   metrics?: Pick<MetricsRegistry, 'increment'>;
   enableFailureRetry?: boolean;
   failureRetryDelayMs?: number;
@@ -86,7 +85,7 @@ function recordSyncFailureMetrics(
 
 export class TaskSyncCoordinator {
   private syncing = false;
-  private pendingStatusPoster: StatusPoster | undefined | false = false;
+  private pendingStatusPoster: TaskStatusPoster | undefined | false = false;
   private failureRetryPending = false;
   private deferredCloseRetryPending = false;
   private failureRetryTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -168,7 +167,7 @@ export class TaskSyncCoordinator {
     metrics.increment('tasks.sync.retry.canceled');
   }
 
-  async sync(statusPoster?: StatusPoster): Promise<TaskSyncResult | null> {
+  async sync(statusPoster?: TaskStatusPoster): Promise<TaskSyncResult | null> {
     const metrics = this.opts.metrics ?? globalMetrics;
     if (this.syncing) {
       metrics.increment('tasks.sync.coalesced');
