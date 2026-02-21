@@ -1,6 +1,7 @@
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
+import type { TaskMetrics } from './metrics-types.js';
 import type { TaskSyncResult, TagMap } from './types.js';
 import type { TaskSyncRunOptions } from './sync-types.js';
 
@@ -29,6 +30,7 @@ export type TaskSyncContext = {
   sidebarMentionUserId?: string;
   forumCountSync?: TaskForumCountSync;
   hasInFlightForChannel?: TaskInFlightChecker;
+  metrics?: TaskMetrics;
   syncCoordinator?: TaskSyncCoordinatorLike;
   syncFailureRetryEnabled?: boolean;
   syncFailureRetryDelayMs?: number;

@@ -1,10 +1,10 @@
 import type { LoggerLike } from '../logging/logger-like.js';
-import { globalMetrics, type MetricsRegistry } from '../observability/metrics.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
 import type { TaskDiscordClient, TaskDiscordGuild } from './discord-types.js';
 import type { TaskSyncRunOptions } from './sync-types.js';
 import type { TaskForumCountSync, TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
+import { noopTaskMetrics, type TaskMetrics } from './metrics-types.js';
 import type { TagMap, TaskSyncResult } from './types.js';
 import { runTaskSync } from './task-sync-engine.js';
 import { reloadTagMapInPlace } from './discord-sync.js';
@@ -25,7 +25,7 @@ type TaskSyncCoordinatorCoreOptions = {
   mentionUserId?: string;
   forumCountSync?: TaskForumCountSync;
   hasInFlightForChannel?: TaskInFlightChecker;
-  metrics?: Pick<MetricsRegistry, 'increment'>;
+  metrics?: TaskMetrics;
   enableFailureRetry?: boolean;
   failureRetryDelayMs?: number;
   deferredRetryDelayMs?: number;
@@ -44,7 +44,7 @@ function classifySyncError(message?: string): string {
 }
 
 function incrementIfPositive(
-  metrics: Pick<MetricsRegistry, 'increment'>,
+  metrics: TaskMetrics,
   name: string,
   value?: number,
 ): void {
@@ -53,7 +53,7 @@ function incrementIfPositive(
 }
 
 function recordSyncSuccessMetrics(
-  metrics: Pick<MetricsRegistry, 'increment'>,
+  metrics: TaskMetrics,
   result: TaskSyncResult,
   durationMs: number,
 ): void {
@@ -73,7 +73,7 @@ function recordSyncSuccessMetrics(
 }
 
 function recordSyncFailureMetrics(
-  metrics: Pick<MetricsRegistry, 'increment'>,
+  metrics: TaskMetrics,
   error: unknown,
   durationMs: number,
 ): void {
@@ -94,7 +94,7 @@ export class TaskSyncCoordinator {
 
   constructor(private readonly opts: TaskSyncCoordinatorOptions) {}
 
-  private scheduleFailureRetry(metrics: Pick<MetricsRegistry, 'increment'>): void {
+  private scheduleFailureRetry(metrics: TaskMetrics): void {
     if (this.opts.enableFailureRetry === false) {
       metrics.increment('tasks.sync.failure_retry.disabled');
       return;
@@ -122,7 +122,7 @@ export class TaskSyncCoordinator {
     }, delayMs);
   }
 
-  private cancelFailureRetry(metrics: Pick<MetricsRegistry, 'increment'>): void {
+  private cancelFailureRetry(metrics: TaskMetrics): void {
     if (!this.failureRetryPending || !this.failureRetryTimeout) return;
     clearTimeout(this.failureRetryTimeout);
     this.failureRetryTimeout = null;
@@ -131,7 +131,7 @@ export class TaskSyncCoordinator {
   }
 
   private scheduleDeferredCloseRetry(
-    metrics: Pick<MetricsRegistry, 'increment'>,
+    metrics: TaskMetrics,
     closesDeferred: number,
   ): void {
     if (this.deferredCloseRetryPending) {
@@ -160,7 +160,7 @@ export class TaskSyncCoordinator {
     }, delayMs);
   }
 
-  private cancelDeferredCloseRetry(metrics: Pick<MetricsRegistry, 'increment'>): void {
+  private cancelDeferredCloseRetry(metrics: TaskMetrics): void {
     if (!this.deferredCloseRetryPending || !this.deferredCloseRetryTimeout) return;
     clearTimeout(this.deferredCloseRetryTimeout);
     this.deferredCloseRetryTimeout = null;
@@ -169,7 +169,7 @@ export class TaskSyncCoordinator {
   }
 
   async sync(statusPoster?: TaskStatusPoster): Promise<TaskSyncResult | null> {
-    const metrics = this.opts.metrics ?? globalMetrics;
+    const metrics = this.opts.metrics ?? noopTaskMetrics;
     if (this.syncing) {
       metrics.increment('tasks.sync.coalesced');
       // Preserve the most specific statusPoster from coalesced callers:

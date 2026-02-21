@@ -113,3 +113,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued post-Track-4 cleanup by replacing the last local Discord logger shape in `channel-context` with the shared `LoggerLike` contract from `src/logging/logger-like.ts`.
 - 2026-02-21: Continued post-Track-4 cleanup by introducing canonical task runtime boundary types in `src/tasks/runtime-types.ts` and migrating task auto-tag/context/initialization surfaces off direct `runtime/*` imports.
 - 2026-02-21: Continued post-Track-4 cleanup by making task model resolution explicit at bootstrap (`initializeTasksContext` now requires `resolveModel`) and fully decoupling `src/tasks/runtime-types.ts` from `src/runtime/*` imports.
+- 2026-02-21: Continued post-Track-4 cleanup by introducing task-local metrics contracts (`src/tasks/metrics-types.ts`), removing `TaskSyncCoordinator` dependency on `globalMetrics`, and injecting metrics from bootstrap wiring.

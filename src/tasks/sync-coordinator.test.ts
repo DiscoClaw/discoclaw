@@ -50,6 +50,17 @@ describe('TaskSyncCoordinator', () => {
     expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
   });
 
+  it('runs without an injected metrics sink', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    const opts = makeOpts();
+    delete opts.metrics;
+    const coord = new TaskSyncCoordinator(opts);
+    const result = await coord.sync();
+
+    expect(runTaskSync).toHaveBeenCalledOnce();
+    expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
+  });
+
   it('records success metrics and transition counters', async () => {
     const { runTaskSync } = await import('./task-sync-engine.js');
     (runTaskSync as any).mockResolvedValueOnce({
