@@ -1,4 +1,4 @@
-import type { LoggerLike } from '../logging/logger-like.js';
+import type { LoggerLike } from './logger-types.js';
 import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
 import type { TaskSyncResult } from './types.js';
 import type { TaskSyncContext, TaskSyncCoordinatorLike, TaskStatusPoster } from './sync-context.js';

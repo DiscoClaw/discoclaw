@@ -1,4 +1,4 @@
-import type { LoggerLike } from '../logging/logger-like.js';
+import type { LoggerLike } from './logger-types.js';
 import type { TaskDiscordAnyThreadChannel, TaskDiscordClient } from './discord-types.js';
 import type { TaskStore } from './store.js';
 import type { TagMap } from './types.js';

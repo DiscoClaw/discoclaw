@@ -1,6 +1,6 @@
 import type { TagMap, TaskData, TaskSyncResult } from './types.js';
 export type { TaskSyncResult } from './types.js';
-import type { LoggerLike } from '../logging/logger-like.js';
+import type { LoggerLike } from './logger-types.js';
 import type { TaskDiscordClient, TaskDiscordGuild } from './discord-types.js';
 import type { TaskInFlightChecker, TaskStatusPoster } from './sync-context.js';
 import type { TaskStore } from './store.js';

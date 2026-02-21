@@ -115,3 +115,4 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued post-Track-4 cleanup by making task model resolution explicit at bootstrap (`initializeTasksContext` now requires `resolveModel`) and fully decoupling `src/tasks/runtime-types.ts` from `src/runtime/*` imports.
 - 2026-02-21: Continued post-Track-4 cleanup by introducing task-local metrics contracts (`src/tasks/metrics-types.ts`), removing `TaskSyncCoordinator` dependency on `globalMetrics`, and injecting metrics from bootstrap wiring.
 - 2026-02-21: Continued post-Track-4 cleanup by extracting tag-map load/reload behavior into `src/tasks/tag-map.ts`, rewiring task runtime callsites to that canonical module, and keeping `discord-sync` as a compatibility re-export only.
+- 2026-02-21: Continued post-Track-4 cleanup by introducing task-local logger contracts (`src/tasks/logger-types.ts`) and removing remaining task-core imports from `src/logging/logger-like.ts`.
