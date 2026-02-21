@@ -496,6 +496,7 @@ describe('TaskSyncCoordinator failure retry', () => {
     const scheduledCalls = (opts.metrics.increment as any).mock.calls
       .filter(([name]: [string]) => name === 'tasks.sync.failure_retry.scheduled');
     expect(scheduledCalls).toHaveLength(1);
+    expect(opts.metrics.increment).toHaveBeenCalledWith('tasks.sync.failure_retry.coalesced');
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(runTaskSync).toHaveBeenCalledTimes(3);
