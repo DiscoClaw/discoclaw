@@ -125,7 +125,7 @@ DiscoClaw includes a task tracker backed by in-process `TaskStore` data and sync
 
 - Data model/store: `src/tasks/types.ts`, `src/tasks/store.ts`
 - Discord task action path: `src/tasks/task-action-executor.ts` (`taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`)
-- Canonical sync modules: `src/tasks/task-sync-engine.ts`, `src/tasks/task-sync-pipeline.ts`, `src/tasks/task-sync-apply.ts`, `src/tasks/sync-coordinator.ts`, `src/tasks/thread-helpers.ts`, `src/tasks/thread-ops.ts`, `src/tasks/tag-map.ts`
+- Canonical sync modules: `src/tasks/task-sync-engine.ts`, `src/tasks/task-sync-pipeline.ts`, `src/tasks/task-sync-apply-types.ts`, `src/tasks/task-sync-phase-apply.ts`, `src/tasks/task-sync-reconcile.ts`, `src/tasks/sync-coordinator.ts`, `src/tasks/thread-helpers.ts`, `src/tasks/thread-ops.ts`, `src/tasks/tag-map.ts`
 - Runtime shim status: `src/beads/*` compatibility modules removed in hard-cut phase
 
 Auto-sync is event-driven from the in-process store and runs a startup reconciliation pass.

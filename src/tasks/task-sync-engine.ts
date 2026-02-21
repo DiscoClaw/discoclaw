@@ -12,11 +12,15 @@ import {
   planTaskSyncApplyExecution,
 } from './task-sync-pipeline.js';
 import {
-  applyTaskSyncExecutionPlan,
-  createTaskSyncApplyCounters,
-  runTaskSyncReconcilePhase,
   type TaskSyncApplyContext,
-} from './task-sync-apply.js';
+  createTaskSyncApplyCounters,
+} from './task-sync-apply-types.js';
+import {
+  applyTaskSyncExecutionPlan,
+} from './task-sync-phase-apply.js';
+import {
+  runTaskSyncReconcilePhase,
+} from './task-sync-reconcile.js';
 import { resolveTasksForum } from './thread-ops.js';
 
 type TaskSyncCoreOptions = {
