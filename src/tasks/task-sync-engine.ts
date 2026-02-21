@@ -14,6 +14,8 @@ import {
   planTaskApplyPhases,
   planTaskReconcileOperations,
   planTaskSyncOperations,
+  type TaskReconcileAction,
+  type TaskReconcileOperation,
   type TaskSyncOperationPhase,
   type TaskThreadSnapshot,
 } from './task-sync-pipeline.js';
@@ -288,12 +290,126 @@ const PHASE_EXECUTORS: Record<TaskSyncOperationPhase, TaskSyncPhaseExecutor> = {
   phase4: applyPhase4ArchiveClosedThreads,
 };
 
+type TaskSyncReconcileApplyState = {
+  threadsReconciled: number;
+  orphanThreadsFound: number;
+};
+
+type TaskSyncReconcileExecutor = (
+  ctx: TaskSyncApplyContext,
+  operation: TaskReconcileOperation,
+  state: TaskSyncReconcileApplyState,
+) => Promise<void>;
+
+async function applyReconcileOrphanThread(
+  ctx: TaskSyncApplyContext,
+  operation: TaskReconcileOperation,
+  state: TaskSyncReconcileApplyState,
+): Promise<void> {
+  state.orphanThreadsFound++;
+  ctx.log?.info(
+    { threadId: operation.thread.id, threadName: operation.thread.name, shortId: operation.shortId },
+    'task-sync:phase5 orphan thread detected',
+  );
+}
+
+async function applyReconcileCollision(
+  ctx: TaskSyncApplyContext,
+  operation: TaskReconcileOperation,
+): Promise<void> {
+  ctx.log?.info(
+    { threadId: operation.thread.id, shortId: operation.shortId, count: operation.collisionCount },
+    'task-sync:phase5 short-id collision, skipping',
+  );
+}
+
+async function applyReconcileSkipMismatch(
+  ctx: TaskSyncApplyContext,
+  operation: TaskReconcileOperation,
+): Promise<void> {
+  ctx.log?.info(
+    { taskId: operation.task?.id, threadId: operation.thread.id, existingThreadId: operation.existingThreadId },
+    'task-sync:phase5 external_ref points to different thread, skipping',
+  );
+}
+
+async function applyReconcileArchiveActiveClosed(
+  ctx: TaskSyncApplyContext,
+  operation: TaskReconcileOperation,
+  state: TaskSyncReconcileApplyState,
+): Promise<void> {
+  const task = operation.task;
+  if (!task) return;
+
+  if (hasInFlightForChannel(operation.thread.id)) {
+    ctx.counters.closesDeferred++;
+    ctx.log?.info({ taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
+    return;
+  }
+
+  if (!operation.existingThreadId) {
+    try {
+      ctx.taskService.update(task.id, { externalRef: `discord:${operation.thread.id}` });
+      ctx.log?.info({ taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 external_ref backfilled');
+    } catch (err) {
+      ctx.log?.warn({ err, taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 external_ref backfill failed');
+      ctx.counters.warnings++;
+    }
+  }
+
+  try {
+    await closeTaskThread(ctx.client, operation.thread.id, task, ctx.tagMap, ctx.log);
+    state.threadsReconciled++;
+    ctx.log?.info({ taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 reconciled (archived)');
+  } catch (err) {
+    ctx.log?.warn({ err, taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 archive failed');
+    ctx.counters.warnings++;
+  }
+}
+
+async function applyReconcileArchivedClosed(
+  ctx: TaskSyncApplyContext,
+  operation: TaskReconcileOperation,
+  state: TaskSyncReconcileApplyState,
+): Promise<void> {
+  const task = operation.task;
+  if (!task) return;
+
+  try {
+    const alreadyClosed = await isTaskThreadAlreadyClosed(ctx.client, operation.thread.id, task, ctx.tagMap);
+    if (!alreadyClosed) {
+      if (hasInFlightForChannel(operation.thread.id)) {
+        ctx.counters.closesDeferred++;
+        ctx.log?.info({ taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
+      } else {
+        ctx.log?.info({ taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 archived thread is stale, unarchiving to reconcile');
+        await closeTaskThread(ctx.client, operation.thread.id, task, ctx.tagMap, ctx.log);
+        state.threadsReconciled++;
+        ctx.log?.info({ taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 reconciled (re-archived)');
+      }
+    }
+  } catch (err) {
+    ctx.log?.warn({ err, taskId: task.id, threadId: operation.thread.id }, 'task-sync:phase5 archived reconcile failed');
+    ctx.counters.warnings++;
+  }
+}
+
+const RECONCILE_EXECUTORS: Record<TaskReconcileAction, TaskSyncReconcileExecutor> = {
+  orphan: applyReconcileOrphanThread,
+  collision: applyReconcileCollision,
+  skip_external_ref_mismatch: applyReconcileSkipMismatch,
+  archive_active_closed: applyReconcileArchiveActiveClosed,
+  reconcile_archived_closed: applyReconcileArchivedClosed,
+};
+
 async function applyPhase5ReconcileThreads(
   ctx: TaskSyncApplyContext,
   allTasks: TaskData[],
 ): Promise<TaskSyncReconcileResult> {
-  let threadsReconciled = 0;
-  let orphanThreadsFound = 0;
+  const reconcileState: TaskSyncReconcileApplyState = {
+    threadsReconciled: 0,
+    orphanThreadsFound: 0,
+  };
 
   const tasksByShortId = buildTasksByShortIdMap(allTasks, shortTaskId);
 
@@ -329,97 +445,18 @@ async function applyPhase5ReconcileThreads(
     });
 
     for (const op of plannedReconcileOps) {
-      if (op.action === 'orphan') {
-        orphanThreadsFound++;
-        ctx.log?.info(
-          { threadId: op.thread.id, threadName: op.thread.name, shortId: op.shortId },
-          'task-sync:phase5 orphan thread detected',
-        );
-        await sleep(ctx.throttleMs);
-        continue;
-      }
-
-      if (op.action === 'collision') {
-        ctx.log?.info(
-          { threadId: op.thread.id, shortId: op.shortId, count: op.collisionCount },
-          'task-sync:phase5 short-id collision, skipping',
-        );
-        await sleep(ctx.throttleMs);
-        continue;
-      }
-
-      if (op.action === 'skip_external_ref_mismatch') {
-        ctx.log?.info(
-          { taskId: op.task?.id, threadId: op.thread.id, existingThreadId: op.existingThreadId },
-          'task-sync:phase5 external_ref points to different thread, skipping',
-        );
-        await sleep(ctx.throttleMs);
-        continue;
-      }
-
-      const task = op.task;
-      if (!task) {
-        await sleep(ctx.throttleMs);
-        continue;
-      }
-
-      if (op.action === 'archive_active_closed') {
-        if (hasInFlightForChannel(op.thread.id)) {
-          ctx.counters.closesDeferred++;
-          ctx.log?.info({ taskId: task.id, threadId: op.thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
-          await sleep(ctx.throttleMs);
-          continue;
-        }
-
-        if (!op.existingThreadId) {
-          try {
-            ctx.taskService.update(task.id, { externalRef: `discord:${op.thread.id}` });
-            ctx.log?.info({ taskId: task.id, threadId: op.thread.id }, 'task-sync:phase5 external_ref backfilled');
-          } catch (err) {
-            ctx.log?.warn({ err, taskId: task.id, threadId: op.thread.id }, 'task-sync:phase5 external_ref backfill failed');
-            ctx.counters.warnings++;
-          }
-        }
-
-        try {
-          await closeTaskThread(ctx.client, op.thread.id, task, ctx.tagMap, ctx.log);
-          threadsReconciled++;
-          ctx.log?.info({ taskId: task.id, threadId: op.thread.id }, 'task-sync:phase5 reconciled (archived)');
-        } catch (err) {
-          ctx.log?.warn({ err, taskId: task.id, threadId: op.thread.id }, 'task-sync:phase5 archive failed');
-          ctx.counters.warnings++;
-        }
-        await sleep(ctx.throttleMs);
-        continue;
-      }
-
-      if (op.action === 'reconcile_archived_closed') {
-        try {
-          const alreadyClosed = await isTaskThreadAlreadyClosed(ctx.client, op.thread.id, task, ctx.tagMap);
-          if (!alreadyClosed) {
-            if (hasInFlightForChannel(op.thread.id)) {
-              ctx.counters.closesDeferred++;
-              ctx.log?.info({ taskId: task.id, threadId: op.thread.id }, 'task-sync:phase5 close deferred (in-flight reply active)');
-            } else {
-              ctx.log?.info({ taskId: task.id, threadId: op.thread.id }, 'task-sync:phase5 archived thread is stale, unarchiving to reconcile');
-              await closeTaskThread(ctx.client, op.thread.id, task, ctx.tagMap, ctx.log);
-              threadsReconciled++;
-              ctx.log?.info({ taskId: task.id, threadId: op.thread.id }, 'task-sync:phase5 reconciled (re-archived)');
-            }
-          }
-        } catch (err) {
-          ctx.log?.warn({ err, taskId: task.id, threadId: op.thread.id }, 'task-sync:phase5 archived reconcile failed');
-          ctx.counters.warnings++;
-        }
-        await sleep(ctx.throttleMs);
-      }
+      await RECONCILE_EXECUTORS[op.action](ctx, op, reconcileState);
+      await sleep(ctx.throttleMs);
     }
   } catch (err) {
     ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch active threads');
     ctx.counters.warnings++;
   }
 
-  return { threadsReconciled, orphanThreadsFound };
+  return {
+    threadsReconciled: reconcileState.threadsReconciled,
+    orphanThreadsFound: reconcileState.orphanThreadsFound,
+  };
 }
 
 /**

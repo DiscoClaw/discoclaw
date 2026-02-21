@@ -48,4 +48,5 @@ Rebuild the tasks subsystem around one explicit domain contract and one authorit
 - 2026-02-21: Continued Track 3 by extracting Phase 5 reconciliation into an explicit apply executor (`applyPhase5ReconcileThreads`) so all sync phases now run through staged apply helpers.
 - 2026-02-21: Continued Track 3 by switching Stage 4 phase dispatch to ordered operation lists from the diff plan (`operationTaskIdList`), so apply execution is directly plan-driven.
 - 2026-02-21: Continued Track 3 by making apply-phase executors consume task lookups from the operation-plan order directly (`tasksById` + `operationTaskIdList`), with added dispatch-order tests.
+- 2026-02-21: Continued Track 3 by routing Phase 5 reconcile operations through a declarative action->executor map (`RECONCILE_EXECUTORS`) so reconciliation apply flow matches the staged pipeline pattern.
 - 2026-02-21: Continued Track 3 by introducing explicit apply-phase planning (`planTaskApplyPhases`) and refactoring Stage 4 execution to iterate a declarative phase->executor map in `task-sync-engine`.
