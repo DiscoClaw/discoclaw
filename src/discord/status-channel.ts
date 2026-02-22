@@ -86,6 +86,7 @@ export type BootReportData = {
   permissionsReason?: string;
   // Credential health (pre-formatted by formatCredentialReport)
   credentialReport?: string;
+  credentialHealth?: Array<{ name: string; status: string; detail?: string }>;
   // Runtime
   runtimeModel?: string;
   bootDurationMs?: number;
@@ -223,6 +224,25 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
 
       if (data.credentialReport) {
         lines.push(`Credentials · ${data.credentialReport}`);
+      }
+
+      if (data.credentialHealth && data.credentialHealth.length > 0) {
+        const passCount = data.credentialHealth.filter(c => c.status === 'pass').length;
+        const failCount = data.credentialHealth.filter(c => c.status === 'fail').length;
+        const skipCount = data.credentialHealth.filter(c => c.status === 'skip').length;
+
+        if (passCount === data.credentialHealth.length) {
+          lines.push('Health · all pass');
+        } else {
+          const summary: string[] = [];
+          if (passCount > 0) summary.push(`${passCount} pass`);
+          if (failCount > 0) summary.push(`${failCount} fail`);
+          if (skipCount > 0) summary.push(`${skipCount} skip`);
+          lines.push(`Health · ${summary.join(', ')}`);
+          for (const c of data.credentialHealth.filter(c => c.status === 'fail')) {
+            lines.push(`  ${c.name}: ${c.detail ?? 'failed'}`);
+          }
+        }
       }
 
       await send(lines.join('\n'));
