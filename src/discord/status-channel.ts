@@ -82,6 +82,8 @@ export type BootReportData = {
   // Config / permissions
   configWarnings?: number;
   permissionsTier?: string;
+  // Credential health (pre-formatted by formatCredentialReport)
+  credentialReport?: string;
   // Runtime
   runtimeModel?: string;
   bootDurationMs?: number;
@@ -206,6 +208,10 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
 
       if (data.configWarnings && data.configWarnings > 0) {
         lines.push(`Config Warnings · ${data.configWarnings}`);
+      }
+
+      if (data.credentialReport) {
+        lines.push(`Credentials · ${data.credentialReport}`);
       }
 
       await send(lines.join('\n'));

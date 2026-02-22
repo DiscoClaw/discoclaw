@@ -61,6 +61,7 @@ import {
 } from './discord/inflight-replies.js';
 import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 import { getGitHash } from './version.js';
+import { runCredentialChecks, formatCredentialReport } from './health/credential-check.js';
 import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
@@ -301,6 +302,13 @@ const defaultWorkspaceCwd = dataDir
 const workspaceCwd = cfg.workspaceCwdOverride || defaultWorkspaceCwd;
 const groupsDir = cfg.groupsDirOverride || path.join(__dirname, '..', 'groups');
 const useGroupDirCwd = cfg.useGroupDirCwd;
+
+// --- Credential health checks (run concurrently with workspace/bot init) ---
+const credentialCheckPromise = runCredentialChecks({
+  token: cfg.token,
+  openaiApiKey: cfg.openaiApiKey,
+  openaiBaseUrl: cfg.openaiBaseUrl,
+});
 
 // --- Scaffold workspace PA files (first run) ---
 await ensureWorkspaceBootstrapFiles(workspaceCwd, log);
@@ -1352,6 +1360,22 @@ if (reactionRemoveHandlerEnabled) {
 
 log.info('Discord bot started');
 
+// --- Await credential check results and log any failures ---
+const credentialCheckReport = await credentialCheckPromise;
+const credentialReport = formatCredentialReport(credentialCheckReport);
+if (credentialCheckReport.criticalFailures.length > 0) {
+  for (const name of credentialCheckReport.criticalFailures) {
+    const result = credentialCheckReport.results.find((r) => r.name === name);
+    log.error({ name, message: result?.message }, 'boot:credential-check: critical credential failed');
+  }
+}
+for (const result of credentialCheckReport.results) {
+  if (result.status === 'fail' && !credentialCheckReport.criticalFailures.includes(result.name)) {
+    log.warn({ name: result.name, message: result.message }, 'boot:credential-check: non-critical credential failed');
+  }
+}
+log.info({ credentialReport }, 'boot:credential-check');
+
 // --- Boot report (replaces the bare online() call in startDiscordBot) ---
 if (botStatus?.bootReport) {
   const actionCategoriesEnabled: string[] = [];
@@ -1383,6 +1407,7 @@ if (botStatus?.bootReport) {
     actionCategoriesEnabled,
     configWarnings: parsedConfig.warnings.length,
     permissionsTier: permProbe.status === 'valid' ? permProbe.permissions.tier : undefined,
+    credentialReport,
     runtimeModel,
     bootDurationMs: Date.now() - bootStartMs,
     buildVersion: gitHash ?? undefined,
