@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const OPENAI_API_DEFAULT_BASE = 'https://api.openai.com/v1';
 
@@ -83,6 +85,37 @@ export async function checkOpenAiKey(opts: {
 }
 
 /**
+ * Check that the workspace path exists and is read/write accessible.
+ * Returns 'skip' if no path is provided.
+ * Always resolves — returns a 'fail' result on access error instead of throwing.
+ */
+export async function checkWorkspacePath(workspacePath?: string): Promise<CredentialCheckResult> {
+  const name = 'workspace-path';
+  if (!workspacePath) {
+    return { name, status: 'skip' };
+  }
+  try {
+    await fs.access(workspacePath, fs.constants.R_OK | fs.constants.W_OK);
+    return { name, status: 'ok' };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { name, status: 'fail', message: `workspace not accessible: ${msg}` };
+  }
+}
+
+/**
+ * Validate that a status channel is configured (either a name or Discord snowflake ID).
+ * Returns 'skip' if no channel is configured.
+ */
+export function checkStatusChannel(channelId?: string): CredentialCheckResult {
+  const name = 'status-channel';
+  if (!channelId) {
+    return { name, status: 'skip', message: 'not configured' };
+  }
+  return { name, status: 'ok' };
+}
+
+/**
  * Run all credential checks concurrently and return a structured report.
  * Never throws — individual validators are responsible for their own error handling.
  */
@@ -90,10 +123,14 @@ export async function runCredentialChecks(opts: {
   token: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  workspacePath?: string;
+  statusChannelId?: string;
 }): Promise<CredentialCheckReport> {
   const results = await Promise.all([
     checkDiscordToken(opts.token),
     checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl }),
+    checkWorkspacePath(opts.workspacePath),
+    Promise.resolve(checkStatusChannel(opts.statusChannelId)),
   ]);
 
   const criticalFailures = results

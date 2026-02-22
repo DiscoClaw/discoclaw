@@ -174,13 +174,19 @@ describe('checkOpenAiKey', () => {
 // runCredentialChecks ------------------------------------------------------
 
 describe('runCredentialChecks', () => {
-  it('returns two results (one per credential)', async () => {
+  it('returns four results (one per check)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response('{}', { status: 200 })),
     );
     const report = await runCredentialChecks({ token: 'valid-token', openaiApiKey: 'sk-valid' });
-    expect(report.results).toHaveLength(2);
+    expect(report.results).toHaveLength(4);
+    expect(report.results.map((r) => r.name)).toEqual([
+      'discord-token',
+      'openai-key',
+      'workspace-path',
+      'status-channel',
+    ]);
   });
 
   it('sets allOk=true when all configured checks pass', async () => {
