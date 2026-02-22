@@ -347,4 +347,22 @@ describe('collectStatusSnapshot', () => {
     );
     expect(snap.rollingSummaryCharCount).toBe(0);
   });
+
+  it('skips openai check and omits it from apiChecks when openai is not in activeProviders', async () => {
+    const snap = await collectStatusSnapshot(
+      baseOpts({ activeProviders: new Set(['claude']) }),
+    );
+    expect(credentialCheck.checkOpenAiKey).not.toHaveBeenCalled();
+    expect(snap.apiChecks).toHaveLength(1);
+    expect(snap.apiChecks[0]).toEqual({ name: 'discord-token', status: 'ok' });
+  });
+
+  it('runs openai check when openai is in activeProviders', async () => {
+    const snap = await collectStatusSnapshot(
+      baseOpts({ openaiApiKey: 'key', activeProviders: new Set(['openai']) }),
+    );
+    expect(credentialCheck.checkOpenAiKey).toHaveBeenCalledWith({ apiKey: 'key', baseUrl: undefined });
+    expect(snap.apiChecks).toHaveLength(2);
+    expect(snap.apiChecks[1]).toEqual({ name: 'openai-key', status: 'skip' });
+  });
 });
