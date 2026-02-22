@@ -84,11 +84,10 @@ Key variables to set:
 - `DISCOCLAW_DATA_DIR=...` (optional; content defaults under this)
 
 Validation:
-- Prefer `pnpm discord:smoke-test` (exits 0 after "Discord bot ready") to validate the token/auth without long-running processes/timeouts.
-- If they want to confirm the bot is actually in their server, ask for the server (guild) ID and run:
-  - `pnpm discord:smoke-test -- --guild-id <GUILD_ID>`
-- Then `pnpm dev` for the real run.
-- Confirm it responds only in allowlisted contexts.
+- **From source only:** `pnpm discord:smoke-test` (exits 0 after "Discord bot ready") validates the token/auth without long-running processes/timeouts. Not available to global-install users.
+  - To confirm the bot is in their server: `pnpm discord:smoke-test -- --guild-id <GUILD_ID>`
+- **Global install users:** start with `discoclaw start` and confirm the bot comes online in Discord.
+- Then confirm it responds only in allowlisted contexts.
 
 Threads:
 - If they want the bot to reliably reply inside threads, set `DISCORD_AUTO_JOIN_THREADS=1`.
