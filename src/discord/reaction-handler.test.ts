@@ -1353,6 +1353,86 @@ describe('streaming behavior', () => {
     expect(hasStderr).toBe(true);
   });
 
+  it('waits for pending keepalive streaming edits before finalizing', async () => {
+    vi.useFakeTimers();
+    try {
+      const unblockRuntime = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const unblockFirstStallEdit = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtimeStarted = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      let stallEditCalls = 0;
+
+      const runtime: RuntimeAdapter = {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(): AsyncIterable<EngineEvent> {
+          runtimeStarted.resolve();
+          await unblockRuntime.promise;
+          yield { type: 'text_final', text: 'Final answer' };
+          yield { type: 'done' };
+        },
+      };
+
+      const replyObj = {
+        edit: vi.fn().mockImplementation(async () => {
+          stallEditCalls++;
+          if (stallEditCalls === 1) {
+            await unblockFirstStallEdit.promise;
+          }
+        }),
+        delete: vi.fn().mockResolvedValue(undefined),
+      };
+      const reaction = mockReaction({
+        message: mockMessage({
+          reply: vi.fn().mockResolvedValue(replyObj),
+          _replyObj: replyObj,
+        }),
+      });
+
+      const params = makeParams({ runtime, streamStallWarningMs: 1 });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      let settled = false;
+      const pending = handler(reaction as any, mockUser() as any).then(() => { settled = true; });
+
+      await runtimeStarted.promise;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(stallEditCalls).toBe(1);
+
+      unblockRuntime.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(
+        replyObj.edit.mock.calls.some((call: any[]) =>
+          String(call?.[0]?.content ?? '').includes('Final answer'),
+        ),
+      ).toBe(false);
+
+      unblockFirstStallEdit.resolve();
+      await pending;
+      expect(
+        replyObj.edit.mock.calls.some((call: any[]) =>
+          String(call?.[0]?.content ?? '').includes('Final answer'),
+        ),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('cleans up stale placeholder on handler error after reply was created', async () => {
     // Runtime that throws after yielding nothing.
     const runtime: RuntimeAdapter = {
