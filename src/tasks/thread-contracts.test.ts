@@ -284,14 +284,14 @@ describe('closeTaskThread', () => {
   }
 
   function makeCloseThread(opts?: { starterContent?: string; starterAuthorId?: string; archived?: boolean }): any {
-    const editFn = vi.fn();
+    const starterEditFn = vi.fn();
+    const threadEditFn = vi.fn();
     const sendFn = vi.fn();
-    const setNameFn = vi.fn();
     const setArchivedFn = vi.fn();
     const fetchStarterFn = vi.fn(async () => ({
       author: { id: opts?.starterAuthorId ?? 'bot-123' },
       content: opts?.starterContent ?? 'old content',
-      edit: editFn,
+      edit: starterEditFn,
     }));
 
     return {
@@ -299,11 +299,10 @@ describe('closeTaskThread', () => {
       archived: opts?.archived ?? false,
       fetchStarterMessage: fetchStarterFn,
       send: sendFn,
-      setName: setNameFn,
+      edit: threadEditFn,
       setArchived: setArchivedFn,
-      _editFn: editFn,
+      _editFn: starterEditFn,
       _sendFn: sendFn,
-      _setNameFn: setNameFn,
       _setArchivedFn: setArchivedFn,
       _fetchStarterFn: fetchStarterFn,
     };
@@ -337,11 +336,12 @@ describe('closeTaskThread', () => {
     const thread = makeCloseThread();
     thread.fetchStarterMessage = vi.fn(async () => { throw new Error('not found'); });
     const client = makeClient(thread);
+    const closedName = buildThreadName(task.id, task.title, task.status);
 
     await closeTaskThread(client, 'thread-1', task);
 
     expect(thread._sendFn).toHaveBeenCalled();
-    expect(thread._setNameFn).toHaveBeenCalled();
+    expect(thread.edit).toHaveBeenCalledWith({ name: closedName });
     expect(thread._setArchivedFn).toHaveBeenCalledWith(true);
   });
 
@@ -593,36 +593,69 @@ describe('closeTaskThread with tagMap', () => {
         edit: vi.fn(),
       })),
       send: vi.fn(),
-      setName: vi.fn(),
       setArchived: vi.fn(),
       edit: vi.fn(),
     };
   }
 
   it('applies closed status tag before archiving when tagMap provided', async () => {
+    const closedName = buildThreadName(task.id, task.title, task.status);
     const tagMap: TagMap = { closed: 'sc', feature: 'c1' };
     const thread = makeCloseThread({ appliedTags: ['c1'] });
     await closeTaskThread(makeClient(thread), 'thread-1', task, tagMap);
 
     expect(thread.edit).toHaveBeenCalledWith({
+      name: closedName,
       appliedTags: expect.arrayContaining(['sc', 'c1']),
     });
     expect(thread.setArchived).toHaveBeenCalledWith(true);
   });
 
-  it('skips tag edit when tags already match', async () => {
+  it('combined edit includes both name and tags when tagMap provided and tags differ', async () => {
+    const closedName = buildThreadName(task.id, task.title, task.status);
+    const tagMap: TagMap = { closed: 'sc', open: 'so', feature: 'c1' };
+    const thread = makeCloseThread({ appliedTags: ['c1', 'so'] });
+    await closeTaskThread(makeClient(thread), 'thread-1', task, tagMap);
+
+    expect(thread.edit).toHaveBeenCalledOnce();
+    expect(thread.edit).toHaveBeenCalledWith({
+      name: closedName,
+      appliedTags: expect.arrayContaining(['sc', 'c1']),
+    });
+    expect(thread.edit.mock.calls[0][0].appliedTags).not.toContain('so');
+  });
+
+  it('skips appliedTags when tags already match, but still updates name', async () => {
+    const closedName = buildThreadName(task.id, task.title, task.status);
     const tagMap: TagMap = { closed: 'sc', feature: 'c1' };
     const thread = makeCloseThread({ appliedTags: ['c1', 'sc'] });
     await closeTaskThread(makeClient(thread), 'thread-1', task, tagMap);
 
-    expect(thread.edit).not.toHaveBeenCalled();
+    expect(thread.edit).toHaveBeenCalledWith({ name: closedName });
   });
 
-  it('skips tag update when tagMap is undefined (backward compat)', async () => {
+  it('skips appliedTags when tagMap is undefined, but still updates name', async () => {
+    const closedName = buildThreadName(task.id, task.title, task.status);
     const thread = makeCloseThread({ appliedTags: ['c1'] });
     await closeTaskThread(makeClient(thread), 'thread-1', task);
 
-    expect(thread.edit).not.toHaveBeenCalled();
+    expect(thread.edit).toHaveBeenCalledWith({ name: closedName });
+  });
+
+  it('handles combined edit failure atomically — logs warning and still archives', async () => {
+    const tagMap: TagMap = { closed: 'sc', feature: 'c1' };
+    const thread = makeCloseThread({ appliedTags: ['c1'] });
+    thread.edit = vi.fn(async () => { throw new Error('rate limited'); });
+    const log = { warn: vi.fn() };
+
+    await closeTaskThread(makeClient(thread), 'thread-1', task, tagMap, log);
+
+    expect(thread.edit).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: task.id }),
+      expect.stringContaining('edit failed'),
+    );
+    expect(thread.setArchived).toHaveBeenCalledWith(true);
   });
 });
 
