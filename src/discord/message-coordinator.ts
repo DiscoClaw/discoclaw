@@ -65,6 +65,8 @@ import { downloadTextAttachments } from './file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { parseHelpCommand, handleHelpCommand } from './help-command.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './health-command.js';
+import { parseStatusCommand, collectStatusSnapshot, renderStatusReport } from './status-command.js';
+import type { StatusCommandContext } from './status-command.js';
 import { parseRestartCommand, handleRestartCommand } from './restart-command.js';
 import { parseModelsCommand, handleModelsCommand } from './models-command.js';
 import { parseUpdateCommand, handleUpdateCommand } from './update-command.js';
@@ -179,6 +181,8 @@ export type BotParams = {
   healthCommandsEnabled?: boolean;
   healthVerboseAllowlist?: Set<string>;
   healthConfigSnapshot?: HealthConfigSnapshot;
+  /** Runtime context for the !status command. Omit to disable the command. */
+  statusCommandContext?: StatusCommandContext;
   metrics?: MetricsRegistry;
   botStatus?: 'online' | 'idle' | 'dnd' | 'invisible';
   botActivity?: string;
@@ -423,6 +427,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
       if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
+      // Track last allowlisted message timestamp for !status dashboard.
+      if (params.statusCommandContext) {
+        params.statusCommandContext.lastMessageAt.current = Date.now();
+      }
+
       const isDm = msg.guildId == null;
       const actionFlags: ActionCategoryFlags = {
         channels: params.discordActionsChannels,
@@ -544,6 +553,27 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           mode,
           botDisplayName: params.botDisplayName,
         });
+        await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
+        return;
+      }
+
+      // Handle !status command — at-a-glance runtime dashboard (live connectivity probes).
+      if (parseStatusCommand(String(msg.content ?? '')) && params.statusCommandContext) {
+        const ctx = params.statusCommandContext;
+        const snapshot = await collectStatusSnapshot({
+          startedAt: ctx.startedAt,
+          lastMessageAt: ctx.lastMessageAt.current,
+          scheduler: params.cronCtx?.scheduler ?? null,
+          taskStore: params.taskCtx?.store ?? null,
+          durableDataDir: params.durableDataDir,
+          summaryDataDir: params.summaryDataDir,
+          discordToken: ctx.discordToken,
+          openaiApiKey: ctx.openaiApiKey,
+          openaiBaseUrl: ctx.openaiBaseUrl,
+          paFilePaths: ctx.paFilePaths,
+          apiCheckTimeoutMs: ctx.apiCheckTimeoutMs,
+        });
+        const report = renderStatusReport(snapshot, params.botDisplayName);
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
         return;
       }

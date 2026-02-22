@@ -631,6 +631,8 @@ if (cfg.forgeAuditorRuntime) {
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
+// Mutable ref updated by the message handler; read by the !status command.
+const statusLastMessageAt: { current: number | null } = { current: null };
 
 const botParams = {
   token,
@@ -751,6 +753,18 @@ const botParams = {
   metrics: globalMetrics,
   appendSystemPrompt,
   startupInjection,
+  statusCommandContext: {
+    startedAt: bootStartMs,
+    lastMessageAt: statusLastMessageAt,
+    discordToken: token,
+    openaiApiKey: cfg.openaiApiKey,
+    openaiBaseUrl: cfg.openaiBaseUrl,
+    paFilePaths: ['SOUL.md', 'IDENTITY.md', 'USER.md'].map((f) => ({
+      label: f,
+      path: path.join(workspaceCwd, f),
+    })),
+    apiCheckTimeoutMs: 5000,
+  },
 };
 
 if (discordActionsEnabled && cfg.discordActionsDefer) {

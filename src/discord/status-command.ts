@@ -5,9 +5,31 @@ import { checkDiscordToken, checkOpenAiKey } from '../health/credential-check.js
 import type { CronScheduler } from '../cron/scheduler.js';
 import type { TaskStore } from '../tasks/store.js';
 
+const DEFAULT_API_CHECK_TIMEOUT_MS = 5000;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * Runtime context provided by the bot startup to the !status command handler.
+ * Carries values that aren't already available on BotParams (note: BotParams
+ * exposes token only at the module level, not to individual handlers).
+ */
+export type StatusCommandContext = {
+  /** Timestamp (Date.now()) when the process started. */
+  startedAt: number;
+  /** Mutable ref updated by the message handler on every allowlisted message. */
+  lastMessageAt: { current: number | null };
+  /** Discord bot token used for the live /users/@me connectivity probe. */
+  discordToken: string;
+  openaiApiKey?: string;
+  openaiBaseUrl?: string;
+  /** Workspace PA files to probe for health. Label is the display name, path is the FS path. */
+  paFilePaths: Array<{ label: string; path: string }>;
+  /** Timeout for live API connectivity checks (ms). Defaults to 5 000 ms. */
+  apiCheckTimeoutMs?: number;
+};
 
 export type StatusCronEntry = {
   name: string;
@@ -56,7 +78,31 @@ export type CollectStatusOpts = {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   paFilePaths: Array<{ label: string; path: string }>;
+  /** Timeout for live API connectivity checks (ms). Defaults to 5 000 ms. */
+  apiCheckTimeoutMs?: number;
 };
+
+/**
+ * Race an API credential check against a timeout sentinel.
+ * Returns a 'fail' result if the check doesn't resolve within `timeoutMs`.
+ */
+function withApiTimeout(
+  promise: Promise<CredentialCheckResult>,
+  timeoutMs: number,
+  name: string,
+): Promise<CredentialCheckResult> {
+  const timeout = new Promise<CredentialCheckResult>((resolve) => {
+    const t = setTimeout(
+      () => resolve({ name, status: 'fail', message: `check timed out after ${timeoutMs}ms` }),
+      timeoutMs,
+    );
+    // Don't block the Node.js event loop exit while this timer is pending.
+    if (typeof t === 'object' && t !== null && typeof (t as any).unref === 'function') {
+      (t as any).unref();
+    }
+  });
+  return Promise.race([promise, timeout]);
+}
 
 async function countDurableItems(dir: string): Promise<number> {
   let total = 0;
@@ -118,7 +164,7 @@ async function checkPaFiles(
   return Promise.all(
     filePaths.map(async ({ label, path: filePath }) => {
       try {
-        await fs.access(filePath, fs.constants.R_OK);
+        await fs.stat(filePath);
         return { label, exists: true };
       } catch {
         return { label, exists: false };
@@ -129,13 +175,18 @@ async function checkPaFiles(
 
 export async function collectStatusSnapshot(opts: CollectStatusOpts): Promise<StatusSnapshot> {
   const now = Date.now();
+  const apiCheckTimeoutMs = opts.apiCheckTimeoutMs ?? DEFAULT_API_CHECK_TIMEOUT_MS;
 
   const [durableItemCount, rollingSummaryCharCount, apiChecks, paFiles] = await Promise.all([
     opts.durableDataDir ? countDurableItems(opts.durableDataDir) : Promise.resolve(0),
     opts.summaryDataDir ? countRollingSummaryChars(opts.summaryDataDir) : Promise.resolve(0),
     Promise.all([
-      checkDiscordToken(opts.discordToken),
-      checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl }),
+      withApiTimeout(checkDiscordToken(opts.discordToken), apiCheckTimeoutMs, 'discord-token'),
+      withApiTimeout(
+        checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl }),
+        apiCheckTimeoutMs,
+        'openai-key',
+      ),
     ]),
     checkPaFiles(opts.paFilePaths),
   ]);
