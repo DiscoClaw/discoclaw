@@ -29,6 +29,18 @@ export type StatusCommandContext = {
   paFilePaths: Array<{ label: string; path: string }>;
   /** Timeout for live API connectivity checks (ms). Defaults to 5 000 ms. */
   apiCheckTimeoutMs?: number;
+  /** Workspace working directory (used for display / future probes). */
+  workspaceCwd: string;
+  /** Rolling summary data directory for char-count stats. */
+  summaryDataDir: string;
+  /** Durable memory data directory for item-count stats. */
+  durableDataDir: string;
+  /** Whether durable memory is enabled. */
+  durableMemoryEnabled: boolean;
+  /** Active cron scheduler; null until cron subsystem initializes. */
+  cronScheduler: CronScheduler | null;
+  /** Shared task store for open-task count. */
+  sharedTaskStore: TaskStore | null;
 };
 
 export type StatusCronEntry = {

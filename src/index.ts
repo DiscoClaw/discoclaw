@@ -764,6 +764,12 @@ const botParams = {
       path: path.join(workspaceCwd, f),
     })),
     apiCheckTimeoutMs: 5000,
+    workspaceCwd,
+    summaryDataDir,
+    durableDataDir,
+    durableMemoryEnabled,
+    cronScheduler: null as CronScheduler | null,
+    sharedTaskStore,
   },
 };
 
@@ -1267,6 +1273,7 @@ if (cronEnabled && effectiveCronForum) {
   cronCtx.executorCtx = cronExecCtx;
 
   botParams.cronCtx = cronCtx;
+  botParams.statusCommandContext.cronScheduler = cronScheduler;
   botParams.discordActionsCrons = discordActionsCrons && cronEnabled;
 
   let cronForumResult: { forumId: string } = { forumId: '' };
