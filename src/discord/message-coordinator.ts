@@ -510,6 +510,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           discordToken: ctx.discordToken,
           openaiApiKey: ctx.openaiApiKey,
           openaiBaseUrl: ctx.openaiBaseUrl,
+          openrouterApiKey: ctx.openrouterApiKey,
+          openrouterBaseUrl: ctx.openrouterBaseUrl,
           paFilePaths: ctx.paFilePaths,
           apiCheckTimeoutMs: ctx.apiCheckTimeoutMs,
           activeProviders: ctx.activeProviders,
