@@ -100,19 +100,12 @@ managing DNS records.
 
 ### Raw public IP with firewall rules
 
-If the host has a public IP and no reverse proxy is in use, you can expose the
-port directly by adjusting `WEBHOOK_HOST` in `.env` and opening the port in
-your firewall:
-
-```
-WEBHOOK_HOST=0.0.0.0
-WEBHOOK_PORT=9400
-```
-
-Then restrict inbound traffic to known source IPs (GitHub's webhook IP ranges
-are published at <https://api.github.com/meta>). This approach gives the most
-control but requires ongoing maintenance of firewall rules and provides no
-automatic TLS.
+If the machine has a publicly routable IP and you control its firewall, you can
+open the webhook port directly. This skips TLS termination — most external
+services require HTTPS, so you would also need to handle TLS yourself (e.g. via
+`stunnel` or a self-managed certificate). Only use this if you understand the
+exposure: an open port is reachable from the full internet. Restrict source IPs
+in the firewall where the external service publishes its IP ranges.
 
 ---
 
@@ -143,11 +136,11 @@ You should see an incoming request log line even for rejected payloads.
 ## Security reminder
 
 HMAC signature verification is always enforced — every incoming payload is
-checked against the secret configured for that source (`WEBHOOK_SECRET_<SOURCE>`
-in `.env`). Exposing the HTTP listener does not grant callers arbitrary access;
-it only makes the endpoint reachable so that legitimate signed payloads can be
-delivered.
+checked against the secret configured for that source (the `"secret"` field in
+the JSON config file referenced by `DISCOCLAW_WEBHOOK_CONFIG`). Exposing the
+HTTP listener does not grant callers arbitrary access; it only makes the
+endpoint reachable so that legitimate signed payloads can be delivered.
 
 Keep your webhook secrets strong and do not share them. If a secret is
-compromised, rotate it in both DiscoClaw's `.env` and the external service's
-webhook settings.
+compromised, rotate it in both the DiscoClaw webhook config file and the
+external service's webhook settings.

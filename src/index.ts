@@ -1318,18 +1318,22 @@ if (cfg.webhookEnabled && savedCronExecCtx) {
       };
 
       try {
+        const webhookHost = '127.0.0.1';
         webhookServer = await startWebhookServer({
           configPath: cfg.webhookConfigPath,
           port: cfg.webhookPort,
+          host: webhookHost,
           guildId: resolvedGuildId,
           executorCtx: webhookExecCtx,
           log,
         });
         log.info({ port: cfg.webhookPort, configPath: cfg.webhookConfigPath }, 'webhook:server started');
-        log.warn(
-          { host: '127.0.0.1', port: cfg.webhookPort },
-          'webhook:server is bound to loopback (127.0.0.1) — external services (e.g. GitHub) cannot reach it. See docs/webhook-exposure.md for exposure options (Tailscale Funnel recommended)',
-        );
+        if (webhookHost === '127.0.0.1' || webhookHost === '::1') {
+          log.warn(
+            { host: webhookHost, port: cfg.webhookPort },
+            'webhook:server is bound to loopback — external services (e.g. GitHub) cannot reach it. See docs/webhook-exposure.md for exposure options (Tailscale Funnel recommended)',
+          );
+        }
       } catch (err) {
         log.error({ err }, 'webhook:server failed to start');
       }
