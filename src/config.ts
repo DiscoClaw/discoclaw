@@ -354,7 +354,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsTasks = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_TASKS', true);
   const discordActionsCrons = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_CRONS', true);
   const discordActionsBotProfile = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', false);
-  const discordActionsForge = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_FORGE', false);
+  const discordActionsForge = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_FORGE', true);
   const discordActionsPlan = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_PLAN', true);
   const discordActionsMemory = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', false);
   const discordActionsDefer = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER', false);
