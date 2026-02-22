@@ -18,7 +18,7 @@ export class CronScheduler {
     const existing = this.jobs.get(id);
     const isScheduled = def.triggerType === 'schedule';
 
-    // Create the job shell first; create the cron timer only for schedule-type agents.
+    // Create the job shell first; create the cron timer only for schedule-type automations.
     const job: CronJob = { id, cronId: cronId ?? existing?.cronId ?? '', threadId, guildId, name, def, cron: null, running: false };
     if (isScheduled) {
       // Construct timer first so invalid schedules don't clobber an existing job.
