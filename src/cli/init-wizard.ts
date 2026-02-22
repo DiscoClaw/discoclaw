@@ -54,6 +54,9 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
       'CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX',
       'CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS',
       'CLAUDE_OUTPUT_FORMAT',
+      'OPENROUTER_API_KEY',
+      'OPENROUTER_BASE_URL',
+      'OPENROUTER_MODEL',
     ];
     lines.push('# PROVIDER');
     lines.push(`PRIMARY_RUNTIME=${vals.PRIMARY_RUNTIME}`);
@@ -274,14 +277,15 @@ export async function runInitWizard(): Promise<void> {
   console.log('  2) Gemini' + (detected.includes('gemini') ? ' (detected)' : ''));
   console.log('  3) OpenAI');
   console.log('  4) Codex' + (detected.includes('codex') ? ' (detected)' : ''));
+  console.log('  5) OpenRouter');
 
   const defaultProvider = selectDefaultProvider(detected);
 
   const providerChoice = await askValidated(
-    `Provider [1-4, default: ${defaultProvider}]: `,
+    `Provider [1-5, default: ${defaultProvider}]: `,
     (val) => {
       const effective = val || defaultProvider;
-      return ['1', '2', '3', '4'].includes(effective) ? null : 'Enter 1, 2, 3, or 4';
+      return ['1', '2', '3', '4', '5'].includes(effective) ? null : 'Enter 1, 2, 3, 4, or 5';
     },
   );
   const finalChoice = providerChoice || defaultProvider;
@@ -324,6 +328,20 @@ export async function runInitWizard(): Promise<void> {
     if (bypassApprovals.toLowerCase() === 'y') {
       values.CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX = '1';
     }
+  } else if (finalChoice === '5') {
+    values.PRIMARY_RUNTIME = 'openrouter';
+    console.log('  Note: the OpenRouter adapter is HTTP-only.');
+    values.OPENROUTER_API_KEY = await askValidated(
+      'OpenRouter API key: ',
+      (val) => (val ? null : 'API key is required'),
+    );
+    const orBaseUrl = await askOptional('OpenRouter base URL [leave empty for default]: ', () => null);
+    if (orBaseUrl) values.OPENROUTER_BASE_URL = orBaseUrl;
+    const orModel = await askOptional(
+      'OpenRouter model [default: anthropic/claude-sonnet-4]: ',
+      () => null,
+    );
+    values.OPENROUTER_MODEL = orModel || 'anthropic/claude-sonnet-4';
   }
 
   // ── Recommended settings ──────────────────────────────────────────────────
@@ -379,19 +397,31 @@ export async function runInitWizard(): Promise<void> {
 
   // ── Next steps ────────────────────────────────────────────────────────────
 
+  let daemonHint: string;
+  if (process.platform === 'darwin') {
+    daemonHint = 'discoclaw install-daemon  # sets up a launchd service';
+  } else if (process.platform === 'win32') {
+    daemonHint = 'Run `discoclaw` directly or use a process manager (e.g. PM2).';
+  } else {
+    daemonHint = 'discoclaw install-daemon  # sets up a systemd user service';
+  }
+
   console.log('Configuration complete!\n');
   console.log('Next steps:');
   if (values.PRIMARY_RUNTIME === 'claude') {
-    console.log('  discoclaw install-daemon');
+    console.log(`  ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'gemini') {
     console.log('  1. Authenticate: run `gemini` and follow the prompts.');
-    console.log('  2. discoclaw install-daemon');
+    console.log(`  2. ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'openai') {
     console.log('  1. Verify your OPENAI_API_KEY is correct.');
-    console.log('  2. discoclaw install-daemon');
+    console.log(`  2. ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'codex') {
     console.log('  1. Ensure the Codex binary is installed and accessible.');
-    console.log('  2. discoclaw install-daemon');
+    console.log(`  2. ${daemonHint}`);
+  } else if (values.PRIMARY_RUNTIME === 'openrouter') {
+    console.log('  1. Verify your OPENROUTER_API_KEY is correct.');
+    console.log(`  2. ${daemonHint}`);
   }
   console.log('');
 
