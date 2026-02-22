@@ -76,6 +76,18 @@ Notes:
 
 ## 4) Configure DiscoClaw
 
+### Recommended: global install
+
+```bash
+npm install -g discoclaw
+discoclaw init           # interactive wizard — creates .env and workspace
+discoclaw install-daemon # register as a user-level systemd service
+```
+
+The `discoclaw init` wizard prompts for your bot token, user/channel IDs, and other essentials, then writes `.env` for you. No manual file editing required.
+
+### From source (contributors / developers)
+
 ```bash
 pnpm i
 pnpm setup     # guided interactive setup
@@ -114,9 +126,10 @@ Run through this checklist in order. Each step should produce the expected outpu
    ```
 
 3. **Environment file exists:**
-   ```bash
-   test -f .env && echo "ok" || echo "missing — run: cp .env.example .env"
-   ```
+   - **Global install:** the `discoclaw init` wizard creates `.env` automatically — nothing to do here.
+   - **From source:** `test -f .env && echo "ok" || echo "missing — run: cp .env.example .env"`
+
+   > **From source only — steps 4 and 5 below use repo convenience scripts not available to global-install users. If you installed via `npm install -g discoclaw`, skip directly to step 6.**
 
 4. **Smoke test (bot token + connection):**
    ```bash
