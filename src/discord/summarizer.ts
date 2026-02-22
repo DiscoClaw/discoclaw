@@ -83,7 +83,7 @@ export async function generateSummary(
       : 'Current summary:\n(none)\n';
 
     const taskStatusRule = opts.taskStatusContext !== undefined
-      ? '- A task status snapshot is provided below. Update the summary to reflect the current status of any referenced tasks. Tasks not present in the snapshot are closed — remove or correct stale references to them. If the snapshot notes it is truncated, only reconcile tasks explicitly listed.'
+      ? '- A task status snapshot is provided below. Update the summary to reflect the current status of any referenced tasks. Tasks listed under "Recently closed" are now done — correct any stale open references to them. Tasks not present as active and not listed as recently closed are likely closed — remove or correct stale open-task references. If the snapshot notes it is truncated, only reconcile tasks explicitly listed.'
       : '';
 
     const taskStatusSection = opts.taskStatusContext !== undefined
