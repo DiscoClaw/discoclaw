@@ -77,6 +77,11 @@ export type DiscoclawConfig = {
   forgeDrafterRuntime?: string;
   forgeAuditorRuntime?: string;
 
+  // OpenRouter adapter config
+  openrouterApiKey?: string;
+  openrouterBaseUrl?: string;
+  openrouterModel: string;
+
   // Gemini CLI adapter config
   geminiBin: string;
   geminiModel: string;
@@ -425,6 +430,19 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to the primary runtime.');
   }
 
+  const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
+  const openrouterBaseUrl = parseTrimmedString(env, 'OPENROUTER_BASE_URL');
+  const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'anthropic/claude-sonnet-4';
+  if (primaryRuntime === 'openrouter' && !openrouterApiKey) {
+    warnings.push('PRIMARY_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; startup will fail unless another runtime is selected.');
+  }
+  if (forgeDrafterRuntime === 'openrouter' && !openrouterApiKey) {
+    warnings.push('FORGE_DRAFTER_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; drafter will fall back to the primary runtime.');
+  }
+  if (forgeAuditorRuntime === 'openrouter' && !openrouterApiKey) {
+    warnings.push('FORGE_AUDITOR_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; auditor will fall back to the primary runtime.');
+  }
+
   const fastModel = parseTrimmedString(env, 'DISCOCLAW_FAST_MODEL') ?? 'fast';
 
   const tasksCwdOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_CWD');
@@ -522,6 +540,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiModel,
       forgeDrafterRuntime,
       forgeAuditorRuntime,
+
+      openrouterApiKey,
+      openrouterBaseUrl,
+      openrouterModel,
 
       geminiBin: parseTrimmedString(env, 'GEMINI_BIN') ?? 'gemini',
       geminiModel: parseTrimmedString(env, 'GEMINI_MODEL') ?? 'gemini-2.5-pro',
