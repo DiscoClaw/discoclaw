@@ -18,6 +18,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Graceful shutdown | `src/index.ts` | **done** |
 | Streaming + fence-safe chunking (2 000 char) | `src/discord.ts` (wire-up), `src/discord/message-coordinator.ts` (handler logic) | **done** |
 | Image input (Discord attachments → Claude) | `src/discord/image-download.ts` | **done** |
+| Startup self-healing (missing workspace files, stale cron/task thread refs, corrupted JSON stores) | `src/health/startup-healing.ts`, `src/workspace-bootstrap.ts` | **done** |
 
 ## 2. Security
 

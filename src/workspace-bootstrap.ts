@@ -92,6 +92,7 @@ export async function ensureWorkspaceBootstrapFiles(
         await fs.writeFile(dest, content.replace('- **Timezone:**', `- **Timezone:** ${systemTz}`), 'utf-8');
       }
       created.push(file);
+      log?.info({ file, workspaceCwd }, 'workspace:bootstrap recreated missing file');
     }
   }
 
