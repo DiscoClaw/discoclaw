@@ -957,7 +957,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         threadId: threadId || null,
       });
 
-      type SummaryWork = { existingSummary: string | null; exchange: string; summarySeq: number };
+      type SummaryWork = { existingSummary: string | null; exchange: string; summarySeq: number; taskStatusContext?: string };
       let pendingSummaryWork: SummaryWork | null = null as SummaryWork | null;
       type ShortTermAppend = { userContent: string; botResponse: string; channelName: string; channelId: string };
       let pendingShortTermAppend: ShortTermAppend | null = null as ShortTermAppend | null;
@@ -2425,6 +2425,29 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               turnCounters.set(sessionKey, 0);
               const summarySeq = (latestSummarySequence.get(sessionKey) ?? 0) + 1;
               latestSummarySequence.set(sessionKey, summarySeq);
+              let taskStatusContext: string | undefined;
+              if (params.taskCtx?.store) {
+                const activeTasks = params.taskCtx.store.list();
+                if (activeTasks.length === 0) {
+                  taskStatusContext = 'No active tasks.';
+                } else {
+                  const TASK_SNAPSHOT_LIMIT = 500;
+                  const TRUNCATION_TRAILER = '(list truncated — only reconcile tasks explicitly listed above)';
+                  const lines: string[] = [];
+                  let totalLen = 0;
+                  let truncated = false;
+                  for (const t of activeTasks) {
+                    const line = `${t.id}: ${t.status}, "${t.title}"`;
+                    if (totalLen + line.length + 1 > TASK_SNAPSHOT_LIMIT) {
+                      truncated = true;
+                      break;
+                    }
+                    lines.push(line);
+                    totalLen += line.length + 1;
+                  }
+                  taskStatusContext = lines.join('\n') + (truncated ? '\n' + TRUNCATION_TRAILER : '');
+                }
+              }
               pendingSummaryWork = {
                 summarySeq,
                 existingSummary: summarySection || null,
@@ -2432,6 +2455,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   (historySection ? historySection + '\n' : '') +
                   `[${msg.author.displayName || msg.author.username}]: ${msg.content}\n` +
                   `[${params.botDisplayName}]: ${(processedText || '').slice(0, 500)}`,
+                ...(taskStatusContext !== undefined ? { taskStatusContext } : {}),
               };
             } else if (summarySection) {
               // Persist counter progress so restarts resume from last known count.
@@ -2489,6 +2513,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             cwd: params.workspaceCwd,
             maxChars: params.summaryMaxChars,
             timeoutMs: 30_000,
+            ...(work.taskStatusContext !== undefined ? { taskStatusContext: work.taskStatusContext } : {}),
           });
 
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;

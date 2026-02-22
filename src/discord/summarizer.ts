@@ -56,6 +56,7 @@ export type GenerateSummaryOpts = {
   cwd: string;
   maxChars: number;
   timeoutMs: number;
+  taskStatusContext?: string;
 };
 
 const SUMMARIZE_PROMPT_TEMPLATE = `You are a conversation summarizer. Update the running summary below with the new exchange.
@@ -65,9 +66,9 @@ Rules:
 - Drop filler; keep decisions, preferences, current focus, and key facts.
 - Write in third person, present tense.
 - Output ONLY the updated summary text, nothing else.
-
+{taskStatusRule}
 {previousSection}
-New exchange:
+{taskStatusSection}New exchange:
 {recentExchange}
 
 Updated summary:`;
@@ -81,9 +82,19 @@ export async function generateSummary(
       ? `Current summary:\n${opts.previousSummary}\n`
       : 'Current summary:\n(none)\n';
 
+    const taskStatusRule = opts.taskStatusContext !== undefined
+      ? '- A task status snapshot is provided below. Update the summary to reflect the current status of any referenced tasks. Tasks not present in the snapshot are closed — remove or correct stale references to them. If the snapshot notes it is truncated, only reconcile tasks explicitly listed.'
+      : '';
+
+    const taskStatusSection = opts.taskStatusContext !== undefined
+      ? `Current task statuses:\n${opts.taskStatusContext}\n\n`
+      : '';
+
     const prompt = SUMMARIZE_PROMPT_TEMPLATE
       .replace('{maxChars}', String(opts.maxChars))
+      .replace('{taskStatusRule}', taskStatusRule)
       .replace('{previousSection}', previousSection)
+      .replace('{taskStatusSection}', taskStatusSection)
       .replace('{recentExchange}', opts.recentExchange);
 
     let finalText = '';
