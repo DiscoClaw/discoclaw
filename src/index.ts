@@ -1293,7 +1293,7 @@ if (cronEnabled && effectiveCronForum) {
     'cron:initialized',
   );
 } else if (cronEnabled && !effectiveCronForum) {
-  log.warn('DISCOCLAW_CRON_ENABLED=1 but no cron forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_CRON_FORUM); cron subsystem disabled');
+  log.warn('DISCOCLAW_CRON_ENABLED=1 but no agents forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_CRON_FORUM); cron subsystem disabled');
 }
 
 // --- Webhook subsystem ---

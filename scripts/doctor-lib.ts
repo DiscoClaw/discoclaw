@@ -156,7 +156,7 @@ export function checkRequiredForums(env: NodeJS.ProcessEnv): DoctorCheckResult[]
       checks.push({
         ok: false,
         label: 'DISCOCLAW_CRON_FORUM is required when DISCOCLAW_CRON_ENABLED=1',
-        hint: 'Set DISCOCLAW_CRON_FORUM to your cron forum channel ID (17-20 digits)',
+        hint: 'Set DISCOCLAW_CRON_FORUM to your agents forum channel ID (17-20 digits)',
       });
     } else if (!validateSnowflake(cronForum)) {
       checks.push({

@@ -249,7 +249,7 @@ export async function runInitWizard(): Promise<void> {
   );
 
   values.DISCOCLAW_CRON_FORUM = await askValidated(
-    'Cron forum channel ID (required): ',
+    'Agents forum channel ID (required): ',
     (val) => (validateSnowflake(val) ? null : 'Must be a 17-20 digit number'),
   );
 

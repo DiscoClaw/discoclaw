@@ -82,7 +82,7 @@ Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for 
 | `RUNTIME_MAX_BUDGET_USD` | *(unset)* | Max USD per CLI process; one-shot = per invocation, multi-turn = per session lifetime |
 | `CLAUDE_APPEND_SYSTEM_PROMPT` | *(unset)* | Append to system prompt (max 4000 chars); skips workspace PA file reads when set |
 | `DISCOCLAW_CRON_ENABLED` | `1` | Master switch for the cron subsystem (forum-based scheduled tasks) |
-| `DISCOCLAW_CRON_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for cron definitions |
+| `DISCOCLAW_CRON_FORUM` | **(required when enabled)** | Agents forum channel ID (snowflake) for cron/agent definitions |
 | `DISCOCLAW_CRON_MODEL` | `fast` | Model tier or concrete name for parsing cron definitions |
 
 ### Browser Automation
