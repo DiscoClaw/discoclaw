@@ -61,6 +61,8 @@ import {
 } from './discord/inflight-replies.js';
 import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 import { getGitHash } from './version.js';
+import { runCredentialChecks, formatCredentialReport } from './health/credential-check.js';
+import { validateDiscordToken } from './validate.js';
 import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
@@ -314,7 +316,7 @@ if (permProbe.status === 'missing') {
     'Run onboarding or manually create workspace/PERMISSIONS.json.',
   );
 } else if (permProbe.status === 'invalid') {
-  log.warn(
+  log.error(
     { workspaceCwd, reason: permProbe.reason },
     'PERMISSIONS.json is invalid — falling back to env/default tools.',
   );
@@ -935,7 +937,19 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
   log.info({ maxDelaySeconds: cfg.deferMaxDelaySeconds, maxConcurrent: cfg.deferMaxConcurrent }, 'defer:scheduler configured');
 }
 
-const { client, status, system } = await startDiscordBot(botParams);
+let client!: Awaited<ReturnType<typeof startDiscordBot>>['client'];
+let status!: Awaited<ReturnType<typeof startDiscordBot>>['status'];
+let system!: Awaited<ReturnType<typeof startDiscordBot>>['system'];
+try {
+  ({ client, status, system } = await startDiscordBot(botParams));
+} catch (err) {
+  const tokenResult = validateDiscordToken(token);
+  log.error(
+    { tokenFormat: tokenResult, error: err instanceof Error ? err.message : String(err) },
+    'Discord login failed',
+  );
+  process.exit(1);
+}
 botStatus = status;
 
 // --- Persist scaffold state (forum IDs) for next boot ---
@@ -958,6 +972,29 @@ if (system) {
 
 // --- Cold-start: clean up orphaned in-flight replies from a previous unclean exit ---
 await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'inflight.json'), log });
+
+// --- Credential health checks (runs after bot connects: full context available) ---
+const resolvedStatusChannelId = statusChannel || system?.statusChannelId || undefined;
+const credentialCheckReport = await runCredentialChecks({
+  token: cfg.token,
+  openaiApiKey: cfg.openaiApiKey,
+  openaiBaseUrl: cfg.openaiBaseUrl,
+  workspacePath: workspaceCwd,
+  statusChannelId: resolvedStatusChannelId,
+});
+const credentialReport = formatCredentialReport(credentialCheckReport);
+if (credentialCheckReport.criticalFailures.length > 0) {
+  for (const name of credentialCheckReport.criticalFailures) {
+    const result = credentialCheckReport.results.find((r) => r.name === name);
+    log.error({ name, message: result?.message }, 'boot:credential-check: critical credential failed');
+  }
+}
+for (const result of credentialCheckReport.results) {
+  if (result.status === 'fail' && !credentialCheckReport.criticalFailures.includes(result.name)) {
+    log.warn({ name: result.name, message: result.message }, 'boot:credential-check: non-critical credential failed');
+  }
+}
+log.info({ credentialReport }, 'boot:credential-check');
 
 // --- Configure task context after bootstrap (so the forum can be auto-created) ---
 let taskCtx: TaskContext | undefined;
@@ -1382,7 +1419,15 @@ if (botStatus?.bootReport) {
     memoryWorkingOn: shortTermMemoryEnabled,
     actionCategoriesEnabled,
     configWarnings: parsedConfig.warnings.length,
+    permissionsStatus: permProbe.status === 'valid' ? 'ok' : permProbe.status,
+    permissionsReason: permProbe.status === 'invalid' ? permProbe.reason : undefined,
     permissionsTier: permProbe.status === 'valid' ? permProbe.permissions.tier : undefined,
+    credentialReport,
+    credentialHealth: credentialCheckReport.results.map((r) => ({
+      name: r.name,
+      status: r.status === 'ok' ? 'pass' : r.status,
+      detail: r.message,
+    })),
     runtimeModel,
     bootDurationMs: Date.now() - bootStartMs,
     buildVersion: gitHash ?? undefined,

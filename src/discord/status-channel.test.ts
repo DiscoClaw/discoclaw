@@ -155,6 +155,87 @@ describe('createStatusPoster', () => {
   });
 });
 
+describe('bootReport', () => {
+  const baseData = {
+    startupType: 'first-boot' as const,
+    tasksEnabled: false,
+    forumResolved: false,
+    cronsEnabled: false,
+    memoryEpisodicOn: false,
+    memorySemanticOn: false,
+    memoryWorkingOn: false,
+    actionCategoriesEnabled: [] as string[],
+  };
+
+  it('includes Credentials line when credentialReport is provided', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, credentialReport: 'discord-token: ok, openai-key: skip' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Credentials · discord-token: ok, openai-key: skip');
+  });
+
+  it('omits Credentials line when credentialReport is absent', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData });
+    const msg = sentContent(ch);
+    expect(msg).not.toContain('Credentials');
+  });
+
+  it('includes FAIL in the Credentials line when a check failed', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({
+      ...baseData,
+      credentialReport: 'discord-token: FAIL (invalid or revoked token (401)), openai-key: skip',
+    });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Credentials · discord-token: FAIL (invalid or revoked token (401)), openai-key: skip');
+  });
+
+  it('formats Permissions as "ok (tier)" when permissionsStatus is ok', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsStatus: 'ok', permissionsTier: 'full' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · ok (full)');
+  });
+
+  it('formats Permissions as "missing" when permissionsStatus is missing', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsStatus: 'missing' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · missing');
+  });
+
+  it('formats Permissions as "INVALID (reason)" when permissionsStatus is invalid with reason', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsStatus: 'invalid', permissionsReason: 'invalid tier: "godmode"' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · INVALID (invalid tier: "godmode")');
+  });
+
+  it('formats Permissions as "INVALID" without parentheses when no reason is provided', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsStatus: 'invalid' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · INVALID');
+    expect(msg).not.toContain('(undefined');
+  });
+
+  it('falls back to tier label when permissionsStatus is absent', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsTier: 'standard' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · standard');
+  });
+});
+
 describe('sanitizeErrorMessage', () => {
   it('passes through short clean messages unchanged', () => {
     expect(sanitizeErrorMessage('timeout')).toBe('timeout');

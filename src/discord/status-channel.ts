@@ -82,6 +82,11 @@ export type BootReportData = {
   // Config / permissions
   configWarnings?: number;
   permissionsTier?: string;
+  permissionsStatus?: 'ok' | 'missing' | 'invalid';
+  permissionsReason?: string;
+  // Credential health (pre-formatted by formatCredentialReport)
+  credentialReport?: string;
+  credentialHealth?: Array<{ name: string; status: string; detail?: string }>;
   // Runtime
   runtimeModel?: string;
   bootDurationMs?: number;
@@ -170,7 +175,16 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       lines.push(`Startup · ${typeLabel[data.startupType]}`);
       if (data.bootDurationMs !== undefined) lines.push(`Boot Time · ${data.bootDurationMs}ms`);
       lines.push(`Model · ${data.runtimeModel || '(default)'}`);
-      lines.push(`Permissions · ${data.permissionsTier || '(unset)'}`);
+      if (data.permissionsStatus) {
+        const permLabel = data.permissionsStatus === 'ok'
+          ? `ok (${data.permissionsTier ?? '?'})`
+          : data.permissionsStatus === 'invalid'
+            ? `INVALID${data.permissionsReason ? ` (${data.permissionsReason})` : ''}`
+            : 'missing';
+        lines.push(`Permissions · ${permLabel}`);
+      } else {
+        lines.push(`Permissions · ${data.permissionsTier || '(unset)'}`);
+      }
 
       if (data.shutdownReason) {
         const reasonParts = [data.shutdownReason];
@@ -206,6 +220,29 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
 
       if (data.configWarnings && data.configWarnings > 0) {
         lines.push(`Config Warnings · ${data.configWarnings}`);
+      }
+
+      if (data.credentialReport) {
+        lines.push(`Credentials · ${data.credentialReport}`);
+      }
+
+      if (data.credentialHealth && data.credentialHealth.length > 0) {
+        const passCount = data.credentialHealth.filter(c => c.status === 'pass').length;
+        const failCount = data.credentialHealth.filter(c => c.status === 'fail').length;
+        const skipCount = data.credentialHealth.filter(c => c.status === 'skip').length;
+
+        if (passCount === data.credentialHealth.length) {
+          lines.push('Health · all pass');
+        } else {
+          const summary: string[] = [];
+          if (passCount > 0) summary.push(`${passCount} pass`);
+          if (failCount > 0) summary.push(`${failCount} fail`);
+          if (skipCount > 0) summary.push(`${skipCount} skip`);
+          lines.push(`Health · ${summary.join(', ')}`);
+          for (const c of data.credentialHealth.filter(c => c.status === 'fail')) {
+            lines.push(`  ${c.name}: ${c.detail ?? 'failed'}`);
+          }
+        }
       }
 
       await send(lines.join('\n'));
