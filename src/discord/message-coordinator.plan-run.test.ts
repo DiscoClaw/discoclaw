@@ -98,13 +98,16 @@ function makeParams() {
 }
 
 function makeMessage(content: string) {
+  const phaseMsg = {
+    edit: vi.fn(async () => ({})),
+  };
   const progressReply = {
     edit: vi.fn(async () => ({})),
   };
   const channel = {
     id: 'channel-1',
     name: 'general',
-    send: vi.fn(async () => ({})),
+    send: vi.fn(async () => phaseMsg),
     isThread: () => false,
   };
   return {
@@ -123,6 +126,7 @@ function makeMessage(content: string) {
     mentions: { has: () => false },
     reply: vi.fn(async () => progressReply),
     progressReply,
+    phaseMsg,
   };
 }
 
@@ -155,7 +159,7 @@ describe('message coordinator plan run phase-start posts', () => {
     await vi.waitFor(() => {
       expect(runNextPhase).toHaveBeenCalled();
       expect(msg.channel.send).toHaveBeenCalledWith(expect.objectContaining({
-        content: 'Starting phase **audit-1**: Post implementation audit',
+        content: '**Post implementation audit**...',
       }));
     });
   });
@@ -181,8 +185,102 @@ describe('message coordinator plan run phase-start posts', () => {
     await vi.waitFor(() => {
       const phaseStartPosts = msg.channel.send.mock.calls
         .map((call: any[]) => String(call[0]?.content ?? ''))
-        .filter((content: string) => content.includes('Starting phase **phase-1**: First phase'));
+        .filter((content: string) => content.includes('**First phase**...'));
       expect(phaseStartPosts).toHaveLength(1);
+    });
+  });
+
+  it('edits phase-start message to resolved state on phase_complete (done)', async () => {
+    const { runNextPhase } = await import('./plan-manager.js');
+    (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+      await opts.onPlanEvent?.({
+        type: 'phase_start',
+        planId: 'plan-042',
+        phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+      });
+      await opts.onPlanEvent?.({
+        type: 'phase_complete',
+        planId: 'plan-042',
+        phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        status: 'done',
+      });
+      return { result: 'nothing_to_run' };
+    });
+
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(makeParams(), queue as any);
+    const msg = makeMessage('!plan run plan-042');
+
+    await handler(msg as any);
+    await vi.waitFor(() => {
+      expect(msg.channel.send).toHaveBeenCalledWith(expect.objectContaining({
+        content: '**First phase**...',
+      }));
+      expect(msg.phaseMsg.edit).toHaveBeenCalledWith(expect.objectContaining({
+        content: '[x] **First phase**',
+      }));
+    });
+  });
+
+  it('edits phase-start message with failure indicator on phase_complete (failed)', async () => {
+    const { runNextPhase } = await import('./plan-manager.js');
+    (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+      await opts.onPlanEvent?.({
+        type: 'phase_start',
+        planId: 'plan-042',
+        phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+      });
+      await opts.onPlanEvent?.({
+        type: 'phase_complete',
+        planId: 'plan-042',
+        phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        status: 'failed',
+      });
+      return { result: 'nothing_to_run' };
+    });
+
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(makeParams(), queue as any);
+    const msg = makeMessage('!plan run plan-042');
+
+    await handler(msg as any);
+    await vi.waitFor(() => {
+      expect(msg.phaseMsg.edit).toHaveBeenCalledWith(expect.objectContaining({
+        content: '[!] **First phase**',
+      }));
+    });
+  });
+
+  it('posts a final summary channel message after a full plan run', async () => {
+    const { runNextPhase } = await import('./plan-manager.js');
+    (runNextPhase as any)
+      .mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        return {
+          result: 'done',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement', status: 'done', dependsOn: [], contextFiles: [] },
+          output: 'done',
+          nextPhase: undefined,
+        };
+      })
+      .mockImplementationOnce(async () => ({ result: 'nothing_to_run' }));
+
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(makeParams(), queue as any);
+    const msg = makeMessage('!plan run plan-042');
+
+    await handler(msg as any);
+    await vi.waitFor(() => {
+      // The final channel.send should include a plan-run-complete summary
+      const finalSend = msg.channel.send.mock.calls.find((call: any[]) => {
+        const content = String(call[0]?.content ?? '');
+        return content.includes('plan-042') && content.includes('phase');
+      });
+      expect(finalSend).toBeDefined();
     });
   });
 });

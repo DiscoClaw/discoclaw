@@ -47,15 +47,26 @@ export type PlanPhasesStateV1 = PlanPhases & {
   version: 1;
 };
 
-export type PlanRunEvent = {
-  type: 'phase_start';
-  planId: string;
-  phase: {
-    id: string;
-    title: string;
-    kind: PhaseKind;
-  };
-};
+export type PlanRunEvent =
+  | {
+      type: 'phase_start';
+      planId: string;
+      phase: {
+        id: string;
+        title: string;
+        kind: PhaseKind;
+      };
+    }
+  | {
+      type: 'phase_complete';
+      planId: string;
+      phase: {
+        id: string;
+        title: string;
+        kind: PhaseKind;
+      };
+      status: 'done' | 'failed' | 'skipped';
+    };
 
 export type PhaseExecutionOpts = {
   runtime: RuntimeAdapter;
@@ -1743,6 +1754,28 @@ export async function runNextPhase(
   }
 
   const updatedPhase = allPhases.phases.find((p) => p.id === phase.id)!;
+
+  // Emit phase_complete event
+  if (opts.onPlanEvent) {
+    const completeStatus = result.status === 'done' ? 'done' : 'failed';
+    try {
+      await opts.onPlanEvent({
+        type: 'phase_complete',
+        planId: allPhases.planId,
+        phase: {
+          id: updatedPhase.id,
+          title: updatedPhase.title,
+          kind: updatedPhase.kind,
+        },
+        status: completeStatus,
+      });
+    } catch (err) {
+      opts.log?.warn(
+        { err, planId: allPhases.planId, phaseId: phase.id },
+        'plan-manager: onPlanEvent phase_complete callback failed',
+      );
+    }
+  }
 
   if (result.status === 'done') {
     const upcoming = getNextPhase(allPhases);
