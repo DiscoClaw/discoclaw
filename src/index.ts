@@ -513,6 +513,25 @@ if (cfg.openaiApiKey) {
   runtimeRegistry.register('openai', openaiRuntime);
 }
 
+if (cfg.openrouterApiKey) {
+  const openrouterRuntimeRaw = createOpenAICompatRuntime({
+    baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1',
+    apiKey: cfg.openrouterApiKey,
+    defaultModel: cfg.openrouterModel,
+    log,
+  });
+  const openrouterRuntime = withConcurrencyLimit(openrouterRuntimeRaw, {
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+  });
+  runtimeRegistry.register('openrouter', openrouterRuntime);
+  log.info(
+    { baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1', model: cfg.openrouterModel },
+    'runtime:openrouter registered',
+  );
+}
+
 // Register Codex CLI runtime.
 const codexRuntimeRaw = createCodexCliRuntime({
   codexBin: cfg.codexBin,
