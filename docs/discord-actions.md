@@ -45,6 +45,11 @@ Channel action types (in `src/discord/actions-channels.ts`):
 - `threadListArchived`, `threadEdit`
 - `forumTagCreate`, `forumTagDelete`, `forumTagList`
 
+Messaging action types (in `src/discord/actions-messaging.ts`):
+- `sendMessage`, `sendFile`, `react`, `unreact`, `readMessages`, `fetchMessage`
+- `editMessage`, `deleteMessage`, `bulkDelete`, `crosspost`, `threadCreate`
+- `pinMessage`, `unpinMessage`, `listPins`
+
 Cron action types (in `src/discord/actions-crons.ts`):
 - `cronCreate`, `cronUpdate`, `cronList`, `cronShow`, `cronPause`, `cronResume`, `cronDelete`, `cronTrigger`, `cronSync`, `cronTagMapReload`
 

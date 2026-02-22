@@ -1,4 +1,6 @@
-import { ChannelType } from 'discord.js';
+import { ChannelType, AttachmentBuilder } from 'discord.js';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, fmtTime, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
@@ -20,12 +22,13 @@ export type MessagingActionRequest =
   | { type: 'threadCreate'; channelId: string; name: string; messageId?: string; autoArchiveMinutes?: number }
   | { type: 'pinMessage'; channelId: string; messageId: string }
   | { type: 'unpinMessage'; channelId: string; messageId: string }
-  | { type: 'listPins'; channel: string };
+  | { type: 'listPins'; channel: string }
+  | { type: 'sendFile'; channel: string; filePath: string; content?: string };
 
 const MESSAGING_TYPE_MAP: Record<MessagingActionRequest['type'], true> = {
   sendMessage: true, react: true, unreact: true, readMessages: true, fetchMessage: true,
   editMessage: true, deleteMessage: true, bulkDelete: true, crosspost: true, threadCreate: true,
-  pinMessage: true, unpinMessage: true, listPins: true,
+  pinMessage: true, unpinMessage: true, listPins: true, sendFile: true,
 };
 export const MESSAGING_ACTION_TYPES = new Set<string>(Object.keys(MESSAGING_TYPE_MAP));
 
@@ -34,6 +37,10 @@ export const MESSAGING_ACTION_TYPES = new Set<string>(Object.keys(MESSAGING_TYPE
 // ---------------------------------------------------------------------------
 
 const DISCORD_MAX_CONTENT = 2000;
+const SENDFILE_MAX_BYTES = 25 * 1024 * 1024; // 25 MB — Discord standard upload limit
+const SENDFILE_ALLOWED_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf',
+]);
 
 // ---------------------------------------------------------------------------
 // Executor
@@ -278,6 +285,49 @@ export async function executeMessagingAction(
       });
       return { ok: true, summary: `Pinned messages in #${channel.name}:\n${lines.join('\n')}` };
     }
+
+    case 'sendFile': {
+      if (typeof action.channel !== 'string' || !action.channel.trim()) {
+        return { ok: false, error: 'sendFile requires a non-empty channel name or ID' };
+      }
+      if (typeof action.filePath !== 'string' || !action.filePath.trim()) {
+        return { ok: false, error: 'sendFile requires a non-empty filePath' };
+      }
+      const ext = path.extname(action.filePath).toLowerCase().slice(1);
+      if (!SENDFILE_ALLOWED_EXTENSIONS.has(ext)) {
+        return { ok: false, error: `File extension ".${ext}" is not allowed. Allowed extensions: ${[...SENDFILE_ALLOWED_EXTENSIONS].join(', ')}` };
+      }
+      if (action.content && action.content.length > DISCORD_MAX_CONTENT) {
+        return { ok: false, error: `Content exceeds Discord's ${DISCORD_MAX_CONTENT} character limit (got ${action.content.length})` };
+      }
+      let fileBuffer: Buffer;
+      try {
+        const stat = await fs.stat(action.filePath);
+        if (stat.size > SENDFILE_MAX_BYTES) {
+          return { ok: false, error: `File exceeds the ${SENDFILE_MAX_BYTES / (1024 * 1024)} MB size limit (${stat.size} bytes)` };
+        }
+        fileBuffer = await fs.readFile(action.filePath) as Buffer;
+      } catch (err: any) {
+        if (err.code === 'ENOENT') {
+          return { ok: false, error: `File not found: ${action.filePath}` };
+        }
+        throw err;
+      }
+      const channel = resolveChannel(guild, action.channel);
+      if (!channel) {
+        const raw = findChannelRaw(guild, action.channel);
+        if (raw) {
+          const kind = describeChannelType(raw);
+          return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot receive files directly.` };
+        }
+        return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived.` };
+      }
+      const attachment = new AttachmentBuilder(fileBuffer, { name: path.basename(action.filePath) });
+      const opts: any = { files: [attachment], allowedMentions: NO_MENTIONS };
+      if (action.content) opts.content = action.content;
+      await channel.send(opts);
+      return { ok: true, summary: `Sent file "${path.basename(action.filePath)}" to #${channel.name}` };
+    }
   }
 }
 
@@ -297,6 +347,17 @@ export function messagingActionsPromptSection(): string {
 - \`replyTo\` (optional): Message ID to reply to.
 - **Important:** Do NOT use sendMessage to reply to the current conversation — your response text is automatically posted as a reply. Only use sendMessage to post in a *different* channel.
 - Forum channels do NOT support sendMessage. To post in a forum, use \`threadCreate\` instead.
+
+**sendFile** — Send a local file as a Discord attachment:
+\`\`\`
+<discord-action>{"type":"sendFile","channel":"#general","filePath":"/tmp/screenshot.png","content":"Here is the screenshot"}</discord-action>
+\`\`\`
+- \`channel\` (required): Channel name (with or without #) or channel ID.
+- \`filePath\` (required): Absolute path to the local file to upload.
+- \`content\` (optional): Caption text to accompany the file.
+- Allowed extensions: png, jpg, jpeg, gif, webp, pdf.
+- Maximum file size: 25 MB.
+- Unlike sendMessage, sendFile is never suppressed when targeting the current channel — the file is not auto-posted as a reply.
 
 **react** — Add a reaction to a message:
 \`\`\`
