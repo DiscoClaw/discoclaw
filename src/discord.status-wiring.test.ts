@@ -123,6 +123,34 @@ describe('status wiring in message handler', () => {
     );
   });
 
+  it('cleans up streaming keepalive timer when invoke throws', async () => {
+    vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    try {
+      const runtime = {
+        invoke: async function* () {
+          throw new Error('kaboom');
+        },
+      } as any;
+      const status = mockStatus();
+      const statusRef: StatusRef = { current: status };
+      const handler = createMessageCreateHandler(baseParams(runtime), makeQueue(), statusRef);
+
+      await handler(makeMsg());
+
+      expect(setIntervalSpy).toHaveBeenCalled();
+      const keepaliveHandle = setIntervalSpy.mock.results.find((r) => r.type === 'return')?.value;
+      expect(keepaliveHandle).toBeDefined();
+      expect(clearIntervalSpy).toHaveBeenCalledWith(keepaliveHandle as any);
+      expect(status.handlerError).toHaveBeenCalledOnce();
+    } finally {
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('does not call status methods when statusRef.current is null', async () => {
     const runtime = {
       invoke: async function* () {

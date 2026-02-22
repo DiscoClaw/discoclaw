@@ -34,6 +34,7 @@ import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } 
 import type { ConfigActionRequest, ConfigContext } from './actions-config.js';
 import { executeReactionPromptAction as executeReactionPrompt, REACTION_PROMPT_ACTION_TYPES, reactionPromptSection } from './reaction-prompts.js';
 import type { ReactionPromptRequest } from './reaction-prompts.js';
+import { describeDestructiveConfirmationRequirement } from './destructive-confirmation.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +47,12 @@ export type ActionContext = {
   messageId: string;
   threadParentId?: string | null;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
+  confirmation?: {
+    mode: 'interactive' | 'automated';
+    sessionKey?: string;
+    userId?: string;
+    bypassDestructive?: boolean;
+  };
 };
 
 export type ActionCategoryFlags = {
@@ -146,6 +153,171 @@ const ACTION_CLOSE = '</discord-action>';
 // Trailing XML closing tags left by garbled AI output (e.g. </parameter>\n</invoke>).
 const TRAILING_XML_RE = /^(?:\s*<\/[a-z-]+>)+/;
 
+type TextRange = { start: number; end: number };
+
+function mergeRanges(ranges: TextRange[]): TextRange[] {
+  if (ranges.length <= 1) return ranges;
+  const sorted = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: TextRange[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = merged[merged.length - 1];
+    const cur = sorted[i];
+    if (cur.start <= prev.end) {
+      prev.end = Math.max(prev.end, cur.end);
+    } else {
+      merged.push({ start: cur.start, end: cur.end });
+    }
+  }
+  return merged;
+}
+
+function isIndexInRanges(index: number, ranges: TextRange[]): boolean {
+  for (const range of ranges) {
+    if (index < range.start) return false;
+    if (index < range.end) return true;
+  }
+  return false;
+}
+
+function computeMarkdownCodeRanges(text: string): TextRange[] {
+  const ranges: TextRange[] = [];
+
+  // 1) Fenced code blocks (``` and ~~~)
+  let inFence = false;
+  let fenceChar = '';
+  let fenceLen = 0;
+  let fenceStart = 0;
+  let lineStart = 0;
+  while (lineStart <= text.length) {
+    const nl = text.indexOf('\n', lineStart);
+    const hasNl = nl !== -1;
+    const lineEnd = hasNl ? nl : text.length;
+    const lineEndWithNl = hasNl ? nl + 1 : text.length;
+    const line = text.slice(lineStart, lineEnd);
+    if (!inFence) {
+      const open = line.match(/^[ \t]*(`{3,}|~{3,})/);
+      if (open) {
+        inFence = true;
+        fenceChar = open[1][0]!;
+        fenceLen = open[1].length;
+        fenceStart = lineStart;
+      }
+    } else {
+      const closeRe = new RegExp(`^[ \\t]*\\${fenceChar}{${fenceLen},}[ \\t]*$`);
+      if (closeRe.test(line)) {
+        ranges.push({ start: fenceStart, end: lineEndWithNl });
+        inFence = false;
+        fenceChar = '';
+        fenceLen = 0;
+      }
+    }
+    if (!hasNl) break;
+    lineStart = lineEndWithNl;
+  }
+  if (inFence) {
+    ranges.push({ start: fenceStart, end: text.length });
+  }
+
+  // 2) Indented code blocks outside fenced blocks.
+  const mergedFence = mergeRanges(ranges);
+  let segStart = 0;
+  for (const fence of mergedFence) {
+    if (segStart < fence.start) {
+      collectIndentedCodeRanges(text, segStart, fence.start, ranges);
+    }
+    segStart = fence.end;
+  }
+  if (segStart < text.length) {
+    collectIndentedCodeRanges(text, segStart, text.length, ranges);
+  }
+
+  // 3) Inline code spans (`...`) outside fenced/indented code blocks.
+  const mergedBlock = mergeRanges(ranges);
+  segStart = 0;
+  for (const block of mergedBlock) {
+    if (segStart < block.start) {
+      collectInlineCodeRanges(text, segStart, block.start, ranges);
+    }
+    segStart = block.end;
+  }
+  if (segStart < text.length) {
+    collectInlineCodeRanges(text, segStart, text.length, ranges);
+  }
+
+  return mergeRanges(ranges);
+}
+
+function collectIndentedCodeRanges(text: string, start: number, end: number, out: TextRange[]): void {
+  let lineStart = start;
+  let blockStart = -1;
+  let blockEnd = -1;
+
+  while (lineStart <= end) {
+    const nl = text.indexOf('\n', lineStart);
+    const hasNl = nl !== -1 && nl < end;
+    const lineEnd = hasNl ? nl : end;
+    const lineEndWithNl = hasNl ? nl + 1 : end;
+    const line = text.slice(lineStart, lineEnd);
+    const isBlank = /^[ \t]*$/.test(line);
+    const isIndented = /^(?: {4,}|\t)/.test(line);
+
+    if (blockStart === -1) {
+      if (isIndented && !isBlank) {
+        blockStart = lineStart;
+        blockEnd = lineEndWithNl;
+      }
+    } else if (isIndented || isBlank) {
+      if (isIndented) blockEnd = lineEndWithNl;
+    } else {
+      out.push({ start: blockStart, end: blockEnd });
+      blockStart = -1;
+      blockEnd = -1;
+    }
+
+    if (!hasNl) break;
+    lineStart = lineEndWithNl;
+  }
+
+  if (blockStart !== -1) {
+    out.push({ start: blockStart, end: blockEnd });
+  }
+}
+
+function collectInlineCodeRanges(text: string, start: number, end: number, out: TextRange[]): void {
+  let i = start;
+  let inInline = false;
+  let inlineTicks = 0;
+  let inlineStart = -1;
+  while (i < end) {
+    if (text[i] !== '`') {
+      i++;
+      continue;
+    }
+    let ticks = 1;
+    while (i + ticks < end && text[i + ticks] === '`') ticks++;
+    if (!inInline) {
+      inInline = true;
+      inlineTicks = ticks;
+      inlineStart = i;
+    } else if (ticks === inlineTicks) {
+      out.push({ start: inlineStart, end: i + ticks });
+      inInline = false;
+      inlineTicks = 0;
+      inlineStart = -1;
+    }
+    i += ticks;
+  }
+}
+
+function findNextActionOpenOutsideCode(text: string, from: number, codeRanges: TextRange[]): number {
+  let idx = text.indexOf(ACTION_OPEN, from);
+  while (idx !== -1) {
+    if (!isIndexInRanges(idx, codeRanges)) return idx;
+    idx = text.indexOf(ACTION_OPEN, idx + ACTION_OPEN.length);
+  }
+  return -1;
+}
+
 /**
  * Extract a JSON object starting at `text[start]` (which must be '{') by
  * counting brace depth, respecting string literals. Returns the substring
@@ -216,12 +388,13 @@ function stripActionsWithScanner(
   validTypes: Set<string>,
   actions: DiscordActionRequest[],
   strippedUnrecognizedTypes: string[],
+  codeRanges: TextRange[],
 ): string {
   let result = '';
   let cursor = 0;
 
   while (cursor < text.length) {
-    const idx = text.indexOf(ACTION_OPEN, cursor);
+    const idx = findNextActionOpenOutsideCode(text, cursor, codeRanges);
     if (idx === -1) { result += text.slice(cursor); break; }
 
     // Copy text before the marker.
@@ -269,10 +442,12 @@ function parseWithRegexFallback(
   text: string,
   flags: ActionCategoryFlags,
   validTypes: Set<string>,
+  codeRanges: TextRange[],
 ): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[] } {
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
-  const cleaned = text.replace(ACTION_RE, (_match, json: string) => {
+  const cleaned = text.replace(ACTION_RE, (match, json: string, offset: number) => {
+    if (isIndexInRanges(offset, codeRanges)) return match;
     parseActionJson(json.trim(), flags, validTypes, actions, strippedUnrecognizedTypes);
     return '';
   });
@@ -290,8 +465,9 @@ export function parseDiscordActions(
   const validTypes = buildValidTypes(flags);
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
+  const codeRanges = computeMarkdownCodeRanges(text);
 
-  const cleaned = stripActionsWithScanner(text, flags, validTypes, actions, strippedUnrecognizedTypes);
+  const cleaned = stripActionsWithScanner(text, flags, validTypes, actions, strippedUnrecognizedTypes, codeRanges);
   const scanned = {
     cleanText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
     actions,
@@ -300,10 +476,11 @@ export function parseDiscordActions(
 
   // Compatibility fallback: if scanner leaves markers behind or extracts nothing,
   // run the legacy regex parser and prefer it when it captures more actions.
-  if (text.includes(ACTION_OPEN)) {
+  const hasActionOutsideCode = findNextActionOpenOutsideCode(text, 0, codeRanges) !== -1;
+  if (hasActionOutsideCode) {
     const markerLeft = scanned.cleanText.includes(ACTION_OPEN) || scanned.cleanText.includes(ACTION_CLOSE);
     if (markerLeft || scanned.actions.length === 0) {
-      const legacy = parseWithRegexFallback(text, flags, validTypes);
+      const legacy = parseWithRegexFallback(text, flags, validTypes, codeRanges);
       if (legacy.actions.length > scanned.actions.length) return legacy;
       if (markerLeft && legacy.actions.length === scanned.actions.length && legacy.cleanText.length < scanned.cleanText.length) {
         return legacy;
@@ -331,6 +508,13 @@ export async function executeDiscordActions(
   for (const action of actions) {
     try {
       let result: DiscordActionResult;
+
+      const destructiveCheck = describeDestructiveConfirmationRequirement(action as unknown as { type: string }, ctx.confirmation);
+      if (!destructiveCheck.allow) {
+        result = { ok: false, error: destructiveCheck.error };
+        results.push(result);
+        continue;
+      }
 
       if (CHANNEL_ACTION_TYPES.has(action.type)) {
         result = await executeChannelAction(action as ChannelActionRequest, ctx);

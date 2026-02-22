@@ -68,6 +68,7 @@ import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from 
 import { parseRestartCommand, handleRestartCommand } from './restart-command.js';
 import { parseModelsCommand, handleModelsCommand } from './models-command.js';
 import { parseUpdateCommand, handleUpdateCommand } from './update-command.js';
+import { consumeDestructiveConfirmation } from './destructive-confirmation.js';
 import type { HealthConfigSnapshot } from './health-command.js';
 import type { MetricsRegistry } from '../observability/metrics.js';
 import { globalMetrics } from '../observability/metrics.js';
@@ -319,6 +320,11 @@ async function resolvePinnedMessagesSummary(
     log?.warn({ err }, 'discord:context pinned fetch failed');
     return undefined;
   }
+}
+
+function parseConfirmToken(text: string): string | null {
+  const m = /^!confirm\s+([a-z0-9_-]{6,64})\s*$/i.exec(text.trim());
+  return m?.[1] ?? null;
 }
 
 export function groupDirNameFromSessionKey(sessionKey: string): string {
@@ -1691,6 +1697,64 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
+          const confirmToken = parseConfirmToken(String(msg.content ?? ''));
+          if (confirmToken) {
+            const pending = consumeDestructiveConfirmation(confirmToken, sessionKey, msg.author.id);
+            if (!pending) {
+              await msg.reply({
+                content: `No pending destructive action found for token \`${confirmToken}\` in this session.`,
+                allowedMentions: NO_MENTIONS,
+              });
+              return;
+            }
+
+            if (!msg.guild) {
+              await msg.reply({
+                content: `Confirmed token \`${confirmToken}\`, but destructive Discord actions require a guild context.`,
+                allowedMentions: NO_MENTIONS,
+              });
+              return;
+            }
+
+            const confirmAction = pending.action as { type: string };
+            const actCtx = {
+              guild: msg.guild,
+              client: msg.client,
+              channelId: msg.channelId,
+              messageId: msg.id,
+              threadParentId,
+              deferScheduler: params.deferScheduler,
+              confirmation: {
+                mode: 'interactive' as const,
+                sessionKey,
+                userId: msg.author.id,
+                bypassDestructive: true,
+              },
+            };
+            const perMessageMemoryCtx = params.memoryCtx ? {
+              ...params.memoryCtx,
+              userId: msg.author.id,
+              channelId: msg.channelId,
+              messageId: msg.id,
+              guildId: msg.guildId ?? undefined,
+              channelName: (msg.channel as any)?.name ?? undefined,
+            } : undefined;
+            const actionResults = await executeDiscordActions([confirmAction as any], actCtx, params.log, {
+              taskCtx: params.taskCtx,
+              cronCtx: params.cronCtx,
+              forgeCtx: params.forgeCtx,
+              planCtx: params.planCtx,
+              memoryCtx: perMessageMemoryCtx,
+              configCtx: params.configCtx,
+            });
+            const displayLines = buildDisplayResultLines([confirmAction], actionResults);
+            const content = displayLines.length > 0
+              ? `Confirmed \`${confirmAction.type}\`.\n${displayLines.join('\n')}`
+              : `Confirmed \`${confirmAction.type}\`.`;
+            await msg.reply({ content, allowedMentions: NO_MENTIONS });
+            return;
+          }
+
           const sessionId = params.useRuntimeSessions
             ? await params.sessionManager.getOrCreate(sessionKey)
             : null;
@@ -2052,83 +2116,90 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 }, { flushDelayMs: 2000, postToolDelayMs: 500 })
               : null;
 
-            for await (const evt of params.runtime.invoke({
-              prompt: currentPrompt,
-              model: resolveModel(params.runtimeModel, params.runtime.id),
-              cwd,
-              addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
-              sessionId,
-              sessionKey,
-              tools: effectiveTools,
-              timeoutMs: params.runtimeTimeoutMs,
-              // Images only on initial turn — follow-ups are text-only continuations
-              // with action results; re-downloading would waste time and bandwidth.
-              images: followUpDepth === 0 ? inputImages : undefined,
-              signal: abortSignal,
-            })) {
-              // Track event flow for stall warning.
-              lastEventAt = Date.now();
-              stallWarned = false;
-              if (evt.type === 'tool_start') activeToolCount++;
-              else if (evt.type === 'tool_end') activeToolCount = Math.max(0, activeToolCount - 1);
+            try {
+              for await (const evt of params.runtime.invoke({
+                prompt: currentPrompt,
+                model: resolveModel(params.runtimeModel, params.runtime.id),
+                cwd,
+                addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
+                sessionId,
+                sessionKey,
+                tools: effectiveTools,
+                timeoutMs: params.runtimeTimeoutMs,
+                // Images only on initial turn — follow-ups are text-only continuations
+                // with action results; re-downloading would waste time and bandwidth.
+                images: followUpDepth === 0 ? inputImages : undefined,
+                signal: abortSignal,
+              })) {
+                // Track event flow for stall warning.
+                lastEventAt = Date.now();
+                stallWarned = false;
+                if (evt.type === 'tool_start') activeToolCount++;
+                else if (evt.type === 'tool_end') activeToolCount = Math.max(0, activeToolCount - 1);
 
-              if (taq) {
-                // Tool-aware mode: route relevant events through the queue.
-                if (evt.type === 'text_delta' || evt.type === 'text_final' ||
-                    evt.type === 'tool_start' || evt.type === 'tool_end') {
-                  taq.handleEvent(evt);
-                } else if (evt.type === 'error') {
-                  invokeHadError = true;
-                  invokeErrorMessage = evt.message;
-                  taq.handleEvent(evt);
-                  finalText = abortSignal.aborted
-                    ? '*(Response aborted.)*'
-                    : mapRuntimeErrorToUserMessage(evt.message);
-                  await maybeEdit(true);
-                  if (!abortSignal.aborted) {
-                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                    statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
-                    params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                if (taq) {
+                  // Tool-aware mode: route relevant events through the queue.
+                  if (evt.type === 'text_delta' || evt.type === 'text_final' ||
+                      evt.type === 'tool_start' || evt.type === 'tool_end') {
+                    taq.handleEvent(evt);
+                  } else if (evt.type === 'error') {
+                    invokeHadError = true;
+                    invokeErrorMessage = evt.message;
+                    taq.handleEvent(evt);
+                    finalText = abortSignal.aborted
+                      ? '*(Response aborted.)*'
+                      : mapRuntimeErrorToUserMessage(evt.message);
+                    await maybeEdit(true);
+                    if (!abortSignal.aborted) {
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                      params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                    }
+                  } else if (evt.type === 'log_line') {
+                    // Bypass queue for log lines.
+                    const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
+                    deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
+                    await maybeEdit(false);
+                  } else if (evt.type === 'image_data') {
+                    collectedImages.push(evt.image);
                   }
-                } else if (evt.type === 'log_line') {
-                  // Bypass queue for log lines.
-                  const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
-                  deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
-                  await maybeEdit(false);
-                } else if (evt.type === 'image_data') {
-                  collectedImages.push(evt.image);
-                }
-              } else {
-                // Flat mode: existing behavior unchanged.
-                if (evt.type === 'text_final') {
-                  hadTextFinal = true;
-                  finalText = evt.text;
-                  await maybeEdit(true);
-                } else if (evt.type === 'error') {
-                  invokeHadError = true;
-                  invokeErrorMessage = evt.message;
-                  finalText = abortSignal.aborted
-                    ? '*(Response aborted.)*'
-                    : mapRuntimeErrorToUserMessage(evt.message);
-                  await maybeEdit(true);
-                  if (!abortSignal.aborted) {
-                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                    statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
-                    params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                } else {
+                  // Flat mode: existing behavior unchanged.
+                  if (evt.type === 'text_final') {
+                    hadTextFinal = true;
+                    finalText = evt.text;
+                    await maybeEdit(true);
+                  } else if (evt.type === 'error') {
+                    invokeHadError = true;
+                    invokeErrorMessage = evt.message;
+                    finalText = abortSignal.aborted
+                      ? '*(Response aborted.)*'
+                      : mapRuntimeErrorToUserMessage(evt.message);
+                    await maybeEdit(true);
+                    if (!abortSignal.aborted) {
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                      params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                    }
+                  } else if (evt.type === 'text_delta') {
+                    deltaText += evt.text;
+                    await maybeEdit(false);
+                  } else if (evt.type === 'log_line') {
+                    const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
+                    deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
+                    await maybeEdit(false);
+                  } else if (evt.type === 'image_data') {
+                    collectedImages.push(evt.image);
                   }
-                } else if (evt.type === 'text_delta') {
-                  deltaText += evt.text;
-                  await maybeEdit(false);
-                } else if (evt.type === 'log_line') {
-                  const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
-                  deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
-                  await maybeEdit(false);
-                } else if (evt.type === 'image_data') {
-                  collectedImages.push(evt.image);
                 }
               }
+            } finally {
+              clearInterval(keepalive);
+              taq?.dispose();
+              // Drain all queued streaming edits so they settle before final output.
+              try { await streamEditQueue; } catch { /* ignore */ }
+              streamEditQueue = Promise.resolve();
             }
-            taq?.dispose();
             metrics.recordInvokeResult('message', Date.now() - t0, !invokeHadError, invokeErrorMessage);
             params.log?.info(
               { flow: 'message', sessionKey, followUpDepth, ms: Date.now() - t0, ok: !invokeHadError },
@@ -2139,14 +2210,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             } else {
               params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');
             }
-            clearInterval(keepalive);
-
-            // Drain all queued streaming edits so they settle before the final
-            // editThenSendChunks call — prevents stale streaming previews from
-            // racing with (and overwriting) the properly-processed final message.
-            try { await streamEditQueue; } catch { /* ignore */ }
-            streamEditQueue = Promise.resolve();
-
             processedText = finalText || deltaText || (collectedImages.length > 0 ? '' : '(no output)');
             let actions: { type: string }[] = [];
             let actionResults: DiscordActionResult[] = [];
@@ -2178,6 +2241,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   messageId: msg.id,
                   threadParentId,
                   deferScheduler: params.deferScheduler,
+                  confirmation: {
+                    mode: 'interactive' as const,
+                    sessionKey,
+                    userId: msg.author.id,
+                  },
                 };
                 // Construct per-message memoryCtx with real user ID and Discord metadata.
                 const perMessageMemoryCtx = params.memoryCtx ? {
