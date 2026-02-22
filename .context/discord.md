@@ -102,7 +102,7 @@ Fail-open: if the channel is not found or the env var is unset, the bot works no
 Implementation: `src/discord/status-channel.ts`
 
 ## Cron (Scheduled Tasks)
-When `DISCOCLAW_CRON_ENABLED=1` (default), `DISCOCLAW_CRON_FORUM` must be set to a forum channel ID (snowflake). DiscoClaw runs a forum-based cron subsystem. Each forum thread is a cron job: the thread name is the job name, and the starter message is a natural-language definition that gets parsed by AI into a schedule, timezone, target channel, and prompt.
+When `DISCOCLAW_CRON_ENABLED=1` (default), `DISCOCLAW_CRON_FORUM` must be set to the "agents" forum channel ID (snowflake). DiscoClaw runs a forum-based cron subsystem. Each forum thread is a cron job: the thread name is the job name, and the starter message is a natural-language definition that gets parsed by AI into a schedule, timezone, target channel, and prompt.
 
 Creating a cron: create a thread in the forum. The starter message should describe the schedule, target channel, and what to do (e.g., "Every weekday at 7am Pacific, check the weather for Portland OR and post a brief summary to #general."). The bot reacts with a checkmark and replies with the parsed schedule.
 

@@ -234,12 +234,12 @@ export async function ensureSystemScaffold(
   const crons = await ensureChild(
     guild,
     system.id,
-    { name: 'crons', type: ChannelType.GuildForum, topic: 'Cron jobs are managed by the bot. Use bot commands to create scheduled tasks. Do not create threads manually — they will be archived.' },
+    { name: 'agents', type: ChannelType.GuildForum, topic: 'Agents are managed by the bot. Use bot commands to create scheduled tasks. Do not create threads manually — they will be archived.' },
     log,
     params.existingCronsId,
   );
-  if (crons.created) created.push('crons');
-  if (crons.moved) moved.push('crons');
+  if (crons.created) created.push('agents');
+  if (crons.moved) moved.push('agents');
 
   let tasks: { id?: string; created: boolean; moved: boolean } | null = null;
   if (ensureTasks) {
