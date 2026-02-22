@@ -260,6 +260,17 @@ export async function startWebhookServer(opts: WebhookServerOptions): Promise<We
 
   log?.info({ port, host }, 'webhook:server listening');
 
+  // Warn when the server is bound to loopback only — external services
+  // (e.g. GitHub) cannot reach it. See docs/webhook-exposure.md.
+  const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+  if (LOOPBACK_HOSTS.has(host)) {
+    log?.warn(
+      { host, port },
+      'webhook:server is bound to loopback only — external services (e.g. GitHub) cannot reach it. ' +
+        'See docs/webhook-exposure.md to expose webhooks via Tailscale Funnel or a reverse proxy.',
+    );
+  }
+
   return {
     server,
     close(): Promise<void> {
