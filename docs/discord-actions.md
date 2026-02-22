@@ -95,7 +95,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_TASKS` (also requires tasks subsystem enabled/configured)
   - `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1; also requires cron subsystem enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 0)
-  - `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 0; also requires forge commands enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1; also requires forge commands enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1; also requires plan commands enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 0; also requires durable memory enabled)
 
@@ -147,7 +147,7 @@ Allow the model to start, monitor, and cancel forge runs (plan drafting + audit 
 | `forgeStatus` | Check if a forge is currently running | No | No |
 | `forgeCancel` | Cancel the running forge | Yes | No (sets cancel flag) |
 
-Env: `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 0, requires `DISCOCLAW_FORGE_COMMANDS_ENABLED`).
+Env: `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1, requires `DISCOCLAW_FORGE_COMMANDS_ENABLED`).
 Context: Requires `ForgeContext` with an `orchestratorFactory`, plans directory, and progress callback.
 Concurrency: Only one forge at a time (module-level singleton via `forge-plan-registry.ts`). Acquires the workspace writer lock for the duration of the run.
 Recursion guard: `forgeCreate` and `forgeResume` are blocked at `depth >= 1` to prevent forge-initiated forges.
