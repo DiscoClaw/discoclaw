@@ -118,6 +118,11 @@ export function checkStatusChannel(channelId?: string): CredentialCheckResult {
 /**
  * Run all credential checks concurrently and return a structured report.
  * Never throws — individual validators are responsible for their own error handling.
+ *
+ * When `activeProviders` is provided, the OpenAI key check is only run if
+ * `'openai'` is in the set; otherwise the result is omitted from the report
+ * entirely. The Discord token check always runs. If `activeProviders` is
+ * omitted, the current behavior is preserved (OpenAI check runs as normal).
  */
 export async function runCredentialChecks(opts: {
   token: string;
@@ -125,13 +130,20 @@ export async function runCredentialChecks(opts: {
   openaiBaseUrl?: string;
   workspacePath?: string;
   statusChannelId?: string;
+  activeProviders?: Set<string>;
 }): Promise<CredentialCheckReport> {
-  const results = await Promise.all([
+  const runOpenAi = opts.activeProviders === undefined || opts.activeProviders.has('openai');
+
+  const [discordResult, openaiResult, workspaceResult, statusResult] = await Promise.all([
     checkDiscordToken(opts.token),
-    checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl }),
+    runOpenAi ? checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl }) : null,
     checkWorkspacePath(opts.workspacePath),
     Promise.resolve(checkStatusChannel(opts.statusChannelId)),
   ]);
+
+  const results: CredentialCheckResult[] = [discordResult];
+  if (openaiResult !== null) results.push(openaiResult);
+  results.push(workspaceResult, statusResult);
 
   const criticalFailures = results
     .filter((r) => r.status === 'fail' && CRITICAL.has(r.name))
