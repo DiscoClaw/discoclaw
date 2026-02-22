@@ -1,7 +1,8 @@
-import type { RuntimeAdapter, EngineEvent, RuntimeCapability } from './types.js';
+import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeId } from './types.js';
 import type { ChatGptTokenProvider } from './openai-auth.js';
 
 type CommonOpts = {
+  id?: RuntimeId;
   baseUrl: string;
   defaultModel: string;
   log?: { debug(...args: unknown[]): void };
@@ -33,7 +34,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
   const capabilities: ReadonlySet<RuntimeCapability> = new Set(['streaming_text']);
 
   return {
-    id: 'openai',
+    id: opts.id ?? 'openai',
     capabilities,
     defaultModel: opts.defaultModel,
     invoke(params) {
