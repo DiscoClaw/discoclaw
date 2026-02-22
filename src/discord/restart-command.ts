@@ -73,6 +73,17 @@ function getPlatformCommands(): PlatformCmds | null {
   return null;
 }
 
+/**
+ * Returns [cmd, args] for restarting the discoclaw service on the current
+ * platform, assuming the service is already running. Falls back to systemctl
+ * on unsupported platforms.
+ */
+export function getRestartCmdArgs(): [string, string[]] {
+  const pc = getPlatformCommands();
+  if (pc) return pc.restartCmd(true);
+  return ['systemctl', ['--user', 'restart', 'discoclaw']];
+}
+
 export type RestartResult = {
   /** The message to send back to Discord. */
   reply: string;

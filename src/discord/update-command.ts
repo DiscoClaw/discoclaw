@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { writeShutdownContext } from './shutdown-context.js';
+import { getRestartCmdArgs } from './restart-command.js';
 import { getActiveOrchestrator, getRunningPlanIds } from './forge-plan-registry.js';
 
 export type UpdateCommand = {
@@ -158,7 +159,8 @@ export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts =
           if (err) log?.error({ err }, 'update-command: restart failed');
         });
       } else {
-        execFile('systemctl', ['--user', 'restart', 'discoclaw'], (err) => {
+        const [restartBin, restartArgList] = getRestartCmdArgs();
+        execFile(restartBin, restartArgList, (err) => {
           if (err) log?.error({ err }, 'update-command: restart failed');
         });
       }
