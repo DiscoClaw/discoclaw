@@ -83,13 +83,16 @@ Author one recipe file for an integration, share it, then let another user's Dis
 
 ## Prerequisites
 
+**End users:**
 - **Node.js >=20** — check with `node --version`
-- **pnpm** — enable via Corepack (`corepack enable`) or install separately
 - One primary runtime:
   - **Claude CLI** on your `PATH` — check with `claude --version` (see [Claude CLI docs](https://docs.anthropic.com/en/docs/claude-code) to install), or
   - **Codex CLI** on your `PATH` — check with `codex --version`, or
   - **OpenAI-compatible API key** via `OPENAI_API_KEY`
 - Runtime-specific access for your chosen provider (Anthropic plan/API credits for Claude, OpenAI access for Codex/OpenAI models)
+
+**Contributors (from source):**
+- Everything above, plus **pnpm** — enable via Corepack (`corepack enable`) or install separately
 
 ## Quick start
 
@@ -112,24 +115,44 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 
 ### Install and run
 
-1. **Install and configure:**
+1. **Install globally:**
    ```bash
-   pnpm install
-   pnpm setup            # guided interactive setup
-   # Or manually: cp .env.example .env and fill in required vars:
-   #   DISCORD_TOKEN
-   #   DISCORD_ALLOW_USER_IDS
-   # For all ~90 options: cp .env.example.full .env
+   npm install -g discoclaw
    ```
 
-2. **Run:**
+2. **Run the interactive setup wizard** (creates `.env` and scaffolds your workspace):
    ```bash
-   pnpm dev
+   discoclaw init
    ```
+
+3. **Register the system service:**
+   ```bash
+   discoclaw install-daemon
+   ```
+
+#### From source (contributors)
+
+```bash
+git clone <repo-url> && cd discoclaw
+pnpm install
+pnpm setup            # guided interactive setup
+# Or manually: cp .env.example .env and fill in required vars:
+#   DISCORD_TOKEN
+#   DISCORD_ALLOW_USER_IDS
+# For all ~90 options: cp .env.example.full .env
+pnpm dev
+```
 
 ## Updating
 
-After pulling new changes:
+**Global install:**
+
+```bash
+npm update -g discoclaw
+discoclaw install-daemon   # re-register the service after updating
+```
+
+**From source:**
 
 ```bash
 git pull

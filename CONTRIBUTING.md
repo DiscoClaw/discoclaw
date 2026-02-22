@@ -2,6 +2,8 @@
 
 ## Quick Start
 
+> **End users:** install via `npm install -g discoclaw`, then run `discoclaw init` and `discoclaw install-daemon`. The steps below are for contributors working from source.
+
 ```bash
 git clone <repo-url> && cd discoclaw
 pnpm install
