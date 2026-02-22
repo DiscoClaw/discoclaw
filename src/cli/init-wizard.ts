@@ -363,9 +363,11 @@ export async function runInitWizard(): Promise<void> {
   const configOptional = await ask('\nConfigure optional features? [y/N] ');
   if (configOptional.toLowerCase() === 'y') {
     const actions = await ask(
-      'Enable Discord Actions? (lets the AI manage your server) [y/N] ',
+      'Enable Discord Actions? (lets the AI manage your server) [Y/n] ',
     );
-    if (actions.toLowerCase() === 'y') {
+    if (actions.toLowerCase() === 'n') {
+      values.DISCOCLAW_DISCORD_ACTIONS = '0';
+    } else {
       values.DISCOCLAW_DISCORD_ACTIONS = '1';
     }
     const statusChannel = await askOptional(
