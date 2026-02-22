@@ -109,11 +109,10 @@ function buildWebhookJob(source: string, src: WebhookSourceConfig, bodyText: str
     guildId,
     name: `webhook:${source}`,
     def: {
-      schedule: '@once',
+      triggerType: 'webhook',
       timezone: 'UTC',
       channel: src.channel,
       prompt,
-      triggerType: 'webhook',
     },
     cron: null,
     running: false,

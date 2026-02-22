@@ -16,13 +16,14 @@ export class CronScheduler {
 
   register(id: string, threadId: string, guildId: string, name: string, def: ParsedCronDef, cronId?: string): CronJob {
     const existing = this.jobs.get(id);
-    const isScheduled = !def.triggerType || def.triggerType === 'schedule';
+    const isScheduled = def.triggerType === 'schedule';
 
     // Create the job shell first; create the cron timer only for schedule-type agents.
     const job: CronJob = { id, cronId: cronId ?? existing?.cronId ?? '', threadId, guildId, name, def, cron: null, running: false };
     if (isScheduled) {
       // Construct timer first so invalid schedules don't clobber an existing job.
-      const cron = new Cron(def.schedule, { timezone: def.timezone }, () => {
+      // schedule is always defined when triggerType === 'schedule'.
+      const cron = new Cron(def.schedule!, { timezone: def.timezone }, () => {
         // Fire-and-forget: errors handled inside the handler.
         void this.handler(job);
       });
@@ -62,11 +63,12 @@ export class CronScheduler {
   enable(id: string): boolean {
     const job = this.jobs.get(id);
     if (!job) return false;
-    const isScheduled = !job.def.triggerType || job.def.triggerType === 'schedule';
+    const isScheduled = job.def.triggerType === 'schedule';
     job.cron?.stop();
     if (isScheduled) {
       // Recreate the cron instance to (re)start scheduling.
-      job.cron = new Cron(job.def.schedule, { timezone: job.def.timezone }, () => {
+      // schedule is always defined when triggerType === 'schedule'.
+      job.cron = new Cron(job.def.schedule!, { timezone: job.def.timezone }, () => {
         void this.handler(job);
       });
     } else {
@@ -86,7 +88,7 @@ export class CronScheduler {
     return this.jobs.get(id);
   }
 
-  listJobs(): Array<{ id: string; name: string; schedule: string; timezone: string; nextRun: Date | null }> {
+  listJobs(): Array<{ id: string; name: string; schedule: string | undefined; timezone: string; nextRun: Date | null }> {
     return Array.from(this.jobs.values()).map((job) => ({
       id: job.id,
       name: job.name,

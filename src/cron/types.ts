@@ -1,11 +1,11 @@
 import type { Cron } from 'croner';
 
 export type ParsedCronDef = {
-  schedule: string;   // 5-field cron expression (e.g., "0 7 * * 1-5"), or '@webhook' for non-schedule agents
+  triggerType: 'schedule' | 'webhook' | 'manual';  // discriminator; 'schedule' for cron-fired agents
+  schedule?: string;  // 5-field cron expression (e.g., "0 7 * * 1-5"); absent for webhook/manual agents
   timezone: string;   // IANA timezone (e.g., "America/Los_Angeles"), default: system timezone
   channel: string;    // target channel name or ID (e.g., "general")
   prompt: string;     // the instruction text for the runtime
-  triggerType?: 'schedule' | 'webhook' | 'manual';  // defaults to 'schedule' for backwards compat
 };
 
 export type CronJob = {

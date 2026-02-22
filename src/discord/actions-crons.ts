@@ -125,7 +125,7 @@ export async function executeCronAction(
 
       const cronId = generateCronId();
       const timezone = action.timezone ?? getDefaultTimezone();
-      const def = { schedule: action.schedule, timezone, channel: action.channel, prompt: action.prompt };
+      const def = { triggerType: 'schedule' as const, schedule: action.schedule, timezone, channel: action.channel, prompt: action.prompt };
       const validationError = validateCronDefinition(def);
       if (validationError) {
         return { ok: false, error: `Invalid cron definition: ${validationError}` };
@@ -258,11 +258,11 @@ export async function executeCronAction(
       }
 
       // Definition changes (schedule, timezone, channel, prompt).
-      const newSchedule = action.schedule ?? job.def.schedule;
+      const newSchedule = action.schedule ?? job.def.schedule ?? '';
       const newTimezone = action.timezone ?? job.def.timezone;
       const newChannel = action.channel ?? job.def.channel;
       const newPrompt = action.prompt ?? job.def.prompt;
-      const newDef = { schedule: newSchedule, timezone: newTimezone, channel: newChannel, prompt: newPrompt };
+      const newDef = { triggerType: job.def.triggerType, schedule: newSchedule, timezone: newTimezone, channel: newChannel, prompt: newPrompt };
 
       const defChanged = action.schedule !== undefined || action.timezone !== undefined || action.channel !== undefined || action.prompt !== undefined;
 

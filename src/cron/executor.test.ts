@@ -23,6 +23,7 @@ vi.mock('../discord/prompt-common.js', async (importOriginal) => {
 
 function makeDef(overrides?: Partial<ParsedCronDef>): ParsedCronDef {
   return {
+    triggerType: 'schedule',
     schedule: '0 7 * * *',
     timezone: 'UTC',
     channel: 'general',

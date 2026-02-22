@@ -35,6 +35,7 @@ describe('parseCronDefinition', () => {
 
     const result = await parseCronDefinition('Every weekday at 7am Pacific, check the weather', runtime);
     expect(result).toEqual({
+      triggerType: 'schedule',
       schedule: '0 7 * * 1-5',
       timezone: 'America/Los_Angeles',
       channel: 'general',
@@ -53,6 +54,7 @@ describe('parseCronDefinition', () => {
 
     const result = await parseCronDefinition('Every minute, say hello to #general', runtime);
     expect(result).toEqual({
+      triggerType: 'schedule',
       schedule: '* * * * *',
       timezone: 'UTC',
       channel: 'general',

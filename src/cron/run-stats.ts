@@ -28,7 +28,7 @@ export type CronRunRecord = {
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
@@ -83,7 +83,7 @@ class WriteMutex {
 // ---------------------------------------------------------------------------
 
 export function emptyStore(): CronRunStatsStore {
-  return { version: 2, updatedAt: Date.now(), jobs: {} };
+  return { version: 3, updatedAt: Date.now(), jobs: {} };
 }
 
 function emptyRecord(cronId: string, threadId: string): CronRunRecord {
@@ -293,6 +293,14 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
       if (!rec.triggerType) rec.triggerType = 'schedule';
     }
     store.version = 2;
+  }
+  // Migrate v2 → v3: ensure triggerType is set on any records that lack it
+  // (records created via upsertRecord without an explicit triggerType update).
+  if (store.version === 2) {
+    for (const rec of Object.values(store.jobs)) {
+      if (!rec.triggerType) rec.triggerType = 'schedule';
+    }
+    store.version = 3;
   }
   return new CronRunStats(store, filePath);
 }

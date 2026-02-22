@@ -4,6 +4,7 @@ import type { ParsedCronDef } from './types.js';
 
 function makeDef(overrides?: Partial<ParsedCronDef>): ParsedCronDef {
   return {
+    triggerType: 'schedule',
     schedule: '0 7 * * 1-5',
     timezone: 'UTC',
     channel: 'general',

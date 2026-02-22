@@ -192,7 +192,7 @@ async function loadThreadAsCron(
   // Ensure stats record exists and set cadence.
   if (opts.statsStore) {
     try {
-      const cadence = detectCadence(def.schedule);
+      const cadence = detectCadence(def.schedule ?? '');
       const existingRecord = opts.statsStore.getRecord(cronId);
       await opts.statsStore.upsertRecord(cronId, thread.id, {
         cadence,

@@ -121,10 +121,11 @@ export async function executePlanAction(
         return { ok: false, error: `Plan not found: ${action.planId}` };
       }
 
+      const taskId = resolvePlanHeaderTaskId(found.header);
       const lines = [
         `**${found.header.planId}** — ${found.header.title}`,
         `Status: ${found.header.status}`,
-        `Task: \`${resolvePlanHeaderTaskId(found.header)}\``,
+        ...(taskId ? [`Task: \`${taskId}\``] : []),
         `Project: ${found.header.project}`,
         `Created: ${found.header.created}`,
       ];

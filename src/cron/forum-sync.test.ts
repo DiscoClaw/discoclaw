@@ -92,6 +92,7 @@ describe('initCronForum', () => {
     const scheduler = makeScheduler();
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: '0 7 * * *',
       timezone: 'UTC',
       channel: 'general',
@@ -128,6 +129,7 @@ describe('initCronForum', () => {
     const scheduler = makeScheduler();
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: '0 7 * * *',
       timezone: 'UTC',
       channel: 'general',
@@ -195,6 +197,7 @@ describe('initCronForum', () => {
     const scheduler = makeScheduler();
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: '0 7 * * *',
       timezone: 'UTC',
       channel: 'general',
@@ -231,6 +234,7 @@ describe('initCronForum', () => {
     const scheduler = makeScheduler();
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: 'not a cron',
       timezone: 'UTC',
       channel: 'general',
@@ -272,6 +276,7 @@ describe('initCronForum', () => {
     const scheduler = makeScheduler();
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: '0 7 * * *',
       timezone: 'UTC',
       channel: 'general',
@@ -321,6 +326,7 @@ describe('initCronForum', () => {
     const scheduler = makeScheduler();
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: '0 7 * * *',
       timezone: 'UTC',
       channel: 'general',
@@ -372,6 +378,7 @@ describe('initCronForum', () => {
     const scheduler = makeScheduler();
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: '0 7 * * *',
       timezone: 'UTC',
       channel: 'general',
@@ -475,6 +482,7 @@ describe('threadCreate listener', () => {
     const { listener } = await setupAndGetListener({ scheduler });
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: '0 7 * * *',
       timezone: 'UTC',
       channel: 'general',
@@ -513,6 +521,7 @@ describe('threadCreate listener', () => {
     const { listener } = await setupAndGetListener({ scheduler });
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: '0 7 * * *',
       timezone: 'UTC',
       channel: 'general',
@@ -594,6 +603,7 @@ describe('threadUpdate listener', () => {
     const { listener } = await setupAndGetListener({ scheduler });
 
     vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
       schedule: '0 7 * * *',
       timezone: 'UTC',
       channel: 'general',
