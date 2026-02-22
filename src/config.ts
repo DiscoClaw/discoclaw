@@ -350,19 +350,19 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('DISCOCLAW_HEALTH_VERBOSE_ALLOWLIST was set but no valid IDs were parsed; verbose health falls back to allowlisted users');
   }
 
-  const discordActionsEnabled = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS', false);
+  const discordActionsEnabled = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS', true);
   const discordActionsChannels = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_CHANNELS', true);
-  const discordActionsMessaging = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MESSAGING', false);
-  const discordActionsGuild = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_GUILD', false);
+  const discordActionsMessaging = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MESSAGING', true);
+  const discordActionsGuild = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_GUILD', true);
   const discordActionsModeration = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MODERATION', false);
-  const discordActionsPolls = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_POLLS', false);
+  const discordActionsPolls = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_POLLS', true);
   const discordActionsTasks = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_TASKS', true);
   const discordActionsCrons = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_CRONS', true);
-  const discordActionsBotProfile = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', false);
+  const discordActionsBotProfile = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE', true);
   const discordActionsForge = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_FORGE', true);
   const discordActionsPlan = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_PLAN', true);
-  const discordActionsMemory = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', false);
-  const discordActionsDefer = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER', false);
+  const discordActionsMemory = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', true);
+  const discordActionsDefer = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER', true);
   const deferMaxDelaySeconds = parsePositiveNumber(
     env,
     'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS',
@@ -448,7 +448,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const tasksCwdOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_CWD');
   const tasksTagMapPathOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_TAG_MAP');
   const tasksMentionUser = parseTrimmedString(env, 'DISCOCLAW_TASKS_MENTION_USER');
-  const tasksSidebar = parseBoolean(env, 'DISCOCLAW_TASKS_SIDEBAR', false);
+  const tasksSidebar = parseBoolean(env, 'DISCOCLAW_TASKS_SIDEBAR', true);
   const tasksAutoTag = parseBoolean(env, 'DISCOCLAW_TASKS_AUTO_TAG', true);
   const tasksAutoTagModel = parseTrimmedString(env, 'DISCOCLAW_TASKS_AUTO_TAG_MODEL') ?? fastModel;
   const tasksSyncSkipPhase5 = parseBoolean(env, 'DISCOCLAW_TASKS_SYNC_SKIP_PHASE5', false);
@@ -491,7 +491,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       contentDirOverride: parseTrimmedString(env, 'DISCOCLAW_CONTENT_DIR'),
       requireChannelContext: parseBoolean(env, 'DISCORD_REQUIRE_CHANNEL_CONTEXT', true),
       autoIndexChannelContext: parseBoolean(env, 'DISCORD_AUTO_INDEX_CHANNEL_CONTEXT', true),
-      autoJoinThreads: parseBoolean(env, 'DISCORD_AUTO_JOIN_THREADS', false),
+      autoJoinThreads: parseBoolean(env, 'DISCORD_AUTO_JOIN_THREADS', true),
       useRuntimeSessions: parseBoolean(env, 'DISCOCLAW_RUNTIME_SESSIONS', true),
 
       discordActionsEnabled,
@@ -571,7 +571,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       cronEnabled,
       cronForum,
       cronModel: parseTrimmedString(env, 'DISCOCLAW_CRON_MODEL') ?? fastModel,
-      cronAutoTag: parseBoolean(env, 'DISCOCLAW_CRON_AUTO_TAG', false),
+      cronAutoTag: parseBoolean(env, 'DISCOCLAW_CRON_AUTO_TAG', true),
       cronAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_CRON_AUTO_TAG_MODEL') ?? fastModel,
       cronStatsDirOverride: parseTrimmedString(env, 'DISCOCLAW_CRON_STATS_DIR'),
       cronTagMapPathOverride: parseTrimmedString(env, 'DISCOCLAW_CRON_TAG_MAP'),
@@ -605,8 +605,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       verbose: effectiveVerbose,
       claudeDebugFile: parseTrimmedString(env, 'CLAUDE_DEBUG_FILE'),
       strictMcpConfig: parseBoolean(env, 'CLAUDE_STRICT_MCP_CONFIG', true),
-      sessionScanning: parseBoolean(env, 'DISCOCLAW_SESSION_SCANNING', false),
-      toolAwareStreaming: parseBoolean(env, 'DISCOCLAW_TOOL_AWARE_STREAMING', false),
+      sessionScanning: parseBoolean(env, 'DISCOCLAW_SESSION_SCANNING', true),
+      toolAwareStreaming: parseBoolean(env, 'DISCOCLAW_TOOL_AWARE_STREAMING', true),
       multiTurn: parseBoolean(env, 'DISCOCLAW_MULTI_TURN', true),
       multiTurnHangTimeoutMs: parsePositiveInt(env, 'DISCOCLAW_MULTI_TURN_HANG_TIMEOUT_MS', 60000),
       multiTurnIdleTimeoutMs: parsePositiveInt(env, 'DISCOCLAW_MULTI_TURN_IDLE_TIMEOUT_MS', 300000),
