@@ -602,7 +602,7 @@ export function buildDisplayResultLines(
 ): string[] {
   return results
     .map((r, i) => {
-      if (r.ok && actions[i]?.type === 'sendMessage') return null;
+      if (r.ok && (actions[i]?.type === 'sendMessage' || actions[i]?.type === 'sendFile')) return null;
       return r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`;
     })
     .filter((line): line is string => line !== null);
