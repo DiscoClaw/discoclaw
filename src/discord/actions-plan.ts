@@ -275,18 +275,31 @@ export async function executePlanAction(
 
         const phaseStartMessages = new Map<string, { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> }>();
         const onPlanEvent = async (event: PlanRunEvent): Promise<void> => {
-          if (event.type !== 'phase_start') return;
-          if (phaseStartMessages.has(event.phase.id) || !runChannel) return;
-          try {
-            const sent = await runChannel.send({
-              content: `**${event.phase.id}**: ${event.phase.title}...`,
-              allowedMentions: NO_MENTIONS,
-            });
-            if (sent && typeof (sent as any).edit === 'function') {
-              phaseStartMessages.set(event.phase.id, sent as any);
+          if (event.type === 'phase_start') {
+            if (phaseStartMessages.has(event.phase.id) || !runChannel) return;
+            try {
+              const sent = await runChannel.send({
+                content: `**${event.phase.title}**...`,
+                allowedMentions: NO_MENTIONS,
+              });
+              if (sent && typeof (sent as any).edit === 'function') {
+                phaseStartMessages.set(event.phase.id, sent as any);
+              }
+            } catch (err) {
+              planCtx.log?.warn({ err, planId: runPlanId, phaseId: event.phase.id }, 'plan:action:run phase-start post failed');
             }
-          } catch (err) {
-            planCtx.log?.warn({ err, planId: runPlanId, phaseId: event.phase.id }, 'plan:action:run phase-start post failed');
+          } else if (event.type === 'phase_complete') {
+            const phaseMsg = phaseStartMessages.get(event.phase.id);
+            if (!phaseMsg) return;
+            const indicator = event.status === 'done' ? '[x]' : event.status === 'failed' ? '[!]' : '[-]';
+            try {
+              await phaseMsg.edit({
+                content: `${indicator} **${event.phase.title}**`,
+                allowedMentions: NO_MENTIONS,
+              });
+            } catch {
+              // best-effort
+            }
           }
         };
 
@@ -359,15 +372,6 @@ export async function executePlanAction(
 
           if (phaseResult.result === 'done') {
             phasesRun++;
-            // Edit phase-start message to reflect completion.
-            const phaseMsg = phaseStartMessages.get(phaseResult.phase.id);
-            if (phaseMsg) {
-              try {
-                await phaseMsg.edit({ content: `✅ **${phaseResult.phase.id}**: ${phaseResult.phase.title}`, allowedMentions: NO_MENTIONS });
-              } catch {
-                // best-effort
-              }
-            }
             // Force-edit on phase completion boundary.
             await editStatus(`**Plan run in progress:** \`${action.planId}\` — phase complete (${phasesRun} done so far)`, true);
           } else if (phaseResult.result === 'nothing_to_run') {
@@ -379,17 +383,6 @@ export async function executePlanAction(
             stopReason = phaseResult.result;
             stopMessage = (phaseResult as any).error ?? (phaseResult as any).message ?? phaseResult.result;
             planCtx.log?.warn({ planId: runPlanId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
-            // Edit phase-start message to reflect failure (if phase info is available).
-            if ('phase' in phaseResult && phaseResult.phase) {
-              const phaseMsg = phaseStartMessages.get(phaseResult.phase.id);
-              if (phaseMsg) {
-                try {
-                  await phaseMsg.edit({ content: `❌ **${phaseResult.phase.id}**: ${phaseResult.phase.title}`, allowedMentions: NO_MENTIONS });
-                } catch {
-                  // best-effort
-                }
-              }
-            }
             // Force-edit to reflect stop.
             await editStatus(`**Plan run stopped:** \`${runPlanId}\` — ${stopMessage ?? stopReason}`, true);
             break;
