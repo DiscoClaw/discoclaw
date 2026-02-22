@@ -233,6 +233,32 @@ describe('parseConfig', () => {
     expect(warnings.some((w) => w.includes('FORGE_DRAFTER_RUNTIME=openai'))).toBe(true);
   });
 
+  // --- OpenRouter adapter ---
+  it('parses OPENROUTER_API_KEY when set', () => {
+    const { config } = parseConfig(env({ OPENROUTER_API_KEY: 'sk-or-test' }));
+    expect(config.openrouterApiKey).toBe('sk-or-test');
+  });
+
+  it('defaults openrouterModel to "anthropic/claude-sonnet-4"', () => {
+    const { config } = parseConfig(env());
+    expect(config.openrouterModel).toBe('anthropic/claude-sonnet-4');
+  });
+
+  it('warns when PRIMARY_RUNTIME=openrouter without OPENROUTER_API_KEY', () => {
+    const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'openrouter', OPENROUTER_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('PRIMARY_RUNTIME=openrouter'))).toBe(true);
+  });
+
+  it('warns when FORGE_DRAFTER_RUNTIME=openrouter without OPENROUTER_API_KEY', () => {
+    const { warnings } = parseConfig(env({ FORGE_DRAFTER_RUNTIME: 'openrouter', OPENROUTER_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('FORGE_DRAFTER_RUNTIME=openrouter'))).toBe(true);
+  });
+
+  it('warns when FORGE_AUDITOR_RUNTIME=openrouter without OPENROUTER_API_KEY', () => {
+    const { warnings } = parseConfig(env({ FORGE_AUDITOR_RUNTIME: 'openrouter', OPENROUTER_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('FORGE_AUDITOR_RUNTIME=openrouter'))).toBe(true);
+  });
+
   // --- Forge auto-implement ---
   it('defaults forgeAutoImplement to true', () => {
     const { config } = parseConfig(env());

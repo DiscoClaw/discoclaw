@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { EngineEvent } from './types.js';
 import { SessionFileScanner } from './session-scanner.js';
@@ -10,12 +11,12 @@ let tmpDir: string;
 
 beforeEach(async () => {
   tmpDir = await fsp.mkdtemp(path.join('/tmp', 'scanner-test-'));
-  // Override HOME so the scanner looks for session files under our temp dir.
-  vi.stubEnv('HOME', tmpDir);
+  // Mock os.homedir() to point at our temp dir so the scanner finds session files there.
+  vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
 });
 
 afterEach(async () => {
-  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 });
 

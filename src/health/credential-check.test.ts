@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   checkDiscordToken,
   checkOpenAiKey,
+  checkOpenRouterKey,
   formatCredentialReport,
   runCredentialChecks,
   type CredentialCheckReport,
@@ -171,6 +172,110 @@ describe('checkOpenAiKey', () => {
   });
 });
 
+// checkOpenRouterKey -------------------------------------------------------
+
+describe('checkOpenRouterKey', () => {
+  it('returns skip when no API key is provided', async () => {
+    const result = await checkOpenRouterKey({});
+    expect(result.name).toBe('openrouter-key');
+    expect(result.status).toBe('skip');
+  });
+
+  it('returns skip for an empty string key', async () => {
+    const result = await checkOpenRouterKey({ apiKey: '' });
+    expect(result.status).toBe('skip');
+  });
+
+  it('returns ok for a 200 response', async () => {
+    mockFetch(200, '{"object":"list","data":[]}');
+    const result = await checkOpenRouterKey({ apiKey: 'sk-or-valid' });
+    expect(result.name).toBe('openrouter-key');
+    expect(result.status).toBe('ok');
+    expect(result.message).toBeUndefined();
+  });
+
+  it('returns fail with 401 message for an invalid key', async () => {
+    mockFetch(401, '{"error":{"message":"Invalid API key"}}');
+    const result = await checkOpenRouterKey({ apiKey: 'sk-or-bad' });
+    expect(result.status).toBe('fail');
+    expect(result.message).toContain('401');
+  });
+
+  it('returns fail with 403 message for a key lacking permissions', async () => {
+    mockFetch(403, '{"error":{"message":"Forbidden"}}');
+    const result = await checkOpenRouterKey({ apiKey: 'sk-or-no-perms' });
+    expect(result.status).toBe('fail');
+    expect(result.message).toContain('403');
+  });
+
+  it('returns fail for an unexpected HTTP status', async () => {
+    mockFetch(429, '{"error":{"message":"Rate limit exceeded"}}');
+    const result = await checkOpenRouterKey({ apiKey: 'sk-or-test' });
+    expect(result.status).toBe('fail');
+    expect(result.message).toContain('429');
+  });
+
+  it('returns fail on network error without throwing', async () => {
+    mockFetchError('connect ETIMEDOUT');
+    const result = await checkOpenRouterKey({ apiKey: 'sk-or-test' });
+    expect(result.status).toBe('fail');
+    expect(result.message).toContain('network error');
+    expect(result.message).toContain('ETIMEDOUT');
+  });
+
+  it('uses the default OpenRouter base URL when none is provided', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await checkOpenRouterKey({ apiKey: 'sk-or-test' });
+
+    const [url] = fetchSpy.mock.calls[0] as [string];
+    expect(url).toBe('https://openrouter.ai/api/v1/models');
+  });
+
+  it('uses a custom base URL when provided', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await checkOpenRouterKey({ apiKey: 'sk-or-test', baseUrl: 'https://my.proxy.example.com/v1' });
+
+    const [url] = fetchSpy.mock.calls[0] as [string];
+    expect(url).toBe('https://my.proxy.example.com/v1/models');
+  });
+
+  it('strips a trailing slash from the custom base URL', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await checkOpenRouterKey({
+      apiKey: 'sk-or-test',
+      baseUrl: 'https://my.proxy.example.com/v1/',
+    });
+
+    const [url] = fetchSpy.mock.calls[0] as [string];
+    expect(url).toBe('https://my.proxy.example.com/v1/models');
+  });
+
+  it('sends the correct Bearer Authorization header', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await checkOpenRouterKey({ apiKey: 'sk-or-my-key' });
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer sk-or-my-key');
+  });
+
+  it('does not call fetch when no key is provided', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await checkOpenRouterKey({});
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
 // runCredentialChecks ------------------------------------------------------
 
 describe('runCredentialChecks', () => {
@@ -299,6 +404,70 @@ describe('runCredentialChecks', () => {
     expect(openaiResult).toBeDefined();
     expect(openaiResult?.status).toBe('ok');
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('omits openrouter-key result when openrouter is not in activeProviders (key present)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const report = await runCredentialChecks({
+      token: 'valid-token',
+      openrouterApiKey: 'sk-or-stale',
+      activeProviders: new Set(['claude']),
+    });
+
+    expect(report.results.find((r) => r.name === 'openrouter-key')).toBeUndefined();
+    // fetch should only be called once (for discord)
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the openrouter-key check when openrouter is in activeProviders', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const report = await runCredentialChecks({
+      token: 'valid-token',
+      openrouterApiKey: 'sk-or-valid',
+      activeProviders: new Set(['openrouter']),
+    });
+
+    const openrouterResult = report.results.find((r) => r.name === 'openrouter-key');
+    expect(openrouterResult).toBeDefined();
+    expect(openrouterResult?.status).toBe('ok');
+  });
+
+  it('runs both openai and openrouter checks concurrently when both are in activeProviders', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const report = await runCredentialChecks({
+      token: 'valid-token',
+      openaiApiKey: 'sk-valid',
+      openrouterApiKey: 'sk-or-valid',
+      activeProviders: new Set(['openai', 'openrouter']),
+    });
+
+    expect(report.results.find((r) => r.name === 'openai-key')).toBeDefined();
+    expect(report.results.find((r) => r.name === 'openrouter-key')).toBeDefined();
+    // discord + openai + openrouter = 3 fetch calls
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('passes openrouterBaseUrl through to checkOpenRouterKey', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await runCredentialChecks({
+      token: 'token',
+      openrouterApiKey: 'sk-or-key',
+      openrouterBaseUrl: 'https://custom-or.example.com/v1',
+      activeProviders: new Set(['openrouter']),
+    });
+
+    const openRouterCall = fetchSpy.mock.calls.find((args: unknown[]) =>
+      typeof args[0] === 'string' && args[0].includes('custom-or.example.com'),
+    );
+    expect(openRouterCall).toBeDefined();
   });
 });
 

@@ -56,13 +56,19 @@ Recurring tasks defined as forum threads in plain language — no crontab, no se
 
 ## How it works
 
-DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with OpenAI and Codex adapters available via `PRIMARY_RUNTIME`). It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
+DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
 2. Assembles context: per-channel rules, conversation history, rolling summary, and durable memory
 3. Routes to the appropriate runtime adapter, running in your workspace directory
 4. Streams the response back, chunked to fit Discord's message limits
 5. Parses and executes any Discord actions the assistant emitted
+
+### OpenRouter
+
+Set `PRIMARY_RUNTIME=openrouter` to route requests through [OpenRouter](https://openrouter.ai), which provides access to models from Anthropic, OpenAI, Google, and others via a single API key — useful if you want to switch models without managing multiple provider accounts.
+
+Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`) and `OPENROUTER_MODEL` (default: `anthropic/claude-sonnet-4`). See `.env.example` for the full reference.
 
 ## Customization
 
@@ -88,7 +94,8 @@ Author one recipe file for an integration, share it, then let another user's Dis
 - One primary runtime:
   - **Claude CLI** on your `PATH` — check with `claude --version` (see [Claude CLI docs](https://docs.anthropic.com/en/docs/claude-code) to install), or
   - **Codex CLI** on your `PATH` — check with `codex --version`, or
-  - **OpenAI-compatible API key** via `OPENAI_API_KEY`
+  - **OpenAI-compatible API key** via `OPENAI_API_KEY`, or
+  - **OpenRouter API key** via `OPENROUTER_API_KEY` (access to many providers)
 - Runtime-specific access for your chosen provider (Anthropic plan/API credits for Claude, OpenAI access for Codex/OpenAI models)
 
 **Contributors (from source):**

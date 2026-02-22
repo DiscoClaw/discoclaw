@@ -431,6 +431,25 @@ describe('OpenAI-compat runtime adapter', () => {
     expect(events[events.length - 1]!.type).toBe('done');
   });
 
+  it('adapter id defaults to "openai" when id is not provided', () => {
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+    });
+    expect(rt.id).toBe('openai');
+  });
+
+  it('adapter id uses override when id is provided in opts', () => {
+    const rt = createOpenAICompatRuntime({
+      id: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'test-key',
+      defaultModel: 'openai/gpt-4o',
+    });
+    expect(rt.id).toBe('openrouter');
+  });
+
   it('stream ending without trailing newline still processes buffered data', async () => {
     // Simulate a stream that ends with a data line but no trailing \n
     const chunk = makeSSEData('buffered');

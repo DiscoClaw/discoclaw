@@ -500,6 +500,7 @@ const registerClaudeRuntime = () => {
 
 if (cfg.openaiApiKey) {
   const openaiRuntimeRaw = createOpenAICompatRuntime({
+    id: 'openai',
     baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
     apiKey: cfg.openaiApiKey,
     defaultModel: cfg.openaiModel,
@@ -511,6 +512,26 @@ if (cfg.openaiApiKey) {
     log,
   });
   runtimeRegistry.register('openai', openaiRuntime);
+}
+
+if (cfg.openrouterApiKey) {
+  const openrouterRuntimeRaw = createOpenAICompatRuntime({
+    id: 'openrouter',
+    baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1',
+    apiKey: cfg.openrouterApiKey,
+    defaultModel: cfg.openrouterModel,
+    log,
+  });
+  const openrouterRuntime = withConcurrencyLimit(openrouterRuntimeRaw, {
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+  });
+  runtimeRegistry.register('openrouter', openrouterRuntime);
+  log.info(
+    { baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1', model: cfg.openrouterModel },
+    'runtime:openrouter registered',
+  );
 }
 
 // Register Codex CLI runtime.
@@ -782,6 +803,8 @@ const botParams = {
     discordToken: token,
     openaiApiKey: cfg.openaiApiKey,
     openaiBaseUrl: cfg.openaiBaseUrl,
+    openrouterApiKey: cfg.openrouterApiKey,
+    openrouterBaseUrl: cfg.openrouterBaseUrl,
     paFilePaths: ['SOUL.md', 'IDENTITY.md', 'USER.md'].map((f) => ({
       label: f,
       path: path.join(workspaceCwd, f),
@@ -1028,6 +1051,8 @@ const credentialCheckReport = await runCredentialChecks({
   token: cfg.token,
   openaiApiKey: cfg.openaiApiKey,
   openaiBaseUrl: cfg.openaiBaseUrl,
+  openrouterApiKey: cfg.openrouterApiKey,
+  openrouterBaseUrl: cfg.openrouterBaseUrl,
   workspacePath: workspaceCwd,
   statusChannelId: resolvedStatusChannelId,
   activeProviders,

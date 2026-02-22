@@ -223,6 +223,10 @@ describe('collectStatusSnapshot', () => {
       name: 'openai-key',
       status: 'skip',
     });
+    vi.spyOn(credentialCheck, 'checkOpenRouterKey').mockResolvedValue({
+      name: 'openrouter-key',
+      status: 'skip',
+    });
   });
 
   afterEach(() => {
@@ -364,5 +368,53 @@ describe('collectStatusSnapshot', () => {
     expect(credentialCheck.checkOpenAiKey).toHaveBeenCalledWith({ apiKey: 'key', baseUrl: undefined });
     expect(snap.apiChecks).toHaveLength(2);
     expect(snap.apiChecks[1]).toEqual({ name: 'openai-key', status: 'skip' });
+  });
+
+  it('skips openrouter check and omits it from apiChecks when openrouter is not in activeProviders', async () => {
+    const snap = await collectStatusSnapshot(
+      baseOpts({ openrouterApiKey: 'sk-or-key', activeProviders: new Set(['claude']) }),
+    );
+    expect(credentialCheck.checkOpenRouterKey).not.toHaveBeenCalled();
+    expect(snap.apiChecks).toHaveLength(1);
+    expect(snap.apiChecks[0]).toEqual({ name: 'discord-token', status: 'ok' });
+  });
+
+  it('runs openrouter check when openrouter is in activeProviders', async () => {
+    const snap = await collectStatusSnapshot(
+      baseOpts({ openrouterApiKey: 'sk-or-key', activeProviders: new Set(['openrouter']) }),
+    );
+    expect(credentialCheck.checkOpenRouterKey).toHaveBeenCalledWith({
+      apiKey: 'sk-or-key',
+      baseUrl: undefined,
+    });
+    expect(snap.apiChecks).toHaveLength(2);
+    expect(snap.apiChecks[1]).toEqual({ name: 'openrouter-key', status: 'skip' });
+  });
+
+  it('passes openrouterBaseUrl to checkOpenRouterKey', async () => {
+    await collectStatusSnapshot(
+      baseOpts({
+        openrouterApiKey: 'sk-or-key',
+        openrouterBaseUrl: 'https://custom-or.example.com/v1',
+        activeProviders: new Set(['openrouter']),
+      }),
+    );
+    expect(credentialCheck.checkOpenRouterKey).toHaveBeenCalledWith({
+      apiKey: 'sk-or-key',
+      baseUrl: 'https://custom-or.example.com/v1',
+    });
+  });
+
+  it('runs both openai and openrouter checks when both are in activeProviders', async () => {
+    const snap = await collectStatusSnapshot(
+      baseOpts({
+        openaiApiKey: 'sk-key',
+        openrouterApiKey: 'sk-or-key',
+        activeProviders: new Set(['openai', 'openrouter']),
+      }),
+    );
+    expect(credentialCheck.checkOpenAiKey).toHaveBeenCalled();
+    expect(credentialCheck.checkOpenRouterKey).toHaveBeenCalled();
+    expect(snap.apiChecks).toHaveLength(3);
   });
 });

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { CredentialCheckResult } from '../health/credential-check.js';
-import { checkDiscordToken, checkOpenAiKey } from '../health/credential-check.js';
+import { checkDiscordToken, checkOpenAiKey, checkOpenRouterKey } from '../health/credential-check.js';
 import type { CronScheduler } from '../cron/scheduler.js';
 import type { TaskStore } from '../tasks/store.js';
 
@@ -25,6 +25,8 @@ export type StatusCommandContext = {
   discordToken: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  openrouterApiKey?: string;
+  openrouterBaseUrl?: string;
   /** Workspace PA files to probe for health. Label is the display name, path is the FS path. */
   paFilePaths: Array<{ label: string; path: string }>;
   /** Timeout for live API connectivity checks (ms). Defaults to 5 000 ms. */
@@ -91,6 +93,8 @@ export type CollectStatusOpts = {
   discordToken: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  openrouterApiKey?: string;
+  openrouterBaseUrl?: string;
   paFilePaths: Array<{ label: string; path: string }>;
   /** Timeout for live API connectivity checks (ms). Defaults to 5 000 ms. */
   apiCheckTimeoutMs?: number;
@@ -207,6 +211,16 @@ export async function collectStatusSnapshot(opts: CollectStatusOpts): Promise<St
             checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl }),
             apiCheckTimeoutMs,
             'openai-key',
+          ),
+        );
+      }
+      const runOpenRouter = opts.activeProviders !== undefined && opts.activeProviders.has('openrouter');
+      if (runOpenRouter) {
+        checks.push(
+          withApiTimeout(
+            checkOpenRouterKey({ apiKey: opts.openrouterApiKey, baseUrl: opts.openrouterBaseUrl }),
+            apiCheckTimeoutMs,
+            'openrouter-key',
           ),
         );
       }

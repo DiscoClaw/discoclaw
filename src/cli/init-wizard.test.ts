@@ -74,6 +74,33 @@ describe('init wizard helpers', () => {
     expect(selectDefaultProvider(['claude', 'gemini', 'codex'])).toBe('1');
     expect(selectDefaultProvider([])).toBe('1');
   });
+
+  it('returns default provider 1 when no OpenRouter runtime is detected (HTTP-only, no binary)', () => {
+    // OpenRouter has no CLI binary so detection never adds it to the list
+    expect(selectDefaultProvider([])).toBe('1');
+    expect(selectDefaultProvider(['openrouter'])).toBe('1');
+  });
+
+  it('includes OpenRouter keys in generated env content', () => {
+    const content = buildEnvContent(
+      {
+        DISCORD_TOKEN: 'a.b.c',
+        DISCORD_ALLOW_USER_IDS: '1000000000000000001',
+        DISCOCLAW_TASKS_FORUM: '1000000000000000002',
+        DISCOCLAW_CRON_FORUM: '1000000000000000003',
+        PRIMARY_RUNTIME: 'openrouter',
+        OPENROUTER_API_KEY: 'sk-or-test-key',
+        OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
+        OPENROUTER_MODEL: 'anthropic/claude-sonnet-4',
+      },
+      new Date('2026-02-22T00:00:00.000Z'),
+    );
+
+    expect(content).toContain('PRIMARY_RUNTIME=openrouter');
+    expect(content).toContain('OPENROUTER_API_KEY=sk-or-test-key');
+    expect(content).toContain('OPENROUTER_BASE_URL=https://openrouter.ai/api/v1');
+    expect(content).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4');
+  });
 });
 
 describe('runInitWizard', () => {
@@ -150,5 +177,44 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
     expect(newEnv).toContain('CLAUDE_OUTPUT_FORMAT=stream-json');
     expect(ensureWorkspaceBootstrapFiles).toHaveBeenCalledWith(path.join(tmpDir, 'workspace'));
+  });
+
+  it('writes openrouter config when provider 5 is selected', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
+    const previousCwd = process.cwd();
+    const answers = [
+      '', // Press Enter to continue
+      // no existing .env
+      'a.b.c', // DISCORD_TOKEN
+      '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '1000000000000000002', // DISCOCLAW_TASKS_FORUM
+      '1000000000000000003', // DISCOCLAW_CRON_FORUM
+      '5', // provider selection -> OpenRouter
+      'sk-or-test-key', // OPENROUTER_API_KEY
+      '', // OPENROUTER_BASE_URL (optional, skip)
+      '', // OPENROUTER_MODEL (optional, use default)
+      'n', // configure recommended settings
+      'n', // configure optional features
+    ];
+
+    process.chdir(tmpDir);
+
+    vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('binary not found');
+    });
+    vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await runInitWizard();
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
+    expect(newEnv).toContain('PRIMARY_RUNTIME=openrouter');
+    expect(newEnv).toContain('OPENROUTER_API_KEY=sk-or-test-key');
+    expect(newEnv).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4');
   });
 });
