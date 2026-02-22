@@ -71,9 +71,13 @@ Note: Discord does not expose the same full-text “search like the client” vi
 
 ## Configure DiscoClaw `.env`
 
-1. Run `pnpm setup` for guided interactive setup, or:
-   `cp .env.example .env` (essentials) / `cp .env.example.full .env` (all options)
-2. Set:
+Two setup tracks:
+
+- **Global install (end users):** Run `discoclaw init` — interactive wizard creates and configures `.env`.
+- **From source (contributors):** Run `pnpm setup` for guided interactive setup, or:
+  `cp .env.example .env` (essentials) / `cp .env.example.full .env` (all options)
+
+Key variables to set:
 - `DISCORD_TOKEN=...`
 - `DISCORD_ALLOW_USER_IDS=...` (required; empty means respond to nobody)
 - `DISCORD_CHANNEL_IDS=...` (recommended for servers; keep minimal)
