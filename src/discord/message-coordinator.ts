@@ -200,6 +200,9 @@ const turnCounters = new Map<string, number>();
 const summaryWorkQueue = new KeyedQueue();
 const latestSummarySequence = new Map<string, number>();
 
+/** Timestamp of the most recent allowlisted message; read by the !status dashboard. */
+let lastProcessedMessage: number | null = null;
+
 const acquireWriterLock = registryAcquireWriterLock;
 const MAX_PLAN_RUN_PHASES = 50;
 
@@ -428,9 +431,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
       // Track last allowlisted message timestamp for !status dashboard.
-      if (params.statusCommandContext) {
-        params.statusCommandContext.lastMessageAt.current = Date.now();
-      }
+      lastProcessedMessage = Date.now();
 
       const isDm = msg.guildId == null;
       const actionFlags: ActionCategoryFlags = {
@@ -496,6 +497,27 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         return;
       }
 
+      // Handle !status command — at-a-glance runtime dashboard (live connectivity probes).
+      if (parseStatusCommand(String(msg.content ?? '')) && params.statusCommandContext) {
+        const ctx = params.statusCommandContext;
+        const snapshot = await collectStatusSnapshot({
+          startedAt: ctx.startedAt,
+          lastMessageAt: lastProcessedMessage,
+          scheduler: params.cronCtx?.scheduler ?? null,
+          taskStore: params.taskCtx?.store ?? null,
+          durableDataDir: params.durableDataDir,
+          summaryDataDir: params.summaryDataDir,
+          discordToken: ctx.discordToken,
+          openaiApiKey: ctx.openaiApiKey,
+          openaiBaseUrl: ctx.openaiBaseUrl,
+          paFilePaths: ctx.paFilePaths,
+          apiCheckTimeoutMs: ctx.apiCheckTimeoutMs,
+        });
+        const report = renderStatusReport(snapshot, params.botDisplayName);
+        await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
+        return;
+      }
+
       const healthMode = (params.healthCommandsEnabled ?? true)
         ? parseHealthCommand(String(msg.content ?? ''))
         : null;
@@ -553,27 +575,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           mode,
           botDisplayName: params.botDisplayName,
         });
-        await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
-        return;
-      }
-
-      // Handle !status command — at-a-glance runtime dashboard (live connectivity probes).
-      if (parseStatusCommand(String(msg.content ?? '')) && params.statusCommandContext) {
-        const ctx = params.statusCommandContext;
-        const snapshot = await collectStatusSnapshot({
-          startedAt: ctx.startedAt,
-          lastMessageAt: ctx.lastMessageAt.current,
-          scheduler: params.cronCtx?.scheduler ?? null,
-          taskStore: params.taskCtx?.store ?? null,
-          durableDataDir: params.durableDataDir,
-          summaryDataDir: params.summaryDataDir,
-          discordToken: ctx.discordToken,
-          openaiApiKey: ctx.openaiApiKey,
-          openaiBaseUrl: ctx.openaiBaseUrl,
-          paFilePaths: ctx.paFilePaths,
-          apiCheckTimeoutMs: ctx.apiCheckTimeoutMs,
-        });
-        const report = renderStatusReport(snapshot, params.botDisplayName);
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
         return;
       }

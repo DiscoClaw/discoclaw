@@ -13,6 +13,7 @@ export function handleHelpCommand(): string {
     '- `!memory` — view or edit durable memory; `!memory help` for details',
     '- `!models` — show or change model assignments; `!models help` for details',
     '- `!health` — show bot health and metrics; `!health verbose` for full config',
+    '- `!status` — show live runtime status (uptime, crons, memory, API connectivity)',
     '- `!update` — check for or apply code updates; `!update help` for details',
     '- `!restart` — restart the discoclaw service; `!restart help` for details',
     '- `!stop` — abort all active AI streams and cancel any running forge',
