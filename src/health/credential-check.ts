@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const OPENAI_API_DEFAULT_BASE = 'https://api.openai.com/v1';
+const OPENROUTER_API_DEFAULT_BASE = 'https://openrouter.ai/api/v1';
 
 export type CredentialStatus = 'ok' | 'fail' | 'skip';
 
@@ -85,6 +86,43 @@ export async function checkOpenAiKey(opts: {
 }
 
 /**
+ * Validate the OpenRouter API key by calling GET /models on the configured base URL.
+ * Returns 'skip' when no key is configured.
+ * Always resolves — returns a 'fail' result on network error instead of throwing.
+ */
+export async function checkOpenRouterKey(opts: {
+  apiKey?: string;
+  baseUrl?: string;
+}): Promise<CredentialCheckResult> {
+  const name = 'openrouter-key';
+  const { apiKey, baseUrl } = opts;
+
+  if (!apiKey) {
+    return { name, status: 'skip' };
+  }
+
+  const base = (baseUrl ?? OPENROUTER_API_DEFAULT_BASE).replace(/\/$/, '');
+  try {
+    const res = await fetch(`${base}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.ok) {
+      return { name, status: 'ok' };
+    }
+    if (res.status === 401) {
+      return { name, status: 'fail', message: 'invalid or expired key (401)' };
+    }
+    if (res.status === 403) {
+      return { name, status: 'fail', message: 'key lacks required permissions (403)' };
+    }
+    return { name, status: 'fail', message: `unexpected status ${res.status}` };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { name, status: 'fail', message: `network error: ${msg}` };
+  }
+}
+
+/**
  * Check that the workspace path exists and is read/write accessible.
  * Returns 'skip' if no path is provided.
  * Always resolves — returns a 'fail' result on access error instead of throwing.
@@ -121,28 +159,40 @@ export function checkStatusChannel(channelId?: string): CredentialCheckResult {
  *
  * When `activeProviders` is provided, the OpenAI key check is only run if
  * `'openai'` is in the set; otherwise the result is omitted from the report
- * entirely. The Discord token check always runs. If `activeProviders` is
- * omitted, the current behavior is preserved (OpenAI check runs as normal).
+ * entirely. The OpenRouter key check is only run if `'openrouter'` is in the
+ * set; otherwise the result is omitted from the report entirely. The Discord
+ * token check always runs. If `activeProviders` is omitted, the current
+ * behavior is preserved (OpenAI check runs as normal).
  */
 export async function runCredentialChecks(opts: {
   token: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  openrouterApiKey?: string;
+  openrouterBaseUrl?: string;
   workspacePath?: string;
   statusChannelId?: string;
   activeProviders?: Set<string>;
 }): Promise<CredentialCheckReport> {
   const runOpenAi = opts.activeProviders === undefined || opts.activeProviders.has('openai');
+  const runOpenRouter = opts.activeProviders !== undefined && opts.activeProviders.has('openrouter');
 
-  const [discordResult, openaiResult, workspaceResult, statusResult] = await Promise.all([
-    checkDiscordToken(opts.token),
-    runOpenAi ? checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl }) : null,
-    checkWorkspacePath(opts.workspacePath),
-    Promise.resolve(checkStatusChannel(opts.statusChannelId)),
-  ]);
+  const [discordResult, openaiResult, openrouterResult, workspaceResult, statusResult] =
+    await Promise.all([
+      checkDiscordToken(opts.token),
+      runOpenAi
+        ? checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl })
+        : null,
+      runOpenRouter
+        ? checkOpenRouterKey({ apiKey: opts.openrouterApiKey, baseUrl: opts.openrouterBaseUrl })
+        : null,
+      checkWorkspacePath(opts.workspacePath),
+      Promise.resolve(checkStatusChannel(opts.statusChannelId)),
+    ]);
 
   const results: CredentialCheckResult[] = [discordResult];
   if (openaiResult !== null) results.push(openaiResult);
+  if (openrouterResult !== null) results.push(openrouterResult);
   results.push(workspaceResult, statusResult);
 
   const criticalFailures = results
