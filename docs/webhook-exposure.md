@@ -1,118 +1,153 @@
 # Exposing Webhooks to External Services
 
-By default the webhook server binds to `127.0.0.1` (loopback only).
-That is the correct safe default for a single-user personal orchestrator —
-but it means external services such as GitHub, Linear, or Stripe **cannot
-reach it** without extra configuration.
+## Overview
 
-This page describes the recommended and alternative approaches.
-None of them change DiscoClaw's bind behavior; you configure exposure
-entirely outside the process.
+The DiscoClaw webhook server binds to `127.0.0.1` (loopback only) by design.
+External services — GitHub, Linear, Stripe, etc. — cannot reach a loopback
+address. This guide explains how to expose the listener so those services can
+deliver payloads to your instance.
+
+None of the approaches below change DiscoClaw's bind behavior. Exposure is
+configured entirely outside the process.
 
 ---
 
-## Recommended: Tailscale Funnel
+## Why localhost?
+
+Binding to loopback by default means the webhook port is unreachable from the
+network until **you** take a deliberate action to open it. This limits the blast
+radius of misconfiguration: a webhook endpoint that nobody can reach cannot be
+abused, even if HMAC verification were somehow bypassed.
+
+When you expose the port you control exactly how, when, and to whom — using one
+of the methods below.
+
+---
+
+## Tailscale Funnel (recommended)
 
 [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) exposes a local TCP
-port on the public internet through Tailscale's infrastructure, with no
-inbound firewall rules needed. It is the first-choice option because:
+port on the public internet through Tailscale's infrastructure, with no inbound
+firewall rules needed. It is the first-choice option because:
 
 - Traffic is TLS-terminated at Tailscale's edge — no cert management on your machine.
 - You get a stable public hostname (`<machine>.<tailnet>.ts.net`) tied to your
-  Tailscale account.
+  Tailscale account, so the URL survives restarts.
 - No third-party account beyond Tailscale is required.
-- Funnel can be toggled off in one command, making it easy to limit exposure
-  to the exact window you need.
+- Funnel can be toggled off in one command, making it easy to limit exposure to
+  the exact window you need.
 
 ### Quick setup
 
 1. Install and authenticate Tailscale: <https://tailscale.com/download>
-2. Enable Funnel for port 8080 (adjust if you changed `WEBHOOK_PORT`):
+2. Enable Funnel for the webhook port:
 
 ```bash
-tailscale funnel 8080
+tailscale funnel 9400
 ```
 
-3. Tailscale prints a public URL such as
-   `https://my-machine.tail1234.ts.net`. Use that as the webhook base URL
-   when configuring GitHub or another service:
+3. Tailscale prints a public URL such as `https://my-machine.tail1234.ts.net`.
+   Append the path when registering the webhook in GitHub or another service:
 
    ```
    https://my-machine.tail1234.ts.net/webhook/<source>
    ```
 
+   Replace `<source>` with the source name you configured (e.g. `github`).
+
 4. When you no longer need external access:
 
 ```bash
-tailscale funnel --bg=false 8080   # or: tailscale funnel off
+tailscale funnel off
 ```
 
-> **Note:** Funnel availability depends on your Tailscale plan. As of 2025,
-> Funnel is available on the Personal (free) tier. Check the Tailscale docs
-> for current plan details.
+> **Note:** Funnel availability depends on your Tailscale plan. As of early
+> 2026, Funnel is available on the Personal (free) tier. Check the Tailscale
+> docs for current plan details.
 
 ---
 
-## Alternative: ngrok (dev/testing only)
+## Alternatives
 
-[ngrok](https://ngrok.com) creates a public HTTPS tunnel to a local port
-with a single command. It is convenient for short-lived testing but is not
-recommended for long-running deployments because the public URL changes on
-each restart (unless you pay for a reserved domain).
+### ngrok (dev/testing only)
+
+[ngrok](https://ngrok.com) creates a public HTTPS tunnel in a single command.
+Convenient for short-lived testing, but the public URL changes on each restart
+unless you pay for a reserved domain.
 
 ```bash
-ngrok http 8080
+ngrok http 9400
 ```
 
 ngrok prints a URL like `https://abc123.ngrok-free.app`. Use it as the webhook
-base URL in the external service and update it each time ngrok restarts.
+base URL in the external service. Remember to update the URL each time ngrok
+restarts.
 
----
+### Caddy reverse proxy
 
-## Alternative: Cloudflare Tunnel
-
-[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
-(`cloudflared`) proxies local services through Cloudflare's network.
-It requires a Cloudflare account and a domain managed by Cloudflare, but
-provides a stable hostname and is suitable for longer-running deployments.
-
-```bash
-cloudflared tunnel --url http://localhost:8080
-```
-
-For a persistent named tunnel, follow the [Cloudflare Tunnel guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/).
-
----
-
-## Alternative: Reverse proxy on a VPS / public server
-
-If DiscoClaw runs on a machine with a public IP (or you already operate a
-reverse proxy on a VPS), you can terminate TLS there and proxy to
-`127.0.0.1:8080` with nginx, Caddy, or similar.
-
-Example minimal Caddy config:
+If DiscoClaw runs on a machine that already has a public IP and a domain, Caddy
+handles TLS automatically with a minimal config:
 
 ```
 webhooks.example.com {
-    reverse_proxy 127.0.0.1:8080
+    reverse_proxy 127.0.0.1:9400
 }
 ```
 
-This requires owning a domain, managing DNS records, and keeping the proxy
-server updated. It is the most work but gives you the most control.
+Run `caddy run` (or configure Caddy as a systemd service). Caddy obtains a
+Let's Encrypt certificate automatically. This requires owning a domain and
+managing DNS records.
+
+### Raw public IP with firewall rules
+
+If the host has a public IP and no reverse proxy is in use, you can expose the
+port directly by adjusting `WEBHOOK_HOST` in `.env` and opening the port in
+your firewall:
+
+```
+WEBHOOK_HOST=0.0.0.0
+WEBHOOK_PORT=9400
+```
+
+Then restrict inbound traffic to known source IPs (GitHub's webhook IP ranges
+are published at <https://api.github.com/meta>). This approach gives the most
+control but requires ongoing maintenance of firewall rules and provides no
+automatic TLS.
 
 ---
 
-## Changing the bind address
+## Verifying it works
 
-If you want DiscoClaw's webhook server to bind to a non-loopback interface
-directly (e.g. inside a private network), set `WEBHOOK_HOST` in your `.env`:
+After configuring exposure, confirm the endpoint is reachable from outside your
+machine:
 
+```bash
+curl -i https://<your-public-url>/webhook/<source>
 ```
-WEBHOOK_HOST=0.0.0.0   # listen on all interfaces
+
+A `400 Bad Request` or `401 Unauthorized` response means the server is
+reachable and HMAC validation is running — that is the expected response for a
+request with no valid signature. A connection timeout or `Connection refused`
+means the tunnel or firewall rule is not working yet.
+
+To confirm DiscoClaw received the request, check the logs:
+
+```bash
+journalctl --user -u discoclaw.service -n 50 | grep webhook
 ```
 
-> **Warning:** binding to `0.0.0.0` without a firewall exposes the webhook
-> endpoint to every network interface on the machine. HMAC signature
-> verification protects the endpoint from unauthorized callers, but limit
-> exposure where possible.
+You should see an incoming request log line even for rejected payloads.
+
+---
+
+## Security reminder
+
+HMAC signature verification is always enforced — every incoming payload is
+checked against the secret configured for that source (`WEBHOOK_SECRET_<SOURCE>`
+in `.env`). Exposing the HTTP listener does not grant callers arbitrary access;
+it only makes the endpoint reachable so that legitimate signed payloads can be
+delivered.
+
+Keep your webhook secrets strong and do not share them. If a secret is
+compromised, rotate it in both DiscoClaw's `.env` and the external service's
+webhook settings.
