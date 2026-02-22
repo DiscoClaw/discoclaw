@@ -16,6 +16,11 @@ function norm(s: string): string {
   return (s ?? '').trim().toLowerCase();
 }
 
+function isCountSuffixOnly(currentName: string, canonicalName: string): boolean {
+  return norm(currentName) !== norm(canonicalName) &&
+    norm(stripCountSuffix(currentName)) === norm(canonicalName);
+}
+
 export function isSnowflake(s: string): boolean {
   return /^\d{8,}$/.test((s ?? '').trim());
 }
@@ -140,11 +145,15 @@ async function ensureChild(
       // Reconcile name if it differs from canonical (e.g. count-sync stacking).
       const currentName = String((byId as any).name ?? '');
       if (norm(currentName) !== norm(spec.name)) {
-        try {
-          await (byId as any).edit({ name: spec.name });
-          log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
-        } catch (err) {
-          log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+        if (isCountSuffixOnly(currentName, spec.name)) {
+          log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: skipping name reconciliation (count suffix only)');
+        } else {
+          try {
+            await (byId as any).edit({ name: spec.name });
+            log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
+          } catch (err) {
+            log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+          }
         }
       }
       // Reconcile topic if it differs from expected.
@@ -168,11 +177,15 @@ async function ensureChild(
     // Reconcile name if it differs from canonical (e.g. found via stripped count suffix).
     const currentName = String((exact as any).name ?? '');
     if (norm(currentName) !== norm(spec.name)) {
-      try {
-        await (exact as any).edit({ name: spec.name });
-        log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
-      } catch (err) {
-        log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+      if (isCountSuffixOnly(currentName, spec.name)) {
+        log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: skipping name reconciliation (count suffix only)');
+      } else {
+        try {
+          await (exact as any).edit({ name: spec.name });
+          log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
+        } catch (err) {
+          log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+        }
       }
     }
     // Reconcile topic if it differs from expected.
@@ -195,11 +208,15 @@ async function ensureChild(
         const moved = await moveUnderCategory(legacy, parentCategoryId, log);
         const currentName = String((legacy as any).name ?? '');
         if (norm(currentName) !== norm(spec.name)) {
-          try {
-            await (legacy as any).edit({ name: spec.name });
-            log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
-          } catch (err) {
-            log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+          if (isCountSuffixOnly(currentName, spec.name)) {
+            log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: skipping name reconciliation (count suffix only)');
+          } else {
+            try {
+              await (legacy as any).edit({ name: spec.name });
+              log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
+            } catch (err) {
+              log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+            }
           }
         }
         if (spec.topic && (legacy as any).topic !== spec.topic) {
