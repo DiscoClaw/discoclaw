@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import os from 'node:os';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { writeShutdownContext } from './shutdown-context.js';
 
@@ -35,6 +36,43 @@ function run(cmd: string, args: string[]): Promise<{ stdout: string; stderr: str
   });
 }
 
+type PlatformCmds = {
+  statusCmd: [string, string[]];
+  logsCmd: [string, string[]];
+  checkActiveCmd: [string, string[]];
+  isActive: (result: { exitCode: number | null; stdout: string }) => boolean;
+  restartCmd: (wasActive: boolean) => [string, string[]];
+};
+
+function getPlatformCommands(): PlatformCmds | null {
+  if (process.platform === 'linux') {
+    return {
+      statusCmd: ['systemctl', ['--user', 'status', 'discoclaw']],
+      logsCmd: ['journalctl', ['--user', '-u', 'discoclaw', '--no-pager', '-n', '30']],
+      checkActiveCmd: ['systemctl', ['--user', 'status', 'discoclaw']],
+      isActive: (result) => result.stdout.includes('active (running)'),
+      restartCmd: () => ['systemctl', ['--user', 'restart', 'discoclaw']],
+    };
+  }
+  if (process.platform === 'darwin') {
+    const uid = process.getuid?.() ?? 501;
+    const plistPath = `${os.homedir()}/Library/LaunchAgents/com.discoclaw.agent.plist`;
+    const domain = `gui/${uid}`;
+    const label = 'com.discoclaw.agent';
+    return {
+      statusCmd: ['launchctl', ['list', label]],
+      logsCmd: ['log', ['show', '--predicate', 'process == "node"', '--last', '5m', '--style', 'compact']],
+      checkActiveCmd: ['launchctl', ['list', label]],
+      isActive: (result) => result.exitCode === 0,
+      restartCmd: (wasActive) =>
+        wasActive
+          ? ['launchctl', ['kickstart', '-k', `${domain}/${label}`]]
+          : ['launchctl', ['bootstrap', domain, plistPath]],
+    };
+  }
+  return null;
+}
+
 export type RestartResult = {
   /** The message to send back to Discord. */
   reply: string;
@@ -66,15 +104,22 @@ export async function handleRestartCommand(cmd: RestartCommand, opts?: RestartOp
       };
     }
 
+    const pc = getPlatformCommands();
+    if (!pc) {
+      return {
+        reply: `!restart is not supported on this platform (${process.platform}). Only Linux (systemd) and macOS (launchd) are supported.`,
+      };
+    }
+
     if (cmd.action === 'status') {
-      const result = await run('systemctl', ['--user', 'status', 'discoclaw']);
+      const result = await run(pc.statusCmd[0], pc.statusCmd[1]);
       const output = (result.stdout || result.stderr).trim();
       log?.info({ exitCode: result.exitCode }, 'restart-command:status');
       return { reply: `\`\`\`\n${output.slice(0, 1800)}\n\`\`\`` };
     }
 
     if (cmd.action === 'logs') {
-      const result = await run('journalctl', ['--user', '-u', 'discoclaw', '--no-pager', '-n', '30']);
+      const result = await run(pc.logsCmd[0], pc.logsCmd[1]);
       const output = (result.stdout || result.stderr).trim();
       log?.info({}, 'restart-command:logs');
       return { reply: `\`\`\`\n${output.slice(0, 1800)}\n\`\`\`` };
@@ -82,8 +127,8 @@ export async function handleRestartCommand(cmd: RestartCommand, opts?: RestartOp
 
     // action === 'restart'
     // Check current status for context in the reply.
-    const before = await run('systemctl', ['--user', 'status', 'discoclaw']);
-    const wasActive = before.stdout.includes('active (running)');
+    const before = await run(pc.checkActiveCmd[0], pc.checkActiveCmd[1]);
+    const wasActive = pc.isActive(before);
     log?.info({ wasActive }, 'restart-command:restart');
 
     // We can't restart inline — the restart kills this process before
@@ -110,7 +155,8 @@ export async function handleRestartCommand(cmd: RestartCommand, opts?: RestartOp
           });
         }
         // Fire and forget — the process will die during this call.
-        execFile('systemctl', ['--user', 'restart', 'discoclaw'], (err) => {
+        const [restartBin, restartArgs] = pc.restartCmd(wasActive);
+        execFile(restartBin, restartArgs, (err) => {
           // If we somehow survive (e.g., the service unit changed), log it.
           if (err) log?.error({ err }, 'restart-command:restart failed');
         });
