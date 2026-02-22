@@ -53,22 +53,19 @@ export async function closeTaskThread(
     // Ignore send failures (thread may already be archived).
   }
 
-  try {
-    await thread.setName(closedName);
-  } catch (err) {
-    log?.warn({ err, taskId: task.id, threadId }, 'closeTaskThread: setName failed');
+  const editPayload: Record<string, unknown> = { name: closedName };
+  if (tagMap) {
+    const current: string[] = (thread as any).appliedTags ?? [];
+    const updated = buildAppliedTagsWithStatus(current, task.status, tagMap);
+    if (!tagsEqual(current, updated)) {
+      editPayload.appliedTags = updated;
+    }
   }
 
-  if (tagMap) {
-    try {
-      const current: string[] = (thread as any).appliedTags ?? [];
-      const updated = buildAppliedTagsWithStatus(current, task.status, tagMap);
-      if (!tagsEqual(current, updated)) {
-        await (thread as any).edit({ appliedTags: updated });
-      }
-    } catch (err) {
-      log?.warn({ err, taskId: task.id, threadId }, 'closeTaskThread: tag update failed');
-    }
+  try {
+    await (thread as any).edit(editPayload);
+  } catch (err) {
+    log?.warn({ err, taskId: task.id, threadId }, 'closeTaskThread: edit failed');
   }
 
   try {
