@@ -513,13 +513,18 @@ describe('executePlanAction', () => {
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      // Initial send: status message posted at start
-      expect(setup.fn).toHaveBeenCalledOnce();
-      const sendContent: string = setup.fn.mock.calls[0]![0]!.content;
-      expect(sendContent).toContain('plan-042');
-      expect(sendContent).toContain('Plan run started');
+      // Two sends: initial status message + standalone completion message
+      expect(setup.fn).toHaveBeenCalledTimes(2);
+      const firstSendContent: string = setup.fn.mock.calls[0]![0]!.content;
+      expect(firstSendContent).toContain('plan-042');
+      expect(firstSendContent).toContain('Plan run started');
 
-      // Final edit: status message updated with completion summary
+      // Second send: standalone completion message posted as a new message
+      const completionSendContent: string = setup.fn.mock.calls[1]![0]!.content;
+      expect(completionSendContent).toContain('plan-042');
+      expect(completionSendContent).toContain('Plan run complete');
+
+      // Status message also edited in place with final summary (backwards compat)
       expect(setup.msg.edit).toHaveBeenCalled();
       const lastEdit = setup.msg.edit.mock.calls.at(-1)![0]!;
       expect(lastEdit.content).toContain('plan-042');
@@ -550,7 +555,7 @@ describe('executePlanAction', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       const contents = setup.fn.mock.calls.map((call) => String(call[0]!.content));
-      expect(contents.some((text) => text.includes('Starting phase **phase-1**: First phase'))).toBe(true);
+      expect(contents.some((text) => text.includes('**phase-1**: First phase'))).toBe(true);
     });
 
     it('deduplicates phase-start posts for repeated progress lines in the same run', async () => {
@@ -579,7 +584,7 @@ describe('executePlanAction', () => {
 
       const phaseStartMessages = setup.fn.mock.calls
         .map((call) => String(call[0]!.content))
-        .filter((content) => content.includes('Starting phase **phase-1**: First phase'));
+        .filter((content) => content.includes('**phase-1**: First phase'));
       expect(phaseStartMessages).toHaveLength(1);
     });
 
@@ -623,7 +628,7 @@ describe('executePlanAction', () => {
 
       expect(setup.fn).toHaveBeenCalledOnce();
       const sent = String(setup.fn.mock.calls[0]![0]!.content);
-      expect(sent).toContain('Starting phase **phase-1**: First phase');
+      expect(sent).toContain('**phase-1**: First phase');
       expect(setup.msg.edit).not.toHaveBeenCalled();
     });
 
@@ -642,7 +647,7 @@ describe('executePlanAction', () => {
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(setup.fn).toHaveBeenCalledOnce();
+      expect(setup.fn).toHaveBeenCalledTimes(2);
       const lastEdit = setup.msg.edit.mock.calls.at(-1)![0]!;
       expect(lastEdit.content).toContain('Stopped:');
     });
@@ -703,9 +708,160 @@ describe('executePlanAction', () => {
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(setup.fn).toHaveBeenCalledOnce();
+      expect(setup.fn).toHaveBeenCalledTimes(2);
       const lastEdit = setup.msg.edit.mock.calls.at(-1)![0]!;
       expect(lastEdit.content).toContain('auto-closed');
+    });
+
+    it('edits phase-start message to done state on phase completion', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      // Create distinct message objects per send call to distinguish phase-start from status.
+      const sendMsgs: Array<{ edit: ReturnType<typeof vi.fn> }> = [];
+      const sendFn = vi.fn(async () => {
+        const msg = { edit: vi.fn(async () => {}) };
+        sendMsgs.push(msg);
+        return msg;
+      });
+
+      const ctx: ActionContext = {
+        guild: {} as any,
+        client: { channels: { fetch: vi.fn(async () => ({ send: sendFn })) } } as any,
+        channelId: 'test-channel',
+        messageId: 'test-message',
+      };
+
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        return { result: 'done', phase: { id: 'phase-1', title: 'First phase', kind: 'implement' }, output: 'ok' };
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // send order: [0] initial status, [1] phase-start, [2] completion
+      expect(sendMsgs.length).toBeGreaterThanOrEqual(2);
+      const phaseMsg = sendMsgs[1]!;
+      expect(phaseMsg.edit).toHaveBeenCalled();
+      const doneEdit = phaseMsg.edit.mock.calls.find((call) => String(call[0]!.content).includes('✅'));
+      expect(doneEdit).toBeDefined();
+      expect(String(doneEdit![0]!.content)).toContain('phase-1');
+      expect(String(doneEdit![0]!.content)).toContain('First phase');
+    });
+
+    it('edits phase-start message to failed state when phase fails', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      const sendMsgs: Array<{ edit: ReturnType<typeof vi.fn> }> = [];
+      const sendFn = vi.fn(async () => {
+        const msg = { edit: vi.fn(async () => {}) };
+        sendMsgs.push(msg);
+        return msg;
+      });
+
+      const ctx: ActionContext = {
+        guild: {} as any,
+        client: { channels: { fetch: vi.fn(async () => ({ send: sendFn })) } } as any,
+        channelId: 'test-channel',
+        messageId: 'test-message',
+      };
+
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        return { result: 'failed', phase: { id: 'phase-1', title: 'First phase', kind: 'implement' }, output: '', error: 'build error' };
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // send order: [0] initial status, [1] phase-start, [2] completion
+      expect(sendMsgs.length).toBeGreaterThanOrEqual(2);
+      const phaseMsg = sendMsgs[1]!;
+      expect(phaseMsg.edit).toHaveBeenCalled();
+      const failEdit = phaseMsg.edit.mock.calls.find((call) => String(call[0]!.content).includes('❌'));
+      expect(failEdit).toBeDefined();
+      expect(String(failEdit![0]!.content)).toContain('phase-1');
+      expect(String(failEdit![0]!.content)).toContain('First phase');
+    });
+
+    it('posts a new standalone completion message after run finishes', async () => {
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Two sends: initial status + standalone completion message
+      expect(setup.fn).toHaveBeenCalledTimes(2);
+      const completionContent: string = setup.fn.mock.calls[1]![0]!.content;
+      expect(completionContent).toContain('Plan run complete');
+      expect(completionContent).toContain('plan-042');
+      expect(completionContent).toContain('Phases run:');
+      expect(setup.fn.mock.calls[1]![0]!.allowedMentions).toEqual({ parse: [] });
+    });
+
+    it('handles gracefully when phase-start message edit fails', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      const failingEdit = vi.fn(async () => { throw new Error('edit failed'); });
+      let sendCallCount = 0;
+      const sendFn = vi.fn(async () => {
+        sendCallCount++;
+        if (sendCallCount === 2) return { edit: failingEdit };
+        return { edit: vi.fn(async () => {}) };
+      });
+
+      const ctx: ActionContext = {
+        guild: {} as any,
+        client: { channels: { fetch: vi.fn(async () => ({ send: sendFn })) } } as any,
+        channelId: 'test-channel',
+        messageId: 'test-message',
+      };
+
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        return { result: 'done', phase: { id: 'phase-1', title: 'First phase', kind: 'implement' }, output: 'ok' };
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Edit was attempted on the failing message
+      expect(failingEdit).toHaveBeenCalled();
+      // Run still completed — completion message was sent (initial + phase-start + completion = 3)
+      expect(sendCallCount).toBeGreaterThanOrEqual(3);
     });
   });
 });

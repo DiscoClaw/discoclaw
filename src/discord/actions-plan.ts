@@ -273,16 +273,18 @@ export async function executePlanAction(
         let statusMsg: { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> } | undefined;
         let lastStatusEditAt = 0;
 
-        const postedPhaseStarts = new Set<string>();
+        const phaseStartMessages = new Map<string, { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> }>();
         const onPlanEvent = async (event: PlanRunEvent): Promise<void> => {
           if (event.type !== 'phase_start') return;
-          if (postedPhaseStarts.has(event.phase.id) || !runChannel) return;
-          postedPhaseStarts.add(event.phase.id);
+          if (phaseStartMessages.has(event.phase.id) || !runChannel) return;
           try {
-            await runChannel.send({
-              content: `Starting phase **${event.phase.id}**: ${event.phase.title}`,
+            const sent = await runChannel.send({
+              content: `**${event.phase.id}**: ${event.phase.title}...`,
               allowedMentions: NO_MENTIONS,
             });
+            if (sent && typeof (sent as any).edit === 'function') {
+              phaseStartMessages.set(event.phase.id, sent as any);
+            }
           } catch (err) {
             planCtx.log?.warn({ err, planId: runPlanId, phaseId: event.phase.id }, 'plan:action:run phase-start post failed');
           }
@@ -357,6 +359,15 @@ export async function executePlanAction(
 
           if (phaseResult.result === 'done') {
             phasesRun++;
+            // Edit phase-start message to reflect completion.
+            const phaseMsg = phaseStartMessages.get(phaseResult.phase.id);
+            if (phaseMsg) {
+              try {
+                await phaseMsg.edit({ content: `✅ **${phaseResult.phase.id}**: ${phaseResult.phase.title}`, allowedMentions: NO_MENTIONS });
+              } catch {
+                // best-effort
+              }
+            }
             // Force-edit on phase completion boundary.
             await editStatus(`**Plan run in progress:** \`${action.planId}\` — phase complete (${phasesRun} done so far)`, true);
           } else if (phaseResult.result === 'nothing_to_run') {
@@ -368,6 +379,17 @@ export async function executePlanAction(
             stopReason = phaseResult.result;
             stopMessage = (phaseResult as any).error ?? (phaseResult as any).message ?? phaseResult.result;
             planCtx.log?.warn({ planId: runPlanId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
+            // Edit phase-start message to reflect failure (if phase info is available).
+            if ('phase' in phaseResult && phaseResult.phase) {
+              const phaseMsg = phaseStartMessages.get(phaseResult.phase.id);
+              if (phaseMsg) {
+                try {
+                  await phaseMsg.edit({ content: `❌ **${phaseResult.phase.id}**: ${phaseResult.phase.title}`, allowedMentions: NO_MENTIONS });
+                } catch {
+                  // best-effort
+                }
+              }
+            }
             // Force-edit to reflect stop.
             await editStatus(`**Plan run stopped:** \`${runPlanId}\` — ${stopMessage ?? stopReason}`, true);
             break;
@@ -428,7 +450,7 @@ export async function executePlanAction(
         }
         const finalContent = lines.join('\n');
 
-        // Edit status message to show final outcome, or send a new message if no statusMsg.
+        // Edit status message to show final outcome (preserved for backwards compatibility).
         if (!planCtx.skipCompletionNotify) {
           try {
             if (statusMsg) {
@@ -438,15 +460,23 @@ export async function executePlanAction(
               } catch {
                 // best-effort
               }
-            } else {
-              // Fall back to sending a new message if we never got a statusMsg.
-              if (runChannel) {
+            }
+            // Post a standalone completion message as a new chat message.
+            if (runChannel) {
+              try {
                 await runChannel.send({ content: finalContent, allowedMentions: NO_MENTIONS });
-              } else {
+              } catch {
+                // best-effort
+              }
+            } else if (!statusMsg) {
+              // Fall back to sending a new message if we never got runChannel or statusMsg.
+              try {
                 const channel = await ctx.client.channels.fetch(ctx.channelId);
                 if (channel && 'send' in channel) {
                   await (channel as any).send({ content: finalContent, allowedMentions: NO_MENTIONS });
                 }
+              } catch {
+                // best-effort
               }
             }
           } catch {
