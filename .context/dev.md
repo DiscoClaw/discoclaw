@@ -21,7 +21,10 @@ pnpm sync:discord-context -- --add-channel 123456789012345678:my-channel
 
 ## Environment
 
-Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for essentials only. For all ~90 options, use `.env.example.full`. See those files for inline comments.
+Two setup paths:
+
+- **Global install (end users):** Run `discoclaw init` — interactive wizard creates and configures `.env`.
+- **From source (contributors):** Run `pnpm setup` for guided configuration, or copy `.env.example` → `.env` for essentials only. For all ~90 options, use `.env.example.full`. See those files for inline comments.
 
 ### Discord
 | Variable | Default | Description |
