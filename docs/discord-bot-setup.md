@@ -63,7 +63,7 @@ These are recommended sets of Discord permissions. You pick them by ticking the 
 
 Notes:
 - If you want the bot to reply inside threads reliably, set `DISCORD_AUTO_JOIN_THREADS=1` so it joins threads it encounters (public threads; private threads still require adding the bot).
-- To join all *active public* threads in a server (one-time):
+- To join all *active public* threads in a server (one-time) — **from source only**:
   - Dry run: `pnpm discord:join-threads -- --guild-id <YOUR_SERVER_ID>`
   - Apply: `pnpm discord:join-threads -- --guild-id <YOUR_SERVER_ID> --apply 1`
 
@@ -119,10 +119,10 @@ Run through this checklist in order. Each step should produce the expected outpu
    ```
    Expected: a version string `>= 2.1.0`. If not found, install it first — see [Claude CLI docs](https://docs.anthropic.com/en/docs/claude-code).
 
-2. **Node and pnpm:**
+2. **Node (and pnpm for contributors):**
    ```bash
    node --version   # should be v20+
-   pnpm --version   # should be v10+
+   pnpm --version   # should be v10+ (from source only; not required for global install)
    ```
 
 3. **Environment file exists:**
