@@ -236,6 +236,20 @@ describe('parseDiscordActions', () => {
     expect(actions).toEqual([]);
     expect(cleanText).toContain('<discord-action>');
   });
+
+  it('parses forgeStatus when forge flag is enabled', () => {
+    const input = '<discord-action>{"type":"forgeStatus","forgeId":"forge-abc"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, { ...ALL_FLAGS, forge: true });
+    expect(actions).toEqual([{ type: 'forgeStatus', forgeId: 'forge-abc' }]);
+    expect(strippedUnrecognizedTypes).toEqual([]);
+  });
+
+  it('strips forgeStatus when forge flag is disabled', () => {
+    const input = '<discord-action>{"type":"forgeStatus","forgeId":"forge-abc"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, { ...ALL_FLAGS, forge: false });
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toEqual(['forgeStatus']);
+  });
 });
 
 // ---------------------------------------------------------------------------
