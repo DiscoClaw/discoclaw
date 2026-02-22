@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { EngineEvent } from './types.js';
 import { toolActivityLabel } from './tool-labels.js';
@@ -23,7 +24,7 @@ function escapeCwd(cwd: string): string {
 }
 
 function sessionFilePath(sessionId: string, cwd: string): string {
-  const home = process.env.HOME ?? '/tmp';
+  const home = os.homedir();
   const escaped = escapeCwd(cwd);
   return path.join(home, '.claude', 'projects', escaped, `${sessionId}.jsonl`);
 }
