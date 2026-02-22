@@ -82,6 +82,8 @@ export type BootReportData = {
   // Config / permissions
   configWarnings?: number;
   permissionsTier?: string;
+  permissionsStatus?: 'ok' | 'missing' | 'invalid';
+  permissionsReason?: string;
   // Credential health (pre-formatted by formatCredentialReport)
   credentialReport?: string;
   // Runtime
@@ -172,7 +174,16 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       lines.push(`Startup · ${typeLabel[data.startupType]}`);
       if (data.bootDurationMs !== undefined) lines.push(`Boot Time · ${data.bootDurationMs}ms`);
       lines.push(`Model · ${data.runtimeModel || '(default)'}`);
-      lines.push(`Permissions · ${data.permissionsTier || '(unset)'}`);
+      if (data.permissionsStatus) {
+        const permLabel = data.permissionsStatus === 'ok'
+          ? `ok (${data.permissionsTier ?? '?'})`
+          : data.permissionsStatus === 'invalid'
+            ? `INVALID${data.permissionsReason ? ` (${data.permissionsReason})` : ''}`
+            : 'missing';
+        lines.push(`Permissions · ${permLabel}`);
+      } else {
+        lines.push(`Permissions · ${data.permissionsTier || '(unset)'}`);
+      }
 
       if (data.shutdownReason) {
         const reasonParts = [data.shutdownReason];

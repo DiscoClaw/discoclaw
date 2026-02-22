@@ -193,6 +193,47 @@ describe('bootReport', () => {
     const msg = sentContent(ch);
     expect(msg).toContain('Credentials · discord-token: FAIL (invalid or revoked token (401)), openai-key: skip');
   });
+
+  it('formats Permissions as "ok (tier)" when permissionsStatus is ok', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsStatus: 'ok', permissionsTier: 'full' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · ok (full)');
+  });
+
+  it('formats Permissions as "missing" when permissionsStatus is missing', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsStatus: 'missing' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · missing');
+  });
+
+  it('formats Permissions as "INVALID (reason)" when permissionsStatus is invalid with reason', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsStatus: 'invalid', permissionsReason: 'invalid tier: "godmode"' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · INVALID (invalid tier: "godmode")');
+  });
+
+  it('formats Permissions as "INVALID" without parentheses when no reason is provided', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsStatus: 'invalid' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · INVALID');
+    expect(msg).not.toContain('(undefined');
+  });
+
+  it('falls back to tier label when permissionsStatus is absent', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, permissionsTier: 'standard' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Permissions · standard');
+  });
 });
 
 describe('sanitizeErrorMessage', () => {

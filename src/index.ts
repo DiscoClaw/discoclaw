@@ -322,7 +322,7 @@ if (permProbe.status === 'missing') {
     'Run onboarding or manually create workspace/PERMISSIONS.json.',
   );
 } else if (permProbe.status === 'invalid') {
-  log.warn(
+  log.error(
     { workspaceCwd, reason: permProbe.reason },
     'PERMISSIONS.json is invalid — falling back to env/default tools.',
   );
@@ -1406,6 +1406,8 @@ if (botStatus?.bootReport) {
     memoryWorkingOn: shortTermMemoryEnabled,
     actionCategoriesEnabled,
     configWarnings: parsedConfig.warnings.length,
+    permissionsStatus: permProbe.status === 'valid' ? 'ok' : permProbe.status,
+    permissionsReason: permProbe.status === 'invalid' ? permProbe.reason : undefined,
     permissionsTier: permProbe.status === 'valid' ? permProbe.permissions.tier : undefined,
     credentialReport,
     runtimeModel,
