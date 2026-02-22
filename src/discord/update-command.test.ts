@@ -258,6 +258,33 @@ describe('handleUpdateCommand: apply', () => {
     expect(restartCall[1]).toEqual(['--user', 'restart', 'discoclaw']);
   });
 
+  it('deferred uses launchctl kickstart on macOS', async () => {
+    const { execFile } = await import('node:child_process');
+    const mock = mockAllSuccess();
+    (execFile as any).mockImplementation(mock);
+
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    const originalGetuid = process.getuid;
+    process.getuid = () => 501;
+
+    try {
+      const result = await handleUpdateCommand({ action: 'apply' });
+      result.deferred!();
+
+      const calls: any[] = (execFile as any).mock.calls;
+      const restartCall = calls.find(
+        ([cmd, args]: [string, string[]]) => cmd === 'launchctl' && args.includes('kickstart'),
+      );
+      expect(restartCall).toBeDefined();
+      expect(restartCall[1]).toContain('-k');
+      expect(restartCall[1].some((a: string) => a.includes('com.discoclaw.agent'))).toBe(true);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      process.getuid = originalGetuid;
+    }
+  });
+
   it('deferred uses restartCmd via /bin/sh when provided', async () => {
     const { execFile } = await import('node:child_process');
     (execFile as any).mockImplementation(mockAllSuccess());
