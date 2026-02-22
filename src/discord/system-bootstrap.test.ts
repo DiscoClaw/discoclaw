@@ -68,7 +68,7 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
 }
 
 describe('ensureSystemScaffold', () => {
-  it('creates System category, status text channel, and agents forum', async () => {
+  it('creates System category, status text channel, and automations forum', async () => {
     const guild = makeMockGuild([]);
     const res = await ensureSystemScaffold({ guild, ensureTasks: false });
     expect(res).not.toBeNull();
@@ -77,7 +77,7 @@ describe('ensureSystemScaffold', () => {
     expect(res?.cronsForumId).toBeTruthy();
     expect(res?.tasksForumId).toBeUndefined();
 
-    // 3 creates: category + status + agents
+    // 3 creates: category + status + automations
     expect(guild.__create).toHaveBeenCalledTimes(3);
   });
 
@@ -85,7 +85,7 @@ describe('ensureSystemScaffold', () => {
     const guild = makeMockGuild([
       { id: 'cat-other', name: 'Other', type: ChannelType.GuildCategory },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-other' },
-      { id: 'crons-1', name: 'agents', type: ChannelType.GuildForum, parentId: null },
+      { id: 'crons-1', name: 'automations', type: ChannelType.GuildForum, parentId: null },
     ]);
 
     const res = await ensureSystemScaffold({ guild, ensureTasks: false });
@@ -103,7 +103,7 @@ describe('ensureSystemScaffold', () => {
     const guild = makeMockGuild([]);
     const res = await ensureSystemScaffold({ guild, ensureTasks: true });
     expect(res?.tasksForumId).toBeTruthy();
-    // 4 creates: category + status + agents + beads
+    // 4 creates: category + status + automations + beads
     expect(guild.__create).toHaveBeenCalledTimes(4);
   });
 
@@ -152,7 +152,7 @@ describe('ensureSystemScaffold', () => {
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
       { id: '1000000000000000002', name: 'beads-6', type: ChannelType.GuildForum, parentId: 'cat-sys' },
-      { id: '1000000000000000001', name: 'agents ・ 1', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: '1000000000000000001', name: 'automations ・ 1', type: ChannelType.GuildForum, parentId: 'cat-sys' },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
     const res = await ensureSystemScaffold({
@@ -172,7 +172,7 @@ describe('ensureSystemScaffold', () => {
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
       // crons ID points to a text channel, not a forum.
-      { id: '1000000000000000001', name: 'agents', type: ChannelType.GuildText, parentId: 'cat-sys' },
+      { id: '1000000000000000001', name: 'automations', type: ChannelType.GuildText, parentId: 'cat-sys' },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -189,9 +189,9 @@ describe('ensureSystemScaffold', () => {
       expect.objectContaining({ existingId: '1000000000000000001' }),
       expect.stringContaining('wrong channel type'),
     );
-    // Should NOT have created a new agents forum.
+    // Should NOT have created a new automations forum.
     const createCalls = guild.__create.mock.calls;
-    const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'agents');
+    const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'automations');
     expect(cronCreateCalls).toHaveLength(0);
   });
 
@@ -212,16 +212,16 @@ describe('ensureSystemScaffold', () => {
       expect.objectContaining({ existingId: '9999999999999999999' }),
       expect.stringContaining('not found in guild'),
     );
-    // Should have created a new agents forum via fallback.
+    // Should have created a new automations forum via fallback.
     expect(res?.cronsForumId).toBeDefined();
     const createCalls = guild.__create.mock.calls;
-    const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'agents');
+    const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'automations');
     expect(cronCreateCalls).toHaveLength(1);
   });
 
   it('finds channel by existingId via API fetch when not in cache', async () => {
     // Guild starts with only System category and status in cache.
-    // The agents forum is NOT in cache but fetch() will return it.
+    // The automations forum is NOT in cache but fetch() will return it.
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
@@ -230,7 +230,7 @@ describe('ensureSystemScaffold', () => {
     // Override fetch to return a channel object for the crons ID.
     const cronsChannel = {
       id: '1000000000000000001',
-      name: 'agents ・ 3',
+      name: 'automations ・ 3',
       type: ChannelType.GuildForum,
       parentId: null,
       setParent: vi.fn(async function (this: any, pid: string) { this.parentId = pid; }),
@@ -250,16 +250,16 @@ describe('ensureSystemScaffold', () => {
     expect(res?.cronsForumId).toBe('1000000000000000001');
     // fetch should have been called with the ID.
     expect(guild.channels.fetch).toHaveBeenCalledWith('1000000000000000001');
-    // Should NOT have created a new agents forum.
+    // Should NOT have created a new automations forum.
     expect(guild.__create).not.toHaveBeenCalled();
   });
 
   it('findByNameAndType: exact match takes precedence over stripped match', async () => {
-    // Both "agents" and "agents ・ 1" exist — searching for "agents" should find the exact match.
+    // Both "automations" and "automations ・ 1" exist — searching for "automations" should find the exact match.
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
-      { id: 'crons-exact', name: 'agents', type: ChannelType.GuildForum },
-      { id: 'crons-suffixed', name: 'agents ・ 1', type: ChannelType.GuildForum },
+      { id: 'crons-exact', name: 'automations', type: ChannelType.GuildForum },
+      { id: 'crons-suffixed', name: 'automations ・ 1', type: ChannelType.GuildForum },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
     const res = await ensureSystemScaffold({ guild, ensureTasks: false });
@@ -267,24 +267,24 @@ describe('ensureSystemScaffold', () => {
   });
 
   it('findByNameAndType: count-suffixed name matches search for base name', async () => {
-    // Only "agents ・ 1" exists (no exact "agents") — should match via stripped suffix.
+    // Only "automations ・ 1" exists (no exact "automations") — should match via stripped suffix.
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
-      { id: 'crons-suffixed', name: 'agents ・ 1', type: ChannelType.GuildForum },
+      { id: 'crons-suffixed', name: 'automations ・ 1', type: ChannelType.GuildForum },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
     const res = await ensureSystemScaffold({ guild, ensureTasks: false });
     expect(res?.cronsForumId).toBe('crons-suffixed');
-    // Should NOT have created a new agents forum.
+    // Should NOT have created a new automations forum.
     const createCalls = guild.__create.mock.calls;
-    const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'agents');
+    const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'automations');
     expect(cronCreateCalls).toHaveLength(0);
   });
 
   it('reconciles name drift when channel found by existingId has a stale name', async () => {
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
-      { id: '1000000000000000001', name: 'agents ・ 3', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: '1000000000000000001', name: 'automations ・ 3', type: ChannelType.GuildForum, parentId: 'cat-sys' },
       { id: '1000000000000000002', name: 'beads-6', type: ChannelType.GuildForum, parentId: 'cat-sys' },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
@@ -302,12 +302,12 @@ describe('ensureSystemScaffold', () => {
     // Names should have been reconciled back to canonical.
     const cronsCh = (guild.__cache as Map<string, any>).get('1000000000000000001');
     const beadsCh = (guild.__cache as Map<string, any>).get('1000000000000000002');
-    expect(cronsCh.name).toBe('agents');
+    expect(cronsCh.name).toBe('automations');
     expect(beadsCh.name).toBe('tasks');
 
     // Should have logged name reconciliation.
     expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'agents', was: 'agents ・ 3' }),
+      expect.objectContaining({ name: 'automations', was: 'automations ・ 3' }),
       expect.stringContaining('reconciled name'),
     );
     expect(log.info).toHaveBeenCalledWith(
@@ -319,7 +319,7 @@ describe('ensureSystemScaffold', () => {
   it('reconciles name drift when channel found by name-based lookup (stripped suffix)', async () => {
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
-      { id: 'crons-1', name: 'agents ・ 5', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: 'crons-1', name: 'automations ・ 5', type: ChannelType.GuildForum, parentId: 'cat-sys' },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -329,9 +329,9 @@ describe('ensureSystemScaffold', () => {
 
     // Name should have been reconciled.
     const cronsCh = (guild.__cache as Map<string, any>).get('crons-1');
-    expect(cronsCh.name).toBe('agents');
+    expect(cronsCh.name).toBe('automations');
     expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'agents', was: 'agents ・ 5' }),
+      expect.objectContaining({ name: 'automations', was: 'automations ・ 5' }),
       expect.stringContaining('reconciled name'),
     );
   });
@@ -339,7 +339,7 @@ describe('ensureSystemScaffold', () => {
   it('does not reconcile name when it already matches canonical', async () => {
     const guild = makeMockGuild([
       { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
-      { id: '1000000000000000001', name: 'agents', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: '1000000000000000001', name: 'automations', type: ChannelType.GuildForum, parentId: 'cat-sys' },
       { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
     ]);
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -357,6 +357,24 @@ describe('ensureSystemScaffold', () => {
       (c: any) => typeof c[1] === 'string' && c[1].includes('reconciled name'),
     );
     expect(nameReconcileCalls).toHaveLength(0);
+  });
+
+  it('finds existing #agents forum by legacy name and renames to #automations', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: 'agents-1', name: 'agents', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const res = await ensureSystemScaffold({ guild, ensureTasks: false });
+    expect(res).not.toBeNull();
+    expect(res?.cronsForumId).toBe('agents-1');
+
+    // No new forum should have been created.
+    expect(guild.__create).not.toHaveBeenCalled();
+
+    // The existing forum should have been renamed to 'automations'.
+    const agentsCh = (guild.__cache as Map<string, any>).get('agents-1');
+    expect(agentsCh.edit).toHaveBeenCalledWith(expect.objectContaining({ name: 'automations' }));
   });
 });
 
