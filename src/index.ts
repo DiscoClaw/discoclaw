@@ -1051,6 +1051,8 @@ const credentialCheckReport = await runCredentialChecks({
   token: cfg.token,
   openaiApiKey: cfg.openaiApiKey,
   openaiBaseUrl: cfg.openaiBaseUrl,
+  openrouterApiKey: cfg.openrouterApiKey,
+  openrouterBaseUrl: cfg.openrouterBaseUrl,
   workspacePath: workspaceCwd,
   statusChannelId: resolvedStatusChannelId,
   activeProviders,
