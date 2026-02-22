@@ -1326,6 +1326,10 @@ if (cfg.webhookEnabled && savedCronExecCtx) {
           log,
         });
         log.info({ port: cfg.webhookPort, configPath: cfg.webhookConfigPath }, 'webhook:server started');
+        log.warn(
+          { host: '127.0.0.1', port: cfg.webhookPort },
+          'webhook:server is bound to loopback (127.0.0.1) — external services (e.g. GitHub) cannot reach it. See docs/webhook-exposure.md for exposure options (Tailscale Funnel recommended)',
+        );
       } catch (err) {
         log.error({ err }, 'webhook:server failed to start');
       }
