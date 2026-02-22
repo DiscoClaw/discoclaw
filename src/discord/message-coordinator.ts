@@ -512,6 +512,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           openaiBaseUrl: ctx.openaiBaseUrl,
           paFilePaths: ctx.paFilePaths,
           apiCheckTimeoutMs: ctx.apiCheckTimeoutMs,
+          activeProviders: ctx.activeProviders,
         });
         const report = renderStatusReport(snapshot, params.botDisplayName);
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
