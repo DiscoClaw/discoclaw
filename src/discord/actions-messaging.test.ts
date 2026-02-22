@@ -1,8 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
+import * as fsMod from 'node:fs/promises';
 import { executeMessagingAction } from './actions-messaging.js';
 import type { MessagingActionRequest } from './actions-messaging.js';
 import type { ActionContext } from './actions.js';
+
+vi.mock('node:fs/promises', () => ({
+  stat: vi.fn(),
+  readFile: vi.fn(),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -985,5 +991,159 @@ describe('listPins', () => {
     );
 
     expect(result).toEqual({ ok: true, summary: 'No pinned messages in #general' });
+  });
+});
+
+describe('sendFile', () => {
+  beforeEach(() => {
+    vi.mocked(fsMod.stat).mockResolvedValue({ size: 1000 } as any);
+    vi.mocked(fsMod.readFile).mockResolvedValue(Buffer.from('fake image data') as any);
+  });
+
+  it('sends a file to a channel', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/screenshot.png' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Sent file "screenshot.png" to #general' });
+    expect(ch.send).toHaveBeenCalledWith(
+      expect.objectContaining({ files: expect.arrayContaining([expect.anything()]) }),
+    );
+  });
+
+  it('rejects empty filePath', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'sendFile requires a non-empty filePath' });
+  });
+
+  it('rejects whitespace-only filePath', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '   ' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('non-empty filePath');
+  });
+
+  it('returns error when file not found on disk', async () => {
+    vi.mocked(fsMod.stat).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/screenshot.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('not found');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('returns error when file exceeds size limit', async () => {
+    vi.mocked(fsMod.stat).mockResolvedValue({ size: 9 * 1024 * 1024 } as any); // 9 MB > 8 MB limit
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/big.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('size limit');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('returns error for disallowed file extension', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/script.exe' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('.exe');
+    // fs should not be touched — extension check happens first
+    expect(fsMod.stat).not.toHaveBeenCalled();
+  });
+
+  it('includes optional content caption when provided', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/screenshot.png', content: 'Here is the screenshot' },
+      ctx,
+    );
+
+    expect(ch.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'Here is the screenshot', files: expect.anything() }),
+    );
+  });
+
+  it('omits content key when content is not provided', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/screenshot.png' },
+      ctx,
+    );
+
+    const callArg = ch.send.mock.calls[0][0];
+    expect(callArg).not.toHaveProperty('content');
+  });
+
+  it('returns error when channel not found', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#nonexistent', filePath: '/tmp/screenshot.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('not found');
+  });
+
+  it('does NOT suppress when targeting the same channel (unlike sendMessage)', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+    ctx.channelId = 'ch1'; // Same as target — would be suppressed for sendMessage
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/screenshot.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).not.toContain('Suppressed');
+    expect(ch.send).toHaveBeenCalled();
+  });
+
+  it('rejects empty channel', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '', filePath: '/tmp/screenshot.png' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'sendFile requires a non-empty channel name or ID' });
   });
 });
