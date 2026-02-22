@@ -38,7 +38,10 @@ export type WebhookSourceConfig = {
   channel: string;
   /**
    * Prompt instruction sent to the runtime. If omitted, a default is built
-   * from the source name and the raw request body.
+   * from the source name and the raw request body. When provided, the
+   * following placeholders are substituted before the prompt is dispatched:
+   * - `{{body}}` — replaced with the raw request body text
+   * - `{{source}}` — replaced with the webhook source name
    */
   prompt?: string;
 };
@@ -101,7 +104,9 @@ let webhookJobCounter = 0;
 function buildWebhookJob(source: string, src: WebhookSourceConfig, bodyText: string, guildId: string): CronJob {
   webhookJobCounter += 1;
   const id = `webhook-${source}-${webhookJobCounter}`;
-  const prompt = src.prompt ?? `A webhook event was received from source "${source}".\n\nPayload:\n${bodyText}`;
+  const prompt = src.prompt !== undefined
+    ? src.prompt.replaceAll('{{body}}', bodyText).replaceAll('{{source}}', source)
+    : `A webhook event was received from source "${source}".\n\nPayload:\n${bodyText}`;
   return {
     id,
     cronId: '',

@@ -270,7 +270,11 @@ describe('startWebhookServer dispatch', () => {
 
   const config: WebhookConfig = {
     github: { secret: 'gh-secret', channel: 'deploys' },
-    alerts: { secret: 'alert-secret', channel: 'ops', prompt: 'Alert received.' },
+    alerts: { secret: 'alert-secret', channel: 'ops', prompt: 'Alert: {{body}}' },
+    notify: { secret: 'notify-secret', channel: 'general', prompt: 'Event from {{source}}!' },
+    combined: { secret: 'combined-secret', channel: 'all', prompt: '{{source}} says: {{body}}' },
+    static: { secret: 'static-secret', channel: 'static-ch', prompt: 'No placeholders here' },
+    multi: { secret: 'multi-secret', channel: 'multi-ch', prompt: '{{body}} then {{body}} again' },
   };
 
   beforeEach(async () => {
@@ -294,12 +298,20 @@ describe('startWebhookServer dispatch', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  async function postValid(source: 'github' | 'alerts', body = '{}') {
-    const secret = source === 'github' ? 'gh-secret' : 'alert-secret';
+  const sourceSecrets: Record<keyof typeof config, string> = {
+    github: 'gh-secret',
+    alerts: 'alert-secret',
+    notify: 'notify-secret',
+    combined: 'combined-secret',
+    static: 'static-secret',
+    multi: 'multi-secret',
+  };
+
+  async function postValid(source: keyof typeof config, body = '{}') {
     return makeRequest(port, {
       path: `/webhook/${source}`,
       body,
-      headers: { 'x-hub-signature-256': signBody(body, secret) },
+      headers: { 'x-hub-signature-256': signBody(body, sourceSecrets[source]) },
     });
   }
 
@@ -343,7 +355,39 @@ describe('startWebhookServer dispatch', () => {
     await tick();
 
     const [job] = vi.mocked(executeCronJob).mock.calls[0] as [any, any];
-    expect(job.def.prompt).toBe('Alert received.');
+    expect(job.def.prompt).toBe('Alert: {"level":"warn"}');
+  });
+
+  it('replaces {{source}} in a custom prompt with the source name', async () => {
+    await postValid('notify', '{}');
+    await tick();
+
+    const [job] = vi.mocked(executeCronJob).mock.calls[0] as [any, any];
+    expect(job.def.prompt).toBe('Event from notify!');
+  });
+
+  it('replaces both {{body}} and {{source}} in a custom prompt', async () => {
+    await postValid('combined', 'hello world');
+    await tick();
+
+    const [job] = vi.mocked(executeCronJob).mock.calls[0] as [any, any];
+    expect(job.def.prompt).toBe('combined says: hello world');
+  });
+
+  it('passes through a custom prompt with no placeholders unchanged', async () => {
+    await postValid('static', '{}');
+    await tick();
+
+    const [job] = vi.mocked(executeCronJob).mock.calls[0] as [any, any];
+    expect(job.def.prompt).toBe('No placeholders here');
+  });
+
+  it('replaces all occurrences of {{body}} when it appears multiple times', async () => {
+    await postValid('multi', 'ping');
+    await tick();
+
+    const [job] = vi.mocked(executeCronJob).mock.calls[0] as [any, any];
+    expect(job.def.prompt).toBe('ping then ping again');
   });
 
   it('names the job with the source', async () => {
