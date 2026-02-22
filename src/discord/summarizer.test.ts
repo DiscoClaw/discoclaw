@@ -202,6 +202,73 @@ describe('generateSummary', () => {
     await generateSummary(runtime, baseOpts);
     expect(seenTools).toEqual([]);
   });
+
+  it('includes task status context section in prompt when provided', async () => {
+    let seenPrompt = '';
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        seenPrompt = p.prompt;
+        yield { type: 'text_final' as const, text: 'ok' };
+      }),
+    } as unknown as RuntimeAdapter;
+
+    await generateSummary(runtime, {
+      ...baseOpts,
+      taskStatusContext: 't-001: open, "Fix login bug"',
+    });
+    expect(seenPrompt).toContain('Current task statuses:');
+    expect(seenPrompt).toContain('t-001: open, "Fix login bug"');
+  });
+
+  it('includes recently-closed tasks in task status context prompt', async () => {
+    let seenPrompt = '';
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        seenPrompt = p.prompt;
+        yield { type: 'text_final' as const, text: 'ok' };
+      }),
+    } as unknown as RuntimeAdapter;
+
+    await generateSummary(runtime, {
+      ...baseOpts,
+      taskStatusContext:
+        't-002: in_progress, "Refactor auth"\nRecently closed:\nt-001: closed, "Fix login bug"',
+    });
+    expect(seenPrompt).toContain('Recently closed:');
+    expect(seenPrompt).toContain('t-001: closed, "Fix login bug"');
+    expect(seenPrompt).toContain('t-002: in_progress, "Refactor auth"');
+  });
+
+  it('prompt rule mentions recently closed tasks when taskStatusContext is provided', async () => {
+    let seenPrompt = '';
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        seenPrompt = p.prompt;
+        yield { type: 'text_final' as const, text: 'ok' };
+      }),
+    } as unknown as RuntimeAdapter;
+
+    await generateSummary(runtime, {
+      ...baseOpts,
+      taskStatusContext: 'No active tasks.\nRecently closed:\nt-003: closed, "Deploy pipeline"',
+    });
+    expect(seenPrompt).toContain('Recently closed');
+    expect(seenPrompt).toContain('stale open');
+  });
+
+  it('omits task status rule and section when taskStatusContext is not provided', async () => {
+    let seenPrompt = '';
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        seenPrompt = p.prompt;
+        yield { type: 'text_final' as const, text: 'ok' };
+      }),
+    } as unknown as RuntimeAdapter;
+
+    await generateSummary(runtime, baseOpts);
+    expect(seenPrompt).not.toContain('Current task statuses:');
+    expect(seenPrompt).not.toContain('Recently closed');
+  });
 });
 
 describe('safe session key', () => {

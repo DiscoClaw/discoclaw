@@ -957,7 +957,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         threadId: threadId || null,
       });
 
-      type SummaryWork = { existingSummary: string | null; exchange: string; summarySeq: number };
+      type SummaryWork = { existingSummary: string | null; exchange: string; summarySeq: number; taskStatusContext?: string };
       let pendingSummaryWork: SummaryWork | null = null as SummaryWork | null;
       type ShortTermAppend = { userContent: string; botResponse: string; channelName: string; channelId: string };
       let pendingShortTermAppend: ShortTermAppend | null = null as ShortTermAppend | null;
@@ -2425,6 +2425,59 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               turnCounters.set(sessionKey, 0);
               const summarySeq = (latestSummarySequence.get(sessionKey) ?? 0) + 1;
               latestSummarySequence.set(sessionKey, summarySeq);
+              let taskStatusContext: string | undefined;
+              if (params.taskCtx?.store) {
+                const activeTasks = params.taskCtx.store.list();
+                const RECENT_CLOSED_WINDOW_MS = 6 * 60 * 60 * 1000;
+                const nowMs = Date.now();
+                const recentlyClosed = params.taskCtx.store
+                  .list({ status: 'closed' })
+                  .filter((t) => {
+                    const closedAt = t.closed_at ? new Date(t.closed_at).getTime() : 0;
+                    return nowMs - closedAt < RECENT_CLOSED_WINDOW_MS;
+                  });
+                const TASK_SNAPSHOT_LIMIT = 500;
+                const CLOSED_SNAPSHOT_LIMIT = 200;
+                const TRUNCATION_TRAILER = '(list truncated — only reconcile tasks explicitly listed above)';
+                const activeLines: string[] = [];
+                let activeTotalLen = 0;
+                let activeTruncated = false;
+                for (const t of activeTasks) {
+                  const line = `${t.id}: ${t.status}, "${t.title}"`;
+                  if (activeTotalLen + line.length + 1 > TASK_SNAPSHOT_LIMIT) {
+                    activeTruncated = true;
+                    break;
+                  }
+                  activeLines.push(line);
+                  activeTotalLen += line.length + 1;
+                }
+                const parts: string[] = [];
+                if (activeLines.length > 0) {
+                  parts.push(activeLines.join('\n') + (activeTruncated ? '\n' + TRUNCATION_TRAILER : ''));
+                } else {
+                  parts.push('No active tasks.');
+                }
+                if (recentlyClosed.length > 0) {
+                  const closedLines: string[] = [];
+                  let closedLen = 0;
+                  let closedTruncated = false;
+                  for (const t of recentlyClosed) {
+                    const line = `${t.id}: closed, "${t.title}"`;
+                    if (closedLen + line.length + 1 > CLOSED_SNAPSHOT_LIMIT) {
+                      closedTruncated = true;
+                      break;
+                    }
+                    closedLines.push(line);
+                    closedLen += line.length + 1;
+                  }
+                  parts.push(
+                    'Recently closed:\n' +
+                      closedLines.join('\n') +
+                      (closedTruncated ? '\n(more closed tasks not shown)' : ''),
+                  );
+                }
+                taskStatusContext = parts.join('\n');
+              }
               pendingSummaryWork = {
                 summarySeq,
                 existingSummary: summarySection || null,
@@ -2432,6 +2485,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   (historySection ? historySection + '\n' : '') +
                   `[${msg.author.displayName || msg.author.username}]: ${msg.content}\n` +
                   `[${params.botDisplayName}]: ${(processedText || '').slice(0, 500)}`,
+                ...(taskStatusContext !== undefined ? { taskStatusContext } : {}),
               };
             } else if (summarySection) {
               // Persist counter progress so restarts resume from last known count.
@@ -2489,6 +2543,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             cwd: params.workspaceCwd,
             maxChars: params.summaryMaxChars,
             timeoutMs: 30_000,
+            ...(work.taskStatusContext !== undefined ? { taskStatusContext: work.taskStatusContext } : {}),
           });
 
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
