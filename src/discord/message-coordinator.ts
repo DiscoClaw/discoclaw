@@ -1086,18 +1086,33 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     params.forgeProgressThrottleMs ?? 3000,
                   );
                   const postedPhaseStarts = new Set<string>();
+                  const phaseStartMessages = new Map<string, { edit: (opts: any) => Promise<any> }>();
 
                   const postPhaseStart = async (event: PlanRunEvent) => {
-                    if (event.type !== 'phase_start') return;
-                    if (postedPhaseStarts.has(event.phase.id)) return;
-                    postedPhaseStarts.add(event.phase.id);
-                    try {
-                      await msg.channel.send({
-                        content: `Starting phase **${event.phase.id}**: ${event.phase.title}`,
-                        allowedMentions: NO_MENTIONS,
-                      });
-                    } catch (err) {
-                      params.log?.warn({ err, planId, phaseId: event.phase.id }, 'plan-run: phase-start post failed');
+                    if (event.type === 'phase_start') {
+                      if (postedPhaseStarts.has(event.phase.id)) return;
+                      postedPhaseStarts.add(event.phase.id);
+                      try {
+                        const phaseMsg = await msg.channel.send({
+                          content: `**${event.phase.title}**...`,
+                          allowedMentions: NO_MENTIONS,
+                        });
+                        phaseStartMessages.set(event.phase.id, phaseMsg as any);
+                      } catch (err) {
+                        params.log?.warn({ err, planId, phaseId: event.phase.id }, 'plan-run: phase-start post failed');
+                      }
+                    } else if (event.type === 'phase_complete') {
+                      const phaseMsg = phaseStartMessages.get(event.phase.id);
+                      if (!phaseMsg) return;
+                      const indicator = event.status === 'done' ? '[x]' : event.status === 'failed' ? '[!]' : '[-]';
+                      try {
+                        await phaseMsg.edit({
+                          content: `${indicator} **${event.phase.title}**`,
+                          allowedMentions: NO_MENTIONS,
+                        });
+                      } catch (err) {
+                        params.log?.warn({ err, planId, phaseId: event.phase.id }, 'plan-run: phase-complete edit failed');
+                      }
                     }
                   };
 
@@ -1260,6 +1275,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     }
 
                     await editSummary(summaryMsg);
+
+                    // Post a separate final summary message in the channel flow (full runs only)
+                    if (!isRunOne) {
+                      try {
+                        await msg.channel.send({ content: summaryMsg, allowedMentions: NO_MENTIONS });
+                      } catch (err) {
+                        params.log?.warn({ err, planId }, 'plan-run: final summary channel post failed');
+                      }
+                    }
 
                     // Auto-close plan if all phases are terminal
                     const closeResult = await closePlanIfComplete(

@@ -273,18 +273,33 @@ export async function executePlanAction(
         let statusMsg: { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> } | undefined;
         let lastStatusEditAt = 0;
 
-        const postedPhaseStarts = new Set<string>();
+        const phaseStartMessages = new Map<string, { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> }>();
         const onPlanEvent = async (event: PlanRunEvent): Promise<void> => {
-          if (event.type !== 'phase_start') return;
-          if (postedPhaseStarts.has(event.phase.id) || !runChannel) return;
-          postedPhaseStarts.add(event.phase.id);
-          try {
-            await runChannel.send({
-              content: `Starting phase **${event.phase.id}**: ${event.phase.title}`,
-              allowedMentions: NO_MENTIONS,
-            });
-          } catch (err) {
-            planCtx.log?.warn({ err, planId: runPlanId, phaseId: event.phase.id }, 'plan:action:run phase-start post failed');
+          if (event.type === 'phase_start') {
+            if (phaseStartMessages.has(event.phase.id) || !runChannel) return;
+            try {
+              const sent = await runChannel.send({
+                content: `**${event.phase.title}**...`,
+                allowedMentions: NO_MENTIONS,
+              });
+              if (sent && typeof (sent as any).edit === 'function') {
+                phaseStartMessages.set(event.phase.id, sent as any);
+              }
+            } catch (err) {
+              planCtx.log?.warn({ err, planId: runPlanId, phaseId: event.phase.id }, 'plan:action:run phase-start post failed');
+            }
+          } else if (event.type === 'phase_complete') {
+            const phaseMsg = phaseStartMessages.get(event.phase.id);
+            if (!phaseMsg) return;
+            const indicator = event.status === 'done' ? '[x]' : event.status === 'failed' ? '[!]' : '[-]';
+            try {
+              await phaseMsg.edit({
+                content: `${indicator} **${event.phase.title}**`,
+                allowedMentions: NO_MENTIONS,
+              });
+            } catch {
+              // best-effort
+            }
           }
         };
 
@@ -428,7 +443,7 @@ export async function executePlanAction(
         }
         const finalContent = lines.join('\n');
 
-        // Edit status message to show final outcome, or send a new message if no statusMsg.
+        // Edit status message to show final outcome (preserved for backwards compatibility).
         if (!planCtx.skipCompletionNotify) {
           try {
             if (statusMsg) {
@@ -438,15 +453,23 @@ export async function executePlanAction(
               } catch {
                 // best-effort
               }
-            } else {
-              // Fall back to sending a new message if we never got a statusMsg.
-              if (runChannel) {
+            }
+            // Post a standalone completion message as a new chat message.
+            if (runChannel) {
+              try {
                 await runChannel.send({ content: finalContent, allowedMentions: NO_MENTIONS });
-              } else {
+              } catch {
+                // best-effort
+              }
+            } else if (!statusMsg) {
+              // Fall back to sending a new message if we never got runChannel or statusMsg.
+              try {
                 const channel = await ctx.client.channels.fetch(ctx.channelId);
                 if (channel && 'send' in channel) {
                   await (channel as any).send({ content: finalContent, allowedMentions: NO_MENTIONS });
                 }
+              } catch {
+                // best-effort
               }
             }
           } catch {

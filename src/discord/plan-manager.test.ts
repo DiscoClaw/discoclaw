@@ -1338,6 +1338,16 @@ describe('runNextPhase', () => {
           kind: phases.phases[0]!.kind,
         },
       },
+      {
+        type: 'phase_complete',
+        planId: 'plan-011',
+        phase: {
+          id: phases.phases[0]!.id,
+          title: phases.phases[0]!.title,
+          kind: phases.phases[0]!.kind,
+        },
+        status: 'done',
+      },
     ]);
   });
 
