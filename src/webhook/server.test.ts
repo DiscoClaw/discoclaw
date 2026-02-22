@@ -367,13 +367,21 @@ describe('startWebhookServer dispatch', () => {
     expect(id0).not.toBe(id1);
   });
 
-  it('sets schedule to @once and timezone to UTC on the synthetic job', async () => {
+  it('leaves schedule undefined and sets timezone to UTC on the synthetic job', async () => {
     await postValid('github');
     await tick();
 
     const [job] = vi.mocked(executeCronJob).mock.calls[0] as [any, any];
-    expect(job.def.schedule).toBe('@once');
+    expect(job.def.schedule).toBeUndefined();
     expect(job.def.timezone).toBe('UTC');
+  });
+
+  it('sets triggerType to webhook on the synthetic job', async () => {
+    await postValid('github');
+    await tick();
+
+    const [job] = vi.mocked(executeCronJob).mock.calls[0] as [any, any];
+    expect(job.def.triggerType).toBe('webhook');
   });
 
   it('decodes a valid percent-encoded source name before looking it up', async () => {

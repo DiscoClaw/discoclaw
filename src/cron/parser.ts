@@ -66,6 +66,7 @@ export async function parseCronDefinition(
       return null;
     }
     return {
+      triggerType: 'schedule',
       schedule: parsed.schedule.trim(),
       timezone: parsed.timezone.trim() || getDefaultTimezone(),
       channel: parsed.channel.replace(/^#/, '').trim(),

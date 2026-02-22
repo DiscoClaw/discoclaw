@@ -53,7 +53,7 @@ describe('CronRunStats', () => {
   it('creates empty store on missing file', async () => {
     const stats = await loadRunStats(statsPath);
     const store = stats.getStore();
-    expect(store.version).toBe(1);
+    expect(store.version).toBe(3);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
 
@@ -189,7 +189,7 @@ describe('CronRunStats', () => {
 describe('emptyStore', () => {
   it('returns valid initial structure', () => {
     const store = emptyStore();
-    expect(store.version).toBe(1);
+    expect(store.version).toBe(3);
     expect(store.updatedAt).toBeGreaterThan(0);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });

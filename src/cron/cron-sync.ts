@@ -102,7 +102,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
 
       if (needsMetadataUpdate) {
         if (needsCadence) {
-          const cadence = detectCadence(fullJob.def.schedule);
+          const cadence = fullJob.def.schedule ? detectCadence(fullJob.def.schedule) : null;
           updates.cadence = cadence;
         }
 
@@ -112,9 +112,11 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
         }
 
         if (needsModel) {
-          const cadence = updates.cadence ?? record.cadence ?? detectCadence(fullJob.def.schedule);
-          const model = await classifyCronModel(runtime, fullJob.name, fullJob.def.prompt, cadence, { model: autoTagModel, cwd });
-          updates.model = model;
+          const cadence = updates.cadence ?? record.cadence ?? (fullJob.def.schedule ? detectCadence(fullJob.def.schedule) : null);
+          if (cadence !== null) {
+            const model = await classifyCronModel(runtime, fullJob.name, fullJob.def.prompt, cadence, { model: autoTagModel, cwd });
+            updates.model = model;
+          }
         }
 
         await statsStore.upsertRecord(record.cronId, record.threadId, updates);
