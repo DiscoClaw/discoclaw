@@ -1990,7 +1990,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
             }
 
-            let lastStreamEditPromise: Promise<void> | null = null;
+            let streamEditQueue: Promise<void> = Promise.resolve();
             const maybeEdit = async (force = false) => {
               if (!reply) return;
               if (isShuttingDown()) return;
@@ -1998,15 +1998,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               lastEditAt = now;
               const out = selectStreamingOutput({ deltaText, activityLabel, finalText, statusTick: statusTick++, showPreview: Date.now() - t0 >= 7000, elapsedMs: Date.now() - t0 });
-              const p = (async () => {
-                try {
-                  await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
-                } catch {
-                  // Ignore Discord edit errors during streaming.
-                }
-              })();
-              lastStreamEditPromise = p;
-              await p;
+              streamEditQueue = streamEditQueue
+                .catch(() => undefined)
+                .then(async () => {
+                  try {
+                    await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
+                  } catch {
+                    // Ignore Discord edit errors during streaming.
+                  }
+                });
+              await streamEditQueue;
             };
 
             // Stream stall warning state.
@@ -2140,13 +2141,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
             clearInterval(keepalive);
 
-            // Drain any in-flight streaming edit so it settles before the final
-            // editThenSendChunks call — prevents the streaming preview from racing
-            // with (and overwriting) the properly-processed final message.
-            if (lastStreamEditPromise) {
-              try { await lastStreamEditPromise; } catch { /* ignore */ }
-              lastStreamEditPromise = null;
-            }
+            // Drain all queued streaming edits so they settle before the final
+            // editThenSendChunks call — prevents stale streaming previews from
+            // racing with (and overwriting) the properly-processed final message.
+            try { await streamEditQueue; } catch { /* ignore */ }
+            streamEditQueue = Promise.resolve();
 
             processedText = finalText || deltaText || (collectedImages.length > 0 ? '' : '(no output)');
             let actions: { type: string }[] = [];
@@ -2158,14 +2157,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             // when the stream completed without error — some runtime modes (long-running
             // process, tool-aware queue timing) may deliver complete text via deltaText
             // without a discrete text_final event.
-            if (!hadTextFinal && !invokeHadError && processedText.includes('<discord-action>')) {
+            const streamCompletedForActions = !invokeHadError && !abortSignal.aborted;
+            if (!hadTextFinal && streamCompletedForActions && processedText.includes('<discord-action>')) {
               params.log?.warn(
                 { flow: 'message', sessionKey, textLen: processedText.length },
                 'discord:action fallback — hadTextFinal=false but text contains action markers',
               );
             }
-            const canParseActions = hadTextFinal || (!invokeHadError && processedText.includes('<discord-action>'));
-            if (params.discordActionsEnabled && msg.guild && canParseActions && !invokeHadError) {
+            const canParseActions = streamCompletedForActions
+              && (hadTextFinal || processedText.includes('<discord-action>'));
+            if (params.discordActionsEnabled && msg.guild && canParseActions) {
               const parsed = parseDiscordActions(processedText, actionFlags);
               if (parsed.actions.length > 0) {
                 actions = parsed.actions;

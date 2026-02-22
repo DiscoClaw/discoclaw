@@ -432,10 +432,12 @@ function createReactionHandler(
           let invokeError: string | null = null;
           let lastEditAt = 0;
           const minEditIntervalMs = 1250;
+          let streamEditQueue: Promise<void> = Promise.resolve();
 
           const maybeEdit = async (force = false) => {
             if (!reply) return;
             if (isShuttingDown()) return;
+            const currentReply = reply;
             const now = Date.now();
             if (!force && now - lastEditAt < minEditIntervalMs) return;
             lastEditAt = now;
@@ -445,9 +447,16 @@ function createReactionHandler(
               showPreview: Date.now() - t0 >= 7000,
               elapsedMs: Date.now() - t0,
             });
-            try {
-              await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
-            } catch { /* ignore Discord edit errors during streaming */ }
+            streamEditQueue = streamEditQueue
+              .catch(() => undefined)
+              .then(async () => {
+                try {
+                  await currentReply.edit({ content: out, allowedMentions: NO_MENTIONS });
+                } catch {
+                  // Ignore Discord edit errors during streaming.
+                }
+              });
+            await streamEditQueue;
           };
 
           // Stream stall warning state.
@@ -514,6 +523,8 @@ function createReactionHandler(
             }
           } finally {
             clearInterval(keepalive);
+            try { await streamEditQueue; } catch { /* ignore */ }
+            streamEditQueue = Promise.resolve();
           }
           metrics.recordInvokeResult('reaction', Date.now() - t0, true);
           params.log?.info({ flow: 'reaction', sessionKey, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');

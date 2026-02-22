@@ -4,6 +4,7 @@ import { ChannelType } from 'discord.js';
 import { createMessageCreateHandler } from './discord.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
 import { inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
+import * as abortRegistry from './discord/abort-registry.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -517,6 +518,106 @@ describe('auto-follow-up for query actions', () => {
     // channelInfo for a non-existent channel fails -> no follow-up.
     expect(runtime.invoke).toHaveBeenCalledTimes(1);
   });
+
+  it('does not execute actions when stream is aborted without a runtime error', async () => {
+    const runtimeStarted = (() => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => { resolve = r; });
+      return { promise, resolve };
+    })();
+    const runtime = {
+      invoke: vi.fn(async function* (p: { signal?: AbortSignal }) {
+        runtimeStarted.resolve();
+        yield {
+          type: 'text_delta',
+          text: 'partial output\n<discord-action>{"type":"channelCreate","name":"unsafe"}</discord-action>',
+        } as any;
+        await new Promise<void>((resolve) => {
+          if (p.signal?.aborted) return resolve();
+          p.signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+        yield { type: 'done' } as any;
+      }),
+    } as any;
+
+    const msg = makeMsg();
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    const pending = handler(msg);
+    await runtimeStarted.promise;
+    let abortedCount = 0;
+    for (let i = 0; i < 25 && abortedCount === 0; i++) {
+      abortedCount = abortRegistry.tryAbortAll();
+      if (abortedCount === 0) await Promise.resolve();
+    }
+    expect(abortedCount).toBe(1);
+    await pending;
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(1);
+    expect(msg.guild.channels.create).not.toHaveBeenCalled();
+  });
+
+  it('drains all queued streaming edits before finalizing the reply', async () => {
+    vi.useFakeTimers();
+    try {
+      const unblockRuntime = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const unblockFirstStallEdit = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtimeStarted = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      let stallEditCalls = 0;
+
+      const runtime = {
+        invoke: vi.fn(async function* () {
+          runtimeStarted.resolve();
+          await unblockRuntime.promise;
+          yield { type: 'done' } as any;
+        }),
+      } as any;
+
+      const replyObj = {
+        edit: vi.fn().mockImplementation(async (payload: { content?: string }) => {
+          stallEditCalls++;
+          if (stallEditCalls === 1) {
+            await unblockFirstStallEdit.promise;
+          }
+        }),
+        delete: vi.fn().mockResolvedValue(undefined),
+      };
+      const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
+      const handler = createMessageCreateHandler(
+        baseParams(runtime, { streamStallWarningMs: 1 }),
+        makeQueue(),
+      );
+
+      let settled = false;
+      const pending = handler(msg).then(() => { settled = true; });
+
+      await runtimeStarted.promise;
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(stallEditCalls).toBe(1);
+
+      unblockRuntime.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      unblockFirstStallEdit.resolve();
+      await pending;
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -526,6 +627,7 @@ describe('auto-follow-up for query actions', () => {
 describe('in-flight reply registry cleanup', () => {
   afterEach(() => {
     resetInFlight();
+    abortRegistry._resetForTest();
   });
 
   it('no leaked registry entries after normal completion', async () => {
