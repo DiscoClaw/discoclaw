@@ -121,7 +121,7 @@ export async function ensureSystemCategory(guild: Guild, log?: LoggerLike): Prom
 async function ensureChild(
   guild: Guild,
   parentCategoryId: string,
-  spec: { name: string; type: ChannelType.GuildText | ChannelType.GuildForum; topic?: string },
+  spec: { name: string; type: ChannelType.GuildText | ChannelType.GuildForum; topic?: string; legacyNames?: string[] },
   log?: LoggerLike,
   existingId?: string,
 ): Promise<{ id?: string; created: boolean; moved: boolean }> {
@@ -187,6 +187,34 @@ async function ensureChild(
     return { id: String((exact as any).id ?? ''), created: false, moved };
   }
 
+  // Legacy name lookup — find by old names and reconcile to canonical.
+  if (spec.legacyNames) {
+    for (const legacyName of spec.legacyNames) {
+      const legacy = findByNameAndType(guild, legacyName, spec.type);
+      if (legacy) {
+        const moved = await moveUnderCategory(legacy, parentCategoryId, log);
+        const currentName = String((legacy as any).name ?? '');
+        if (norm(currentName) !== norm(spec.name)) {
+          try {
+            await (legacy as any).edit({ name: spec.name });
+            log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
+          } catch (err) {
+            log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+          }
+        }
+        if (spec.topic && (legacy as any).topic !== spec.topic) {
+          try {
+            await (legacy as any).edit({ topic: spec.topic });
+            log?.info({ name: spec.name }, 'system-bootstrap: reconciled topic');
+          } catch (err) {
+            log?.warn({ err, name: spec.name }, 'system-bootstrap: failed to reconcile topic');
+          }
+        }
+        return { id: String((legacy as any).id ?? ''), created: false, moved };
+      }
+    }
+  }
+
   const nameClash = findAnyByName(guild, spec.name).filter((c) => c.type !== spec.type);
   if (nameClash.length > 0) {
     log?.warn(
@@ -234,12 +262,12 @@ export async function ensureSystemScaffold(
   const crons = await ensureChild(
     guild,
     system.id,
-    { name: 'agents', type: ChannelType.GuildForum, topic: 'Agents are managed by the bot. Use bot commands to create scheduled tasks. Do not create threads manually — they will be archived.' },
+    { name: 'automations', type: ChannelType.GuildForum, topic: 'Automations are managed by the bot. Use bot commands to create scheduled tasks. Do not create threads manually — they will be archived.', legacyNames: ['agents'] },
     log,
     params.existingCronsId,
   );
-  if (crons.created) created.push('agents');
-  if (crons.moved) moved.push('agents');
+  if (crons.created) created.push('automations');
+  if (crons.moved) moved.push('automations');
 
   let tasks: { id?: string; created: boolean; moved: boolean } | null = null;
   if (ensureTasks) {
