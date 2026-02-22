@@ -33,7 +33,7 @@ describe('stripCountSuffix', () => {
   });
 
   it('no-ops on name without suffix', () => {
-    expect(stripCountSuffix('agents')).toBe('agents');
+    expect(stripCountSuffix('automations')).toBe('automations');
   });
 
   it('strips count suffix from "my forum ・ 0"', () => {
@@ -56,16 +56,16 @@ describe('stripCountSuffix', () => {
     expect(stripCountSuffix('beads-6 ・ 5')).toBe('beads');
   });
 
-  it('strips Discord-slugified separator "agents-・-1"', () => {
-    expect(stripCountSuffix('agents-・-1')).toBe('agents');
+  it('strips Discord-slugified separator "automations-・-1"', () => {
+    expect(stripCountSuffix('automations-・-1')).toBe('automations');
   });
 
   it('strips stacked slugified corruption "beads-6-・-・-6"', () => {
     expect(stripCountSuffix('beads-6-・-・-6')).toBe('beads');
   });
 
-  it('strips compact format "agents・1"', () => {
-    expect(stripCountSuffix('agents・1')).toBe('agents');
+  it('strips compact format "automations・1"', () => {
+    expect(stripCountSuffix('automations・1')).toBe('automations');
   });
 });
 
