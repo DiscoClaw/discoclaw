@@ -62,6 +62,7 @@ import {
 import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 import { getGitHash } from './version.js';
 import { runCredentialChecks, formatCredentialReport } from './health/credential-check.js';
+import { healCorruptedJsonStores, healStaleCronRecords, healStaleTaskThreadRefs } from './health/startup-healing.js';
 import { validateDiscordToken } from './validate.js';
 import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
@@ -291,6 +292,7 @@ const cronStatsDir = cfg.cronStatsDirOverride
 const cronTagMapPath = cfg.cronTagMapPathOverride
   || path.join(cronStatsDir, 'tag-map.json');
 const cronTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'cron', 'cron-tag-map.json');
+const cronStatsPath = path.join(cronStatsDir, 'cron-run-stats.json');
 
 if (requireChannelContext && !discordChannelContext) {
   log.error({ contentDir }, 'DISCORD_REQUIRE_CHANNEL_CONTEXT=1 but channel context failed to initialize');
@@ -332,8 +334,28 @@ const botDisplayName = await resolveDisplayName({
 });
 log.info({ botDisplayName }, 'resolved bot display name');
 
+// Resolve task data paths early for JSON healing (before scaffold state is parsed).
+const tasksDataRoot = dataDir ?? path.join(__dirname, '..', 'data');
+const tasksDataDir = path.join(tasksDataRoot, 'tasks');
+const tasksTagMapDefaultPath =
+  resolveTaskDataPath(tasksDataRoot, 'tag-map.json')
+  ?? path.join(tasksDataDir, 'tag-map.json');
+const tasksTagMapPath = cfg.tasksTagMapPathOverride || tasksTagMapDefaultPath;
+
 // --- Load persisted scaffold state (forum IDs created on previous boots) ---
 const scaffoldStatePath = path.join(pidLockDir, 'system-scaffold.json');
+
+// --- JSON healing: back up any corrupted JSON stores before loaders read them ---
+await healCorruptedJsonStores(
+  [
+    { path: scaffoldStatePath, label: 'system-scaffold' },
+    { path: cronStatsPath, label: 'cron-run-stats' },
+    { path: cronTagMapPath, label: 'cron-tag-map' },
+    { path: tasksTagMapPath, label: 'tasks-tag-map' },
+  ],
+  log,
+);
+
 let scaffoldState: { guildId?: string; systemCategoryId?: string; cronsForumId?: string; tasksForumId?: string } = {};
 try {
   const raw = await fs.readFile(scaffoldStatePath, 'utf8');
@@ -357,16 +379,9 @@ const cronForum = cfg.cronForum || scaffoldState.cronsForumId;
 const tasksEnabled = cfg.tasksEnabled;
 const tasksCwd = cfg.tasksCwdOverride || workspaceCwd;
 const tasksForum = cfg.tasksForum || scaffoldState.tasksForumId || '';
-const tasksDataRoot = dataDir ?? path.join(__dirname, '..', 'data');
-const tasksDataDir = path.join(tasksDataRoot, 'tasks');
 const tasksPersistPath =
   resolveTaskDataPath(tasksDataRoot, 'tasks.jsonl')
   ?? path.join(tasksDataDir, 'tasks.jsonl');
-const tasksTagMapDefaultPath =
-  resolveTaskDataPath(tasksDataRoot, 'tag-map.json')
-  ?? path.join(tasksDataDir, 'tag-map.json');
-const tasksTagMapPath = cfg.tasksTagMapPathOverride
-  || tasksTagMapDefaultPath;
 const tasksTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'tasks', 'tag-map.json');
 const tasksMentionUser = cfg.tasksMentionUser;
 const tasksSidebar = cfg.tasksSidebar;
@@ -1002,6 +1017,11 @@ if (system) {
 // --- Cold-start: clean up orphaned in-flight replies from a previous unclean exit ---
 await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'inflight.json'), log });
 
+// --- Task thread healing: surface stale task thread refs for deleted Discord threads ---
+healStaleTaskThreadRefs(sharedTaskStore, client, log).catch((err) => {
+  log.warn({ err }, 'startup:heal:task thread refs failed');
+});
+
 // --- Credential health checks (runs after bot connects: full context available) ---
 const resolvedStatusChannelId = statusChannel || system?.statusChannelId || undefined;
 const credentialCheckReport = await runCredentialChecks({
@@ -1205,8 +1225,10 @@ if (cronEnabled && effectiveCronForum) {
   const cronLocksDir = path.join(cronStatsDir, 'locks');
   await fs.mkdir(cronLocksDir, { recursive: true });
 
-  const cronStatsPath = path.join(cronStatsDir, 'cron-run-stats.json');
   const cronStats = await loadRunStats(cronStatsPath);
+
+  // --- Cron record healing: remove stale stats records for deleted threads ---
+  await healStaleCronRecords(cronStats, client, log);
 
   const cronActionFlags: ActionCategoryFlags = {
     channels: discordActionsChannels,
