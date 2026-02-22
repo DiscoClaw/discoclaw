@@ -37,10 +37,9 @@ export const MESSAGING_ACTION_TYPES = new Set<string>(Object.keys(MESSAGING_TYPE
 // ---------------------------------------------------------------------------
 
 const DISCORD_MAX_CONTENT = 2000;
-const SENDFILE_MAX_BYTES = 8 * 1024 * 1024; // 8 MB — Discord free-tier upload limit
+const SENDFILE_MAX_BYTES = 25 * 1024 * 1024; // 25 MB — Discord standard upload limit
 const SENDFILE_ALLOWED_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'webp',
-  'pdf', 'txt', 'md', 'csv', 'json', 'log',
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -298,6 +297,9 @@ export async function executeMessagingAction(
       if (!SENDFILE_ALLOWED_EXTENSIONS.has(ext)) {
         return { ok: false, error: `File extension ".${ext}" is not allowed. Allowed extensions: ${[...SENDFILE_ALLOWED_EXTENSIONS].join(', ')}` };
       }
+      if (action.content && action.content.length > DISCORD_MAX_CONTENT) {
+        return { ok: false, error: `Content exceeds Discord's ${DISCORD_MAX_CONTENT} character limit (got ${action.content.length})` };
+      }
       let fileBuffer: Buffer;
       try {
         const stat = await fs.stat(action.filePath);
@@ -321,7 +323,7 @@ export async function executeMessagingAction(
         return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived.` };
       }
       const attachment = new AttachmentBuilder(fileBuffer, { name: path.basename(action.filePath) });
-      const opts: any = { files: [attachment] };
+      const opts: any = { files: [attachment], allowedMentions: NO_MENTIONS };
       if (action.content) opts.content = action.content;
       await channel.send(opts);
       return { ok: true, summary: `Sent file "${path.basename(action.filePath)}" to #${channel.name}` };
@@ -353,8 +355,8 @@ export function messagingActionsPromptSection(): string {
 - \`channel\` (required): Channel name (with or without #) or channel ID.
 - \`filePath\` (required): Absolute path to the local file to upload.
 - \`content\` (optional): Caption text to accompany the file.
-- Allowed extensions: png, jpg, jpeg, gif, webp, pdf, txt, md, csv, json, log.
-- Maximum file size: 8 MB.
+- Allowed extensions: png, jpg, jpeg, gif, webp, pdf.
+- Maximum file size: 25 MB.
 - Unlike sendMessage, sendFile is never suppressed when targeting the current channel — the file is not auto-posted as a reply.
 
 **react** — Add a reaction to a message:

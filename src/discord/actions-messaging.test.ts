@@ -1011,7 +1011,7 @@ describe('sendFile', () => {
 
     expect(result).toEqual({ ok: true, summary: 'Sent file "screenshot.png" to #general' });
     expect(ch.send).toHaveBeenCalledWith(
-      expect.objectContaining({ files: expect.arrayContaining([expect.anything()]) }),
+      expect.objectContaining({ files: expect.arrayContaining([expect.anything()]), allowedMentions: { parse: [] } }),
     );
   });
 
@@ -1054,7 +1054,7 @@ describe('sendFile', () => {
   });
 
   it('returns error when file exceeds size limit', async () => {
-    vi.mocked(fsMod.stat).mockResolvedValue({ size: 9 * 1024 * 1024 } as any); // 9 MB > 8 MB limit
+    vi.mocked(fsMod.stat).mockResolvedValue({ size: 26 * 1024 * 1024 } as any); // 26 MB > 25 MB limit
     const ch = makeMockChannel({ id: 'ch1', name: 'general' });
     const ctx = makeCtx([ch]);
 
@@ -1094,6 +1094,22 @@ describe('sendFile', () => {
     expect(ch.send).toHaveBeenCalledWith(
       expect.objectContaining({ content: 'Here is the screenshot', files: expect.anything() }),
     );
+  });
+
+  it('rejects caption exceeding 2000 chars', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/screenshot.png', content: 'x'.repeat(2001) },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('2000 character limit');
+    expect(ch.send).not.toHaveBeenCalled();
+    // Caption validation must happen before any file I/O
+    expect(fsMod.stat).not.toHaveBeenCalled();
   });
 
   it('omits content key when content is not provided', async () => {
@@ -1145,5 +1161,33 @@ describe('sendFile', () => {
     );
 
     expect(result).toEqual({ ok: false, error: 'sendFile requires a non-empty channel name or ID' });
+  });
+
+  it('returns descriptive error when targeting a forum channel by ID', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: 'forum1', filePath: '/tmp/screenshot.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('forum channel');
+    expect((result as any).error).not.toContain('not found');
+  });
+
+  it('returns descriptive error when targeting a forum channel by name', async () => {
+    const forum = makeMockChannel({ id: 'forum1', name: 'beads', type: ChannelType.GuildForum });
+    const ctx = makeCtx([forum]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: 'beads', filePath: '/tmp/screenshot.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('forum channel');
+    expect((result as any).error).not.toContain('not found');
   });
 });

@@ -522,6 +522,25 @@ describe('buildDisplayResultLines', () => {
       'Failed: Channel not found',
     ]);
   });
+
+  it('filters successful sendFile results', () => {
+    const actions = [{ type: 'sendFile' }, { type: 'react' }];
+    const results: DiscordActionResult[] = [
+      { ok: true, summary: 'Sent file "screenshot.png" to #general' },
+      { ok: true, summary: 'Reacted with 👍' },
+    ];
+    const lines = buildDisplayResultLines(actions, results);
+    expect(lines).toEqual(['Done: Reacted with 👍']);
+  });
+
+  it('keeps failed sendFile results', () => {
+    const actions = [{ type: 'sendFile' }];
+    const results: DiscordActionResult[] = [
+      { ok: false, error: 'File not found: /tmp/missing.png' },
+    ];
+    const lines = buildDisplayResultLines(actions, results);
+    expect(lines).toEqual(['Failed: File not found: /tmp/missing.png']);
+  });
 });
 
 describe('buildAllResultLines', () => {
