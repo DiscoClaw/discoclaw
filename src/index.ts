@@ -500,6 +500,7 @@ const registerClaudeRuntime = () => {
 
 if (cfg.openaiApiKey) {
   const openaiRuntimeRaw = createOpenAICompatRuntime({
+    id: 'openai',
     baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
     apiKey: cfg.openaiApiKey,
     defaultModel: cfg.openaiModel,
@@ -515,6 +516,7 @@ if (cfg.openaiApiKey) {
 
 if (cfg.openrouterApiKey) {
   const openrouterRuntimeRaw = createOpenAICompatRuntime({
+    id: 'openrouter',
     baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1',
     apiKey: cfg.openrouterApiKey,
     defaultModel: cfg.openrouterModel,
