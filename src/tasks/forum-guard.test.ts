@@ -150,8 +150,8 @@ describe('initTasksForumGuard task-aware re-archive (threadCreate)', () => {
     await listener(thread);
 
     expect(thread.send).not.toHaveBeenCalled();
-    expect(thread.edit).toHaveBeenCalled();
-    expect(thread.setName).toHaveBeenCalledWith('✅ [001] My Task');
+    expect(thread.edit).toHaveBeenCalledWith({ name: '✅ [001] My Task', appliedTags: ['tag-closed'] });
+    expect(thread.setName).not.toHaveBeenCalled();
     expect(thread.setArchived).toHaveBeenCalledWith(true);
   });
 
@@ -185,15 +185,6 @@ describe('initTasksForumGuard task-aware re-archive (threadCreate)', () => {
     expect(thread.setArchived).toHaveBeenCalledWith(true);
   });
 
-  it('still archives even when setName throws', async () => {
-    vi.mocked(findTaskByThreadId).mockReturnValue(MOCK_TASK as any);
-    const { listener } = setup();
-    const thread = makeThread({ ownerId: 'some-user' });
-    thread.setName.mockRejectedValue(new Error('setName failed'));
-    await listener(thread);
-
-    expect(thread.setArchived).toHaveBeenCalledWith(true);
-  });
 });
 
 describe('initTasksForumGuard task-aware re-archive (threadUpdate)', () => {
@@ -219,8 +210,8 @@ describe('initTasksForumGuard task-aware re-archive (threadUpdate)', () => {
     await listener(oldThread, newThread);
 
     expect(newThread.send).not.toHaveBeenCalled();
-    expect(newThread.edit).toHaveBeenCalled();
-    expect(newThread.setName).toHaveBeenCalledWith('✅ [001] My Task');
+    expect(newThread.edit).toHaveBeenCalledWith({ name: '✅ [001] My Task', appliedTags: ['tag-closed'] });
+    expect(newThread.setName).not.toHaveBeenCalled();
     expect(newThread.setArchived).toHaveBeenCalledWith(true);
   });
 

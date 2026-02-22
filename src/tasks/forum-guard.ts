@@ -57,12 +57,8 @@ async function reArchiveTaskThread(
   try {
     const current: string[] = (thread as any).appliedTags ?? [];
     const updated = buildAppliedTagsWithStatus(current, task.status, tagMap);
-    await (thread as any).edit({ appliedTags: updated });
-  } catch { /* ignore — proceed to setName */ }
-
-  try {
     const name = buildThreadName(task.id, task.title, task.status);
-    await thread.setName(name);
+    await (thread as any).edit({ name, appliedTags: updated });
   } catch { /* ignore — proceed to archive */ }
 
   try {
