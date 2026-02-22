@@ -560,6 +560,9 @@ function createReactionHandler(
                 messageId: msg.id,
                 threadParentId,
                 deferScheduler: params.deferScheduler,
+                confirmation: {
+                  mode: 'automated' as const,
+                },
               };
               // Construct per-event memoryCtx with the reacting user's ID and Discord metadata.
               const perEventMemoryCtx = params.memoryCtx ? {

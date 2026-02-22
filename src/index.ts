@@ -813,7 +813,8 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
       botProfile: Boolean(botParams.discordActionsBotProfile),
       forge: Boolean(botParams.discordActionsForge),
       plan: Boolean(botParams.discordActionsPlan),
-      memory: Boolean(botParams.discordActionsMemory),
+      // Deferred runs do not carry a user identity, so memory actions are disabled.
+      memory: false,
       config: Boolean(botParams.discordActionsConfig),
       defer: false,
     };
@@ -890,6 +891,9 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
       channelId: channel.id,
       messageId: `defer-${Date.now()}`,
       threadParentId,
+      confirmation: {
+        mode: 'automated',
+      },
     };
     let actionResults: DiscordActionResult[] = [];
     if (parsed.actions.length > 0) {

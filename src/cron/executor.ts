@@ -275,6 +275,9 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           channelId: targetChannel.id,
           messageId: '',
           deferScheduler: ctx.deferScheduler,
+          confirmation: {
+            mode: 'automated' as const,
+          },
         };
         const results = await discordActions.executeDiscordActions(actions, actCtx, ctx.log, {
           taskCtx: ctx.taskCtx,

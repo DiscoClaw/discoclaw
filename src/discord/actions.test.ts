@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionResult } from './actions.js';
 import { TaskStore } from '../tasks/store.js';
+import { _resetDestructiveConfirmationForTest } from './destructive-confirmation.js';
 
 const ALL_FLAGS: ActionCategoryFlags = {
   channels: true,
@@ -25,6 +26,10 @@ const ALL_FLAGS: ActionCategoryFlags = {
 // ---------------------------------------------------------------------------
 
 describe('parseDiscordActions', () => {
+  beforeEach(() => {
+    _resetDestructiveConfirmationForTest();
+  });
+
   it('extracts a single action and strips it from text', () => {
     const input = 'Here is the list:\n<discord-action>{"type":"channelList"}</discord-action>\nDone.';
     const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
@@ -206,6 +211,31 @@ describe('parseDiscordActions', () => {
     const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, tasks: true, plan: true });
     expect(actions).toEqual([{ type: 'planClose', planId: 'dev-uqy' }]);
   });
+
+  it('ignores action tags inside fenced code blocks', () => {
+    const input =
+      'Example only:\n```json\n<discord-action>{"type":"channelDelete","channelId":"ch1"}</discord-action>\n```\nNo action.';
+    const { actions, cleanText } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([]);
+    expect(cleanText).toContain('<discord-action>');
+  });
+
+  it('ignores action tags inside inline code spans', () => {
+    const input = 'Do not run `<discord-action>{"type":"channelDelete","channelId":"ch1"}</discord-action>` please.';
+    const { actions, cleanText } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([]);
+    expect(cleanText).toContain('<discord-action>');
+  });
+
+  it('ignores action tags inside indented code blocks', () => {
+    const input =
+      'Example only:\n' +
+      '    <discord-action>{"type":"channelDelete","channelId":"ch1"}</discord-action>\n' +
+      'No action.';
+    const { actions, cleanText } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([]);
+    expect(cleanText).toContain('<discord-action>');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -253,6 +283,10 @@ function makeCtx(guild: any) {
 }
 
 describe('executeDiscordActions', () => {
+  beforeEach(() => {
+    _resetDestructiveConfirmationForTest();
+  });
+
   it('channelCreate succeeds with parent category', async () => {
     const guild = makeMockGuild([
       { id: 'cat1', name: 'Dev', type: ChannelType.GuildCategory },
@@ -376,6 +410,53 @@ describe('executeDiscordActions', () => {
     );
     expect(results).toHaveLength(1);
     expect(results[0].ok).toBe(true);
+  });
+
+  it('blocks destructive actions without explicit confirmation bypass', async () => {
+    const guild = makeMockGuild([]);
+    const results = await executeDiscordActions(
+      [{ type: 'channelDelete', channelId: 'ch1' } as any],
+      {
+        ...makeCtx(guild),
+        confirmation: {
+          mode: 'interactive',
+          sessionKey: 'discord:channel:chan',
+          userId: '123',
+        },
+      },
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    if (results[0].ok) throw new Error('unexpected ok result');
+    expect(results[0].error).toContain('requires confirmation');
+    expect(results[0].error).toContain('!confirm');
+  });
+
+  it('allows destructive actions with bypassDestructive confirmation context', async () => {
+    const ban = vi.fn(async () => {});
+    const guild = {
+      members: {
+        fetch: vi.fn(async () => ({ displayName: 'User42', ban })),
+      },
+    } as any;
+    const results = await executeDiscordActions(
+      [{ type: 'ban', userId: '42' } as any],
+      {
+        guild,
+        client: {} as any,
+        channelId: 'chan',
+        messageId: 'msg',
+        confirmation: {
+          mode: 'interactive',
+          sessionKey: 'discord:channel:chan',
+          userId: '123',
+          bypassDestructive: true,
+        },
+      },
+    );
+    expect(results).toEqual([{ ok: true, summary: 'Banned User42' }]);
+    expect(guild.members.fetch).toHaveBeenCalledWith('42');
+    expect(ban).toHaveBeenCalledOnce();
   });
 });
 

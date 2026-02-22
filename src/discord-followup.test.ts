@@ -5,6 +5,7 @@ import { createMessageCreateHandler } from './discord.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
 import { inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
 import * as abortRegistry from './discord/abort-registry.js';
+import { _resetDestructiveConfirmationForTest as resetDestructiveConfirm } from './discord/destructive-confirmation.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -617,6 +618,52 @@ describe('auto-follow-up for query actions', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('destructive action confirmation flow', () => {
+  afterEach(() => {
+    resetDestructiveConfirm();
+  });
+
+  it('requires !confirm token before executing destructive actions', async () => {
+    const ban = vi.fn(async () => {});
+    const guild = {
+      members: {
+        fetch: vi.fn(async () => ({ displayName: 'BadUser', ban })),
+      },
+      channels: { cache: { find: vi.fn(), values: vi.fn() } },
+    } as any;
+
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: '<discord-action>{"type":"ban","userId":"42"}</discord-action>' } as any;
+      }),
+    } as any;
+
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { discordActionsModeration: true }),
+      makeQueue(),
+    );
+
+    const msg1 = makeMsg({ guild, content: 'ban that user' });
+    await handler(msg1);
+
+    const firstReply = await msg1.reply.mock.results[0]?.value;
+    const firstContent = String(
+      firstReply?.edit?.mock?.calls?.[firstReply.edit.mock.calls.length - 1]?.[0]?.content ?? '',
+    );
+    const token = /!confirm\s+([a-z0-9_-]{6,64})/i.exec(firstContent)?.[1];
+    expect(token).toBeTruthy();
+    expect(ban).not.toHaveBeenCalled();
+
+    const msg2 = makeMsg({ guild, content: `!confirm ${token}` });
+    await handler(msg2);
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(1);
+    expect(ban).toHaveBeenCalledOnce();
+    const confirmReply = (msg2.reply as any).mock.calls[0]?.[0]?.content ?? '';
+    expect(confirmReply).toContain('Confirmed `ban`.');
   });
 });
 
