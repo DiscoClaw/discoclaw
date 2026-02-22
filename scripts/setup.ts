@@ -192,6 +192,8 @@ if (configOptional.toLowerCase() === 'y') {
   const actions = await ask('Enable Discord Actions? (lets the AI manage your server) [y/N] ');
   if (actions.toLowerCase() === 'y') {
     values.DISCOCLAW_DISCORD_ACTIONS = '1';
+  } else {
+    values.DISCOCLAW_DISCORD_ACTIONS = '0';
   }
 
   const statusChannel = await askOptional(
