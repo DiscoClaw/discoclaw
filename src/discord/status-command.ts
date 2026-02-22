@@ -41,6 +41,8 @@ export type StatusCommandContext = {
   cronScheduler: CronScheduler | null;
   /** Shared task store for open-task count. */
   sharedTaskStore: TaskStore | null;
+  /** Set of runtime provider IDs that are actively configured (e.g. 'claude', 'openai'). */
+  activeProviders?: Set<string>;
 };
 
 export type StatusCronEntry = {
@@ -92,6 +94,8 @@ export type CollectStatusOpts = {
   paFilePaths: Array<{ label: string; path: string }>;
   /** Timeout for live API connectivity checks (ms). Defaults to 5 000 ms. */
   apiCheckTimeoutMs?: number;
+  /** Set of runtime provider IDs that are actively configured. */
+  activeProviders?: Set<string>;
 };
 
 /**
@@ -192,14 +196,22 @@ export async function collectStatusSnapshot(opts: CollectStatusOpts): Promise<St
   const [durableItemCount, rollingSummaryCharCount, apiChecks, paFiles] = await Promise.all([
     opts.durableDataDir ? countDurableItems(opts.durableDataDir) : Promise.resolve(0),
     opts.summaryDataDir ? countRollingSummaryChars(opts.summaryDataDir) : Promise.resolve(0),
-    Promise.all([
-      withApiTimeout(checkDiscordToken(opts.discordToken), apiCheckTimeoutMs, 'discord-token'),
-      withApiTimeout(
-        checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl }),
-        apiCheckTimeoutMs,
-        'openai-key',
-      ),
-    ]),
+    (async () => {
+      const checks: Promise<CredentialCheckResult>[] = [
+        withApiTimeout(checkDiscordToken(opts.discordToken), apiCheckTimeoutMs, 'discord-token'),
+      ];
+      const runOpenAi = opts.activeProviders === undefined || opts.activeProviders.has('openai');
+      if (runOpenAi) {
+        checks.push(
+          withApiTimeout(
+            checkOpenAiKey({ apiKey: opts.openaiApiKey, baseUrl: opts.openaiBaseUrl }),
+            apiCheckTimeoutMs,
+            'openai-key',
+          ),
+        );
+      }
+      return Promise.all(checks);
+    })(),
     checkPaFiles(opts.paFilePaths),
   ]);
 

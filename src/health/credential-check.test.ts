@@ -255,6 +255,51 @@ describe('runCredentialChecks', () => {
     );
     expect(openAiCall).toBeDefined();
   });
+
+  it('omits openai-key result when openai is not in activeProviders (key present)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const report = await runCredentialChecks({
+      token: 'valid-token',
+      openaiApiKey: 'sk-stale',
+      activeProviders: new Set(['claude']),
+    });
+
+    expect(report.results.find((r) => r.name === 'openai-key')).toBeUndefined();
+    // fetch should only be called once (for discord)
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the openai-key check when openai is in activeProviders', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const report = await runCredentialChecks({
+      token: 'valid-token',
+      openaiApiKey: 'sk-valid',
+      activeProviders: new Set(['openai']),
+    });
+
+    const openaiResult = report.results.find((r) => r.name === 'openai-key');
+    expect(openaiResult).toBeDefined();
+    expect(openaiResult?.status).toBe('ok');
+  });
+
+  it('preserves current behavior (runs openai check) when activeProviders is omitted', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const report = await runCredentialChecks({
+      token: 'valid-token',
+      openaiApiKey: 'sk-valid',
+    });
+
+    const openaiResult = report.results.find((r) => r.name === 'openai-key');
+    expect(openaiResult).toBeDefined();
+    expect(openaiResult?.status).toBe('ok');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
 });
 
 // formatCredentialReport ---------------------------------------------------

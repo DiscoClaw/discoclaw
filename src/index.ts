@@ -629,6 +629,14 @@ if (cfg.forgeAuditorRuntime) {
   }
 }
 
+// Collect the set of provider IDs that are actually in use.
+// Used to skip credential checks for providers that aren't configured.
+const activeProviders = new Set<string>([runtime.id]);
+if (forgeCommandsEnabled) {
+  if (drafterRuntime?.id) activeProviders.add(drafterRuntime.id);
+  if (auditorRuntime?.id) activeProviders.add(auditorRuntime.id);
+}
+
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
 // Mutable ref updated by the message handler; read by the !status command.
@@ -770,6 +778,7 @@ const botParams = {
     durableMemoryEnabled,
     cronScheduler: null as CronScheduler | null,
     sharedTaskStore,
+    activeProviders,
   },
 };
 
@@ -1001,6 +1010,7 @@ const credentialCheckReport = await runCredentialChecks({
   openaiBaseUrl: cfg.openaiBaseUrl,
   workspacePath: workspaceCwd,
   statusChannelId: resolvedStatusChannelId,
+  activeProviders,
 });
 const credentialReport = formatCredentialReport(credentialCheckReport);
 if (credentialCheckReport.criticalFailures.length > 0) {
