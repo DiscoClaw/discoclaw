@@ -80,7 +80,7 @@ describe('parseConfig', () => {
 
   it('defaults discordActionsDefer settings', () => {
     const { config } = parseConfig(env());
-    expect(config.discordActionsDefer).toBe(false);
+    expect(config.discordActionsDefer).toBe(true);
     expect(config.deferMaxDelaySeconds).toBe(DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS);
     expect(config.deferMaxConcurrent).toBe(DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT);
   });
@@ -194,14 +194,59 @@ describe('parseConfig', () => {
   });
 
   // --- Bot profile: action flag ---
-  it('defaults discordActionsBotProfile to false', () => {
+  it('defaults discordActionsBotProfile to true', () => {
     const { config } = parseConfig(env());
-    expect(config.discordActionsBotProfile).toBe(false);
+    expect(config.discordActionsBotProfile).toBe(true);
   });
 
   it('defaults discordActionsPlan to true', () => {
     const { config } = parseConfig(env());
     expect(config.discordActionsPlan).toBe(true);
+  });
+
+  it('defaults discordActionsEnabled to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsEnabled).toBe(true);
+  });
+
+  it('defaults discordActionsMessaging to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsMessaging).toBe(true);
+  });
+
+  it('defaults discordActionsGuild to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsGuild).toBe(true);
+  });
+
+  it('defaults discordActionsPolls to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsPolls).toBe(true);
+  });
+
+  it('defaults discordActionsMemory to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsMemory).toBe(true);
+  });
+
+  it('defaults sessionScanning to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.sessionScanning).toBe(true);
+  });
+
+  it('defaults toolAwareStreaming to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.toolAwareStreaming).toBe(true);
+  });
+
+  it('defaults cronAutoTag to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.cronAutoTag).toBe(true);
+  });
+
+  it('defaults autoJoinThreads to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.autoJoinThreads).toBe(true);
   });
 
   it('reports ignored bot profile action flag when master actions off', () => {
@@ -324,9 +369,9 @@ describe('parseConfig', () => {
   });
 
   // --- Tasks sidebar ---
-  it('defaults tasksSidebar to false', () => {
+  it('defaults tasksSidebar to true', () => {
     const { config } = parseConfig(env());
-    expect(config.tasksSidebar).toBe(false);
+    expect(config.tasksSidebar).toBe(true);
   });
 
   it('parses DISCOCLAW_TASKS_SIDEBAR=1 as true', () => {
