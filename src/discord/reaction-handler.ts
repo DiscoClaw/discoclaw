@@ -523,11 +523,20 @@ function createReactionHandler(
           params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0, hadError: Boolean(invokeError) }, `${logPrefix}:invoke:end`);
 
           // Parse and execute Discord actions.
+          // Relax hadTextFinal requirement when stream completed without error
+          // but text contains action markers (same fix as message-coordinator).
+          if (!hadTextFinal && !invokeError && processedText.includes('<discord-action>')) {
+            params.log?.warn(
+              { sessionKey, textLen: processedText.length },
+              'discord:action fallback — hadTextFinal=false but text contains action markers',
+            );
+          }
+          const canParseActions = hadTextFinal || (!invokeError && processedText.includes('<discord-action>'));
           let parsedActionCount = 0;
           let parsedActions: DiscordActionRequest[] = [];
           let actionResults: DiscordActionResult[] = [];
           let strippedUnrecognizedTypes: string[] = [];
-          if (params.discordActionsEnabled && msg.guild && hadTextFinal && !invokeError) {
+          if (params.discordActionsEnabled && msg.guild && canParseActions && !invokeError) {
             const parsed = parseDiscordActions(processedText, actionFlags);
             parsedActionCount = parsed.actions.length;
             parsedActions = parsed.actions;
