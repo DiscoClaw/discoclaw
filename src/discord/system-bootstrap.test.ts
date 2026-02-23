@@ -299,17 +299,19 @@ describe('ensureSystemScaffold', () => {
     expect(res?.cronsForumId).toBe('1000000000000000001');
     expect(res?.tasksForumId).toBe('1000000000000000002');
 
-    // Names should have been reconciled back to canonical.
     const cronsCh = (guild.__cache as Map<string, any>).get('1000000000000000001');
     const beadsCh = (guild.__cache as Map<string, any>).get('1000000000000000002');
-    expect(cronsCh.name).toBe('automations');
-    expect(beadsCh.name).toBe('tasks');
 
-    // Should have logged name reconciliation.
+    // automations ・ 3 differs only by count suffix — should NOT be renamed.
+    expect(cronsCh.name).toBe('automations ・ 3');
+    expect(cronsCh.edit).not.toHaveBeenCalledWith(expect.objectContaining({ name: expect.anything() }));
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'automations', was: 'automations ・ 3' }),
-      expect.stringContaining('reconciled name'),
+      expect.stringContaining('skipping'),
     );
+
+    // beads-6 is a genuine name deviation — should still be reconciled.
+    expect(beadsCh.name).toBe('tasks');
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'tasks', was: 'beads-6' }),
       expect.stringContaining('reconciled name'),
@@ -327,12 +329,13 @@ describe('ensureSystemScaffold', () => {
     expect(res).not.toBeNull();
     expect(res?.cronsForumId).toBe('crons-1');
 
-    // Name should have been reconciled.
+    // automations ・ 5 differs only by count suffix — should NOT be renamed.
     const cronsCh = (guild.__cache as Map<string, any>).get('crons-1');
-    expect(cronsCh.name).toBe('automations');
+    expect(cronsCh.name).toBe('automations ・ 5');
+    expect(cronsCh.edit).not.toHaveBeenCalledWith(expect.objectContaining({ name: expect.anything() }));
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'automations', was: 'automations ・ 5' }),
-      expect.stringContaining('reconciled name'),
+      expect.stringContaining('skipping'),
     );
   });
 
@@ -357,6 +360,54 @@ describe('ensureSystemScaffold', () => {
       (c: any) => typeof c[1] === 'string' && c[1].includes('reconciled name'),
     );
     expect(nameReconcileCalls).toHaveLength(0);
+  });
+
+  it('skips name reconciliation when only difference is a count suffix (ID-based)', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: '1000000000000000001', name: 'automations', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: '1000000000000000002', name: 'tasks・4', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const res = await ensureSystemScaffold({
+      guild,
+      ensureTasks: true,
+      existingCronsId: '1000000000000000001',
+      existingTasksId: '1000000000000000002',
+    }, log as any);
+    expect(res).not.toBeNull();
+    expect(res?.tasksForumId).toBe('1000000000000000002');
+
+    const tasksCh = (guild.__cache as Map<string, any>).get('1000000000000000002');
+    // edit should NOT have been called with a name argument.
+    expect(tasksCh.edit).not.toHaveBeenCalledWith(expect.objectContaining({ name: expect.anything() }));
+    // Should have logged skip.
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'tasks', was: 'tasks・4' }),
+      expect.stringContaining('skipping'),
+    );
+  });
+
+  it('skips name reconciliation when only difference is a count suffix (name-based)', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: 'crons-1', name: 'automations・5', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const res = await ensureSystemScaffold({ guild, ensureTasks: false }, log as any);
+    expect(res).not.toBeNull();
+    expect(res?.cronsForumId).toBe('crons-1');
+
+    const cronsCh = (guild.__cache as Map<string, any>).get('crons-1');
+    // edit should NOT have been called with a name argument.
+    expect(cronsCh.edit).not.toHaveBeenCalledWith(expect.objectContaining({ name: expect.anything() }));
+    // Should have logged skip.
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'automations', was: 'automations・5' }),
+      expect.stringContaining('skipping'),
+    );
   });
 
   it('finds existing #agents forum by legacy name and renames to #automations', async () => {
