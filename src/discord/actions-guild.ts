@@ -25,6 +25,30 @@ const GUILD_TYPE_MAP: Record<GuildActionRequest['type'], true> = {
 };
 export const GUILD_ACTION_TYPES = new Set<string>(Object.keys(GUILD_TYPE_MAP));
 
+type SearchMessage = {
+  id: string;
+  content: string;
+  author?: { username?: string };
+  createdAt?: Date | null;
+};
+
+type SearchableChannel = {
+  name: string;
+  messages: {
+    fetch(opts: { limit: number; before?: string }): Promise<{ values(): Iterable<SearchMessage> }>;
+  };
+};
+
+function asSearchableChannel(channel: unknown): SearchableChannel | null {
+  if (!channel || typeof channel !== 'object') return null;
+  if (!('messages' in channel) || !('name' in channel)) return null;
+  const messages = (channel as { messages?: unknown }).messages;
+  const name = (channel as { name?: unknown }).name;
+  if (!messages || typeof messages !== 'object' || typeof name !== 'string') return null;
+  if (!('fetch' in messages) || typeof (messages as { fetch?: unknown }).fetch !== 'function') return null;
+  return channel as SearchableChannel;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -123,10 +147,11 @@ export async function executeGuildAction(
     }
 
     case 'searchMessages': {
-      const channel = action.channel
+      const rawChannel = action.channel
         ? resolveChannel(guild, action.channel)
         : guild.channels.cache.get(ctx.channelId);
-      if (!channel || !('messages' in channel)) {
+      const channel = asSearchableChannel(rawChannel);
+      if (!channel) {
         return { ok: false, error: `Channel not found` };
       }
 
@@ -136,16 +161,16 @@ export async function executeGuildAction(
       const afterSnowflake = action.after ? isoToSnowflake(action.after) : null;
 
       const query = action.query.toLowerCase();
-      const matches: any[] = [];
+      const matches: SearchMessage[] = [];
       let cursor: string | undefined = beforeSnowflake ?? undefined;
       let totalScanned = 0;
       let hitAfterBound = false;
 
       for (let page = 0; page < maxPages; page++) {
-        const fetchOpts: any = { limit: 100 };
+        const fetchOpts: { limit: number; before?: string } = { limit: 100 };
         if (cursor) fetchOpts.before = cursor;
 
-        const batch = await (channel as any).messages.fetch(fetchOpts);
+        const batch = await channel.messages.fetch(fetchOpts);
         const msgs = [...batch.values()];
         if (msgs.length === 0) break;
 
@@ -171,16 +196,16 @@ export async function executeGuildAction(
       }
 
       if (matches.length === 0) {
-        return { ok: true, summary: `No messages matching "${action.query}" in #${(channel as any).name} (scanned ${totalScanned} messages)` };
+        return { ok: true, summary: `No messages matching "${action.query}" in #${channel.name} (scanned ${totalScanned} messages)` };
       }
 
-      const lines = matches.map((m: any) => {
+      const lines = matches.map((m) => {
         const author = m.author?.username ?? 'Unknown';
         const ts = m.createdAt ? fmtTime(m.createdAt) : '';
         const text = (m.content || '').slice(0, 150);
         return `[${ts}] [${author}] ${text} (id:${m.id})`;
       });
-      return { ok: true, summary: `Search results for "${action.query}" in #${(channel as any).name} (${matches.length} found, ${totalScanned} scanned):\n${lines.join('\n')}` };
+      return { ok: true, summary: `Search results for "${action.query}" in #${channel.name} (${matches.length} found, ${totalScanned} scanned):\n${lines.join('\n')}` };
     }
 
     case 'eventList': {
@@ -189,7 +214,7 @@ export async function executeGuildAction(
         return { ok: true, summary: 'No scheduled events' };
       }
 
-      const lines = [...events.values()].map((e: any) => {
+      const lines = [...events.values()].map((e) => {
         const start = e.scheduledStartAt ? fmtTime(e.scheduledStartAt) : 'TBD';
         return `${e.name} (id:${e.id}) — ${start}${e.description ? ` — ${e.description.slice(0, 80)}` : ''}`;
       });
@@ -202,7 +227,7 @@ export async function executeGuildAction(
         return { ok: false, error: `Invalid startTime: "${action.startTime}"` };
       }
 
-      const opts: any = {
+      const opts: Record<string, unknown> = {
         name: action.name,
         scheduledStartTime: startTime.toISOString(),
         privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
@@ -234,7 +259,7 @@ export async function executeGuildAction(
         }
       }
 
-      const event = await guild.scheduledEvents.create(opts);
+      const event = await guild.scheduledEvents.create(opts as unknown as Parameters<Guild['scheduledEvents']['create']>[0]);
       return { ok: true, summary: `Created event "${event.name}"` };
     }
 
@@ -244,7 +269,7 @@ export async function executeGuildAction(
         return { ok: false, error: 'eventEdit requires at least one field to update' };
       }
 
-      const edits: any = {};
+      const edits: Record<string, unknown> = {};
       if (name) edits.name = name;
       if (description !== undefined) edits.description = description;
       if (location) edits.entityMetadata = { location };
@@ -260,13 +285,13 @@ export async function executeGuildAction(
         edits.scheduledEndTime = d.toISOString();
       }
 
-      const event = await guild.scheduledEvents.edit(eventId, edits);
+      const event = await guild.scheduledEvents.edit(eventId, edits as unknown as Parameters<Guild['scheduledEvents']['edit']>[1]);
       return { ok: true, summary: `Edited event "${event.name}"` };
     }
 
     case 'eventDelete': {
       const event = await guild.scheduledEvents.fetch(action.eventId).catch(() => null);
-      const name = (event as any)?.name ?? action.eventId;
+      const name = event?.name ?? action.eventId;
       await guild.scheduledEvents.delete(action.eventId);
       return { ok: true, summary: `Deleted event "${name}"` };
     }

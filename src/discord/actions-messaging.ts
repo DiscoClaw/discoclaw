@@ -38,9 +38,56 @@ export const MESSAGING_ACTION_TYPES = new Set<string>(Object.keys(MESSAGING_TYPE
 
 const DISCORD_MAX_CONTENT = 2000;
 const SENDFILE_MAX_BYTES = 25 * 1024 * 1024; // 25 MB — Discord standard upload limit
+const THREAD_AUTO_ARCHIVE_MINUTES = new Set([60, 1440, 4320, 10080]);
 const SENDFILE_ALLOWED_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf',
 ]);
+
+type MessageRecord = {
+  id: string;
+  author?: { username?: string };
+  content?: string;
+  createdAt: Date;
+  createdTimestamp: number;
+  reactions: {
+    resolve(emoji: string): { users: { remove(userId: string): Promise<unknown> } } | null;
+  };
+  react(emoji: string): Promise<unknown>;
+  edit(opts: { content: string; allowedMentions?: unknown }): Promise<unknown>;
+  delete(): Promise<unknown>;
+  crosspost(): Promise<unknown>;
+  pin(): Promise<unknown>;
+  unpin(): Promise<unknown>;
+  startThread(opts: { name: string; autoArchiveDuration: number }): Promise<{ name: string }>;
+};
+
+type MessageChannelRecord = {
+  name: string;
+  type?: ChannelType;
+  messages: {
+    fetch(id: string): Promise<MessageRecord>;
+    fetch(opts: { limit: number; before?: string }): Promise<{ values(): Iterable<MessageRecord> }>;
+    fetchPinned(): Promise<{ size: number; values(): Iterable<MessageRecord> }>;
+  };
+  threads?: {
+    create(opts: { name: string; autoArchiveDuration: number }): Promise<{ name: string }>;
+  };
+  bulkDelete?: (count: number, filterOld: boolean) => Promise<{ size: number }>;
+};
+
+function asMessageChannelRecord(channel: unknown): MessageChannelRecord | null {
+  if (!channel || typeof channel !== 'object') return null;
+  if (!('messages' in channel)) return null;
+  const messages = (channel as { messages?: unknown }).messages;
+  if (!messages || typeof messages !== 'object') return null;
+  if (!('fetch' in messages) || typeof (messages as { fetch?: unknown }).fetch !== 'function') return null;
+  return channel as MessageChannelRecord;
+}
+
+function errorCode(err: unknown): string | number | undefined {
+  if (!err || typeof err !== 'object' || !('code' in err)) return undefined;
+  return (err as { code?: string | number }).code;
+}
 
 // ---------------------------------------------------------------------------
 // Executor
@@ -89,7 +136,11 @@ export async function executeMessagingAction(
         return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived. If this was a task thread, use taskShow with the task ID instead.` };
       }
 
-      const opts: any = { content: action.content, allowedMentions: NO_MENTIONS };
+      const opts: {
+        content: string;
+        allowedMentions: typeof NO_MENTIONS;
+        reply?: { messageReference: string };
+      } = { content: action.content, allowedMentions: NO_MENTIONS };
       if (action.replyTo) {
         opts.reply = { messageReference: action.replyTo };
       }
@@ -102,8 +153,9 @@ export async function executeMessagingAction(
       if (!action.messageId?.trim()) return { ok: false, error: 'react requires a non-empty messageId' };
       if (!action.emoji?.trim()) return { ok: false, error: 'react requires a non-empty emoji' };
       const channel = guild.channels.cache.get(action.channelId);
-      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
-      const message = await (channel as any).messages.fetch(action.messageId);
+      const messageChannel = asMessageChannelRecord(channel);
+      if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await messageChannel.messages.fetch(action.messageId);
       await message.react(action.emoji);
       return { ok: true, summary: `Reacted with ${action.emoji}` };
     }
@@ -113,8 +165,9 @@ export async function executeMessagingAction(
       if (!action.messageId?.trim()) return { ok: false, error: 'unreact requires a non-empty messageId' };
       if (!action.emoji?.trim()) return { ok: false, error: 'unreact requires a non-empty emoji' };
       const channel = guild.channels.cache.get(action.channelId);
-      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
-      const message = await (channel as any).messages.fetch(action.messageId);
+      const messageChannel = asMessageChannelRecord(channel);
+      if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await messageChannel.messages.fetch(action.messageId);
       const reaction = message.reactions.resolve(action.emoji);
       if (!reaction) return { ok: false, error: `Reaction "${action.emoji}" not found on message` };
       await reaction.users.remove(ctx.client.user!.id);
@@ -133,19 +186,19 @@ export async function executeMessagingAction(
       }
 
       const limit = Math.min(Math.max(1, action.limit ?? 10), 20);
-      const opts: any = { limit };
+      const opts: { limit: number; before?: string } = { limit };
       if (action.before) opts.before = action.before;
 
-      const messages = await channel.messages.fetch(opts) as any;
+      const messages = await channel.messages.fetch(opts);
       const sorted = [...messages.values()].sort(
-        (a: any, b: any) => a.createdTimestamp - b.createdTimestamp,
+        (a, b) => a.createdTimestamp - b.createdTimestamp,
       );
 
       if (sorted.length === 0) {
         return { ok: true, summary: `No messages found in #${channel.name}` };
       }
 
-      const lines = sorted.map((m: any) => {
+      const lines = sorted.map((m) => {
         const author = m.author?.username ?? 'Unknown';
         const time = fmtTime(m.createdAt);
         const text = (m.content || '(no text)').slice(0, 200);
@@ -158,12 +211,13 @@ export async function executeMessagingAction(
       if (!action.channelId?.trim()) return { ok: false, error: 'fetchMessage requires a non-empty channelId' };
       if (!action.messageId?.trim()) return { ok: false, error: 'fetchMessage requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
-      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
-      const message = await (channel as any).messages.fetch(action.messageId);
+      const messageChannel = asMessageChannelRecord(channel);
+      if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await messageChannel.messages.fetch(action.messageId);
       const author = message.author?.username ?? 'Unknown';
       const time = fmtTime(message.createdAt);
       const text = (message.content || '(no text)').slice(0, 500);
-      return { ok: true, summary: `[${author}]: ${text} (${time}, #${(channel as any).name}, id:${message.id})` };
+      return { ok: true, summary: `[${author}]: ${text} (${time}, #${messageChannel.name}, id:${message.id})` };
     }
 
     case 'editMessage': {
@@ -176,20 +230,22 @@ export async function executeMessagingAction(
         return { ok: false, error: `Content exceeds Discord's ${DISCORD_MAX_CONTENT} character limit (got ${action.content.length})` };
       }
       const channel = guild.channels.cache.get(action.channelId);
-      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
-      const message = await (channel as any).messages.fetch(action.messageId);
+      const messageChannel = asMessageChannelRecord(channel);
+      if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await messageChannel.messages.fetch(action.messageId);
       await message.edit({ content: action.content, allowedMentions: NO_MENTIONS });
-      return { ok: true, summary: `Edited message in #${(channel as any).name}` };
+      return { ok: true, summary: `Edited message in #${messageChannel.name}` };
     }
 
     case 'deleteMessage': {
       if (!action.channelId?.trim()) return { ok: false, error: 'deleteMessage requires a non-empty channelId' };
       if (!action.messageId?.trim()) return { ok: false, error: 'deleteMessage requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
-      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
-      const message = await (channel as any).messages.fetch(action.messageId);
+      const messageChannel = asMessageChannelRecord(channel);
+      if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await messageChannel.messages.fetch(action.messageId);
       await message.delete();
-      return { ok: true, summary: `Deleted message in #${(channel as any).name}` };
+      return { ok: true, summary: `Deleted message in #${messageChannel.name}` };
     }
 
     case 'bulkDelete': {
@@ -198,45 +254,61 @@ export async function executeMessagingAction(
         return { ok: false, error: 'bulkDelete count must be an integer between 2 and 100' };
       }
       const channel = guild.channels.cache.get(action.channelId);
-      if (!channel || !('bulkDelete' in channel)) {
+      const messageChannel = channel as unknown as MessageChannelRecord | undefined;
+      if (!messageChannel || typeof messageChannel.bulkDelete !== 'function') {
         return { ok: false, error: `Channel "${action.channelId}" not found or does not support bulk delete` };
       }
-      const deleted = await (channel as any).bulkDelete(count, true);
-      return { ok: true, summary: `Bulk deleted ${deleted.size} messages in #${(channel as any).name}` };
+      const deleted = await messageChannel.bulkDelete(count, true);
+      return { ok: true, summary: `Bulk deleted ${deleted.size} messages in #${messageChannel.name}` };
     }
 
     case 'crosspost': {
       if (!action.channelId?.trim()) return { ok: false, error: 'crosspost requires a non-empty channelId' };
       if (!action.messageId?.trim()) return { ok: false, error: 'crosspost requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
-      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
-      if ((channel as any).type !== ChannelType.GuildAnnouncement) {
-        return { ok: false, error: `Channel #${(channel as any).name} is not an announcement channel` };
+      const messageChannel = asMessageChannelRecord(channel);
+      if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (messageChannel.type !== ChannelType.GuildAnnouncement) {
+        return { ok: false, error: `Channel #${messageChannel.name} is not an announcement channel` };
       }
-      const message = await (channel as any).messages.fetch(action.messageId);
+      const message = await messageChannel.messages.fetch(action.messageId);
       await message.crosspost();
-      return { ok: true, summary: `Published message to followers of #${(channel as any).name}` };
+      return { ok: true, summary: `Published message to followers of #${messageChannel.name}` };
     }
 
     case 'threadCreate': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'threadCreate requires a non-empty channelId' };
+      if (typeof action.name !== 'string' || !action.name.trim()) {
+        return { ok: false, error: 'threadCreate requires a non-empty name' };
+      }
+      const autoArchiveDuration = action.autoArchiveMinutes ?? 1440;
+      if (!THREAD_AUTO_ARCHIVE_MINUTES.has(autoArchiveDuration)) {
+        return {
+          ok: false,
+          error: 'threadCreate autoArchiveMinutes must be one of 60, 1440, 4320, 10080',
+        };
+      }
+
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
 
       if (action.messageId && 'messages' in channel) {
-        const message = await (channel as any).messages.fetch(action.messageId);
+        const messageChannel = channel as unknown as MessageChannelRecord;
+        const message = await messageChannel.messages.fetch(action.messageId);
         const thread = await message.startThread({
-          name: action.name,
-          autoArchiveDuration: action.autoArchiveMinutes ?? 1440,
+          name: action.name.trim(),
+          autoArchiveDuration,
         });
-        return { ok: true, summary: `Created thread "${thread.name}" from message in #${(channel as any).name}` };
+        return { ok: true, summary: `Created thread "${thread.name}" from message in #${messageChannel.name}` };
       }
 
       if ('threads' in channel) {
-        const thread = await (channel as any).threads.create({
-          name: action.name,
-          autoArchiveDuration: action.autoArchiveMinutes ?? 1440,
+        const threadable = channel as unknown as MessageChannelRecord;
+        const thread = await threadable.threads!.create({
+          name: action.name.trim(),
+          autoArchiveDuration,
         });
-        return { ok: true, summary: `Created thread "${thread.name}" in #${(channel as any).name}` };
+        return { ok: true, summary: `Created thread "${thread.name}" in #${threadable.name}` };
       }
 
       return { ok: false, error: `Channel "${action.channelId}" does not support threads` };
@@ -246,20 +318,22 @@ export async function executeMessagingAction(
       if (!action.channelId?.trim()) return { ok: false, error: 'pinMessage requires a non-empty channelId' };
       if (!action.messageId?.trim()) return { ok: false, error: 'pinMessage requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
-      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
-      const message = await (channel as any).messages.fetch(action.messageId);
+      const messageChannel = asMessageChannelRecord(channel);
+      if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await messageChannel.messages.fetch(action.messageId);
       await message.pin();
-      return { ok: true, summary: `Pinned message in #${(channel as any).name}` };
+      return { ok: true, summary: `Pinned message in #${messageChannel.name}` };
     }
 
     case 'unpinMessage': {
       if (!action.channelId?.trim()) return { ok: false, error: 'unpinMessage requires a non-empty channelId' };
       if (!action.messageId?.trim()) return { ok: false, error: 'unpinMessage requires a non-empty messageId' };
       const channel = guild.channels.cache.get(action.channelId);
-      if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
-      const message = await (channel as any).messages.fetch(action.messageId);
+      const messageChannel = asMessageChannelRecord(channel);
+      if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      const message = await messageChannel.messages.fetch(action.messageId);
       await message.unpin();
-      return { ok: true, summary: `Unpinned message in #${(channel as any).name}` };
+      return { ok: true, summary: `Unpinned message in #${messageChannel.name}` };
     }
 
     case 'listPins': {
@@ -293,7 +367,11 @@ export async function executeMessagingAction(
       if (typeof action.filePath !== 'string' || !action.filePath.trim()) {
         return { ok: false, error: 'sendFile requires a non-empty filePath' };
       }
-      const ext = path.extname(action.filePath).toLowerCase().slice(1);
+      const trimmedPath = action.filePath.trim();
+      if (!path.isAbsolute(trimmedPath)) {
+        return { ok: false, error: 'sendFile filePath must be an absolute path' };
+      }
+      const ext = path.extname(trimmedPath).toLowerCase().slice(1);
       if (!SENDFILE_ALLOWED_EXTENSIONS.has(ext)) {
         return { ok: false, error: `File extension ".${ext}" is not allowed. Allowed extensions: ${[...SENDFILE_ALLOWED_EXTENSIONS].join(', ')}` };
       }
@@ -302,14 +380,14 @@ export async function executeMessagingAction(
       }
       let fileBuffer: Buffer;
       try {
-        const stat = await fs.stat(action.filePath);
+        const stat = await fs.stat(trimmedPath);
         if (stat.size > SENDFILE_MAX_BYTES) {
           return { ok: false, error: `File exceeds the ${SENDFILE_MAX_BYTES / (1024 * 1024)} MB size limit (${stat.size} bytes)` };
         }
-        fileBuffer = await fs.readFile(action.filePath) as Buffer;
-      } catch (err: any) {
-        if (err.code === 'ENOENT') {
-          return { ok: false, error: `File not found: ${action.filePath}` };
+        fileBuffer = await fs.readFile(trimmedPath) as Buffer;
+      } catch (err) {
+        if (errorCode(err) === 'ENOENT') {
+          return { ok: false, error: `File not found: ${trimmedPath}` };
         }
         throw err;
       }
@@ -322,11 +400,15 @@ export async function executeMessagingAction(
         }
         return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived.` };
       }
-      const attachment = new AttachmentBuilder(fileBuffer, { name: path.basename(action.filePath) });
-      const opts: any = { files: [attachment], allowedMentions: NO_MENTIONS };
+      const attachment = new AttachmentBuilder(fileBuffer, { name: path.basename(trimmedPath) });
+      const opts: {
+        files: AttachmentBuilder[];
+        allowedMentions: typeof NO_MENTIONS;
+        content?: string;
+      } = { files: [attachment], allowedMentions: NO_MENTIONS };
       if (action.content) opts.content = action.content;
       await channel.send(opts);
-      return { ok: true, summary: `Sent file "${path.basename(action.filePath)}" to #${channel.name}` };
+      return { ok: true, summary: `Sent file "${path.basename(trimmedPath)}" to #${channel.name}` };
     }
   }
 }

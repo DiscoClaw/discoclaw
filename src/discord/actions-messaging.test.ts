@@ -866,6 +866,44 @@ describe('threadCreate', () => {
     expect((result as any).summary).toContain('New Thread');
     expect(ch.threads.create).toHaveBeenCalledWith({ name: 'New Thread', autoArchiveDuration: 1440 });
   });
+
+  it('rejects empty channelId', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'threadCreate', channelId: '', name: 'Discussion' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'threadCreate requires a non-empty channelId' });
+  });
+
+  it('rejects empty name', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'threadCreate', channelId: 'ch1', name: '   ' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'threadCreate requires a non-empty name' });
+  });
+
+  it('rejects invalid autoArchiveMinutes', async () => {
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'threadCreate', channelId: 'ch1', name: 'Discussion', autoArchiveMinutes: 30 },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'threadCreate autoArchiveMinutes must be one of 60, 1440, 4320, 10080',
+    });
+    expect(ch.threads.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('pinMessage / unpinMessage', () => {
@@ -1036,6 +1074,18 @@ describe('sendFile', () => {
 
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('non-empty filePath');
+  });
+
+  it('rejects relative filePath', async () => {
+    const ctx = makeCtx([]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: './screenshot.png' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'sendFile filePath must be an absolute path' });
+    expect(fsMod.stat).not.toHaveBeenCalled();
   });
 
   it('returns error when file not found on disk', async () => {

@@ -38,6 +38,16 @@ async function rejectManualThread(
   } catch { /* ignore */ }
 }
 
+type EditableTaskThread = TaskDiscordAnyThreadChannel & {
+  appliedTags?: string[];
+  edit: (payload: { name?: string; appliedTags?: string[] }) => Promise<unknown>;
+};
+
+function asEditableTaskThread(thread: TaskDiscordAnyThreadChannel): EditableTaskThread | null {
+  if (typeof (thread as { edit?: unknown }).edit !== 'function') return null;
+  return thread as EditableTaskThread;
+}
+
 async function reArchiveTaskThread(
   thread: TaskDiscordAnyThreadChannel,
   store: TaskStore,
@@ -54,11 +64,15 @@ async function reArchiveTaskThread(
 
   log?.info({ threadId: thread.id, taskId: task.id }, 'tasks:forum re-archiving known task thread');
 
+  const editableThread = asEditableTaskThread(thread);
+
   try {
-    const current: string[] = (thread as any).appliedTags ?? [];
-    const updated = buildAppliedTagsWithStatus(current, task.status, tagMap);
-    const name = buildThreadName(task.id, task.title, task.status);
-    await (thread as any).edit({ name, appliedTags: updated });
+    if (editableThread) {
+      const current: string[] = editableThread.appliedTags ?? [];
+      const updated = buildAppliedTagsWithStatus(current, task.status, tagMap);
+      const name = buildThreadName(task.id, task.title, task.status);
+      await editableThread.edit({ name, appliedTags: updated });
+    }
   } catch { /* ignore — proceed to archive */ }
 
   try {

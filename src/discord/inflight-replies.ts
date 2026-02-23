@@ -18,6 +18,38 @@ type OrphanEntry = {
   messageId: string;
 };
 
+type FetchableMessage = {
+  edit(opts: { content: string; allowedMentions?: { parse: readonly never[] } }): Promise<unknown>;
+};
+
+type MessageFetchableChannel = {
+  messages: {
+    fetch(id: string): Promise<FetchableMessage>;
+  };
+};
+
+type StartupClient = {
+  channels: {
+    fetch(id: string): Promise<unknown>;
+  };
+};
+
+function asOrphanEntry(value: unknown): OrphanEntry | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as { channelId?: unknown; messageId?: unknown };
+  if (typeof candidate.channelId !== 'string' || typeof candidate.messageId !== 'string') {
+    return null;
+  }
+  return { channelId: candidate.channelId, messageId: candidate.messageId };
+}
+
+function hasMessageFetch(channel: unknown): channel is MessageFetchableChannel {
+  if (!channel || typeof channel !== 'object' || !('messages' in channel)) return false;
+  const messages = (channel as { messages?: unknown }).messages;
+  return !!messages && typeof messages === 'object' && 'fetch' in messages &&
+    typeof (messages as { fetch?: unknown }).fetch === 'function';
+}
+
 const INTERRUPTED_GRACEFUL = '*(Interrupted \u2014 bot is restarting.)*';
 const INTERRUPTED_COLD = '*(Interrupted \u2014 bot was restarted.)*';
 
@@ -146,12 +178,9 @@ export function loadOrphanedReplies(filePath: string): Promise<OrphanEntry[]> {
     .then((raw) => {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter(
-        (e: unknown): e is OrphanEntry =>
-          typeof e === 'object' && e !== null &&
-          typeof (e as any).channelId === 'string' &&
-          typeof (e as any).messageId === 'string',
-      );
+      return parsed
+        .map((entry) => asOrphanEntry(entry))
+        .filter((entry): entry is OrphanEntry => entry !== null);
     })
     .catch(() => []);
 }
@@ -160,7 +189,7 @@ export function loadOrphanedReplies(filePath: string): Promise<OrphanEntry[]> {
  * On startup, detect and clean up any orphaned messages left by a previous unclean exit.
  */
 export async function cleanupOrphanedReplies(opts: {
-  client: { channels: { fetch(id: string): Promise<any> } };
+  client: StartupClient;
   dataFilePath: string;
   log?: LoggerLike;
   timeoutMs?: number;
@@ -175,11 +204,11 @@ export async function cleanupOrphanedReplies(opts: {
   const editPromises = orphans.map(async (orphan) => {
     try {
       const channel = await client.channels.fetch(orphan.channelId);
-      if (!channel || typeof (channel as any).messages?.fetch !== 'function') {
+      if (!hasMessageFetch(channel)) {
         log?.warn({ channelId: orphan.channelId }, 'inflight:cold-start channel not fetchable');
         return;
       }
-      const message = await (channel as any).messages.fetch(orphan.messageId);
+      const message = await channel.messages.fetch(orphan.messageId);
       await message.edit({ content: INTERRUPTED_COLD, allowedMentions: NO_MENTIONS });
       log?.info({ channelId: orphan.channelId, messageId: orphan.messageId }, 'inflight:cold-start edited orphan');
     } catch (err) {

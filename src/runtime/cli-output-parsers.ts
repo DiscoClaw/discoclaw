@@ -7,10 +7,24 @@ import type { EngineEvent, ImageData } from './types.js';
 /** Max base64 string length (~25 MB encoded, ~18.75 MB decoded). */
 const MAX_IMAGE_BASE64_LEN = 25 * 1024 * 1024;
 
+function getObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function getNestedString(root: unknown, path: string[]): string | undefined {
+  let current: unknown = root;
+  for (const key of path) {
+    const obj = getObject(current);
+    if (!obj) return undefined;
+    current = obj[key];
+  }
+  return typeof current === 'string' ? current : undefined;
+}
+
 /** Extract a text string from a Claude CLI stream-json event. */
 export function extractTextFromUnknownEvent(evt: unknown): string | null {
-  if (!evt || typeof evt !== 'object') return null;
-  const anyEvt = evt as Record<string, unknown>;
+  const anyEvt = getObject(evt);
+  if (!anyEvt) return null;
 
   // Claude CLI stream-json emits nested structures; check common shapes.
   const candidates: unknown[] = [
@@ -18,12 +32,9 @@ export function extractTextFromUnknownEvent(evt: unknown): string | null {
     anyEvt.delta,
     anyEvt.content,
     // Sometimes nested under .data.
-    (anyEvt.data && typeof anyEvt.data === 'object') ? (anyEvt.data as any).text : undefined,
+    getNestedString(anyEvt, ['data', 'text']),
     // Claude CLI stream-json: event.delta.text (content_block_delta events)
-    (anyEvt.event && typeof anyEvt.event === 'object' &&
-     (anyEvt.event as any).delta && typeof (anyEvt.event as any).delta === 'object')
-      ? (anyEvt.event as any).delta.text
-      : undefined,
+    getNestedString(anyEvt, ['event', 'delta', 'text']),
   ];
 
   for (const c of candidates) {

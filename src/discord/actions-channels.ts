@@ -30,6 +30,8 @@ const CHANNEL_TYPE_MAP: Record<ChannelActionRequest['type'], true> = {
 };
 export const CHANNEL_ACTION_TYPES = new Set<string>(Object.keys(CHANNEL_TYPE_MAP));
 
+type ForumEditOptions = Parameters<ForumChannel['edit']>[0];
+
 type GuildChannelType = ChannelType.GuildText | ChannelType.GuildVoice | ChannelType.GuildAnnouncement | ChannelType.GuildStageVoice;
 
 const CHANNEL_TYPE_ENUM: Record<string, GuildChannelType> = {
@@ -154,7 +156,7 @@ export async function executeChannelAction(
         name: action.name,
         type: ChannelType.GuildCategory,
         position: action.position,
-      } as any);
+      });
       return { ok: true, summary: `Created category "${created.name}"` };
     }
 
@@ -176,7 +178,7 @@ export async function executeChannelAction(
           let cat = guild.channels.cache.get(action.parent);
           if (!cat || cat.type !== ChannelType.GuildCategory) {
             cat = guild.channels.cache.find(
-              (ch: any) =>
+              (ch) =>
                 ch.type === ChannelType.GuildCategory &&
                 ch.name.toLowerCase() === action.parent!.toLowerCase(),
             );
@@ -237,7 +239,7 @@ export async function executeChannelAction(
         ...existingTags.map((t) => ({ id: t.id, name: t.name, moderated: t.moderated, emoji: t.emoji })),
         newTag,
       ];
-      await forum.edit({ availableTags: updatedTags as any });
+      await forum.edit({ availableTags: updatedTags } as ForumEditOptions);
 
       // Re-fetch to get the created tag's ID.
       const updated = guild.channels.cache.get(action.channelId) as ForumChannel | undefined;
@@ -263,7 +265,7 @@ export async function executeChannelAction(
       const filteredTags = existingTags
         .filter((t) => t.id !== action.tagId)
         .map((t) => ({ id: t.id, name: t.name, moderated: t.moderated, emoji: t.emoji }));
-      await forum.edit({ availableTags: filteredTags as any });
+      await forum.edit({ availableTags: filteredTags } as ForumEditOptions);
       return { ok: true, summary: `Deleted forum tag "${tagToDelete.name}" (id:${action.tagId}) from #${channel.name}` };
     }
 
@@ -326,12 +328,12 @@ export async function executeChannelAction(
 
       if (!thread) return { ok: false, error: `Thread "${action.threadId}" not found` };
 
-      if ((thread as any).guildId !== guild.id) {
+      if (thread.guildId !== guild.id) {
         return { ok: false, error: `Thread "${action.threadId}" does not belong to this guild` };
       }
 
       if (action.appliedTags != null) {
-        const parentType = (thread as any).parent?.type;
+        const parentType = thread.parent?.type;
         if (parentType !== ChannelType.GuildForum) {
           return { ok: false, error: `Thread "${action.threadId}" is not in a forum channel — appliedTags only applies to forum threads` };
         }
@@ -341,21 +343,21 @@ export async function executeChannelAction(
       }
 
       // Unarchive before editing — Discord rejects edits on archived threads.
-      const wasArchived = (thread as any).archived === true;
+      const wasArchived = thread.archived === true;
       if (wasArchived) {
-        try { await (thread as any).setArchived(false); } catch { /* proceed — edit may still work */ }
+        try { await thread.setArchived(false); } catch { /* proceed — edit may still work */ }
       }
 
       const edits: { appliedTags?: string[]; name?: string } = {};
       if (action.appliedTags != null) edits.appliedTags = action.appliedTags;
       if (action.name != null) edits.name = action.name;
 
-      await (thread as any).edit(edits);
+      await thread.edit(edits);
 
       // Re-archive if the thread was archived before we touched it.
       let rearchiveFailed = false;
       if (wasArchived) {
-        try { await (thread as any).setArchived(true); } catch { rearchiveFailed = true; }
+        try { await thread.setArchived(true); } catch { rearchiveFailed = true; }
       }
 
       const parts: string[] = [];

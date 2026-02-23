@@ -1,6 +1,6 @@
 import type { TagMap } from './types.js';
 import type { LoggerLike } from './logger-types.js';
-import type { TaskDiscordClient } from './discord-types.js';
+import type { TaskDiscordClient, TaskDiscordForumChannel } from './discord-types.js';
 import type { TaskInFlightChecker } from './sync-context.js';
 import type { TaskStore } from './store.js';
 import type { TaskService } from './service.js';
@@ -18,7 +18,7 @@ export type TaskSyncApplyCounters = {
 
 export type TaskSyncApplyContext = {
   client: TaskDiscordClient;
-  forum: any;
+  forum: TaskDiscordForumChannel;
   tagMap: TagMap;
   store: TaskStore;
   taskService: TaskService;

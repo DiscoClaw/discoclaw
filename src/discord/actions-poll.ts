@@ -17,6 +17,17 @@ export type PollActionRequest = {
 const POLL_TYPE_MAP: Record<PollActionRequest['type'], true> = { poll: true };
 export const POLL_ACTION_TYPES = new Set<string>(Object.keys(POLL_TYPE_MAP));
 
+type PollSendTarget = {
+  send(payload: {
+    poll: {
+      question: { text: string };
+      answers: Array<{ text: string }>;
+      allowMultiselect: boolean;
+      duration: number;
+    };
+  }): Promise<unknown>;
+};
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -29,17 +40,18 @@ export async function executePollAction(
 
   const channel = resolveChannel(guild, action.channel);
   if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
+  const pollTarget = channel as unknown as PollSendTarget;
 
   const pollAnswers = action.answers.map((text) => ({ text }));
 
-  await channel.send({
+  await pollTarget.send({
     poll: {
       question: { text: action.question },
       answers: pollAnswers,
       allowMultiselect: action.allowMultiselect ?? false,
       duration: action.durationHours ?? 24,
     },
-  } as any);
+  });
 
   return { ok: true, summary: `Created poll "${action.question}" in #${channel.name} with ${action.answers.length} options` };
 }

@@ -8,6 +8,29 @@ import {
 } from './thread-helpers.js';
 import { fetchThreadChannel, tagsEqual } from './thread-ops-shared.js';
 
+type EditableTaskThread = {
+  appliedTags?: string[];
+  edit: (payload: Record<string, unknown>) => Promise<unknown>;
+};
+
+function getThreadAppliedTags(thread: unknown): string[] {
+  if (!thread || typeof thread !== 'object') return [];
+  const tags = (thread as { appliedTags?: unknown }).appliedTags;
+  if (!Array.isArray(tags)) return [];
+  return tags.filter((tag): tag is string => typeof tag === 'string');
+}
+
+function asEditableTaskThread(thread: unknown): EditableTaskThread | null {
+  if (!thread || typeof thread !== 'object') return null;
+  const candidate = thread as { edit?: unknown; appliedTags?: unknown };
+  if (typeof candidate.edit !== 'function') return null;
+  const appliedTags = getThreadAppliedTags(thread);
+  return {
+    appliedTags: appliedTags.length > 0 ? appliedTags : undefined,
+    edit: candidate.edit as EditableTaskThread['edit'],
+  };
+}
+
 /** Post a close summary, rename with checkmark, and archive the thread. */
 export async function closeTaskThread(
   client: TaskDiscordClient,
@@ -55,15 +78,21 @@ export async function closeTaskThread(
 
   const editPayload: Record<string, unknown> = { name: closedName };
   if (tagMap) {
-    const current: string[] = (thread as any).appliedTags ?? [];
-    const updated = buildAppliedTagsWithStatus(current, task.status, tagMap);
-    if (!tagsEqual(current, updated)) {
-      editPayload.appliedTags = updated;
+    const editable = asEditableTaskThread(thread);
+    if (editable) {
+      const current = editable.appliedTags ?? [];
+      const updated = buildAppliedTagsWithStatus(current, task.status, tagMap);
+      if (!tagsEqual(current, updated)) {
+        editPayload.appliedTags = updated;
+      }
     }
   }
 
   try {
-    await (thread as any).edit(editPayload);
+    const editable = asEditableTaskThread(thread);
+    if (editable) {
+      await editable.edit(editPayload);
+    }
   } catch (err) {
     log?.warn({ err, taskId: task.id, threadId }, 'closeTaskThread: edit failed');
   }
@@ -95,7 +124,7 @@ export async function isTaskThreadAlreadyClosed(
   if (thread.archived !== true || thread.name !== closedName) return false;
   // If tagMap provided, verify tags match expected closed state.
   if (tagMap && getStatusTagIds(tagMap).size > 0) {
-    const current: string[] = (thread as any).appliedTags ?? [];
+    const current = getThreadAppliedTags(thread);
     const expected = buildAppliedTagsWithStatus(current, task.status, tagMap);
     if (!tagsEqual(current, expected)) return false;
   }
@@ -159,10 +188,12 @@ export async function updateTaskThreadTags(
 ): Promise<boolean> {
   const thread = await fetchThreadChannel(client, threadId);
   if (!thread) return false;
-  const current: string[] = (thread as any).appliedTags ?? [];
+  const editable = asEditableTaskThread(thread);
+  if (!editable) return false;
+  const current = getThreadAppliedTags(thread);
   const updated = buildAppliedTagsWithStatus(current, task.status, tagMap);
   if (tagsEqual(current, updated)) return false;
-  await (thread as any).edit({ appliedTags: updated });
+  await editable.edit({ appliedTags: updated });
   return true;
 }
 

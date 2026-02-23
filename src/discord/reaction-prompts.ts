@@ -23,6 +23,20 @@ export type ReactionPromptRequest = {
 
 export const REACTION_PROMPT_ACTION_TYPES = new Set<string>(['reactionPrompt']);
 
+type ReactionPromptMessage = {
+  id: string;
+  react: (emoji: string) => Promise<void>;
+};
+
+type SendableChannel = {
+  send(payload: { content: string; allowedMentions?: unknown }): Promise<ReactionPromptMessage>;
+};
+
+function isSendableChannel(channel: unknown): channel is SendableChannel {
+  return !!channel && typeof channel === 'object' && 'send' in channel &&
+    typeof (channel as { send?: unknown }).send === 'function';
+}
+
 // ---------------------------------------------------------------------------
 // Prompt store
 // ---------------------------------------------------------------------------
@@ -111,14 +125,14 @@ export async function executeReactionPromptAction(
   // Resolve the channel.
   const { guild, channelId } = ctx;
   const channel = guild.channels.cache.get(channelId);
-  if (!channel || !('send' in channel)) {
+  if (!isSendableChannel(channel)) {
     return { ok: false, error: `reactionPrompt: channel "${channelId}" not found or not a text channel` };
   }
 
   // Send the prompt message (question text only — no emoji in the body).
   let promptMessage: { id: string; react: (emoji: string) => Promise<void> };
   try {
-    promptMessage = await (channel as any).send({
+    promptMessage = await channel.send({
       content: action.question,
       allowedMentions: NO_MENTIONS,
     });

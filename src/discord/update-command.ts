@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import type { ExecFileException } from 'node:child_process';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { writeShutdownContext } from './shutdown-context.js';
 import { getRestartCmdArgs } from './restart-command.js';
@@ -45,15 +46,19 @@ function run(
         env: opts.env ?? process.env,
       },
       (err, stdout, stderr) => {
-        const exitCode = err ? (err as any).code ?? null : 0;
         resolve({
           stdout: String(stdout ?? ''),
           stderr: String(stderr ?? ''),
-          exitCode: typeof exitCode === 'number' ? exitCode : null,
+          exitCode: mapExitCode(err),
         });
       },
     );
   });
+}
+
+function mapExitCode(err: ExecFileException | null): number | null {
+  if (!err) return 0;
+  return typeof err.code === 'number' ? err.code : null;
 }
 
 const GIT_ENV: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };

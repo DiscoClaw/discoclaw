@@ -163,7 +163,7 @@ export class SessionFileScanner {
   }
 
   private processLine(line: string): void {
-    let parsed: any;
+    let parsed: unknown;
     try {
       parsed = JSON.parse(line);
     } catch {
@@ -171,33 +171,44 @@ export class SessionFileScanner {
       return;
     }
 
+    if (!parsed || typeof parsed !== 'object') return;
+    const parsedObj = parsed as {
+      type?: unknown;
+      message?: { content?: unknown };
+    };
+    const content = parsedObj.message?.content;
+
     // Tool use: assistant message with tool_use content blocks
-    if (parsed?.type === 'assistant' && Array.isArray(parsed?.message?.content)) {
-      for (const block of parsed.message.content) {
-        if (block?.type === 'tool_use' && typeof block.name === 'string') {
-          const blockId = String(block.id ?? '');
-          this.activeTools.set(blockId, { name: block.name, blockId });
+    if (parsedObj.type === 'assistant' && Array.isArray(content)) {
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue;
+        const toolBlock = block as { type?: unknown; name?: unknown; id?: unknown; input?: unknown };
+        if (toolBlock.type === 'tool_use' && typeof toolBlock.name === 'string') {
+          const blockId = String(toolBlock.id ?? '');
+          this.activeTools.set(blockId, { name: toolBlock.name, blockId });
           this.callbacks.onEvent({
             type: 'tool_start',
-            name: block.name,
-            input: block.input,
+            name: toolBlock.name,
+            input: toolBlock.input,
           });
         }
       }
     }
 
     // Tool result: user message with tool_result content blocks
-    if (parsed?.type === 'user' && Array.isArray(parsed?.message?.content)) {
-      for (const block of parsed.message.content) {
-        if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string') {
-          const toolUseId = block.tool_use_id;
+    if (parsedObj.type === 'user' && Array.isArray(content)) {
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue;
+        const resultBlock = block as { type?: unknown; tool_use_id?: unknown; is_error?: unknown };
+        if (resultBlock.type === 'tool_result' && typeof resultBlock.tool_use_id === 'string') {
+          const toolUseId = resultBlock.tool_use_id;
           const active = this.activeTools.get(toolUseId);
           if (active) {
             this.activeTools.delete(toolUseId);
             this.callbacks.onEvent({
               type: 'tool_end',
               name: active.name,
-              ok: !block.is_error,
+              ok: !resultBlock.is_error,
             });
           }
         }

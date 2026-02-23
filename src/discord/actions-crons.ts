@@ -108,6 +108,12 @@ function requestRunningJobCancel(cronCtx: CronContext, threadId: string, cronId:
   return canceled;
 }
 
+type CronThreadOps = {
+  edit?: (opts: { appliedTags: string[] }) => Promise<unknown>;
+  send?: (opts: { content: string; allowedMentions: { parse: string[] } }) => Promise<unknown>;
+  setArchived?: (archived: boolean) => Promise<unknown>;
+};
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -336,7 +342,10 @@ export async function executeCronAction(
             if (uniqueTagIds.length > 0) {
               const thread = cronCtx.client.channels.cache.get(record.threadId);
               if (thread && thread.isThread()) {
-                await (thread as any).edit({ appliedTags: uniqueTagIds });
+                const threadOps = thread as CronThreadOps;
+                if (typeof threadOps.edit === 'function') {
+                  await threadOps.edit({ appliedTags: uniqueTagIds });
+                }
               }
             }
           }
@@ -421,7 +430,10 @@ export async function executeCronAction(
       try {
         const thread = cronCtx.client.channels.cache.get(record.threadId);
         if (thread && thread.isThread()) {
-          await (thread as any).send({ content: '\u23F8\uFE0F **Cron paused**', allowedMentions: { parse: [] } });
+          const threadOps = thread as CronThreadOps;
+          if (typeof threadOps.send === 'function') {
+            await threadOps.send({ content: '\u23F8\uFE0F **Cron paused**', allowedMentions: { parse: [] } });
+          }
         }
       } catch {}
 
@@ -448,7 +460,10 @@ export async function executeCronAction(
       try {
         const thread = cronCtx.client.channels.cache.get(record.threadId);
         if (thread && thread.isThread()) {
-          await (thread as any).send({ content: '\u25B6\uFE0F **Cron resumed**', allowedMentions: { parse: [] } });
+          const threadOps = thread as CronThreadOps;
+          if (typeof threadOps.send === 'function') {
+            await threadOps.send({ content: '\u25B6\uFE0F **Cron resumed**', allowedMentions: { parse: [] } });
+          }
         }
       } catch {}
 
@@ -473,11 +488,16 @@ export async function executeCronAction(
       // Archive the thread.
       const thread = cronCtx.client.channels.cache.get(record.threadId);
       if (thread && thread.isThread()) {
+        const threadOps = thread as CronThreadOps;
         try {
-          await (thread as any).send({ content: '\uD83D\uDDD1\uFE0F **Cron deleted**', allowedMentions: { parse: [] } });
+          if (typeof threadOps.send === 'function') {
+            await threadOps.send({ content: '\uD83D\uDDD1\uFE0F **Cron deleted**', allowedMentions: { parse: [] } });
+          }
         } catch {}
         try {
-          await (thread as any).setArchived(true);
+          if (typeof threadOps.setArchived === 'function') {
+            await threadOps.setArchived(true);
+          }
         } catch (err) {
           cronCtx.log?.warn({ err, cronId: action.cronId, threadId: record.threadId }, 'cron:action:delete archive failed');
           return {

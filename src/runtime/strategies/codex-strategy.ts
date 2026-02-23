@@ -169,14 +169,15 @@ export function createCodexStrategy(defaultModel: string): CliAdapterStrategy {
       return sanitizeCodexError(raw);
     },
 
-    handleSpawnError(err: any, binary: string): string | null {
+    handleSpawnError(err: unknown, binary: string): string | null {
       // Let the universal adapter handle timeouts.
-      if (err?.timedOut) return null;
+      if ((err as { timedOut?: boolean } | undefined)?.timedOut) return null;
 
       // Use fixed messages to prevent prompt/session leaks.
       // execa's shortMessage/originalMessage can contain the full command line.
-      const code = err?.code || err?.errno || '';
-      const isNotFound = code === 'ENOENT' || String(err?.originalMessage || '').includes('ENOENT');
+      const e = err as { code?: unknown; errno?: unknown; originalMessage?: unknown };
+      const code = e.code || e.errno || '';
+      const isNotFound = code === 'ENOENT' || String(e.originalMessage || '').includes('ENOENT');
       if (isNotFound) return `codex binary not found (${binary}). Check CODEX_BIN or PATH.`;
       return `codex process failed unexpectedly${code ? ` (${code})` : ''}`;
     },

@@ -35,7 +35,7 @@ import type {
 export const templateStrategy: CliAdapterStrategy = {
   // --- Required: identity ---
 
-  id: 'template' as any, // Replace with your RuntimeId (add to types.ts first).
+  id: 'other', // Replace with your RuntimeId (add to types.ts first).
   binaryDefault: 'my-cli', // Default binary name (overridden by opts.binary).
   defaultModel: 'my-model', // Used when params.model is empty.
   capabilities: [
@@ -103,6 +103,6 @@ export const templateStrategy: CliAdapterStrategy = {
   // Return a user-facing message, or null to use default handling.
 
   // sanitizeError(raw: string, binary: string): string { return raw; },
-  // handleSpawnError(err: any, binary: string): string | null { return null; },
+  // handleSpawnError(err: unknown, binary: string): string | null { return null; },
   // handleExitError(exitCode: number, stderr: string, stdout: string): string | null { return null; },
 };

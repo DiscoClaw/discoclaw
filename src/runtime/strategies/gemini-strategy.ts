@@ -58,14 +58,15 @@ export function createGeminiStrategy(defaultModel: string): CliAdapterStrategy {
       return sanitizeGeminiError(raw);
     },
 
-    handleSpawnError(err: any, binary: string): string | null {
+    handleSpawnError(err: unknown, binary: string): string | null {
       // Let the universal adapter handle timeouts.
-      if (err?.timedOut) return null;
+      if ((err as { timedOut?: boolean } | undefined)?.timedOut) return null;
 
       // Use fixed messages to prevent prompt leaks.
       // execa's shortMessage/originalMessage can contain the full command line.
-      const code = err?.code || err?.errno || '';
-      const isNotFound = code === 'ENOENT' || String(err?.originalMessage || '').includes('ENOENT');
+      const e = err as { code?: unknown; errno?: unknown; originalMessage?: unknown };
+      const code = e.code || e.errno || '';
+      const isNotFound = code === 'ENOENT' || String(e.originalMessage || '').includes('ENOENT');
       if (isNotFound) return `gemini binary not found (${binary}). Check GEMINI_BIN or PATH.`;
       return `gemini process failed unexpectedly${code ? ` (${code})` : ''}`;
     },

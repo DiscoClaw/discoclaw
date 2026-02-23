@@ -1,5 +1,5 @@
 import { ChannelType } from 'discord.js';
-import type { Guild, GuildTextBasedChannel } from 'discord.js';
+import type { Guild, GuildBasedChannel, GuildTextBasedChannel } from 'discord.js';
 
 /**
  * Resolve a channel reference to a text-based guild channel.
@@ -29,7 +29,8 @@ export function resolveChannel(
   return byName as GuildTextBasedChannel | undefined;
 }
 
-function isTextBased(ch: any): boolean {
+function isTextBased(ch: GuildBasedChannel | undefined): ch is GuildTextBasedChannel {
+  if (!ch) return false;
   // We only want channels that are meaningfully sendable via `.send()`.
   return (
     ch.type === ChannelType.GuildText ||
@@ -41,7 +42,7 @@ function isTextBased(ch: any): boolean {
 }
 
 /** Human-readable channel type name for error messages. */
-export function describeChannelType(ch: any): string {
+export function describeChannelType(ch: { type?: ChannelType | number } | null | undefined): string {
   switch (ch?.type) {
     case ChannelType.GuildForum: return 'forum';
     case ChannelType.GuildMedia: return 'media';
@@ -56,7 +57,7 @@ export function describeChannelType(ch: any): string {
  * Look up a channel by ref (ID or name) and return it raw, without filtering
  * by type. Returns undefined only if the channel truly doesn't exist.
  */
-export function findChannelRaw(guild: Guild, ref: string): any | undefined {
+export function findChannelRaw(guild: Guild, ref: string): GuildBasedChannel | undefined {
   const cleaned = ref.replace(/^#/, '').trim();
   if (!cleaned) return undefined;
 

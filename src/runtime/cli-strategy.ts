@@ -134,7 +134,7 @@ export interface CliAdapterStrategy {
    * Handle spawn errors (ENOENT, EACCES, etc.).
    * Return a user-facing error message, or null to use default handling.
    */
-  handleSpawnError?(err: any, binary: string): string | null;
+  handleSpawnError?(err: unknown, binary: string): string | null;
 
   /**
    * Handle process exit with non-zero code.

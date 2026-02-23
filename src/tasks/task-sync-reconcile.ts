@@ -146,7 +146,7 @@ async function fetchPhase5ThreadSources(
   let activeThreads: Map<string, TaskThreadLike>;
   try {
     const fetchedActive = await ctx.forum.threads.fetchActive();
-    activeThreads = fetchedActive.threads as Map<string, TaskThreadLike>;
+    activeThreads = fetchedActive.threads as unknown as Map<string, TaskThreadLike>;
   } catch (err) {
     ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch active threads');
     ctx.counters.warnings++;
@@ -156,7 +156,7 @@ async function fetchPhase5ThreadSources(
   let archivedThreads: Map<string, TaskThreadLike> = new Map();
   try {
     const fetchedArchived = await ctx.forum.threads.fetchArchived();
-    archivedThreads = new Map(fetchedArchived.threads as Map<string, TaskThreadLike>);
+    archivedThreads = new Map(fetchedArchived.threads as unknown as Map<string, TaskThreadLike>);
   } catch (err) {
     ctx.log?.warn({ err }, 'task-sync:phase5 failed to fetch archived threads');
     ctx.counters.warnings++;

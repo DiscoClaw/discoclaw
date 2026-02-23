@@ -72,6 +72,34 @@ export type PlanContext = {
   onRunComplete?: (content: string) => Promise<void>;
 };
 
+type MessageEditTarget = {
+  edit(opts: { content: string; allowedMentions: unknown }): Promise<unknown>;
+};
+
+type MessageSendTarget = {
+  send(opts: { content: string; allowedMentions: unknown }): Promise<unknown>;
+};
+
+function asMessageEditTarget(value: unknown): MessageEditTarget | null {
+  if (!value || typeof value !== 'object' || !('edit' in value)) return null;
+  const edit = (value as { edit?: unknown }).edit;
+  return typeof edit === 'function' ? (value as MessageEditTarget) : null;
+}
+
+function asMessageSendTarget(value: unknown): MessageSendTarget | null {
+  if (!value || typeof value !== 'object' || !('send' in value)) return null;
+  const send = (value as { send?: unknown }).send;
+  return typeof send === 'function' ? (value as MessageSendTarget) : null;
+}
+
+function extractPhaseStopMessage(phaseResult: { result: string } & Record<string, unknown>): string {
+  const error = phaseResult.error;
+  if (typeof error === 'string' && error.trim()) return error;
+  const message = phaseResult.message;
+  if (typeof message === 'string' && message.trim()) return message;
+  return phaseResult.result;
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -282,8 +310,9 @@ export async function executePlanAction(
                 content: `**${event.phase.title}**...`,
                 allowedMentions: NO_MENTIONS,
               });
-              if (sent && typeof (sent as any).edit === 'function') {
-                phaseStartMessages.set(event.phase.id, sent as any);
+              const editable = asMessageEditTarget(sent);
+              if (editable) {
+                phaseStartMessages.set(event.phase.id, editable);
               }
             } catch (err) {
               planCtx.log?.warn({ err, planId: runPlanId, phaseId: event.phase.id }, 'plan:action:run phase-start post failed');
@@ -317,9 +346,7 @@ export async function executePlanAction(
 
         try {
           const channel = await ctx.client.channels.fetch(ctx.channelId);
-          if (channel && 'send' in channel) {
-            runChannel = channel as any;
-          }
+          runChannel = asMessageSendTarget(channel) ?? undefined;
         } catch {
           // best-effort — phase-start posts and completion fall back gracefully
         }
@@ -330,9 +357,7 @@ export async function executePlanAction(
               content: `**Plan run started:** \`${runPlanId}\` — starting phase ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}`,
               allowedMentions: NO_MENTIONS,
             });
-            if (sent && typeof (sent as any).edit === 'function') {
-              statusMsg = sent as any;
-            }
+            statusMsg = asMessageEditTarget(sent) ?? undefined;
           } catch {
             // best-effort — missing status message is non-fatal
           }
@@ -381,7 +406,7 @@ export async function executePlanAction(
           } else {
             // Any error/stale/corrupt/audit_failed/retry_blocked stops the loop.
             stopReason = phaseResult.result;
-            stopMessage = (phaseResult as any).error ?? (phaseResult as any).message ?? phaseResult.result;
+            stopMessage = extractPhaseStopMessage(phaseResult as { result: string } & Record<string, unknown>);
             planCtx.log?.warn({ planId: runPlanId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
             // Force-edit to reflect stop.
             await editStatus(`**Plan run stopped:** \`${runPlanId}\` — ${stopMessage ?? stopReason}`, true);
@@ -465,8 +490,9 @@ export async function executePlanAction(
               // Fall back to sending a new message if we never got runChannel or statusMsg.
               try {
                 const channel = await ctx.client.channels.fetch(ctx.channelId);
-                if (channel && 'send' in channel) {
-                  await (channel as any).send({ content: finalContent, allowedMentions: NO_MENTIONS });
+                const sendTarget = asMessageSendTarget(channel);
+                if (sendTarget) {
+                  await sendTarget.send({ content: finalContent, allowedMentions: NO_MENTIONS });
                 }
               } catch {
                 // best-effort

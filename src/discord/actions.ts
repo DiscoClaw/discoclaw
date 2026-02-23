@@ -570,7 +570,7 @@ export async function executeDiscordActions(
           result = executeConfigAction(action as ConfigActionRequest, effectiveSubs.configCtx);
         }
       } else {
-        result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
+        result = { ok: false, error: `Unknown action type: ${String(action.type ?? 'unknown')}` };
       }
 
       results.push(result);

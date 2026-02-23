@@ -137,7 +137,7 @@ export function executeConfigAction(
           }
           break;
         default:
-          return { ok: false, error: `Unknown role: ${(action as any).role}` };
+          return { ok: false, error: `Unknown role: ${String(action.role)}` };
       }
 
       const resolvedDisplay = resolveModel(model, configCtx.runtime.id);

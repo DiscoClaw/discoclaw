@@ -1045,8 +1045,11 @@ export function resolveProjectCwd(
     if (!stat.isDirectory()) {
       throw new Error(`Project directory is not a directory: ${projectDir}`);
     }
-  } catch (err: any) {
-    if (err.code === 'ENOENT') {
+  } catch (err) {
+    const code = typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: unknown }).code
+      : null;
+    if (code === 'ENOENT') {
       throw new Error(`Project directory does not exist: ${projectDir}`);
     }
     throw err;

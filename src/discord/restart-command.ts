@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import type { ExecFileException } from 'node:child_process';
 import os from 'node:os';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { writeShutdownContext } from './shutdown-context.js';
@@ -26,14 +27,19 @@ export function parseRestartCommand(content: string): RestartCommand | null {
 function run(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve) => {
     execFile(cmd, args, { timeout: 15_000 }, (err, stdout, stderr) => {
-      const exitCode = err ? (err as any).code ?? null : 0;
+      const exitCode = mapExitCode(err);
       resolve({
         stdout: String(stdout ?? ''),
         stderr: String(stderr ?? ''),
-        exitCode: typeof exitCode === 'number' ? exitCode : null,
+        exitCode,
       });
     });
   });
+}
+
+function mapExitCode(err: ExecFileException | null): number | null {
+  if (!err) return 0;
+  return typeof err.code === 'number' ? err.code : null;
 }
 
 type PlatformCmds = {
