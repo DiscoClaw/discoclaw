@@ -506,7 +506,7 @@ describe('template content — AGENTS.md', () => {
 
   it('contains task creation guidance', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Task Creation');
+    expect(agents).toContain('Task Management');
   });
 
   it('contains git commit hash guidance', async () => {
@@ -639,14 +639,14 @@ describe('scaffolded workspace contains operational content', () => {
       'Landing the Plane',
       'Plan-Audit-Implement Workflow',
       'Discord Formatting',
-      'Task Creation',
+      'Task Management',
     ];
     for (const section of requiredSections) {
       expect(agents).toContain(section);
     }
   });
 
-  it('fresh scaffold produces TOOLS.md with all 13 action types', async () => {
+  it('fresh scaffold produces TOOLS.md with all 30 action types', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
     dirs.push(workspace);
 
@@ -657,6 +657,8 @@ describe('scaffolded workspace contains operational content', () => {
       'forgeCreate', 'forgeResume', 'forgeStatus', 'forgeCancel',
       'planList', 'planShow', 'planApprove', 'planClose', 'planCreate', 'planRun',
       'memoryRemember', 'memoryForget', 'memoryShow',
+      'taskCreate', 'taskUpdate', 'taskClose', 'taskShow', 'taskList', 'taskSync', 'tagMapReload',
+      'cronCreate', 'cronUpdate', 'cronList', 'cronShow', 'cronPause', 'cronResume', 'cronDelete', 'cronTrigger', 'cronSync', 'cronTagMapReload',
     ];
     for (const action of allActionTypes) {
       expect(tools).toContain(action);
