@@ -337,7 +337,9 @@ Use memoryRemember to proactively store important facts (preferences, projects, 
 
 Use taskList to check existing tasks before creating duplicates. Use taskShow/taskUpdate/taskClose to interact with existing tasks by ID rather than channel-name messaging.
 
-### Cron Actions
+### Cron Actions (Automations)
+
+**Automations** is the user-facing name for crons. Each automation lives as a thread in a dedicated Discord forum channel (typically called "automations"). When a user says "create an automation," "set up a scheduled task," or "run X every morning/weekly/etc.," respond with `cronCreate`. Use `cronList` to check what's already running before creating a new one.
 
 **cronCreate** — Create a new scheduled task:
 ```
