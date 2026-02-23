@@ -2436,6 +2436,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     mode: 'interactive' as const,
                     sessionKey,
                     userId: msg.author.id,
+                    bypassDestructive: true,
                   },
                 };
                 // Construct per-message memoryCtx with real user ID and Discord metadata.
