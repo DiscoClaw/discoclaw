@@ -37,6 +37,20 @@ npm is configured to trust `publish.yml` in the `DiscoClaw/discoclaw` repo. If t
 filename ever changes, the Trusted Publisher config at `https://www.npmjs.com/package/discoclaw`
 → Settings → Trusted Publishers must be updated to match.
 
+### Do not use NPM_TOKEN or any npm access token
+
+**Never** add `NODE_AUTH_TOKEN`, `NPM_TOKEN`, or any npm access token as a GitHub secret
+or pass it into the publish workflow. Reasons:
+
+- Tokens expire and cause silent failures months later (`401 Access token expired`)
+- Tokens require manual rotation — OIDC tokens are ephemeral and auto-renewed per-run
+- OIDC is strictly more secure: only this specific workflow in this specific repo can publish
+
+If you ever see an npm auth failure in CI, the fix is **not** to create a new token. Check:
+1. Is `id-token: write` set on the publish job? (It is — don't remove it.)
+2. Is the Trusted Publisher config on npmjs.com still pointing at `publish.yml`? (If the workflow was renamed, update it there.)
+3. Is `NODE_AUTH_TOKEN` being passed somewhere? Remove it.
+
 ## Setting up Trusted Publishing (one-time)
 
 1. Go to `https://www.npmjs.com/package/discoclaw` → **Settings** tab.
