@@ -6,10 +6,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  release:
+  tag:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      new_tag: ${{ steps.tag_check.outputs.exists == 'false' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,3 +34,11 @@ jobs:
         run: |
           git tag "v${{ steps.pkg.outputs.version }}"
           git push origin "v${{ steps.pkg.outputs.version }}"
+
+  publish:
+    needs: tag
+    if: needs.tag.outputs.new_tag == 'true'
+    uses: ./.github/workflows/publish.yml
+    permissions:
+      contents: read
+      id-token: write
