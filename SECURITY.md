@@ -12,7 +12,7 @@ Do **not** open a public issue for security vulnerabilities.
 **In scope:**
 - The DiscoClaw orchestration layer (context assembly, runtime routing, Discord event handling, task scheduling)
 - Configuration parsing and validation
-- Bead/cron subsystem logic
+- Task/cron subsystem logic
 
 **Out of scope:**
 - Claude Code itself (report to [Anthropic](https://www.anthropic.com/responsible-disclosure))
