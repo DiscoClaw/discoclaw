@@ -20,6 +20,16 @@ type ChatGptOAuthOpts = CommonOpts & {
 
 export type OpenAICompatOpts = ApiKeyOpts | ChatGptOAuthOpts;
 
+/**
+ * Returns true for models that require `max_completion_tokens` instead of `max_tokens`.
+ * Strips any provider namespace (e.g. "openai/") before matching.
+ */
+export function useMaxCompletionTokens(model: string): boolean {
+  const name = model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model;
+  const lower = name.toLowerCase();
+  return lower.startsWith('o1') || lower.startsWith('o3') || lower.startsWith('gpt-5');
+}
+
 /** Extract the data payload from an SSE line, or undefined if not a data line. */
 function parseSSEData(line: string): string | undefined {
   const trimmed = line.trim();
@@ -42,10 +52,17 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
         const model = params.model || opts.defaultModel;
         const url = `${opts.baseUrl}/chat/completions`;
 
+        const tokenField = params.maxTokens !== undefined
+          ? (useMaxCompletionTokens(model)
+            ? { max_completion_tokens: params.maxTokens }
+            : { max_tokens: params.maxTokens })
+          : {};
+
         const body = JSON.stringify({
           model,
           messages: [{ role: 'user', content: params.prompt }],
           stream: true,
+          ...tokenField,
         });
 
         const controller = new AbortController();

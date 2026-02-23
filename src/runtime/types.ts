@@ -38,6 +38,7 @@ export type RuntimeInvokeParams = {
   tools?: string[];
   addDirs?: string[];
   timeoutMs?: number;
+  maxTokens?: number;
   images?: ImageData[];
   signal?: AbortSignal;
 };
