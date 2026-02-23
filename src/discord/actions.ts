@@ -373,11 +373,13 @@ function parseActionJson(
   validTypes: Set<string>,
   actions: DiscordActionRequest[],
   strippedUnrecognizedTypes: string[],
+  parseFailuresRef: { count: number },
 ): void {
   try {
     const parsed = JSON.parse(jsonStr);
     collectParsedAction(parsed, flags, validTypes, actions, strippedUnrecognizedTypes);
   } catch {
+    parseFailuresRef.count++;
     // Malformed JSON — skip silently.
   }
 }
@@ -389,6 +391,7 @@ function stripActionsWithScanner(
   actions: DiscordActionRequest[],
   strippedUnrecognizedTypes: string[],
   codeRanges: TextRange[],
+  parseFailuresRef: { count: number },
 ): string {
   let result = '';
   let cursor = 0;
@@ -422,7 +425,7 @@ function stripActionsWithScanner(
       continue;
     }
 
-    parseActionJson(jsonStr, flags, validTypes, actions, strippedUnrecognizedTypes);
+    parseActionJson(jsonStr, flags, validTypes, actions, strippedUnrecognizedTypes, parseFailuresRef);
 
     // Advance past the JSON object and consume any trailing XML closing tags.
     cursor = afterMarker + jsonStr.length;
@@ -443,35 +446,39 @@ function parseWithRegexFallback(
   flags: ActionCategoryFlags,
   validTypes: Set<string>,
   codeRanges: TextRange[],
-): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[] } {
+): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[]; parseFailures: number } {
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
+  const parseFailuresRef = { count: 0 };
   const cleaned = text.replace(ACTION_RE, (match, json: string, offset: number) => {
     if (isIndexInRanges(offset, codeRanges)) return match;
-    parseActionJson(json.trim(), flags, validTypes, actions, strippedUnrecognizedTypes);
+    parseActionJson(json.trim(), flags, validTypes, actions, strippedUnrecognizedTypes, parseFailuresRef);
     return '';
   });
   return {
     cleanText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
     actions,
     strippedUnrecognizedTypes,
+    parseFailures: parseFailuresRef.count,
   };
 }
 
 export function parseDiscordActions(
   text: string,
   flags: ActionCategoryFlags,
-): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[] } {
+): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[]; parseFailures: number } {
   const validTypes = buildValidTypes(flags);
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
   const codeRanges = computeMarkdownCodeRanges(text);
+  const parseFailuresRef = { count: 0 };
 
-  const cleaned = stripActionsWithScanner(text, flags, validTypes, actions, strippedUnrecognizedTypes, codeRanges);
+  const cleaned = stripActionsWithScanner(text, flags, validTypes, actions, strippedUnrecognizedTypes, codeRanges, parseFailuresRef);
   const scanned = {
     cleanText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
     actions,
     strippedUnrecognizedTypes,
+    parseFailures: parseFailuresRef.count,
   };
 
   // Compatibility fallback: if scanner leaves markers behind or extracts nothing,
@@ -579,7 +586,7 @@ export async function executeDiscordActions(
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      results.push({ ok: false, error: msg });
+      results.push({ ok: false, error: `Failed (${action.type}): ${msg}` });
       log?.error({ err, action }, 'discord:action failed');
     }
   }
