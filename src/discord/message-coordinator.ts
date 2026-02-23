@@ -21,6 +21,7 @@ import { executePlanAction } from './actions-plan.js';
 import type { PlanContext } from './actions-plan.js';
 import type { MemoryContext } from './actions-memory.js';
 import type { ConfigContext } from './actions-config.js';
+import type { ImagegenContext } from './actions-imagegen.js';
 import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -134,6 +135,7 @@ export type BotParams = {
   discordActionsMemory?: boolean;
   discordActionsConfig?: boolean;
   discordActionsDefer?: boolean;
+  discordActionsImagegen?: boolean;
   deferMaxDelaySeconds?: number;
   deferMaxConcurrent?: number;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
@@ -143,6 +145,7 @@ export type BotParams = {
   planCtx?: PlanContext;
   memoryCtx?: MemoryContext;
   configCtx?: ConfigContext;
+  imagegenCtx?: ImagegenContext;
   messageHistoryBudget: number;
   summaryEnabled: boolean;
   summaryModel: string;
@@ -576,6 +579,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         memory: params.discordActionsMemory ?? false,
         config: params.discordActionsConfig ?? false,
         defer: !isDm && (params.discordActionsDefer ?? false),
+        imagegen: params.discordActionsImagegen ?? false,
       };
 
       if (!isDm && params.allowChannelIds) {
@@ -1932,6 +1936,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               planCtx: params.planCtx,
               memoryCtx: perMessageMemoryCtx,
               configCtx: params.configCtx,
+              imagegenCtx: params.imagegenCtx,
             });
             const displayLines = buildDisplayResultLines([confirmAction], actionResults);
             const content = displayLines.length > 0
@@ -2455,6 +2460,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   planCtx: params.planCtx,
                   memoryCtx: perMessageMemoryCtx,
                   configCtx: params.configCtx,
+                  imagegenCtx: params.imagegenCtx,
                 });
                 for (const result of actionResults) {
                   metrics.recordActionResult(result.ok);

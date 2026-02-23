@@ -30,6 +30,7 @@ import type { CronContext } from './discord/actions-crons.js';
 import type { ForgeContext } from './discord/actions-forge.js';
 import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
+import type { ImagegenContext } from './discord/actions-imagegen.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
 import { initializeTasksContext, wireTaskSync } from './tasks/initialize.js';
 import type { TaskSyncWiring } from './tasks/sync-types.js';
@@ -681,6 +682,7 @@ const botParams = {
   discordActionsForge: discordActionsForge && forgeCommandsEnabled,
   discordActionsPlan: discordActionsPlan && planCommandsEnabled,
   discordActionsMemory: discordActionsMemory && durableMemoryEnabled,
+  discordActionsImagegen: cfg.discordActionsImagegen,
   discordActionsConfig: discordActionsEnabled, // Always enabled when actions are on — model switching is a core capability.
   discordActionsDefer: cfg.discordActionsDefer,
   deferMaxDelaySeconds: cfg.deferMaxDelaySeconds,
@@ -691,6 +693,7 @@ const botParams = {
   forgeCtx: undefined as ForgeContext | undefined,
   planCtx: undefined as PlanContext | undefined,
   memoryCtx: undefined as MemoryContext | undefined,
+  imagegenCtx: undefined as ImagegenContext | undefined,
   configCtx: undefined as import('./discord/actions-config.js').ConfigContext | undefined,
   messageHistoryBudget,
   summaryEnabled,
@@ -1015,6 +1018,14 @@ if (taskCtx) {
     };
     log.info('config:action context initialized');
   }
+
+  if (cfg.discordActionsImagegen && cfg.openaiApiKey) {
+    botParams.imagegenCtx = {
+      apiKey: cfg.openaiApiKey,
+      baseUrl: cfg.openaiBaseUrl,
+    };
+    log.info('imagegen:action context initialized');
+  }
 }
 
 // --- Cron subsystem ---
@@ -1047,6 +1058,7 @@ if (cronEnabled && effectiveCronForum) {
     memory: false, // No user context in cron flows.
     config: false, // No model switching from cron flows.
     defer: false,
+    imagegen: false,
   };
   const cronRunControl = new CronRunControl();
 
@@ -1275,6 +1287,7 @@ const actionCategoriesEnabled = buildActionCategoriesEnabled({
   planCommandsEnabled,
   discordActionsMemory,
   durableMemoryEnabled,
+  discordActionsImagegen: cfg.discordActionsImagegen,
 });
 publishBootReport({
   botStatus,

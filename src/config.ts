@@ -42,6 +42,7 @@ export type DiscoclawConfig = {
   discordActionsPlan: boolean;
   discordActionsMemory: boolean;
   discordActionsDefer: boolean;
+  discordActionsImagegen: boolean;
 
   deferMaxDelaySeconds: number;
   deferMaxConcurrent: number;
@@ -74,6 +75,7 @@ export type DiscoclawConfig = {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   openaiModel: string;
+
   forgeDrafterRuntime?: string;
   forgeAuditorRuntime?: string;
 
@@ -363,6 +365,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsPlan = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_PLAN', true);
   const discordActionsMemory = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', true);
   const discordActionsDefer = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER', true);
+  const discordActionsImagegen = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', false);
   const deferMaxDelaySeconds = parsePositiveNumber(
     env,
     'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS',
@@ -388,6 +391,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       { name: 'DISCOCLAW_DISCORD_ACTIONS_PLAN', enabled: discordActionsPlan },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', enabled: discordActionsMemory },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_DEFER', enabled: discordActionsDefer },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', enabled: discordActionsImagegen },
     ]
       .filter((entry) => (env[entry.name] ?? '').trim().length > 0 && entry.enabled)
       .map((entry) => entry.name);
@@ -428,6 +432,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
   if (forgeAuditorRuntime === 'openai' && !openaiApiKey) {
     warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to the primary runtime.');
+  }
+  if (discordActionsImagegen && !openaiApiKey) {
+    warnings.push('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1 but OPENAI_API_KEY is not set; imagegen will fail at runtime.');
   }
 
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
@@ -507,6 +514,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsPlan,
       discordActionsMemory,
       discordActionsDefer,
+      discordActionsImagegen,
 
       deferMaxDelaySeconds,
       deferMaxConcurrent,

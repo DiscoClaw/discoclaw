@@ -229,6 +229,34 @@ describe('parseConfig', () => {
     expect(config.discordActionsMemory).toBe(true);
   });
 
+  it('defaults discordActionsImagegen to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsImagegen).toBe(false);
+  });
+
+  it('enables discordActionsImagegen when DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1' }));
+    expect(config.discordActionsImagegen).toBe(true);
+  });
+
+  it('reports ignored imagegen category flag when master actions off', () => {
+    const { infos } = parseConfig(env({
+      DISCOCLAW_DISCORD_ACTIONS: '0',
+      DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1',
+    }));
+    expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN'))).toBe(true);
+  });
+
+  it('warns when discordActionsImagegen is enabled but OPENAI_API_KEY is unset', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1', OPENAI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1'))).toBe(true);
+  });
+
+  it('does not warn about imagegen key when discordActionsImagegen is disabled', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '0', OPENAI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1'))).toBe(false);
+  });
+
   it('defaults sessionScanning to true', () => {
     const { config } = parseConfig(env());
     expect(config.sessionScanning).toBe(true);

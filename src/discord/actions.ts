@@ -34,6 +34,8 @@ import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } 
 import type { ConfigActionRequest, ConfigContext } from './actions-config.js';
 import { executeReactionPromptAction as executeReactionPrompt, REACTION_PROMPT_ACTION_TYPES, reactionPromptSection } from './reaction-prompts.js';
 import type { ReactionPromptRequest } from './reaction-prompts.js';
+import { IMAGEGEN_ACTION_TYPES, executeImagegenAction, imagegenActionsPromptSection } from './actions-imagegen.js';
+import type { ImagegenActionRequest, ImagegenContext } from './actions-imagegen.js';
 import { describeDestructiveConfirmationRequirement } from './destructive-confirmation.js';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +71,7 @@ export type ActionCategoryFlags = {
   memory: boolean;
   defer: boolean;
   config: boolean;
+  imagegen?: boolean;
 };
 
 export type DiscordActionRequest =
@@ -85,7 +88,8 @@ export type DiscordActionRequest =
   | MemoryActionRequest
   | DeferActionRequest
   | ConfigActionRequest
-  | ReactionPromptRequest;
+  | ReactionPromptRequest
+  | ImagegenActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -100,6 +104,7 @@ export type SubsystemContexts = {
   planCtx?: PlanContext;
   memoryCtx?: MemoryContext;
   configCtx?: ConfigContext;
+  imagegenCtx?: ImagegenContext;
 };
 
 // ---------------------------------------------------------------------------
@@ -122,6 +127,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.memory) for (const t of MEMORY_ACTION_TYPES) types.add(t);
   if (flags.defer) for (const t of DEFER_ACTION_TYPES) types.add(t);
   if (flags.config) for (const t of CONFIG_ACTION_TYPES) types.add(t);
+  if (flags.imagegen) for (const t of IMAGEGEN_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -576,6 +582,12 @@ export async function executeDiscordActions(
         } else {
           result = executeConfigAction(action as ConfigActionRequest, effectiveSubs.configCtx);
         }
+      } else if (IMAGEGEN_ACTION_TYPES.has(action.type)) {
+        if (!effectiveSubs.imagegenCtx) {
+          result = { ok: false, error: 'Imagegen subsystem not configured' };
+        } else {
+          result = await executeImagegenAction(action as ImagegenActionRequest, ctx, effectiveSubs.imagegenCtx);
+        }
       } else {
         result = { ok: false, error: `Unknown action type: ${String(action.type ?? 'unknown')}` };
       }
@@ -685,6 +697,10 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
 
   if (flags.config) {
     sections.push(configActionsPromptSection());
+  }
+
+  if (flags.imagegen) {
+    sections.push(imagegenActionsPromptSection());
   }
 
   sections.push(`### Rules
