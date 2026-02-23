@@ -44,8 +44,6 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 - `src/tasks/thread-cache.ts`
 - `src/tasks/forum-guard.ts`
 
-Legacy runtime compatibility shims under `src/beads/` have been removed.
-
 Primary action trigger is `taskSync` via `src/tasks/task-action-executor.ts`.
 
 ## Auto-Tagging
