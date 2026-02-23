@@ -89,7 +89,7 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
   | Var | Default | Purpose |
   |-----|---------|---------|
   | `GEMINI_BIN` | `gemini` | Path to the Gemini CLI binary |
-  | `GEMINI_MODEL` | `gemini-2.5-flash` | Default model ID |
+  | `GEMINI_MODEL` | `gemini-2.5-pro` | Default model ID |
 - Model tier mapping:
   | Tier | Model |
   |------|-------|
@@ -117,7 +117,7 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
   - `streaming_text` only
   - No tool execution
   - No sessions / multi-turn
-- Health system: credential presence checked via `checkOpenRouterKey` — fails health check if key is missing or invalid.
+- Health system: credential presence checked via `checkOpenRouterKey` — returns `skip` if key is missing, `fail` if key is present but invalid/expired.
 
 ## Tool Surface
 - Default tools: `Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch` (8 tools).
