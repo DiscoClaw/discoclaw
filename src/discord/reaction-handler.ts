@@ -13,7 +13,7 @@ import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { tryAbortAll } from './abort-registry.js';
 import { getActiveOrchestrator } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
-import { editThenSendChunks, appendUnavailableActionTypesNotice } from './output-common.js';
+import { editThenSendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
@@ -581,11 +581,13 @@ function createReactionHandler(
           let parsedActions: DiscordActionRequest[] = [];
           let actionResults: DiscordActionResult[] = [];
           let strippedUnrecognizedTypes: string[] = [];
+          let parseFailuresCount = 0;
           if (params.discordActionsEnabled && msg.guild && canParseActions && !invokeError) {
             const parsed = parseDiscordActions(processedText, actionFlags);
             parsedActionCount = parsed.actions.length;
             parsedActions = parsed.actions;
             strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
+            parseFailuresCount = parsed.parseFailures;
             if (parsed.actions.length > 0) {
               const actCtx = {
                 guild: msg.guild,
@@ -632,6 +634,7 @@ function createReactionHandler(
                 && anyActionSucceeded
                 && collectedImages.length === 0
                 && strippedUnrecognizedTypes.length === 0
+                && parseFailuresCount === 0
               ) {
                 try { await reply?.delete?.(); } catch { /* ignore */ }
                 replyFinalized = true;
@@ -652,6 +655,7 @@ function createReactionHandler(
             }
           }
           processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
+          processedText = appendParseFailureNotice(processedText, parseFailuresCount);
 
           // Suppress empty responses and the HEARTBEAT_OK sentinel — delete placeholder and bail.
           const strippedText = processedText.replace(/\s+/g, ' ').trim();

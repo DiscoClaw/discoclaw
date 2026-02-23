@@ -57,7 +57,7 @@ import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
-import { editThenSendChunks, shouldSuppressFollowUp, appendUnavailableActionTypesNotice } from './output-common.js';
+import { editThenSendChunks, shouldSuppressFollowUp, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { resolveReplyReference } from './reply-reference.js';
 import type { MessageWithReference } from './reply-reference.js';
@@ -2400,6 +2400,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let actions: { type: string }[] = [];
             let actionResults: DiscordActionResult[] = [];
             let strippedUnrecognizedTypes: string[] = [];
+            let parseFailuresCount = 0;
             // Gate action execution on successful stream completion — do not execute
             // actions against partial or error output, which could cause side effects
             // based on incomplete model responses.  Relax the hadTextFinal requirement
@@ -2417,6 +2418,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               && (hadTextFinal || processedText.includes('<discord-action>'));
             if (params.discordActionsEnabled && msg.guild && canParseActions) {
               const parsed = parseDiscordActions(processedText, actionFlags);
+              parseFailuresCount = parsed.parseFailures;
+              if (parsed.parseFailures > 0) {
+                params.log?.warn(`parseDiscordActions: ${parsed.parseFailures} action block(s) failed to parse (sessionKey=${sessionKey})`);
+              }
               if (parsed.actions.length > 0) {
                 actions = parsed.actions;
                 strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
@@ -2469,6 +2474,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   && anyActionSucceeded
                   && collectedImages.length === 0
                   && strippedUnrecognizedTypes.length === 0
+                  && parseFailuresCount === 0
                 ) {
                   try { await reply.delete(); } catch { /* ignore */ }
                   replyFinalized = true;
@@ -2490,6 +2496,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
             }
             processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
+            processedText = appendParseFailureNotice(processedText, parseFailuresCount);
 
             // Suppression: if a follow-up response is trivially short and has no further
             // actions, suppress it to avoid posting empty messages like "Got it."

@@ -250,6 +250,33 @@ describe('parseDiscordActions', () => {
     expect(actions).toHaveLength(0);
     expect(strippedUnrecognizedTypes).toEqual(['forgeStatus']);
   });
+
+  it('parses two same-type taskCreate actions and extracts both', () => {
+    const input =
+      '<discord-action>{"type":"taskCreate","title":"First task"}</discord-action>' +
+      '<discord-action>{"type":"taskCreate","title":"Second task"}</discord-action>';
+    const { actions, parseFailures } = parseDiscordActions(input, { ...ALL_FLAGS, tasks: true });
+    expect(actions).toHaveLength(2);
+    expect(actions[0]).toEqual({ type: 'taskCreate', title: 'First task' });
+    expect(actions[1]).toEqual({ type: 'taskCreate', title: 'Second task' });
+    expect(parseFailures).toBe(0);
+  });
+
+  it('returns parseFailures: 1 and only the valid action when second block has malformed JSON', () => {
+    const input =
+      '<discord-action>{"type":"taskCreate","title":"Valid task"}</discord-action>' +
+      '<discord-action>{bad json}</discord-action>';
+    const { actions, parseFailures } = parseDiscordActions(input, { ...ALL_FLAGS, tasks: true });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toEqual({ type: 'taskCreate', title: 'Valid task' });
+    expect(parseFailures).toBe(1);
+  });
+
+  it('returns parseFailures: 0 for well-formed input', () => {
+    const input = '<discord-action>{"type":"channelList"}</discord-action>';
+    const { parseFailures } = parseDiscordActions(input, ALL_FLAGS);
+    expect(parseFailures).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -379,7 +406,7 @@ describe('executeDiscordActions', () => {
     );
 
     expect(results).toHaveLength(1);
-    expect(results[0]).toEqual({ ok: false, error: 'Missing Permissions' });
+    expect(results[0]).toEqual({ ok: false, error: 'Failed (channelCreate): Missing Permissions' });
   });
 
   it('one failure does not block subsequent actions', async () => {
@@ -444,6 +471,22 @@ describe('executeDiscordActions', () => {
     if (results[0].ok) throw new Error('unexpected ok result');
     expect(results[0].error).toContain('requires confirmation');
     expect(results[0].error).toContain('!confirm');
+  });
+
+  it('executes two same-type channelCreate actions and returns two results', async () => {
+    const guild = makeMockGuild([]);
+
+    const results = await executeDiscordActions(
+      [
+        { type: 'channelCreate', name: 'alpha' },
+        { type: 'channelCreate', name: 'beta' },
+      ],
+      makeCtx(guild),
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ ok: true, summary: 'Created #alpha' });
+    expect(results[1]).toEqual({ ok: true, summary: 'Created #beta' });
   });
 
   it('allows destructive actions with bypassDestructive confirmation context', async () => {

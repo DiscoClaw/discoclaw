@@ -16,7 +16,7 @@ import type { CronRunControl } from './run-control.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import * as discordActions from '../discord/actions.js';
-import { sendChunks, appendUnavailableActionTypesNotice } from '../discord/output-common.js';
+import { sendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from '../discord/output-common.js';
 import { buildPromptPreamble, loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
@@ -271,12 +271,14 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     let processedText = output;
     let strippedUnrecognizedTypes: string[] = [];
+    let parseFailuresCount = 0;
 
     // Handle Discord actions if enabled.
     if (ctx.discordActionsEnabled) {
       const parsed = discordActions.parseDiscordActions(processedText, ctx.actionFlags);
       const { cleanText, actions } = parsed;
       strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
+      parseFailuresCount = parsed.parseFailures;
       if (actions.length > 0) {
         const actCtx = {
           guild,
@@ -305,7 +307,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           ? cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
           : cleanText.trimEnd();
         // When all display lines were suppressed and there's no prose, skip posting.
-        if (!processedText.trim() && anyActionSucceeded && strippedUnrecognizedTypes.length === 0) {
+        if (!processedText.trim() && anyActionSucceeded && strippedUnrecognizedTypes.length === 0 && parseFailuresCount === 0) {
           ctx.log?.info({ jobId: job.id }, 'cron:reply suppressed (actions-only, no display text)');
         }
 
@@ -321,6 +323,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       }
     }
     processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
+    processedText = appendParseFailureNotice(processedText, parseFailuresCount);
 
     await sendChunks(channelForSend, processedText, collectedImages);
 
