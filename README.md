@@ -136,6 +136,10 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    ```bash
    discoclaw install-daemon
    ```
+   Optional: pass `--service-name <name>` to use a custom service name (useful on macOS when running multiple instances, or to match your own naming convention):
+   ```bash
+   discoclaw install-daemon --service-name personal
+   ```
 
 #### From source (contributors)
 
@@ -157,6 +161,8 @@ pnpm dev
 ```bash
 npm update -g discoclaw
 discoclaw install-daemon   # re-register the service after updating
+# If you used a custom service name, pass it again:
+# discoclaw install-daemon --service-name personal
 ```
 
 **From source:**
