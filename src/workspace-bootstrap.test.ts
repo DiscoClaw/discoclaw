@@ -504,9 +504,9 @@ describe('template content — AGENTS.md', () => {
     expect(agents).toContain('No markdown tables in Discord');
   });
 
-  it('contains bead creation guidance', async () => {
+  it('contains task creation guidance', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Bead Creation');
+    expect(agents).toContain('Task Creation');
   });
 
   it('contains git commit hash guidance', async () => {
@@ -639,7 +639,7 @@ describe('scaffolded workspace contains operational content', () => {
       'Landing the Plane',
       'Plan-Audit-Implement Workflow',
       'Discord Formatting',
-      'Bead Creation',
+      'Task Creation',
     ];
     for (const section of requiredSections) {
       expect(agents).toContain(section);
