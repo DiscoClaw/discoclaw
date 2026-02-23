@@ -105,6 +105,7 @@ export function buildActionCategoriesEnabled(opts: {
   planCommandsEnabled: boolean;
   discordActionsMemory: boolean;
   durableMemoryEnabled: boolean;
+  discordActionsImagegen: boolean;
 }): string[] {
   const enabled: string[] = [];
   if (opts.discordActionsChannels) enabled.push('channels');
@@ -118,6 +119,7 @@ export function buildActionCategoriesEnabled(opts: {
   if (opts.discordActionsForge && opts.forgeCommandsEnabled) enabled.push('forge');
   if (opts.discordActionsPlan && opts.planCommandsEnabled) enabled.push('plan');
   if (opts.discordActionsMemory && opts.durableMemoryEnabled) enabled.push('memory');
+  if (opts.discordActionsImagegen) enabled.push('imagegen');
   return enabled;
 }
 
