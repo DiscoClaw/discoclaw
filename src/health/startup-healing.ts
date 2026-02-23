@@ -10,6 +10,26 @@ type ChannelClient = {
   };
 };
 
+type DiscordFetchErrorLike = {
+  code?: unknown;
+  status?: unknown;
+  httpStatus?: unknown;
+};
+
+function discordFetchErrorMeta(err: unknown): { code: number | null; status: number | null } {
+  if (!err || typeof err !== 'object') return { code: null, status: null };
+  const errorLike = err as DiscordFetchErrorLike;
+  const code = typeof errorLike.code === 'number' ? errorLike.code : null;
+  const statusCandidate = errorLike.status ?? errorLike.httpStatus;
+  const status = typeof statusCandidate === 'number' ? statusCandidate : null;
+  return { code, status };
+}
+
+function isDeletedDiscordChannelError(err: unknown): boolean {
+  const { code, status } = discordFetchErrorMeta(err);
+  return code === 10003 || status === 404;
+}
+
 /**
  * Scenario 2: Remove stale cron run-stats records for threads that no longer exist.
  *
@@ -42,9 +62,7 @@ export async function healStaleCronRecords(
     } catch (err: unknown) {
       // Treat Discord "Unknown Channel" (code 10003) or HTTP 404 as definitely gone.
       // Any other error is treated as transient — skip to avoid purging live records.
-      const code = (err as any)?.code;
-      const status = (err as any)?.status ?? (err as any)?.httpStatus;
-      if (code === 10003 || status === 404) {
+      if (isDeletedDiscordChannelError(err)) {
         threadGone = true;
       } else {
         log?.warn(
@@ -105,9 +123,7 @@ export async function healStaleTaskThreadRefs(
         );
       }
     } catch (err: unknown) {
-      const code = (err as any)?.code;
-      const status = (err as any)?.status ?? (err as any)?.httpStatus;
-      if (code === 10003 || status === 404) {
+      if (isDeletedDiscordChannelError(err)) {
         log?.warn(
           { taskId: task.id, threadId },
           'startup:heal:task thread no longer exists (external_ref retained for next sync)',

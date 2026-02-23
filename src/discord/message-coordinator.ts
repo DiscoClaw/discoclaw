@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { Guild } from 'discord.js';
+import type { Client, Guild, TextBasedChannel } from 'discord.js';
 import type { RuntimeAdapter, ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import type { SessionManager } from '../sessions.js';
@@ -60,7 +60,9 @@ import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-m
 import { editThenSendChunks, shouldSuppressFollowUp, appendUnavailableActionTypesNotice } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { resolveReplyReference } from './reply-reference.js';
+import type { MessageWithReference } from './reply-reference.js';
 import { resolveThreadContext } from './thread-context.js';
+import type { ThreadLikeChannel } from './thread-context.js';
 import { downloadTextAttachments } from './file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { parseHelpCommand, handleHelpCommand } from './help-command.js';
@@ -80,6 +82,7 @@ import type { SendTarget } from './onboarding-completion.js';
 import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { getDefaultTimezone } from '../cron/default-timezone.js';
+import type { AttachmentLike } from './image-download.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed };
@@ -111,6 +114,7 @@ export type BotParams = {
   sessionManager: SessionManager;
   workspaceCwd: string;
   projectCwd: string;
+  updateRestartCmd?: string;
   groupsDir: string;
   useGroupDirCwd: boolean;
   runtimeModel: string;
@@ -206,8 +210,117 @@ let lastProcessedMessage: number | null = null;
 const acquireWriterLock = registryAcquireWriterLock;
 const MAX_PLAN_RUN_PHASES = 50;
 
+type ReplyTarget = {
+  id: string;
+  edit: (opts: { content: string; allowedMentions?: unknown; files?: unknown[] }) => Promise<unknown>;
+  delete: () => Promise<unknown>;
+  react?: (emoji: string) => Promise<unknown>;
+  reactions?: {
+    resolve?: (emoji: string) => { remove?: () => Promise<unknown> } | null;
+  };
+};
+
+type CoordinatorMessage = {
+  id: string;
+  type?: number | null;
+  content?: string | null;
+  channelId: string;
+  guildId?: string | null;
+  guild: Guild | null;
+  author: {
+    id: string;
+    bot?: boolean;
+    displayName?: string;
+    username?: string;
+    send: (opts: { content: string; allowedMentions?: unknown; files?: unknown[] }) => Promise<unknown>;
+  };
+  channel: ThreadChannelLike &
+    PinnedFetchChannel & {
+      send: (opts: { content: string; allowedMentions?: unknown; files?: unknown[] }) => Promise<ReplyTarget>;
+      messages: {
+        fetch: (arg: unknown) => Promise<unknown>;
+        fetchPinned?: () => Promise<{ size: number; values(): Iterable<PinnedMessageLike> } | Map<string, unknown>>;
+      };
+    };
+  client: Client<boolean>;
+  mentions?: { has: (user: unknown) => boolean } | null;
+  attachments?: { size: number; values(): Iterable<AttachmentLike> } | null;
+  stickers?: { size: number } | null;
+  embeds?: unknown[] | null;
+  reference?: { messageId?: string } | null;
+  reply: (opts: { content: string; allowedMentions?: unknown; files?: unknown[] }) => Promise<ReplyTarget>;
+};
+
+type ThreadChannelLike = {
+  id?: string;
+  parentId?: string | null;
+  name?: string;
+  parent?: { name?: string; type?: number } | null;
+  joinable?: boolean;
+  joined?: boolean;
+  isThread?: () => boolean;
+  join?: () => Promise<unknown>;
+};
+
+type MessageEditTarget = {
+  edit: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
+};
+
+type PinnedMessageLike = {
+  id: string;
+  content?: string;
+  attachments?: { size?: number };
+  embeds?: unknown[];
+  author?: { bot?: boolean; displayName?: string; username?: string };
+};
+
+type PinnedFetchChannel = {
+  messages?: {
+    fetchPinned?: () => Promise<{ size: number; values(): Iterable<PinnedMessageLike> }>;
+  };
+};
+
+function asThreadChannel(channel: unknown): ThreadChannelLike {
+  return (channel ?? {}) as ThreadChannelLike;
+}
+
+function channelName(channel: unknown): string | undefined {
+  if (!channel || typeof channel !== 'object') return undefined;
+  const candidate = channel as { name?: unknown };
+  return typeof candidate.name === 'string' ? candidate.name : undefined;
+}
+
+function channelNameOrParent(channel: unknown, fallback = ''): string {
+  if (!channel || typeof channel !== 'object') return fallback;
+  const candidate = channel as {
+    name?: unknown;
+    parent?: { name?: unknown } | null;
+  };
+  const ownName = typeof candidate.name === 'string' ? candidate.name : '';
+  const parentName = typeof candidate.parent?.name === 'string' ? candidate.parent.name : '';
+  return ownName || parentName || fallback;
+}
+
+function errorCode(err: unknown): number | null {
+  if (!err || typeof err !== 'object' || !('code' in err)) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'number' ? code : null;
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+function toSendTarget(candidate: unknown): SendTarget | null {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const maybe = candidate as { send?: unknown };
+  if (typeof maybe.send !== 'function') return null;
+  return candidate as SendTarget;
+}
+
 type ConversationContextOptions = {
-  msg: any;
+  msg: CoordinatorMessage;
   params: Omit<BotParams, 'token'>;
   isThread: boolean;
   threadId: string | null;
@@ -238,13 +351,17 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
 
   const contextParts: string[] = [];
 
-  const replyRef = await resolveReplyReference(msg, params.botDisplayName, params.log);
+  const replyRef = await resolveReplyReference(
+    msg as MessageWithReference,
+    params.botDisplayName,
+    params.log,
+  );
   if (replyRef?.section) {
     contextParts.push(`Context (replied-to message):\n${replyRef.section}`);
   }
 
   const threadCtx = await resolveThreadContext(
-    msg.channel as any,
+    msg.channel as ThreadLikeChannel,
     msg.id,
     { botDisplayName: params.botDisplayName, log: params.log },
   );
@@ -255,7 +372,7 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
   if (contextParts.length === 0 && params.messageHistoryBudget > 0) {
     try {
       const history = await fetchMessageHistory(
-        msg.channel,
+        msg.channel as TextBasedChannel,
         msg.id,
         { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
       );
@@ -278,7 +395,7 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
 }
 
 async function resolvePinnedMessagesSummary(
-  channel: any,
+  channel: PinnedFetchChannel,
   botDisplayName?: string,
   log?: LoggerLike,
   maxChars = 600,
@@ -287,7 +404,7 @@ async function resolvePinnedMessagesSummary(
   if (typeof fetchPinned !== 'function') return undefined;
 
   try {
-    const pinned = await channel.messages.fetchPinned();
+    const pinned = await fetchPinned();
     if (!pinned || pinned.size === 0) return undefined;
 
     const lines: string[] = [];
@@ -335,8 +452,12 @@ function parseConfirmToken(text: string): string | null {
 }
 
 export function groupDirNameFromSessionKey(sessionKey: string): string {
-  // Keep it filesystem-safe and easy to inspect.
-  return sessionKey.replace(/[^a-zA-Z0-9:_-]+/g, '-');
+  // Keep it filesystem-safe and easy to inspect across platforms.
+  const sanitized = sessionKey
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+  return sanitized || 'session';
 }
 
 export async function ensureGroupDir(groupsDir: string, sessionKey: string, botDisplayName?: string): Promise<string> {
@@ -370,7 +491,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
   const ONBOARDING_TIMEOUT_MS = 24 * 60 * 60 * 1000;
   let onboardingTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   let onboardingDisplayName: string | null = null;
-  let onboardingCtxRef: { guild: any; client: any; channelId: string; messageId: string; channelName: string } | null = null;
+  let onboardingCtxRef: {
+    guild: Guild | null;
+    client: CoordinatorMessage['client'];
+    channelId: string;
+    messageId: string;
+    channelName: string;
+  } | null = null;
 
   function destroyOnboardingSession() {
     onboardingSession = null;
@@ -393,7 +520,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         try {
           if (!session || !ctxRef) return;
           const values = session.getValuesWithDefaults(displayName, getDefaultTimezone());
-          const sendTarget: SendTarget = (ctxRef.client.channels.cache.get(ctxRef.channelId) as any)
+          const sendTarget = toSendTarget(ctxRef.client.channels.cache.get(ctxRef.channelId))
             ?? { send: () => Promise.resolve() };
           const cronDispatch = (params.cronCtx && ctxRef.guild) ? {
             cronCtx: params.cronCtx,
@@ -416,7 +543,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
     }, ONBOARDING_TIMEOUT_MS);
   }
 
-  return async (msg: any) => {
+  return async (incoming: unknown) => {
+    const msg = incoming as CoordinatorMessage;
     try {
       if (!msg?.author || msg.author.bot) return;
 
@@ -451,7 +579,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       };
 
       if (!isDm && params.allowChannelIds) {
-        const ch: any = msg.channel as any;
+        const ch = asThreadChannel(msg.channel);
         const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
         const parentId = isThread ? String(ch.parentId ?? '') : '';
         const allowed =
@@ -487,8 +615,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       if (String(msg.content ?? '').trim().toLowerCase() === '!stop') {
         const aborted = tryAbortAll();
         const orch = getActiveOrchestrator();
-        const forgeRunning = orch?.isRunning ?? false;
-        if (forgeRunning) orch!.requestCancel();
+        const forgeRunning = Boolean(orch?.isRunning);
+        if (forgeRunning && orch) orch.requestCancel();
         const parts: string[] = [];
         if (aborted > 0) parts.push(`Aborted ${aborted} active stream${aborted === 1 ? '' : 's'}.`);
         if (forgeRunning) parts.push('Forge cancel requested.');
@@ -616,7 +744,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           log: params.log,
           projectCwd: params.projectCwd,
           dataDir: params.dataDir,
-          restartCmd: process.env.DC_RESTART_CMD,
+          restartCmd: params.updateRestartCmd,
         });
         await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
         // Deferred action (e.g., restart after apply) runs after the reply is sent.
@@ -788,7 +916,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 client: msg.client,
                 channelId: msg.channelId,
                 messageId: msg.id,
-                channelName: (msg.channel as any)?.name ?? msg.channelId,
+                channelName: channelName(msg.channel) ?? msg.channelId,
               };
               resetOnboardingTimeout();
 
@@ -804,10 +932,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   await msg.author.send({ content: startResult.reply, allowedMentions: NO_MENTIONS });
                   onboardingSession.channelMode = 'dm';
                   await msg.reply({ content: 'Let\'s set up in DMs — check your messages!', allowedMentions: NO_MENTIONS });
-                } catch (dmErr: any) {
+                } catch (dmErr) {
                   // DM failed — fall back to guild channel
                   params.log?.info(
-                    { userId, channelId: msg.channelId, error: dmErr?.message },
+                    { userId, channelId: msg.channelId, error: errorMessage(dmErr) },
                     'onboarding:dm-failed, falling back to guild channel',
                   );
                   onboardingSession.channelMode = 'guild';
@@ -831,9 +959,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         }
       }
 
-      const isThread = typeof (msg.channel as any)?.isThread === 'function' ? (msg.channel as any).isThread() : false;
-      const threadId = isThread ? String((msg.channel as any).id ?? '') : null;
-      const threadParentId = isThread ? String((msg.channel as any).parentId ?? '') : null;
+      const threadChannel = asThreadChannel(msg.channel);
+      const isThread = typeof threadChannel.isThread === 'function' ? threadChannel.isThread() : false;
+      const threadId = isThread ? String(threadChannel.id ?? '') : null;
+      const threadParentId = isThread ? String(threadChannel.parentId ?? '') : null;
       const shouldSendManualPlanCta = (result: ForgeResult) =>
         !result.error && !!result.planId && !result.reachedMaxRounds && result.finalVerdict !== 'CANCELLED';
 
@@ -876,10 +1005,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
         // Deferred promise: onRunComplete waits for the outcome message to exist before editing it,
         // eliminating the race where "Plan run complete" could appear before "Plan run started".
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let resolveOutcomeMsg!: (m: any) => void;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const outcomeMsgPromise = new Promise<any>((resolve) => { resolveOutcomeMsg = resolve; });
+        let resolveOutcomeMsg!: (m: MessageEditTarget | null) => void;
+        const outcomeMsgPromise = new Promise<MessageEditTarget | null>((resolve) => { resolveOutcomeMsg = resolve; });
 
         const planCtx: PlanContext = {
           plansDir,
@@ -997,15 +1124,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       let pendingShortTermAppend: ShortTermAppend | null = null as ShortTermAppend | null;
 
       await queue.run(sessionKey, async () => {
-        let reply: any = null;
+        let reply: ReplyTarget | null = null;
         let abortSignal: AbortSignal | undefined;
         try {
           // Handle !memory commands before session creation or the "..." placeholder.
           if (params.memoryCommandsEnabled) {
             const cmd = parseMemoryCommand(String(msg.content ?? ''));
             if (cmd) {
-              const ch: any = msg.channel as any;
-              const channelName = String(ch?.name ?? '');
+              const channelName = channelNameOrParent(msg.channel, '');
               const response = await handleMemoryCommand(cmd, {
                 userId: msg.author.id,
                 sessionKey,
@@ -1073,7 +1199,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   let phasesFilePath: string;
                   let planFilePath: string;
                   let projectCwd: string;
-                  let progressReply: typeof msg;
+                  let progressReply: ReplyTarget;
 
                   const validationLock = await acquireWriterLock();
                   try {
@@ -1120,7 +1246,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     params.forgeProgressThrottleMs ?? 3000,
                   );
                   const postedPhaseStarts = new Set<string>();
-                  const phaseStartMessages = new Map<string, { edit: (opts: any) => Promise<any> }>();
+                  const phaseStartMessages = new Map<string, MessageEditTarget>();
 
                   const postPhaseStart = async (event: PlanRunEvent) => {
                     if (event.type === 'phase_start') {
@@ -1131,7 +1257,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           content: `**${event.phase.title}**...`,
                           allowedMentions: NO_MENTIONS,
                         });
-                        phaseStartMessages.set(event.phase.id, phaseMsg as any);
+                        const phaseEditTarget = phaseMsg as MessageEditTarget;
+                        phaseStartMessages.set(event.phase.id, phaseEditTarget);
                       } catch (err) {
                         params.log?.warn({ err, planId, phaseId: event.phase.id }, 'plan-run: phase-start post failed');
                       }
@@ -1180,8 +1307,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   const editSummary = async (content: string) => {
                     try {
                       await progressReply.edit({ content, allowedMentions: NO_MENTIONS });
-                    } catch (editErr: any) {
-                      if (editErr?.code === 10008) {
+                    } catch (editErr) {
+                      if (errorCode(editErr) === 10008) {
                         try { await msg.channel.send({ content, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                       }
                     }
@@ -1338,8 +1465,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         try {
                           const errMsg = `Plan run crashed: ${sanitizeErrorMessage(String(err))}`;
                           await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
-                        } catch (editErr: any) {
-                          if (editErr?.code === 10008) {
+                        } catch (editErr) {
+                          if (errorCode(editErr) === 10008) {
                             try { await msg.channel.send({ content: `Plan run crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                           }
                         }
@@ -1638,8 +1765,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     try {
                       const errMsg = `Forge resume crashed: ${sanitizeErrorMessage(String(err))}`;
                       await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
-                    } catch (editErr: any) {
-                      if (editErr?.code === 10008) {
+                    } catch (editErr) {
+                      if (errorCode(editErr) === 10008) {
                         try { await msg.channel.send({ content: `Forge resume crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                       }
                     }
@@ -1741,8 +1868,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   try {
                     const errMsg = `Forge crashed: ${sanitizeErrorMessage(String(err))}`;
                     await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
-                  } catch (editErr: any) {
-                    if (editErr?.code === 10008) {
+                  } catch (editErr) {
+                    if (errorCode(editErr) === 10008) {
                       try { await msg.channel.send({ content: `Forge crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                     }
                   }
@@ -1795,9 +1922,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               channelId: msg.channelId,
               messageId: msg.id,
               guildId: msg.guildId ?? undefined,
-              channelName: (msg.channel as any)?.name ?? undefined,
+              channelName: channelName(msg.channel),
             } : undefined;
-            const actionResults = await executeDiscordActions([confirmAction as any], actCtx, params.log, {
+            const confirmedAction = confirmAction as Parameters<typeof executeDiscordActions>[0][number];
+            const actionResults = await executeDiscordActions([confirmedAction], actCtx, params.log, {
               taskCtx: params.taskCtx,
               cronCtx: params.cronCtx,
               forgeCtx: params.forgeCtx,
@@ -1819,7 +1947,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           // If the message is in a thread, join it before replying so sends don't fail.
           if (params.autoJoinThreads && isThread) {
-            const th: any = msg.channel as any;
+            const th = asThreadChannel(msg.channel);
             const joinable = typeof th?.joinable === 'boolean' ? th.joinable : true;
             const joined = typeof th?.joined === 'boolean' ? th.joined : false;
             if (joinable && !joined && typeof th?.join === 'function') {
@@ -1841,7 +1969,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           const { signal, dispose: abortDispose } = registerAbort(reply.id);
           abortSignal = signal;
           // Best-effort: add 🛑 so the user can tap it to kill the running stream.
-          (reply as any).react?.('🛑')?.catch(() => { /* best-effort */ });
+          reply.react?.('🛑')?.catch(() => { /* best-effort */ });
           // Declared before try so they remain accessible after the finally block closes.
           let historySection = '';
           let summarySection = '';
@@ -1856,7 +1984,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (!isDm && params.discordChannelContext && params.autoIndexChannelContext) {
             const id = (threadParentId && threadParentId.trim()) ? threadParentId : String(msg.channelId ?? '');
             // Best-effort: in most guild channels this will be populated; fallback uses channel-id.
-            const chName = String((msg.channel as any)?.name ?? (msg.channel as any)?.parent?.name ?? '').trim();
+            const chName = channelNameOrParent(msg.channel, '').trim();
             try {
               await ensureIndexedDiscordChannelContext({
                 ctx: params.discordChannelContext,
@@ -1901,7 +2029,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (params.messageHistoryBudget > 0) {
             try {
               historySection = await fetchMessageHistory(
-                msg.channel,
+                msg.channel as TextBasedChannel,
                 msg.id,
                 { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
               );
@@ -1949,7 +2077,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               taskCtx: params.taskCtx,
               log: params.log,
             }),
-            resolveReplyReference(msg, params.botDisplayName, params.log),
+            resolveReplyReference(msg as MessageWithReference, params.botDisplayName, params.log),
           ]);
 
           const inlinedContext = await inlineContextFiles(
@@ -2033,9 +2161,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           // Collect images from reply reference (downloaded first, takes priority).
           let inputImages: ImageData[] | undefined;
-          const replyRefImageCount = replyRef?.images.length ?? 0;
+          const replyRefImages = replyRef?.images ?? [];
+          const replyRefImageCount = replyRefImages.length;
           if (replyRefImageCount > 0) {
-            inputImages = [...replyRef!.images];
+            inputImages = [...replyRefImages];
             params.log?.info({ imageCount: replyRefImageCount }, 'discord:reply-ref images downloaded');
           }
 
@@ -2112,7 +2241,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
             let streamEditQueue: Promise<void> = Promise.resolve();
             const maybeEdit = async (force = false) => {
-              if (!reply) return;
+              const currentReply = reply;
+              if (!currentReply) return;
               if (isShuttingDown()) return;
               const now = Date.now();
               if (!force && now - lastEditAt < minEditIntervalMs) return;
@@ -2122,7 +2252,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 .catch(() => undefined)
                 .then(async () => {
                   try {
-                    await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
+                    await currentReply.edit({ content: out, allowedMentions: NO_MENTIONS });
                   } catch {
                     // Ignore Discord edit errors during streaming.
                   }
@@ -2310,7 +2440,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   channelId: msg.channelId,
                   messageId: msg.id,
                   guildId: msg.guildId ?? undefined,
-                  channelName: (msg.channel as any)?.name ?? undefined,
+                  channelName: channelName(msg.channel),
                 } : undefined;
                 actionResults = await executeDiscordActions(parsed.actions, actCtx, params.log, {
                   taskCtx: params.taskCtx,
@@ -2383,11 +2513,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               try {
                 await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
                 replyFinalized = true;
-              } catch (editErr: any) {
+              } catch (editErr) {
                 // Thread archived by a taskClose action — the close summary was already
                 // posted inside closeTaskThread, so the only thing lost is Claude's
                 // conversational wrapper ("Done. Closing it out now.").  Swallow gracefully.
-                if (editErr?.code === 50083) {
+                if (errorCode(editErr) === 50083) {
                   params.log?.info({ sessionKey }, 'discord:reply skipped (thread archived by action)');
                   try { await reply.delete(); } catch { /* best-effort cleanup */ }
                   replyFinalized = true;
@@ -2445,7 +2575,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
             abortDispose();
             // Best-effort: remove the 🛑 reaction added at stream start.
-            try { await (reply as any)?.reactions?.resolve?.('🛑')?.remove?.(); } catch { /* best-effort */ }
+            try { await reply?.reactions?.resolve?.('🛑')?.remove?.(); } catch { /* best-effort */ }
             dispose();
           }
 
@@ -2532,7 +2662,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           // Stage short-term memory append for fire-and-forget after queue.
           if (params.shortTermMemoryEnabled && !isDm && msg.guildId && msg.guild) {
-            const ch: any = msg.channel as any;
+            const ch = asThreadChannel(msg.channel);
             if (isChannelPublic(ch, msg.guild)) {
               pendingShortTermAppend = {
                 userContent: String(msg.content ?? ''),
@@ -2587,7 +2717,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           });
 
           if (params.summaryToDurableEnabled) {
-            const ch: any = msg.channel as any;
+            const ch = asThreadChannel(msg.channel);
             await applyUserTurnToDurable({
               runtime: params.runtime,
               userMessageText: String(msg.content ?? ''),
