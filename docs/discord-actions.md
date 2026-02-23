@@ -248,11 +248,11 @@ Allow the model to schedule a deferred follow-up invocation in a target channel 
 |--------|-------------|-----------|--------|
 | `defer` | Schedule a delayed re-invocation of the runtime in a named channel | Yes | Yes (in-process timer; fires after `delaySeconds`) |
 
-Fields: `channel` (channel name or ID), `prompt` (text sent as the user message when the timer fires), `delaySeconds` (positive integer).
+Fields: `channel` (channel name or ID), `prompt` (text sent as the user message when the timer fires), `delaySeconds` (positive number).
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1).
 `DeferScheduler` constraints: delays are capped at `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` (default 1800 s); at most `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` (default 5) timers may be pending simultaneously. Timers are in-process only — they do not survive a restart.
-Execution flow: when the timer fires, `deferred-runner.ts` resolves the channel, constructs a synthetic message, and re-invokes the runtime exactly as a normal Discord message would.
+Execution flow: when the timer fires, `deferred-runner.ts` resolves the channel, builds a prompt (PA preamble + deferred header + user prompt text), invokes the runtime directly, then parses any action blocks from the response and posts the result to the target channel. This is a direct runtime invocation, not a replay through the Discord message handler.
 
 ### Config Actions (`actions-config.ts`)
 
@@ -296,6 +296,15 @@ The following categories are **enabled** in cron flows (gated by their respectiv
 
 - `forge` — enables cron → forge autonomous workflows (e.g., scheduled plan drafting)
 - `plan` — enables cron → plan autonomous workflows (e.g., check for approved plans and run them)
+
+### Deferred Flow Restrictions
+
+When actions are executed within a deferred run (via `src/discord/deferred-runner.ts`), the following categories are always disabled regardless of env flags:
+
+- `memory` — deferred runs do not carry a user identity, so memory reads/writes are suppressed
+- `defer` — prevents chaining: a deferred run cannot schedule further deferred runs
+
+All other categories (`channels`, `messaging`, `guild`, `moderation`, `polls`, `tasks`, `crons`, `botProfile`, `forge`, `plan`, `config`) are enabled or disabled according to their env flags, the same as normal Discord message flows.
 
 ## Adding A New Action (Existing Category)
 
