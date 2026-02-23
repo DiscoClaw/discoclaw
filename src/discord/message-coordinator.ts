@@ -2419,6 +2419,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (params.discordActionsEnabled && msg.guild && canParseActions) {
               const parsed = parseDiscordActions(processedText, actionFlags);
               parseFailuresCount = parsed.parseFailures;
+              if (parsed.parseFailures > 0) {
+                params.log?.warn(`parseDiscordActions: ${parsed.parseFailures} action block(s) failed to parse (sessionKey=${sessionKey})`);
+              }
               if (parsed.actions.length > 0) {
                 actions = parsed.actions;
                 strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
