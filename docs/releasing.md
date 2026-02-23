@@ -48,8 +48,65 @@ or pass it into the publish workflow. Reasons:
 
 If you ever see an npm auth failure in CI, the fix is **not** to create a new token. Check:
 1. Is `id-token: write` set on the publish job? (It is — don't remove it.)
-2. Is the Trusted Publisher config on npmjs.com still pointing at `publish.yml`? (If the workflow was renamed, update it there.)
-3. Is `NODE_AUTH_TOKEN` being passed somewhere? Remove it.
+2. Is `registry-url: "https://registry.npmjs.org/"` present in the `actions/setup-node` step? (It must be — see below.)
+3. Is the Trusted Publisher config on npmjs.com still pointing at `publish.yml`? (If the workflow was renamed, update it there.)
+4. Is `NODE_AUTH_TOKEN` being passed somewhere? Remove it.
+
+### `registry-url` is required — do not remove it
+
+The `actions/setup-node` step in `publish.yml` **must** include `registry-url: "https://registry.npmjs.org/"`.
+
+This is what triggers `setup-node` to write an `.npmrc` file that configures the npm registry. Without it, npm has no registry configuration at all and throws `ENEEDAUTH` — even though the OIDC token is valid.
+
+With `registry-url` present and no `NODE_AUTH_TOKEN`, npm correctly performs the OIDC exchange to obtain a temporary publish token. This is the working configuration.
+
+**Root cause of v0.1.3 failure (for future reference):**
+`v0.1.3` added `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` to the publish step. `NPM_TOKEN` was not set as a GitHub secret, so it expanded to an empty string. `setup-node` wrote `.npmrc` with an empty token, which npm sent to the registry, getting a 404/expired-token error. Fix: remove `NODE_AUTH_TOKEN` entirely. Do not remove `registry-url`.
+
+## Recovery: retagging a release
+
+Use this when a tag was pushed pointing to the wrong commit (e.g., a bad PR was tagged before the fix was merged).
+
+`release.yml` checks whether the remote tag exists before creating one. If the tag is already on the remote, `release.yml` will skip tagging and not trigger `publish.yml`. You must retag manually.
+
+### Check current state
+
+```bash
+cd ~/code/discoclaw
+git fetch --tags
+git log --oneline -5               # confirm HEAD is the correct commit
+git rev-parse v1.2.3               # see what the existing tag points to
+git ls-remote --tags origin | grep v1.2.3  # check if tag exists on remote
+```
+
+### Retag (local tag wrong, remote tag missing)
+
+If the local tag exists but points to the wrong commit, and the remote tag doesn't exist yet:
+
+```bash
+git tag -d v1.2.3                  # delete local tag
+git tag v1.2.3                     # re-create pointing to HEAD
+git push origin v1.2.3             # push — triggers publish.yml
+```
+
+### Retag (remote tag exists and is wrong)
+
+If the remote tag exists and points to the wrong commit:
+
+```bash
+git tag -d v1.2.3                  # delete local tag
+git push origin :refs/tags/v1.2.3  # delete remote tag
+git tag v1.2.3                     # re-create pointing to HEAD
+git push origin v1.2.3             # push — triggers publish.yml
+```
+
+### Why this works
+
+`publish.yml` triggers on `push: tags: v*` regardless of how the tag was pushed. A manually pushed tag fires it directly, bypassing `release.yml` entirely.
+
+After pushing, verify:
+1. The `publish` Actions run completed successfully (green in the Actions tab)
+2. `npm view discoclaw version` returns the expected version
 
 ## Setting up Trusted Publishing (one-time)
 
