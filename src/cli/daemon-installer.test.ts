@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import {
   parseEnvFile,
+  parseServiceName,
   renderSystemdUnit,
   renderLaunchdPlist,
   runDaemonInstaller,
@@ -65,6 +66,32 @@ describe('parseEnvFile', () => {
   });
 });
 
+// ── parseServiceName ───────────────────────────────────────────────────────
+
+describe('parseServiceName', () => {
+  it('returns "discoclaw" when --service-name is absent', () => {
+    expect(parseServiceName(['node', 'discoclaw', 'install-daemon'])).toBe('discoclaw');
+  });
+
+  it('returns the provided name when --service-name is present', () => {
+    expect(
+      parseServiceName(['node', 'discoclaw', 'install-daemon', '--service-name', 'personal']),
+    ).toBe('personal');
+  });
+
+  it('ignores --service-name if the next token starts with a dash', () => {
+    expect(
+      parseServiceName(['node', 'discoclaw', 'install-daemon', '--service-name', '--other-flag']),
+    ).toBe('discoclaw');
+  });
+
+  it('ignores --service-name if it is the last token with no value', () => {
+    expect(parseServiceName(['node', 'discoclaw', 'install-daemon', '--service-name'])).toBe(
+      'discoclaw',
+    );
+  });
+});
+
 // ── renderSystemdUnit ──────────────────────────────────────────────────────
 
 describe('renderSystemdUnit', () => {
@@ -98,10 +125,16 @@ describe('renderSystemdUnit', () => {
 describe('renderLaunchdPlist', () => {
   const envVars = { DISCORD_TOKEN: 'tok', FOO: 'bar' };
 
-  it('produces valid XML plist with correct label', () => {
+  it('produces valid XML plist with default label', () => {
     const plist = renderLaunchdPlist(PACKAGE_ROOT, CWD, envVars);
     expect(plist).toContain('<?xml version="1.0"');
-    expect(plist).toContain('<string>com.discoclaw.agent</string>');
+    expect(plist).toContain('<string>com.discoclaw.discoclaw</string>');
+  });
+
+  it('uses custom service name in label when provided', () => {
+    const plist = renderLaunchdPlist(PACKAGE_ROOT, CWD, envVars, 'personal');
+    expect(plist).toContain('<string>com.discoclaw.personal</string>');
+    expect(plist).not.toContain('com.discoclaw.discoclaw');
   });
 
   it('sets ProgramArguments to /usr/bin/node and dist/index.js', () => {

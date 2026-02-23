@@ -40,8 +40,10 @@ function printHelp(ver: string): void {
     `discoclaw v${ver} — Personal AI orchestrator\n` +
       `\nUsage: discoclaw <command>\n` +
       `\nCommands:\n` +
-      `  init              Interactive setup wizard — creates .env and workspace/\n` +
-      `  install-daemon    Register discoclaw as a persistent background service\n` +
+      `  init                                  Interactive setup wizard — creates .env and workspace/\n` +
+      `  install-daemon [--service-name <name>]  Register discoclaw as a persistent background service\n` +
+      `                                          Use --service-name to run multiple instances side-by-side.\n` +
+      `                                          Defaults to "discoclaw".\n` +
       `\nOptions:\n` +
       `  -v, --version   Print version\n` +
       `  -h, --help      Print this help\n`,

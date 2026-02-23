@@ -25,6 +25,19 @@ export function resolvePackageRoot(): string {
   return path.resolve(selfDir, '..', '..');
 }
 
+/**
+ * Parses --service-name <name> from argv.
+ * Defaults to 'discoclaw' if not provided.
+ */
+export function parseServiceName(argv: string[] = process.argv): string {
+  const idx = argv.indexOf('--service-name');
+  if (idx !== -1 && idx + 1 < argv.length) {
+    const name = argv[idx + 1];
+    if (name && !name.startsWith('-')) return name;
+  }
+  return 'discoclaw';
+}
+
 // ── Rendering helpers ──────────────────────────────────────────────────────
 
 /**
@@ -79,8 +92,10 @@ export function renderLaunchdPlist(
   packageRoot: string,
   cwd: string,
   envVars: Record<string, string>,
+  serviceName = 'discoclaw',
 ): string {
   const entryPoint = path.join(packageRoot, 'dist', 'index.js');
+  const label = `com.discoclaw.${serviceName}`;
   const envEntries = Object.entries(envVars)
     .map(([k, v]) => `\t\t<key>${k}</key>\n\t\t<string>${v}</string>`)
     .join('\n');
@@ -91,7 +106,7 @@ export function renderLaunchdPlist(
     '<plist version="1.0">',
     '<dict>',
     '\t<key>Label</key>',
-    '\t<string>com.discoclaw.agent</string>',
+    `\t<string>${label}</string>`,
     '\t<key>ProgramArguments</key>',
     '\t<array>',
     '\t\t<string>/usr/bin/node</string>',
@@ -119,10 +134,11 @@ export function renderLaunchdPlist(
 async function installSystemd(
   packageRoot: string,
   cwd: string,
+  serviceName: string,
   ask: (prompt: string) => Promise<string>,
 ): Promise<void> {
   const serviceDir = path.join(os.homedir(), '.config', 'systemd', 'user');
-  const servicePath = path.join(serviceDir, 'discoclaw.service');
+  const servicePath = path.join(serviceDir, `${serviceName}.service`);
 
   if (fs.existsSync(servicePath)) {
     const answer = await ask(
@@ -147,9 +163,9 @@ async function installSystemd(
     process.exit(1);
   }
 
-  console.log('Enabling and starting discoclaw service...');
+  console.log(`Enabling and starting ${serviceName} service...`);
   try {
-    execFileSync('systemctl', ['--user', 'enable', '--now', 'discoclaw']);
+    execFileSync('systemctl', ['--user', 'enable', '--now', serviceName]);
   } catch (err) {
     console.error(`systemctl enable/start failed: ${(err as Error).message}\n`);
     process.exit(1);
@@ -157,9 +173,9 @@ async function installSystemd(
 
   console.log('DiscoClaw daemon installed and started.\n');
   console.log('Useful commands:');
-  console.log('  journalctl --user -u discoclaw.service -f   # tail logs');
-  console.log('  systemctl --user status discoclaw           # check status');
-  console.log('  systemctl --user stop discoclaw             # stop the service');
+  console.log(`  journalctl --user -u ${serviceName}.service -f   # tail logs`);
+  console.log(`  systemctl --user status ${serviceName}           # check status`);
+  console.log(`  systemctl --user stop ${serviceName}             # stop the service`);
   console.log('');
 }
 
@@ -167,10 +183,12 @@ async function installLaunchd(
   packageRoot: string,
   cwd: string,
   envPath: string,
+  serviceName: string,
   ask: (prompt: string) => Promise<string>,
 ): Promise<void> {
   const agentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
-  const plistPath = path.join(agentsDir, 'com.discoclaw.agent.plist');
+  const label = `com.discoclaw.${serviceName}`;
+  const plistPath = path.join(agentsDir, `${label}.plist`);
 
   if (fs.existsSync(plistPath)) {
     const answer = await ask(`Plist already exists at ${plistPath}. Overwrite? [y/N] `);
@@ -182,7 +200,7 @@ async function installLaunchd(
 
   const envContent = fs.readFileSync(envPath, 'utf8');
   const envVars = parseEnvFile(envContent);
-  const plist = renderLaunchdPlist(packageRoot, cwd, envVars);
+  const plist = renderLaunchdPlist(packageRoot, cwd, envVars, serviceName);
 
   fs.mkdirSync(agentsDir, { recursive: true });
   fs.writeFileSync(plistPath, plist, 'utf8');
@@ -194,7 +212,7 @@ async function installLaunchd(
   );
 
   const uid = process.getuid!();
-  const target = `gui/${uid}/com.discoclaw.agent`;
+  const target = `gui/${uid}/${label}`;
 
   // Idempotent: bootout first (ignore failure if agent is not currently loaded)
   try {
@@ -214,7 +232,7 @@ async function installLaunchd(
   console.log('DiscoClaw daemon installed and started.\n');
   console.log('Useful commands:');
   console.log("  log stream --predicate 'process == \"node\"'  # tail logs");
-  console.log('  launchctl list com.discoclaw.agent           # check status');
+  console.log(`  launchctl list ${label}           # check status`);
   console.log(`  launchctl bootout ${target}  # stop and unload`);
   console.log('');
 }
@@ -256,14 +274,15 @@ export async function runDaemonInstaller(): Promise<void> {
     process.exit(1);
   }
 
+  const serviceName = parseServiceName();
   const rl = readline.createInterface({ input, output });
   const ask = (prompt: string): Promise<string> => rl.question(prompt);
 
   try {
     if (platform === 'linux') {
-      await installSystemd(packageRoot, cwd, ask);
+      await installSystemd(packageRoot, cwd, serviceName, ask);
     } else {
-      await installLaunchd(packageRoot, cwd, envPath, ask);
+      await installLaunchd(packageRoot, cwd, envPath, serviceName, ask);
     }
   } finally {
     rl.close();
