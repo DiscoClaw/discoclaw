@@ -143,9 +143,9 @@ describe('prompt inlines context file contents', () => {
     await handler(makeMsg({ channelId: 'chan' }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    // PA file contents should be inlined.
+    // PA file contents should be inlined (pa-safety.md retired — not loaded at runtime).
     expect(seenPrompt).toContain('# PA context');
-    expect(seenPrompt).toContain('# PA safety rules');
+    expect(seenPrompt).not.toContain('# PA safety rules');
     expect(seenPrompt).toContain('# General channel');
     expect(seenPrompt).not.toContain('Context files (read with Read tool');
     expect(seenPrompt).toContain('User message:\nhello');

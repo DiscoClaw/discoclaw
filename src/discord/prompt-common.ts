@@ -78,7 +78,13 @@ export function buildContextFiles(
 ): string[] {
   const contextFiles: string[] = [...paFiles];
   if (discordChannelContext) {
-    contextFiles.push(...discordChannelContext.paContextFiles);
+    // pa-safety.md is retired from runtime loading: ROOT_POLICY now inlines the
+    // injection-defence rules as an immutable preamble in every prompt. The file
+    // no longer needs to be loaded as a context module.
+    const paContextFiles = discordChannelContext.paContextFiles.filter(
+      (f) => path.basename(f) !== 'pa-safety.md',
+    );
+    contextFiles.push(...paContextFiles);
   }
   if (channelContextPath) contextFiles.push(channelContextPath);
   return contextFiles;
