@@ -47,7 +47,7 @@ export function taskActionsPromptSection(): string {
 
 #### Task Quality Guidelines
 - **Title**: imperative mood, specific, <60 chars. Good: "Add retry logic to webhook handler", "Plan March Denver trip". Bad: "fix stuff".
-- **Description** should answer what/why/scope. Use markdown for structure. Include what "done" looks like for larger tasks.
+- **Description** should answer what/why/scope. Use markdown for structure. Include what "done" looks like for larger tasks. Max 1900 characters — the system will reject longer descriptions with an error.
 - **Priority**: P0=urgent, P1=important, P2=normal (default), P3=nice-to-have, P4=someday.
 - If the user explicitly asks to create a task, always create it.
 - Apply the same description quality standards when using taskUpdate to backfill details.

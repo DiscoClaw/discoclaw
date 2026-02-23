@@ -649,7 +649,7 @@ describe('taskActionsPromptSection', () => {
     // Slice up to the cross-task section (or end of string if not found)
     const end = crossRefIdx > idx ? crossRefIdx : section.length;
     const guidelinesBlock = section.slice(idx, end);
-    expect(guidelinesBlock.length).toBeLessThanOrEqual(600);
+    expect(guidelinesBlock.length).toBeLessThanOrEqual(700);
   });
 
   it('includes cross-task references guideline', () => {

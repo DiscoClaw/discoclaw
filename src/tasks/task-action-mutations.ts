@@ -23,6 +23,13 @@ import type {
 /** Pre-computed set for filtering status names from tag candidates. */
 const STATUS_NAME_SET = new Set<string>(TASK_STATUSES);
 
+/**
+ * Discord message content limit. Descriptions are rendered in the thread's
+ * starter message, so they must fit within this budget (minus ~100 chars of
+ * metadata overhead added by buildTaskStarterContent).
+ */
+const TASK_DESC_WRITE_MAX = 1900;
+
 export async function handleTaskCreate(
   action: Extract<TaskActionRequest, { type: 'taskCreate' }>,
   ctx: TaskActionRunContext,
@@ -30,6 +37,9 @@ export async function handleTaskCreate(
 ): Promise<TaskActionResult> {
   if (!action.title) {
     return { ok: false, error: 'taskCreate requires a title' };
+  }
+  if (action.description && action.description.length > TASK_DESC_WRITE_MAX) {
+    return { ok: false, error: `description exceeds ${TASK_DESC_WRITE_MAX} character limit (got ${action.description.length})` };
   }
 
   const labels: string[] = [];
@@ -107,6 +117,9 @@ export async function handleTaskUpdate(
   const taskId = resolveTaskId(action);
   if (!taskId) {
     return { ok: false, error: 'taskUpdate requires taskId' };
+  }
+  if (action.description && action.description.length > TASK_DESC_WRITE_MAX) {
+    return { ok: false, error: `description exceeds ${TASK_DESC_WRITE_MAX} character limit (got ${action.description.length})` };
   }
 
   if (action.status && !isTaskStatus(action.status)) {
