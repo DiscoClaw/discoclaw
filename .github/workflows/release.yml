@@ -1,0 +1,36 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Skip if this push is already the version bump commit (prevents infinite loop)
+    if: "!startsWith(github.event.head_commit.message, 'chore: release')"
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+        # reads packageManager from package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump patch version and tag
+        run: npm version patch -m "chore: release v%s"
+
+      - name: Push commit and tag
+        run: git push --follow-tags
