@@ -27,7 +27,7 @@ function asEditableTaskThread(thread: unknown): EditableTaskThread | null {
   const appliedTags = getThreadAppliedTags(thread);
   return {
     appliedTags: appliedTags.length > 0 ? appliedTags : undefined,
-    edit: candidate.edit as EditableTaskThread['edit'],
+    edit: (candidate.edit as EditableTaskThread['edit']).bind(candidate),
   };
 }
 

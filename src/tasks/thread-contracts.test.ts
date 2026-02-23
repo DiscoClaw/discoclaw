@@ -354,6 +354,30 @@ describe('closeTaskThread', () => {
     await closeTaskThread(client, 'missing', task);
     // No error thrown — function completes silently.
   });
+
+  it('calls thread.edit with correct this context (regression: unbound this)', async () => {
+    let capturedThis: unknown;
+    const mockClient = { rest: {} };
+    const thread: any = {
+      isThread: () => true,
+      archived: false,
+      client: mockClient,
+      fetchStarterMessage: vi.fn(async () => ({
+        author: { id: 'bot-123' },
+        content: buildTaskStarterContent(task),
+        edit: vi.fn(),
+      })),
+      send: vi.fn(),
+      setArchived: vi.fn(),
+      edit: function (this: any, _payload: unknown) { capturedThis = this; },
+    };
+    const client = makeClient(thread);
+
+    await closeTaskThread(client, 'thread-1', task);
+
+    expect(capturedThis).toBe(thread);
+    expect((capturedThis as any).client).toBe(mockClient);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -562,6 +586,23 @@ describe('updateTaskThreadTags', () => {
       appliedTags: expect.arrayContaining(['s2', 'c1']),
     });
     expect(thread.edit.mock.calls[0][0].appliedTags).not.toContain('s1');
+  });
+
+  it('calls thread.edit with correct this context (regression: unbound this)', async () => {
+    let capturedThis: unknown;
+    const mockClient = { rest: {} };
+    const tagMap: TagMap = { open: 's1', in_progress: 's2' };
+    const thread: any = {
+      isThread: () => true,
+      appliedTags: ['s1'],
+      client: mockClient,
+      edit: function (this: any, _payload: unknown) { capturedThis = this; },
+    };
+
+    await updateTaskThreadTags(makeClient(thread), '123', task, tagMap);
+
+    expect(capturedThis).toBe(thread);
+    expect((capturedThis as any).client).toBe(mockClient);
   });
 });
 
