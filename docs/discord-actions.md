@@ -306,6 +306,22 @@ When actions are executed within a deferred run (via `src/discord/deferred-runne
 
 All other categories (`channels`, `messaging`, `guild`, `moderation`, `polls`, `tasks`, `crons`, `botProfile`, `forge`, `plan`, `config`) are enabled or disabled according to their env flags, the same as normal Discord message flows.
 
+### Reaction Flow Restrictions
+
+When actions are executed within a reaction-triggered invocation (via `src/discord/reaction-handler.ts`), no action categories are force-disabled. All categories are enabled or disabled according to their env flags, the same as normal Discord message flows.
+
+Reaction handler configuration:
+
+- `DISCOCLAW_REACTION_HANDLER` (default 1) — enables the `messageReactionAdd` handler; when off, emoji reactions do not trigger AI invocations.
+- `DISCOCLAW_REACTION_REMOVE_HANDLER` (default 0) — enables the `messageReactionRemove` handler; off by default since remove events are rarely actionable.
+- `DISCOCLAW_REACTION_MAX_AGE_HOURS` (default 24) — maximum age of the reacted-to message. Reactions on older messages are silently dropped. Set to `0` to disable the staleness guard entirely.
+
+Special reaction behaviors:
+
+- **🛑 abort intercept:** Reacting with 🛑 to a bot reply cancels all active runtime streams and any running forge plan. In remove mode the event is silently consumed. The abort check is skipped when the reaction resolves a pending `reactionPrompt`.
+- **Staleness guard bypass:** Reactions that resolve a pending `reactionPrompt` always bypass the staleness guard, regardless of `DISCOCLAW_REACTION_MAX_AGE_HOURS`. The age check would otherwise reject reactions on prompt messages that aged out between emission and the user's response.
+- **Guild-only:** Reactions in DMs are always ignored (no action flags are evaluated and no AI invocation occurs).
+
 ## Adding A New Action (Existing Category)
 
 Example: add a new messaging action.
