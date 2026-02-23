@@ -73,6 +73,7 @@ Two setup paths:
 | `USE_GROUP_DIR_CWD` | `0` | Enable nanoclaw-style group CWD per session |
 | `LOG_LEVEL` | `info` | Pino log level |
 | `DISCOCLAW_DEBUG_RUNTIME` | `0` | Dump resolved runtime config at startup (debugging systemd env issues) |
+| `DISCOCLAW_FORCE_BOOTSTRAP` | `0` | Re-create `workspace/BOOTSTRAP.md` from template on next startup (set to `1`; auto-clears after first boot) |
 
 ### Runtime Invocation
 | Variable | Default | Description |
@@ -114,6 +115,7 @@ Two setup paths:
 | `DISCOCLAW_CRON_AUTO_TAG_MODEL` | `fast` | Model tier or concrete name for cron auto-tagging |
 | `DISCOCLAW_CRON_STATS_DIR` | *(empty)* | Override directory for cron run stats (defaults to data dir) |
 | `DISCOCLAW_CRON_TAG_MAP` | *(empty)* | Override path to cron forum tag map JSON |
+| `DEFAULT_TIMEZONE` | *(system timezone)* | Default IANA timezone for cron schedules that don't specify one (e.g. `America/New_York`); falls back to system timezone if unset or invalid |
 
 ### Tasks (Task Tracking)
 | Variable | Default | Description |
