@@ -232,7 +232,7 @@ Only one forge can run at a time. Forge runs are asynchronous — progress updat
 <discord-action>{"type":"planClose","planId":"plan-042"}</discord-action>
 ```
 
-**planCreate** — Create a new plan (drafts a plan file and backing bead):
+**planCreate** — Create a new plan (drafts a plan file and backing task):
 ```
 <discord-action>{"type":"planCreate","description":"Add retry logic to webhook handler","context":"Optional extra context"}</discord-action>
 ```
@@ -289,7 +289,7 @@ Use memoryRemember to proactively store important facts (preferences, projects, 
 | Role | What it controls |
 |------|-----------------|
 | `chat` | Discord messages, plan runs, deferred runs, forge fallback |
-| `fast` | All small/fast tasks (summary, cron auto-tag, beads auto-tag) |
+| `fast` | All small/fast tasks (summary, cron auto-tag, tasks auto-tag) |
 | `forge-drafter` | Forge plan drafting/revision |
 | `forge-auditor` | Forge plan auditing |
 | `summary` | Rolling summaries only (overrides fast) |

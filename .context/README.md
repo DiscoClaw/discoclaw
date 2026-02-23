@@ -12,10 +12,10 @@ Core instructions live in `CLAUDE.md` at the repo root.
 | **Discord behavior + routing** | `discord.md` |
 | **Discord bot setup (invite + env)** | `bot-setup.md` |
 | **Development / build / test** | `dev.md` |
-| **Runtime adapters (Claude CLI, OpenAI/Gemini later)** | `runtime.md` |
+| **Runtime adapters (Claude CLI, Codex CLI, Gemini CLI, OpenRouter)** | `runtime.md` |
 | **Ops / systemd service** | `ops.md` |
 | **Memory system** | `memory.md` |
-| **Task tracking / bd CLI** | `tasks.md` |
+| **Task tracking** | `tasks.md` |
 | **Architecture / system overview** | `architecture.md` |
 | **Tool capabilities / browser automation** | `tools.md` |
 | **Forge/plan standing constraints** | `project.md` *(auto-loaded by forge)* |
@@ -31,10 +31,10 @@ Core instructions live in `CLAUDE.md` at the repo root.
 - **pa-safety.md** — Indirect prompt injection defense, golden rules, red flags
 - **dev.md** — Commands, env, local dev loops, build/test
 - **discord.md** — Allowlist gating, session keys, threading rules, output constraints
-- **runtime.md** — Runtime adapter interface, Claude CLI flags, capability routing
+- **runtime.md** — Runtime adapter interface, multi-runtime CLI flags, capability routing
 - **ops.md** — systemd service notes, logs, restart workflow
 - **memory.md** — Memory layers, user-facing examples, config reference, concurrency
-- **tasks.md** — Task tracker: data model, bd CLI, hooks, Discord sync, auto-tagging
+- **tasks.md** — Task tracker: data model, store events, Discord sync, auto-tagging
 - **architecture.md** — System overview, data flow, directory layout, key concepts
 - **bot-setup.md** — One-time bot creation and invite guide
 - **tools.md** — Available tools: browser automation (agent-browser), escalation ladder, CDP connect, security guardrails

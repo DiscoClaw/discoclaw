@@ -41,6 +41,10 @@ Legend: **done** | *stub* | ~~cut~~
 | Runtime registry (name → adapter lookup) | `src/runtime/registry.ts` | **done** |
 | Adapter selection via env (`FORGE_AUDITOR_RUNTIME`) | `src/index.ts` | **done** |
 | Gemini CLI adapter (subprocess) | `src/runtime/gemini-cli.ts` | **done** |
+| Universal CLI adapter factory (spawns any CLI runtime via strategy) | `src/runtime/cli-adapter.ts` | **done** |
+| CLI strategy interface (contract for Claude/Codex/Gemini strategies) | `src/runtime/cli-strategy.ts` | **done** |
+| Template strategy (documents how to add a new CLI runtime) | `src/runtime/strategies/template-strategy.ts` | **done** |
+| OpenRouter runtime (OpenAI-compat adapter at `openrouter.ai/api/v1`, `id: 'openrouter'`) | `src/runtime/openai-compat.ts`, `src/health/credential-check.ts` | **done** |
 
 ## 4. Memory Systems
 
@@ -50,6 +54,8 @@ Legend: **done** | *stub* | ~~cut~~
 | Rolling summaries (AI-generated, per-session) | `src/discord/summarizer.ts` | **done** |
 | Durable memory (facts/preferences/constraints) | `src/discord/durable-memory.ts` | **done** |
 | Memory commands (`!memory show/remember/forget/reset`) | `src/discord/memory-commands.ts` | **done** |
+| Short-term memory (cross-channel recent excerpts, time-based expiry, character-budget injection) | `src/discord/shortterm-memory.ts`, `src/discord/shortterm-memory.test.ts` | **done** |
+| Auto-extraction / user-turn-to-durable (AI fact extraction → durable memory, dedup, async write queue) | `src/discord/user-turn-to-durable.ts`, `src/discord/user-turn-to-durable.test.ts`, `src/discord/durable-write-queue.ts` | **done** |
 
 ## 5. Channel Context
 
@@ -79,6 +85,8 @@ All actions are gated by category env flags (off by default except channels).
 | Forge (autonomous plan drafting) | create, resume, status, cancel | `actions-forge.ts` | **done** |
 | Plan management (autonomous) | list, show, approve, close, create, run | `actions-plan.ts` | **done** |
 | Memory (durable memory mutation) | remember, forget, show | `actions-memory.ts` | **done** |
+| Defer scheduler (in-process timers with concurrency limits) | — | `src/discord/defer-scheduler.ts` | **done** |
+| Deferred runner (wires defer action type into action/runtime pipeline) | — | `src/discord/deferred-runner.ts` | **done** |
 
 ## 7. Task Sync Subsystem (`src/tasks/`)
 
@@ -147,7 +155,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Bot setup skill (invite + env) | `.claude/skills/` | **done** |
 | Setup guide | `docs/discord-bot-setup.md` | **done** |
 
-## 13. Tests
+## 14. Tests
 
 | Area | Files | Status |
 |------|-------|--------|
@@ -160,7 +168,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Integration (fail-closed, prompt-context, status, channel-context) | 4 tests | **done** |
 | Pipeline engine | 51 tests | **done** |
 
-## 14. Documentation
+## 15. Documentation
 
 | Doc | File | Status |
 |-----|------|--------|
@@ -173,10 +181,11 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Plan & Forge reference | `docs/plan-and-forge.md` | **done** |
 | Post-hard-cut tasks refactor plan | `docs/tasks-ground-zero-post-hard-cut-plan.md` | **done** |
 | Webhook exposure guide | `docs/webhook-exposure.md` | **done** |
+| Releasing / npm publish guide | `docs/releasing.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
 
-## 15. Pipeline Engine (`src/pipeline/`)
+## 16. Pipeline Engine (`src/pipeline/`)
 
 General-purpose step-chaining primitive. Each step sends a prompt to a runtime adapter; its text output is injected as context for the next step. Foundational building block for composable action chaining.
 
@@ -199,7 +208,7 @@ General-purpose step-chaining primitive. Each step sends a prompt to a runtime a
 | `confirmAllowed` gate (blocks destructive commands without explicit opt-in) | `src/pipeline/engine.ts` | **done** |
 | Discord-action step kind | `src/pipeline/engine.ts` | **done** |
 
-## 16. Transport Abstraction
+## 17. Transport Abstraction
 
 Platform-agnostic message normalization layer (Phase 1 of transport portability). Downstream consumers can be migrated off discord.js types incrementally.
 
@@ -208,6 +217,52 @@ Platform-agnostic message normalization layer (Phase 1 of transport portability)
 | `PlatformMessage` type (normalized chat message shape) | `src/transport/types.ts` | **done** |
 | discord.js `Message` → `PlatformMessage` mapper | `src/discord/platform-message.ts` | **done** |
 | Mapper unit tests | `src/discord/platform-message.test.ts` | **done** |
+
+## 18. Webhook Server
+
+HTTP server that receives external webhook POSTs, verifies HMAC-SHA256 signatures, and dispatches through the cron executor pipeline. See `docs/webhook-exposure.md` for setup.
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| Webhook HTTP server (HMAC-SHA256 verification, dispatcher) | `src/webhook/server.ts` | **done** |
+| Webhook server tests | `src/webhook/server.test.ts` | **done** |
+
+Config: `DISCOCLAW_WEBHOOK_ENABLED`, `DISCOCLAW_WEBHOOK_PORT`, `DISCOCLAW_WEBHOOK_CONFIG`.
+
+## 19. Configuration
+
+Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boolean, number, enum, and string fields with validation, warnings, and info messages emitted at startup.
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| Config parser (`DiscoclawConfig` type, env-var parsing, validation) | `src/config.ts` | **done** |
+| Config parser tests | `src/config.test.ts` | **done** |
+
+## 20. Bang Commands
+
+`!`-prefixed commands handled directly by the message coordinator without AI invocation.
+
+| Command | Description | File(s) | Status |
+|---------|-------------|---------|--------|
+| `!help` | Lists available bang commands | `src/discord/help-command.ts` | **done** |
+| `!health [verbose\|tools]` | Renders runtime metrics, config snapshot, and tool reports | `src/discord/health-command.ts`, `src/discord/health-command.test.ts` | **done** |
+| `!status` | Shows bot status summary | `src/discord/status-command.ts` | **done** |
+| `!restart` | Triggers graceful restart | `src/discord/restart-command.ts` | **done** |
+| `!stop` | Shuts down the bot process | `src/discord/stop-command.ts` | **done** |
+| `!models` | Lists registered runtime adapters | `src/discord/models-command.ts` | **done** |
+| `!update` | Pulls latest code and restarts | `src/discord/update-command.ts` | **done** |
+| `!memory` | Memory read/write subcommands (see section 4) | `src/discord/memory-commands.ts` | **done** |
+| `!plan` | Plan management subcommands | `src/discord/plan-commands.ts` | **done** |
+| `!forge` | Forge control subcommands | `src/discord/forge-commands.ts` | **done** |
+
+## 21. npm Publishing
+
+CI/CD pipeline for publishing DiscoClaw to npm on versioned releases.
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| GitHub Actions publish workflow (triggered on `v*` tags, OIDC Trusted Publishing) | `.github/workflows/publish.yml` | **done** |
+| Releasing guide | `docs/releasing.md` | **done** |
 
 ---
 

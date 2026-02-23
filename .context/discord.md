@@ -28,7 +28,7 @@ Strict mode:
 - `DISCORD_AUTO_INDEX_CHANNEL_CONTEXT=1` (default): when a message arrives for a new channel, DiscoClaw appends it to `discord/DISCORD.md` and creates a blank stub file.
 
 Thread auto-join:
-- `DISCORD_AUTO_JOIN_THREADS=0` (default): best-effort auto-join threads so the bot can respond inside them. Private threads still require adding the bot manually.
+- `DISCORD_AUTO_JOIN_THREADS=1` (default): best-effort auto-join threads so the bot can respond inside them. Private threads still require adding the bot manually.
 
 ## Conversation History & Memory
 When `DISCOCLAW_MESSAGE_HISTORY_BUDGET` > 0 (default: `3000`), DiscoClaw fetches recent messages from the Discord channel and includes them in the prompt as conversation context. This allows Claude to maintain conversational context across messages without relying on CLI session persistence. The char budget caps the total history size; messages are selected newest-first so the most relevant context is preserved. Bot responses are truncated when necessary to fit the budget.
@@ -73,19 +73,30 @@ Each action category has its own flag (only active when the master switch is `1`
 
 | Flag | Default | Actions |
 |------|---------|---------|
-| `DISCOCLAW_DISCORD_ACTIONS_CHANNELS` | `1` | channelCreate, channelEdit, channelDelete, channelList, channelInfo, categoryCreate, threadListArchived |
-| `DISCOCLAW_DISCORD_ACTIONS_MESSAGING` | `0` | sendMessage, react, readMessages, fetchMessage, editMessage, deleteMessage, threadCreate, pinMessage, unpinMessage, listPins |
-| `DISCOCLAW_DISCORD_ACTIONS_GUILD` | `0` | memberInfo, roleInfo, roleAdd, roleRemove, searchMessages, eventList, eventCreate |
+| `DISCOCLAW_DISCORD_ACTIONS_CHANNELS` | `1` | channelCreate, channelEdit, channelDelete, channelList, channelInfo, categoryCreate, channelMove, threadListArchived, forumTagCreate, forumTagDelete, forumTagList, threadEdit |
+| `DISCOCLAW_DISCORD_ACTIONS_MESSAGING` | `1` | sendMessage, sendFile, react, unreact, readMessages, fetchMessage, editMessage, deleteMessage, bulkDelete, crosspost, threadCreate, pinMessage, unpinMessage, listPins, reactionPrompt |
+| `DISCOCLAW_DISCORD_ACTIONS_GUILD` | `1` | memberInfo, roleInfo, roleAdd, roleRemove, searchMessages, eventList, eventCreate, eventEdit, eventDelete |
 | `DISCOCLAW_DISCORD_ACTIONS_MODERATION` | `0` | timeout, kick, ban |
-| `DISCOCLAW_DISCORD_ACTIONS_POLLS` | `0` | poll |
-| `DISCOCLAW_DISCORD_ACTIONS_TASKS` | `1` | taskCreate, taskUpdate, taskClose, taskShow, taskList, taskSync |
+| `DISCOCLAW_DISCORD_ACTIONS_POLLS` | `1` | poll |
+| `DISCOCLAW_DISCORD_ACTIONS_TASKS` | `1` | taskCreate, taskUpdate, taskClose, taskShow, taskList, taskSync, tagMapReload |
+| `DISCOCLAW_DISCORD_ACTIONS_CRONS` | `1` | cronCreate, cronUpdate, cronList, cronShow, cronPause, cronResume, cronDelete, cronTrigger, cronSync, cronTagMapReload |
+| `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` | `1` | botSetStatus, botSetActivity, botSetNickname |
+| `DISCOCLAW_DISCORD_ACTIONS_FORGE` | `1` | forgeCreate, forgeResume, forgeStatus, forgeCancel |
+| `DISCOCLAW_DISCORD_ACTIONS_PLAN` | `1` | planList, planShow, planApprove, planClose, planCreate, planRun |
+| `DISCOCLAW_DISCORD_ACTIONS_MEMORY` | `1` | memoryRemember, memoryForget, memoryShow |
+| `DISCOCLAW_DISCORD_ACTIONS_DEFER` | `1` | defer |
+| _(config — always on)_ | — | modelSet, modelShow |
 
-Auto-follow-up: When query actions (channelList, channelInfo, threadListArchived, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow) succeed, DiscoClaw automatically re-invokes Claude with the results. This allows Claude to reason about query results without requiring the user to send a follow-up message. Controlled by `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` (default `3`, `0` disables). Mutation-only responses do not trigger follow-ups. Trivially short follow-up responses (<50 chars with no actions) are suppressed.
+Notes:
+- `reactionPrompt` is gated by the MESSAGING flag — it is registered via `REACTION_PROMPT_ACTION_TYPES` only when `flags.messaging` is true (`src/discord/actions.ts:113`).
+- Config actions (`modelSet`, `modelShow`) have no separate env flag. They are always enabled when the master switch is on, hardcoded in `src/index.ts`.
+
+Auto-follow-up: When query actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow, forgeStatus) succeed, DiscoClaw automatically re-invokes Claude with the results. This allows Claude to reason about query results without requiring the user to send a follow-up message. Controlled by `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` (default `3`, `0` disables). Mutation-only responses do not trigger follow-ups. Trivially short follow-up responses (<50 chars with no actions) are suppressed.
 
 Requirements:
 - The bot needs appropriate permissions in the server (Manage Channels, Manage Roles, Moderate Members, etc.) depending on the actions used. These are server-level role permissions, not Developer Portal settings.
 - Only works in guild channels (not DMs).
-- Master switch defaults to off (`0`). Only allowlisted users can trigger actions.
+- Master switch defaults to on (`1`). Only allowlisted users can trigger actions.
 - Destructive actions (delete, kick, ban, timeout) prompt Claude to confirm with the user first.
 - If actions fail with "Missing Permissions", the bot's role lacks the required permission.
 
@@ -126,7 +137,6 @@ DiscoClaw includes a task tracker backed by in-process `TaskStore` data and sync
 - Data model/store: `src/tasks/types.ts`, `src/tasks/store.ts`
 - Discord task action path: `src/tasks/task-action-executor.ts` (dispatch), `src/tasks/task-action-mutations.ts` (create/update/close), `src/tasks/task-action-thread-sync.ts` (thread lifecycle helpers), `src/tasks/task-action-mutation-helpers.ts` (shared mutation helpers), `src/tasks/task-action-read-ops.ts` (show/list/sync/reload), `src/tasks/task-action-contract.ts` (request types)
 - Canonical sync modules: `src/tasks/task-sync-engine.ts`, `src/tasks/task-sync-pipeline.ts` (facade), `src/tasks/task-sync-apply-plan.ts`, `src/tasks/task-sync-reconcile-plan.ts`, `src/tasks/task-sync-apply-types.ts`, `src/tasks/task-sync-phase-apply.ts`, `src/tasks/task-sync-reconcile.ts`, `src/tasks/sync-coordinator.ts`, `src/tasks/sync-coordinator-metrics.ts`, `src/tasks/sync-coordinator-retries.ts`, `src/tasks/thread-helpers.ts`, `src/tasks/thread-forum-ops.ts`, `src/tasks/thread-lifecycle-ops.ts`, `src/tasks/thread-ops.ts` (facade), `src/tasks/tag-map.ts`
-- Runtime shim status: `src/beads/*` compatibility modules removed in hard-cut phase
 
 Auto-sync is event-driven from the in-process store and runs a startup reconciliation pass.
 Auto-triggered syncs are silent; explicit `taskSync` can post status output.

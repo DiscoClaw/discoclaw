@@ -44,8 +44,6 @@ Canonical runtime sync implementation lives in `src/tasks/*`:
 - `src/tasks/thread-cache.ts`
 - `src/tasks/forum-guard.ts`
 
-Legacy runtime compatibility shims under `src/beads/` have been removed.
-
 Primary action trigger is `taskSync` via `src/tasks/task-action-executor.ts`.
 
 ## Auto-Tagging
@@ -69,3 +67,6 @@ Primary names:
 - `DISCOCLAW_TASKS_AUTO_TAG_MODEL`
 - `DISCOCLAW_TASKS_SYNC_SKIP_PHASE5`
 - `DISCOCLAW_TASKS_PREFIX`
+- `DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_ENABLED`
+- `DISCOCLAW_TASKS_SYNC_FAILURE_RETRY_DELAY_MS`
+- `DISCOCLAW_TASKS_SYNC_DEFERRED_RETRY_DELAY_MS`

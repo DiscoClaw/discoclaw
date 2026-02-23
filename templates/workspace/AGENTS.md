@@ -145,13 +145,13 @@ Plans are stored in `workspace/plans/plan-NNN-slug.md`. The user must explicitly
 
 See TOOLS.md for the full reference of forge, plan, and memory `<discord-action>` types. Never send `!forge`/`!plan`/`!memory` as text messages — bot-sent messages don't trigger command handlers. Use the action blocks instead.
 
-## Bead Creation
+## Task Creation
 
-After creating a bead, always post a link to its Discord thread so the user can jump straight to it.
+After creating a task, always post a link to its Discord thread so the user can jump straight to it.
 
 ## Discord Action Batching
 
-The action system processes **one action per type per response**. If you emit 7 `beadCreate` actions, only the first fires -- the rest are silently dropped. No error, no feedback.
+The action system processes **one action per type per response**. If you emit 7 `taskCreate` actions, only the first fires -- the rest are silently dropped. No error, no feedback.
 
 **Rules:**
 - When creating multiple items of the same type, send them across separate responses (the system handles this naturally when each action gets its own follow-up)
@@ -160,7 +160,7 @@ The action system processes **one action per type per response**. If you emit 7 
 
 ## Response Economy
 
-When a query action returns a big list (channel list, bead list, thread list, etc.) and you only need one item from it, extract the answer and present just that -- not the full dump. Use query results as internal working data, not chat content.
+When a query action returns a big list (channel list, task list, thread list, etc.) and you only need one item from it, extract the answer and present just that -- not the full dump. Use query results as internal working data, not chat content.
 
 But don't over-apply this to substantive content. Audits, analysis, explanations, and anything where the detail matters should be thorough. Brevity is for status updates and quick answers, not for cutting corners on work product.
 
@@ -202,7 +202,6 @@ This is a starting point. Add your own conventions, style, and rules as you figu
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
