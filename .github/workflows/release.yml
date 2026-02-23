@@ -8,29 +8,27 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # Skip if this push is already the version bump commit (prevents infinite loop)
-    if: "!startsWith(github.event.head_commit.message, 'chore: release')"
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        # reads packageManager from package.json
+      - name: Get version from package.json
+        id: pkg
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Configure git
+      - name: Check if tag already exists
+        id: tag_check
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --tags origin "refs/tags/v${{ steps.pkg.outputs.version }}" | grep -q .; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.pkg.outputs.version }} already exists — skipping"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Bump patch version and tag
+      - name: Create and push tag
+        if: steps.tag_check.outputs.exists == 'false'
         run: |
-          npm version patch -m "chore: release v%s"
-
-      - name: Push commit and tag
-        run: git push --follow-tags
+          git tag "v${{ steps.pkg.outputs.version }}"
+          git push origin "v${{ steps.pkg.outputs.version }}"
