@@ -42,7 +42,13 @@
     "doctor:online": "tsx scripts/doctor.ts --check-connection",
     "setup": "tsx scripts/setup.ts",
     "test": "vitest run --passWithNoTests",
-    "prepublishOnly": "pnpm build && pnpm test"
+    "prepublishOnly": "pnpm build && pnpm test",
+    "review:sections": "tsx scripts/review-sections.ts",
+    "review:long-chunks": "tsx scripts/review-long-file-chunks.ts",
+    "review:chunk-risks": "tsx scripts/review-chunk-risks.ts",
+    "review:chunk-audit": "tsx scripts/review-chunk-audit.ts",
+    "review:finalize": "tsx scripts/review-finalize.ts",
+    "review:full-audit": "pnpm review:sections --with-gates && pnpm review:long-chunks && pnpm review:chunk-risks && pnpm review:chunk-audit && pnpm review:finalize"
   },
   "dependencies": {
     "croner": "^10.0.1",

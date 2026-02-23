@@ -13,12 +13,11 @@ import { createCodexCliRuntime } from './runtime/codex-cli.js';
 import { createGeminiCliRuntime } from './runtime/gemini-cli.js';
 import { createConcurrencyLimiter, withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
-import { loadDiscordChannelContext, resolveDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines } from './discord/actions.js';
-import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './discord/actions.js';
-import { resolveChannel, fmtTime } from './discord/action-utils.js';
-import { DeferScheduler } from './discord/defer-scheduler.js';
-import type { DeferActionRequest, DeferredRun } from './discord/actions-defer.js';
+import { loadDiscordChannelContext, validatePaContextModules } from './discord/channel-context.js';
+import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
+import type { DeferScheduler } from './discord/defer-scheduler.js';
+import type { DeferActionRequest } from './discord/actions-defer.js';
+import { configureDeferredScheduler } from './discord/deferred-runner.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
@@ -56,20 +55,17 @@ import { MemorySampler } from './observability/memory-sampler.js';
 import {
   setDataFilePath,
   drainInFlightReplies,
-  cleanupOrphanedReplies,
   hasInFlightForChannel,
 } from './discord/inflight-replies.js';
 import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 import { getGitHash } from './version.js';
-import { runCredentialChecks, formatCredentialReport } from './health/credential-check.js';
-import { healCorruptedJsonStores, healStaleCronRecords, healStaleTaskThreadRefs } from './health/startup-healing.js';
+import { healCorruptedJsonStores, healStaleCronRecords } from './health/startup-healing.js';
 import { validateDiscordToken } from './validate.js';
-import { buildContextFiles, buildPromptPreamble, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
-import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
-import { NO_MENTIONS } from './discord/allowed-mentions.js';
-import { appendUnavailableActionTypesNotice } from './discord/output-common.js';
 import { TaskStore } from './tasks/store.js';
 import { migrateLegacyTaskDataFile, resolveTaskDataPath } from './tasks/path-defaults.js';
+import { resolveCronTagBootstrapForumId, resolveSessionStorePath } from './index.paths.js';
+import { collectActiveProviders, logRuntimeDebugConfig, resolveForgeRuntimes } from './index.runtime.js';
+import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupChecks } from './index.post-connect.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -603,77 +599,47 @@ log.info(
   'runtime:primary selected',
 );
 
-// Debug: surface common "works in terminal but not in systemd" issues without logging secrets.
-if (cfg.debugRuntime) {
-  log.info(
-    {
-      env: {
-        HOME: process.env.HOME,
-        USER: process.env.USER,
-        PATH: process.env.PATH,
-        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
-        DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS ? '(set)' : '(unset)',
-        DISPLAY: process.env.DISPLAY ? '(set)' : '(unset)',
-        WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ? '(set)' : '(unset)',
-      },
-      claude: {
-        bin: claudeBin,
-        outputFormat,
-        echoStdio,
-        verbose,
-        dangerouslySkipPermissions,
-      },
-      runtime: {
-        selected: primaryRuntimeName,
-        runtimeId: runtime.id,
-        model: runtimeModel,
-        toolsCount: runtimeTools.length,
-        timeoutMs: runtimeTimeoutMs,
-        workspaceCwd,
-        groupsDir,
-        useRuntimeSessions,
-        maxConcurrentInvocations,
-      },
-    },
-    'debug:runtime config',
-  );
-}
+logRuntimeDebugConfig({
+  enabled: cfg.debugRuntime,
+  log,
+  env: process.env,
+  claude: {
+    bin: claudeBin,
+    outputFormat,
+    echoStdio,
+    verbose,
+    dangerouslySkipPermissions,
+  },
+  runtime: {
+    selected: primaryRuntimeName,
+    runtimeId: runtime.id,
+    model: runtimeModel,
+    toolsCount: runtimeTools.length,
+    timeoutMs: runtimeTimeoutMs,
+    workspaceCwd,
+    groupsDir,
+    useRuntimeSessions,
+    maxConcurrentInvocations,
+  },
+});
 
-// Resolve the drafter runtime (if configured)
-let drafterRuntime: import('./runtime/types.js').RuntimeAdapter | undefined;
-if (cfg.forgeDrafterRuntime) {
-  drafterRuntime = cfg.forgeDrafterRuntime === primaryRuntimeName
-    ? limitedRuntime
-    : runtimeRegistry.get(cfg.forgeDrafterRuntime);
-  if (!drafterRuntime) {
-    log.warn(
-      `FORGE_DRAFTER_RUNTIME='${cfg.forgeDrafterRuntime}' but no adapter registered with that name. Available: ${runtimeRegistry.list().join(', ')}. Falling back to PRIMARY_RUNTIME='${primaryRuntimeName}'.`,
-    );
-  }
-}
+const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({
+  primaryRuntimeName,
+  primaryRuntime: limitedRuntime,
+  forgeDrafterRuntime: cfg.forgeDrafterRuntime,
+  forgeAuditorRuntime: cfg.forgeAuditorRuntime,
+  runtimeRegistry,
+  log,
+});
 
-// Resolve the auditor runtime (if configured)
-let auditorRuntime: import('./runtime/types.js').RuntimeAdapter | undefined;
-if (cfg.forgeAuditorRuntime) {
-  auditorRuntime = cfg.forgeAuditorRuntime === primaryRuntimeName
-    ? limitedRuntime
-    : runtimeRegistry.get(cfg.forgeAuditorRuntime);
-  if (!auditorRuntime) {
-    log.warn(
-      `FORGE_AUDITOR_RUNTIME='${cfg.forgeAuditorRuntime}' but no adapter registered with that name. Available: ${runtimeRegistry.list().join(', ')}. Falling back to PRIMARY_RUNTIME='${primaryRuntimeName}'.`,
-    );
-  }
-}
+const activeProviders = collectActiveProviders({
+  primaryRuntimeId: runtime.id,
+  forgeCommandsEnabled,
+  drafterRuntime,
+  auditorRuntime,
+});
 
-// Collect the set of provider IDs that are actually in use.
-// Used to skip credential checks for providers that aren't configured.
-const activeProviders = new Set<string>([runtime.id]);
-if (forgeCommandsEnabled) {
-  if (drafterRuntime?.id) activeProviders.add(drafterRuntime.id);
-  if (auditorRuntime?.id) activeProviders.add(auditorRuntime.id);
-}
-
-const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
+const sessionManager = new SessionManager(resolveSessionStorePath(dataDir, projectRoot));
 
 // Mutable ref updated by the message handler; read by the !status command.
 const statusLastMessageAt: { current: number | null } = { current: null };
@@ -695,6 +661,7 @@ const botParams = {
   sessionManager,
   workspaceCwd,
   projectCwd: projectRoot,
+  updateRestartCmd: process.env.DC_RESTART_CMD,
   groupsDir,
   useGroupDirCwd,
   runtimeModel,
@@ -821,192 +788,24 @@ const botParams = {
 };
 
 if (discordActionsEnabled && cfg.discordActionsDefer) {
-  const handleDeferredRun = async (run: DeferredRun): Promise<void> => {
-    const { action, context } = run;
-    const guild = context.guild;
-    if (!guild) {
-      log?.warn({ run, action }, 'defer:missing-guild');
-      return;
-    }
-
-    const channel = resolveChannel(guild, action.channel);
-    if (!channel) {
-      log?.warn({ run, channel: action.channel }, 'defer:target channel not found');
-      return;
-    }
-
-    if (botParams.allowChannelIds?.size) {
-      const ch: any = channel;
-      const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
-      const parentId = isThread ? String(ch.parentId ?? '') : '';
-      const allowed =
-        botParams.allowChannelIds.has(channel.id) ||
-        (parentId && botParams.allowChannelIds.has(parentId));
-      if (!allowed) {
-        log?.warn({ channelId: channel.id }, 'defer:target channel not allowlisted');
-        return;
-      }
-    }
-
-    const isThread = typeof (channel as any)?.isThread === 'function' ? (channel as any).isThread() : false;
-    const threadParentId = isThread ? String((channel as any).parentId ?? '') : null;
-
-    const channelCtx = resolveDiscordChannelContext({
-      ctx: discordChannelContext,
-      isDm: false,
-      channelId: channel.id,
-      threadParentId,
-    });
-
-    const paFiles = await loadWorkspacePaFiles(workspaceCwd, { skip: !!appendSystemPrompt });
-    const contextFiles = buildContextFiles(paFiles, discordChannelContext, channelCtx.contextPath);
-    let inlinedContext = '';
-    if (contextFiles.length > 0) {
-      try {
-        inlinedContext = await inlineContextFiles(contextFiles, {
-          required: new Set(discordChannelContext?.paContextFiles ?? []),
-        });
-      } catch (err) {
-        log?.warn({ err, channelId: channel.id }, 'defer:context inline failed');
-      }
-    }
-
-    const deferredActionFlags: ActionCategoryFlags = {
-      channels: botParams.discordActionsChannels,
-      messaging: botParams.discordActionsMessaging,
-      guild: botParams.discordActionsGuild,
-      moderation: botParams.discordActionsModeration,
-      polls: botParams.discordActionsPolls,
-      tasks: Boolean(botParams.discordActionsTasks),
-      crons: Boolean(botParams.discordActionsCrons),
-      botProfile: Boolean(botParams.discordActionsBotProfile),
-      forge: Boolean(botParams.discordActionsForge),
-      plan: Boolean(botParams.discordActionsPlan),
-      // Deferred runs do not carry a user identity, so memory actions are disabled.
-      memory: false,
-      config: Boolean(botParams.discordActionsConfig),
-      defer: false,
-    };
-
-    let prompt =
-      buildPromptPreamble(inlinedContext) + '\n\n' +
-      `---\nDeferred follow-up scheduled for <#${channel.id}> (runs at ${fmtTime(run.runsAt)}).\n---\n` +
-      `User message:\n${action.prompt}`;
-
-    if (botParams.discordActionsEnabled) {
-      prompt += '\n\n---\n' + discordActionsPromptSection(deferredActionFlags, botDisplayName);
-    }
-
-    const noteLines: string[] = [];
-    let effectiveTools = runtimeTools;
-    try {
-      const toolsInfo = await resolveEffectiveTools({
-        workspaceCwd,
-        runtimeTools,
-        runtimeCapabilities: runtime.capabilities,
-        runtimeId: runtime.id,
-        log,
-      });
-      effectiveTools = toolsInfo.effectiveTools;
-      if (toolsInfo.permissionNote) noteLines.push(`Permission note: ${toolsInfo.permissionNote}`);
-      if (toolsInfo.runtimeCapabilityNote) noteLines.push(`Runtime capability note: ${toolsInfo.runtimeCapabilityNote}`);
-    } catch (err) {
-      log?.warn({ err }, 'defer:resolve effective tools failed');
-    }
-
-    if (noteLines.length > 0) {
-      prompt += `\n\n---\n${noteLines.join('\n')}\n`;
-    }
-
-    const addDirs: string[] = [];
-    if (useGroupDirCwd) addDirs.push(workspaceCwd);
-    if (discordChannelContext) addDirs.push(discordChannelContext.contentDir);
-    const uniqueAddDirs = addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined;
-
-    let finalText = '';
-    let deltaText = '';
-    let runtimeError: string | undefined;
-    try {
-      for await (const evt of runtime.invoke({
-        prompt,
-        model: resolveModel(botParams.runtimeModel, runtime.id),
-        cwd: workspaceCwd,
-        addDirs: uniqueAddDirs,
-        tools: effectiveTools,
-        timeoutMs: runtimeTimeoutMs,
-      })) {
-        if (evt.type === 'text_final') {
-          finalText = evt.text;
-        } else if (evt.type === 'text_delta') {
-          deltaText += evt.text;
-        } else if (evt.type === 'error') {
-          runtimeError = evt.message;
-          finalText = mapRuntimeErrorToUserMessage(evt.message);
-          break;
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      runtimeError ??= msg;
-      finalText = mapRuntimeErrorToUserMessage(msg);
-      log?.warn({ err }, 'defer:runtime invocation failed');
-    }
-
-    const processedText = finalText || deltaText || '';
-    const parsed = parseDiscordActions(processedText, deferredActionFlags);
-    const actCtx: ActionContext = {
-      guild,
-      client: context.client,
-      channelId: channel.id,
-      messageId: `defer-${Date.now()}`,
-      threadParentId,
-      confirmation: {
-        mode: 'automated',
-      },
-    };
-    let actionResults: DiscordActionResult[] = [];
-    if (parsed.actions.length > 0) {
-      actionResults = await executeDiscordActions(parsed.actions, actCtx, log, {
-        taskCtx: botParams.taskCtx,
-        cronCtx: botParams.cronCtx,
-        forgeCtx: botParams.forgeCtx,
-        planCtx: botParams.planCtx,
-        memoryCtx: botParams.memoryCtx,
-        configCtx: botParams.configCtx,
-      });
-    }
-
-    const displayLines = buildDisplayResultLines(parsed.actions, actionResults);
-    let outgoingText = parsed.cleanText.trim();
-    if (displayLines.length > 0) {
-      outgoingText = outgoingText ? `${outgoingText}\n\n${displayLines.join('\n')}` : displayLines.join('\n');
-    }
-    outgoingText = appendUnavailableActionTypesNotice(outgoingText, parsed.strippedUnrecognizedTypes).trim();
-    if (!outgoingText && runtimeError) {
-      outgoingText = runtimeError;
-    }
-
-    if (outgoingText) {
-      try {
-        await channel.send({ content: outgoingText, allowedMentions: NO_MENTIONS });
-      } catch (err) {
-        log?.warn({ err, channelId: channel.id }, 'defer:failed to post follow-up');
-      }
-    }
-  };
-
-  const deferScheduler = new DeferScheduler({
+  const deferScheduler = configureDeferredScheduler({
     maxDelaySeconds: cfg.deferMaxDelaySeconds,
     maxConcurrent: cfg.deferMaxConcurrent,
-    jobHandler: handleDeferredRun,
+    state: botParams,
+    runtime,
+    runtimeTools,
+    runtimeTimeoutMs,
+    workspaceCwd,
+    discordChannelContext,
+    appendSystemPrompt,
+    useGroupDirCwd,
+    botDisplayName,
+    log,
   });
   botParams.deferScheduler = deferScheduler;
-  log.info({ maxDelaySeconds: cfg.deferMaxDelaySeconds, maxConcurrent: cfg.deferMaxConcurrent }, 'defer:scheduler configured');
 }
 
-let client!: Awaited<ReturnType<typeof startDiscordBot>>['client'];
-let status!: Awaited<ReturnType<typeof startDiscordBot>>['status'];
-let system!: Awaited<ReturnType<typeof startDiscordBot>>['system'];
+let client!: Awaited<ReturnType<typeof startDiscordBot>>['client'], status!: Awaited<ReturnType<typeof startDiscordBot>>['status'], system!: Awaited<ReturnType<typeof startDiscordBot>>['system'];
 try {
   ({ client, status, system } = await startDiscordBot(botParams));
 } catch (err) {
@@ -1019,57 +818,23 @@ try {
 }
 botStatus = status;
 
-// --- Persist scaffold state (forum IDs) for next boot ---
-if (system) {
-  const newState: Record<string, string> = {};
-  const resolvedGuild = guildId || system.guildId || '';
-  if (resolvedGuild) newState.guildId = resolvedGuild;
-  if (system.systemCategoryId) newState.systemCategoryId = system.systemCategoryId;
-  if (system.cronsForumId) newState.cronsForumId = system.cronsForumId;
-  if (system.tasksForumId) newState.tasksForumId = system.tasksForumId;
-  if (Object.keys(newState).length > 0) {
-    try {
-      await fs.writeFile(scaffoldStatePath, JSON.stringify(newState, null, 2) + '\n', 'utf8');
-      log.info({ scaffoldStatePath }, 'system-scaffold: persisted forum IDs');
-    } catch (err) {
-      log.warn({ err, scaffoldStatePath }, 'system-scaffold: failed to persist forum IDs');
-    }
-  }
-}
-
-// --- Cold-start: clean up orphaned in-flight replies from a previous unclean exit ---
-await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'inflight.json'), log });
-
-// --- Task thread healing: surface stale task thread refs for deleted Discord threads ---
-healStaleTaskThreadRefs(sharedTaskStore, client, log).catch((err) => {
-  log.warn({ err }, 'startup:heal:task thread refs failed');
-});
-
-// --- Credential health checks (runs after bot connects: full context available) ---
-const resolvedStatusChannelId = statusChannel || system?.statusChannelId || undefined;
-const credentialCheckReport = await runCredentialChecks({
+const { credentialCheckReport, credentialReport } = await runPostConnectStartupChecks({
+  system,
+  guildId,
+  scaffoldStatePath,
+  client,
+  pidLockDir,
+  sharedTaskStore,
   token: cfg.token,
   openaiApiKey: cfg.openaiApiKey,
   openaiBaseUrl: cfg.openaiBaseUrl,
   openrouterApiKey: cfg.openrouterApiKey,
   openrouterBaseUrl: cfg.openrouterBaseUrl,
-  workspacePath: workspaceCwd,
-  statusChannelId: resolvedStatusChannelId,
+  workspaceCwd,
+  statusChannel,
   activeProviders,
+  log,
 });
-const credentialReport = formatCredentialReport(credentialCheckReport);
-if (credentialCheckReport.criticalFailures.length > 0) {
-  for (const name of credentialCheckReport.criticalFailures) {
-    const result = credentialCheckReport.results.find((r) => r.name === name);
-    log.error({ name, message: result?.message }, 'boot:credential-check: critical credential failed');
-  }
-}
-for (const result of credentialCheckReport.results) {
-  if (result.status === 'fail' && !credentialCheckReport.criticalFailures.includes(result.name)) {
-    log.warn({ name: result.name, message: result.message }, 'boot:credential-check: non-critical credential failed');
-  }
-}
-log.info({ credentialReport }, 'boot:credential-check');
 
 // --- Configure task context after bootstrap (so the forum can be auto-created) ---
 let taskCtx: TaskContext | undefined;
@@ -1103,11 +868,12 @@ if (tasksEnabled) {
 }
 
 if (taskCtx) {
+  const activeTaskCtx = taskCtx;
   // Attach status poster now that the bot is connected (may not have been available during pre-flight).
-  if (!taskCtx.statusPoster && botStatus) {
-    taskCtx.statusPoster = botStatus;
+  if (!activeTaskCtx.statusPoster && botStatus) {
+    activeTaskCtx.statusPoster = botStatus;
   }
-  botParams.taskCtx = taskCtx;
+  botParams.taskCtx = activeTaskCtx;
   botParams.discordActionsTasks = discordActionsTasks && tasksEnabled;
   botParams.healthConfigSnapshot.tasksActive = true;
 
@@ -1116,22 +882,28 @@ if (taskCtx) {
   const guild = resolvedGuildId ? client.guilds.cache.get(resolvedGuildId) : undefined;
   if (guild) {
     // Create forum count sync for tasks.
-    const tasksForumChannel = await resolveTasksForum(guild, taskCtx.forumId);
+    const tasksForumChannel = await resolveTasksForum(guild, activeTaskCtx.forumId);
     if (tasksForumChannel) {
       taskForumCountSync = new ForumCountSync(
         client,
         tasksForumChannel.id,
         async () => {
-          return taskCtx!.store.list({ status: 'all' }).filter((b) => b.status !== 'closed').length;
+          return activeTaskCtx.store.list({ status: 'all' }).filter((b) => b.status !== 'closed').length;
         },
         log,
       );
-      taskCtx.forumCountSync = taskForumCountSync;
+      activeTaskCtx.forumCountSync = taskForumCountSync;
       taskForumCountSync.requestUpdate();
     }
 
     // Install forum guard before any async operations that touch the forum.
-    initTasksForumGuard({ client, forumId: taskCtx.forumId, log, store: taskCtx.store, tagMap: taskCtx.tagMap });
+    initTasksForumGuard({
+      client,
+      forumId: activeTaskCtx.forumId,
+      log,
+      store: activeTaskCtx.store,
+      tagMap: activeTaskCtx.tagMap,
+    });
 
     // Tag bootstrap + reload BEFORE wireTaskSync so the first sync has the correct tag map.
     if (tasksForumChannel) {
@@ -1144,21 +916,26 @@ if (taskCtx) {
         log.warn({ err }, 'tasks:tag bootstrap failed');
       }
       try {
-        await reloadTagMapInPlace(tasksTagMapPath, taskCtx.tagMap);
+        await reloadTagMapInPlace(tasksTagMapPath, activeTaskCtx.tagMap);
       } catch (err) {
         log.warn({ err }, 'tasks:tag map reload failed');
       }
     }
 
     // Wire coordinator + sync triggers + startup sync (now uses correct tag map).
-    const wired = await wireTaskSync(taskCtx, { client, guild });
+    const wired = await wireTaskSync(activeTaskCtx, { client, guild });
     taskSyncWiring = wired;
   } else {
     log.warn({ resolvedGuildId }, 'tasks:sync wiring skipped; guild not in cache');
   }
 
   log.info(
-    { tasksCwd, tasksForum: taskCtx.forumId, tagCount: Object.keys(taskCtx.tagMap).length, autoTag: tasksAutoTag },
+    {
+      tasksCwd,
+      tasksForum: activeTaskCtx.forumId,
+      tagCount: Object.keys(activeTaskCtx.tagMap).length,
+      autoTag: tasksAutoTag,
+    },
     'tasks:initialized',
   );
 }
@@ -1280,9 +1057,17 @@ if (cronEnabled && effectiveCronForum) {
   });
 
   const cronPendingThreadIds = new Set<string>();
+  let cronExecCtx: import('./cron/executor.js').CronExecutorContext | null = null;
+
+  cronScheduler = new CronScheduler((job) => {
+    if (!cronExecCtx) {
+      throw new Error('cron executor context not initialized');
+    }
+    return executeCronJob(job, cronExecCtx);
+  }, log);
 
   const cronCtx: CronContext = {
-    scheduler: null as any, // Will be set after scheduler creation.
+    scheduler: cronScheduler,
     client,
     forumId: effectiveCronForum,
     tagMapPath: cronTagMapPath,
@@ -1301,7 +1086,7 @@ if (cronEnabled && effectiveCronForum) {
     cronCtx.deferScheduler = botParams.deferScheduler;
   }
 
-  const cronExecCtx = {
+  cronExecCtx = {
     client,
     runtime,
     model: runtimeModel,
@@ -1325,8 +1110,6 @@ if (cronEnabled && effectiveCronForum) {
   };
 
   savedCronExecCtx = cronExecCtx;
-  cronScheduler = new CronScheduler((job) => executeCronJob(job, cronExecCtx), log);
-  cronCtx.scheduler = cronScheduler;
   cronCtx.executorCtx = cronExecCtx;
 
   botParams.cronCtx = cronCtx;
@@ -1353,11 +1136,12 @@ if (cronEnabled && effectiveCronForum) {
   }
 
   // Create forum count sync for crons (after initCronForum so all jobs are loaded).
-  if (cronForumResult.forumId) {
+  const activeCronScheduler = cronScheduler;
+  if (cronForumResult.forumId && activeCronScheduler) {
     cronForumCountSync = new ForumCountSync(
       client,
       cronForumResult.forumId,
-      () => cronScheduler!.listJobs().length,
+      () => activeCronScheduler.listJobs().length,
       log,
     );
     cronCtx.forumCountSync = cronForumCountSync;
@@ -1365,11 +1149,11 @@ if (cronEnabled && effectiveCronForum) {
   }
 
   // Wire coordinator + watcher for cron tag-map hot-reload
-  if (cronForumResult.forumId) {
+  if (cronForumResult.forumId && activeCronScheduler) {
     const cronSyncCoordinator = new CronSyncCoordinator({
       client,
       forumId: cronForumResult.forumId,
-      scheduler: cronScheduler!,
+      scheduler: activeCronScheduler,
       statsStore: cronStats,
       runtime,
       tagMap: cronTagMap,
@@ -1399,8 +1183,19 @@ if (cronEnabled && effectiveCronForum) {
   if (system?.guildId) {
     const guild = client.guilds.cache.get(system.guildId);
     if (guild) {
+      const forumIdForTagBootstrap = resolveCronTagBootstrapForumId({
+        resolvedForumId: cronForumResult.forumId,
+        configuredForumRef: effectiveCronForum,
+      });
       try {
-        await ensureForumTags(guild, effectiveCronForum, cronTagMapPath, { log });
+        if (forumIdForTagBootstrap) {
+          await ensureForumTags(guild, forumIdForTagBootstrap, cronTagMapPath, { log });
+        } else {
+          log.warn(
+            { effectiveCronForum },
+            'cron:forum tag bootstrap skipped; resolved forum ID unavailable',
+          );
+        }
       } catch (err) {
         log.warn({ err }, 'cron:forum tag bootstrap failed');
       }
@@ -1458,56 +1253,46 @@ if (cfg.webhookEnabled && savedCronExecCtx) {
   log.warn('DISCOCLAW_WEBHOOK_ENABLED=1 but cron executor context is not available; webhook server disabled');
 }
 
-if (reactionHandlerEnabled) {
-  log.info({ reactionMaxAgeHours }, 'reaction:handler enabled');
-}
-if (reactionRemoveHandlerEnabled) {
-  log.info({ reactionMaxAgeHours }, 'reaction-remove:handler enabled');
-}
+if (reactionHandlerEnabled) log.info({ reactionMaxAgeHours }, 'reaction:handler enabled');
+if (reactionRemoveHandlerEnabled) log.info({ reactionMaxAgeHours }, 'reaction-remove:handler enabled');
 
 log.info('Discord bot started');
 
-// --- Boot report (replaces the bare online() call in startDiscordBot) ---
-if (botStatus?.bootReport) {
-  const actionCategoriesEnabled: string[] = [];
-  if (discordActionsChannels) actionCategoriesEnabled.push('channels');
-  if (discordActionsMessaging) actionCategoriesEnabled.push('messaging');
-  if (discordActionsGuild) actionCategoriesEnabled.push('guild');
-  if (discordActionsModeration) actionCategoriesEnabled.push('moderation');
-  if (discordActionsPolls) actionCategoriesEnabled.push('polls');
-  if (discordActionsTasks && tasksEnabled) actionCategoriesEnabled.push('tasks');
-  if (discordActionsCrons && cronEnabled) actionCategoriesEnabled.push('crons');
-  if (discordActionsBotProfile) actionCategoriesEnabled.push('bot-profile');
-  if (discordActionsForge && forgeCommandsEnabled) actionCategoriesEnabled.push('forge');
-  if (discordActionsPlan && planCommandsEnabled) actionCategoriesEnabled.push('plan');
-  if (discordActionsMemory && durableMemoryEnabled) actionCategoriesEnabled.push('memory');
-
-  botStatus.bootReport({
-    startupType: startupCtx.type,
-    shutdownReason: startupCtx.shutdown?.reason,
-    shutdownMessage: startupCtx.shutdown?.message,
-    shutdownRequestedBy: startupCtx.shutdown?.requestedBy,
-    activeForge: startupCtx.shutdown?.activeForge,
-    tasksEnabled: tasksEnabled,
-    forumResolved: Boolean(taskCtx?.forumId),
-    cronsEnabled: Boolean(cronEnabled && botParams.cronCtx),
-    cronJobCount: cronScheduler?.listJobs().length,
-    memoryEpisodicOn: summaryEnabled,
-    memorySemanticOn: durableMemoryEnabled,
-    memoryWorkingOn: shortTermMemoryEnabled,
-    actionCategoriesEnabled,
-    configWarnings: parsedConfig.warnings.length,
-    permissionsStatus: permProbe.status === 'valid' ? 'ok' : permProbe.status,
-    permissionsReason: permProbe.status === 'invalid' ? permProbe.reason : undefined,
-    permissionsTier: permProbe.status === 'valid' ? permProbe.permissions.tier : undefined,
-    credentialReport,
-    credentialHealth: credentialCheckReport.results.map((r) => ({
-      name: r.name,
-      status: r.status === 'ok' ? 'pass' : r.status,
-      detail: r.message,
-    })),
-    runtimeModel,
-    bootDurationMs: Date.now() - bootStartMs,
-    buildVersion: gitHash ?? undefined,
-  }).catch((err) => log.warn({ err }, 'status-channel: boot report failed'));
-}
+const actionCategoriesEnabled = buildActionCategoriesEnabled({
+  discordActionsChannels,
+  discordActionsMessaging,
+  discordActionsGuild,
+  discordActionsModeration,
+  discordActionsPolls,
+  discordActionsTasks,
+  tasksEnabled,
+  discordActionsCrons,
+  cronEnabled,
+  discordActionsBotProfile,
+  discordActionsForge,
+  forgeCommandsEnabled,
+  discordActionsPlan,
+  planCommandsEnabled,
+  discordActionsMemory,
+  durableMemoryEnabled,
+});
+publishBootReport({
+  botStatus,
+  startupCtx,
+  tasksEnabled,
+  forumResolved: Boolean(taskCtx?.forumId),
+  cronsEnabled: Boolean(cronEnabled && botParams.cronCtx),
+  cronJobCount: cronScheduler?.listJobs().length,
+  memoryEpisodicOn: summaryEnabled,
+  memorySemanticOn: durableMemoryEnabled,
+  memoryWorkingOn: shortTermMemoryEnabled,
+  actionCategoriesEnabled,
+  configWarnings: parsedConfig.warnings.length,
+  permProbe,
+  credentialReport,
+  credentialCheckReport,
+  runtimeModel,
+  bootDurationMs: Date.now() - bootStartMs,
+  buildVersion: gitHash ?? undefined,
+  log,
+});

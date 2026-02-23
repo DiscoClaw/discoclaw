@@ -1,0 +1,56 @@
+{
+  "generatedAtUtc": "2026-02-23T04:48:32.180Z",
+  "commit": "96b0edd",
+  "verdict": "PASS",
+  "inputs": {
+    "sections": "docs/code-review/section-review-2026-02-23.json",
+    "chunkRisks": "docs/code-review/long-file-chunk-risks-2026-02-23.json",
+    "chunkAudit": "docs/code-review/long-file-chunk-audit-2026-02-23.json"
+  },
+  "gates": {
+    "build": "PASS",
+    "test": "PASS",
+    "legacyGuard": "PASS",
+    "preflight": "PASS"
+  },
+  "totals": {
+    "filesReviewed": 407,
+    "sectionFindings": 2,
+    "chunkRiskFindings": 0,
+    "bugFindings": 0,
+    "structuralLongFiles": 2,
+    "unmitigatedLongFiles": 0,
+    "longFilesMitigated": 2,
+    "chunksAudited": 20,
+    "chunkFollowUp": 0
+  },
+  "longFileStatus": [
+    {
+      "file": "src/discord/message-coordinator.ts",
+      "mitigatedByChunkAudit": true
+    },
+    {
+      "file": "src/discord/plan-manager.ts",
+      "mitigatedByChunkAudit": true
+    }
+  ],
+  "sectionFindingsExcludedAsStructural": [
+    {
+      "severity": "P2",
+      "section": "discord",
+      "file": "src/discord/message-coordinator.ts",
+      "line": 1,
+      "rule": "LONG_FILE",
+      "details": "File has 2771 lines; review complexity/splitting risk. (hits=1; lines=1)"
+    },
+    {
+      "severity": "P2",
+      "section": "discord",
+      "file": "src/discord/plan-manager.ts",
+      "line": 1,
+      "rule": "LONG_FILE",
+      "details": "File has 1796 lines; review complexity/splitting risk. (hits=1; lines=1)"
+    }
+  ],
+  "bugFindings": []
+}

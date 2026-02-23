@@ -1,0 +1,230 @@
+{
+  "generatedAtUtc": "2026-02-23T04:48:31.599Z",
+  "manifestPath": "docs/code-review/long-file-chunks-2026-02-23.json",
+  "risksPath": "docs/code-review/long-file-chunk-risks-2026-02-23.json",
+  "chunksAudited": 20,
+  "passed": 20,
+  "followUp": 0,
+  "entries": [
+    {
+      "id": "discord:src/discord/message-coordinator.ts:1",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 1,
+      "chunkCount": 12,
+      "startLine": 1,
+      "endLine": 250,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:2",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 2,
+      "chunkCount": 12,
+      "startLine": 251,
+      "endLine": 500,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:3",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 3,
+      "chunkCount": 12,
+      "startLine": 501,
+      "endLine": 750,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:4",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 4,
+      "chunkCount": 12,
+      "startLine": 751,
+      "endLine": 1000,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:5",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 5,
+      "chunkCount": 12,
+      "startLine": 1001,
+      "endLine": 1250,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:6",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 6,
+      "chunkCount": 12,
+      "startLine": 1251,
+      "endLine": 1500,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:7",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 7,
+      "chunkCount": 12,
+      "startLine": 1501,
+      "endLine": 1750,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:8",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 8,
+      "chunkCount": 12,
+      "startLine": 1751,
+      "endLine": 2000,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:9",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 9,
+      "chunkCount": 12,
+      "startLine": 2001,
+      "endLine": 2250,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:10",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 10,
+      "chunkCount": 12,
+      "startLine": 2251,
+      "endLine": 2500,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:11",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 11,
+      "chunkCount": 12,
+      "startLine": 2501,
+      "endLine": 2750,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/message-coordinator.ts:12",
+      "file": "src/discord/message-coordinator.ts",
+      "section": "discord",
+      "chunkIndex": 12,
+      "chunkCount": 12,
+      "startLine": 2751,
+      "endLine": 2771,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/plan-manager.ts:1",
+      "file": "src/discord/plan-manager.ts",
+      "section": "discord",
+      "chunkIndex": 1,
+      "chunkCount": 8,
+      "startLine": 1,
+      "endLine": 250,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/plan-manager.ts:2",
+      "file": "src/discord/plan-manager.ts",
+      "section": "discord",
+      "chunkIndex": 2,
+      "chunkCount": 8,
+      "startLine": 251,
+      "endLine": 500,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/plan-manager.ts:3",
+      "file": "src/discord/plan-manager.ts",
+      "section": "discord",
+      "chunkIndex": 3,
+      "chunkCount": 8,
+      "startLine": 501,
+      "endLine": 750,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/plan-manager.ts:4",
+      "file": "src/discord/plan-manager.ts",
+      "section": "discord",
+      "chunkIndex": 4,
+      "chunkCount": 8,
+      "startLine": 751,
+      "endLine": 1000,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/plan-manager.ts:5",
+      "file": "src/discord/plan-manager.ts",
+      "section": "discord",
+      "chunkIndex": 5,
+      "chunkCount": 8,
+      "startLine": 1001,
+      "endLine": 1250,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/plan-manager.ts:6",
+      "file": "src/discord/plan-manager.ts",
+      "section": "discord",
+      "chunkIndex": 6,
+      "chunkCount": 8,
+      "startLine": 1251,
+      "endLine": 1500,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/plan-manager.ts:7",
+      "file": "src/discord/plan-manager.ts",
+      "section": "discord",
+      "chunkIndex": 7,
+      "chunkCount": 8,
+      "startLine": 1501,
+      "endLine": 1750,
+      "status": "passed",
+      "findings": []
+    },
+    {
+      "id": "discord:src/discord/plan-manager.ts:8",
+      "file": "src/discord/plan-manager.ts",
+      "section": "discord",
+      "chunkIndex": 8,
+      "chunkCount": 8,
+      "startLine": 1751,
+      "endLine": 1796,
+      "status": "passed",
+      "findings": []
+    }
+  ]
+}
