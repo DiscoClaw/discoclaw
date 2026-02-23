@@ -94,6 +94,7 @@ function buildDeferredActionFlags(state: DeferredRunnerState): ActionCategoryFla
     memory: false,
     config: Boolean(state.discordActionsConfig),
     defer: false,
+    imagegen: false,
   };
 }
 
