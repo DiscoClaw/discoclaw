@@ -141,13 +141,13 @@ Plans are stored in `workspace/plans/plan-NNN-slug.md`. The user must explicitly
 
 **Canonical reference:** See `docs/plan-and-forge.md` for full command syntax, the forge orchestration loop, phase manager details, configuration options, and end-to-end workflows.
 
-## Forge, Plan & Memory Action Types
+## Discord Action Types
 
-See TOOLS.md for the full reference of forge, plan, and memory `<discord-action>` types. Never send `!forge`/`!plan`/`!memory` as text messages — bot-sent messages don't trigger command handlers. Use the action blocks instead.
+See TOOLS.md for the full reference of forge, plan, memory, task, and cron `<discord-action>` types. Never send `!forge`/`!plan`/`!memory` as text messages — bot-sent messages don't trigger command handlers. Use the action blocks instead.
 
-## Task Creation
+## Task Management
 
-After creating a task, always post a link to its Discord thread so the user can jump straight to it.
+Discoclaw has a built-in task tracker backed by Discord forum threads. Use `taskCreate` for tracking work items (TODOs, follow-ups, bugs, feature requests) — not GitHub issues, not manual thread creation. After creating a task, always post a link to its Discord thread so the user can jump straight to it. See TOOLS.md for action syntax.
 
 ## Discord Action Batching
 
@@ -196,9 +196,9 @@ This is a starting point. Add your own conventions, style, and rules as you figu
 
 **MANDATORY WORKFLOW:**
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
+1. **Track remaining work** - Use `taskCreate` for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
+3. **Update task status** - Use `taskClose`/`taskUpdate` to close finished work and update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase

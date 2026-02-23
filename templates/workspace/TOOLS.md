@@ -177,7 +177,19 @@ Plans are stored in `workspace/plans/plan-NNN-slug.md`. Complex plans can be dec
 
 **Canonical reference:** See `docs/plan-and-forge.md` for full command syntax, the forge orchestration loop, phase manager details, configuration options, and end-to-end workflows.
 
-## Discord Action Types for Forge, Plan & Memory
+## Task Management
+
+Discoclaw has a built-in task tracker backed by Discord forum threads. Use `taskCreate` for tracking work items — not GitHub issues and not manual thread creation.
+
+**When to create a task:**
+- TODOs or action items that come up in conversation
+- Follow-up work the user mentions but isn't ready to start
+- Bug reports, feature requests, or things to revisit later
+- Any work item the user wants tracked
+
+After creating a task, always post a link to its Discord thread so the user can jump straight to it.
+
+## Discord Action Types
 
 Use these as `<discord-action>` blocks in responses — never send `!forge`/`!plan`/`!memory` as text messages (bot-sent messages don't trigger command handlers).
 
@@ -269,6 +281,120 @@ Use planList to check existing plans before creating duplicates. Use forgeCreate
 ```
 
 Use memoryRemember to proactively store important facts (preferences, projects, tools, constraints). Pick the most specific `kind` that fits. Memory items persist across sessions, channels, and restarts.
+
+### Task Actions
+
+**taskCreate** — Create a new task:
+```
+<discord-action>{"type":"taskCreate","title":"Task title","description":"Optional details","priority":2,"tags":"feature,work"}</discord-action>
+```
+- `title` (required): Task title.
+- `description` (optional): Detailed description.
+- `priority` (optional): 0-4 (0=highest, default 2).
+- `tags` (optional): Comma-separated labels/tags.
+
+**taskUpdate** — Update a task's fields:
+```
+<discord-action>{"type":"taskUpdate","taskId":"ws-001","status":"in_progress","priority":1}</discord-action>
+```
+- `taskId` (required): Task ID.
+- `title`, `description`, `priority`, `status` (optional): Fields to update.
+
+**taskClose** — Close a task:
+```
+<discord-action>{"type":"taskClose","taskId":"ws-001","reason":"Done"}</discord-action>
+```
+
+**taskShow** — Show task details:
+```
+<discord-action>{"type":"taskShow","taskId":"ws-001"}</discord-action>
+```
+
+**taskList** — List tasks:
+```
+<discord-action>{"type":"taskList","status":"open","limit":10}</discord-action>
+```
+- `status` (optional): Filter by status (open, in_progress, blocked, closed, all).
+- `label` (optional): Filter by label.
+- `limit` (optional): Max results.
+
+**taskSync** — Run full sync between local task store and Discord threads:
+```
+<discord-action>{"type":"taskSync"}</discord-action>
+```
+
+**tagMapReload** — Reload tag map from disk (hot-reload without restart):
+```
+<discord-action>{"type":"tagMapReload"}</discord-action>
+```
+
+#### Task Quality Guidelines
+- **Title**: imperative mood, specific, <60 chars. Good: "Add retry logic to webhook handler", "Plan March Denver trip". Bad: "fix stuff".
+- **Description** should answer what/why/scope. Use markdown for structure. Include what "done" looks like for larger tasks. Max 1900 characters — the system will reject longer descriptions with an error.
+- **Priority**: P0=urgent, P1=important, P2=normal (default), P3=nice-to-have, P4=someday.
+- If the user explicitly asks to create a task, always create it.
+- Apply the same description quality standards when using taskUpdate to backfill details.
+
+Use taskList to check existing tasks before creating duplicates. Use taskShow/taskUpdate/taskClose to interact with existing tasks by ID rather than channel-name messaging.
+
+### Cron Actions
+
+**cronCreate** — Create a new scheduled task:
+```
+<discord-action>{"type":"cronCreate","name":"Morning Report","schedule":"0 7 * * 1-5","timezone":"America/Los_Angeles","channel":"general","prompt":"Generate a brief morning status update","model":"fast"}</discord-action>
+```
+- `name` (required): Human-readable name.
+- `schedule` (required): 5-field cron expression (e.g., "0 7 * * 1-5").
+- `channel` (required): Target channel name or ID.
+- `prompt` (required): The instruction text.
+- `timezone` (optional, default: system timezone, or DEFAULT_TIMEZONE env if set): IANA timezone.
+- `tags` (optional): Comma-separated purpose tags.
+- `model` (optional): "fast" or "capable" (auto-classified if omitted).
+
+**cronUpdate** — Update a cron's settings:
+```
+<discord-action>{"type":"cronUpdate","cronId":"cron-a1b2c3d4","schedule":"0 9 * * *","model":"capable"}</discord-action>
+```
+- `cronId` (required): The stable cron ID.
+- `schedule`, `timezone`, `channel`, `prompt`, `model`, `tags` (optional).
+
+**cronList** — List all cron jobs:
+```
+<discord-action>{"type":"cronList"}</discord-action>
+```
+
+**cronShow** — Show full details for a cron:
+```
+<discord-action>{"type":"cronShow","cronId":"cron-a1b2c3d4"}</discord-action>
+```
+
+**cronPause** / **cronResume** — Pause or resume a cron:
+```
+<discord-action>{"type":"cronPause","cronId":"cron-a1b2c3d4"}</discord-action>
+<discord-action>{"type":"cronResume","cronId":"cron-a1b2c3d4"}</discord-action>
+```
+
+**cronDelete** — Remove a cron job and archive its thread:
+```
+<discord-action>{"type":"cronDelete","cronId":"cron-a1b2c3d4"}</discord-action>
+```
+Note: cronDelete **archives** the thread (reversible) — it does not permanently delete it. The thread history is preserved and can be unarchived later via the Discord UI, which will re-register the cron job automatically.
+
+**cronTrigger** — Immediately execute a cron (manual fire):
+```
+<discord-action>{"type":"cronTrigger","cronId":"cron-a1b2c3d4"}</discord-action>
+```
+Note: `force` overrides are disabled in Discord actions.
+
+**cronSync** — Run full bidirectional sync:
+```
+<discord-action>{"type":"cronSync"}</discord-action>
+```
+
+**cronTagMapReload** — Reload tag map from disk and optionally trigger sync:
+```
+<discord-action>{"type":"cronTagMapReload"}</discord-action>
+```
 
 ### Model Configuration
 
