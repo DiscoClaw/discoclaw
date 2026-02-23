@@ -626,7 +626,7 @@ describe('destructive action confirmation flow', () => {
     resetDestructiveConfirm();
   });
 
-  it('requires !confirm token before executing destructive actions', async () => {
+  it('executes destructive actions immediately in interactive mode without !confirm', async () => {
     const ban = vi.fn(async () => {});
     const guild = {
       members: {
@@ -649,21 +649,8 @@ describe('destructive action confirmation flow', () => {
     const msg1 = makeMsg({ guild, content: 'ban that user' });
     await handler(msg1);
 
-    const firstReply = await msg1.reply.mock.results[0]?.value;
-    const firstContent = String(
-      firstReply?.edit?.mock?.calls?.[firstReply.edit.mock.calls.length - 1]?.[0]?.content ?? '',
-    );
-    const token = /!confirm\s+([a-z0-9_-]{6,64})/i.exec(firstContent)?.[1];
-    expect(token).toBeTruthy();
-    expect(ban).not.toHaveBeenCalled();
-
-    const msg2 = makeMsg({ guild, content: `!confirm ${token}` });
-    await handler(msg2);
-
     expect(runtime.invoke).toHaveBeenCalledTimes(1);
     expect(ban).toHaveBeenCalledOnce();
-    const confirmReply = (msg2.reply as any).mock.calls[0]?.[0]?.content ?? '';
-    expect(confirmReply).toContain('Confirmed `ban`.');
   });
 });
 
