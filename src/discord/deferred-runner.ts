@@ -15,7 +15,7 @@ import type { ConfigContext } from './actions-config.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
-import { appendUnavailableActionTypesNotice } from './output-common.js';
+import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
 import {
   buildContextFiles,
   buildPromptPreamble,
@@ -242,6 +242,7 @@ export function configureDeferredScheduler(
       outgoingText = outgoingText ? `${outgoingText}\n\n${displayLines.join('\n')}` : displayLines.join('\n');
     }
     outgoingText = appendUnavailableActionTypesNotice(outgoingText, parsed.strippedUnrecognizedTypes).trim();
+    outgoingText = appendParseFailureNotice(outgoingText, parsed.parseFailures).trim();
     if (!outgoingText && runtimeError) {
       outgoingText = runtimeError;
     }

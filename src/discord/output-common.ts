@@ -187,6 +187,24 @@ export function appendUnavailableActionTypesNotice(
   return base ? `${base}\n\n${notice}` : notice;
 }
 
+export function buildParseFailureNotice(count: number): string {
+  if (count <= 0) return '';
+  if (count === 1) {
+    return 'Warning: 1 action block failed to parse (malformed JSON) and was skipped.';
+  }
+  return `Warning: ${count} action blocks failed to parse (malformed JSON) and were skipped.`;
+}
+
+export function appendParseFailureNotice(
+  text: string,
+  count: number,
+): string {
+  const notice = buildParseFailureNotice(count);
+  if (!notice) return text;
+  const base = String(text ?? '').trimEnd();
+  return base ? `${base}\n\n${notice}` : notice;
+}
+
 export async function sendChunks(
   channel: { send: (opts: SendOpts) => Promise<unknown> },
   text: string,

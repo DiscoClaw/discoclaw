@@ -8,6 +8,8 @@ import {
   shouldSuppressFollowUp,
   buildUnavailableActionTypesNotice,
   appendUnavailableActionTypesNotice,
+  buildParseFailureNotice,
+  appendParseFailureNotice,
 } from './output-common.js';
 import type { ImageData } from '../runtime/types.js';
 
@@ -234,5 +236,48 @@ describe('sendChunks with images', () => {
     await sendChunks(channel, 'Hello world', images);
     expect(channel.send).toHaveBeenCalledOnce();
     expect(channel.send.mock.calls[0][0].files).toHaveLength(1);
+  });
+});
+
+describe('buildParseFailureNotice', () => {
+  it('returns empty string for zero failures', () => {
+    expect(buildParseFailureNotice(0)).toBe('');
+  });
+
+  it('returns empty string for negative count', () => {
+    expect(buildParseFailureNotice(-1)).toBe('');
+  });
+
+  it('returns singular warning for one failure', () => {
+    const out = buildParseFailureNotice(1);
+    expect(out).toContain('1 action block');
+    expect(out).toContain('malformed JSON');
+    expect(out).toContain('skipped');
+  });
+
+  it('returns plural warning for multiple failures', () => {
+    const out = buildParseFailureNotice(3);
+    expect(out).toContain('3 action blocks');
+    expect(out).toContain('malformed JSON');
+    expect(out).toContain('skipped');
+  });
+});
+
+describe('appendParseFailureNotice', () => {
+  it('appends the notice under existing text', () => {
+    const out = appendParseFailureNotice('hello', 1);
+    expect(out).toContain('hello');
+    expect(out).toContain('malformed JSON');
+    expect(out.indexOf('hello')).toBeLessThan(out.indexOf('malformed JSON'));
+  });
+
+  it('returns notice alone when base text is empty', () => {
+    const out = appendParseFailureNotice('', 2);
+    expect(out).toContain('2 action blocks');
+    expect(out.startsWith('Warning:')).toBe(true);
+  });
+
+  it('returns original text when count is zero', () => {
+    expect(appendParseFailureNotice('hello', 0)).toBe('hello');
   });
 });
