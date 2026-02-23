@@ -4,6 +4,43 @@ Canonical reference for DiscoClaw's `!plan` and `!forge` command systems.
 
 ---
 
+## 0. When to Use Forge
+
+Forge runs a multi-round draft → audit → revise loop, so it adds real turnaround time (~1–3 minutes for a simple plan, longer for complex ones). Knowing when it pays off prevents unnecessary friction.
+
+### Use forge when
+
+- **The plan is large or the scope is uncertain.** Forge's drafter reads the codebase and identifies the affected files; its auditor catches gaps before implementation starts. This adversarial review is worth the overhead when you'd otherwise guess at scope.
+- **You're working in an unfamiliar area of the codebase.** The drafter agent explores the relevant source before writing the plan — it's effectively a free codebase-read pass embedded in planning.
+- **You want adversarial review before touching code.** The auditor is explicitly instructed to be skeptical. Catching a design flaw in the plan is much cheaper than catching it mid-phase.
+- **The change has non-trivial risks.** Forge's auditor checks for security, correctness, and architectural issues that are easy to miss under time pressure.
+
+### Skip forge when
+
+- **You're iterating quickly on a known change.** If you already know exactly what needs to change and why, `!plan <desc>` + editing the file by hand is faster.
+- **The scope is small and well-understood.** A one-file fix with a clear diff doesn't need a multi-round draft loop.
+- **You're in a tight feedback loop.** If you're already mid-implementation and need to record a plan for tracking purposes, `!plan <desc>` and filling in the template manually is the right call.
+
+### Cost of editing a plan mid-run
+
+Once `!plan run` has started, the phase runner records a `planContentHash` — a fingerprint of the plan file at generation time. If you edit the plan file while phases are running or between runs, the hash changes and the runner blocks with:
+
+```
+Plan file has changed since phases were generated.
+Run `!plan phases --regenerate <plan-id>` to update.
+```
+
+This is intentional: stale phases may no longer match the plan's intent. The escape hatch is `--regenerate`:
+
+```
+!plan phases --regenerate plan-NNN
+!plan run plan-NNN
+```
+
+Regeneration overwrites the phases file and resets all phase statuses to `pending`. Git commits from already-completed phases are preserved on the branch, but the phase tracker loses their `done` status — the runner will re-execute them. Edit the plan before running whenever possible to avoid this.
+
+---
+
 ## 1. Overview
 
 **`!plan`** manages structured implementation plans — markdown files in `workspace/plans/` that track an idea from draft through approval, phase decomposition, and implementation.
@@ -614,6 +651,68 @@ Additionally, the status line is normalized to just `DRAFT` (removes any options
 ---
 ## Implementation Notes
 ```
+
+### Required sections (human drafter guide)
+
+When writing a plan manually (via `!plan <desc>` or by editing the file directly), the following sections are required for the plan to pass the structural audit gate and for phase decomposition to work correctly:
+
+| Section | Required | Purpose |
+|---------|----------|---------|
+| `## Objective` | Yes | One paragraph: what problem this plan solves and why. |
+| `## Scope` | Yes | What is in scope and explicitly what is out of scope. Helps the auditor and the phase runner bound the work. |
+| `## Changes` | Yes | File-by-file change specifications. Parsed by the phase decomposer — format matters (see below). |
+| `## Risks` | Yes | Known risks, failure modes, and mitigations. Required by the structural pre-flight check. |
+| `## Testing` | Yes | How the changes will be verified. At minimum: what commands to run, what to look for. |
+| `## Audit Log` | Yes (auto-filled) | Appended by the forge auditor and `!plan audit`. Leave the heading present; the bot fills the content. |
+| `## Implementation Notes` | Yes (can be empty) | Scratch space for the implementor: notes that don't fit in the main plan but should travel with it. |
+
+Missing any of the first five sections (`Objective`, `Scope`, `Changes`, `Risks`, `Testing`) will cause the structural pre-flight check in `!plan audit` to report a `high` severity finding and abort before the AI audit runs.
+
+### What the phase decomposer needs from `## Changes`
+
+`decomposePlan()` calls `extractFilePathsDeterministic()` (plus a legacy fallback) to find file paths in the `## Changes` section. It matches **backtick-wrapped paths** in three line types only — all other lines are ignored:
+
+1. **List item lines** — lines starting with `-`, `*`, or `+`
+
+   ```markdown
+   - `src/webhook.ts` — Create new webhook handler with rate limiting.
+   - `src/webhook.test.ts` — Unit tests for the rate limiter.
+   ```
+
+2. **Markdown heading lines** — lines starting with `#`
+
+   ```markdown
+   ### `src/webhook.ts`
+   ```
+
+3. **Bold entry lines** — lines where the first non-whitespace token is a bold-wrapped backtick path (`**\`path\`**` or `***\`path\`***`)
+
+   ```markdown
+   **`src/webhook.ts`** — New module.
+   **`src/config.ts`** — Add `WEBHOOK_RATE_LIMIT_RPM` env var.
+   ```
+
+Paths that are not backtick-wrapped, or that appear in plain prose lines, are **not** picked up by the decomposer. If the decomposer finds no paths anywhere (including the Change Manifest below), it falls back to a generic `read → implement → audit` phase sequence rather than file-specific phases.
+
+**`isLikelyFilePath` filter:** The decomposer also rejects tokens that look like config keys (`ALL_CAPS`), PascalCase type names, quoted strings, or single words without a path separator or file extension. Tokens must contain `/` or a `.ext` to pass.
+
+### `## Change Manifest` alternative
+
+If your plan's `## Changes` section is prose-heavy, you can add a separate `## Change Manifest` section containing a JSON array of file paths. The decomposer checks this section first: if it finds a valid JSON array with at least one path, those paths are used instead of anything parsed from `## Changes`.
+
+```markdown
+## Change Manifest
+
+```json
+["src/webhook.ts", "src/webhook.test.ts", "src/config.ts"]
+```
+```
+
+Rules:
+- The section must contain a bare JSON array (no wrapping object).
+- Paths are still filtered by `isLikelyFilePath` — plain strings without `/` or a file extension are ignored.
+- `## Change Manifest` takes **precedence** over `## Changes` for file discovery. The `## Changes` prose is still used to extract per-file change specs for phase prompts, so keep it even when using a manifest.
+- Use this when you want a clean, machine-readable file list decoupled from the narrative change description.
 
 ---
 
