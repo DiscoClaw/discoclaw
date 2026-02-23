@@ -26,8 +26,11 @@ Forge runs a multi-round draft → audit → revise loop, so it adds real turnar
 Once `!plan run` has started, the phase runner records a `planContentHash` — a fingerprint of the plan file at generation time. If you edit the plan file while phases are running or between runs, the hash changes and the runner blocks with:
 
 ```
-Plan file has changed since phases were generated.
-Run `!plan phases --regenerate <plan-id>` to update.
+Plan file has changed since phases were generated — the existing phases may not match the current plan intent and cannot run safely.
+
+**Fix:** `!plan phases --regenerate <plan-id>`
+
+This regenerates phases from the current plan content. All phase statuses are reset to `pending` — previously completed phases will be re-executed. Git commits from completed phases are preserved on the branch, but the phase tracker loses their `done` status.
 ```
 
 This is intentional: stale phases may no longer match the plan's intent. The escape hatch is `--regenerate`:
@@ -570,8 +573,11 @@ Phases are generated with a `planContentHash` — a 16-character truncated SHA-2
 Before running a phase, both `preparePlanRun()` (in `plan-commands.ts`) and `runNextPhase()` (in `plan-manager.ts`) call `checkStaleness()`, which recomputes the hash and compares. If they differ, the run is blocked:
 
 ```
-Plan file has changed since phases were generated.
-Run `!plan phases --regenerate <plan-id>` to update.
+Plan file has changed since phases were generated — the existing phases may not match the current plan intent and cannot run safely.
+
+**Fix:** `!plan phases --regenerate <plan-id>`
+
+This regenerates phases from the current plan content. All phase statuses are reset to `pending` — previously completed phases will be re-executed. Git commits from completed phases are preserved on the branch, but the phase tracker loses their `done` status.
 ```
 
 The remedy is always `!plan phases --regenerate <plan-id>`.
@@ -961,7 +967,13 @@ The 🛑 reaction on the forge progress message and the `!stop` command trigger 
 ```
 !plan run plan-017
 ```
-→ `Plan file has changed since phases were generated. Run !plan phases --regenerate plan-017 to update.`
+```
+Plan file has changed since phases were generated — the existing phases may not match the current plan intent and cannot run safely.
+
+**Fix:** `!plan phases --regenerate plan-017`
+
+This regenerates phases from the current plan content. All phase statuses are reset to `pending` — previously completed phases will be re-executed. Git commits from completed phases are preserved on the branch, but the phase tracker loses their `done` status.
+```
 
 ```
 !plan phases --regenerate plan-017

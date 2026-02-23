@@ -76,7 +76,7 @@ export type PhaseExecutionOpts = {
   timeoutMs: number;
   workspaceCwd: string;
   log?: LoggerLike;
-  /** Max audit→fix→re-audit loops before giving up. Default: 3. */
+  /** Max audit→fix→re-audit loops before giving up. Default: 2. */
   maxAuditFixAttempts?: number;
   /** Optional streaming event callback for live Discord progress previews. */
   onEvent?: (evt: EngineEvent) => void;
@@ -745,7 +745,7 @@ export function checkStaleness(
       message:
         'Plan file has changed since phases were generated — the existing phases may not match the current plan intent and cannot run safely.\n\n' +
         '**Fix:** `!plan phases --regenerate <plan-id>`\n\n' +
-        'This regenerates phases from the current plan content. Pending phases are rebuilt; completed phases are preserved.',
+        'This regenerates phases from the current plan content. All phase statuses are reset to `pending` — previously completed phases will be re-executed. Git commits from completed phases are preserved on the branch, but the phase tracker loses their `done` status.',
     };
   }
   return { stale: false, message: '' };
@@ -1584,7 +1584,7 @@ export async function runNextPhase(
   let result = await executePhase(currentPhase, planContent, allPhases, opts, injectedContext);
 
   // 9a. Audit fix loop: if audit failed and git is available, attempt fix→re-audit cycles
-  const maxFixAttempts = opts.maxAuditFixAttempts ?? 3;
+  const maxFixAttempts = opts.maxAuditFixAttempts ?? 2;
   let fixAttemptsUsed: number | undefined;
 
   if (result.status === 'audit_failed' && maxFixAttempts > 0) {
