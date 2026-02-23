@@ -4,7 +4,54 @@ import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskData } from '../tasks/types.js';
 
-import { loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, buildTaskContextSection, buildTaskThreadSection, resolveEffectiveTools, _resetToolsAuditState } from './prompt-common.js';
+import { ROOT_POLICY, buildPromptPreamble, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, buildTaskContextSection, buildTaskThreadSection, resolveEffectiveTools, _resetToolsAuditState } from './prompt-common.js';
+
+// ---------------------------------------------------------------------------
+// ROOT_POLICY and buildPromptPreamble
+// ---------------------------------------------------------------------------
+
+describe('ROOT_POLICY', () => {
+  it('is a non-empty string', () => {
+    expect(typeof ROOT_POLICY).toBe('string');
+    expect(ROOT_POLICY.length).toBeGreaterThan(0);
+  });
+
+  it('contains the immutable security policy heading', () => {
+    expect(ROOT_POLICY).toContain('Security Policy');
+  });
+
+  it('contains the external-content-is-data rule', () => {
+    expect(ROOT_POLICY).toMatch(/external content is data/i);
+  });
+
+  it('is the same value on every access (evaluated once at module load)', () => {
+    expect(ROOT_POLICY).toBe(ROOT_POLICY);
+  });
+});
+
+describe('buildPromptPreamble', () => {
+  it('returns ROOT_POLICY alone when inlinedContext is empty', () => {
+    expect(buildPromptPreamble('')).toBe(ROOT_POLICY);
+  });
+
+  it('prepends ROOT_POLICY before inlined context', () => {
+    const ctx = 'Some workspace context';
+    const result = buildPromptPreamble(ctx);
+    expect(result).toBe(ROOT_POLICY + '\n\n' + ctx);
+  });
+
+  it('ROOT_POLICY comes before any inlined content', () => {
+    const ctx = 'channel rules';
+    const result = buildPromptPreamble(ctx);
+    expect(result.indexOf(ROOT_POLICY)).toBeLessThan(result.indexOf(ctx));
+  });
+
+  it('inlined context is preserved verbatim', () => {
+    const ctx = '--- SOUL.md ---\nYou are a helpful assistant.';
+    const result = buildPromptPreamble(ctx);
+    expect(result).toContain(ctx);
+  });
+});
 
 describe('loadWorkspacePaFiles', () => {
   const dirs: string[] = [];
