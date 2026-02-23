@@ -7,6 +7,7 @@
 Sources to check:
 - **Anthropic:** https://platform.claude.com/docs/en/about-claude/models/overview
 - **OpenAI/Codex:** https://developers.openai.com/codex/models/
+- **Google Gemini:** https://ai.google.dev/gemini-api/docs/models
 - **Claude Code CLI shorthand:** `sonnet`, `opus`, `haiku` resolve to the latest version of each model family
 
 Current model IDs (as of 2026-02-17):
@@ -18,6 +19,10 @@ Current model IDs (as of 2026-02-17):
 | OpenAI | GPT-5.3-Codex | `gpt-5.3-codex` |
 | OpenAI | GPT-5.3-Codex-Spark | `gpt-5.3-codex-spark` |
 | OpenAI | GPT-5-Codex-Mini | `gpt-5-codex-mini` |
+| Google | Gemini 2.5 Pro | `gemini-2.5-pro` |
+| Google | Gemini 2.5 Flash | `gemini-2.5-flash` |
+
+**OpenRouter model IDs** use provider-namespaced format: `anthropic/claude-sonnet-4`, `openai/gpt-4o`, etc. Always check the OpenRouter model list for current IDs — do not guess.
 
 ## Runtime Adapter Interface
 - The orchestrator consumes a provider-agnostic event stream (`EngineEvent`) from any adapter.
@@ -41,6 +46,7 @@ The factory provides: subprocess tracking, process pool, stall detection, sessio
 |----------|------|------------|-------|
 | Claude Code | `strategies/claude-strategy.ts` | process-pool | Default JSONL parsing, image support |
 | Codex CLI | `strategies/codex-strategy.ts` | session-resume | Custom JSONL (thread.started, item.completed), error sanitization; reasoning items surface in the Discord preview during streaming but are excluded from the final reply |
+| Gemini CLI | `strategies/gemini-strategy.ts` | none (Phase 1) | Text-only output mode; no sessions; stdin fallback for large prompts |
 | Template | `strategies/template-strategy.ts` | — | Commented starting point for new models |
 
 Thin wrappers (`claude-code-cli.ts`, `codex-cli.ts`) map legacy opts and re-export for backward compatibility. Shared utilities live in `cli-shared.ts` and `cli-output-parsers.ts`. Strategy types are in `cli-strategy.ts`.
@@ -70,6 +76,49 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
   - `CLAUDE_OUTPUT_FORMAT=stream-json` (preferred; DiscoClaw parses JSONL and streams text)
   - `CLAUDE_OUTPUT_FORMAT=text` (fallback if your local CLI doesn't support stream-json)
 
+## Gemini CLI Runtime
+
+- Adapter: `src/runtime/gemini-cli.ts` (thin wrapper around `cli-adapter.ts` + `strategies/gemini-strategy.ts`)
+- Invocation shape:
+  ```
+  gemini --model <id> -- <prompt>
+  ```
+  For large prompts that exceed arg length limits, the prompt is passed via stdin instead.
+- Auth: the Gemini CLI binary handles its own authentication — either OAuth (interactive login) or `GEMINI_API_KEY` env var. DiscoClaw does not manage credentials directly.
+- Env vars:
+  | Var | Default | Purpose |
+  |-----|---------|---------|
+  | `GEMINI_BIN` | `gemini` | Path to the Gemini CLI binary |
+  | `GEMINI_MODEL` | `gemini-2.5-flash` | Default model ID |
+- Model tier mapping:
+  | Tier | Model |
+  |------|-------|
+  | `fast` | `gemini-2.5-flash` |
+  | `capable` | `gemini-2.5-pro` |
+- Capabilities (Phase 1):
+  - `streaming_text` only
+  - No sessions / multi-turn (each invocation is independent)
+  - No JSONL streaming — output is plain text
+  - No tool execution, no fs tools
+  - No image input/output support
+
+## OpenRouter Adapter
+
+- Implementation: reuses `src/runtime/openai-compat.ts` with `id: 'openrouter'` — no separate adapter file needed.
+- Conditional registration: only registered in the runtime registry when `OPENROUTER_API_KEY` is set.
+- Env vars:
+  | Var | Default | Purpose |
+  |-----|---------|---------|
+  | `OPENROUTER_API_KEY` | *(required)* | API key; also gates registration |
+  | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter API base URL |
+  | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4` | Default model (provider-namespaced) |
+- Model naming: OpenRouter uses provider-namespaced IDs — e.g. `anthropic/claude-sonnet-4`, `openai/gpt-4o`, `google/gemini-2.5-pro`. Never use bare model names.
+- Capabilities:
+  - `streaming_text` only
+  - No tool execution
+  - No sessions / multi-turn
+- Health system: credential presence checked via `checkOpenRouterKey` — fails health check if key is missing or invalid.
+
 ## Tool Surface
 - Default tools: `Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch` (8 tools).
 - `Glob` + `Grep` are purpose-built for file search — faster than `find`/`grep` via Bash.
@@ -77,7 +126,8 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
 - Non-Claude adapters use a **capability gate** (`tools_fs`) to determine tool access:
   - Codex CLI adapter: declares `tools_fs` — receives read-only tools (Read, Glob, Grep) in auditor role.
   - OpenAI HTTP adapter: text-only (`streaming_text` only) — no tool execution.
-  - Future adapters (Gemini, etc.): declare capabilities as appropriate.
+  - Gemini CLI adapter: text-only (`streaming_text` only) — no tool execution, no fs tools (Phase 1).
+  - OpenRouter adapter: text-only (`streaming_text` only) — no tool execution.
 
 ## Per-Workspace Permissions
 - `workspace/PERMISSIONS.json` controls the tool surface per workspace.
