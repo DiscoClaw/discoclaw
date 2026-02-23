@@ -21,6 +21,19 @@ export type ShortTermStore = {
   entries: ShortTermEntry[];
 };
 
+export const CURRENT_VERSION = 1 as const;
+
+function migrateStore(store: ShortTermStore): ShortTermStore | null {
+  if (store.version !== CURRENT_VERSION) {
+    // Unsupported version — caller will create a fresh store.
+    return null;
+  }
+  // v1 is current; no migration body needed.
+  // Future migrations follow the run-stats.ts pattern:
+  //   if (store.version === 1) { /* transform fields */; store.version = 2; }
+  return store;
+}
+
 // ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
@@ -47,7 +60,7 @@ export async function loadShortTermMemory(
       'entries' in parsed &&
       Array.isArray((parsed as any).entries)
     ) {
-      return parsed as ShortTermStore;
+      return migrateStore(parsed as ShortTermStore);
     }
     return null;
   } catch {
