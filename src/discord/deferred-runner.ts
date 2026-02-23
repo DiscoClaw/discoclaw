@@ -12,6 +12,7 @@ import type { ForgeContext } from './actions-forge.js';
 import type { PlanContext } from './actions-plan.js';
 import type { MemoryContext } from './actions-memory.js';
 import type { ConfigContext } from './actions-config.js';
+import type { ImagegenContext } from './actions-imagegen.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -46,12 +47,14 @@ type DeferredRunnerState = {
   discordActionsForge?: boolean;
   discordActionsPlan?: boolean;
   discordActionsConfig?: boolean;
+  discordActionsImagegen?: boolean;
   taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
   planCtx?: PlanContext;
   memoryCtx?: MemoryContext;
   configCtx?: ConfigContext;
+  imagegenCtx?: ImagegenContext;
 };
 
 export type ConfigureDeferredSchedulerOpts = {
@@ -94,7 +97,7 @@ function buildDeferredActionFlags(state: DeferredRunnerState): ActionCategoryFla
     memory: false,
     config: Boolean(state.discordActionsConfig),
     defer: false,
-    imagegen: false,
+    imagegen: Boolean(state.discordActionsImagegen),
   };
 }
 
@@ -234,6 +237,7 @@ export function configureDeferredScheduler(
         planCtx: opts.state.planCtx,
         memoryCtx: opts.state.memoryCtx,
         configCtx: opts.state.configCtx,
+        imagegenCtx: opts.state.imagegenCtx,
       });
     }
 
