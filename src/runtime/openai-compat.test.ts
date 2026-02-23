@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createOpenAICompatRuntime } from './openai-compat.js';
+import { createOpenAICompatRuntime, useMaxCompletionTokens } from './openai-compat.js';
 import type { EngineEvent } from './types.js';
 
 async function collectEvents(iter: AsyncIterable<EngineEvent>): Promise<EngineEvent[]> {
@@ -448,6 +448,84 @@ describe('OpenAI-compat runtime adapter', () => {
       defaultModel: 'openai/gpt-4o',
     });
     expect(rt.id).toBe('openrouter');
+  });
+
+  // ---------------------------------------------------------------------------
+  // maxTokens field routing tests
+  // ---------------------------------------------------------------------------
+
+  it('maxTokens with standard model (gpt-4o) sends max_tokens', async () => {
+    let capturedBody: string | undefined;
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      capturedBody = init?.body as string;
+      return Promise.resolve(makeSSEResponse(['data: [DONE]']));
+    });
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: 'gpt-4o',
+      cwd: '/tmp',
+      maxTokens: 512,
+    }));
+
+    const parsed = JSON.parse(capturedBody!);
+    expect(parsed.max_tokens).toBe(512);
+    expect(parsed.max_completion_tokens).toBeUndefined();
+  });
+
+  it('maxTokens with newer model (o3-mini) sends max_completion_tokens', async () => {
+    let capturedBody: string | undefined;
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      capturedBody = init?.body as string;
+      return Promise.resolve(makeSSEResponse(['data: [DONE]']));
+    });
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: 'o3-mini',
+      cwd: '/tmp',
+      maxTokens: 1024,
+    }));
+
+    const parsed = JSON.parse(capturedBody!);
+    expect(parsed.max_completion_tokens).toBe(1024);
+    expect(parsed.max_tokens).toBeUndefined();
+  });
+
+  it('no maxTokens set: neither max_tokens nor max_completion_tokens in request body', async () => {
+    let capturedBody: string | undefined;
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      capturedBody = init?.body as string;
+      return Promise.resolve(makeSSEResponse(['data: [DONE]']));
+    });
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: 'gpt-4o',
+      cwd: '/tmp',
+    }));
+
+    const parsed = JSON.parse(capturedBody!);
+    expect(parsed.max_tokens).toBeUndefined();
+    expect(parsed.max_completion_tokens).toBeUndefined();
   });
 
   it('stream ending without trailing newline still processes buffered data', async () => {
