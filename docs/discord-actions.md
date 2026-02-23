@@ -297,27 +297,74 @@ The following categories are **enabled** in cron flows (gated by their respectiv
 - `forge` — enables cron → forge autonomous workflows (e.g., scheduled plan drafting)
 - `plan` — enables cron → plan autonomous workflows (e.g., check for approved plans and run them)
 
-### Deferred Flow Restrictions
+### Deferred Runner (`deferred-runner.ts`)
 
-When actions are executed within a deferred run (via `src/discord/deferred-runner.ts`), the following categories are always disabled regardless of env flags:
+The deferred runner is the integration point that fires scheduled follow-ups queued by the `defer` action. It wires `DeferScheduler` timers to full AI invocations. The sole export is `configureDeferredScheduler`, which returns a configured `DeferScheduler` instance.
 
-- `memory` — deferred runs do not carry a user identity, so memory reads/writes are suppressed
-- `defer` — prevents chaining: a deferred run cannot schedule further deferred runs
+Execution flow (runs when a deferred timer fires):
 
-All other categories (`channels`, `messaging`, `guild`, `moderation`, `polls`, `tasks`, `crons`, `botProfile`, `forge`, `plan`, `config`) are enabled or disabled according to their env flags, the same as normal Discord message flows.
+1. **Channel resolution** — resolves the target channel (by name or ID from the original `defer` action) on the guild stored in the original action context.
+2. **Channel allowlist** — if `DISCORD_CHANNEL_IDS` is configured, the target channel (or its thread parent) must be present; otherwise the run is dropped with a warning.
+3. **Channel context** — resolves the per-channel `DiscordChannelContext` for prompt building (used for context path and content directory).
+4. **Context inlining** — loads workspace PA files and inlines any matching context files for the target channel.
+5. **Prompt construction** — builds: PA preamble + `---\nDeferred follow-up scheduled for <#channel> (runs at HH:MM).\n---\nUser message:\n{prompt}`. If `discordActionsEnabled`, appends the full actions prompt section.
+6. **Tool resolution** — applies workspace permissions and runtime capabilities to produce the effective tool list.
+7. **Runtime invocation** — invokes the runtime directly. This is not replayed through the normal Discord message handler.
+8. **Action parsing and execution** — parses action blocks (`parseDiscordActions`) and executes them (`executeDiscordActions`) with a synthetic action context (`messageId: "defer-<timestamp>"`).
+9. **Output assembly** — combines clean prose with display lines and posts to the target channel with `allowedMentions: { parse: [] }`.
 
-### Reaction Flow Restrictions
+Action flag overrides (always applied, regardless of env):
+- `memory`: `false` — deferred runs carry no user identity.
+- `defer`: `false` — prevents chaining; a deferred run cannot schedule further deferred runs.
 
-When actions are executed within a reaction-triggered invocation (via `src/discord/reaction-handler.ts`), no action categories are force-disabled. All categories are enabled or disabled according to their env flags, the same as normal Discord message flows.
+All other categories (`channels`, `messaging`, `guild`, `moderation`, `polls`, `tasks`, `crons`, `botProfile`, `forge`, `plan`, `config`) follow their env flags.
 
-Reaction handler configuration:
+Configuration:
+- `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1) — master switch for the defer action.
+- `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` (default 1800) — maximum allowed delay in seconds; enforced by `DeferScheduler`.
+- `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` (default 5) — maximum number of pending timers.
 
-- `DISCOCLAW_REACTION_HANDLER` (default 1) — enables the `messageReactionAdd` handler; when off, emoji reactions do not trigger AI invocations.
-- `DISCOCLAW_REACTION_REMOVE_HANDLER` (default 0) — enables the `messageReactionRemove` handler; off by default since remove events are rarely actionable.
-- `DISCOCLAW_REACTION_MAX_AGE_HOURS` (default 24) — maximum age of the reacted-to message. Reactions on older messages are silently dropped. Set to `0` to disable the staleness guard entirely.
+Timers are in-process only and do not survive a bot restart.
 
-Special reaction behaviors:
+### Reaction Handler (`reaction-handler.ts`)
 
+The reaction handler creates the `messageReactionAdd` and `messageReactionRemove` event listeners. Both modes share a single `createReactionHandler(mode, params, queue, statusRef)` implementation.
+
+Exported entry points:
+- `createReactionAddHandler` — handler for `messageReactionAdd`.
+- `createReactionRemoveHandler` — handler for `messageReactionRemove`.
+
+Handler step sequence (for each incoming reaction event):
+
+1. **Self-reaction guard** — ignores reactions emitted by the bot itself (infinite-loop prevention).
+2. **Partial fetch** — fetches the reaction and message objects if either is a Discord partial.
+3. **Guild-only** — ignores reactions in DMs (`guildId == null`).
+4. **Allowlist check** — ignores reactions from users not in `DISCORD_ALLOW_USER_IDS`.
+5. **Reaction prompt interception** — before the staleness guard, checks whether the reaction resolves a pending `reactionPrompt` (add mode only). If it does, `resolvedPrompt` is set and the staleness guard is bypassed.
+6. **Abort intercept** — if the emoji is 🛑 and the reacted message is a bot reply, cancels all active runtime streams and any running forge plan (add mode), or silently consumes the event (remove mode). Skipped when `resolvedPrompt` is non-null.
+7. **Staleness guard** — drops reactions on messages older than `DISCOCLAW_REACTION_MAX_AGE_HOURS`. Bypassed when `resolvedPrompt` is set.
+8. **Channel restriction** — if `DISCORD_CHANNEL_IDS` is configured, ignores reactions outside allowlisted channels or their thread parents.
+9. **Session key + queue** — serializes per-`(channelId, userId)` session; all remaining work runs inside the queue callback.
+
+Inside the queue callback (AI invocation flow):
+- Optionally joins the thread if `autoJoinThreads` is enabled and the bot has not yet joined.
+- Posts a `**Thinking...**` placeholder reply.
+- Loads workspace PA files, context files, durable memory section, and task thread section.
+- Builds the prompt: PA preamble + task section + durable memory + reaction event line (or resolved-prompt line when `resolvedPrompt` is set) + original message content + attachment text + embeds + guidance line + actions prompt section.
+- Downloads image attachments and non-image text attachments from the reacted-to message.
+- Streams the runtime response with keepalive ticks (every 5 s) and stall warnings.
+- Parses and executes action blocks. A per-event `memoryCtx` is constructed with the reacting user's ID so memory actions target the correct user.
+- Runs the auto-follow-up loop (up to `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` iterations).
+- Edits the placeholder reply with the final output, or deletes it for trivial or action-only responses.
+
+No action categories are force-disabled in reaction flows — all follow their env flags, identical to normal Discord message handling.
+
+Configuration:
+- `DISCOCLAW_REACTION_HANDLER` (default 1) — enables `messageReactionAdd`; when off, emoji reactions do not trigger AI invocations.
+- `DISCOCLAW_REACTION_REMOVE_HANDLER` (default 0) — enables `messageReactionRemove`; off by default since remove events are rarely actionable.
+- `DISCOCLAW_REACTION_MAX_AGE_HOURS` (default 24) — staleness cutoff in hours. Set to `0` to disable the guard entirely.
+
+Special behaviors:
 - **🛑 abort intercept:** Reacting with 🛑 to a bot reply cancels all active runtime streams and any running forge plan. In remove mode the event is silently consumed. The abort check is skipped when the reaction resolves a pending `reactionPrompt`.
 - **Staleness guard bypass:** Reactions that resolve a pending `reactionPrompt` always bypass the staleness guard, regardless of `DISCOCLAW_REACTION_MAX_AGE_HOURS`. The age check would otherwise reject reactions on prompt messages that aged out between emission and the user's response.
 - **Guild-only:** Reactions in DMs are always ignored (no action flags are evaluated and no AI invocation occurs).
