@@ -54,6 +54,10 @@
   "simple-git-hooks": {
     "pre-push": "pnpm build && pnpm test"
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "pnpm": {
     "onlyBuiltDependencies": [
       "simple-git-hooks"
