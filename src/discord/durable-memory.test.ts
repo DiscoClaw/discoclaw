@@ -11,6 +11,7 @@ import {
   deprecateItems,
   selectItemsForInjection,
   formatDurableSection,
+  CURRENT_VERSION,
 } from './durable-memory.js';
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
 
@@ -71,12 +72,12 @@ describe('loadDurableMemory', () => {
     expect(result).toEqual(store);
   });
 
-  it('returns null for unsupported version', async () => {
+  it('returns empty store for unsupported version', async () => {
     const dir = await makeTmpDir();
     const store = { version: 99, updatedAt: 1000, items: [] };
     await fs.writeFile(path.join(dir, 'user2.json'), JSON.stringify(store), 'utf8');
     const result = await loadDurableMemory(dir, 'user2');
-    expect(result).toBeNull();
+    expect(result).toMatchObject({ version: CURRENT_VERSION, items: [] });
   });
 
   it('returns null for store missing version field', async () => {

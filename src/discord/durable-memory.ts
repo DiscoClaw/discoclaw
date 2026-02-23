@@ -21,14 +21,18 @@ export type DurableMemoryStore = {
 
 export const CURRENT_VERSION = 1 as const;
 
+export function emptyStore(): DurableMemoryStore {
+  return { version: CURRENT_VERSION, updatedAt: Date.now(), items: [] };
+}
+
 function migrateStore(store: DurableMemoryStore): DurableMemoryStore | null {
+  // Migration blocks run first, then the unknown-version guard.
+  // Future migrations follow the run-stats.ts pattern:
+  //   if ((store as any).version === 1) { /* transform fields */; store.version = 2; }
   if (store.version !== CURRENT_VERSION) {
-    // Unsupported version — caller will create a fresh store.
+    // Unrecognized (future) version — caller will create a fresh store.
     return null;
   }
-  // v1 is current; no migration body needed.
-  // Future migrations follow the run-stats.ts pattern:
-  //   if (store.version === 1) { /* transform fields */; store.version = 2; }
   return store;
 }
 
@@ -54,7 +58,7 @@ export async function loadDurableMemory(
       'items' in parsed &&
       Array.isArray((parsed as any).items)
     ) {
-      return migrateStore(parsed as DurableMemoryStore);
+      return migrateStore(parsed as DurableMemoryStore) ?? emptyStore();
     }
     return null;
   } catch {
