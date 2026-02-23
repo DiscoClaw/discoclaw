@@ -229,6 +229,11 @@ describe('parseConfig', () => {
     expect(config.discordActionsMemory).toBe(true);
   });
 
+  it('defaults discordActionsImagegen to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsImagegen).toBe(false);
+  });
+
   it('defaults sessionScanning to true', () => {
     const { config } = parseConfig(env());
     expect(config.sessionScanning).toBe(true);

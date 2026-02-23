@@ -42,6 +42,7 @@ export type DiscoclawConfig = {
   discordActionsPlan: boolean;
   discordActionsMemory: boolean;
   discordActionsDefer: boolean;
+  discordActionsImagegen: boolean;
 
   deferMaxDelaySeconds: number;
   deferMaxConcurrent: number;
@@ -363,6 +364,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsPlan = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_PLAN', true);
   const discordActionsMemory = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', true);
   const discordActionsDefer = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER', true);
+  const discordActionsImagegen = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', false);
   const deferMaxDelaySeconds = parsePositiveNumber(
     env,
     'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS',
@@ -507,6 +509,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsPlan,
       discordActionsMemory,
       discordActionsDefer,
+      discordActionsImagegen,
 
       deferMaxDelaySeconds,
       deferMaxConcurrent,
