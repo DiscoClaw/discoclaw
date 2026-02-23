@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { buildPromptPreamble as buildRootPolicyPreamble } from '../root-policy.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import { formatDurableSection, loadDurableMemory, selectItemsForInjection } from './durable-memory.js';
 import { buildShortTermMemorySection } from './shortterm-memory.js';
@@ -11,6 +12,22 @@ import type { TaskContext } from '../tasks/task-context.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import type { RuntimeCapability } from '../runtime/types.js';
 import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';
+
+// ---------------------------------------------------------------------------
+// Root policy preamble
+// ---------------------------------------------------------------------------
+
+/** Immutable root policy text — evaluated once at module load. */
+export const ROOT_POLICY = buildRootPolicyPreamble();
+
+/**
+ * Prepend the immutable root policy to any inlined context string.
+ * When inlinedContext is non-empty the result is `ROOT_POLICY + '\n\n' + inlinedContext`;
+ * when empty just `ROOT_POLICY` is returned.
+ */
+export function buildPromptPreamble(inlinedContext: string): string {
+  return inlinedContext ? ROOT_POLICY + '\n\n' + inlinedContext : ROOT_POLICY;
+}
 
 export async function loadWorkspacePaFiles(
   workspaceCwd: string,
