@@ -39,6 +39,10 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-forge.ts`
 - `src/discord/actions-plan.ts`
 - `src/discord/actions-memory.ts`
+- `src/discord/actions-defer.ts`
+- `src/discord/defer-scheduler.ts` (defer scheduler implementation)
+- `src/discord/actions-config.ts`
+- `src/discord/reaction-prompts.ts`
 
 Channel action types (in `src/discord/actions-channels.ts`):
 - `channelList`, `channelCreate`, `channelDelete`, `channelEdit`, `channelInfo`, `channelMove`
@@ -68,6 +72,15 @@ Memory action types (in `src/discord/actions-memory.ts`):
 Task action types (in `src/tasks/task-action-contract.ts`):
 - `taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`, `tagMapReload`
 
+Defer action types (in `src/discord/actions-defer.ts`):
+- `defer`
+
+Config action types (in `src/discord/actions-config.ts`):
+- `modelSet`, `modelShow`
+
+Reaction prompt types (in `src/discord/reaction-prompts.ts`):
+- `reactionPrompt` (gated under messaging flag — only available when messaging actions are enabled)
+
 > **Task References:** Task IDs are the stable identifier for cross-task interaction. When interacting with another task (e.g. reading its content, posting an update, or closing it), always use `taskShow`/`taskUpdate`/etc. with the task ID. Do not use channel-name based messaging actions for task threads.
 
 Query actions (read-only actions that can trigger an auto-follow-up loop):
@@ -76,6 +89,8 @@ Query actions (read-only actions that can trigger an auto-follow-up loop):
 Integration points (where actions are included in the prompt and executed):
 - `src/discord.ts` (normal message handling)
 - `src/cron/executor.ts` (cron jobs)
+- `src/discord/deferred-runner.ts` (deferred action execution)
+- `src/discord/reaction-handler.ts` (reaction-based prompt resolution)
 
 Env wiring:
 - `.env.example` / `.env.example.full`
@@ -85,19 +100,22 @@ Env wiring:
 
 Actions are controlled by a master switch plus per-category switches:
 
-- Master: `DISCOCLAW_DISCORD_ACTIONS=1`
+- Master: `DISCOCLAW_DISCORD_ACTIONS` (default 1 — on by default)
 - Categories (only relevant if master is 1):
   - `DISCOCLAW_DISCORD_ACTIONS_CHANNELS` (default 1)
-  - `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
-  - `DISCOCLAW_DISCORD_ACTIONS_GUILD`
-  - `DISCOCLAW_DISCORD_ACTIONS_MODERATION`
-  - `DISCOCLAW_DISCORD_ACTIONS_POLLS`
-  - `DISCOCLAW_DISCORD_ACTIONS_TASKS` (also requires tasks subsystem enabled/configured)
+  - `DISCOCLAW_DISCORD_ACTIONS_MESSAGING` (default 1)
+  - `DISCOCLAW_DISCORD_ACTIONS_GUILD` (default 1)
+  - `DISCOCLAW_DISCORD_ACTIONS_MODERATION` (default 0)
+  - `DISCOCLAW_DISCORD_ACTIONS_POLLS` (default 1)
+  - `DISCOCLAW_DISCORD_ACTIONS_TASKS` (default 1; also requires tasks subsystem enabled/configured)
   - `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1; also requires cron subsystem enabled)
-  - `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 0)
+  - `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 1)
   - `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1; also requires forge commands enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1; also requires plan commands enabled)
-  - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 0; also requires durable memory enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
+  - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
+  - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
 
 Those env vars get translated into an `ActionCategoryFlags` object (see `src/discord/actions.ts`) and passed down from `src/index.ts` into the Discord handler and cron executor.
 
@@ -183,7 +201,7 @@ Allow the model to read and mutate the user's durable memory (facts, preferences
 | `memoryForget` | Deprecate items matching a substring | Yes |
 | `memoryShow` | Show current durable memory items | No (query) |
 
-Env: `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 0, requires durable memory enabled).
+Env: `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1, requires durable memory enabled).
 Context: Requires `MemoryContext` with user ID, data directory, and capacity limits.
 Concurrency: Writes are serialized per-user via `durableWriteQueue`.
 
@@ -218,9 +236,51 @@ Allow the model to change the bot's Discord presence and nickname.
 | `botSetActivity` | Set activity text (Playing/Listening/Watching/Competing/Custom) | Yes |
 | `botSetNickname` | Change server nickname | Yes |
 
-Env: `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 0 — opt-in only).
+Env: `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 1).
 No subsystem context required (uses the Discord client directly).
 Excluded from cron flows to avoid rate-limit and abuse issues.
+
+### Defer Actions (`actions-defer.ts`)
+
+Allow the model to schedule a deferred follow-up invocation in a target channel after a delay.
+
+| Action | Description | Mutating? | Async? |
+|--------|-------------|-----------|--------|
+| `defer` | Schedule a delayed re-invocation of the runtime in a named channel | Yes | Yes (in-process timer; fires after `delaySeconds`) |
+
+Fields: `channel` (channel name or ID), `prompt` (text sent as the user message when the timer fires), `delaySeconds` (positive integer).
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1).
+`DeferScheduler` constraints: delays are capped at `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` (default 1800 s); at most `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` (default 5) timers may be pending simultaneously. Timers are in-process only — they do not survive a restart.
+Execution flow: when the timer fires, `deferred-runner.ts` resolves the channel, constructs a synthetic message, and re-invokes the runtime exactly as a normal Discord message would.
+
+### Config Actions (`actions-config.ts`)
+
+Allow the model to inspect and update live model assignments for all runtime roles without restarting the bot.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `modelSet` | Change the model for a named role (takes effect immediately, reverts on restart) | Yes |
+| `modelShow` | Show current model assignments for all roles | No (query) |
+
+Roles: `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`.
+Changes are **ephemeral** — use env vars for persistent configuration.
+No subsystem context required beyond `ConfigContext` (holds `botParams` and the runtime adapter).
+No separate env flag — config actions are always enabled when the master switch is on.
+`modelShow` is a query action: it triggers the auto-follow-up loop so the model can read and reason about the current configuration.
+
+### Reaction Prompt Actions (`reaction-prompts.ts`)
+
+Allow the model to present an emoji-based multiple-choice question to the user without requiring a typed reply.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `reactionPrompt` | Send a question message, add emoji reactions as choices, and await the user's reaction | Yes |
+
+Fields: `question` (string displayed as the bot message), `choices` (2–9 emoji strings added as reactions).
+Gated under the `messaging` flag — no separate env var.
+Prompt store lifecycle: `registerPrompt` records the pending prompt keyed by message ID; `tryResolveReactionPrompt` (called from `reaction-handler.ts`) matches incoming reactions to the stored record, returns the resolved choice, and deletes the record. Bypasses the normal reaction staleness guard since the prompt message is always fresh.
+When the user reacts, `reaction-handler.ts` detects the match and re-invokes the runtime with a system message conveying the user's choice.
 
 ### Cron Flow Restrictions
 
@@ -229,6 +289,8 @@ When actions are executed within a cron job (via `src/cron/executor.ts`), the fo
 - `crons` — prevents cron jobs from mutating cron state (self-modification loops)
 - `botProfile` — prevents rate-limit and abuse issues
 - `memory` — no user context in cron flows
+- `config` — no relevant runtime context in cron flows
+- `defer` — deferred runs target Discord message flows, not cron flows
 
 The following categories are **enabled** in cron flows (gated by their respective env flags):
 
