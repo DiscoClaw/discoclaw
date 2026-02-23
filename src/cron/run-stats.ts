@@ -33,6 +33,8 @@ export type CronRunStatsStore = {
   jobs: Record<string, CronRunRecord>;
 };
 
+export const CURRENT_VERSION = 3 as const;
+
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
 // ---------------------------------------------------------------------------
@@ -83,7 +85,7 @@ class WriteMutex {
 // ---------------------------------------------------------------------------
 
 export function emptyStore(): CronRunStatsStore {
-  return { version: 3, updatedAt: Date.now(), jobs: {} };
+  return { version: CURRENT_VERSION, updatedAt: Date.now(), jobs: {} };
 }
 
 function emptyRecord(cronId: string, threadId: string): CronRunRecord {
@@ -287,6 +289,8 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   } catch {
     store = emptyStore();
   }
+  // Sequential version-migration guards — see docs/data-migration.md for the convention.
+  // Each block handles exactly one step; transformations are additive only.
   // Migrate v1 → v2: backfill triggerType on existing records (additive, no data loss).
   if (store.version === 1) {
     for (const rec of Object.values(store.jobs)) {
@@ -302,5 +306,7 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
     }
     store.version = 3;
   }
+  // Add future migration blocks here:
+  //   if (store.version === 3) { /* transform fields */; store.version = 4; }
   return new CronRunStats(store, filePath);
 }
