@@ -62,6 +62,30 @@ describe('loadDurableMemory', () => {
     const dir = await makeTmpDir();
     await expect(loadDurableMemory(dir, '../evil')).rejects.toThrow(/Invalid userId/);
   });
+
+  it('returns store unchanged for version-1 store (migration no-op)', async () => {
+    const dir = await makeTmpDir();
+    const store: DurableMemoryStore = { version: 1, updatedAt: 1000, items: [] };
+    await fs.writeFile(path.join(dir, 'user1.json'), JSON.stringify(store), 'utf8');
+    const result = await loadDurableMemory(dir, 'user1');
+    expect(result).toEqual(store);
+  });
+
+  it('returns null for unsupported version', async () => {
+    const dir = await makeTmpDir();
+    const store = { version: 99, updatedAt: 1000, items: [] };
+    await fs.writeFile(path.join(dir, 'user2.json'), JSON.stringify(store), 'utf8');
+    const result = await loadDurableMemory(dir, 'user2');
+    expect(result).toBeNull();
+  });
+
+  it('returns null for store missing version field', async () => {
+    const dir = await makeTmpDir();
+    const store = { updatedAt: 1000, items: [] };
+    await fs.writeFile(path.join(dir, 'user3.json'), JSON.stringify(store), 'utf8');
+    const result = await loadDurableMemory(dir, 'user3');
+    expect(result).toBeNull();
+  });
 });
 
 describe('saveDurableMemory — path traversal', () => {

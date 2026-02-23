@@ -19,6 +19,19 @@ export type DurableMemoryStore = {
   items: DurableItem[];
 };
 
+export const CURRENT_VERSION = 1 as const;
+
+function migrateStore(store: DurableMemoryStore): DurableMemoryStore | null {
+  if (store.version !== CURRENT_VERSION) {
+    // Unsupported version — caller will create a fresh store.
+    return null;
+  }
+  // v1 is current; no migration body needed.
+  // Future migrations follow the run-stats.ts pattern:
+  //   if (store.version === 1) { /* transform fields */; store.version = 2; }
+  return store;
+}
+
 function safeUserId(userId: string): string {
   if (!/^[a-zA-Z0-9_-]+$/.test(userId)) {
     throw new Error(`Invalid userId for durable memory path: ${userId}`);
@@ -41,7 +54,7 @@ export async function loadDurableMemory(
       'items' in parsed &&
       Array.isArray((parsed as any).items)
     ) {
-      return parsed as DurableMemoryStore;
+      return migrateStore(parsed as DurableMemoryStore);
     }
     return null;
   } catch {
