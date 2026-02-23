@@ -40,7 +40,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Codex CLI adapter (subprocess, `tools_fs` capable) | `src/runtime/codex-cli.ts` | **done** |
 | Runtime registry (name → adapter lookup) | `src/runtime/registry.ts` | **done** |
 | Adapter selection via env (`FORGE_AUDITOR_RUNTIME`) | `src/index.ts` | **done** |
-| Gemini adapter | — | *stub — not started* |
+| Gemini CLI adapter (subprocess) | `src/runtime/gemini-cli.ts` | **done** |
 
 ## 4. Memory Systems
 
@@ -215,7 +215,7 @@ Platform-agnostic message normalization layer (Phase 1 of transport portability)
 
 ### Must-have for MVP
 
-- [ ] **README rewrite** — current README is developer-internal; needs a clear "what is this / quickstart / how to run" for anyone cloning the repo.
+- [x] **README rewrite** — user-facing overview, setup, and quickstart are now in `README.md`.
 - [x] **`.env.example`** — slimmed to essentials; `.env.example.full` has all ~90 options.
 - [x] **First-run experience** — `pnpm setup` provides guided interactive configuration; `pnpm preflight` validates the result.
 - [x] **Graceful degradation when external prerequisites missing** — tasks no longer require the `bd` CLI at runtime (the in-process `TaskStore` is the live path); `bd` is only needed for one-time data migration. Cron requires a forum channel. Clean errors / skip when prerequisites aren't configured.
@@ -229,7 +229,7 @@ Platform-agnostic message normalization layer (Phase 1 of transport portability)
 
 - [x] **OpenAI-compatible runtime adapter** — `src/runtime/openai-compat.ts` with registry and forge auditor routing via `FORGE_AUDITOR_RUNTIME`.
 - [x] **Codex CLI runtime adapter** — `src/runtime/codex-cli.ts` shells out to `codex exec` for models that aren't available on the public completions API (e.g., `gpt-5.3-codex`). Selectable via `FORGE_AUDITOR_RUNTIME=codex`. Supports session persistence (`sessions` capability) — maps session keys to Codex thread IDs in memory, using `codex exec resume` for multi-turn conversations within a forge run.
-- [ ] **Additional runtime adapters** — Gemini adapter so the project supports three model families.
+- [x] **Additional runtime adapters** — Gemini adapter landed in `src/runtime/gemini-cli.ts` with tests.
 - [ ] **Full runtime selection for all roles** — currently only the forge auditor can be routed to a non-Claude runtime. The Codex CLI adapter now supports read-only tools (`tools_fs`), but extending to drafter/reviser would require write tool support. Cron executor and message handler still need evaluation.
 - [ ] Discord-native dashboard (status embeds, config commands, health checks in a dedicated channel)
 - [x] Shareable PRD packs — `docs/discoclaw-recipe-spec.md`, `templates/recipes/integration.discoclaw-recipe.md`, and `skills/discoclaw-recipe-{generator,consumer}/` define exchangeable `recipes/*.discoclaw-recipe.md` artifacts
