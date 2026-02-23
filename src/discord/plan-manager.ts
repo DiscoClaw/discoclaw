@@ -742,7 +742,10 @@ export function checkStaleness(
   if (currentHash !== phases.planContentHash) {
     return {
       stale: true,
-      message: 'Plan file has changed since phases were generated. Run `!plan phases --regenerate <plan-id>` to update.',
+      message:
+        'Plan file has changed since phases were generated — the existing phases may not match the current plan intent and cannot run safely.\n\n' +
+        '**Fix:** `!plan phases --regenerate <plan-id>`\n\n' +
+        'This regenerates phases from the current plan content. Pending phases are rebuilt; completed phases are preserved.',
     };
   }
   return { stale: false, message: '' };
