@@ -277,6 +277,27 @@ describe('parseDiscordActions', () => {
     const { parseFailures } = parseDiscordActions(input, ALL_FLAGS);
     expect(parseFailures).toBe(0);
   });
+
+  it('includes generateImage in valid types when imagegen flag is true', () => {
+    const input = '<discord-action>{"type":"generateImage","prompt":"sunset","channel":"art"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, { ...ALL_FLAGS, imagegen: true });
+    expect(actions).toEqual([{ type: 'generateImage', prompt: 'sunset', channel: 'art' }]);
+    expect(strippedUnrecognizedTypes).toEqual([]);
+  });
+
+  it('excludes generateImage from valid types when imagegen flag is false', () => {
+    const input = '<discord-action>{"type":"generateImage","prompt":"sunset","channel":"art"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, { ...ALL_FLAGS, imagegen: false });
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toEqual(['generateImage']);
+  });
+
+  it('excludes generateImage from valid types when imagegen flag is omitted', () => {
+    const input = '<discord-action>{"type":"generateImage","prompt":"sunset","channel":"art"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toEqual(['generateImage']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -487,6 +508,33 @@ describe('executeDiscordActions', () => {
     expect(results).toHaveLength(2);
     expect(results[0]).toEqual({ ok: true, summary: 'Created #alpha' });
     expect(results[1]).toEqual({ ok: true, summary: 'Created #beta' });
+  });
+
+  it('returns imagegen not-configured error when imagegenCtx is absent', async () => {
+    const results = await executeDiscordActions(
+      [{ type: 'generateImage', prompt: 'sunset', channel: 'art' } as any],
+      makeCtx(makeMockGuild([])),
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({ ok: false, error: 'Imagegen subsystem not configured' });
+  });
+
+  it('reaches imagegen executor when imagegenCtx is provided', async () => {
+    const guild = makeMockGuild([]);
+    // Add cache.get so resolveChannel/findChannelRaw can proceed
+    guild.channels.cache.get = (_id: string) => undefined;
+    const results = await executeDiscordActions(
+      [{ type: 'generateImage', prompt: 'sunset', channel: 'nonexistent-channel' } as any],
+      makeCtx(guild),
+      undefined,
+      { imagegenCtx: { apiKey: 'test-key' } },
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    if (results[0].ok) throw new Error('unexpected ok result');
+    // Executor was reached — error comes from channel resolution, not the "not configured" guard
+    expect(results[0].error).not.toContain('not configured');
+    expect(results[0].error).toContain('Channel');
   });
 
   it('allows destructive actions with bypassDestructive confirmation context', async () => {
