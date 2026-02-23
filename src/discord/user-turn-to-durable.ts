@@ -26,7 +26,7 @@ Only extract something if it would still be useful to know in a month. Most mess
 - Transient decisions that will resolve within days
 - Specific code line numbers, file paths, commit hashes, or error messages
 - Anything that reads like a status update rather than a lasting fact
-- In-progress test gaps or TODO items
+- In-progress test gaps or to-do items
 - Summaries of what was just done in the current session
 
 ## Output format
@@ -42,6 +42,14 @@ JSON array:`;
 const MAX_ITEMS_PER_EXTRACTION = 3;
 
 export type ExtractedItem = { kind: DurableItem['kind']; text: string };
+
+function asExtractedItem(value: unknown): ExtractedItem | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as { kind?: unknown; text?: unknown };
+  if (typeof candidate.text !== 'string' || candidate.text.trim().length === 0) return null;
+  if (!VALID_KINDS.has(candidate.kind as DurableItem['kind'])) return null;
+  return { kind: candidate.kind as DurableItem['kind'], text: candidate.text.trim() };
+}
 
 export async function extractFromUserTurn(
   runtime: RuntimeAdapter,
@@ -80,15 +88,8 @@ export function parseExtractionResult(raw: string): ExtractedItem[] {
     if (!Array.isArray(parsed)) return [];
 
     return parsed
-      .filter(
-        (item: any) =>
-          item &&
-          typeof item === 'object' &&
-          typeof item.text === 'string' &&
-          item.text.trim().length > 0 &&
-          VALID_KINDS.has(item.kind),
-      )
-      .map((item: any) => ({ kind: item.kind as DurableItem['kind'], text: item.text.trim() }))
+      .map((item) => asExtractedItem(item))
+      .filter((item): item is ExtractedItem => item !== null)
       .slice(0, MAX_ITEMS_PER_EXTRACTION);
   } catch {
     return [];

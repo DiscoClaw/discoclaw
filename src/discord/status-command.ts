@@ -7,6 +7,28 @@ import type { TaskStore } from '../tasks/store.js';
 
 const DEFAULT_API_CHECK_TIMEOUT_MS = 5000;
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function parseActiveDurableItems(value: unknown): number {
+  const obj = asRecord(value);
+  if (!obj) return 0;
+  const items = obj.items;
+  if (!Array.isArray(items)) return 0;
+  return items.filter((item) => {
+    const entry = asRecord(item);
+    return entry?.status === 'active';
+  }).length;
+}
+
+function parseSummaryLength(value: unknown): number {
+  const obj = asRecord(value);
+  if (!obj) return 0;
+  return typeof obj.summary === 'string' ? obj.summary.length : 0;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -117,9 +139,7 @@ function withApiTimeout(
       timeoutMs,
     );
     // Don't block the Node.js event loop exit while this timer is pending.
-    if (typeof t === 'object' && t !== null && typeof (t as any).unref === 'function') {
-      (t as any).unref();
-    }
+    t.unref?.();
   });
   return Promise.race([promise, timeout]);
 }
@@ -132,15 +152,7 @@ async function countDurableItems(dir: string): Promise<number> {
       if (!file.endsWith('.json')) continue;
       try {
         const raw = await fs.readFile(path.join(dir, file), 'utf8');
-        const parsed = JSON.parse(raw) as unknown;
-        if (
-          parsed &&
-          typeof parsed === 'object' &&
-          'items' in parsed &&
-          Array.isArray((parsed as any).items)
-        ) {
-          total += (parsed as any).items.filter((i: any) => i?.status === 'active').length;
-        }
+        total += parseActiveDurableItems(JSON.parse(raw) as unknown);
       } catch {
         // skip malformed files
       }
@@ -159,15 +171,7 @@ async function countRollingSummaryChars(dir: string): Promise<number> {
       if (!file.endsWith('.json')) continue;
       try {
         const raw = await fs.readFile(path.join(dir, file), 'utf8');
-        const parsed = JSON.parse(raw) as unknown;
-        if (
-          parsed &&
-          typeof parsed === 'object' &&
-          'summary' in parsed &&
-          typeof (parsed as any).summary === 'string'
-        ) {
-          total += (parsed as any).summary.length;
-        }
+        total += parseSummaryLength(JSON.parse(raw) as unknown);
       } catch {
         // skip malformed files
       }

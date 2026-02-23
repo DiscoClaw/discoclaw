@@ -113,9 +113,18 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       return;
     }
 
+    type ChannelAllowlistShape = {
+      id?: string;
+      parentId?: string | null;
+      isThread?: () => boolean;
+    };
+    const channelForSend = targetChannel as {
+      id: string;
+      send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown>;
+    };
     if (ctx.allowChannelIds) {
-      const ch: any = targetChannel as any;
-      const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
+      const ch = targetChannel as unknown as ChannelAllowlistShape;
+      const isThread = typeof ch.isThread === 'function' ? ch.isThread() : false;
       const parentId = isThread ? String(ch.parentId ?? '') : '';
       const allowed =
         ctx.allowChannelIds.has(String(ch.id ?? '')) ||
@@ -135,7 +144,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     try {
       const paFiles = await loadWorkspacePaFiles(ctx.cwd);
       inlinedContext = await inlineContextFiles(paFiles);
-      (ctx.log as any)?.debug?.(
+      ctx.log?.info?.(
         { jobId: job.id, paFileCount: paFiles.length },
         'cron:exec loaded workspace PA files',
       );
@@ -230,7 +239,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
             `Cron "${job.name}": ${evt.message}`,
           );
           try {
-            await sendChunks(targetChannel as any, mapRuntimeErrorToUserMessage(evt.message));
+            await sendChunks(channelForSend, mapRuntimeErrorToUserMessage(evt.message));
           } catch {
             // Best-effort user-facing signal; status channel/log already carry details.
           }
@@ -313,7 +322,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
     processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
 
-    await sendChunks(targetChannel as any, processedText, collectedImages);
+    await sendChunks(channelForSend, processedText, collectedImages);
 
     ctx.log?.info({ jobId: job.id, name: job.name, channel: job.def.channel }, 'cron:exec done');
 
@@ -339,8 +348,11 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       const guild = ctx.client.guilds.cache.get(job.guildId);
       const targetChannel = guild ? resolveChannel(guild, job.def.channel) : null;
       if (targetChannel) {
+        const channelForSend = targetChannel as {
+          send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown>;
+        };
         try {
-          await sendChunks(targetChannel as any, mapRuntimeErrorToUserMessage(msg));
+          await sendChunks(channelForSend, mapRuntimeErrorToUserMessage(msg));
         } catch {
           // Best-effort.
         }

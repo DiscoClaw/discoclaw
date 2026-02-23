@@ -28,12 +28,29 @@ export function emptyStore(): DurableMemoryStore {
 function migrateStore(store: DurableMemoryStore): DurableMemoryStore | null {
   // Migration blocks run first, then the unknown-version guard.
   // Future migrations follow the run-stats.ts pattern:
-  //   if ((store as any).version === 1) { /* transform fields */; store.version = 2; }
+  //   if (store.version === 1) { /* transform fields */; store.version = 2; }
   if (store.version !== CURRENT_VERSION) {
     // Unrecognized (future) version — caller will create a fresh store.
     return null;
   }
   return store;
+}
+
+function asDurableMemoryStore(value: unknown): DurableMemoryStore | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as {
+    version?: unknown;
+    updatedAt?: unknown;
+    items?: unknown;
+  };
+  if (
+    typeof candidate.version !== 'number' ||
+    typeof candidate.updatedAt !== 'number' ||
+    !Array.isArray(candidate.items)
+  ) {
+    return null;
+  }
+  return candidate as DurableMemoryStore;
 }
 
 function safeUserId(userId: string): string {
@@ -50,16 +67,8 @@ export async function loadDurableMemory(
   const filePath = path.join(dir, `${safeUserId(userId)}.json`);
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      'version' in parsed &&
-      'items' in parsed &&
-      Array.isArray((parsed as any).items)
-    ) {
-      return migrateStore(parsed as DurableMemoryStore) ?? emptyStore();
-    }
+    const parsed = asDurableMemoryStore(JSON.parse(raw) as unknown);
+    if (parsed) return migrateStore(parsed) ?? emptyStore();
     return null;
   } catch {
     return null;

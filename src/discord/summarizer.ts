@@ -8,6 +8,18 @@ export type ConversationSummary = {
   turnsSinceUpdate?: number;
 };
 
+function asConversationSummary(value: unknown): ConversationSummary | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as {
+    summary?: unknown;
+    updatedAt?: unknown;
+    turnsSinceUpdate?: unknown;
+  };
+  if (typeof candidate.summary !== 'string' || typeof candidate.updatedAt !== 'number') return null;
+  if (candidate.turnsSinceUpdate !== undefined && typeof candidate.turnsSinceUpdate !== 'number') return null;
+  return candidate as ConversationSummary;
+}
+
 function safeSessionKey(sessionKey: string): string {
   return sessionKey.replace(/[^a-zA-Z0-9:_-]+/g, '-');
 }
@@ -19,16 +31,7 @@ export async function loadSummary(
   const filePath = path.join(dir, `${safeSessionKey(sessionKey)}.json`);
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      'summary' in parsed &&
-      typeof (parsed as any).summary === 'string'
-    ) {
-      return parsed as ConversationSummary;
-    }
-    return null;
+    return asConversationSummary(JSON.parse(raw) as unknown);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return null;

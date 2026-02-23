@@ -24,6 +24,11 @@ const FILENAME = 'shutdown-context.json';
 const VALID_REASONS = new Set<ShutdownReason>(['restart-command', 'deploy', 'code-fix', 'unknown']);
 const MAX_FIELD_LENGTH = 500;
 
+function asObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // Write (shutdown side)
 // ---------------------------------------------------------------------------
@@ -84,7 +89,7 @@ export async function readAndClearShutdownContext(
     // Best-effort deletion.
   }
 
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -93,18 +98,22 @@ export async function readAndClearShutdownContext(
   }
 
   // Non-object JSON (null, string, array, number) → treat as crash.
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+  const parsedObj = asObjectRecord(parsed);
+  if (!parsedObj) {
     return { type: 'crash' };
   }
 
   // Validate reason against known union; unknown/missing → graceful-unknown.
-  const reason: ShutdownReason = VALID_REASONS.has(parsed.reason) ? parsed.reason : 'unknown';
+  const reasonValue = parsedObj.reason;
+  const reason: ShutdownReason = typeof reasonValue === 'string' && VALID_REASONS.has(reasonValue as ShutdownReason)
+    ? (reasonValue as ShutdownReason)
+    : 'unknown';
   const ctx: ShutdownContext = {
     reason,
-    timestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : new Date().toISOString(),
-    message: typeof parsed.message === 'string' ? parsed.message.slice(0, MAX_FIELD_LENGTH) : undefined,
-    activeForge: typeof parsed.activeForge === 'string' ? parsed.activeForge.slice(0, MAX_FIELD_LENGTH) : undefined,
-    requestedBy: typeof parsed.requestedBy === 'string' ? parsed.requestedBy : undefined,
+    timestamp: typeof parsedObj.timestamp === 'string' ? parsedObj.timestamp : new Date().toISOString(),
+    message: typeof parsedObj.message === 'string' ? parsedObj.message.slice(0, MAX_FIELD_LENGTH) : undefined,
+    activeForge: typeof parsedObj.activeForge === 'string' ? parsedObj.activeForge.slice(0, MAX_FIELD_LENGTH) : undefined,
+    requestedBy: typeof parsedObj.requestedBy === 'string' ? parsedObj.requestedBy : undefined,
   };
 
   if (ctx.reason === 'unknown') {

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { ActivityType, Client, GatewayIntentBits, Partials } from 'discord.js';
-import type { PresenceData } from 'discord.js';
+import type { Guild, PresenceData } from 'discord.js';
 import { KeyedQueue } from './group-queue.js';
 import type { LoggerLike } from './logging/logger-like.js';
 import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
@@ -39,6 +39,12 @@ export function getActiveForgeId(): string | undefined {
   return registryGetActiveForgeId();
 }
 
+function errorCode(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'number' ? code : null;
+}
+
 type GuildForNickname = {
   id: string;
   members: {
@@ -65,8 +71,8 @@ export async function setBotNickname(guild: GuildForNickname, nickname: string, 
 
     await me.setNickname(nickname, 'Automatic nickname from bot identity');
     log?.info({ guildId: guild.id, nickname }, 'discord:nickname set');
-  } catch (err: any) {
-    if (err?.code === 50013) {
+  } catch (err) {
+    if (errorCode(err) === 50013) {
       log?.warn({ guildId: guild.id }, 'discord:nickname Missing Permissions — cannot set nickname');
     } else {
       log?.warn({ err, guildId: guild.id }, 'discord:nickname failed to set');
@@ -91,7 +97,7 @@ function resolveStatusChannel(client: Client, nameOrId: string, statusOpts: { bo
 async function resolveStatusChannelById(client: Client, channelId: string, statusOpts: { botDisplayName?: string; log?: LoggerLike }): Promise<import('./discord/status-channel.js').StatusPoster | null> {
   const cached = client.channels.cache.get(channelId);
   const ch = cached ?? await client.channels.fetch(channelId).catch(() => null);
-  if (ch?.isTextBased() && !ch.isDMBased()) return createStatusPoster(ch as any, statusOpts);
+  if (ch?.isTextBased() && !ch.isDMBased()) return createStatusPoster(ch, statusOpts);
   return null;
 }
 
@@ -126,7 +132,7 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
   }
 
   if (params.autoJoinThreads) {
-    client.on('threadCreate', async (thread: any) => {
+    client.on('threadCreate', async (thread) => {
       const joinable = typeof thread?.joinable === 'boolean' ? thread.joinable : true;
       const joined = typeof thread?.joined === 'boolean' ? thread.joined : false;
       if (!joinable || joined || typeof thread?.join !== 'function') return;
@@ -142,7 +148,7 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
     });
   }
 
-  client.on('guildCreate', async (guild: any) => {
+  client.on('guildCreate', async (guild: Guild) => {
     await setBotNickname(guild, params.botDisplayName, params.log);
   });
 

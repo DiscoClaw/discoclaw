@@ -50,17 +50,13 @@ export type PlatformMessage = {
  * message normalization — keep it that way.
  */
 export function toPlatformMessage(msg: Message): PlatformMessage {
-  const isThread =
-    typeof (msg.channel as any)?.isThread === 'function'
-      ? (msg.channel as any).isThread()
-      : false;
-
-  const threadId = isThread ? String((msg.channel as any).id ?? '') : undefined;
-  const rawParentId = isThread ? ((msg.channel as any).parentId ?? null) : null;
+  const isThread = msg.channel.isThread();
+  const threadId = isThread ? String(msg.channel.id) : undefined;
+  const rawParentId = isThread ? msg.channel.parentId : null;
   const threadParentId = rawParentId != null ? String(rawParentId) : undefined;
 
   const attachments: AttachmentLike[] = msg.attachments
-    ? [...msg.attachments.values()].map((a: any) => ({
+    ? [...msg.attachments.values()].map((a) => ({
         url: a.url,
         name: a.name ?? null,
         contentType: a.contentType ?? null,
@@ -69,7 +65,7 @@ export function toPlatformMessage(msg: Message): PlatformMessage {
     : [];
 
   const embeds: { title?: string; url?: string; description?: string }[] = msg.embeds
-    ? msg.embeds.map((e: any) => ({
+    ? msg.embeds.map((e) => ({
         title: e.title ?? undefined,
         url: e.url ?? undefined,
         description: e.description ?? undefined,

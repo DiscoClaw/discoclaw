@@ -45,6 +45,41 @@ export function reactionPromptText(mode: ReactionMode): {
   };
 }
 
+type ReactionChannelLike = {
+  id?: string;
+  parentId?: string | null;
+  name?: string;
+  parent?: { name?: string; type?: number } | null;
+  joinable?: boolean;
+  joined?: boolean;
+  isThread?: () => boolean;
+  join?: () => Promise<unknown>;
+  send?: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown>;
+};
+
+type ReplyMessageLike = {
+  id: string;
+  edit: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
+  delete?: () => Promise<unknown>;
+};
+
+type ReplyableMessageLike = {
+  channel: unknown;
+  reply: (opts: { content: string; allowedMentions: unknown }) => Promise<ReplyMessageLike>;
+};
+
+function channelNameFrom(channel: unknown): string | undefined {
+  if (!channel || typeof channel !== 'object') return undefined;
+  const candidate = channel as { name?: unknown };
+  return typeof candidate.name === 'string' ? candidate.name : undefined;
+}
+
+function errorCode(err: unknown): number | null {
+  if (!err || typeof err !== 'object' || !('code' in err)) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'number' ? code : null;
+}
+
 function createReactionHandler(
   mode: ReactionMode,
   params: Omit<BotParams, 'token'>,
@@ -134,7 +169,7 @@ function createReactionHandler(
       }
 
       // Resolve channel/thread info once, used by guards and the queue callback.
-      const ch: any = reaction.message.channel as any;
+      const ch = reaction.message.channel as unknown as ReactionChannelLike;
       const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
       const threadId = isThread ? String(ch.id ?? '') : null;
       const threadParentId = isThread ? String(ch.parentId ?? '') : null;
@@ -156,10 +191,11 @@ function createReactionHandler(
         threadId: threadId || null,
       });
 
-      // 9. Queue.
+        // 9. Queue.
       await queue.run(sessionKey, async () => {
         const msg = reaction.message;
-        let reply: { edit: (opts: any) => Promise<unknown> } | null = null;
+        const replyableMessage = msg as unknown as ReplyableMessageLike;
+        let reply: ReplyMessageLike | null = null;
         try {
           // Join thread if needed.
           if (params.autoJoinThreads && isThread) {
@@ -175,7 +211,7 @@ function createReactionHandler(
             }
           }
 
-          reply = await (msg as any).reply({
+          reply = await replyableMessage.reply({
             content: formatBoldLabel(thinkingLabel(0)),
             allowedMentions: NO_MENTIONS,
           });
@@ -394,7 +430,7 @@ function createReactionHandler(
           );
 
           // Track this reply for graceful shutdown cleanup.
-          let dispose = registerInFlightReply(reply!, reaction.message.channelId, (reply as any).id, `${logPrefix}:${reaction.message.channelId}`);
+          let dispose = registerInFlightReply(reply!, reaction.message.channelId, reply.id, `${logPrefix}:${reaction.message.channelId}`);
           // Tracks whether the reply was successfully replaced with real content (or deleted).
           // If false when the finally block runs, the reply still shows thinking-format content
           // and must be deleted to prevent a stale "Thinking..." message from persisting.
@@ -407,11 +443,11 @@ function createReactionHandler(
           while (true) {
           if (followUpDepth > 0) {
             dispose();
-            reply = await (msg as any).reply({
+            reply = await replyableMessage.reply({
               content: formatBoldLabel('(following up...)'),
               allowedMentions: NO_MENTIONS,
             });
-            dispose = registerInFlightReply(reply!, reaction.message.channelId, (reply as any).id, `${logPrefix}:${reaction.message.channelId}:followup-${followUpDepth}`);
+            dispose = registerInFlightReply(reply!, reaction.message.channelId, reply.id, `${logPrefix}:${reaction.message.channelId}:followup-${followUpDepth}`);
             replyFinalized = false;
           }
 
@@ -569,7 +605,7 @@ function createReactionHandler(
                 channelId: msg.channelId,
                 messageId: msg.id,
                 guildId: msg.guildId ?? undefined,
-                channelName: (msg.channel as any)?.name ?? undefined,
+                channelName: channelNameFrom(msg.channel),
               } : undefined;
               const results = await executeDiscordActions(parsed.actions, actCtx, params.log, {
                 taskCtx: params.taskCtx,
@@ -597,7 +633,7 @@ function createReactionHandler(
                 && collectedImages.length === 0
                 && strippedUnrecognizedTypes.length === 0
               ) {
-                try { await (reply as any)?.delete(); } catch { /* ignore */ }
+                try { await reply?.delete?.(); } catch { /* ignore */ }
                 replyFinalized = true;
                 params.log?.info({ sessionKey }, `${logPrefix}:reply suppressed (actions-only, no display text)`);
                 return;
@@ -623,7 +659,7 @@ function createReactionHandler(
           if (parsedActionCount === 0 && collectedImages.length === 0 && isSuppressible) {
             params.log?.info({ sessionKey, chars: strippedText.length }, `${logPrefix}:trivial response suppressed`);
             try {
-              await (reply as any)?.delete();
+              await reply?.delete?.();
               replyFinalized = true;
             } catch (delErr) {
               params.log?.warn({ sessionKey, err: delErr }, `${logPrefix}:placeholder delete failed`);
@@ -633,12 +669,17 @@ function createReactionHandler(
 
           if (!isShuttingDown()) {
             try {
-              await editThenSendChunks(reply!, (msg as any).channel, processedText, collectedImages);
+              await editThenSendChunks(
+                reply!,
+                msg.channel as unknown as { send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown> },
+                processedText,
+                collectedImages,
+              );
               replyFinalized = true;
-            } catch (editErr: any) {
-              if (editErr?.code === 50083) {
+            } catch (editErr) {
+              if (errorCode(editErr) === 50083) {
                 params.log?.info({ sessionKey }, `${logPrefix}:reply skipped (thread archived by action)`);
-                try { await (reply as any)?.delete(); } catch { /* best-effort cleanup */ }
+                try { await reply?.delete?.(); } catch { /* best-effort cleanup */ }
                 replyFinalized = true;
               } else {
                 throw editErr;
@@ -686,7 +727,7 @@ function createReactionHandler(
             // Safety net runs before dispose() so cold-start recovery can still see
             // the in-flight entry if the delete fails.
             if (!replyFinalized && reply && !isShuttingDown()) {
-              try { await (reply as any).delete(); } catch { /* best-effort */ }
+              try { await reply.delete?.(); } catch { /* best-effort */ }
             }
             dispose();
           }

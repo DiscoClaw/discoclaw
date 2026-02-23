@@ -26,6 +26,12 @@ export type StreamingProgressController = {
 /** The faster edit interval used for streaming preview edits (matches normal message handler). */
 const STREAMING_EDIT_INTERVAL_MS = 1250;
 
+function errorCode(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'number' ? code : null;
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -121,8 +127,8 @@ export function createStreamingProgress(
 
     try {
       await progressReply.edit({ content: msg, allowedMentions: NO_MENTIONS });
-    } catch (editErr: any) {
-      if (editErr?.code === 10008) progressMessageGone = true;
+    } catch (editErr) {
+      if (errorCode(editErr) === 10008) progressMessageGone = true;
     }
   };
 

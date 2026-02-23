@@ -31,6 +31,12 @@ export const ACTIVITY_TYPE_MAP: Record<string, ActivityType> = {
   Custom: ActivityType.Custom,
 };
 
+function errorCode(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'number' ? code : null;
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -90,8 +96,8 @@ export async function executeBotProfileAction(
       }
       try {
         await me.setNickname(action.nickname, 'Runtime nickname change via bot profile action');
-      } catch (err: any) {
-        if (err?.code === 50013) {
+      } catch (err) {
+        if (errorCode(err) === 50013) {
           return { ok: false, error: 'Missing Permissions — cannot set nickname (check bot role permissions)' };
         }
         throw err;

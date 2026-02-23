@@ -94,7 +94,7 @@ async function applyPhase2FixBlockedStatus(
     const task = tasksById.get(taskId);
     if (!task) continue;
     try {
-      ctx.taskService.update(task.id, { status: 'blocked' as any });
+      ctx.taskService.update(task.id, { status: 'blocked' });
       task.status = 'blocked';
       ctx.counters.statusesUpdated++;
       ctx.log?.info({ taskId: task.id }, 'task-sync:phase2 status updated to blocked');

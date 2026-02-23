@@ -43,20 +43,19 @@
 4. Runs the test suite with `pnpm test`.
 5. Publishes with `npm publish --provenance --access public`.
 
-The publish step authenticates using the `NPM_TOKEN` secret and requests an OIDC
-provenance attestation (`id-token: write`) so consumers can verify the package
-was built by this workflow.
+The publish step authenticates via **OIDC Trusted Publishing** — no token or
+secret is required. GitHub Actions exchanges an OIDC token directly with npm,
+and provenance attestation (`id-token: write`) is included automatically.
 
-## Setting up the npm token secret
+## Setting up Trusted Publishing (one-time)
 
-1. Log in to [npmjs.com](https://www.npmjs.com) and go to **Access Tokens** in
-   your account settings.
-2. Generate a **Granular Access Token** (or a classic Automation token). Scope it
-   to the `discoclaw` package with **Read and Publish** permission.
-3. In the GitHub repository, go to **Settings → Secrets and variables → Actions**.
-4. Create a secret named **`NPM_TOKEN`** and paste the token value.
-
-The workflow reads it as `${{ secrets.NPM_TOKEN }}`.
+1. Go to `https://www.npmjs.com/package/discoclaw` → **Settings** tab.
+2. Under **Trusted Publishers → GitHub Actions**, add a publisher:
+   - **GitHub owner:** `DiscoClaw`
+   - **Repository:** `discoclaw`
+   - **Workflow filename:** `publish.yml`
+   - **Environment name:** leave blank
+3. Save. No secrets or tokens to create or rotate.
 
 ## Verifying the publish succeeded
 

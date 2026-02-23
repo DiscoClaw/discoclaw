@@ -30,12 +30,22 @@ export function emptyStore(): ShortTermStore {
 function migrateStore(store: ShortTermStore): ShortTermStore | null {
   // Migration blocks run first, then the unknown-version guard.
   // Future migrations follow the run-stats.ts pattern:
-  //   if ((store as any).version === 1) { /* transform fields */; store.version = 2; }
+  //   if (store.version === 1) { /* transform fields */; store.version = 2; }
   if (store.version !== CURRENT_VERSION) {
     // Unrecognized (future) version — caller will create a fresh store.
     return null;
   }
   return store;
+}
+
+function asShortTermStore(value: unknown): ShortTermStore | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as {
+    version?: unknown;
+    entries?: unknown;
+  };
+  if (typeof candidate.version !== 'number' || !Array.isArray(candidate.entries)) return null;
+  return candidate as ShortTermStore;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,16 +66,8 @@ export async function loadShortTermMemory(
   const filePath = path.join(dir, `${safeGuildUserId(guildUserId)}.json`);
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      'version' in parsed &&
-      'entries' in parsed &&
-      Array.isArray((parsed as any).entries)
-    ) {
-      return migrateStore(parsed as ShortTermStore) ?? emptyStore();
-    }
+    const parsed = asShortTermStore(JSON.parse(raw) as unknown);
+    if (parsed) return migrateStore(parsed) ?? emptyStore();
     return null;
   } catch {
     return null;
@@ -167,32 +169,49 @@ export function formatShortTermSection(entries: ShortTermEntry[]): string {
 // Channel privacy check
 // ---------------------------------------------------------------------------
 
-export function isChannelPublic(channel: any, guild: Guild): boolean {
+type PermissionView = { has(flag: bigint): boolean };
+type PermissionReadableChannel = {
+  type?: unknown;
+  parent?: unknown;
+  isThread?: () => boolean;
+  permissionsFor?: (role: unknown) => PermissionView | null;
+};
+
+function asPermissionReadableChannel(value: unknown): PermissionReadableChannel | null {
+  if (!value || typeof value !== 'object') return null;
+  return value as PermissionReadableChannel;
+}
+
+export function isChannelPublic(channel: unknown, guild: Guild): boolean {
   // DMs have no guild — always skip.
   if (!guild) return false;
+  const channelRef = asPermissionReadableChannel(channel);
+  if (!channelRef) return false;
 
   // Category / voice channels — skip.
-  const type = channel?.type;
+  const type = channelRef.type;
   if (type === undefined || type === null) return false;
 
   // Check if it's a thread (public or private) or forum post.
-  const isThread = typeof channel.isThread === 'function' ? channel.isThread() : false;
+  const isThread = typeof channelRef.isThread === 'function' ? channelRef.isThread() : false;
 
   if (isThread) {
     // Inherit parent channel visibility.
-    const parent = channel.parent;
+    const parent = channelRef.parent;
     if (!parent) return false;
     return checkEveryoneViewChannel(parent, guild);
   }
 
-  return checkEveryoneViewChannel(channel, guild);
+  return checkEveryoneViewChannel(channelRef, guild);
 }
 
-function checkEveryoneViewChannel(channel: any, guild: Guild): boolean {
+function checkEveryoneViewChannel(channel: unknown, guild: Guild): boolean {
+  const channelRef = asPermissionReadableChannel(channel);
+  if (!channelRef) return false;
   try {
     const everyone = guild.roles.everyone;
     if (!everyone) return false;
-    const perms = channel.permissionsFor?.(everyone);
+    const perms = channelRef.permissionsFor?.(everyone);
     if (!perms) return false;
     return perms.has(PermissionFlagsBits.ViewChannel);
   } catch {
@@ -211,7 +230,7 @@ export async function buildShortTermMemorySection(opts: {
   userId: string;
   maxChars: number;
   maxAgeMs: number;
-  log?: { warn(obj: any, msg?: string): void };
+  log?: { warn(obj: unknown, msg?: string): void };
 }): Promise<string> {
   if (!opts.enabled) return '';
   if (!opts.guildId) return '';

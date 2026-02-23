@@ -28,6 +28,16 @@ import type { CliAdapterStrategy, CliInvokeContext, UniversalCliOpts, ParsedLine
 // Global subprocess tracker shared across all CLI adapters.
 const globalTracker = new SubprocessTracker();
 
+type CliLogLike = {
+  info?: (...args: unknown[]) => void;
+  debug?: (...args: unknown[]) => void;
+};
+
+function asCliLogLike(log: UniversalCliOpts['log']): CliLogLike | undefined {
+  if (!log || typeof log !== 'object') return undefined;
+  return log as CliLogLike;
+}
+
 /** SIGKILL all tracked CLI subprocesses across all adapters (e.g. on SIGTERM). */
 export function killAllSubprocesses(): void {
   globalTracker.killAll();
@@ -54,9 +64,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
   // Multi-turn process pool (only for process-pool mode).
   let pool: ProcessPool | null = null;
+  const cliLog = asCliLogLike(opts.log);
   if (opts.multiTurn && strategy.multiTurnMode === 'process-pool') {
-    const logForPool = opts.log && typeof (opts.log as any).info === 'function'
-      ? opts.log as { info(...a: unknown[]): void; debug(...a: unknown[]): void }
+    const logForPool = cliLog && typeof cliLog.info === 'function'
+      ? cliLog as { info(...a: unknown[]): void; debug(...a: unknown[]): void }
       : undefined;
     pool = new ProcessPool({
       maxProcesses: opts.multiTurnMaxProcesses ?? 5,
@@ -92,8 +103,8 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           addDirs: params.addDirs,
           hangTimeoutMs: opts.multiTurnHangTimeoutMs,
           idleTimeoutMs: opts.multiTurnIdleTimeoutMs,
-          log: pool && opts.log && typeof (opts.log as any).info === 'function'
-            ? opts.log as { info(...a: unknown[]): void; debug(...a: unknown[]): void }
+          log: pool && cliLog && typeof cliLog.info === 'function'
+            ? cliLog as { info(...a: unknown[]): void; debug(...a: unknown[]): void }
             : undefined,
         });
         if (proc?.isAlive) {
@@ -127,10 +138,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
           if (sub) globalTracker.delete(sub);
           if (!fallback) return;
-          (opts.log as any)?.info?.('multi-turn: process failed, falling back to one-shot');
+          cliLog?.info?.('multi-turn: process failed, falling back to one-shot');
         }
       } catch (err) {
-        (opts.log as any)?.info?.({ err }, 'multi-turn: error, falling back to one-shot');
+        cliLog?.info?.({ err }, 'multi-turn: error, falling back to one-shot');
       }
     }
 
@@ -270,7 +281,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     let stderrForError = '';
     let stdoutEnded = false;
     let stderrEnded = subprocess.stderr == null;
-    let procResult: any | null = null;
+    let procResult: Awaited<typeof subprocess> | null = null;
     const seenImages = new Set<string>();
     let imageCount = 0;
 
@@ -459,7 +470,8 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'error', message: spawnMsg });
         } else {
           const msg = (procResult.shortMessage || procResult.originalMessage || procResult.message || '').trim();
-          push({ type: 'error', message: msg || `${strategy.id} failed (no exit code)` });
+          const sanitized = strategy.sanitizeError?.(msg, binary) ?? msg;
+          push({ type: 'error', message: sanitized || `${strategy.id} failed (no exit code)` });
         }
         push({ type: 'done' });
         finished = true;
@@ -524,7 +536,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         // Clear stale session on error (session-resume mode).
         if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
 
-        const exitMsg = strategy.handleExitError?.(exitCode, stderrForError || stderr, stdout);
+        const exitMsg =
+          typeof exitCode === 'number'
+            ? strategy.handleExitError?.(exitCode, stderrForError || stderr, stdout)
+            : null;
         if (exitMsg) {
           push({ type: 'error', message: exitMsg });
         } else {
@@ -557,12 +572,12 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     subprocess.then((result) => {
       procResult = result;
       tryFinalize();
-    }).catch((err: any) => {
+    }).catch((err: unknown) => {
       clearStallTimer();
       if (finished) return;
 
       // Check timeout first — use fixed message to avoid leaking prompt/command line.
-      if (err?.timedOut) {
+      if ((err as { timedOut?: boolean } | undefined)?.timedOut) {
         push({
           type: 'error',
           message: `${strategy.id === 'claude_code' ? 'claude' : strategy.id} timed out after ${params.timeoutMs ?? 0}ms`,
@@ -572,12 +587,18 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         if (spawnMsg) {
           push({ type: 'error', message: spawnMsg });
         } else {
+          const e = err as {
+            originalMessage?: unknown;
+            shortMessage?: unknown;
+            message?: unknown;
+          };
           const msg = String(
-            (err?.originalMessage || err?.shortMessage || err?.message || err || '')
+            (e.originalMessage || e.shortMessage || e.message || err || '')
           ).trim();
+          const sanitized = strategy.sanitizeError?.(msg, binary) ?? msg;
           push({
             type: 'error',
-            message: msg || `${strategy.id} failed`,
+            message: sanitized || `${strategy.id} failed`,
           });
         }
       }

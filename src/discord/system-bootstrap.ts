@@ -12,6 +12,15 @@ export type SystemScaffold = {
   tasksForumId?: string;
 };
 
+type EditableBootstrapChannel = GuildBasedChannel & {
+  parentId?: string | null;
+  topic?: string | null;
+  setParent?: (parentId: string) => Promise<unknown>;
+  edit?: (options: { parent?: string; name?: string; topic?: string }) => Promise<unknown>;
+};
+
+type ForumEditOptions = Parameters<ForumChannel['edit']>[0];
+
 function norm(s: string): string {
   return (s ?? '').trim().toLowerCase();
 }
@@ -52,7 +61,7 @@ async function tryFetchChannel(guild: Guild, id: string): Promise<GuildBasedChan
   if (!trimmed || !isSnowflake(trimmed)) return null;
   try {
     const fetched = await guild.channels.fetch(trimmed);
-    return (fetched as GuildBasedChannel) ?? null;
+    return fetched ?? null;
   } catch {
     return null;
   }
@@ -81,7 +90,7 @@ function findAnyByName(
   const want = norm(name);
   const out: GuildBasedChannel[] = [];
   for (const c of guild.channels.cache.values()) {
-    if (norm((c as any)?.name ?? '') === want) out.push(c as GuildBasedChannel);
+    if (norm(c.name) === want) out.push(c);
   }
   return out;
 }
@@ -91,32 +100,33 @@ async function moveUnderCategory(
   parentCategoryId: string,
   log?: LoggerLike,
 ): Promise<boolean> {
-  const current = String((ch as any)?.parentId ?? '');
+  const editable = ch as EditableBootstrapChannel;
+  const current = String(editable.parentId ?? '');
   if (current === parentCategoryId) return false;
   try {
-    if (typeof (ch as any).setParent === 'function') {
-      await (ch as any).setParent(parentCategoryId);
-    } else if (typeof (ch as any).edit === 'function') {
-      await (ch as any).edit({ parent: parentCategoryId });
+    if (typeof editable.setParent === 'function') {
+      await editable.setParent(parentCategoryId);
+    } else if (typeof editable.edit === 'function') {
+      await editable.edit({ parent: parentCategoryId });
     } else {
       return false;
     }
     return true;
   } catch (err) {
-    log?.warn({ err, channelId: (ch as any)?.id, name: (ch as any)?.name }, 'system-bootstrap: failed to move channel');
+    log?.warn({ err, channelId: ch.id, name: ch.name }, 'system-bootstrap: failed to move channel');
     return false;
   }
 }
 
 export async function ensureSystemCategory(guild: Guild, log?: LoggerLike): Promise<CategoryChannel | null> {
-  const existing = findByNameAndType(guild, 'System', ChannelType.GuildCategory) as CategoryChannel | null;
-  if (existing) return existing;
+  const existing = findByNameAndType(guild, 'System', ChannelType.GuildCategory);
+  if (existing?.type === ChannelType.GuildCategory) return existing;
   try {
     const created = await guild.channels.create({
       name: 'System',
       type: ChannelType.GuildCategory,
-    } as any);
-    return created as CategoryChannel;
+    });
+    return created;
   } catch (err) {
     log?.warn({ err }, 'system-bootstrap: failed to create System category');
     return null;
@@ -134,6 +144,7 @@ async function ensureChild(
   if (existingId && isSnowflake(existingId)) {
     const byId = guild.channels.cache.get(existingId) ?? await tryFetchChannel(guild, existingId);
     if (byId) {
+      const editableById = byId as EditableBootstrapChannel;
       if (byId.type !== spec.type) {
         log?.error(
           { existingId, name: spec.name, expected: ChannelType[spec.type], actual: ChannelType[byId.type] },
@@ -143,29 +154,31 @@ async function ensureChild(
       }
       const moved = await moveUnderCategory(byId, parentCategoryId, log);
       // Reconcile name if it differs from canonical (e.g. count-sync stacking).
-      const currentName = String((byId as any).name ?? '');
+      const currentName = String(byId.name ?? '');
       if (norm(currentName) !== norm(spec.name)) {
         if (isCountSuffixOnly(currentName, spec.name)) {
           log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: skipping name reconciliation (count suffix only)');
         } else {
-          try {
-            await (byId as any).edit({ name: spec.name });
-            log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
-          } catch (err) {
-            log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+          if (typeof editableById.edit === 'function') {
+            try {
+              await editableById.edit({ name: spec.name });
+              log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
+            } catch (err) {
+              log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+            }
           }
         }
       }
       // Reconcile topic if it differs from expected.
-      if (spec.topic && (byId as any).topic !== spec.topic) {
+      if (spec.topic && editableById.topic !== spec.topic && typeof editableById.edit === 'function') {
         try {
-          await (byId as any).edit({ topic: spec.topic });
+          await editableById.edit({ topic: spec.topic });
           log?.info({ name: spec.name }, 'system-bootstrap: reconciled topic');
         } catch (err) {
           log?.warn({ err, name: spec.name }, 'system-bootstrap: failed to reconcile topic');
         }
       }
-      return { id: String((byId as any).id ?? ''), created: false, moved };
+      return { id: String(byId.id ?? ''), created: false, moved };
     }
     // ID not found — stale config or deleted channel. Fall through to name-based lookup / creation.
     log?.warn({ existingId, name: spec.name }, 'system-bootstrap: configured channel ID not found in guild, falling back to name lookup');
@@ -173,31 +186,34 @@ async function ensureChild(
 
   const exact = findByNameAndType(guild, spec.name, spec.type);
   if (exact) {
+    const editableExact = exact as EditableBootstrapChannel;
     const moved = await moveUnderCategory(exact, parentCategoryId, log);
     // Reconcile name if it differs from canonical (e.g. found via stripped count suffix).
-    const currentName = String((exact as any).name ?? '');
+    const currentName = String(exact.name ?? '');
     if (norm(currentName) !== norm(spec.name)) {
       if (isCountSuffixOnly(currentName, spec.name)) {
         log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: skipping name reconciliation (count suffix only)');
       } else {
-        try {
-          await (exact as any).edit({ name: spec.name });
-          log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
-        } catch (err) {
-          log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+        if (typeof editableExact.edit === 'function') {
+          try {
+            await editableExact.edit({ name: spec.name });
+            log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
+          } catch (err) {
+            log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+          }
         }
       }
     }
     // Reconcile topic if it differs from expected.
-    if (spec.topic && (exact as any).topic !== spec.topic) {
+    if (spec.topic && editableExact.topic !== spec.topic && typeof editableExact.edit === 'function') {
       try {
-        await (exact as any).edit({ topic: spec.topic });
+        await editableExact.edit({ topic: spec.topic });
         log?.info({ name: spec.name }, 'system-bootstrap: reconciled topic');
       } catch (err) {
         log?.warn({ err, name: spec.name }, 'system-bootstrap: failed to reconcile topic');
       }
     }
-    return { id: String((exact as any).id ?? ''), created: false, moved };
+    return { id: String(exact.id ?? ''), created: false, moved };
   }
 
   // Legacy name lookup — find by old names and reconcile to canonical.
@@ -205,29 +221,32 @@ async function ensureChild(
     for (const legacyName of spec.legacyNames) {
       const legacy = findByNameAndType(guild, legacyName, spec.type);
       if (legacy) {
+        const editableLegacy = legacy as EditableBootstrapChannel;
         const moved = await moveUnderCategory(legacy, parentCategoryId, log);
-        const currentName = String((legacy as any).name ?? '');
+        const currentName = String(legacy.name ?? '');
         if (norm(currentName) !== norm(spec.name)) {
           if (isCountSuffixOnly(currentName, spec.name)) {
             log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: skipping name reconciliation (count suffix only)');
           } else {
-            try {
-              await (legacy as any).edit({ name: spec.name });
-              log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
-            } catch (err) {
-              log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+            if (typeof editableLegacy.edit === 'function') {
+              try {
+                await editableLegacy.edit({ name: spec.name });
+                log?.info({ name: spec.name, was: currentName }, 'system-bootstrap: reconciled name');
+              } catch (err) {
+                log?.warn({ err, name: spec.name, was: currentName }, 'system-bootstrap: failed to reconcile name');
+              }
             }
           }
         }
-        if (spec.topic && (legacy as any).topic !== spec.topic) {
+        if (spec.topic && editableLegacy.topic !== spec.topic && typeof editableLegacy.edit === 'function') {
           try {
-            await (legacy as any).edit({ topic: spec.topic });
+            await editableLegacy.edit({ topic: spec.topic });
             log?.info({ name: spec.name }, 'system-bootstrap: reconciled topic');
           } catch (err) {
             log?.warn({ err, name: spec.name }, 'system-bootstrap: failed to reconcile topic');
           }
         }
-        return { id: String((legacy as any).id ?? ''), created: false, moved };
+        return { id: String(legacy.id ?? ''), created: false, moved };
       }
     }
   }
@@ -235,7 +254,7 @@ async function ensureChild(
   const nameClash = findAnyByName(guild, spec.name).filter((c) => c.type !== spec.type);
   if (nameClash.length > 0) {
     log?.warn(
-      { name: spec.name, wantType: ChannelType[spec.type], foundTypes: nameClash.map((c) => ChannelType[(c as any).type] ?? String((c as any).type)) },
+      { name: spec.name, wantType: ChannelType[spec.type], foundTypes: nameClash.map((c) => ChannelType[c.type] ?? String(c.type)) },
       'system-bootstrap: name exists with different type; skipping creation',
     );
     return { created: false, moved: false };
@@ -247,8 +266,8 @@ async function ensureChild(
       type: spec.type,
       parent: parentCategoryId,
       topic: spec.topic,
-    } as any);
-    return { id: String((created as any)?.id ?? ''), created: true, moved: false };
+    });
+    return { id: String(created.id ?? ''), created: true, moved: false };
   } catch (err) {
     log?.warn({ err, name: spec.name, type: ChannelType[spec.type] }, 'system-bootstrap: failed to create channel');
     return { created: false, moved: false };
@@ -451,7 +470,7 @@ export async function ensureForumTags(
         ...existingTags.map((t) => ({ id: t.id, name: t.name, moderated: t.moderated, emoji: t.emoji })),
         ...creating.map((name) => ({ name })),
       ];
-      await forumChannel.edit({ availableTags: newTags as any });
+      await forumChannel.edit({ availableTags: newTags } as ForumEditOptions);
 
       // Re-fetch to get the created tag IDs.
       const updated = guild.channels.cache.get(forumId) as ForumChannel | undefined;

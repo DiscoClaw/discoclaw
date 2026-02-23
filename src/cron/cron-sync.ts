@@ -71,8 +71,48 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
   let statusMessagesUpdated = 0;
   let orphansDetected = 0;
 
+  type EditableCronThread = {
+    id: string;
+    parentId: string | null;
+    name: string;
+    appliedTags?: string[];
+    edit: (payload: { appliedTags?: string[] }) => Promise<unknown>;
+    setName: (name: string) => Promise<unknown>;
+  };
+
+  const asEditableCronThread = (value: unknown): EditableCronThread | null => {
+    if (!value || typeof value !== 'object') return null;
+    const t = value as {
+      id?: unknown;
+      parentId?: unknown;
+      name?: unknown;
+      appliedTags?: unknown;
+      edit?: unknown;
+      setName?: unknown;
+    };
+    if (
+      typeof t.id !== 'string' ||
+      typeof t.parentId !== 'string' ||
+      typeof t.name !== 'string' ||
+      typeof t.edit !== 'function' ||
+      typeof t.setName !== 'function'
+    ) {
+      return null;
+    }
+    const appliedTags =
+      Array.isArray(t.appliedTags) ? t.appliedTags.filter((id): id is string => typeof id === 'string') : undefined;
+    return {
+      id: t.id,
+      parentId: t.parentId,
+      name: t.name,
+      appliedTags,
+      edit: t.edit as EditableCronThread['edit'],
+      setName: t.setName as EditableCronThread['setName'],
+    };
+  };
+
   // Get all active threads in the forum.
-  let threads: ReadonlyMap<string, any> = new Map();
+  let threads: ReadonlyMap<string, unknown> = new Map();
   try {
     const fetched = await forum.threads.fetchActive();
     threads = fetched.threads;
@@ -124,7 +164,8 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
 
       // Apply tags to Discord thread.
       const thread = threads.get(fullJob.threadId);
-      if (thread) {
+      const editableThread = asEditableCronThread(thread);
+      if (editableThread) {
         const desiredPurposeTags = updates.purposeTags ?? record.purposeTags;
         const desiredCadence = updates.cadence ?? record.cadence;
         const allTags: string[] = [
@@ -137,9 +178,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
           .filter((id): id is string => Boolean(id));
         const uniqueTagIds = [...new Set(desiredTagIds)].slice(0, 5);
 
-        const currentTagIds: string[] = Array.isArray((thread as any).appliedTags)
-          ? (thread as any).appliedTags.filter((id: unknown): id is string => typeof id === 'string')
-          : [];
+        const currentTagIds: string[] = editableThread.appliedTags ?? [];
         const desiredSet = new Set(uniqueTagIds);
         const tagsOutOfSync =
           currentTagIds.length !== uniqueTagIds.length
@@ -147,7 +186,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
 
         if (tagsOutOfSync) {
           try {
-            await (thread as any).edit({ appliedTags: uniqueTagIds });
+            await editableThread.edit({ appliedTags: uniqueTagIds });
             tagsApplied++;
           } catch (err) {
             log?.warn({ err, threadId: fullJob.threadId }, 'cron-sync:phase1 tag apply failed');
@@ -170,11 +209,12 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
     const expectedName = buildCronThreadName(fullJob.name, cadence);
 
     const thread = threads.get(fullJob.threadId);
-    if (thread && thread.name !== expectedName) {
+    const editableThread = asEditableCronThread(thread);
+    if (editableThread && editableThread.name !== expectedName) {
       try {
-        await (thread as any).setName(expectedName);
+        await editableThread.setName(expectedName);
         namesUpdated++;
-        log?.info({ threadId: fullJob.threadId, oldName: thread.name, newName: expectedName }, 'cron-sync:phase2 name updated');
+        log?.info({ threadId: fullJob.threadId, oldName: editableThread.name, newName: expectedName }, 'cron-sync:phase2 name updated');
       } catch (err) {
         log?.warn({ err, threadId: fullJob.threadId }, 'cron-sync:phase2 name update failed');
       }
@@ -201,10 +241,12 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
 
   // Phase 4: Orphan detection (non-destructive, log only).
   for (const thread of threads.values()) {
-    if (thread.parentId !== forumId) continue;
-    if (!jobThreadIds.has(thread.id)) {
+    const editableThread = asEditableCronThread(thread);
+    if (!editableThread) continue;
+    if (editableThread.parentId !== forumId) continue;
+    if (!jobThreadIds.has(editableThread.id)) {
       orphansDetected++;
-      log?.warn({ threadId: thread.id, name: thread.name }, 'cron-sync:phase4 orphan thread (no registered job)');
+      log?.warn({ threadId: editableThread.id, name: editableThread.name }, 'cron-sync:phase4 orphan thread (no registered job)');
     }
   }
 

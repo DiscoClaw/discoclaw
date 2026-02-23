@@ -137,7 +137,7 @@ async function loadThreadAsCron(
     return false;
   }
 
-  const starterAuthorId = (starter as any)?.author?.id ? String((starter as any).author.id) : '';
+  const starterAuthorId = typeof starter.author?.id === 'string' ? starter.author.id : '';
   const botUserId = thread.client?.user?.id ?? '';
   // SECURITY: Bot-authored threads are accepted because cronCreate (the only
   // code path that creates bot-authored threads in the cron forum) already
@@ -372,17 +372,18 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
     }
   });
 
-  client.on('messageUpdate', async (_oldMsg: any, newMsg: any) => {
+  client.on('messageUpdate', async (_oldMsg: unknown, newMsg: unknown) => {
     try {
+      const maybeMsg = newMsg as { channel?: AnyThreadChannel; id?: string };
       // Check if this is the starter message of a tracked cron thread.
-      if (!newMsg?.channel || !newMsg?.id) return;
-      const thread = newMsg.channel;
+      if (!maybeMsg?.channel || !maybeMsg?.id) return;
+      const thread = maybeMsg.channel;
       if (thread.parentId !== forumId) return;
 
       // Verify it's the starter message (first message in thread).
       try {
         const starter = await thread.fetchStarterMessage();
-        if (starter?.id !== newMsg.id) return;
+        if (starter?.id !== maybeMsg.id) return;
       } catch {
         return;
       }

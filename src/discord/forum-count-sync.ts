@@ -32,6 +32,13 @@ export function stripCountSuffix(name: string): string {
 const DEBOUNCE_MS = 10_000;       // 10s debounce after last requestUpdate()
 const MIN_INTERVAL_MS = 5 * 60_000; // 5min minimum between actual setName() calls
 
+function retryAfterSeconds(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null) return null;
+  const candidate = err as { retryAfter?: unknown; retry_after?: unknown };
+  const value = candidate.retryAfter ?? candidate.retry_after;
+  return typeof value === 'number' ? value : null;
+}
+
 /**
  * Keeps a forum channel name in sync with a dynamic item count.
  * Aggressively debounces to stay within Discord's 2-per-10-min channel rename limit.
@@ -110,10 +117,10 @@ export class ForumCountSync {
       await channel.setName(newName);
       this.lastUpdateMs = Date.now();
       this.log?.info({ forumId: this.forumId, name: newName }, 'forum-count-sync: updated');
-    } catch (err: any) {
+    } catch (err) {
       // Handle Discord 429 rate limit.
-      const retryAfter = err?.retryAfter ?? err?.retry_after;
-      if (retryAfter && typeof retryAfter === 'number') {
+      const retryAfter = retryAfterSeconds(err);
+      if (retryAfter && retryAfter > 0) {
         const retryMs = retryAfter * 1000;
         this.log?.warn({ forumId: this.forumId, retryAfter }, 'forum-count-sync: rate limited, rescheduling');
         if (this.deferredTimer) clearTimeout(this.deferredTimer);

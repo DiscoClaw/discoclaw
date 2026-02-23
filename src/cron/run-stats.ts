@@ -275,12 +275,14 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw) as unknown;
+    const parsedObj = parsed as { version?: unknown; jobs?: unknown };
     if (
       parsed &&
       typeof parsed === 'object' &&
-      'version' in parsed &&
-      'jobs' in parsed &&
-      typeof (parsed as any).jobs === 'object'
+      'version' in parsedObj &&
+      'jobs' in parsedObj &&
+      typeof parsedObj.jobs === 'object' &&
+      parsedObj.jobs !== null
     ) {
       store = parsed as CronRunStatsStore;
     } else {
