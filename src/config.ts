@@ -76,9 +76,6 @@ export type DiscoclawConfig = {
   openaiBaseUrl?: string;
   openaiModel: string;
 
-  // Image generation config (DALL-E or compatible)
-  imagegenApiKey?: string;
-  imagegenBaseUrl?: string;
   forgeDrafterRuntime?: string;
   forgeAuditorRuntime?: string;
 
@@ -394,6 +391,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       { name: 'DISCOCLAW_DISCORD_ACTIONS_PLAN', enabled: discordActionsPlan },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', enabled: discordActionsMemory },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_DEFER', enabled: discordActionsDefer },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', enabled: discordActionsImagegen },
     ]
       .filter((entry) => (env[entry.name] ?? '').trim().length > 0 && entry.enabled)
       .map((entry) => entry.name);
@@ -435,6 +433,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   if (forgeAuditorRuntime === 'openai' && !openaiApiKey) {
     warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to the primary runtime.');
   }
+  if (discordActionsImagegen && !openaiApiKey) {
+    warnings.push('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1 but OPENAI_API_KEY is not set; imagegen will fail at runtime.');
+  }
 
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
   const openrouterBaseUrl = parseTrimmedString(env, 'OPENROUTER_BASE_URL');
@@ -447,12 +448,6 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
   if (forgeAuditorRuntime === 'openrouter' && !openrouterApiKey) {
     warnings.push('FORGE_AUDITOR_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; auditor will fall back to the primary runtime.');
-  }
-
-  const imagegenApiKey = parseTrimmedString(env, 'IMAGEGEN_API_KEY');
-  const imagegenBaseUrl = parseTrimmedString(env, 'IMAGEGEN_BASE_URL');
-  if (discordActionsImagegen && !imagegenApiKey) {
-    warnings.push('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1 but IMAGEGEN_API_KEY is not set; generateImage actions will fail.');
   }
 
   const fastModel = parseTrimmedString(env, 'DISCOCLAW_FAST_MODEL') ?? 'fast';
@@ -553,9 +548,6 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiModel,
       forgeDrafterRuntime,
       forgeAuditorRuntime,
-
-      imagegenApiKey,
-      imagegenBaseUrl,
 
       openrouterApiKey,
       openrouterBaseUrl,

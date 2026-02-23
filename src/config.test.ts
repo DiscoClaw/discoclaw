@@ -234,29 +234,27 @@ describe('parseConfig', () => {
     expect(config.discordActionsImagegen).toBe(false);
   });
 
-  it('defaults imagegenApiKey to undefined', () => {
-    const { config } = parseConfig(env());
-    expect(config.imagegenApiKey).toBeUndefined();
+  it('enables discordActionsImagegen when DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1' }));
+    expect(config.discordActionsImagegen).toBe(true);
   });
 
-  it('parses imagegenApiKey from IMAGEGEN_API_KEY', () => {
-    const { config } = parseConfig(env({ IMAGEGEN_API_KEY: 'sk-img-test' }));
-    expect(config.imagegenApiKey).toBe('sk-img-test');
+  it('reports ignored imagegen category flag when master actions off', () => {
+    const { infos } = parseConfig(env({
+      DISCOCLAW_DISCORD_ACTIONS: '0',
+      DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1',
+    }));
+    expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN'))).toBe(true);
   });
 
-  it('parses imagegenBaseUrl from IMAGEGEN_BASE_URL', () => {
-    const { config } = parseConfig(env({ IMAGEGEN_BASE_URL: 'https://proxy.example.com/v1' }));
-    expect(config.imagegenBaseUrl).toBe('https://proxy.example.com/v1');
+  it('warns when discordActionsImagegen is enabled but OPENAI_API_KEY is unset', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1', OPENAI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1'))).toBe(true);
   });
 
-  it('warns when imagegen enabled but IMAGEGEN_API_KEY missing', () => {
-    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1' }));
-    expect(warnings.some((w) => w.includes('IMAGEGEN_API_KEY'))).toBe(true);
-  });
-
-  it('does not warn about imagegen API key when imagegen is disabled', () => {
-    const { warnings } = parseConfig(env());
-    expect(warnings.some((w) => w.includes('IMAGEGEN_API_KEY'))).toBe(false);
+  it('does not warn about imagegen key when discordActionsImagegen is disabled', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '0', OPENAI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1'))).toBe(false);
   });
 
   it('defaults sessionScanning to true', () => {
