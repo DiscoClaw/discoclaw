@@ -685,6 +685,30 @@ describe('executeCronJob workspace PA context', () => {
     );
   });
 
+  it('prompt starts with ## Security Policy when PA files exist', async () => {
+    await fs.writeFile(path.join(wsDir, 'SOUL.md'), 'Be helpful.');
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
+    const ctx = makeCtx({ runtime, cwd: wsDir });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toMatch(/^## Security Policy/);
+  });
+
+  it('prompt starts with ## Security Policy when no PA files exist', async () => {
+    const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
+    const ctx = makeCtx({ runtime, cwd: wsDir });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toMatch(/^## Security Policy/);
+  });
+
   it('uses cronExecModel over ctx.model when set', async () => {
     let invokedModel = '';
     const runtime: RuntimeAdapter = {

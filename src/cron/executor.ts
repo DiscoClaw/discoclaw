@@ -17,7 +17,7 @@ import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import * as discordActions from '../discord/actions.js';
 import { sendChunks, appendUnavailableActionTypesNotice } from '../discord/output-common.js';
-import { loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
+import { buildPromptPreamble, loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
@@ -144,7 +144,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
 
     let prompt =
-      (inlinedContext ? inlinedContext + '\n\n' : '') +
+      buildPromptPreamble(inlinedContext) + '\n\n' +
       `You are executing a scheduled cron job named "${job.name}".\n\n` +
       `Instruction: ${job.def.prompt}\n\n` +
       `Your output will be posted automatically to the Discord channel #${job.def.channel}. ` +

@@ -52,7 +52,7 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed } from './output-utils.js';
-import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './prompt-common.js';
+import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
@@ -1965,9 +1965,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           let prompt =
-            (inlinedContext
-              ? inlinedContext + '\n\n'
-              : '') +
+            buildPromptPreamble(inlinedContext) + '\n\n' +
             (taskSection
               ? `---\n${taskSection}\n\n`
               : '') +

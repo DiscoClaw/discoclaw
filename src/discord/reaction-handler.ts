@@ -12,7 +12,7 @@ import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { tryAbortAll } from './abort-registry.js';
 import { getActiveOrchestrator } from './forge-plan-registry.js';
-import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
+import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
 import { editThenSendChunks, appendUnavailableActionTypesNotice } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
@@ -265,9 +265,7 @@ function createReactionHandler(
             : promptText.guidanceLine;
 
           let prompt =
-            (inlinedContext
-              ? inlinedContext + '\n\n'
-              : '') +
+            buildPromptPreamble(inlinedContext) + '\n\n' +
             (taskSection
               ? `---\n${taskSection}\n\n`
               : '') +

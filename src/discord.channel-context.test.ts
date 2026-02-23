@@ -10,7 +10,7 @@ describe('resolveDiscordChannelContext', () => {
     const ctx = {
       contentDir: '/content',
       indexPath: '/content/discord/DISCORD.md',
-      paContextFiles: ['/.context/pa.md', '/.context/pa-safety.md'],
+      paContextFiles: ['/.context/pa.md'],
       channelsDir: '/content/discord/channels',
       byChannelId: new Map(),
       dmContextPath: '/content/discord/channels/dm.md',
@@ -23,7 +23,7 @@ describe('resolveDiscordChannelContext', () => {
     const ctx = {
       contentDir: '/content',
       indexPath: '/content/discord/DISCORD.md',
-      paContextFiles: ['/.context/pa.md', '/.context/pa-safety.md'],
+      paContextFiles: ['/.context/pa.md'],
       channelsDir: '/content/discord/channels',
       byChannelId: new Map(),
       dmContextPath: '/content/discord/channels/dm.md',
@@ -50,14 +50,6 @@ describe('validatePaContextModules', () => {
     await expect(validatePaContextModules(dir)).rejects.toThrow(/pa\.md/);
   });
 
-  it('throws when pa-safety.md is missing but pa.md exists', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pa-validate-'));
-    tempDirs.push(dir);
-    await fs.writeFile(path.join(dir, 'pa.md'), '# PA', 'utf-8');
-
-    await expect(validatePaContextModules(dir)).rejects.toThrow(/pa-safety\.md/);
-  });
-
   it('throws when contextModulesDir does not exist', async () => {
     await expect(validatePaContextModules('/nonexistent/path')).rejects.toThrow();
   });
@@ -66,7 +58,6 @@ describe('validatePaContextModules', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pa-validate-'));
     tempDirs.push(dir);
     await fs.writeFile(path.join(dir, 'pa.md'), '# PA', 'utf-8');
-    await fs.writeFile(path.join(dir, 'pa-safety.md'), '# Safety', 'utf-8');
 
     await expect(validatePaContextModules(dir)).resolves.toBeUndefined();
   });
@@ -85,14 +76,12 @@ describe('loadDiscordChannelContext', () => {
     const contextModulesDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ctx-modules-'));
     tempDirs.push(contentDir, contextModulesDir);
     await fs.writeFile(path.join(contextModulesDir, 'pa.md'), '# PA', 'utf-8');
-    await fs.writeFile(path.join(contextModulesDir, 'pa-safety.md'), '# Safety', 'utf-8');
     await fs.mkdir(path.join(contentDir, 'discord', 'channels'), { recursive: true });
 
     const ctx = await loadDiscordChannelContext({ contentDir, contextModulesDir });
 
-    expect(ctx.paContextFiles).toHaveLength(2);
+    expect(ctx.paContextFiles).toHaveLength(1);
     expect(ctx.paContextFiles[0]).toBe(path.join(contextModulesDir, 'pa.md'));
-    expect(ctx.paContextFiles[1]).toBe(path.join(contextModulesDir, 'pa-safety.md'));
   });
 });
 

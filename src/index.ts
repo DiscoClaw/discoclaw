@@ -64,7 +64,7 @@ import { getGitHash } from './version.js';
 import { runCredentialChecks, formatCredentialReport } from './health/credential-check.js';
 import { healCorruptedJsonStores, healStaleCronRecords, healStaleTaskThreadRefs } from './health/startup-healing.js';
 import { validateDiscordToken } from './validate.js';
-import { buildContextFiles, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
+import { buildContextFiles, buildPromptPreamble, inlineContextFiles, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { appendUnavailableActionTypesNotice } from './discord/output-common.js';
@@ -889,7 +889,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
     };
 
     let prompt =
-      (inlinedContext ? `${inlinedContext}\n\n` : '') +
+      buildPromptPreamble(inlinedContext) + '\n\n' +
       `---\nDeferred follow-up scheduled for <#${channel.id}> (runs at ${fmtTime(run.runsAt)}).\n---\n` +
       `User message:\n${action.prompt}`;
 

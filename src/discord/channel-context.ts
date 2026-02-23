@@ -2,7 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { LoggerLike } from '../logging/logger-like.js';
 
-const PA_CONTEXT_MODULES = ['pa.md', 'pa-safety.md'] as const;
+// pa-safety.md is retired from runtime loading: ROOT_POLICY now inlines the
+// injection-defence rules as an immutable preamble in every prompt.
+const PA_CONTEXT_MODULES = ['pa.md'] as const;
 
 export type ChannelContextEntry = {
   channelId: string;
