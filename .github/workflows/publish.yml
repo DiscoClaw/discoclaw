@@ -24,6 +24,8 @@ jobs:
           registry-url: "https://registry.npmjs.org/"
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm publish --no-git-checks
+      - run: pnpm build
+      - run: pnpm test
+      - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
