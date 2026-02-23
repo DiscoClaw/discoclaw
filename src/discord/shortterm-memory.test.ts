@@ -13,6 +13,7 @@ import {
   isChannelPublic,
   formatShortTermSection,
   buildShortTermMemorySection,
+  CURRENT_VERSION,
 } from './shortterm-memory.js';
 import type { ShortTermStore, ShortTermEntry } from './shortterm-memory.js';
 
@@ -56,6 +57,35 @@ describe('loadShortTermMemory', () => {
   it('rejects path traversal', async () => {
     const dir = await makeTmpDir();
     await expect(loadShortTermMemory(dir, '../evil')).rejects.toThrow(/Invalid guildUserId/);
+  });
+
+  it('returns store unchanged for version-1 store (migration no-op)', async () => {
+    const dir = await makeTmpDir();
+    const store: ShortTermStore = { version: 1, entries: [] };
+    await fs.writeFile(path.join(dir, 'guild1-user1.json'), JSON.stringify(store), 'utf8');
+    expect(await loadShortTermMemory(dir, 'guild1-user1')).toEqual(store);
+  });
+
+  it('returns empty store for unsupported version', async () => {
+    const dir = await makeTmpDir();
+    const store = { version: 99, entries: [] };
+    await fs.writeFile(path.join(dir, 'guild1-user1.json'), JSON.stringify(store), 'utf8');
+    expect(await loadShortTermMemory(dir, 'guild1-user1')).toMatchObject({ version: CURRENT_VERSION, entries: [] });
+  });
+
+  it('returns null for store with no version field', async () => {
+    const dir = await makeTmpDir();
+    const store = { entries: [] };
+    await fs.writeFile(path.join(dir, 'guild1-user1.json'), JSON.stringify(store), 'utf8');
+    expect(await loadShortTermMemory(dir, 'guild1-user1')).toBeNull();
+  });
+});
+
+describe('saveShortTermMemory — path traversal', () => {
+  it('rejects path traversal in guildUserId', async () => {
+    const dir = await makeTmpDir();
+    const store: ShortTermStore = { version: 1, entries: [] };
+    await expect(saveShortTermMemory(dir, '../evil', store)).rejects.toThrow(/Invalid guildUserId/);
   });
 });
 

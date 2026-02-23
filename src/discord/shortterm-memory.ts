@@ -21,6 +21,23 @@ export type ShortTermStore = {
   entries: ShortTermEntry[];
 };
 
+export const CURRENT_VERSION = 1 as const;
+
+export function emptyStore(): ShortTermStore {
+  return { version: CURRENT_VERSION, entries: [] };
+}
+
+function migrateStore(store: ShortTermStore): ShortTermStore | null {
+  // Migration blocks run first, then the unknown-version guard.
+  // Future migrations follow the run-stats.ts pattern:
+  //   if ((store as any).version === 1) { /* transform fields */; store.version = 2; }
+  if (store.version !== CURRENT_VERSION) {
+    // Unrecognized (future) version — caller will create a fresh store.
+    return null;
+  }
+  return store;
+}
+
 // ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
@@ -47,7 +64,7 @@ export async function loadShortTermMemory(
       'entries' in parsed &&
       Array.isArray((parsed as any).entries)
     ) {
-      return parsed as ShortTermStore;
+      return migrateStore(parsed as ShortTermStore) ?? emptyStore();
     }
     return null;
   } catch {
@@ -84,10 +101,7 @@ export async function appendEntry(
   opts: { maxEntries: number; maxAgeMs: number },
 ): Promise<void> {
   await shortTermWriteQueue.run(guildUserId, async () => {
-    const store = (await loadShortTermMemory(dir, guildUserId)) ?? {
-      version: 1 as const,
-      entries: [],
-    };
+    const store = (await loadShortTermMemory(dir, guildUserId)) ?? emptyStore();
 
     store.entries.push(entry);
 
