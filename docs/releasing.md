@@ -76,3 +76,25 @@ and provenance attestation (`id-token: write`) is included automatically.
   ```bash
   npx discoclaw@latest init
   ```
+
+## Releasing via Weston (Discord)
+
+When you're ready to ship, just say something like:
+
+> "tag a release" or "tag a patch release" or "bump to 0.3.0 and tag it"
+
+Weston will:
+
+1. Bump the version in `package.json` (choosing patch/minor/major based on context, or what you specify)
+2. Commit the version bump
+3. Push the commit and tag to `origin/main`
+4. The `publish.yml` CI workflow fires automatically
+5. Weston checks the result a few minutes later and reports back
+
+### Version guidance
+
+- **patch** (0.x.**y**) — bug fixes, small tweaks, no new features
+- **minor** (0.**x**.0) — new features, backwards-compatible
+- **major** (**x**.0.0) — breaking changes
+
+If you don't specify, Weston picks the right one based on what's changed and tells you before proceeding.
