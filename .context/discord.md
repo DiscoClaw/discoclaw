@@ -85,11 +85,13 @@ Each action category has its own flag (only active when the master switch is `1`
 | `DISCOCLAW_DISCORD_ACTIONS_PLAN` | `1` | planList, planShow, planApprove, planClose, planCreate, planRun |
 | `DISCOCLAW_DISCORD_ACTIONS_MEMORY` | `1` | memoryRemember, memoryForget, memoryShow |
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER` | `1` | defer |
+| `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` | `0` | generateImage |
 | _(config — always on)_ | — | modelSet, modelShow |
 
 Notes:
 - `reactionPrompt` is gated by the MESSAGING flag — it is registered via `REACTION_PROMPT_ACTION_TYPES` only when `flags.messaging` is true (`src/discord/actions.ts:113`).
 - Config actions (`modelSet`, `modelShow`) have no separate env flag. They are always enabled when the master switch is on, hardcoded in `src/index.ts`.
+- `generateImage` requires `IMAGEGEN_API_KEY` to be set (any OpenAI-compatible image generation endpoint). Optional: `IMAGEGEN_BASE_URL` to point at a non-OpenAI provider. Defaults to the DALL-E 3 model at `https://api.openai.com/v1`.
 
 Auto-follow-up: When query actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow, forgeStatus) succeed, DiscoClaw automatically re-invokes Claude with the results. This allows Claude to reason about query results without requiring the user to send a follow-up message. Controlled by `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` (default `3`, `0` disables). Mutation-only responses do not trigger follow-ups. Trivially short follow-up responses (<50 chars with no actions) are suppressed.
 

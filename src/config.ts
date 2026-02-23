@@ -75,6 +75,10 @@ export type DiscoclawConfig = {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   openaiModel: string;
+
+  // Image generation config (DALL-E or compatible)
+  imagegenApiKey?: string;
+  imagegenBaseUrl?: string;
   forgeDrafterRuntime?: string;
   forgeAuditorRuntime?: string;
 
@@ -445,6 +449,12 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('FORGE_AUDITOR_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; auditor will fall back to the primary runtime.');
   }
 
+  const imagegenApiKey = parseTrimmedString(env, 'IMAGEGEN_API_KEY');
+  const imagegenBaseUrl = parseTrimmedString(env, 'IMAGEGEN_BASE_URL');
+  if (discordActionsImagegen && !imagegenApiKey) {
+    warnings.push('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1 but IMAGEGEN_API_KEY is not set; generateImage actions will fail.');
+  }
+
   const fastModel = parseTrimmedString(env, 'DISCOCLAW_FAST_MODEL') ?? 'fast';
 
   const tasksCwdOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_CWD');
@@ -543,6 +553,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiModel,
       forgeDrafterRuntime,
       forgeAuditorRuntime,
+
+      imagegenApiKey,
+      imagegenBaseUrl,
 
       openrouterApiKey,
       openrouterBaseUrl,
