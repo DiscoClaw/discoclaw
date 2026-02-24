@@ -5,6 +5,17 @@ import type { EngineEvent, RuntimeCapability } from '../types.js';
 import type { CliAdapterStrategy, CliInvokeContext, ParsedLineResult, UniversalCliOpts } from '../cli-strategy.js';
 import { extractResultText, extractResultContentBlocks } from '../cli-output-parsers.js';
 
+/**
+ * Compact safety reminder prepended to every forge and planRun phase prompt.
+ * Mirrors the destructive patterns guarded by the tool-call gate so the model
+ * receives an explicit boundary at each phase boundary.
+ */
+export const PHASE_SAFETY_REMINDER =
+  'SAFETY (automated agent): Do not run rm -rf outside build artifact directories, ' +
+  'git push --force, git branch -D, DROP TABLE, or chmod 777. ' +
+  'Do not write to .env, root-policy.ts, ~/.ssh/, or ~/.claude/ paths. ' +
+  'If a task requires any of these, report it instead of executing.';
+
 // Per-invocation tool tracking state (keyed by ctx to avoid cross-invocation leaks).
 type ToolTrackState = { activeTools: Map<number, string>; inputBufs: Map<number, string> };
 const toolState = new WeakMap<CliInvokeContext, ToolTrackState>();
