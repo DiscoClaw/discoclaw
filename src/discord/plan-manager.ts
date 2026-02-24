@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { collectRuntimeText } from './runtime-utils.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
+import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
@@ -770,7 +771,7 @@ export function buildPhasePrompt(
   planContent: string,
   injectedContext?: string,
 ): string {
-  const lines: string[] = [];
+  const lines: string[] = [PHASE_SAFETY_REMINDER, ''];
 
   lines.push('## Objective');
   lines.push('');
@@ -969,7 +970,7 @@ export function buildAuditFixPrompt(
   attemptNumber: number,
   maxAttempts: number,
 ): string {
-  const lines: string[] = [];
+  const lines: string[] = [PHASE_SAFETY_REMINDER, ''];
 
   lines.push('## Objective');
   lines.push('');

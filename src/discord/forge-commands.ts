@@ -10,6 +10,7 @@ import { resolveModel } from '../runtime/model-tiers.js';
 import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { getSection, parsePlan } from './plan-parser.js';
+import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 export { parseAuditVerdict };
 export type { AuditVerdict };
 
@@ -95,6 +96,8 @@ export function buildDrafterPrompt(
   contextSummary: string,
 ): string {
   return [
+    PHASE_SAFETY_REMINDER,
+    '',
     'You are a senior software engineer drafting a technical implementation plan.',
     '',
     '## Task',
@@ -134,6 +137,8 @@ export function buildAuditorPrompt(
   opts?: { hasTools?: boolean },
 ): string {
   const sections = [
+    PHASE_SAFETY_REMINDER,
+    '',
     'You are an adversarial senior engineer auditing a technical plan. Your job is to find flaws, gaps, and risks.',
     '',
   ];
@@ -263,6 +268,8 @@ export function buildRevisionPrompt(
   projectContext?: string,
 ): string {
   const sections = [
+    PHASE_SAFETY_REMINDER,
+    '',
     'You are a senior software engineer revising a technical plan based on audit feedback.',
     '',
   ];
