@@ -66,6 +66,16 @@ describe('init wizard helpers', () => {
     expect(content).toContain('DISCORD_GUILD_ID=1000000000000000004');
     expect(content).toContain('# OPTIONAL');
     expect(content).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
+    // Forum IDs are auto-detected, not in REQUIRED
+    expect(content).toContain('# AUTO-DETECTED');
+    expect(content).toContain('DISCOCLAW_TASKS_FORUM=1000000000000000002');
+    expect(content).toContain('DISCOCLAW_CRON_FORUM=1000000000000000003');
+    // Forum IDs must not appear before the AUTO-DETECTED header
+    const requiredIdx = content.indexOf('# REQUIRED');
+    const autoDetectedIdx = content.indexOf('# AUTO-DETECTED');
+    const tasksIdx = content.indexOf('DISCOCLAW_TASKS_FORUM=');
+    expect(tasksIdx).toBeGreaterThan(autoDetectedIdx);
+    expect(autoDetectedIdx).toBeGreaterThan(requiredIdx);
   });
 
   it('selects provider defaults in expected precedence order', () => {
@@ -100,6 +110,42 @@ describe('init wizard helpers', () => {
     expect(content).toContain('OPENROUTER_API_KEY=sk-or-test-key');
     expect(content).toContain('OPENROUTER_BASE_URL=https://openrouter.ai/api/v1');
     expect(content).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4');
+    expect(content).toContain('# AUTO-DETECTED');
+    expect(content).toContain('DISCOCLAW_TASKS_FORUM=1000000000000000002');
+    expect(content).toContain('DISCOCLAW_CRON_FORUM=1000000000000000003');
+  });
+
+  it('writes DISCOCLAW_DATA_DIR in required section when provided', () => {
+    const content = buildEnvContent(
+      {
+        DISCORD_TOKEN: 'a.b.c',
+        DISCORD_ALLOW_USER_IDS: '1000000000000000001',
+        DISCOCLAW_DATA_DIR: '/home/user/discoclaw-data',
+      },
+      new Date('2026-02-23T00:00:00.000Z'),
+    );
+
+    expect(content).toContain('DISCOCLAW_DATA_DIR=/home/user/discoclaw-data');
+    // Must appear inside the REQUIRED section (before any PROVIDER or AUTO-DETECTED section)
+    const requiredIdx = content.indexOf('# REQUIRED');
+    const dataDirIdx = content.indexOf('DISCOCLAW_DATA_DIR=');
+    expect(dataDirIdx).toBeGreaterThan(requiredIdx);
+    // No AUTO-DETECTED section when no forum IDs are present
+    expect(content).not.toContain('# AUTO-DETECTED');
+  });
+
+  it('omits auto-detected section when no forum IDs are present', () => {
+    const content = buildEnvContent(
+      {
+        DISCORD_TOKEN: 'a.b.c',
+        DISCORD_ALLOW_USER_IDS: '1000000000000000001',
+      },
+      new Date('2026-02-23T00:00:00.000Z'),
+    );
+
+    expect(content).not.toContain('# AUTO-DETECTED');
+    expect(content).not.toContain('DISCOCLAW_TASKS_FORUM');
+    expect(content).not.toContain('DISCOCLAW_CRON_FORUM');
   });
 });
 
@@ -139,11 +185,10 @@ describe('runInitWizard', () => {
     const oldEnv = 'DISCORD_TOKEN=old.token.value\nDISCORD_ALLOW_USER_IDS=111111111111111111\n';
     const answers = [
       '', // Press Enter to continue
+      '', // data directory (default cwd)
       'y', // Overwrite existing .env
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
-      '1000000000000000002', // DISCOCLAW_TASKS_FORUM
-      '1000000000000000003', // DISCOCLAW_CRON_FORUM
       '', // provider selection -> default (Claude)
       '', // enable skip permissions
       '', // enable stream-json
@@ -176,6 +221,7 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('PRIMARY_RUNTIME=claude');
     expect(newEnv).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
     expect(newEnv).toContain('CLAUDE_OUTPUT_FORMAT=stream-json');
+    expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${tmpDir}`);
     expect(ensureWorkspaceBootstrapFiles).toHaveBeenCalledWith(path.join(tmpDir, 'workspace'));
   });
 
@@ -184,11 +230,10 @@ describe('runInitWizard', () => {
     const previousCwd = process.cwd();
     const answers = [
       '', // Press Enter to continue
+      '', // data directory (default cwd)
       // no existing .env
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
-      '1000000000000000002', // DISCOCLAW_TASKS_FORUM
-      '1000000000000000003', // DISCOCLAW_CRON_FORUM
       '5', // provider selection -> OpenRouter
       'sk-or-test-key', // OPENROUTER_API_KEY
       '', // OPENROUTER_BASE_URL (optional, skip)
@@ -216,5 +261,90 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('PRIMARY_RUNTIME=openrouter');
     expect(newEnv).toContain('OPENROUTER_API_KEY=sk-or-test-key');
     expect(newEnv).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4');
+    expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${tmpDir}`);
+  });
+
+  it('always writes DISCOCLAW_DATA_DIR when a custom path is given', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
+    const previousCwd = process.cwd();
+    const customDataDir = path.join(tmpDir, 'my-data');
+    const answers = [
+      '', // Press Enter to continue
+      customDataDir, // data directory (custom path)
+      'a.b.c', // DISCORD_TOKEN
+      '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '', // provider selection -> default (Claude)
+      '', // enable skip permissions
+      '', // enable stream-json
+      'n', // configure recommended settings
+      'n', // configure optional features
+    ];
+
+    process.chdir(tmpDir);
+
+    vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('binary not found');
+    });
+    vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await runInitWizard();
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
+    expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${customDataDir}`);
+  });
+
+  it('carries forward DISCOCLAW_TASKS_FORUM and DISCOCLAW_CRON_FORUM from existing .env on overwrite', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
+    const previousCwd = process.cwd();
+    const oldEnv = [
+      'DISCORD_TOKEN=old.token.value',
+      'DISCORD_ALLOW_USER_IDS=111111111111111111',
+      'DISCOCLAW_TASKS_FORUM=9000000000000000001',
+      'DISCOCLAW_CRON_FORUM=9000000000000000002',
+    ].join('\n') + '\n';
+
+    const answers = [
+      '', // Press Enter to continue
+      '', // data directory (default cwd)
+      'y', // Overwrite existing .env
+      'a.b.c', // DISCORD_TOKEN
+      '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '', // provider selection -> default (Claude)
+      '', // enable skip permissions
+      '', // enable stream-json
+      'n', // configure recommended settings
+      'n', // configure optional features
+    ];
+
+    fs.writeFileSync(path.join(tmpDir, '.env'), oldEnv, 'utf8');
+    process.chdir(tmpDir);
+
+    vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('binary not found');
+    });
+    vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await runInitWizard();
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
+    expect(newEnv).toContain('# AUTO-DETECTED');
+    expect(newEnv).toContain('DISCOCLAW_TASKS_FORUM=9000000000000000001');
+    expect(newEnv).toContain('DISCOCLAW_CRON_FORUM=9000000000000000002');
+    // Must appear under AUTO-DETECTED, not REQUIRED
+    const autoDetectedIdx = newEnv.indexOf('# AUTO-DETECTED');
+    const tasksIdx = newEnv.indexOf('DISCOCLAW_TASKS_FORUM=');
+    expect(tasksIdx).toBeGreaterThan(autoDetectedIdx);
   });
 });
