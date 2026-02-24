@@ -14,12 +14,52 @@ export function isModelTier(s: string): s is ModelTier {
  * Maps tier × runtime to a concrete model string.
  * Empty string = adapter-default sentinel (adapter uses its own defaultModel).
  */
-const tierMap: Record<string, Record<ModelTier, string>> = {
+const defaults: Record<string, Record<ModelTier, string>> = {
   claude_code: { fast: 'haiku', capable: 'opus' },
   gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro' },
   openai: { fast: '', capable: '' },
   codex: { fast: '', capable: '' },
 };
+
+function buildDefault(): Record<string, Record<ModelTier, string>> {
+  return Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, { ...v }]));
+}
+
+let tierMap = buildDefault();
+
+/**
+ * Read env vars matching `DISCOCLAW_TIER_<RUNTIME>_<TIER>` and overlay them
+ * onto the hardcoded defaults. Resets to defaults on each call so repeated
+ * invocations are idempotent. If never called, defaults apply unchanged.
+ *
+ * Examples:
+ *   DISCOCLAW_TIER_CLAUDE_CODE_FAST=sonnet
+ *   DISCOCLAW_TIER_GEMINI_CAPABLE=gemini-2.5-flash
+ */
+export function initTierOverrides(env: Record<string, string | undefined>): void {
+  tierMap = buildDefault();
+  const PREFIX = 'DISCOCLAW_TIER_';
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.startsWith(PREFIX) || value === undefined) continue;
+    const rest = key.slice(PREFIX.length);
+    let tier: ModelTier;
+    let runtimeUpper: string;
+    if (rest.endsWith('_FAST')) {
+      tier = 'fast';
+      runtimeUpper = rest.slice(0, -'_FAST'.length);
+    } else if (rest.endsWith('_CAPABLE')) {
+      tier = 'capable';
+      runtimeUpper = rest.slice(0, -'_CAPABLE'.length);
+    } else {
+      continue;
+    }
+    const runtime = runtimeUpper.toLowerCase();
+    if (!tierMap[runtime]) {
+      tierMap[runtime] = { fast: '', capable: '' };
+    }
+    tierMap[runtime][tier] = value;
+  }
+}
 
 /**
  * Resolve a tier name or literal model string to a concrete model string.
