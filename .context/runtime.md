@@ -194,7 +194,7 @@ Both require `CLAUDE_OUTPUT_FORMAT=stream-json` for structured events.
 
 **Budget semantics:** For multi-turn sessions, budget accumulates across turns and cannot be reset mid-session. Recommend $5-10 for multi-turn.
 
-**Append system prompt:** When set, workspace PA files (SOUL.md, IDENTITY.md, USER.md, TOOLS.md) are skipped from the context file list (their content is already in the system prompt). PA context modules (`.context/pa.md`, `.context/pa-safety.md`) and channel-specific context are unaffected. **Note:** Do not set this on first run before `workspace/BOOTSTRAP.md` has been consumed — the skip logic also bypasses BOOTSTRAP.md loading.
+**Append system prompt:** When set, workspace PA files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, TOOLS.md) are skipped from the context file list (their content is already in the system prompt). PA context modules (`.context/pa.md`, `.context/pa-safety.md`) and channel-specific context are unaffected. **Note:** Do not set this on first run before `workspace/BOOTSTRAP.md` has been consumed — the skip logic also bypasses BOOTSTRAP.md loading.
 
 - **Session scanner** (`src/runtime/session-scanner.ts`): watches `~/.claude/projects/<escaped-cwd>/<session-id>.jsonl`, skips pre-existing content, degrades gracefully if the file never appears.
 - **Tool-aware queue** (`src/discord/tool-aware-queue.ts`): state machine that suppresses narration text before tools, shows human-readable activity labels (from `src/runtime/tool-labels.ts`), and streams the final answer after all tool use completes.

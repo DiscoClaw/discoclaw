@@ -45,7 +45,7 @@ No context files, no memory, no history. Very small — prompt length is just th
 
 ### Note on AGENTS.md
 
-`workspace/AGENTS.md` is NOT loaded via `loadWorkspacePaFiles()`. It's discovered by Claude Code's native AGENTS.md mechanism when the workspace is the working directory. It contributes to the Claude Code system prompt, not the DiscoClaw-assembled user prompt.
+`workspace/AGENTS.md` is loaded via `loadWorkspacePaFiles()` alongside SOUL/IDENTITY/USER/TOOLS. It is injected into every prompt (chat, cron, deferred, forge).
 
 ---
 
@@ -55,7 +55,7 @@ Ordered from largest to smallest typical contribution. No hard token numbers —
 
 | Layer | Relative Size | Varies Per-Request | Config Env Var |
 |-------|--------------|-------------------|----------------|
-| Workspace PA files (SOUL, IDENTITY, USER, TOOLS) | **Large** | No (stable) | `WORKSPACE_CWD` |
+| Workspace PA files (SOUL, IDENTITY, USER, AGENTS, TOOLS) | **Large** | No (stable) | `WORKSPACE_CWD` |
 | PA context modules (pa.md, pa-safety.md) | **Medium** | No (stable) | `.context/` in repo root |
 | Message history | **Medium** | Yes (every message) | `DISCOCLAW_MESSAGE_HISTORY_BUDGET` (default: 3000 chars) |
 | Durable memory | **Medium** | Yes (on `!memory` changes) | `DISCOCLAW_DURABLE_INJECT_MAX_CHARS` (default: 2000 chars) |

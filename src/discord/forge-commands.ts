@@ -966,7 +966,7 @@ export class ForgeOrchestrator {
       pinnedThreadSummary?: string;
     },
   ): Promise<string> {
-    const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
+    const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'AGENTS.md', 'TOOLS.md'];
     const sections: string[] = [];
     for (const name of contextFiles) {
       const p = path.join(this.opts.workspaceCwd, name);
