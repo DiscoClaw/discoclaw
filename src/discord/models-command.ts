@@ -68,6 +68,8 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models set forge-drafter opus`',
       '- `!models set cron-exec haiku` — run crons on a cheaper model',
       '- `!models set cron-exec default` — revert to following chat model',
+      '',
+      '**Note:** Image generation (imagegen) configuration is shown automatically in `!models` when enabled, but is not switchable via `!models set` — configure it via environment variables instead.',
     ].join('\n');
   }
 
