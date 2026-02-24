@@ -224,8 +224,8 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       clearStallTimer();
       stallTimer = setTimeout(() => {
         const ms = opts.streamStallTimeoutMs!;
-        opts.log?.info?.(`one-shot: stream stall detected, killing process`);
-        push({ type: 'error', message: `stream stall: no output for ${ms}ms` });
+        opts.log?.info?.(`one-shot: stream stall detected after ${ms}ms, killing process`);
+        push({ type: 'error', message: `stream stall: no output for ${ms}ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: ${ms}ms)` });
         push({ type: 'done' });
         finished = true;
         subprocess.kill('SIGTERM');
