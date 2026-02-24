@@ -7,7 +7,9 @@ import {
   resolveProvider,
 } from './actions-imagegen.js';
 import type { ImagegenContext } from './actions-imagegen.js';
-import type { ActionContext } from './actions.js';
+import type { ActionContext, ActionCategoryFlags } from './actions.js';
+import { parseDiscordActions } from './actions.js';
+import { buildUnavailableActionTypesNotice } from './output-common.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -557,6 +559,21 @@ describe('generateImage', () => {
     expect(result).toEqual({ ok: true, summary: 'Generated image posted to #images' });
     expect(ch.send).toHaveBeenCalled();
   });
+
+  it('returns clear error when apiKey is missing for OpenAI', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx({ apiKey: undefined }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('apiKey');
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
 
 describe('generateImage — gpt-image-1', () => {
@@ -904,6 +921,23 @@ describe('generateImage — Gemini', () => {
       expect.anything(),
     );
   });
+
+  it('returns error when Gemini API call throws (network error)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Connection refused')));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('API request failed');
+    expect((result as any).error).toContain('Connection refused');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
 });
 
 describe('default model resolution', () => {
@@ -986,5 +1020,77 @@ describe('default model resolution', () => {
 
     const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
     expect(callBody.model).toBe('dall-e-2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Actionable-guidance codepath (disabled flag → strippedUnrecognizedTypes → notice)
+// ---------------------------------------------------------------------------
+
+const IMAGEGEN_OFF_FLAGS: ActionCategoryFlags = {
+  channels: false,
+  messaging: false,
+  guild: false,
+  moderation: false,
+  polls: false,
+  tasks: false,
+  crons: false,
+  botProfile: false,
+  forge: false,
+  plan: false,
+  memory: false,
+  defer: false,
+  config: false,
+  imagegen: false,
+};
+
+describe('generateImage — actionable-guidance when imagegen is disabled', () => {
+  it('parseDiscordActions strips generateImage into strippedUnrecognizedTypes when imagegen: false', () => {
+    const input = '<discord-action>{"type":"generateImage","prompt":"A cat"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, IMAGEGEN_OFF_FLAGS);
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toContain('generateImage');
+  });
+
+  it('parseDiscordActions strips generateImage when imagegen flag is absent', () => {
+    const flags: ActionCategoryFlags = {
+      channels: false,
+      messaging: false,
+      guild: false,
+      moderation: false,
+      polls: false,
+      tasks: false,
+      crons: false,
+      botProfile: false,
+      forge: false,
+      plan: false,
+      memory: false,
+      defer: false,
+      config: false,
+      // imagegen intentionally omitted
+    };
+    const input = '<discord-action>{"type":"generateImage","prompt":"A cat"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, flags);
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toContain('generateImage');
+  });
+
+  it('buildUnavailableActionTypesNotice returns actionable enable-guidance for generateImage', () => {
+    const notice = buildUnavailableActionTypesNotice(['generateImage']);
+    expect(notice).toContain('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1');
+    expect(notice).toContain('`generateImage`');
+    expect(notice).not.toContain('unknown type or category disabled');
+  });
+
+  it('notice references required API key env vars', () => {
+    const notice = buildUnavailableActionTypesNotice(['generateImage']);
+    expect(notice).toMatch(/OPENAI_API_KEY|IMAGEGEN_GEMINI_API_KEY/);
+  });
+
+  it('full path: disabled imagegen → stripped type → notice contains enable env var', () => {
+    const input = '<discord-action>{"type":"generateImage","prompt":"A cat"}</discord-action>';
+    const { strippedUnrecognizedTypes } = parseDiscordActions(input, IMAGEGEN_OFF_FLAGS);
+    const notice = buildUnavailableActionTypesNotice(strippedUnrecognizedTypes);
+    expect(notice).toContain('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1');
   });
 });
