@@ -634,9 +634,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       multiTurnHangTimeoutMs: parsePositiveInt(env, 'DISCOCLAW_MULTI_TURN_HANG_TIMEOUT_MS', 60000),
       multiTurnIdleTimeoutMs: parsePositiveInt(env, 'DISCOCLAW_MULTI_TURN_IDLE_TIMEOUT_MS', 300000),
       multiTurnMaxProcesses: parsePositiveInt(env, 'DISCOCLAW_MULTI_TURN_MAX_PROCESSES', 5),
-      streamStallTimeoutMs: parseNonNegativeInt(env, 'DISCOCLAW_STREAM_STALL_TIMEOUT_MS', 300000),
+      streamStallTimeoutMs: parseNonNegativeInt(env, 'DISCOCLAW_STREAM_STALL_TIMEOUT_MS', 600000),
       progressStallTimeoutMs: parseNonNegativeInt(env, 'DISCOCLAW_PROGRESS_STALL_TIMEOUT_MS', 300000),
-      streamStallWarningMs: parseNonNegativeInt(env, 'DISCOCLAW_STREAM_STALL_WARNING_MS', 150000),
+      streamStallWarningMs: parseNonNegativeInt(env, 'DISCOCLAW_STREAM_STALL_WARNING_MS', 300000),
       maxConcurrentInvocations: parseNonNegativeInt(env, 'DISCOCLAW_MAX_CONCURRENT_INVOCATIONS', 0),
       debugRuntime: parseBoolean(env, 'DISCOCLAW_DEBUG_RUNTIME', false),
 
