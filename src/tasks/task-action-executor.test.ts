@@ -112,6 +112,7 @@ function makeStore() {
     update: vi.fn((id: string) => defaultTask(id)),
     close: vi.fn((id: string) => ({ ...defaultTask(id), status: 'closed' as const })),
     addLabel: vi.fn((id: string) => defaultTask(id)),
+    reload: vi.fn(async () => ({ added: [], updated: [], removed: [] })),
   };
 }
 
