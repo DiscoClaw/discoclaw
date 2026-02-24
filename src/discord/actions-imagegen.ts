@@ -16,7 +16,7 @@ const IMAGEGEN_TYPE_MAP: Record<ImagegenActionRequest['type'], true> = {
 export const IMAGEGEN_ACTION_TYPES = new Set<string>(Object.keys(IMAGEGEN_TYPE_MAP));
 
 export type ImagegenContext = {
-  apiKey: string;
+  apiKey?: string;
   baseUrl?: string;
   geminiApiKey?: string;
 };
@@ -242,7 +242,7 @@ export async function executeImagegenAction(
         result = await callGemini(action.prompt.trim(), model, size, imagegenCtx.geminiApiKey!);
       } else {
         const baseUrl = imagegenCtx.baseUrl ?? 'https://api.openai.com/v1';
-        result = await callOpenAI(action.prompt.trim(), model, size, quality, imagegenCtx.apiKey, baseUrl);
+        result = await callOpenAI(action.prompt.trim(), model, size, quality, imagegenCtx.apiKey!, baseUrl);
       }
 
       if (!result.ok) {
