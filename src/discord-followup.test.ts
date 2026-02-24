@@ -520,6 +520,36 @@ describe('auto-follow-up for query actions', () => {
     expect(runtime.invoke).toHaveBeenCalledTimes(1);
   });
 
+  it('triggers follow-up when a non-query action fails (generateImage not configured)', async () => {
+    // generateImage is a non-query action. When it fails, the bot should receive a
+    // follow-up invocation so it can explain the error in plain language (d8c7753 fix).
+    let callCount = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        callCount++;
+        if (callCount === 1) {
+          // Emit generateImage without channel — defaults to ctx.channelId.
+          yield { type: 'text_final', text: 'Generating:\n<discord-action>{"type":"generateImage","prompt":"A mountain"}</discord-action>' } as any;
+        } else {
+          yield { type: 'text_final', text: 'Sorry, image generation failed because the imagegen subsystem is not configured on this bot.' } as any;
+        }
+      }),
+    } as any;
+
+    const handler = createMessageCreateHandler(
+      // discordActionsImagegen enables the action type; no imagegenCtx -> fails with
+      // "Imagegen subsystem not configured" (non-query failure -> follow-up triggered).
+      baseParams(runtime, { discordActionsImagegen: true }),
+      makeQueue(),
+    );
+    await handler(makeMsg());
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
+    const secondPrompt = runtime.invoke.mock.calls[1][0].prompt;
+    expect(secondPrompt).toContain('[Auto-follow-up]');
+    expect(secondPrompt).toContain('Failed:');
+  });
+
   it('does not execute actions when stream is aborted without a runtime error', async () => {
     const runtimeStarted = (() => {
       let resolve!: () => void;
