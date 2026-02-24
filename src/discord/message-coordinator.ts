@@ -1974,7 +1974,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           const { signal, dispose: abortDispose } = registerAbort(reply.id);
           abortSignal = signal;
           // Best-effort: add 🛑 so the user can tap it to kill the running stream.
-          reply.react?.('🛑')?.catch(() => { /* best-effort */ });
+          const reactPromise = reply.react?.('🛑')?.catch(() => { /* best-effort */ });
           // Declared before try so they remain accessible after the finally block closes.
           let historySection = '';
           let summarySection = '';
@@ -2591,6 +2591,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
             abortDispose();
             // Best-effort: remove the 🛑 reaction added at stream start.
+            // Await the react() promise first so the reaction is in cache before removal.
+            await reactPromise?.catch(() => { /* best-effort */ });
             try { await reply?.reactions?.resolve?.('🛑')?.remove?.(); } catch { /* best-effort */ }
             dispose();
           }
