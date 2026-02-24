@@ -17,7 +17,7 @@ import { loadDiscordChannelContext, validatePaContextModules } from './discord/c
 import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
 import type { DeferScheduler } from './discord/defer-scheduler.js';
 import type { DeferActionRequest } from './discord/actions-defer.js';
-import { configureDeferredScheduler } from './discord/deferred-runner.js';
+import { configureDeferredScheduler, type ConfigureDeferredSchedulerOpts } from './discord/deferred-runner.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
@@ -791,8 +791,9 @@ const botParams = {
   },
 };
 
+let deferOpts: ConfigureDeferredSchedulerOpts | undefined;
 if (discordActionsEnabled && cfg.discordActionsDefer) {
-  const deferScheduler = configureDeferredScheduler({
+  deferOpts = {
     maxDelaySeconds: cfg.deferMaxDelaySeconds,
     maxConcurrent: cfg.deferMaxConcurrent,
     state: botParams,
@@ -805,7 +806,8 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
     useGroupDirCwd,
     botDisplayName,
     log,
-  });
+  };
+  const deferScheduler = configureDeferredScheduler(deferOpts);
   botParams.deferScheduler = deferScheduler;
 }
 
@@ -821,6 +823,7 @@ try {
   process.exit(1);
 }
 botStatus = status;
+if (deferOpts) deferOpts.status = botStatus;
 
 const { credentialCheckReport, credentialReport } = await runPostConnectStartupChecks({
   system,
