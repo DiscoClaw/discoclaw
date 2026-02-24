@@ -1024,6 +1024,7 @@ if (taskCtx) {
       apiKey: cfg.openaiApiKey,
       baseUrl: cfg.openaiBaseUrl,
       geminiApiKey: cfg.imagegenGeminiApiKey,
+      defaultModel: cfg.imagegenDefaultModel,
     };
     log.info('imagegen:action context initialized');
   }

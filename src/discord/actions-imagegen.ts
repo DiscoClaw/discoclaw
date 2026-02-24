@@ -19,13 +19,13 @@ export type ImagegenContext = {
   apiKey?: string;
   baseUrl?: string;
   geminiApiKey?: string;
+  defaultModel?: string;
 };
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MODEL = 'dall-e-3';
 const DEFAULT_SIZE_OPENAI = '1024x1024';
 const DEFAULT_SIZE_GEMINI = '1:1';
 
@@ -39,6 +39,12 @@ const DISCORD_MAX_CONTENT = 2000;
 // ---------------------------------------------------------------------------
 // Provider resolution
 // ---------------------------------------------------------------------------
+
+function resolveDefaultModel(imagegenCtx: ImagegenContext): string {
+  if (imagegenCtx.defaultModel) return imagegenCtx.defaultModel;
+  if (imagegenCtx.geminiApiKey && !imagegenCtx.apiKey) return 'imagen-4.0-generate-001';
+  return 'dall-e-3';
+}
 
 export function resolveProvider(model: string, explicit?: 'openai' | 'gemini'): 'openai' | 'gemini' {
   if (explicit !== undefined) return explicit;
@@ -118,12 +124,14 @@ async function callGemini(
   size: string,
   geminiApiKey: string,
 ): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateImages`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`;
 
   const body: Record<string, unknown> = {
-    prompt,
-    number_of_images: 1,
-    aspect_ratio: size,
+    instances: [{ prompt }],
+    parameters: {
+      sampleCount: 1,
+      aspectRatio: size,
+    },
   };
 
   let response: Response;
@@ -152,7 +160,7 @@ async function callGemini(
     return { ok: false, error: `generateImage: API error ${response.status}${detail ? `: ${detail}` : ''}` };
   }
 
-  type GeminiResponse = { generatedImages?: Array<{ image?: { imageBytes?: string } }> };
+  type GeminiResponse = { predictions?: Array<{ bytesBase64Encoded?: string }> };
   let data: GeminiResponse;
   try {
     data = await response.json() as GeminiResponse;
@@ -160,7 +168,7 @@ async function callGemini(
     return { ok: false, error: 'generateImage: failed to parse API response' };
   }
 
-  const b64 = data.generatedImages?.[0]?.image?.imageBytes;
+  const b64 = data.predictions?.[0]?.bytesBase64Encoded;
   if (!b64) {
     return { ok: false, error: 'generateImage: API returned no image data' };
   }
@@ -182,7 +190,7 @@ export async function executeImagegenAction(
       if (!action.prompt?.trim()) {
         return { ok: false, error: 'generateImage requires a non-empty prompt' };
       }
-      const model = action.model ?? DEFAULT_MODEL;
+      const model = action.model ?? resolveDefaultModel(imagegenCtx);
       const provider = resolveProvider(model, action.provider);
       const defaultSize = provider === 'gemini' ? DEFAULT_SIZE_GEMINI : DEFAULT_SIZE_OPENAI;
       const size = action.size ?? defaultSize;
@@ -277,9 +285,9 @@ export function imagegenActionsPromptSection(): string {
 \`\`\`
 - \`prompt\` (required): Text description of the image to generate.
 - \`channel\` (optional): Channel name (with or without #) or channel ID to post the image to. Defaults to the current channel/thread if omitted.
-- \`model\` (optional): Model to use. Default: \`dall-e-3\`. Available models:
+- \`model\` (optional): Model to use. Default depends on configuration (auto-detected from available API keys). Available models:
   - OpenAI: \`dall-e-3\`, \`gpt-image-1\`
-  - Gemini: \`imagen-3.0-generate-001\`, \`imagen-3.0-fast-generate-001\`
+  - Gemini: \`imagen-4.0-generate-001\`, \`imagen-4.0-fast-generate-001\`, \`imagen-4.0-ultra-generate-001\`
 - \`provider\` (optional): \`openai\` or \`gemini\`. Auto-detected from model prefix if omitted.
 - \`size\` (optional): Depends on provider:
   - OpenAI dall-e-3 / dall-e-2: pixel dimensions — \`1024x1024\` (default), \`1024x1792\`, \`1792x1024\`, \`256x256\`, \`512x512\`

@@ -277,6 +277,41 @@ describe('parseConfig', () => {
     expect(config.imagegenGeminiApiKey).toBeUndefined();
   });
 
+  it('parses IMAGEGEN_DEFAULT_MODEL when set', () => {
+    const { config } = parseConfig(env({ IMAGEGEN_DEFAULT_MODEL: 'imagen-4.0-generate-002', IMAGEGEN_GEMINI_API_KEY: 'gemini-key' }));
+    expect(config.imagegenDefaultModel).toBe('imagen-4.0-generate-002');
+  });
+
+  it('returns undefined for imagegenDefaultModel when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.imagegenDefaultModel).toBeUndefined();
+  });
+
+  it('warns when IMAGEGEN_DEFAULT_MODEL is an imagen-* model but IMAGEGEN_GEMINI_API_KEY is unset', () => {
+    const { warnings } = parseConfig(env({ IMAGEGEN_DEFAULT_MODEL: 'imagen-4.0-generate-002', IMAGEGEN_GEMINI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('IMAGEGEN_DEFAULT_MODEL') && w.includes('IMAGEGEN_GEMINI_API_KEY'))).toBe(true);
+  });
+
+  it('warns when IMAGEGEN_DEFAULT_MODEL is a dall-e-* model but OPENAI_API_KEY is unset', () => {
+    const { warnings } = parseConfig(env({ IMAGEGEN_DEFAULT_MODEL: 'dall-e-3', OPENAI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('IMAGEGEN_DEFAULT_MODEL') && w.includes('OPENAI_API_KEY'))).toBe(true);
+  });
+
+  it('warns when IMAGEGEN_DEFAULT_MODEL is a gpt-image-* model but OPENAI_API_KEY is unset', () => {
+    const { warnings } = parseConfig(env({ IMAGEGEN_DEFAULT_MODEL: 'gpt-image-1', OPENAI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('IMAGEGEN_DEFAULT_MODEL') && w.includes('OPENAI_API_KEY'))).toBe(true);
+  });
+
+  it('does not warn about IMAGEGEN_DEFAULT_MODEL when imagen-* and IMAGEGEN_GEMINI_API_KEY is set', () => {
+    const { warnings } = parseConfig(env({ IMAGEGEN_DEFAULT_MODEL: 'imagen-4.0-generate-002', IMAGEGEN_GEMINI_API_KEY: 'gemini-key' }));
+    expect(warnings.some((w) => w.includes('IMAGEGEN_DEFAULT_MODEL'))).toBe(false);
+  });
+
+  it('does not warn about IMAGEGEN_DEFAULT_MODEL when dall-e-* and OPENAI_API_KEY is set', () => {
+    const { warnings } = parseConfig(env({ IMAGEGEN_DEFAULT_MODEL: 'dall-e-3', OPENAI_API_KEY: 'sk-test' }));
+    expect(warnings.some((w) => w.includes('IMAGEGEN_DEFAULT_MODEL'))).toBe(false);
+  });
+
   it('defaults sessionScanning to true', () => {
     const { config } = parseConfig(env());
     expect(config.sessionScanning).toBe(true);
