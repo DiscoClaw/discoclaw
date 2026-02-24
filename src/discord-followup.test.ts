@@ -590,6 +590,116 @@ describe('auto-follow-up for query actions', () => {
     expect(secondPrompt).toContain('Failed:');
   });
 
+  it('failure follow-up placeholder contains action type and error (not generic)', async () => {
+    let callCount = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        callCount++;
+        if (callCount === 1) {
+          yield { type: 'text_final', text: 'Generating:\n<discord-action>{"type":"generateImage","prompt":"A mountain"}</discord-action>' } as any;
+        } else {
+          yield { type: 'text_final', text: 'Sorry, image generation failed because the imagegen subsystem is not configured on this bot.' } as any;
+        }
+      }),
+    } as any;
+
+    const msg = makeMsg();
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { discordActionsImagegen: true }),
+      makeQueue(),
+    );
+    await handler(msg);
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
+    // channel.send is called to post the follow-up placeholder message.
+    const sendArg = msg.channel.send.mock.calls[0]?.[0];
+    expect(sendArg).toBeDefined();
+    const content = typeof sendArg === 'string' ? sendArg : sendArg?.content ?? '';
+    // Should name the failing action type and not fall back to the generic placeholder.
+    expect(content).toContain('generateImage');
+    expect(content).not.toContain('(following up...)');
+  });
+
+  it('query-success follow-up placeholder is generic (following up...)', async () => {
+    let callCount = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        callCount++;
+        if (callCount === 1) {
+          yield { type: 'text_final', text: 'Listing:\n<discord-action>{"type":"channelList"}</discord-action>' } as any;
+        } else {
+          yield { type: 'text_final', text: 'Analysis complete with sufficient detail to avoid the suppression threshold cutoff.' } as any;
+        }
+      }),
+    } as any;
+
+    const msg = makeMsg();
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    await handler(msg);
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
+    const sendArg = msg.channel.send.mock.calls[0]?.[0];
+    expect(sendArg).toBeDefined();
+    const content = typeof sendArg === 'string' ? sendArg : sendArg?.content ?? '';
+    // Query-success follow-ups use the generic "(following up...)" placeholder.
+    expect(content).toContain('following up');
+  });
+
+  it('failure follow-up prompt includes explicit retry instruction text', async () => {
+    let callCount = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        callCount++;
+        if (callCount === 1) {
+          yield { type: 'text_final', text: 'Generating:\n<discord-action>{"type":"generateImage","prompt":"A mountain"}</discord-action>' } as any;
+        } else {
+          yield { type: 'text_final', text: 'Sorry, image generation is not configured.' } as any;
+        }
+      }),
+    } as any;
+
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { discordActionsImagegen: true }),
+      makeQueue(),
+    );
+    await handler(makeMsg());
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
+    const secondPrompt = runtime.invoke.mock.calls[1][0].prompt;
+    expect(secondPrompt).toContain('[Auto-follow-up]');
+    expect(secondPrompt).toContain('One or more actions failed');
+    expect(secondPrompt).toContain('explicitly tell the user what failed');
+  });
+
+  it('failure retry success: follow-up response is posted (edit called, delete not called)', async () => {
+    let callCount = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        callCount++;
+        if (callCount === 1) {
+          yield { type: 'text_final', text: 'Generating:\n<discord-action>{"type":"generateImage","prompt":"A mountain"}</discord-action>' } as any;
+        } else {
+          // Substantial response — above the 50-char suppression threshold.
+          yield { type: 'text_final', text: 'Image generation is not available on this bot because the imagegen subsystem is not configured.' } as any;
+        }
+      }),
+    } as any;
+
+    const msg = makeMsg();
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { discordActionsImagegen: true }),
+      makeQueue(),
+    );
+    await handler(msg);
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
+    // The follow-up placeholder (sent via channel.send) should be edited with the response, not deleted.
+    const sendResult = await msg.channel.send.mock.results[0]?.value;
+    expect(sendResult).toBeDefined();
+    expect(sendResult.edit).toHaveBeenCalled();
+    expect(sendResult.delete).not.toHaveBeenCalled();
+  });
+
   it('does not execute actions when stream is aborted without a runtime error', async () => {
     const runtimeStarted = (() => {
       let resolve!: () => void;
