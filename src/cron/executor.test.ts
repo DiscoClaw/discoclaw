@@ -336,6 +336,34 @@ describe('executeCronJob', () => {
     expect(outputContent).toContain('`totallyUnknownAction`');
   });
 
+  it('passes imagegenCtx to executeDiscordActions when present', async () => {
+    const executeDiscordActionsSpy = vi.spyOn(discordActions, 'executeDiscordActions');
+    const responseWithAction = '<discord-action>{"type":"generateImage","prompt":"a sunset"}</discord-action>';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: responseWithAction };
+        yield { type: 'done' };
+      },
+    };
+    const imagegenCtx = { generateImage: vi.fn().mockResolvedValue({ ok: true, url: 'http://example.com/img.png' }) } as any;
+    const ctx = makeCtx({
+      runtime,
+      discordActionsEnabled: true,
+      actionFlags: makeCronActionFlags({ imagegen: true } as any),
+      imagegenCtx,
+    });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    expect(executeDiscordActionsSpy).toHaveBeenCalledOnce();
+    const subsArg = executeDiscordActionsSpy.mock.calls[0][3];
+    expect(subsArg).toMatchObject({ imagegenCtx });
+
+    executeDiscordActionsSpy.mockRestore();
+  });
+
   it('does not post if output is empty', async () => {
     const ctx = makeCtx({ runtime: makeMockRuntime('') });
     const job = makeJob();

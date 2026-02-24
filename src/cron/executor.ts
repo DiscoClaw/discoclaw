@@ -9,6 +9,7 @@ import type { CronContext } from '../discord/actions-crons.js';
 import type { ForgeContext } from '../discord/actions-forge.js';
 import type { PlanContext } from '../discord/actions-plan.js';
 import type { MemoryContext } from '../discord/actions-memory.js';
+import type { ImagegenContext } from '../discord/actions-imagegen.js';
 import type { DeferScheduler } from '../discord/defer-scheduler.js';
 import type { DeferActionRequest } from '../discord/actions-defer.js';
 import type { CronRunStats } from './run-stats.js';
@@ -43,6 +44,7 @@ export type CronExecutorContext = {
   forgeCtx?: ForgeContext;
   planCtx?: PlanContext;
   memoryCtx?: MemoryContext;
+  imagegenCtx?: ImagegenContext;
   statsStore?: CronRunStats;
   lockDir?: string;
   runControl?: CronRunControl;
@@ -296,6 +298,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           forgeCtx: ctx.forgeCtx,
           planCtx: ctx.planCtx,
           memoryCtx: ctx.memoryCtx,
+          imagegenCtx: ctx.imagegenCtx,
         });
         for (const result of results) {
           metrics.recordActionResult(result.ok);
