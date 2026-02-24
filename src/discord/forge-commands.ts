@@ -425,6 +425,34 @@ function wrapWithEventForwarding(
 }
 
 // ---------------------------------------------------------------------------
+// Retry helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when the error message indicates a transient hang, stall, or
+ * unexpected crash that is safe to retry automatically.
+ *
+ * Pattern origins:
+ *  - 'hang detected'               — hang detector timeout in subprocess watcher
+ *  - 'stream stall'                — pipeline stream inactivity watchdog
+ *  - 'progress stall'              — pipeline progress inactivity watchdog
+ *  - 'timed out'                   — general timeout (e.g. AbortController deadline)
+ *  - 'process exited unexpectedly' — subprocess crash before completing output
+ *  - 'stdin write failed'          — broken pipe writing to subprocess stdin
+ */
+export function isRetryableError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes('hang detected') ||
+    lower.includes('stream stall') ||
+    lower.includes('progress stall') ||
+    lower.includes('timed out') ||
+    lower.includes('process exited unexpectedly') ||
+    lower.includes('stdin write failed')
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ForgeOrchestrator
 // ---------------------------------------------------------------------------
 
@@ -727,7 +755,7 @@ export class ForgeOrchestrator {
           contextSummary,
         );
 
-        const draftPipelineResult = await this.runPhaseWithRetry({
+        const draftPipelineResult = await this.runWithRetry({
           steps: [{
             kind: 'prompt',
             prompt: drafterPrompt,
@@ -799,7 +827,7 @@ export class ForgeOrchestrator {
         { hasTools: auditorHasFileTools },
       );
       const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(auditorRt, onEvent) : auditorRt;
-      const auditPipelineResult = await this.runPhaseWithRetry({
+      const auditPipelineResult = await this.runWithRetry({
         steps: [{
           kind: 'prompt',
           prompt: auditorPrompt,
@@ -872,7 +900,7 @@ export class ForgeOrchestrator {
         projectContext,
       );
 
-      const revisionPipelineResult = await this.runPhaseWithRetry({
+      const revisionPipelineResult = await this.runWithRetry({
         steps: [{
           kind: 'prompt',
           prompt: revisionPrompt,
@@ -1039,12 +1067,14 @@ export class ForgeOrchestrator {
   }
 
   /**
-   * Runs a pipeline phase with one automatic retry on failure.
-   * Posts a phase-specific retry notice to Discord via onProgress before retrying.
+   * Runs a pipeline phase with one automatic retry on transient failures.
+   * Only retries when `isRetryableError` matches the first error message.
+   * If the first error is NOT retryable, throws immediately with phase context.
+   * Posts a phase-specific stall notice to Discord via onProgress before retrying.
    * Returns null if the run was cancelled; throws with a phase-specific message
-   * if both attempts fail.
+   * if the error is non-retryable or both attempts fail.
    */
-  private async runPhaseWithRetry(
+  private async runWithRetry(
     def: Parameters<typeof runPipeline>[0],
     phase: string,
     onProgress: ProgressFn,
@@ -1054,8 +1084,11 @@ export class ForgeOrchestrator {
     } catch (firstErr) {
       if (this.cancelRequested) return null;
       const firstMsg = String(firstErr instanceof Error ? firstErr.message : firstErr);
+      if (!isRetryableError(firstMsg)) {
+        throw new Error(`${phase} failed: ${firstMsg}`);
+      }
       this.opts.log?.warn({ err: firstErr, phase }, 'forge:retry');
-      await onProgress(`Forge: ${phase} failed, retrying... (${firstMsg})`, { force: true });
+      await onProgress(`Forge ${phase} stalled — retrying...`, { force: true });
       try {
         return await this.runCancellable(def);
       } catch (secondErr) {
