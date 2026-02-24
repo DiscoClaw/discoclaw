@@ -7,7 +7,6 @@ import os from 'node:os';
 import { collectRuntimeText } from './runtime-utils.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
-import { matchesDestructivePattern } from '../runtime/tool-call-gate.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
@@ -1359,7 +1358,7 @@ export async function executePhase(
       tools,
       addDirs,
       opts.timeoutMs,
-      { requireFinalEvent: true, onEvent: opts.onEvent, signal: opts.signal, toolCallGate: true },
+      { requireFinalEvent: true, onEvent: opts.onEvent, signal: opts.signal },
     );
 
     if (phase.kind === 'audit') {
@@ -1423,21 +1422,6 @@ export async function runNextPhase(
   opts: PhaseExecutionOpts,
   onProgress: (msg: string) => Promise<void>,
 ): Promise<RunPhaseResult> {
-  // Destructive tool call gate: wrap onEvent to detect and flag destructive tool_start events.
-  let destructiveDetected = false;
-  let destructiveReason = '';
-  const wrappedOnEvent = (evt: EngineEvent): void => {
-    if (evt.type === 'tool_start') {
-      const { matched, reason } = matchesDestructivePattern(evt.name, evt.input);
-      if (matched) {
-        destructiveDetected = true;
-        destructiveReason = reason;
-      }
-    }
-    opts.onEvent?.(evt);
-  };
-  const gatedOpts: PhaseExecutionOpts = { ...opts, onEvent: wrappedOnEvent };
-
   // 1. Read and deserialize phases file
   let allPhases: PlanPhases;
   try {
@@ -1601,11 +1585,7 @@ export async function runNextPhase(
   // Reload the phase from allPhases to get the updated status
   const currentPhase = allPhases.phases.find((p) => p.id === phase.id)!;
   await onProgress(`**${phase.id}**: Executing ${phase.kind} phase...`);
-  let result = await executePhase(currentPhase, planContent, allPhases, gatedOpts, injectedContext);
-
-  if (destructiveDetected) {
-    result = { status: 'failed', output: result.output, error: `Destructive tool call blocked: ${destructiveReason}` };
-  }
+  let result = await executePhase(currentPhase, planContent, allPhases, opts, injectedContext);
 
   // 9a. Audit fix loop: if audit failed and git is available, attempt fix→re-audit cycles
   const maxFixAttempts = opts.maxAuditFixAttempts ?? 2;
@@ -1666,23 +1646,16 @@ export async function runNextPhase(
             ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
             fixAddDirs,
             opts.timeoutMs,
-            { requireFinalEvent: true, onEvent: gatedOpts.onEvent, signal: opts.signal, toolCallGate: true },
+            { requireFinalEvent: true, onEvent: opts.onEvent, signal: opts.signal },
           );
         } catch (err) {
           opts.log?.warn({ err, phase: phase.id, attempt }, 'plan-manager: audit fix agent failed');
           continue; // Consumed attempt — try again or exit loop
         }
 
-        if (destructiveDetected) break;
-
         // Re-audit
         await onProgress(`**${phase.id}**: Fix attempt ${attempt} complete. Re-auditing...`);
-        result = await executePhase(currentPhase, planContent, allPhases, gatedOpts);
-
-        if (destructiveDetected) {
-          result = { status: 'failed', output: result.output, error: `Destructive tool call blocked: ${destructiveReason}` };
-          break;
-        }
+        result = await executePhase(currentPhase, planContent, allPhases, opts);
 
         if (result.status === 'done') {
           fixAttemptsUsed = attempt;

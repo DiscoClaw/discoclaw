@@ -60,10 +60,6 @@ export class LongRunningProcess {
   private turnSeenImages = new Set<string>();
   private turnImageCount = 0;
 
-  // Per-turn tool tracking state for stream_event wrappers.
-  private turnActiveTools = new Map<number, string>();
-  private turnInputBufs = new Map<number, string>();
-
   /** Called when this process is added to / removed from an external tracking set. */
   onCleanup?: () => void;
 
@@ -180,8 +176,6 @@ export class LongRunningProcess {
     this.turnInToolUse = false;
     this.turnSeenImages = new Set<string>();
     this.turnImageCount = 0;
-    this.turnActiveTools = new Map();
-    this.turnInputBufs = new Map();
     this.stdoutBuffer = '';
 
     // Wire up stdout parsing for this turn.
@@ -325,45 +319,6 @@ export class LongRunningProcess {
 
         this.finalizeTurn();
         return;
-      }
-
-      // Handle stream_event wrapper for tool tracking (mirrors claude-strategy.ts logic).
-      if (anyEvt.type === 'stream_event' && anyEvt.event && typeof anyEvt.event === 'object') {
-        const inner = anyEvt.event as Record<string, unknown>;
-        const idx = typeof inner.index === 'number' ? inner.index : -1;
-
-        if (inner.type === 'content_block_start' && inner.content_block && typeof inner.content_block === 'object') {
-          const cb = inner.content_block as Record<string, unknown>;
-          if (cb.type === 'tool_use' && typeof cb.name === 'string') {
-            this.turnActiveTools.set(idx, cb.name);
-            this.turnInputBufs.set(idx, '');
-          }
-          continue;
-        }
-
-        if (inner.type === 'content_block_delta' && inner.delta && typeof inner.delta === 'object') {
-          const delta = inner.delta as Record<string, unknown>;
-          if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
-            const buf = this.turnInputBufs.get(idx);
-            if (buf !== undefined) this.turnInputBufs.set(idx, buf + delta.partial_json);
-            continue;
-          }
-          // text_delta and other delta types fall through to existing text extraction.
-        }
-
-        if (inner.type === 'content_block_stop') {
-          const name = this.turnActiveTools.get(idx);
-          if (name) {
-            let input: unknown;
-            const buf = this.turnInputBufs.get(idx);
-            if (buf) { try { input = JSON.parse(buf); } catch { /* partial */ } }
-            this.turnActiveTools.delete(idx);
-            this.turnInputBufs.delete(idx);
-            this.pushEvent({ type: 'tool_start', name, ...(input ? { input } : {}) });
-            this.pushEvent({ type: 'tool_end', name, ok: true });
-          }
-          continue;
-        }
       }
 
       // Extract streaming text.

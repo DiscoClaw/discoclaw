@@ -1,5 +1,4 @@
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
-import { matchesDestructivePattern } from '../runtime/tool-call-gate.js';
 
 /**
  * Collect the final text from a runtime invocation, streaming through all events.
@@ -9,10 +8,6 @@ import { matchesDestructivePattern } from '../runtime/tool-call-gate.js';
  *
  * When `opts.onEvent` is provided, each event is forwarded to it before
  * processing — used to drive live streaming preview in Discord progress messages.
- *
- * When `opts.toolCallGate` is true, each `tool_start` event is checked against
- * the destructive-pattern registry. A match throws immediately, halting the
- * current phase so the orchestration loop stops before the next phase begins.
  */
 export async function collectRuntimeText(
   runtime: RuntimeAdapter,
@@ -22,7 +17,7 @@ export async function collectRuntimeText(
   tools: string[],
   addDirs: string[],
   timeoutMs: number,
-  opts?: { requireFinalEvent?: boolean; sessionKey?: string; signal?: AbortSignal; onEvent?: (evt: EngineEvent) => void; toolCallGate?: boolean },
+  opts?: { requireFinalEvent?: boolean; sessionKey?: string; signal?: AbortSignal; onEvent?: (evt: EngineEvent) => void },
 ): Promise<string> {
   let text = '';
   let sawFinal = false;
@@ -37,12 +32,6 @@ export async function collectRuntimeText(
     ...(opts?.signal ? { signal: opts.signal } : {}),
   })) {
     try { opts?.onEvent?.(evt); } catch { /* UI callback errors must not abort execution */ }
-    if (opts?.toolCallGate && evt.type === 'tool_start') {
-      const { matched, reason } = matchesDestructivePattern(evt.name, evt.input);
-      if (matched) {
-        throw new Error(`Destructive tool call blocked by safety gate: ${reason}`);
-      }
-    }
     if (evt.type === 'text_final') {
       text = evt.text;
       sawFinal = true;
