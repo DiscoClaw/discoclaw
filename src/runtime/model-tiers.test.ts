@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { isModelTier, resolveModel } from './model-tiers.js';
+import { initTierOverrides, isModelTier, resolveModel } from './model-tiers.js';
 import type { ModelTier } from './model-tiers.js';
+import type { RuntimeId } from './types.js';
 
 describe('isModelTier', () => {
   it('returns true for known tiers', () => {
@@ -78,5 +79,48 @@ describe('resolveModel', () => {
     it('passes through empty string', () => {
       expect(resolveModel('', 'claude_code')).toBe('');
     });
+  });
+});
+
+describe('initTierOverrides', () => {
+  afterEach(() => {
+    initTierOverrides({});
+  });
+
+  it('overrides a specific runtime+tier', () => {
+    initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_FAST: 'sonnet' });
+    expect(resolveModel('fast', 'claude_code')).toBe('sonnet');
+  });
+
+  it('leaves unrelated tiers and runtimes at their defaults', () => {
+    initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_FAST: 'sonnet' });
+    expect(resolveModel('capable', 'claude_code')).toBe('opus');
+    expect(resolveModel('fast', 'gemini')).toBe('gemini-2.5-flash');
+    expect(resolveModel('capable', 'gemini')).toBe('gemini-2.5-pro');
+  });
+
+  it('accepts unknown runtimes and creates new map entries', () => {
+    initTierOverrides({ DISCOCLAW_TIER_MYRUNTIME_FAST: 'my-model' });
+    expect(resolveModel('fast', 'myruntime' as RuntimeId)).toBe('my-model');
+  });
+
+  it('is idempotent — second call replaces the first, does not accumulate', () => {
+    initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_FAST: 'sonnet' });
+    initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_CAPABLE: 'sonnet' });
+    // First override must be gone; default restored for fast
+    expect(resolveModel('fast', 'claude_code')).toBe('haiku');
+    expect(resolveModel('capable', 'claude_code')).toBe('sonnet');
+  });
+
+  it('restores defaults when called with no matching env vars', () => {
+    initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_FAST: 'sonnet' });
+    initTierOverrides({});
+    expect(resolveModel('fast', 'claude_code')).toBe('haiku');
+    expect(resolveModel('capable', 'claude_code')).toBe('opus');
+  });
+
+  it('ignores env vars with unrecognised tier suffixes', () => {
+    initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_UNKNOWN: 'sonnet' });
+    expect(resolveModel('fast', 'claude_code')).toBe('haiku');
   });
 });
