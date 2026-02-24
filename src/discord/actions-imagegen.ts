@@ -40,7 +40,7 @@ const DISCORD_MAX_CONTENT = 2000;
 // Provider resolution
 // ---------------------------------------------------------------------------
 
-function resolveDefaultModel(imagegenCtx: ImagegenContext): string {
+export function resolveDefaultModel(imagegenCtx: ImagegenContext): string {
   if (imagegenCtx.defaultModel) return imagegenCtx.defaultModel;
   if (imagegenCtx.geminiApiKey && !imagegenCtx.apiKey) return 'imagen-4.0-generate-001';
   return 'dall-e-3';

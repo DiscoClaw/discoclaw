@@ -179,4 +179,10 @@ describe('handleModelsCommand', () => {
     expect(result).toContain('forge-drafter');
     expect(result).toContain('!models set chat sonnet');
   });
+
+  it('help mentions imagegen configuration', () => {
+    const result = handleModelsCommand({ action: 'help' }, enabled);
+    expect(result).toContain('imagegen');
+    expect(result).toContain('environment variables');
+  });
 });

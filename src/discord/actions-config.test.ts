@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } from './actions-config.js';
 import type { ConfigActionRequest, ConfigContext, ConfigMutableParams } from './actions-config.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import type { ImagegenContext } from './actions-imagegen.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -159,6 +160,64 @@ describe('modelShow', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.summary).toContain('(adapter default)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// modelShow — imagegen row
+// ---------------------------------------------------------------------------
+
+describe('modelShow imagegen row', () => {
+  it('shows imagegen row with OpenAI config (apiKey set)', () => {
+    const imagegenCtx: ImagegenContext = { apiKey: 'sk-test' };
+    const ctx = makeCtx({ imagegenCtx });
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('imagegen');
+    expect(result.summary).toContain('dall-e-3');
+    expect(result.summary).toContain('openai');
+  });
+
+  it('shows imagegen row with Gemini config (geminiApiKey only)', () => {
+    const imagegenCtx: ImagegenContext = { geminiApiKey: 'gk-test' };
+    const ctx = makeCtx({ imagegenCtx });
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('imagegen');
+    expect(result.summary).toContain('imagen-4.0-generate-001');
+    expect(result.summary).toContain('gemini');
+  });
+
+  it('respects explicit defaultModel', () => {
+    const imagegenCtx: ImagegenContext = { apiKey: 'sk-test', defaultModel: 'gpt-image-1' };
+    const ctx = makeCtx({ imagegenCtx });
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('imagegen');
+    expect(result.summary).toContain('gpt-image-1');
+    expect(result.summary).toContain('openai');
+  });
+
+  it('omits imagegen row when imagegenCtx is absent', () => {
+    const ctx = makeCtx({ imagegenCtx: undefined });
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).not.toContain('imagegen');
+  });
+
+  it('defaults to dall-e-3/openai when both apiKey and geminiApiKey are set', () => {
+    const imagegenCtx: ImagegenContext = { apiKey: 'sk-test', geminiApiKey: 'gk-test' };
+    const ctx = makeCtx({ imagegenCtx });
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('imagegen');
+    expect(result.summary).toContain('dall-e-3');
+    expect(result.summary).toContain('openai');
   });
 });
 
