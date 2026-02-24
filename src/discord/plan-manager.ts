@@ -813,6 +813,7 @@ export function buildPhasePrompt(
     lines.push('');
     lines.push('Implement the specified changes using the Write, Edit, and Read tools.');
     lines.push('After making changes, output a brief summary of what was changed.');
+    lines.push("As you work, briefly narrate each step (e.g. 'Reading X...', 'Applying change to Y...') so progress is visible.");
   } else if (phase.kind === 'read') {
     lines.push('## Task');
     lines.push('');
@@ -832,6 +833,7 @@ export function buildPhasePrompt(
     lines.push('## Instructions');
     lines.push('');
     lines.push('Read the specified files and produce analysis notes. Use Read, Glob, and Grep tools only.');
+    lines.push("As you work, briefly narrate each step (e.g. 'Reading X...', 'Applying change to Y...') so progress is visible.");
   } else {
     // audit
     lines.push('## Task');
@@ -868,6 +870,7 @@ export function buildPhasePrompt(
     lines.push('End with a **Verdict:** line — either "Needs revision." (if any blocking concerns) or "Ready to approve." (if no blocking concerns).');
     lines.push('');
     lines.push('Use Read, Glob, and Grep tools only.');
+    lines.push("As you work, briefly narrate each step (e.g. 'Reading X...', 'Applying change to Y...') so progress is visible.");
   }
 
   return lines.join('\n');

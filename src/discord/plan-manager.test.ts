@@ -802,6 +802,12 @@ describe('buildPhasePrompt', () => {
     expect(prompt).toContain('if no blocking concerns');
     expect(prompt).not.toContain('if any high/medium concerns');
   });
+
+  it.each(['implement', 'read', 'audit'] as const)('%s phase includes narration instruction', (kind) => {
+    const p: PlanPhase = { ...phase, kind };
+    const prompt = buildPhasePrompt(p, SAMPLE_PLAN);
+    expect(prompt).toContain("briefly narrate each step");
+  });
 });
 
 // ---------------------------------------------------------------------------
