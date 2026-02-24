@@ -612,7 +612,7 @@ describe('auto-follow-up for query actions', () => {
 
     expect(runtime.invoke).toHaveBeenCalledTimes(2);
     // channel.send is called to post the follow-up placeholder message.
-    const sendArg = msg.channel.send.mock.calls[0]?.[0];
+    const sendArg = (msg.channel.send.mock.calls as any[][])[0]?.[0];
     expect(sendArg).toBeDefined();
     const content = typeof sendArg === 'string' ? sendArg : sendArg?.content ?? '';
     // Should name the failing action type and not fall back to the generic placeholder.
@@ -638,7 +638,7 @@ describe('auto-follow-up for query actions', () => {
     await handler(msg);
 
     expect(runtime.invoke).toHaveBeenCalledTimes(2);
-    const sendArg = msg.channel.send.mock.calls[0]?.[0];
+    const sendArg = (msg.channel.send.mock.calls as any[][])[0]?.[0];
     expect(sendArg).toBeDefined();
     const content = typeof sendArg === 'string' ? sendArg : sendArg?.content ?? '';
     // Query-success follow-ups use the generic "(following up...)" placeholder.
