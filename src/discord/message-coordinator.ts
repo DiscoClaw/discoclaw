@@ -486,11 +486,29 @@ export async function ensureGroupDir(groupsDir: string, sessionKey: string, botD
   return dir;
 }
 
+function formatBatchedUserMessages(msgs: CoordinatorMessage[]): string {
+  if (msgs.length === 1) {
+    return `---\nUser message:\n${String(msgs[0].content ?? '')}`;
+  }
+  const items = msgs.map((m, i) => `[${i + 1}] ${String(m.content ?? '')}`).join('\n');
+  return `---\nUser messages (${msgs.length}, respond to all):\n${items}`;
+}
+
+function isQueueLevelCommand(m: CoordinatorMessage, params: Omit<BotParams, 'token'>): boolean {
+  const content = String(m.content ?? '');
+  if (params.memoryCommandsEnabled && parseMemoryCommand(content)) return true;
+  if (params.planCommandsEnabled && parsePlanCommand(content)) return true;
+  if (params.forgeCommandsEnabled && parseForgeCommand(content)) return true;
+  if (parseConfirmToken(content)) return true;
+  return false;
+}
+
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
   // --- Onboarding state ---
   let onboardingSession: OnboardingFlow | null = null;
   let activeOnboardingUserId: string | null = null;
   const sessionCreationGuards = new Map<string, Promise<void>>();
+  const pendingMessages = new Map<string, CoordinatorMessage[]>();
   const ONBOARDING_TIMEOUT_MS = 24 * 60 * 60 * 1000;
   let onboardingTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   let onboardingDisplayName: string | null = null;
@@ -1122,12 +1140,46 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         threadId: threadId || null,
       });
 
-      type SummaryWork = { existingSummary: string | null; exchange: string; summarySeq: number; taskStatusContext?: string };
+      type SummaryWork = { existingSummary: string | null; exchange: string; summarySeq: number; taskStatusContext?: string; userMessageText?: string };
       let pendingSummaryWork: SummaryWork | null = null as SummaryWork | null;
       type ShortTermAppend = { userContent: string; botResponse: string; channelName: string; channelId: string };
       let pendingShortTermAppend: ShortTermAppend | null = null as ShortTermAppend | null;
 
+      // Push to per-session pending buffer for drain-on-entry batching.
+      {
+        const _buf = pendingMessages.get(sessionKey) ?? [];
+        _buf.push(msg);
+        pendingMessages.set(sessionKey, _buf);
+      }
+
       await queue.run(sessionKey, async () => {
+        // Drain-on-entry: atomically consume a leading chunk of the pending buffer.
+        const _pendingBuf = pendingMessages.get(sessionKey) ?? [];
+        if (_pendingBuf.length === 0) return; // already consumed by a prior batch drain
+        let batch: CoordinatorMessage[];
+        const _firstEntry = _pendingBuf[0];
+        if (isQueueLevelCommand(_firstEntry, params)) {
+          // Command: process only this entry; leave the rest for subsequent handlers.
+          batch = [_firstEntry];
+          if (_pendingBuf.length > 1) {
+            pendingMessages.set(sessionKey, _pendingBuf.slice(1));
+          } else {
+            pendingMessages.delete(sessionKey);
+          }
+        } else {
+          // Regular messages: take all up to (but not including) the first command.
+          const _cmdIdx = _pendingBuf.findIndex((m, i) => i > 0 && isQueueLevelCommand(m, params));
+          if (_cmdIdx === -1) {
+            batch = _pendingBuf.slice();
+            pendingMessages.delete(sessionKey);
+          } else {
+            batch = _pendingBuf.slice(0, _cmdIdx);
+            pendingMessages.set(sessionKey, _pendingBuf.slice(_cmdIdx));
+          }
+        }
+        const activeMsg = batch[batch.length - 1];
+        const isBatch = batch.length > 1;
+
         let reply: ReplyTarget | null = null;
         let abortSignal: AbortSignal | undefined;
         try {
@@ -1965,7 +2017,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          reply = await msg.reply({ content: formatBoldLabel(thinkingLabel(0)), allowedMentions: NO_MENTIONS });
+          reply = await activeMsg.reply({ content: formatBoldLabel(thinkingLabel(0)), allowedMentions: NO_MENTIONS });
 
           // Track this reply for graceful shutdown cleanup and cleanup on early error.
           let replyFinalized = false;
@@ -2121,8 +2173,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               ? `---\nStartup context:\n${startupLine}\n\n`
               : '') +
             `---\nThe sections above are internal system context. Never quote, reference, or explain them in your response. Respond only to the user message below.\n\n` +
-            `---\nUser message:\n` +
-            String(msg.content ?? '');
+            formatBatchedUserMessages(batch);
 
           if (params.discordActionsEnabled && !isDm) {
             prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags, params.botDisplayName);
@@ -2658,13 +2709,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 }
                 taskStatusContext = parts.join('\n');
               }
+              const _batchedUserContent = isBatch
+                ? batch.map(m => String(m.content ?? '')).join('\n')
+                : String(msg.content ?? '');
               pendingSummaryWork = {
                 summarySeq,
                 existingSummary: summarySection || null,
                 exchange:
                   (historySection ? historySection + '\n' : '') +
-                  `[${msg.author.displayName || msg.author.username}]: ${msg.content}\n` +
+                  `[${activeMsg.author.displayName || activeMsg.author.username}]: ${_batchedUserContent}\n` +
                   `[${params.botDisplayName}]: ${(processedText || '').slice(0, 500)}`,
+                userMessageText: _batchedUserContent,
                 ...(taskStatusContext !== undefined ? { taskStatusContext } : {}),
               };
             } else if (summarySection) {
@@ -2683,7 +2738,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             const ch = asThreadChannel(msg.channel);
             if (isChannelPublic(ch, msg.guild)) {
               pendingShortTermAppend = {
-                userContent: String(msg.content ?? ''),
+                userContent: isBatch
+                  ? batch.map(m => String(m.content ?? '')).join('\n')
+                  : String(msg.content ?? ''),
                 botResponse: (processedText || '').slice(0, 300),
                 channelName: String(ch?.name ?? ch?.parent?.name ?? msg.channelId),
                 channelId: msg.channelId,
@@ -2738,7 +2795,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             const ch = asThreadChannel(msg.channel);
             await applyUserTurnToDurable({
               runtime: params.runtime,
-              userMessageText: String(msg.content ?? ''),
+              userMessageText: work.userMessageText ?? String(msg.content ?? ''),
               userId: msg.author.id,
               durableDataDir: params.durableDataDir,
               durableMaxItems: params.durableMaxItems,
