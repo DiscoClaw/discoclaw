@@ -13,7 +13,7 @@ import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection
 import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './actions.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
-import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
+import { shouldTriggerFollowUp } from './action-categories.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { CronContext } from './actions-crons.js';
 import type { ForgeContext } from './actions-forge.js';
@@ -2546,18 +2546,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             // -- auto-follow-up check --
             if (followUpDepth >= params.actionFollowupDepth) break;
             if (actions.length === 0) break;
-            const actionTypes = actions.map((a) => a.type);
-            // Non-query action failures (e.g. generateImage) trigger a follow-up so the
-            // bot can explain the failure in plain language. Query action failures do not,
-            // because there's no useful result data to analyse.
-            const anyNonQueryActionFailed = actionResults.some(
-              (r, i) => r && !r.ok && !QUERY_ACTION_TYPES.has(actions[i]?.type ?? ''),
-            );
-            if (!hasQueryAction(actionTypes) && !anyNonQueryActionFailed) break;
-            const anyQuerySucceeded = actions.some(
-              (a, i) => QUERY_ACTION_TYPES.has(a.type) && actionResults[i]?.ok,
-            );
-            if (!anyQuerySucceeded && !anyNonQueryActionFailed) break;
+            if (!shouldTriggerFollowUp(actions, actionResults)) break;
 
             // Build follow-up prompt with action results.
             const followUpLines = buildAllResultLines(actionResults);

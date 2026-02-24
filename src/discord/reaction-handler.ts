@@ -8,7 +8,7 @@ import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
-import { hasQueryAction, QUERY_ACTION_TYPES } from './action-categories.js';
+import { shouldTriggerFollowUp } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { tryAbortAll } from './abort-registry.js';
 import { getActiveOrchestrator } from './forge-plan-registry.js';
@@ -698,11 +698,7 @@ function createReactionHandler(
           // -- auto-follow-up check --
           if (followUpDepth >= params.actionFollowupDepth) break;
           if (parsedActions.length === 0) break;
-          if (!hasQueryAction(parsedActions.map((a) => a.type))) break;
-          const anyQuerySucceeded = parsedActions.some(
-            (a, i) => QUERY_ACTION_TYPES.has(a.type) && actionResults[i]?.ok,
-          );
-          if (!anyQuerySucceeded) break;
+          if (!shouldTriggerFollowUp(parsedActions, actionResults)) break;
 
           // Build follow-up prompt with action results.
           const followUpLines = buildAllResultLines(actionResults);
