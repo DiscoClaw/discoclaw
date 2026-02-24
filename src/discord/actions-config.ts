@@ -1,6 +1,8 @@
 import type { DiscordActionResult } from './actions.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import type { ImagegenContext } from './actions-imagegen.js';
+import { resolveDefaultModel, resolveProvider } from './actions-imagegen.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,6 +40,7 @@ export type ConfigMutableParams = {
   };
   taskCtx?: { autoTagModel: string };
   planCtx?: { model?: string };
+  imagegenCtx?: ImagegenContext;
 };
 
 // ---------------------------------------------------------------------------
@@ -164,6 +167,12 @@ export function executeConfigAction(
       const taskAutoTagModel = bp.taskCtx?.autoTagModel;
       if (taskAutoTagModel) {
         rows.push(['tasks-auto-tag', taskAutoTagModel, 'Tasks auto-tagging']);
+      }
+
+      if (bp.imagegenCtx) {
+        const igModel = resolveDefaultModel(bp.imagegenCtx);
+        const igProvider = resolveProvider(igModel);
+        rows.push(['imagegen', igModel, `Image generation (${igProvider})`]);
       }
 
       const adapterDefault = configCtx.runtime.defaultModel;
