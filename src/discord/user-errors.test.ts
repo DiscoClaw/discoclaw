@@ -29,9 +29,18 @@ describe('mapRuntimeErrorToUserMessage', () => {
     expect(msg).toContain('Claude CLI authentication');
   });
 
-  it('maps stream stall errors to stall-specific user message', () => {
+  it('maps stream stall errors to stall-specific user message with duration', () => {
     const msg = mapRuntimeErrorToUserMessage('stream stall: no output for 120000ms');
     expect(msg).toContain('stream stalled');
+    expect(msg).toContain('120000ms');
+    expect(msg).toContain('2 min');
     expect(msg).toContain('DISCOCLAW_STREAM_STALL_TIMEOUT_MS');
+  });
+
+  it('maps malformed stall errors to generic stall message without duration', () => {
+    const msg = mapRuntimeErrorToUserMessage('stream stall: timeout');
+    expect(msg).toContain('stream stalled');
+    expect(msg).toContain('DISCOCLAW_STREAM_STALL_TIMEOUT_MS');
+    expect(msg).not.toContain('ms /');
   });
 });

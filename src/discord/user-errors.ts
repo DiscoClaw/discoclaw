@@ -40,6 +40,18 @@ export function mapRuntimeErrorToUserMessage(raw: string): string {
   }
 
   if (lc.includes('stream stall')) {
+    const msMatch = msg.match(/no output for (\d+)ms/i);
+    if (msMatch) {
+      const ms = parseInt(msMatch[1], 10);
+      const humanDuration = ms >= 60000
+        ? `${Math.round(ms / 60000)} min`
+        : `${Math.round(ms / 1000)} sec`;
+      return (
+        `The runtime stream stalled (no output for ${ms}ms / ${humanDuration}). ` +
+        `This may indicate a long-running tool or API hang. ` +
+        `Ask the bot to increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow more time.`
+      );
+    }
     return 'The runtime stream stalled (no output received). This may indicate a network issue or API hang. Try again or increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS.';
   }
 
