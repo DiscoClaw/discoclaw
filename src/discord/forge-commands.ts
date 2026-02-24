@@ -11,6 +11,7 @@ import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { getSection, parsePlan } from './plan-parser.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
+import { matchesDestructivePattern } from '../runtime/tool-call-gate.js';
 export { parseAuditVerdict };
 export type { AuditVerdict };
 
@@ -409,13 +410,17 @@ export function appendAuditRound(
 // ---------------------------------------------------------------------------
 
 /**
- * Wraps a RuntimeAdapter so every emitted EngineEvent is forwarded to
- * `onEvent` before being yielded to the pipeline engine. Errors thrown by
+ * Wraps a RuntimeAdapter so every emitted EngineEvent is optionally forwarded
+ * to `onEvent` before being yielded to the pipeline engine. Errors thrown by
  * `onEvent` are swallowed to prevent UI callbacks from aborting execution.
+ *
+ * When `onDestructive` is provided, every `tool_start` event is checked against
+ * the destructive-pattern registry and the callback is invoked on the first match.
  */
 function wrapWithEventForwarding(
   rt: RuntimeAdapter,
-  onEvent: (evt: EngineEvent) => void,
+  onEvent: ((evt: EngineEvent) => void) | undefined,
+  onDestructive?: (reason: string) => void,
 ): RuntimeAdapter {
   return {
     id: rt.id,
@@ -423,7 +428,13 @@ function wrapWithEventForwarding(
     invoke(params) {
       return (async function* (): AsyncGenerator<EngineEvent> {
         for await (const evt of rt.invoke(params)) {
-          try { onEvent(evt); } catch { /* UI callback errors must not abort execution */ }
+          if (onDestructive && evt.type === 'tool_start') {
+            const { matched, reason } = matchesDestructivePattern(evt.name, evt.input);
+            if (matched) onDestructive(reason);
+          }
+          if (onEvent) {
+            try { onEvent(evt); } catch { /* UI callback errors must not abort execution */ }
+          }
           yield evt;
         }
       })();
@@ -466,6 +477,8 @@ export function isRetryableError(msg: string): boolean {
 export class ForgeOrchestrator {
   private running = false;
   private cancelRequested = false;
+  private destructiveDetected = false;
+  private destructiveReason = '';
   private abortController = new AbortController();
   private currentPlanId: string | undefined;
   private opts: ForgeOrchestratorOpts;
@@ -710,6 +723,13 @@ export class ForgeOrchestrator {
     } = params;
     const t0 = params.t0 ?? Date.now();
 
+    this.destructiveDetected = false;
+    this.destructiveReason = '';
+    const onDestructive = (reason: string): void => {
+      this.destructiveDetected = true;
+      this.destructiveReason = reason;
+    };
+
     const rawDrafterModel = this.opts.drafterModel ?? this.opts.model;
     const rawAuditorModel = this.opts.auditorModel ?? this.opts.model;
     const drafterRt = this.opts.drafterRuntime ?? this.opts.runtime;
@@ -727,8 +747,8 @@ export class ForgeOrchestrator {
     const drafterSessionKey = `forge:${planId}:${rawDrafterModel}:drafter`;
     const auditorSessionKey = `forge:${planId}:${rawAuditorModel}:auditor`;
 
-    // Wrap drafter runtime to forward events to the onEvent callback when provided.
-    const effectiveDrafterRt = onEvent ? wrapWithEventForwarding(drafterRt, onEvent) : drafterRt;
+    // Wrap drafter runtime to forward events and detect destructive tool calls.
+    const effectiveDrafterRt = wrapWithEventForwarding(drafterRt, onEvent, onDestructive);
 
     let round = startRound - 1; // will be incremented at top of loop
     let planContent = await fs.readFile(filePath, 'utf-8');
@@ -741,6 +761,21 @@ export class ForgeOrchestrator {
     while (round < maxRound) {
       if (this.cancelRequested) {
         await this.updatePlanStatus(filePath, 'CANCELLED');
+        return {
+          planId,
+          filePath,
+          finalVerdict: 'CANCELLED',
+          rounds: round - startRound + 1,
+          reachedMaxRounds: false,
+        };
+      }
+
+      if (this.destructiveDetected) {
+        await this.updatePlanStatus(filePath, 'CANCELLED');
+        await onProgress(
+          `Forge halted — destructive tool call blocked (${this.destructiveReason}). Plan saved: \`!plan show ${planId}\``,
+          { force: true },
+        );
         return {
           planId,
           filePath,
@@ -833,7 +868,7 @@ export class ForgeOrchestrator {
         projectContext,
         { hasTools: auditorHasFileTools },
       );
-      const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(auditorRt, onEvent) : auditorRt;
+      const effectiveAuditorRt = wrapWithEventForwarding(auditorRt, onEvent, onDestructive);
       const auditPipelineResult = await this.runWithRetry({
         steps: [{
           kind: 'prompt',
