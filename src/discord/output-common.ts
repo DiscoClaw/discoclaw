@@ -162,19 +162,61 @@ export function shouldSuppressFollowUp(
 }
 
 /**
+ * Known-but-flag-gated action types mapped to actionable enable instructions.
+ * Types not listed here are treated as truly unknown (typo or hallucination).
+ */
+const DISABLED_TYPE_HELP: Record<string, string> = {
+  // Image generation — requires DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN + an API key.
+  generateImage:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` in .env (also requires `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`).',
+  // Moderation — requires DISCOCLAW_DISCORD_ACTIONS_MODERATION.
+  ban: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',
+  kick: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',
+  timeout: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',
+};
+
+/**
  * Build a user-facing note for action types that were stripped because they
  * were unknown or disabled by the current action category flags.
+ *
+ * For known-but-disabled types, includes the env var needed to enable them.
+ * For truly unknown types, falls back to a generic "unknown type" notice.
  */
 export function buildUnavailableActionTypesNotice(strippedTypes: string[]): string {
   const uniqueTypes = Array.from(
     new Set(strippedTypes.map((t) => t.trim()).filter(Boolean)),
   );
   if (uniqueTypes.length === 0) return '';
-  const renderedTypes = uniqueTypes.map((t) => `\`${t}\``).join(', ');
-  if (uniqueTypes.length === 1) {
-    return `Ignored unavailable action type: ${renderedTypes} (unknown type or category disabled).`;
+
+  const knownLines: string[] = [];
+  const unknownTypes: string[] = [];
+  const seenHelp = new Set<string>();
+
+  for (const t of uniqueTypes) {
+    const help = DISABLED_TYPE_HELP[t];
+    if (help) {
+      // Deduplicate help lines (e.g. ban + kick share the same message).
+      const line = `\`${t}\` is disabled. ${help}`;
+      if (!seenHelp.has(help)) {
+        seenHelp.add(help);
+        // Group types sharing the same help text onto one line.
+        const sharedTypes = uniqueTypes.filter((u) => DISABLED_TYPE_HELP[u] === help);
+        const label = sharedTypes.map((u) => `\`${u}\``).join(', ');
+        knownLines.push(`${label} ${sharedTypes.length === 1 ? 'is' : 'are'} disabled. ${help}`);
+      }
+    } else {
+      unknownTypes.push(t);
+    }
   }
-  return `Ignored unavailable action types: ${renderedTypes} (unknown type or category disabled).`;
+
+  const parts: string[] = [...knownLines];
+  if (unknownTypes.length > 0) {
+    const rendered = unknownTypes.map((t) => `\`${t}\``).join(', ');
+    const noun = unknownTypes.length === 1 ? 'type' : 'types';
+    parts.push(`Ignored unavailable action ${noun}: ${rendered} (unknown type or category disabled).`);
+  }
+
+  return parts.join('\n');
 }
 
 export function appendUnavailableActionTypesNotice(

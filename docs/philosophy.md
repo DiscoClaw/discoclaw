@@ -14,6 +14,8 @@ DiscoClaw is an orchestrator, not a platform. These principles guide what we bui
 
 **Opinionated defaults, minimal config.** ~90 env vars exist but the quick start needs two. Features ship enabled with good defaults or disabled with a clear reason. We don't add toggles for things that should just work one way.
 
+**Follow the flag, don't double-gate.** If a feature is controlled by an env flag, that flag is the single source of truth — we don't also hardcode it off in specific execution contexts. Double-gating creates invisible restrictions that silently ignore user intent. When a disabled action is attempted, the system should explain what env var enables it, not just say "unavailable."
+
 **Single-user by design.** One bot, one human, one private server. No multi-user auth, no concurrent access guards, no shared state. This constraint keeps the codebase honest — we don't over-engineer for scenarios that don't exist.
 
 **State is files, not infrastructure.** JSON files in `data/`, markdown in `workspace/`, channel context in `content/`. No database server, no Redis, no external dependencies beyond Node and the AI runtime. Backups are Dropbox sync or `cp -r`.

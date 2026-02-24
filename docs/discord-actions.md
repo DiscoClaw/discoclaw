@@ -297,7 +297,7 @@ Valid sizes:
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0). Requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY` to be set; the action will fail at runtime if neither is present.
 Context: Requires `ImagegenContext` with `apiKey` (OpenAI), `geminiApiKey`, `baseUrl`, and `defaultModel`.
-Excluded from cron flows (no user context, and image generation from automated jobs is generally undesirable).
+Available in cron flows when `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` is set — follows the env flag rather than being hardcoded off.
 
 ### Reaction Prompt Actions (`reaction-prompts.ts`)
 
@@ -321,12 +321,14 @@ When actions are executed within a cron job (via `src/cron/executor.ts`), the fo
 - `memory` — no user context in cron flows
 - `config` — no relevant runtime context in cron flows
 - `defer` — deferred runs target Discord message flows, not cron flows
-- `imagegen` — no user context; image generation from automated jobs is generally undesirable
 
 The following categories are **enabled** in cron flows (gated by their respective env flags):
 
 - `forge` — enables cron → forge autonomous workflows (e.g., scheduled plan drafting)
 - `plan` — enables cron → plan autonomous workflows (e.g., check for approved plans and run them)
+- `imagegen` — enables cron-triggered image generation (e.g., weather-image automations); requires `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` and an API key
+
+**Principle:** A feature gated by an env flag should follow that flag everywhere. We don't hardcode it off in an additional place — if the user configured it, crons can use it.
 
 ### Deferred Runner (`deferred-runner.ts`)
 
