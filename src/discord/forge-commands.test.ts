@@ -739,9 +739,18 @@ describe('ForgeOrchestrator', () => {
     expect(progress.some((p) => p.includes('Forge stopped after 3 audit rounds'))).toBe(true);
   });
 
-  it('reports error when draft phase fails', async () => {
+  it('reports error when draft phase fails both attempts', async () => {
     const tmpDir = await makeTmpDir();
-    const runtime = makeMockRuntimeWithError(0, []);
+    // Both draft attempts (original + retry) must error.
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(_params) {
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'error', message: 'Runtime crashed' };
+        })();
+      },
+    };
     const opts = await baseOpts(tmpDir, runtime);
     const orchestrator = new ForgeOrchestrator(opts);
 
@@ -754,11 +763,29 @@ describe('ForgeOrchestrator', () => {
     expect(progress.some((p) => p.includes('Forge failed'))).toBe(true);
   });
 
-  it('reports error when audit phase fails but preserves draft', async () => {
+  it('reports error when audit phase fails both attempts but preserves draft', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
-    // Draft succeeds, audit errors
-    const runtime = makeMockRuntimeWithError(1, [draftPlan]);
+    // Draft succeeds; both audit attempts (original + retry) fail
+    // makeMockRuntimeWithError errors on errorOnCall index; after the error, responses[idx] is used.
+    // We need call 1 and call 2 both to error. Use a custom runtime for clarity.
+    let callIdx = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(_params) {
+        const idx = callIdx++;
+        if (idx === 0) {
+          return (async function* (): AsyncGenerator<EngineEvent> {
+            yield { type: 'text_final', text: draftPlan };
+          })();
+        }
+        // idx 1 and 2 (audit attempt + retry) both error
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'error', message: 'Runtime crashed' };
+        })();
+      },
+    };
     const opts = await baseOpts(tmpDir, runtime);
     const orchestrator = new ForgeOrchestrator(opts);
 
@@ -1174,6 +1201,136 @@ describe('ForgeOrchestrator', () => {
 
     expect(result.finalVerdict).toBe('CANCELLED');
     expect(result.error).toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Retry behavior
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns a runtime where each call index maps to either an error event or a
+   * text response. `'error'` entries emit a runtime error; strings emit text.
+   */
+  function makeRetryableRuntime(callMap: Array<string | 'error'>): RuntimeAdapter {
+    let callIndex = 0;
+    return {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(_params) {
+        const entry = callMap[callIndex] ?? 'error';
+        callIndex++;
+        if (entry === 'error') {
+          return (async function* (): AsyncGenerator<EngineEvent> {
+            yield { type: 'error', message: 'subprocess crashed' };
+          })();
+        }
+        const text = entry;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+        })();
+      },
+    };
+  }
+
+  it('retries draft phase on failure and completes if retry succeeds', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    // Call 0: draft attempt 1 → error, Call 1: draft retry → success, Call 2: audit → clean
+    const runtime = makeRetryableRuntime(['error', draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.rounds).toBe(1);
+    expect(progress.some((p) => p.includes('Draft') && p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+  });
+
+  it('retries audit phase on failure and completes if retry succeeds', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    // Call 0: draft → success, Call 1: audit attempt 1 → error, Call 2: audit retry → clean
+    const runtime = makeRetryableRuntime([draftPlan, 'error', auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.rounds).toBe(1);
+    expect(progress.some((p) => p.includes('Audit round 1') && p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+  });
+
+  it('reports phase-specific error when draft fails twice', async () => {
+    const tmpDir = await makeTmpDir();
+
+    // Both draft attempts (attempt + retry) fail
+    const runtime = makeRetryableRuntime(['error', 'error']);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('Draft');
+    expect(progress.some((p) => p.includes('Draft') && p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge failed'))).toBe(true);
+  });
+
+  it('reports phase-specific error when audit fails twice', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+
+    // Draft succeeds; both audit attempts fail
+    const runtime = makeRetryableRuntime([draftPlan, 'error', 'error']);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('Audit round');
+    expect(progress.some((p) => p.includes('Audit round 1') && p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Partial plan saved'))).toBe(true);
+  });
+
+  it('retry notice is posted with force: true', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    // Draft fails once then succeeds on retry
+    const runtime = makeRetryableRuntime(['error', draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const calls: Array<{ msg: string; force?: boolean }> = [];
+    await orchestrator.run('Test feature', async (msg, optsArg) => {
+      calls.push({ msg, force: optsArg?.force });
+    });
+
+    const retryCall = calls.find((c) => c.msg.includes('retrying'));
+    expect(retryCall).toBeDefined();
+    expect(retryCall!.force).toBe(true);
   });
 
   it('passes existingTaskId through to handlePlanCommand (skips create)', async () => {

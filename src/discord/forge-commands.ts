@@ -727,7 +727,7 @@ export class ForgeOrchestrator {
           contextSummary,
         );
 
-        const draftPipelineResult = await this.runCancellable({
+        const draftPipelineResult = await this.runPhaseWithRetry({
           steps: [{
             kind: 'prompt',
             prompt: drafterPrompt,
@@ -742,7 +742,7 @@ export class ForgeOrchestrator {
           cwd: this.opts.cwd,
           model: this.opts.model,
           signal: this.abortController.signal,
-        });
+        }, 'Draft', onProgress);
         if (!draftPipelineResult) {
           await this.updatePlanStatus(filePath, 'CANCELLED');
           return {
@@ -799,7 +799,7 @@ export class ForgeOrchestrator {
         { hasTools: auditorHasFileTools },
       );
       const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(auditorRt, onEvent) : auditorRt;
-      const auditPipelineResult = await this.runCancellable({
+      const auditPipelineResult = await this.runPhaseWithRetry({
         steps: [{
           kind: 'prompt',
           prompt: auditorPrompt,
@@ -814,7 +814,7 @@ export class ForgeOrchestrator {
         cwd: this.opts.cwd,
         model: this.opts.model,
         signal: this.abortController.signal,
-      });
+      }, `Audit round ${round}`, onProgress);
       if (!auditPipelineResult) {
         await this.updatePlanStatus(filePath, 'CANCELLED');
         return {
@@ -872,7 +872,7 @@ export class ForgeOrchestrator {
         projectContext,
       );
 
-      const revisionPipelineResult = await this.runCancellable({
+      const revisionPipelineResult = await this.runPhaseWithRetry({
         steps: [{
           kind: 'prompt',
           prompt: revisionPrompt,
@@ -887,7 +887,7 @@ export class ForgeOrchestrator {
         cwd: this.opts.cwd,
         model: this.opts.model,
         signal: this.abortController.signal,
-      });
+      }, `Revision after round ${round}`, onProgress);
       if (!revisionPipelineResult) {
         await this.updatePlanStatus(filePath, 'CANCELLED');
         return {
@@ -1035,6 +1035,34 @@ export class ForgeOrchestrator {
     } catch (err) {
       if (this.cancelRequested) return null;
       throw err;
+    }
+  }
+
+  /**
+   * Runs a pipeline phase with one automatic retry on failure.
+   * Posts a phase-specific retry notice to Discord via onProgress before retrying.
+   * Returns null if the run was cancelled; throws with a phase-specific message
+   * if both attempts fail.
+   */
+  private async runPhaseWithRetry(
+    def: Parameters<typeof runPipeline>[0],
+    phase: string,
+    onProgress: ProgressFn,
+  ): Promise<{ outputs: string[] } | null> {
+    try {
+      return await this.runCancellable(def);
+    } catch (firstErr) {
+      if (this.cancelRequested) return null;
+      const firstMsg = String(firstErr instanceof Error ? firstErr.message : firstErr);
+      this.opts.log?.warn({ err: firstErr, phase }, 'forge:retry');
+      await onProgress(`Forge: ${phase} failed, retrying... (${firstMsg})`, { force: true });
+      try {
+        return await this.runCancellable(def);
+      } catch (secondErr) {
+        if (this.cancelRequested) return null;
+        const secondMsg = String(secondErr instanceof Error ? secondErr.message : secondErr);
+        throw new Error(`${phase} failed after retry: ${secondMsg}`);
+      }
     }
   }
 
