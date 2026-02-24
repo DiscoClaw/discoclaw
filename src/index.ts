@@ -1060,7 +1060,7 @@ if (cronEnabled && effectiveCronForum) {
     memory: false, // No user context in cron flows.
     config: false, // No model switching from cron flows.
     defer: false,
-    imagegen: false,
+    imagegen: Boolean(botParams.imagegenCtx), // Follows env flag (DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN + API key) — cron jobs may generate images if explicitly configured.
   };
   const cronRunControl = new CronRunControl();
 
@@ -1118,6 +1118,7 @@ if (cronEnabled && effectiveCronForum) {
     cronCtx,
     forgeCtx: botParams.forgeCtx,
     planCtx: botParams.planCtx,
+    imagegenCtx: botParams.imagegenCtx,
     statsStore: cronStats,
     lockDir: cronLocksDir,
     runControl: cronRunControl,

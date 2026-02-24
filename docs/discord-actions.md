@@ -42,6 +42,7 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-defer.ts`
 - `src/discord/defer-scheduler.ts` (defer scheduler implementation)
 - `src/discord/actions-config.ts`
+- `src/discord/actions-imagegen.ts`
 - `src/discord/reaction-prompts.ts`
 
 Channel action types (in `src/discord/actions-channels.ts`):
@@ -77,6 +78,9 @@ Defer action types (in `src/discord/actions-defer.ts`):
 
 Config action types (in `src/discord/actions-config.ts`):
 - `modelSet`, `modelShow`
+
+Imagegen action types (in `src/discord/actions-imagegen.ts`):
+- `generateImage`
 
 Reaction prompt types (in `src/discord/reaction-prompts.ts`):
 - `reactionPrompt` (gated under messaging flag — only available when messaging actions are enabled)
@@ -114,6 +118,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1; also requires plan commands enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
+  - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
   - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
 
@@ -269,6 +274,31 @@ No subsystem context required beyond `ConfigContext` (holds `botParams` and the 
 No separate env flag — config actions are always enabled when the master switch is on.
 `modelShow` is a query action: it triggers the auto-follow-up loop so the model can read and reason about the current configuration.
 
+### Imagegen Actions (`actions-imagegen.ts`)
+
+Allow the model to generate images via OpenAI or Gemini and post them to a Discord channel.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `generateImage` | Generate an image and post it to a channel | Yes |
+
+Fields: `prompt` (required), `channel` (optional — defaults to current channel), `model` (optional), `provider` (optional: `openai` or `gemini`, auto-detected from model prefix), `size` (optional), `quality` (optional: `standard` or `hd`, dall-e-3 only), `caption` (optional).
+
+Available models:
+- OpenAI: `dall-e-3`, `gpt-image-1`
+- Gemini: `imagen-4.0-generate-001`, `imagen-4.0-fast-generate-001`, `imagen-4.0-ultra-generate-001`
+
+Default model is auto-detected from available API keys: if only `IMAGEGEN_GEMINI_API_KEY` is set → `imagen-4.0-generate-001`; otherwise → `dall-e-3`. Override with `IMAGEGEN_DEFAULT_MODEL`.
+
+Valid sizes:
+- OpenAI dall-e-3: `1024x1024` (default), `1024x1792`, `1792x1024`, `256x256`, `512x512`
+- OpenAI gpt-image-1: same as above, plus `auto`
+- Gemini: `1:1` (default), `3:4`, `4:3`, `9:16`, `16:9`
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0). Requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY` to be set; the action will fail at runtime if neither is present.
+Context: Requires `ImagegenContext` with `apiKey` (OpenAI), `geminiApiKey`, `baseUrl`, and `defaultModel`.
+Available in cron flows when `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` is set — follows the env flag rather than being hardcoded off.
+
 ### Reaction Prompt Actions (`reaction-prompts.ts`)
 
 Allow the model to present an emoji-based multiple-choice question to the user without requiring a typed reply.
@@ -296,6 +326,9 @@ The following categories are **enabled** in cron flows (gated by their respectiv
 
 - `forge` — enables cron → forge autonomous workflows (e.g., scheduled plan drafting)
 - `plan` — enables cron → plan autonomous workflows (e.g., check for approved plans and run them)
+- `imagegen` — enables cron-triggered image generation (e.g., weather-image automations); requires `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` and an API key
+
+**Principle:** A feature gated by an env flag should follow that flag everywhere. We don't hardcode it off in an additional place — if the user configured it, crons can use it.
 
 ### Deferred Runner (`deferred-runner.ts`)
 
