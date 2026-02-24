@@ -1,6 +1,6 @@
 {
   "name": "discoclaw",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Minimal Discord bridge routing messages to AI runtimes",
   "license": "MIT",
   "repository": {

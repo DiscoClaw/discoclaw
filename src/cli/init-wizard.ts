@@ -40,8 +40,9 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   lines.push('# REQUIRED');
   lines.push(`DISCORD_TOKEN=${vals.DISCORD_TOKEN ?? ''}`);
   lines.push(`DISCORD_ALLOW_USER_IDS=${vals.DISCORD_ALLOW_USER_IDS ?? ''}`);
-  lines.push(`DISCOCLAW_TASKS_FORUM=${vals.DISCOCLAW_TASKS_FORUM ?? ''}`);
-  lines.push(`DISCOCLAW_CRON_FORUM=${vals.DISCOCLAW_CRON_FORUM ?? ''}`);
+  if (vals.DISCOCLAW_DATA_DIR) {
+    lines.push(`DISCOCLAW_DATA_DIR=${vals.DISCOCLAW_DATA_DIR}`);
+  }
   lines.push('');
 
   if (vals.PRIMARY_RUNTIME) {
@@ -76,6 +77,16 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   if (hasOptional) {
     lines.push('# OPTIONAL');
     for (const k of optionalKeys) {
+      if (vals[k]) lines.push(`${k}=${vals[k]}`);
+    }
+    lines.push('');
+  }
+
+  const autoDetectedKeys = ['DISCOCLAW_TASKS_FORUM', 'DISCOCLAW_CRON_FORUM'];
+  const hasAutoDetected = autoDetectedKeys.some((k) => vals[k]);
+  if (hasAutoDetected) {
+    lines.push('# AUTO-DETECTED');
+    for (const k of autoDetectedKeys) {
       if (vals[k]) lines.push(`${k}=${vals[k]}`);
     }
     lines.push('');
@@ -182,12 +193,25 @@ export async function runInitWizard(): Promise<void> {
       `  4. Enable "Message Content Intent" under Privileged Gateway Intents.\n` +
       `  5. Click "Reset Token", copy it — you'll enter it below.\n` +
       `  6. Invite your bot: Bot tab → OAuth2 → URL Generator\n` +
-      `     Scopes: bot   Permissions: Send Messages, Read Message History\n` +
+      `     Scopes: bot   Permissions: View Channels, Send Messages,\n` +
+      `     Read Message History, Manage Channels, Manage Threads,\n` +
+      `     Send Messages in Threads\n` +
       `     Open the generated URL and select your server.\n\n` +
       `Already have a bot? Just press Enter.\n`,
   );
 
   await ask('Press Enter to continue... ');
+
+  // ── Data directory ────────────────────────────────────────────────────────
+
+  const defaultDataDir = path.join(cwd, 'data');
+  const dataDirInput = await ask(`Data directory [${defaultDataDir}]: `);
+  const dataDir = dataDirInput.trim() || defaultDataDir;
+
+  // ── Collected values ──────────────────────────────────────────────────────
+
+  const values: Record<string, string> = {};
+  values.DISCOCLAW_DATA_DIR = dataDir;
 
   // ── Check existing .env ───────────────────────────────────────────────────
 
@@ -224,16 +248,27 @@ export async function runInitWizard(): Promise<void> {
     const backupPath = path.join(cwd, bkName);
     fs.copyFileSync(envPath, backupPath);
     console.log(`  Backed up to ${bkName}\n`);
+
+    // Carry forward auto-detected forum channel IDs so explicit overrides survive re-runs
+    const tasksMatch = existing.match(/^DISCOCLAW_TASKS_FORUM=(.*)$/m);
+    const cronMatch = existing.match(/^DISCOCLAW_CRON_FORUM=(.*)$/m);
+    if (tasksMatch?.[1]?.trim()) values.DISCOCLAW_TASKS_FORUM = tasksMatch[1].trim();
+    if (cronMatch?.[1]?.trim()) values.DISCOCLAW_CRON_FORUM = cronMatch[1].trim();
   }
 
   // ── Required values ───────────────────────────────────────────────────────
-
-  const values: Record<string, string> = {};
 
   values.DISCORD_TOKEN = await askValidated('Discord bot token: ', (val) => {
     const r = validateDiscordToken(val);
     return r.valid ? null : (r.reason ?? 'Invalid token format');
   });
+
+  console.log(
+    `\nDiscord User ID\n` +
+      `  A Discord user ID is an 18-19 digit number uniquely identifying your account.\n` +
+      `  To find yours: Settings → Advanced → enable Developer Mode,\n` +
+      `  then right-click your username anywhere and choose "Copy User ID".\n`,
+  );
 
   values.DISCORD_ALLOW_USER_IDS = await askValidated(
     'Allowed user IDs (comma-separated): ',
@@ -246,15 +281,7 @@ export async function runInitWizard(): Promise<void> {
     },
   );
 
-  values.DISCOCLAW_TASKS_FORUM = await askValidated(
-    'Tasks forum channel ID (required): ',
-    (val) => (validateSnowflake(val) ? null : 'Must be a 17-20 digit number'),
-  );
-
-  values.DISCOCLAW_CRON_FORUM = await askValidated(
-    'Automations forum channel ID (required): ',
-    (val) => (validateSnowflake(val) ? null : 'Must be a 17-20 digit number'),
-  );
+  // (DISCOCLAW_TASKS_FORUM and DISCOCLAW_CRON_FORUM are auto-created on first connect)
 
   // ── Runtime detection ─────────────────────────────────────────────────────
 
@@ -410,6 +437,7 @@ export async function runInitWizard(): Promise<void> {
 
   console.log('Configuration complete!\n');
   console.log('Next steps:');
+  console.log('  Note: The bot will auto-create its forum channels on first connect.');
   if (values.PRIMARY_RUNTIME === 'claude') {
     console.log(`  ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'gemini') {
