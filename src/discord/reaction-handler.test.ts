@@ -104,6 +104,8 @@ function mockQueue() {
 function makeParams(overrides?: Partial<Omit<BotParams, 'token'>>): Omit<BotParams, 'token'> {
   return {
     allowUserIds: new Set(['user-1']),
+    allowBotIds: new Set<string>(),
+    botMessageMemoryWriteEnabled: false,
     allowChannelIds: undefined,
     botDisplayName: 'TestBot',
     log: mockLog(),

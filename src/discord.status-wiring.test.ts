@@ -26,6 +26,8 @@ function makeMsg(overrides: Partial<any> = {}) {
 function baseParams(runtimeOverride: any) {
   return {
     allowUserIds: new Set(['123']),
+    allowBotIds: new Set<string>(),
+    botMessageMemoryWriteEnabled: false,
     botDisplayName: 'TestBot',
     runtime: runtimeOverride,
     sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,

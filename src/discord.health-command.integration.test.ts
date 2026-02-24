@@ -24,6 +24,8 @@ function makeMsg(content: string, authorId = '123') {
 function baseParams(metrics: MetricsRegistry, overrides: Partial<any> = {}) {
   return {
     allowUserIds: new Set(['123']),
+    allowBotIds: new Set<string>(),
+    botMessageMemoryWriteEnabled: false,
     botDisplayName: 'TestBot',
     runtime: { invoke: vi.fn(async function* () { yield { type: 'text_final', text: 'ok' } as any; }) } as any,
     sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,

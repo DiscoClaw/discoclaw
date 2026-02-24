@@ -93,6 +93,8 @@ describe('prompt inlines context file contents', () => {
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: '/tmp',
@@ -176,6 +178,8 @@ describe('prompt inlines context file contents', () => {
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: '/tmp',
@@ -249,6 +253,8 @@ describe('prompt inlines context file contents', () => {
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: '/tmp',
@@ -316,6 +322,8 @@ describe('discord action flags are not frozen at handler creation', () => {
 
     const params: any = {
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: '/tmp',
@@ -394,6 +402,8 @@ describe('durable memory injection into prompt', () => {
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: '/tmp',
@@ -472,6 +482,8 @@ describe('workspace PA files in prompt', () => {
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: workspace,
@@ -552,6 +564,8 @@ describe('workspace PA files in prompt', () => {
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: workspace,
@@ -621,6 +635,8 @@ describe('workspace PA files in prompt', () => {
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: workspace,
@@ -689,6 +705,8 @@ describe('memory command interception', () => {
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager,
       workspaceCwd: '/tmp',
@@ -765,6 +783,8 @@ function makeBeadParams(overrides?: Partial<any>) {
 
   const params: any = {
     allowUserIds: new Set(['123']),
+    allowBotIds: new Set<string>(),
+    botMessageMemoryWriteEnabled: false,
     runtime,
     sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
     workspaceCwd: '/tmp',
@@ -913,6 +933,8 @@ describe('!memory remember threads Discord metadata into durable source', () => 
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: '/tmp',
@@ -1028,6 +1050,8 @@ describe('bead resolution dispatch wiring', () => {
 
     const params: any = {
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd,

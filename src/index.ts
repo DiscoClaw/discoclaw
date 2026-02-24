@@ -93,6 +93,8 @@ initTierOverrides(process.env);
 
 const token = cfg.token;
 const allowUserIds = cfg.allowUserIds;
+const allowBotIds = cfg.allowBotIds;
+const botMessageMemoryWriteEnabled = cfg.botMessageMemoryWriteEnabled;
 const allowChannelIds = cfg.allowChannelIds;
 const restrictChannelIds = cfg.restrictChannelIds;
 
@@ -649,6 +651,8 @@ const statusLastMessageAt: { current: number | null } = { current: null };
 const botParams = {
   token,
   allowUserIds,
+  allowBotIds,
+  botMessageMemoryWriteEnabled,
   guildId,
   botDisplayName,
   dataDir: pidLockDir,

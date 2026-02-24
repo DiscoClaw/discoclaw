@@ -78,6 +78,8 @@ function baseParams(overrides: Partial<BotParams> = {}): BotParams {
   return {
     token: 'test-token',
     allowUserIds: new Set(['123']),
+    allowBotIds: new Set<string>(),
+    botMessageMemoryWriteEnabled: false,
     botDisplayName: 'TestBot',
     log: makeMockLog() as any,
     requireChannelContext: false,
