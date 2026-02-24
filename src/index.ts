@@ -49,7 +49,7 @@ import { ensureForumTags, isSnowflake } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
 import { startWebhookServer } from './webhook/server.js';
 import type { WebhookServer } from './webhook/server.js';
-import { resolveModel } from './runtime/model-tiers.js';
+import { resolveModel, initTierOverrides } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
 import { MemorySampler } from './observability/memory-sampler.js';
@@ -89,6 +89,7 @@ for (const info of parsedConfig.infos) {
   log.info(info);
 }
 const cfg = parsedConfig.config;
+initTierOverrides(process.env);
 
 const token = cfg.token;
 const allowUserIds = cfg.allowUserIds;
