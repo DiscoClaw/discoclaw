@@ -83,6 +83,31 @@ async function baseOpts(
   };
 }
 
+/**
+ * Returns a runtime where each call index maps to either an error event or a
+ * text response. `'error'` entries emit a runtime error; strings emit text.
+ */
+function makeRetryableRuntime(callMap: Array<string | 'error'>): RuntimeAdapter {
+  let callIndex = 0;
+  return {
+    id: 'claude_code' as const,
+    capabilities: new Set(['streaming_text' as const]),
+    invoke(_params) {
+      const entry = callMap[callIndex] ?? 'error';
+      callIndex++;
+      if (entry === 'error') {
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'error', message: 'hang detected' };
+        })();
+      }
+      const text = entry;
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        yield { type: 'text_final', text };
+      })();
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // parseForgeCommand
 // ---------------------------------------------------------------------------
@@ -1250,31 +1275,6 @@ describe('ForgeOrchestrator', () => {
   // ---------------------------------------------------------------------------
   // Retry behavior
   // ---------------------------------------------------------------------------
-
-  /**
-   * Returns a runtime where each call index maps to either an error event or a
-   * text response. `'error'` entries emit a runtime error; strings emit text.
-   */
-  function makeRetryableRuntime(callMap: Array<string | 'error'>): RuntimeAdapter {
-    let callIndex = 0;
-    return {
-      id: 'claude_code' as const,
-      capabilities: new Set(['streaming_text' as const]),
-      invoke(_params) {
-        const entry = callMap[callIndex] ?? 'error';
-        callIndex++;
-        if (entry === 'error') {
-          return (async function* (): AsyncGenerator<EngineEvent> {
-            yield { type: 'error', message: 'hang detected' };
-          })();
-        }
-        const text = entry;
-        return (async function* (): AsyncGenerator<EngineEvent> {
-          yield { type: 'text_final', text };
-        })();
-      },
-    };
-  }
 
   it('retries draft phase on failure and completes if retry succeeds', async () => {
     const tmpDir = await makeTmpDir();
