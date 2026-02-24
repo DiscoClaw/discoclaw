@@ -185,7 +185,7 @@ describe('runInitWizard', () => {
     const oldEnv = 'DISCORD_TOKEN=old.token.value\nDISCORD_ALLOW_USER_IDS=111111111111111111\n';
     const answers = [
       '', // Press Enter to continue
-      '', // data directory (default cwd)
+      '', // data directory (default cwd/data)
       'y', // Overwrite existing .env
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
@@ -221,7 +221,7 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('PRIMARY_RUNTIME=claude');
     expect(newEnv).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
     expect(newEnv).toContain('CLAUDE_OUTPUT_FORMAT=stream-json');
-    expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${tmpDir}`);
+    expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${path.join(tmpDir, 'data')}`);
     expect(ensureWorkspaceBootstrapFiles).toHaveBeenCalledWith(path.join(tmpDir, 'workspace'));
   });
 
@@ -230,7 +230,7 @@ describe('runInitWizard', () => {
     const previousCwd = process.cwd();
     const answers = [
       '', // Press Enter to continue
-      '', // data directory (default cwd)
+      '', // data directory (default cwd/data)
       // no existing .env
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
@@ -261,7 +261,7 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('PRIMARY_RUNTIME=openrouter');
     expect(newEnv).toContain('OPENROUTER_API_KEY=sk-or-test-key');
     expect(newEnv).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4');
-    expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${tmpDir}`);
+    expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${path.join(tmpDir, 'data')}`);
   });
 
   it('always writes DISCOCLAW_DATA_DIR when a custom path is given', async () => {
@@ -311,7 +311,7 @@ describe('runInitWizard', () => {
 
     const answers = [
       '', // Press Enter to continue
-      '', // data directory (default cwd)
+      '', // data directory (default cwd/data)
       'y', // Overwrite existing .env
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS

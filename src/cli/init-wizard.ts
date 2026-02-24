@@ -204,8 +204,9 @@ export async function runInitWizard(): Promise<void> {
 
   // ── Data directory ────────────────────────────────────────────────────────
 
-  const dataDirInput = await ask(`Data directory [${cwd}]: `);
-  const dataDir = dataDirInput.trim() || cwd;
+  const defaultDataDir = path.join(cwd, 'data');
+  const dataDirInput = await ask(`Data directory [${defaultDataDir}]: `);
+  const dataDir = dataDirInput.trim() || defaultDataDir;
 
   // ── Collected values ──────────────────────────────────────────────────────
 
