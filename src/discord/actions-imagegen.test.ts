@@ -99,8 +99,8 @@ describe('imagegenActionsPromptSection', () => {
 
 describe('resolveProvider', () => {
   it('detects gemini from imagen- prefix', () => {
-    expect(resolveProvider('imagen-3.0-generate-001')).toBe('gemini');
-    expect(resolveProvider('imagen-3.0-fast-generate-001')).toBe('gemini');
+    expect(resolveProvider('imagen-4.0-generate-001')).toBe('gemini');
+    expect(resolveProvider('imagen-4.0-fast-generate-001')).toBe('gemini');
   });
 
   it('detects openai from dall-e- prefix', () => {
@@ -118,7 +118,7 @@ describe('resolveProvider', () => {
   });
 
   it('respects explicit provider override over model prefix', () => {
-    expect(resolveProvider('imagen-3.0-generate-001', 'openai')).toBe('openai');
+    expect(resolveProvider('imagen-4.0-generate-001', 'openai')).toBe('openai');
     expect(resolveProvider('dall-e-3', 'gemini')).toBe('gemini');
     expect(resolveProvider('gpt-image-1', 'gemini')).toBe('gemini');
   });
@@ -690,13 +690,13 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1:1' },
       ctx,
       makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
     );
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict',
+      'https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
@@ -712,7 +712,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain lake', channel: '#art', model: 'imagen-3.0-generate-001', size: '16:9' },
+      { type: 'generateImage', prompt: 'A mountain lake', channel: '#art', model: 'imagen-4.0-generate-001', size: '16:9' },
       ctx,
       makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
     );
@@ -729,7 +729,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     const result = await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1:1' },
       ctx,
       makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
     );
@@ -751,7 +751,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     const result = await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1:1' },
       ctx,
       makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
     );
@@ -767,7 +767,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     const result = await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1:1' },
       ctx,
       makeImagegenCtx({ geminiApiKey: 'bad-key' }),
     );
@@ -784,7 +784,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     const result = await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1:1' },
       ctx,
       makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
     );
@@ -801,7 +801,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     const result = await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1:1' },
       ctx,
       makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
     );
@@ -816,7 +816,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     const result = await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1:1' },
       ctx,
       makeImagegenCtx(), // no geminiApiKey
     );
@@ -831,7 +831,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     const result = await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1024x1024' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1024x1024' },
       ctx,
       makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
     );
@@ -849,7 +849,7 @@ describe('generateImage — Gemini', () => {
       const ctx = makeCtx([ch]);
 
       const result = await executeImagegenAction(
-        { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size },
+        { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size },
         ctx,
         makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
       );
@@ -863,7 +863,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001' },
       ctx,
       makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
     );
@@ -894,7 +894,7 @@ describe('generateImage — Gemini', () => {
     const ctx = makeCtx([ch]);
 
     await executeImagegenAction(
-      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1024x1024', provider: 'openai' },
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1024x1024', provider: 'openai' },
       ctx,
       makeImagegenCtx({ apiKey: 'openai-key' }),
     );
@@ -903,5 +903,88 @@ describe('generateImage — Gemini', () => {
       expect.stringContaining('api.openai.com'),
       expect.anything(),
     );
+  });
+});
+
+describe('default model resolution', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('uses explicit defaultModel from context when set', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx({ defaultModel: 'gpt-image-1' }),
+    );
+
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody.model).toBe('gpt-image-1');
+  });
+
+  it('auto-detects Gemini default when only geminiApiKey is present', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiSuccessResponse()));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx({ apiKey: undefined, geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('imagen-4.0-generate-001:predict'),
+      expect.anything(),
+    );
+  });
+
+  it('falls back to dall-e-3 when apiKey is present', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx({ apiKey: 'openai-key' }),
+    );
+
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody.model).toBe('dall-e-3');
+  });
+
+  it('falls back to dall-e-3 when both keys are present', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx({ apiKey: 'openai-key', geminiApiKey: 'gemini-key' }),
+    );
+
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody.model).toBe('dall-e-3');
+  });
+
+  it('explicit action.model wins over imagegenCtx.defaultModel when both are set', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'dall-e-2' },
+      ctx,
+      makeImagegenCtx({ defaultModel: 'gpt-image-1' }),
+    );
+
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody.model).toBe('dall-e-2');
   });
 });

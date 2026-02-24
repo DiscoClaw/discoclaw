@@ -19,13 +19,13 @@ export type ImagegenContext = {
   apiKey?: string;
   baseUrl?: string;
   geminiApiKey?: string;
+  defaultModel?: string;
 };
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MODEL = 'dall-e-3';
 const DEFAULT_SIZE_OPENAI = '1024x1024';
 const DEFAULT_SIZE_GEMINI = '1:1';
 
@@ -39,6 +39,12 @@ const DISCORD_MAX_CONTENT = 2000;
 // ---------------------------------------------------------------------------
 // Provider resolution
 // ---------------------------------------------------------------------------
+
+function resolveDefaultModel(imagegenCtx: ImagegenContext): string {
+  if (imagegenCtx.defaultModel) return imagegenCtx.defaultModel;
+  if (imagegenCtx.geminiApiKey && !imagegenCtx.apiKey) return 'imagen-4.0-generate-001';
+  return 'dall-e-3';
+}
 
 export function resolveProvider(model: string, explicit?: 'openai' | 'gemini'): 'openai' | 'gemini' {
   if (explicit !== undefined) return explicit;
@@ -184,7 +190,7 @@ export async function executeImagegenAction(
       if (!action.prompt?.trim()) {
         return { ok: false, error: 'generateImage requires a non-empty prompt' };
       }
-      const model = action.model ?? DEFAULT_MODEL;
+      const model = action.model ?? resolveDefaultModel(imagegenCtx);
       const provider = resolveProvider(model, action.provider);
       const defaultSize = provider === 'gemini' ? DEFAULT_SIZE_GEMINI : DEFAULT_SIZE_OPENAI;
       const size = action.size ?? defaultSize;
@@ -279,7 +285,7 @@ export function imagegenActionsPromptSection(): string {
 \`\`\`
 - \`prompt\` (required): Text description of the image to generate.
 - \`channel\` (optional): Channel name (with or without #) or channel ID to post the image to. Defaults to the current channel/thread if omitted.
-- \`model\` (optional): Model to use. Default: \`dall-e-3\`. Available models:
+- \`model\` (optional): Model to use. Default depends on configuration (auto-detected from available API keys). Available models:
   - OpenAI: \`dall-e-3\`, \`gpt-image-1\`
   - Gemini: \`imagen-4.0-generate-001\`, \`imagen-4.0-fast-generate-001\`, \`imagen-4.0-ultra-generate-001\`
 - \`provider\` (optional): \`openai\` or \`gemini\`. Auto-detected from model prefix if omitted.
