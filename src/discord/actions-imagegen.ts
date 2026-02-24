@@ -118,12 +118,14 @@ async function callGemini(
   size: string,
   geminiApiKey: string,
 ): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateImages`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`;
 
   const body: Record<string, unknown> = {
-    prompt,
-    number_of_images: 1,
-    aspect_ratio: size,
+    instances: [{ prompt }],
+    parameters: {
+      sampleCount: 1,
+      aspectRatio: size,
+    },
   };
 
   let response: Response;
@@ -152,7 +154,7 @@ async function callGemini(
     return { ok: false, error: `generateImage: API error ${response.status}${detail ? `: ${detail}` : ''}` };
   }
 
-  type GeminiResponse = { generatedImages?: Array<{ image?: { imageBytes?: string } }> };
+  type GeminiResponse = { predictions?: Array<{ bytesBase64Encoded?: string }> };
   let data: GeminiResponse;
   try {
     data = await response.json() as GeminiResponse;
@@ -160,7 +162,7 @@ async function callGemini(
     return { ok: false, error: 'generateImage: failed to parse API response' };
   }
 
-  const b64 = data.generatedImages?.[0]?.image?.imageBytes;
+  const b64 = data.predictions?.[0]?.bytesBase64Encoded;
   if (!b64) {
     return { ok: false, error: 'generateImage: API returned no image data' };
   }
@@ -279,7 +281,7 @@ export function imagegenActionsPromptSection(): string {
 - \`channel\` (optional): Channel name (with or without #) or channel ID to post the image to. Defaults to the current channel/thread if omitted.
 - \`model\` (optional): Model to use. Default: \`dall-e-3\`. Available models:
   - OpenAI: \`dall-e-3\`, \`gpt-image-1\`
-  - Gemini: \`imagen-3.0-generate-001\`, \`imagen-3.0-fast-generate-001\`
+  - Gemini: \`imagen-4.0-generate-001\`, \`imagen-4.0-fast-generate-001\`, \`imagen-4.0-ultra-generate-001\`
 - \`provider\` (optional): \`openai\` or \`gemini\`. Auto-detected from model prefix if omitted.
 - \`size\` (optional): Depends on provider:
   - OpenAI dall-e-3 / dall-e-2: pixel dimensions — \`1024x1024\` (default), \`1024x1792\`, \`1792x1024\`, \`256x256\`, \`512x512\`
