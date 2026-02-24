@@ -1611,13 +1611,54 @@ describe('reaction prompt interception', () => {
     const handler = createReactionAddHandler(params, queue);
     await handler(reaction as any, mockUser() as any);
 
-    // reactionPrompt is not in QUERY_ACTION_TYPES, so the auto-follow-up loop does not fire.
+    // shouldTriggerFollowUp returns false when a non-query action succeeds (reactionPrompt
+    // is a non-query action that succeeded here), so the auto-follow-up loop does not fire.
     // The second invocation (acting on the user's choice) happens in a separate handler call
     // triggered when the user actually reacts to the prompt message.
     expect(invokeCalls).toHaveLength(1);
 
     // The prompt was registered — the reaction handler will intercept the user's reaction.
     expect(reactionPrompts.pendingPromptCount()).toBe(1);
+  });
+
+  it('non-query action failure triggers follow-up so bot can explain the error', async () => {
+    const invokeCalls: any[] = [];
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeCalls.push(p);
+        if (invokeCalls.length === 1) {
+          // First call: emit a generateImage action — non-query, will fail because
+          // no imagegenCtx is configured ("Imagegen subsystem not configured").
+          yield { type: 'text_final', text: 'Generating:\n<discord-action>{"type":"generateImage","prompt":"A mountain"}</discord-action>' };
+          yield { type: 'done' };
+        } else {
+          // Follow-up call: bot explains the failure.
+          yield { type: 'text_final', text: 'Sorry, image generation is not configured on this bot.' };
+          yield { type: 'done' };
+        }
+      },
+    };
+
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsImagegen: true,
+      actionFollowupDepth: 1,
+    });
+
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    await handler(mockReaction() as any, mockUser() as any);
+
+    // The initial invoke emits a failing non-query action, so shouldTriggerFollowUp
+    // returns true and the bot is re-invoked to explain the error.
+    expect(invokeCalls).toHaveLength(2);
+    const followUpPrompt: string = invokeCalls[1].prompt;
+    expect(followUpPrompt).toContain('[Auto-follow-up]');
+    expect(followUpPrompt).toContain('Failed:');
   });
 });
 

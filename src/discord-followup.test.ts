@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { ChannelType } from 'discord.js';
 
 import { createMessageCreateHandler } from './discord.js';
-import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
+import { hasQueryAction, QUERY_ACTION_TYPES, shouldTriggerFollowUp } from './discord/action-categories.js';
 import { inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
 import * as abortRegistry from './discord/abort-registry.js';
 import { _resetDestructiveConfirmationForTest as resetDestructiveConfirm } from './discord/destructive-confirmation.js';
@@ -156,6 +156,46 @@ describe('QUERY_ACTION_TYPES', () => {
 
   it('contains forgeStatus (forgeStatus returns data the model must synthesize into a reply)', () => {
     expect(QUERY_ACTION_TYPES.has('forgeStatus')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shouldTriggerFollowUp unit tests
+// ---------------------------------------------------------------------------
+
+describe('shouldTriggerFollowUp', () => {
+  it('returns false when there are no actions', () => {
+    expect(shouldTriggerFollowUp([], [])).toBe(false);
+  });
+
+  it('returns false when all non-query actions succeed', () => {
+    const actions = [{ type: 'sendMessage' }, { type: 'channelCreate' }];
+    const results = [{ ok: true as const }, { ok: true as const }];
+    expect(shouldTriggerFollowUp(actions, results)).toBe(false);
+  });
+
+  it('returns true when a query action succeeds', () => {
+    const actions = [{ type: 'channelList' }];
+    const results = [{ ok: true as const }];
+    expect(shouldTriggerFollowUp(actions, results)).toBe(true);
+  });
+
+  it('returns true when a non-query action fails', () => {
+    const actions = [{ type: 'sendMessage' }];
+    const results = [{ ok: false as const }];
+    expect(shouldTriggerFollowUp(actions, results)).toBe(true);
+  });
+
+  it('returns true when both a query action succeeds and a non-query action fails', () => {
+    const actions = [{ type: 'channelList' }, { type: 'sendMessage' }];
+    const results = [{ ok: true as const }, { ok: false as const }];
+    expect(shouldTriggerFollowUp(actions, results)).toBe(true);
+  });
+
+  it('returns false when only a query action fails', () => {
+    const actions = [{ type: 'channelList' }];
+    const results = [{ ok: false as const }];
+    expect(shouldTriggerFollowUp(actions, results)).toBe(false);
   });
 });
 
