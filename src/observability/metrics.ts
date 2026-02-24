@@ -1,6 +1,6 @@
 import type { MemoryStats, MemorySampler } from './memory-sampler.js';
 
-export type InvokeFlow = 'message' | 'reaction' | 'cron';
+export type InvokeFlow = 'message' | 'reaction' | 'cron' | 'defer';
 
 export type MetricsSnapshot = {
   startedAt: number;
@@ -33,6 +33,7 @@ export class MetricsRegistry {
     message: [],
     reaction: [],
     cron: [],
+    defer: [],
   };
   private readonly maxLatencySamples = 400;
   private memorySampler?: MemorySampler;
@@ -73,6 +74,7 @@ export class MetricsRegistry {
         message: this.latencySummary('message'),
         reaction: this.latencySummary('reaction'),
         cron: this.latencySummary('cron'),
+        defer: this.latencySummary('defer'),
       },
     };
     if (this.memorySampler) {

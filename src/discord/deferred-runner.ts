@@ -26,6 +26,8 @@ import {
 } from './prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import { globalMetrics } from '../observability/metrics.js';
+import type { StatusPoster } from './status-channel.js';
 
 type ThreadChannelShape = {
   isThread?: () => boolean;
@@ -70,6 +72,7 @@ export type ConfigureDeferredSchedulerOpts = {
   useGroupDirCwd: boolean;
   botDisplayName: string;
   log?: LoggerLike;
+  status?: StatusPoster | null;
 };
 
 function getThreadParentId(candidate: unknown): string | null {
@@ -108,13 +111,13 @@ export function configureDeferredScheduler(
     const { action, context } = run;
     const guild = context.guild;
     if (!guild) {
-      opts.log?.warn({ run, action }, 'defer:missing-guild');
+      opts.log?.warn({ flow: 'defer', run, action }, 'defer:missing-guild');
       return;
     }
 
     const channel = resolveChannel(guild, action.channel);
     if (!channel) {
-      opts.log?.warn({ run, channel: action.channel }, 'defer:target channel not found');
+      opts.log?.warn({ flow: 'defer', run, channel: action.channel }, 'defer:target channel not found');
       return;
     }
 
@@ -124,7 +127,7 @@ export function configureDeferredScheduler(
         opts.state.allowChannelIds.has(channel.id) ||
         (parentId && opts.state.allowChannelIds.has(parentId));
       if (!allowed) {
-        opts.log?.warn({ channelId: channel.id }, 'defer:target channel not allowlisted');
+        opts.log?.warn({ flow: 'defer', channelId: channel.id }, 'defer:target channel not allowlisted');
         return;
       }
     }
@@ -146,7 +149,7 @@ export function configureDeferredScheduler(
           required: new Set(opts.discordChannelContext?.paContextFiles ?? []),
         });
       } catch (err) {
-        opts.log?.warn({ err, channelId: channel.id }, 'defer:context inline failed');
+        opts.log?.warn({ flow: 'defer', channelId: channel.id, err }, 'defer:context inline failed');
       }
     }
 
@@ -174,7 +177,7 @@ export function configureDeferredScheduler(
       if (toolsInfo.permissionNote) noteLines.push(`Permission note: ${toolsInfo.permissionNote}`);
       if (toolsInfo.runtimeCapabilityNote) noteLines.push(`Runtime capability note: ${toolsInfo.runtimeCapabilityNote}`);
     } catch (err) {
-      opts.log?.warn({ err }, 'defer:resolve effective tools failed');
+      opts.log?.warn({ flow: 'defer', channelId: channel.id, err }, 'defer:resolve effective tools failed');
     }
 
     if (noteLines.length > 0) {
@@ -186,9 +189,13 @@ export function configureDeferredScheduler(
     if (opts.discordChannelContext) addDirs.push(opts.discordChannelContext.contentDir);
     const uniqueAddDirs = addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined;
 
+    const t0 = Date.now();
+    globalMetrics.recordInvokeStart('defer');
+    opts.log?.info({ flow: 'defer', channelId: channel.id }, 'obs.invoke.start');
     let finalText = '';
     let deltaText = '';
     let runtimeError: string | undefined;
+    let invokeResultRecorded = false;
     try {
       for await (const evt of opts.runtime.invoke({
         prompt,
@@ -205,6 +212,11 @@ export function configureDeferredScheduler(
         } else if (evt.type === 'error') {
           runtimeError = evt.message;
           finalText = mapRuntimeErrorToUserMessage(evt.message);
+          globalMetrics.recordInvokeResult('defer', Date.now() - t0, false, evt.message);
+          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+          opts.status?.runtimeError({ sessionKey: `defer:${channel.id}` }, evt.message);
+          opts.log?.warn({ flow: 'defer', channelId: channel.id, error: evt.message }, 'obs.invoke.error');
+          invokeResultRecorded = true;
           break;
         }
       }
@@ -212,7 +224,17 @@ export function configureDeferredScheduler(
       const msg = err instanceof Error ? err.message : String(err);
       runtimeError ??= msg;
       finalText = mapRuntimeErrorToUserMessage(msg);
-      opts.log?.warn({ err }, 'defer:runtime invocation failed');
+      if (!invokeResultRecorded) {
+        globalMetrics.recordInvokeResult('defer', Date.now() - t0, false, msg);
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        opts.status?.runtimeError({ sessionKey: `defer:${channel.id}` }, msg);
+        invokeResultRecorded = true;
+      }
+      opts.log?.warn({ flow: 'defer', channelId: channel.id, err }, 'defer:runtime invocation failed');
+    }
+    if (!invokeResultRecorded) {
+      globalMetrics.recordInvokeResult('defer', Date.now() - t0, true);
+      opts.log?.info({ flow: 'defer', channelId: channel.id, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');
     }
 
     const processedText = finalText || deltaText || '';
@@ -239,6 +261,15 @@ export function configureDeferredScheduler(
         configCtx: opts.state.configCtx,
         imagegenCtx: opts.state.imagegenCtx,
       });
+      for (let i = 0; i < actionResults.length; i++) {
+        const result = actionResults[i];
+        globalMetrics.recordActionResult(result.ok);
+        opts.log?.info({ flow: 'defer', channelId: channel.id, ok: result.ok }, 'obs.action.result');
+        if (!result.ok) {
+          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+          opts.status?.actionFailed(parsed.actions[i].type, result.error);
+        }
+      }
     }
 
     const displayLines = buildDisplayResultLines(parsed.actions, actionResults);
@@ -256,7 +287,7 @@ export function configureDeferredScheduler(
     try {
       await channel.send({ content: outgoingText, allowedMentions: NO_MENTIONS });
     } catch (err) {
-      opts.log?.warn({ err, channelId: channel.id }, 'defer:failed to post follow-up');
+      opts.log?.warn({ flow: 'defer', channelId: channel.id, err }, 'defer:failed to post follow-up');
     }
   };
 
