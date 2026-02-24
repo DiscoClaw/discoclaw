@@ -499,3 +499,164 @@ describe('TaskStore — persistence', () => {
     await expect(store.load()).resolves.toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// reload
+// ---------------------------------------------------------------------------
+
+describe('TaskStore — reload', () => {
+  it('returns empty diff when no persistPath is configured', async () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    store.create({ title: 'T' });
+    const diff = await store.reload();
+    expect(diff).toEqual({ added: [], updated: [], removed: [] });
+  });
+
+  it('returns empty diff on ENOENT', async () => {
+    const store = new TaskStore({ prefix: 'ws', persistPath: '/tmp/no-such-file-reload-99999.jsonl' });
+    const diff = await store.reload();
+    expect(diff).toEqual({ added: [], updated: [], removed: [] });
+  });
+
+  it('detects tasks added on disk since last load', async () => {
+    const fsp = await import('node:fs/promises');
+    const path = '/tmp/discoclaw-test-reload-added.jsonl';
+    await fsp.default.unlink(path).catch(() => {});
+
+    // Store has no tasks; write one directly to disk
+    const diskTask = {
+      id: 'ws-001', title: 'Disk only', status: 'open',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    };
+    await fsp.default.writeFile(path, JSON.stringify(diskTask) + '\n', 'utf8');
+
+    const store = new TaskStore({ prefix: 'ws', persistPath: path });
+    const diff = await store.reload();
+
+    expect(diff.added).toEqual(['ws-001']);
+    expect(diff.updated).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(store.get('ws-001')?.title).toBe('Disk only');
+
+    await fsp.default.unlink(path).catch(() => {});
+  });
+
+  it('detects tasks updated on disk', async () => {
+    const fsp = await import('node:fs/promises');
+    const path = '/tmp/discoclaw-test-reload-updated.jsonl';
+    await fsp.default.unlink(path).catch(() => {});
+
+    const store = new TaskStore({ prefix: 'ws', persistPath: path });
+    store.create({ title: 'Original' }); // ws-001
+    await store.flush();
+
+    // Simulate external edit: overwrite the file with a modified title
+    const edited = {
+      id: 'ws-001', title: 'Edited externally', status: 'open',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
+    };
+    await fsp.default.writeFile(path, JSON.stringify(edited) + '\n', 'utf8');
+
+    const diff = await store.reload();
+
+    expect(diff.added).toEqual([]);
+    expect(diff.updated).toEqual(['ws-001']);
+    expect(diff.removed).toEqual([]);
+    expect(store.get('ws-001')?.title).toBe('Edited externally');
+
+    await fsp.default.unlink(path).catch(() => {});
+  });
+
+  it('detects tasks removed from disk', async () => {
+    const fsp = await import('node:fs/promises');
+    const path = '/tmp/discoclaw-test-reload-removed.jsonl';
+    await fsp.default.unlink(path).catch(() => {});
+
+    const store = new TaskStore({ prefix: 'ws', persistPath: path });
+    store.create({ title: 'Will be removed' }); // ws-001
+    await store.flush();
+
+    // Simulate external removal: write an empty file
+    await fsp.default.writeFile(path, '', 'utf8');
+
+    const diff = await store.reload();
+
+    expect(diff.added).toEqual([]);
+    expect(diff.updated).toEqual([]);
+    expect(diff.removed).toEqual(['ws-001']);
+    expect(store.size()).toBe(0);
+
+    await fsp.default.unlink(path).catch(() => {});
+  });
+
+  it('replaces in-memory map with the full disk state', async () => {
+    const fsp = await import('node:fs/promises');
+    const path = '/tmp/discoclaw-test-reload-replace.jsonl';
+    await fsp.default.unlink(path).catch(() => {});
+
+    const store = new TaskStore({ prefix: 'ws', persistPath: path });
+    store.create({ title: 'Mem only' }); // ws-001 — will be gone after reload
+    await store.flush();
+
+    // Replace file with a completely different task
+    const diskTask = {
+      id: 'ws-002', title: 'Disk replacement', status: 'open',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    };
+    await fsp.default.writeFile(path, JSON.stringify(diskTask) + '\n', 'utf8');
+
+    await store.reload();
+
+    expect(store.get('ws-001')).toBeUndefined();
+    expect(store.get('ws-002')?.title).toBe('Disk replacement');
+    expect(store.size()).toBe(1);
+
+    await fsp.default.unlink(path).catch(() => {});
+  });
+
+  it('advances the counter to prevent ID collisions with externally-added tasks', async () => {
+    const fsp = await import('node:fs/promises');
+    const path = '/tmp/discoclaw-test-reload-counter.jsonl';
+    await fsp.default.unlink(path).catch(() => {});
+
+    // Write a task with a high ID directly to disk
+    const diskTask = {
+      id: 'ws-050', title: 'High ID task', status: 'open',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    };
+    await fsp.default.writeFile(path, JSON.stringify(diskTask) + '\n', 'utf8');
+
+    const store = new TaskStore({ prefix: 'ws', persistPath: path });
+    await store.reload();
+
+    // Next created task should not collide with ws-050
+    const next = store.create({ title: 'New' });
+    expect(parseInt(next.id.split('-')[1], 10)).toBeGreaterThan(50);
+
+    await fsp.default.unlink(path).catch(() => {});
+  });
+
+  it('does not emit store events', async () => {
+    const fsp = await import('node:fs/promises');
+    const path = '/tmp/discoclaw-test-reload-no-events.jsonl';
+    await fsp.default.unlink(path).catch(() => {});
+
+    const diskTask = {
+      id: 'ws-001', title: 'New on disk', status: 'open',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    };
+    await fsp.default.writeFile(path, JSON.stringify(diskTask) + '\n', 'utf8');
+
+    const store = new TaskStore({ prefix: 'ws', persistPath: path });
+    const events: string[] = [];
+    store.on('created', () => events.push('created'));
+    store.on('updated', () => events.push('updated'));
+    store.on('closed', () => events.push('closed'));
+
+    await store.reload();
+
+    expect(events).toHaveLength(0);
+
+    await fsp.default.unlink(path).catch(() => {});
+  });
+});
