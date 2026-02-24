@@ -76,6 +76,9 @@ export type DiscoclawConfig = {
   openaiBaseUrl?: string;
   openaiModel: string;
 
+  // Imagegen provider keys
+  imagegenGeminiApiKey?: string;
+
   forgeDrafterRuntime?: string;
   forgeAuditorRuntime?: string;
 
@@ -424,6 +427,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
   const openaiBaseUrl = parseTrimmedString(env, 'OPENAI_BASE_URL');
   const openaiModel = parseTrimmedString(env, 'OPENAI_MODEL') ?? 'gpt-4o';
+  const imagegenGeminiApiKey = parseTrimmedString(env, 'IMAGEGEN_GEMINI_API_KEY');
   if (primaryRuntime === 'openai' && !openaiApiKey) {
     warnings.push('PRIMARY_RUNTIME=openai but OPENAI_API_KEY is not set; startup will fail unless another runtime is selected.');
   }
@@ -433,8 +437,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   if (forgeAuditorRuntime === 'openai' && !openaiApiKey) {
     warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to the primary runtime.');
   }
-  if (discordActionsImagegen && !openaiApiKey) {
-    warnings.push('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1 but OPENAI_API_KEY is not set; imagegen will fail at runtime.');
+  if (discordActionsImagegen && !openaiApiKey && !imagegenGeminiApiKey) {
+    warnings.push('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1 but neither OPENAI_API_KEY nor IMAGEGEN_GEMINI_API_KEY is set; imagegen will fail at runtime.');
   }
 
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
@@ -546,6 +550,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiApiKey,
       openaiBaseUrl,
       openaiModel,
+      imagegenGeminiApiKey,
       forgeDrafterRuntime,
       forgeAuditorRuntime,
 
