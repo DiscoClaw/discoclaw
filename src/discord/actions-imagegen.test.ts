@@ -302,8 +302,25 @@ describe('generateImage', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('rejects empty channel', async () => {
-    const ctx = makeCtx([]);
+  it('generates image in originating channel when channel is omitted', async () => {
+    const originCh = makeMockChannel({ id: 'origin-ch', name: 'general' });
+    const ctx = makeCtx([originCh]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Generated image posted to #general' });
+    expect(originCh.send).toHaveBeenCalledWith(
+      expect.objectContaining({ files: expect.arrayContaining([expect.anything()]) }),
+    );
+  });
+
+  it('generates image in originating channel when channel is empty string', async () => {
+    const originCh = makeMockChannel({ id: 'origin-ch', name: 'general' });
+    const ctx = makeCtx([originCh]);
 
     const result = await executeImagegenAction(
       { type: 'generateImage', prompt: 'A mountain', channel: '' },
@@ -311,8 +328,24 @@ describe('generateImage', () => {
       makeImagegenCtx(),
     );
 
-    expect(result).toEqual({ ok: false, error: 'generateImage requires a non-empty channel' });
-    expect(fetch).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, summary: 'Generated image posted to #general' });
+    expect(originCh.send).toHaveBeenCalled();
+  });
+
+  it('still resolves an explicit channel name when provided', async () => {
+    const artCh = makeMockChannel({ id: 'ch-art', name: 'art' });
+    const originCh = makeMockChannel({ id: 'origin-ch', name: 'general' });
+    const ctx = makeCtx([artCh, originCh]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Generated image posted to #art' });
+    expect(artCh.send).toHaveBeenCalled();
+    expect(originCh.send).not.toHaveBeenCalled();
   });
 
   it('rejects invalid size', async () => {

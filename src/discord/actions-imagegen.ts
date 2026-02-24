@@ -8,7 +8,7 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 // ---------------------------------------------------------------------------
 
 export type ImagegenActionRequest =
-  | { type: 'generateImage'; prompt: string; channel: string; size?: string; model?: string; quality?: string; caption?: string; provider?: 'openai' | 'gemini' };
+  | { type: 'generateImage'; prompt: string; channel?: string; size?: string; model?: string; quality?: string; caption?: string; provider?: 'openai' | 'gemini' };
 
 const IMAGEGEN_TYPE_MAP: Record<ImagegenActionRequest['type'], true> = {
   generateImage: true,
@@ -182,10 +182,6 @@ export async function executeImagegenAction(
       if (!action.prompt?.trim()) {
         return { ok: false, error: 'generateImage requires a non-empty prompt' };
       }
-      if (!action.channel?.trim()) {
-        return { ok: false, error: 'generateImage requires a non-empty channel' };
-      }
-
       const model = action.model ?? DEFAULT_MODEL;
       const provider = resolveProvider(model, action.provider);
       const defaultSize = provider === 'gemini' ? DEFAULT_SIZE_GEMINI : DEFAULT_SIZE_OPENAI;
@@ -215,14 +211,15 @@ export async function executeImagegenAction(
         return { ok: false, error: `Caption exceeds Discord's ${DISCORD_MAX_CONTENT} character limit (got ${action.caption.length})` };
       }
 
-      const channel = resolveChannel(ctx.guild, action.channel);
+      const channelInput = action.channel?.trim() || ctx.channelId;
+      const channel = resolveChannel(ctx.guild, channelInput);
       if (!channel) {
-        const raw = findChannelRaw(ctx.guild, action.channel);
+        const raw = findChannelRaw(ctx.guild, channelInput);
         if (raw) {
           const kind = describeChannelType(raw);
-          return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot receive messages directly.` };
+          return { ok: false, error: `Channel "${channelInput}" is a ${kind} channel and cannot receive messages directly.` };
         }
-        return { ok: false, error: `Channel "${action.channel}" not found` };
+        return { ok: false, error: `Channel "${channelInput}" not found` };
       }
 
       // Check API key availability
@@ -279,7 +276,7 @@ export function imagegenActionsPromptSection(): string {
 <discord-action>{"type":"generateImage","prompt":"A serene mountain lake at sunset","channel":"#art"}</discord-action>
 \`\`\`
 - \`prompt\` (required): Text description of the image to generate.
-- \`channel\` (required): Channel name (with or without #) or channel ID to post the image to.
+- \`channel\` (optional): Channel name (with or without #) or channel ID to post the image to. Defaults to the current channel/thread if omitted.
 - \`model\` (optional): Model to use. Default: \`dall-e-3\`. Available models:
   - OpenAI: \`dall-e-3\`, \`gpt-image-1\`
   - Gemini: \`imagen-3.0-generate-001\`, \`imagen-3.0-fast-generate-001\`
