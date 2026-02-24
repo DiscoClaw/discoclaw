@@ -184,6 +184,7 @@ describe('runInitWizard', () => {
     const previousCwd = process.cwd();
     const oldEnv = 'DISCORD_TOKEN=old.token.value\nDISCORD_ALLOW_USER_IDS=111111111111111111\n';
     const answers = [
+      '', // install directory (default)
       '', // Press Enter to continue
       '', // data directory (default cwd/data)
       'y', // Overwrite existing .env
@@ -229,6 +230,7 @@ describe('runInitWizard', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
     const previousCwd = process.cwd();
     const answers = [
+      '', // install directory (default)
       '', // Press Enter to continue
       '', // data directory (default cwd/data)
       // no existing .env
@@ -269,6 +271,7 @@ describe('runInitWizard', () => {
     const previousCwd = process.cwd();
     const customDataDir = path.join(tmpDir, 'my-data');
     const answers = [
+      '', // install directory (default)
       '', // Press Enter to continue
       customDataDir, // data directory (custom path)
       'a.b.c', // DISCORD_TOKEN
@@ -310,6 +313,7 @@ describe('runInitWizard', () => {
     ].join('\n') + '\n';
 
     const answers = [
+      '', // install directory (default)
       '', // Press Enter to continue
       '', // data directory (default cwd/data)
       'y', // Overwrite existing .env
@@ -346,5 +350,63 @@ describe('runInitWizard', () => {
     const autoDetectedIdx = newEnv.indexOf('# AUTO-DETECTED');
     const tasksIdx = newEnv.indexOf('DISCOCLAW_TASKS_FORUM=');
     expect(tasksIdx).toBeGreaterThan(autoDetectedIdx);
+  });
+
+  it('uses a custom install directory when a path is provided', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
+    const answers = [
+      tmpDir, // install directory (custom path)
+      '', // Press Enter to continue
+      '', // data directory (default)
+      'a.b.c', // DISCORD_TOKEN
+      '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '', // provider selection -> default (Claude)
+      '', // enable skip permissions
+      '', // enable stream-json
+      'n', // configure recommended settings
+      'n', // configure optional features
+    ];
+
+    vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('binary not found');
+    });
+    vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runInitWizard();
+
+    expect(fs.existsSync(path.join(tmpDir, '.env'))).toBe(true);
+    expect(ensureWorkspaceBootstrapFiles).toHaveBeenCalledWith(path.join(tmpDir, 'workspace'));
+  });
+
+  it('creates the install directory if it does not exist', async () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
+    const newDir = path.join(baseDir, 'new-subdir');
+    const answers = [
+      newDir, // install directory (non-existent path)
+      '', // Press Enter to continue
+      '', // data directory (default)
+      'a.b.c', // DISCORD_TOKEN
+      '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '', // provider selection -> default (Claude)
+      '', // enable skip permissions
+      '', // enable stream-json
+      'n', // configure recommended settings
+      'n', // configure optional features
+    ];
+
+    vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('binary not found');
+    });
+    vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runInitWizard();
+
+    expect(fs.existsSync(newDir)).toBe(true);
+    expect(fs.existsSync(path.join(newDir, '.env'))).toBe(true);
+    expect(ensureWorkspaceBootstrapFiles).toHaveBeenCalledWith(path.join(newDir, 'workspace'));
   });
 });
