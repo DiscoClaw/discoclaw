@@ -181,6 +181,35 @@ const DISABLED_TYPE_HELP: Record<string, string> = {
   botSetNickname: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1` in .env.',
   // Polls — requires DISCOCLAW_DISCORD_ACTIONS_POLLS.
   poll: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_POLLS=1` in .env.',
+  // Forge — requires DISCOCLAW_DISCORD_ACTIONS_FORGE + DISCOCLAW_FORGE_COMMANDS_ENABLED.
+  forgeCreate:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_FORGE=1` and `DISCOCLAW_FORGE_COMMANDS_ENABLED=1` in .env.',
+  forgeResume:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_FORGE=1` and `DISCOCLAW_FORGE_COMMANDS_ENABLED=1` in .env.',
+  forgeStatus:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_FORGE=1` and `DISCOCLAW_FORGE_COMMANDS_ENABLED=1` in .env.',
+  forgeCancel:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_FORGE=1` and `DISCOCLAW_FORGE_COMMANDS_ENABLED=1` in .env.',
+  // Plan — requires DISCOCLAW_DISCORD_ACTIONS_PLAN + DISCOCLAW_PLAN_COMMANDS_ENABLED.
+  planList:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_PLAN=1` and `DISCOCLAW_PLAN_COMMANDS_ENABLED=1` in .env.',
+  planShow:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_PLAN=1` and `DISCOCLAW_PLAN_COMMANDS_ENABLED=1` in .env.',
+  planApprove:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_PLAN=1` and `DISCOCLAW_PLAN_COMMANDS_ENABLED=1` in .env.',
+  planClose:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_PLAN=1` and `DISCOCLAW_PLAN_COMMANDS_ENABLED=1` in .env.',
+  planCreate:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_PLAN=1` and `DISCOCLAW_PLAN_COMMANDS_ENABLED=1` in .env.',
+  planRun:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_PLAN=1` and `DISCOCLAW_PLAN_COMMANDS_ENABLED=1` in .env.',
+  // Memory — requires DISCOCLAW_DISCORD_ACTIONS_MEMORY + DISCOCLAW_DURABLE_MEMORY_ENABLED.
+  memoryRemember:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MEMORY=1` and `DISCOCLAW_DURABLE_MEMORY_ENABLED=1` in .env.',
+  memoryForget:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MEMORY=1` and `DISCOCLAW_DURABLE_MEMORY_ENABLED=1` in .env.',
+  memoryShow:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MEMORY=1` and `DISCOCLAW_DURABLE_MEMORY_ENABLED=1` in .env.',
 };
 
 /**

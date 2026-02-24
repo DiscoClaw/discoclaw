@@ -188,10 +188,10 @@ describe('buildUnavailableActionTypesNotice', () => {
   });
 
   it('deduplicates and renders plural notice for multiple unavailable types', () => {
-    const out = buildUnavailableActionTypesNotice(['taskSync', 'taskSync', 'planRun']);
+    const out = buildUnavailableActionTypesNotice(['taskSync', 'taskSync', 'channelCreate']);
     expect(out).toContain('Ignored unavailable action types:');
     expect(out).toContain('`taskSync`');
-    expect(out).toContain('`planRun`');
+    expect(out).toContain('`channelCreate`');
   });
 
   it('renders specific enable-guidance for a known-disabled type (generateImage)', () => {
@@ -234,6 +234,45 @@ describe('buildUnavailableActionTypesNotice', () => {
     expect(out).toContain('DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1');
     // All three share the same help text — guidance should appear only once
     const occurrences = (out.match(/DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1/g) ?? []).length;
+    expect(occurrences).toBe(1);
+    expect(out).not.toContain('unknown type or category disabled');
+  });
+
+  it('renders forge enable-guidance for all forge action types', () => {
+    const out = buildUnavailableActionTypesNotice(['forgeCreate', 'forgeResume', 'forgeStatus', 'forgeCancel']);
+    expect(out).toContain('`forgeCreate`');
+    expect(out).toContain('`forgeResume`');
+    expect(out).toContain('`forgeStatus`');
+    expect(out).toContain('`forgeCancel`');
+    expect(out).toContain('DISCOCLAW_DISCORD_ACTIONS_FORGE=1');
+    expect(out).toContain('DISCOCLAW_FORGE_COMMANDS_ENABLED=1');
+    // All four share the same help text — guidance should appear only once
+    const occurrences = (out.match(/DISCOCLAW_DISCORD_ACTIONS_FORGE=1/g) ?? []).length;
+    expect(occurrences).toBe(1);
+    expect(out).not.toContain('unknown type or category disabled');
+  });
+
+  it('renders plan enable-guidance for all plan action types', () => {
+    const out = buildUnavailableActionTypesNotice(['planList', 'planShow', 'planApprove', 'planClose', 'planCreate', 'planRun']);
+    expect(out).toContain('`planList`');
+    expect(out).toContain('`planRun`');
+    expect(out).toContain('DISCOCLAW_DISCORD_ACTIONS_PLAN=1');
+    expect(out).toContain('DISCOCLAW_PLAN_COMMANDS_ENABLED=1');
+    // All six share the same help text — guidance should appear only once
+    const occurrences = (out.match(/DISCOCLAW_DISCORD_ACTIONS_PLAN=1/g) ?? []).length;
+    expect(occurrences).toBe(1);
+    expect(out).not.toContain('unknown type or category disabled');
+  });
+
+  it('renders memory enable-guidance for all memory action types', () => {
+    const out = buildUnavailableActionTypesNotice(['memoryRemember', 'memoryForget', 'memoryShow']);
+    expect(out).toContain('`memoryRemember`');
+    expect(out).toContain('`memoryForget`');
+    expect(out).toContain('`memoryShow`');
+    expect(out).toContain('DISCOCLAW_DISCORD_ACTIONS_MEMORY=1');
+    expect(out).toContain('DISCOCLAW_DURABLE_MEMORY_ENABLED=1');
+    // All three share the same help text — guidance should appear only once
+    const occurrences = (out.match(/DISCOCLAW_DISCORD_ACTIONS_MEMORY=1/g) ?? []).length;
     expect(occurrences).toBe(1);
     expect(out).not.toContain('unknown type or category disabled');
   });
