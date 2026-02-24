@@ -330,8 +330,12 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('DISCORD_ALLOW_USER_IDS is empty: bot will respond to nobody (fail closed)');
   }
 
-  const allowBotIds = parseAllowBotIds(env.DISCORD_ALLOW_BOT_IDS);
-  const botMessageMemoryWriteEnabled = env.BOT_MESSAGE_MEMORY_WRITE === 'true';
+  const allowBotIdsRaw = env.DISCORD_ALLOW_BOT_IDS;
+  const allowBotIds = parseAllowBotIds(allowBotIdsRaw);
+  if ((allowBotIdsRaw ?? '').trim().length > 0 && allowBotIds.size === 0) {
+    warnings.push('DISCORD_ALLOW_BOT_IDS was set but no valid IDs were parsed: trusted-bot allowlist is empty');
+  }
+  const botMessageMemoryWriteEnabled = parseBoolean(env, 'DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE', false);
 
   const allowChannelIdsRaw = env.DISCORD_CHANNEL_IDS;
   const restrictChannelIds = (allowChannelIdsRaw ?? '').trim().length > 0;

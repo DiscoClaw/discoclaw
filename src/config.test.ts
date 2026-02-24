@@ -64,20 +64,24 @@ describe('parseConfig', () => {
     expect(config.botMessageMemoryWriteEnabled).toBe(false);
   });
 
-  it('sets botMessageMemoryWriteEnabled to true when BOT_MESSAGE_MEMORY_WRITE=true', () => {
-    const { config } = parseConfig(env({ BOT_MESSAGE_MEMORY_WRITE: 'true' }));
+  it('sets botMessageMemoryWriteEnabled to true when DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE=true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE: 'true' }));
     expect(config.botMessageMemoryWriteEnabled).toBe(true);
   });
 
-  it('leaves botMessageMemoryWriteEnabled false when BOT_MESSAGE_MEMORY_WRITE=1', () => {
-    // Only the exact string "true" enables it; "1" is not accepted.
-    const { config } = parseConfig(env({ BOT_MESSAGE_MEMORY_WRITE: '1' }));
+  it('sets botMessageMemoryWriteEnabled to true when DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE=1', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE: '1' }));
+    expect(config.botMessageMemoryWriteEnabled).toBe(true);
+  });
+
+  it('leaves botMessageMemoryWriteEnabled false when DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE=false', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE: 'false' }));
     expect(config.botMessageMemoryWriteEnabled).toBe(false);
   });
 
-  it('leaves botMessageMemoryWriteEnabled false when BOT_MESSAGE_MEMORY_WRITE=false', () => {
-    const { config } = parseConfig(env({ BOT_MESSAGE_MEMORY_WRITE: 'false' }));
-    expect(config.botMessageMemoryWriteEnabled).toBe(false);
+  it('emits a warning when DISCORD_ALLOW_BOT_IDS is set but yields no valid IDs', () => {
+    const { warnings } = parseConfig(env({ DISCORD_ALLOW_BOT_IDS: 'not-a-snowflake' }));
+    expect(warnings.some((w) => w.includes('DISCORD_ALLOW_BOT_IDS was set but no valid IDs were parsed'))).toBe(true);
   });
 
   it('throws on invalid boolean values', () => {
