@@ -113,8 +113,7 @@ export async function runInitWizard(): Promise<void> {
     process.exit(1);
   }
 
-  const cwd = process.cwd();
-  const envPath = path.join(cwd, '.env');
+  let cwd = process.cwd();
   let rl: readline.Interface | null = null;
   let canceled = false;
   let completed = false;
@@ -177,10 +176,15 @@ export async function runInitWizard(): Promise<void> {
 
   // ── Welcome ──────────────────────────────────────────────────────────────
 
-  console.log(
-    `\nDiscoclaw Init\n==============\n` +
-      `This wizard creates a .env file and workspace/ directory in:\n  ${cwd}\n`,
-  );
+  console.log(`\nDiscoclaw Init\n==============`);
+  const installDirInput = await ask(`Install directory [${cwd}]: `);
+  if (installDirInput.trim()) {
+    cwd = path.resolve(installDirInput.trim());
+    if (!fs.existsSync(cwd)) {
+      fs.mkdirSync(cwd, { recursive: true });
+    }
+  }
+  console.log(`This wizard creates a .env file and workspace/ directory in:\n  ${cwd}\n`);
 
   // ── Discord bot guidance ──────────────────────────────────────────────────
 
@@ -214,6 +218,8 @@ export async function runInitWizard(): Promise<void> {
   values.DISCOCLAW_DATA_DIR = dataDir;
 
   // ── Check existing .env ───────────────────────────────────────────────────
+
+  const envPath = path.join(cwd, '.env');
 
   if (fs.existsSync(envPath)) {
     const existing = fs.readFileSync(envPath, 'utf8');
