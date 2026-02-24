@@ -17,6 +17,12 @@ type TaskStoreEventMap = {
 // Options
 // ---------------------------------------------------------------------------
 
+export type ReloadDiff = {
+  added: string[];
+  updated: string[];
+  removed: string[];
+};
+
 export type TaskStoreOptions = {
   /** Short prefix for generated IDs, e.g. "ws". Default: "t". */
   prefix?: string;
@@ -85,6 +91,68 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
   /** Await the most recently scheduled persist, if any. */
   async flush(): Promise<void> {
     await this.persistPromise;
+  }
+
+  /**
+   * Re-read the configured JSONL file and replace the in-memory map with the
+   * on-disk state. Returns a diff describing which task IDs were added, updated,
+   * or removed relative to what was in memory.
+   *
+   * No-op (returns empty diff) if no persistPath is configured.
+   * Does NOT emit store events — the caller handles reconciliation.
+   * Does NOT call flush() first — flushing would overwrite external edits.
+   */
+  async reload(): Promise<ReloadDiff> {
+    const diff: ReloadDiff = { added: [], updated: [], removed: [] };
+    if (!this.persistPath) return diff;
+
+    let content: string;
+    try {
+      content = await fs.readFile(this.persistPath, 'utf8');
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return diff;
+      throw err;
+    }
+
+    const diskTasks = new Map<string, TaskData>();
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const task = JSON.parse(trimmed) as TaskData;
+      diskTasks.set(task.id, task);
+    }
+
+    // Categorize changes before mutating the map
+    for (const [id, diskTask] of diskTasks) {
+      const memTask = this.tasks.get(id);
+      if (!memTask) {
+        diff.added.push(id);
+      } else if (JSON.stringify(memTask) !== JSON.stringify(diskTask)) {
+        diff.updated.push(id);
+      }
+    }
+    for (const id of this.tasks.keys()) {
+      if (!diskTasks.has(id)) {
+        diff.removed.push(id);
+      }
+    }
+
+    // Replace in-memory map with disk state
+    this.tasks.clear();
+    for (const [id, task] of diskTasks) {
+      this.tasks.set(id, task);
+    }
+
+    // Advance counter to prevent ID collisions with externally-added tasks
+    for (const id of diskTasks.keys()) {
+      const match = new RegExp(`^${this.prefix}-(\\d+)$`).exec(id);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > this.counter) this.counter = n;
+      }
+    }
+
+    return diff;
   }
 
   private schedulePersist(): void {

@@ -112,6 +112,7 @@ function makeStore() {
     update: vi.fn((id: string) => defaultTask(id)),
     close: vi.fn((id: string) => ({ ...defaultTask(id), status: 'closed' as const })),
     addLabel: vi.fn((id: string) => defaultTask(id)),
+    reload: vi.fn(async () => ({ added: [], updated: [], removed: [] })),
   };
 }
 
@@ -442,6 +443,42 @@ describe('executeTaskAction', () => {
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain('status-fixes');
     expect((result as any).summary).toContain('5 starters');
+  });
+
+  it('taskSync calls store.reload before running sync', async () => {
+    const store = makeStore();
+    await executeTaskAction(
+      { type: 'taskSync' },
+      makeCtx(),
+      makeTaskCtx({ store: store as any }),
+    );
+    expect(store.reload).toHaveBeenCalledOnce();
+  });
+
+  it('taskSync summary includes reload note when disk changes detected', async () => {
+    const store = makeStore();
+    (store.reload as any).mockResolvedValueOnce({ added: ['ws-001'], updated: ['ws-002'], removed: [] });
+
+    const result = await executeTaskAction(
+      { type: 'taskSync' },
+      makeCtx(),
+      makeTaskCtx({ store: store as any }),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('reloaded 2 changed tasks');
+  });
+
+  it('taskSync summary omits reload note when no disk changes', async () => {
+    const store = makeStore();
+    // Default mock already returns empty diff
+
+    const result = await executeTaskAction(
+      { type: 'taskSync' },
+      makeCtx(),
+      makeTaskCtx({ store: store as any }),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).not.toContain('reloaded');
   });
 
   it('taskSync passes statusPoster through to runTaskSync', async () => {

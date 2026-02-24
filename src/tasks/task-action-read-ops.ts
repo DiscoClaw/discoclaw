@@ -63,6 +63,15 @@ export async function handleTaskSync(
   taskCtx: TaskContext,
 ): Promise<TaskActionResult> {
   try {
+    const diff = await taskCtx.store.reload();
+    const totalChanged = diff.added.length + diff.updated.length + diff.removed.length;
+    if (totalChanged > 0) {
+      taskCtx.log?.info(
+        { added: diff.added.length, updated: diff.updated.length, removed: diff.removed.length },
+        'taskSync: reloaded tasks from disk',
+      );
+    }
+
     const result = await runTaskSync(
       taskCtx,
       { client: ctx.client, guild: ctx.guild },
@@ -72,9 +81,10 @@ export async function handleTaskSync(
       return { ok: true, summary: 'Sync already running; changes will be picked up.' };
     }
 
+    const reloadNote = totalChanged > 0 ? `, reloaded ${totalChanged} changed tasks` : '';
     return {
       ok: true,
-      summary: `Sync complete: ${result.threadsCreated} created, ${result.emojisUpdated} updated, ${result.starterMessagesUpdated} starters, ${result.tagsUpdated} tags, ${result.threadsArchived} archived, ${result.statusesUpdated} status-fixes${result.threadsReconciled ? `, ${result.threadsReconciled} reconciled` : ''}${result.orphanThreadsFound ? `, ${result.orphanThreadsFound} orphans` : ''}${result.warnings ? `, ${result.warnings} warnings` : ''}`,
+      summary: `Sync complete: ${result.threadsCreated} created, ${result.emojisUpdated} updated, ${result.starterMessagesUpdated} starters, ${result.tagsUpdated} tags, ${result.threadsArchived} archived, ${result.statusesUpdated} status-fixes${result.threadsReconciled ? `, ${result.threadsReconciled} reconciled` : ''}${result.orphanThreadsFound ? `, ${result.orphanThreadsFound} orphans` : ''}${result.warnings ? `, ${result.warnings} warnings` : ''}${reloadNote}`,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
