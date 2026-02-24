@@ -1118,6 +1118,7 @@ if (cronEnabled && effectiveCronForum) {
     cronCtx,
     forgeCtx: botParams.forgeCtx,
     planCtx: botParams.planCtx,
+    imagegenCtx: botParams.imagegenCtx,
     statsStore: cronStats,
     lockDir: cronLocksDir,
     runControl: cronRunControl,
