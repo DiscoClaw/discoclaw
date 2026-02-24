@@ -2,6 +2,7 @@ import { AttachmentBuilder } from 'discord.js';
 import { splitDiscord, truncateCodeBlocks } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import type { ImageData } from '../runtime/types.js';
+import { QUERY_ACTION_TYPES } from './action-categories.js';
 
 export function prepareDiscordOutput(text: string): string[] {
   const outText = truncateCodeBlocks(text);
@@ -272,6 +273,31 @@ export function buildParseFailureNotice(count: number): string {
     return 'Warning: 1 action block failed to parse (malformed JSON) and was skipped.';
   }
   return `Warning: ${count} action blocks failed to parse (malformed JSON) and were skipped.`;
+}
+
+/**
+ * Build a placeholder message for a follow-up triggered by a non-query action failure.
+ *
+ * Returns a formatted string like:
+ *   "⚠️ Action failed (`taskCreate`: description too long). Retrying..."
+ *
+ * Returns null when the follow-up was triggered by a query success rather than a failure.
+ */
+export function buildFailureRetryPlaceholder(
+  actions: { type: string }[],
+  results: { ok: boolean; error?: string }[],
+): string | null {
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i];
+    const result = results[i];
+    if (!action || !result) continue;
+    if (result.ok) continue;
+    if (QUERY_ACTION_TYPES.has(action.type)) continue;
+    const errorText = result.error ?? 'unknown error';
+    const truncated = errorText.length > 120 ? errorText.slice(0, 117) + '...' : errorText;
+    return `⚠️ Action failed (\`${action.type}\`: ${truncated}). Retrying...`;
+  }
+  return null;
 }
 
 export function appendParseFailureNotice(
