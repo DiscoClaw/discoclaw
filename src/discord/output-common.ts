@@ -173,6 +173,14 @@ const DISABLED_TYPE_HELP: Record<string, string> = {
   ban: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',
   kick: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',
   timeout: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',
+  // Deferred replies — requires DISCOCLAW_DISCORD_ACTIONS_DEFER.
+  defer: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_DEFER=1` in .env.',
+  // Bot profile — requires DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE.
+  botSetStatus: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1` in .env.',
+  botSetActivity: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1` in .env.',
+  botSetNickname: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1` in .env.',
+  // Polls — requires DISCOCLAW_DISCORD_ACTIONS_POLLS.
+  poll: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_POLLS=1` in .env.',
 };
 
 /**
