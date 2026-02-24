@@ -274,15 +274,20 @@ export async function executeImagegenAction(
 export function imagegenActionsPromptSection(): string {
   return `### Image Generation
 
-**generateImage** — Generate an image with DALL-E and post it to a channel:
+**generateImage** — Generate an image and post it to a channel:
 \`\`\`
 <discord-action>{"type":"generateImage","prompt":"A serene mountain lake at sunset","channel":"#art"}</discord-action>
 \`\`\`
 - \`prompt\` (required): Text description of the image to generate.
 - \`channel\` (required): Channel name (with or without #) or channel ID to post the image to.
-- \`size\` (optional): Image dimensions. Allowed: \`1024x1024\` (default), \`1024x1792\`, \`1792x1024\` (tall/wide, dall-e-3 only), \`256x256\`, \`512x512\`.
-- \`model\` (optional): Model to use. Default: \`dall-e-3\`.
-- \`quality\` (optional): \`standard\` (default) or \`hd\` (dall-e-3 only, higher detail and cost).
-- \`caption\` (optional): Text message to accompany the image in the channel.
-- \`provider\` (optional): \`openai\` or \`gemini\`. Auto-detected from model name if omitted.`;
+- \`model\` (optional): Model to use. Default: \`dall-e-3\`. Available models:
+  - OpenAI: \`dall-e-3\`, \`gpt-image-1\`
+  - Gemini: \`imagen-3.0-generate-001\`, \`imagen-3.0-fast-generate-001\`
+- \`provider\` (optional): \`openai\` or \`gemini\`. Auto-detected from model prefix if omitted.
+- \`size\` (optional): Depends on provider:
+  - OpenAI dall-e-3 / dall-e-2: pixel dimensions — \`1024x1024\` (default), \`1024x1792\`, \`1792x1024\`, \`256x256\`, \`512x512\`
+  - OpenAI gpt-image-1: pixel dimensions as above, plus \`auto\`
+  - Gemini: aspect ratios — \`1:1\` (default), \`3:4\`, \`4:3\`, \`9:16\`, \`16:9\`
+- \`quality\` (optional): \`standard\` (default) or \`hd\` — applies to OpenAI dall-e-3 only.
+- \`caption\` (optional): Text message to accompany the image in the channel.`;
 }
