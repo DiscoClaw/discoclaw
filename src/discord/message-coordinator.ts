@@ -58,7 +58,7 @@ import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
-import { editThenSendChunks, shouldSuppressFollowUp, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
+import { editThenSendChunks, shouldSuppressFollowUp, appendUnavailableActionTypesNotice, appendParseFailureNotice, buildFailureRetryPlaceholder } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { resolveReplyReference } from './reply-reference.js';
 import type { MessageWithReference } from './reply-reference.js';
@@ -2215,6 +2215,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           let currentPrompt = prompt;
           let followUpDepth = 0;
+          let pendingFollowUpPlaceholder: string | null = null;
+          let isFailureFollowUp = false;
 
           // -- auto-follow-up loop --
           // When query actions (channelList, readMessages, etc.) succeed, re-invoke
@@ -2238,7 +2240,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             // On follow-up iterations, send a new placeholder message.
             if (followUpDepth > 0) {
               dispose();
-              reply = await msg.channel.send({ content: formatBoldLabel('(following up...)'), allowedMentions: NO_MENTIONS });
+              const followUpPlaceholderContent = pendingFollowUpPlaceholder ?? formatBoldLabel('(following up...)');
+              reply = await msg.channel.send({ content: followUpPlaceholderContent, allowedMentions: NO_MENTIONS });
               dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}:followup-${followUpDepth}`);
               replyFinalized = false;
               params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
@@ -2549,11 +2552,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (!shouldTriggerFollowUp(actions, actionResults)) break;
 
             // Build follow-up prompt with action results.
+            pendingFollowUpPlaceholder = buildFailureRetryPlaceholder(actions, actionResults);
+            isFailureFollowUp = pendingFollowUpPlaceholder !== null;
             const followUpLines = buildAllResultLines(actionResults);
+            const followUpSuffix = isFailureFollowUp
+              ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
+              : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
             currentPrompt =
               `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
               followUpLines.join('\n') +
-              `\n\nContinue your analysis based on these results. If you need additional information, you may emit further query actions.`;
+              `\n\n${followUpSuffix}`;
             followUpDepth++;
           }
 
