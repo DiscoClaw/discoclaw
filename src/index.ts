@@ -775,7 +775,7 @@ const botParams = {
     openaiBaseUrl: cfg.openaiBaseUrl,
     openrouterApiKey: cfg.openrouterApiKey,
     openrouterBaseUrl: cfg.openrouterBaseUrl,
-    paFilePaths: ['SOUL.md', 'IDENTITY.md', 'USER.md'].map((f) => ({
+    paFilePaths: ['SOUL.md', 'IDENTITY.md', 'USER.md', 'AGENTS.md'].map((f) => ({
       label: f,
       path: path.join(workspaceCwd, f),
     })),

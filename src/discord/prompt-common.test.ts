@@ -75,11 +75,13 @@ describe('loadWorkspacePaFiles', () => {
     dirs.push(workspace);
     await fs.writeFile(path.join(workspace, 'SOUL.md'), '# Soul', 'utf-8');
     await fs.writeFile(path.join(workspace, 'IDENTITY.md'), '# ID', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'AGENTS.md'), '# Agents', 'utf-8');
 
     const files = await loadWorkspacePaFiles(workspace, { skip: false });
     expect(files).toEqual([
       path.join(workspace, 'SOUL.md'),
       path.join(workspace, 'IDENTITY.md'),
+      path.join(workspace, 'AGENTS.md'),
     ]);
   });
 

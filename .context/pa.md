@@ -14,7 +14,7 @@ For architecture details, see `.context/architecture.md`.
 | `SOUL.md` | Core personality and values | Every prompt |
 | `IDENTITY.md` | Name and vibe | Every prompt |
 | `USER.md` | Who you're helping | Every prompt |
-| `AGENTS.md` | Your personal rules and conventions | Scaffolded on setup; accessible via Read tool |
+| `AGENTS.md` | Your personal rules and conventions | Every prompt |
 | `TOOLS.md` | Available tools and integrations | Every prompt |
 | `HEARTBEAT.md` | Periodic self-check template | By cron |
 | `MEMORY.md` | Curated long-term memory | DM prompts |
