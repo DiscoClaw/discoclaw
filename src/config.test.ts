@@ -247,14 +247,34 @@ describe('parseConfig', () => {
     expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN'))).toBe(true);
   });
 
-  it('warns when discordActionsImagegen is enabled but OPENAI_API_KEY is unset', () => {
-    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1', OPENAI_API_KEY: undefined }));
+  it('warns when discordActionsImagegen is enabled but neither key is set', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1', OPENAI_API_KEY: undefined, IMAGEGEN_GEMINI_API_KEY: undefined }));
     expect(warnings.some((w) => w.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1'))).toBe(true);
   });
 
-  it('does not warn about imagegen key when discordActionsImagegen is disabled', () => {
-    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '0', OPENAI_API_KEY: undefined }));
+  it('does not warn about imagegen key when OPENAI_API_KEY is set', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1', OPENAI_API_KEY: 'sk-test', IMAGEGEN_GEMINI_API_KEY: undefined }));
     expect(warnings.some((w) => w.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1'))).toBe(false);
+  });
+
+  it('does not warn about imagegen key when IMAGEGEN_GEMINI_API_KEY is set', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1', OPENAI_API_KEY: undefined, IMAGEGEN_GEMINI_API_KEY: 'gemini-key' }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1'))).toBe(false);
+  });
+
+  it('does not warn about imagegen key when discordActionsImagegen is disabled', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '0', OPENAI_API_KEY: undefined, IMAGEGEN_GEMINI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1'))).toBe(false);
+  });
+
+  it('parses IMAGEGEN_GEMINI_API_KEY when set', () => {
+    const { config } = parseConfig(env({ IMAGEGEN_GEMINI_API_KEY: 'gemini-key' }));
+    expect(config.imagegenGeminiApiKey).toBe('gemini-key');
+  });
+
+  it('returns undefined for imagegenGeminiApiKey when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.imagegenGeminiApiKey).toBeUndefined();
   });
 
   it('defaults sessionScanning to true', () => {

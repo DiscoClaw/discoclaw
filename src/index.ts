@@ -1019,10 +1019,11 @@ if (taskCtx) {
     log.info('config:action context initialized');
   }
 
-  if (cfg.discordActionsImagegen && cfg.openaiApiKey) {
+  if (cfg.discordActionsImagegen && (cfg.openaiApiKey || cfg.imagegenGeminiApiKey)) {
     botParams.imagegenCtx = {
       apiKey: cfg.openaiApiKey,
       baseUrl: cfg.openaiBaseUrl,
+      geminiApiKey: cfg.imagegenGeminiApiKey,
     };
     log.info('imagegen:action context initialized');
   }

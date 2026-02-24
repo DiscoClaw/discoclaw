@@ -4,6 +4,7 @@ import {
   executeImagegenAction,
   IMAGEGEN_ACTION_TYPES,
   imagegenActionsPromptSection,
+  resolveProvider,
 } from './actions-imagegen.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import type { ActionContext } from './actions.js';
@@ -61,6 +62,13 @@ function makeSuccessResponse(b64 = 'aGVsbG8='): Response {
   );
 }
 
+function makeGeminiSuccessResponse(b64 = 'aGVsbG8='): Response {
+  return new Response(
+    JSON.stringify({ generatedImages: [{ image: { imageBytes: b64 } }] }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+}
+
 function makeErrorResponse(status: number, message: string): Response {
   return new Response(
     JSON.stringify({ error: { message } }),
@@ -86,6 +94,33 @@ describe('imagegenActionsPromptSection', () => {
     expect(section).toContain('prompt');
     expect(section).toContain('channel');
     expect(section).toContain('dall-e-3');
+  });
+});
+
+describe('resolveProvider', () => {
+  it('detects gemini from imagen- prefix', () => {
+    expect(resolveProvider('imagen-3.0-generate-001')).toBe('gemini');
+    expect(resolveProvider('imagen-3.0-fast-generate-001')).toBe('gemini');
+  });
+
+  it('detects openai from dall-e- prefix', () => {
+    expect(resolveProvider('dall-e-3')).toBe('openai');
+    expect(resolveProvider('dall-e-2')).toBe('openai');
+  });
+
+  it('detects openai from gpt-image- prefix', () => {
+    expect(resolveProvider('gpt-image-1')).toBe('openai');
+  });
+
+  it('defaults to openai for unknown model', () => {
+    expect(resolveProvider('unknown-model')).toBe('openai');
+    expect(resolveProvider('')).toBe('openai');
+  });
+
+  it('respects explicit provider override over model prefix', () => {
+    expect(resolveProvider('imagen-3.0-generate-001', 'openai')).toBe('openai');
+    expect(resolveProvider('dall-e-3', 'gemini')).toBe('gemini');
+    expect(resolveProvider('gpt-image-1', 'gemini')).toBe('gemini');
   });
 });
 
@@ -488,5 +523,353 @@ describe('generateImage', () => {
 
     expect(result).toEqual({ ok: true, summary: 'Generated image posted to #images' });
     expect(ch.send).toHaveBeenCalled();
+  });
+});
+
+describe('generateImage — gpt-image-1', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('accepts auto size for gpt-image-1', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'gpt-image-1', size: 'auto' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it.each([['1024x1024'], ['1024x1792'], ['1792x1024']])(
+    'accepts valid gpt-image-1 size %s',
+    async (size) => {
+      const ch = makeMockChannel({ name: 'art' });
+      const ctx = makeCtx([ch]);
+
+      const result = await executeImagegenAction(
+        { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'gpt-image-1', size },
+        ctx,
+        makeImagegenCtx(),
+      );
+
+      expect(result.ok).toBe(true);
+    },
+  );
+
+  it('rejects 256x256 size for gpt-image-1', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'gpt-image-1', size: '256x256' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('"256x256"');
+    expect((result as any).error).toContain('gpt-image-1');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects 512x512 size for gpt-image-1', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'gpt-image-1', size: '512x512' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('gpt-image-1');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('sends gpt-image-1 request to OpenAI images endpoint with correct body', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'gpt-image-1', size: '1024x1024' },
+      ctx,
+      makeImagegenCtx({ apiKey: 'gpt-key' }),
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/images/generations',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Authorization': 'Bearer gpt-key',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody).toMatchObject({
+      model: 'gpt-image-1',
+      prompt: 'A mountain',
+      n: 1,
+      size: '1024x1024',
+      response_format: 'b64_json',
+    });
+  });
+
+  it('parses gpt-image-1 response like DALL-E', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'gpt-image-1', size: 'auto' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Generated image posted to #art' });
+    expect(ch.send).toHaveBeenCalledWith(
+      expect.objectContaining({ files: expect.arrayContaining([expect.anything()]) }),
+    );
+  });
+});
+
+describe('generateImage — Gemini', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiSuccessResponse()));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('calls Gemini API with correct URL and auth header', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:generateImages',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-goog-api-key': 'gemini-key',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+  });
+
+  it('sends correct Gemini request body', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain lake', channel: '#art', model: 'imagen-3.0-generate-001', size: '16:9' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody).toMatchObject({
+      prompt: 'A mountain lake',
+      number_of_images: 1,
+      aspect_ratio: '16:9',
+    });
+  });
+
+  it('parses Gemini response and posts image', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Generated image posted to #art' });
+    expect(ch.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: expect.arrayContaining([expect.anything()]),
+        allowedMentions: { parse: [] },
+      }),
+    );
+  });
+
+  it('returns error when generatedImages is empty', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ generatedImages: [] }), { status: 200 }),
+    ));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('no image data');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('returns error on Gemini 401', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeErrorResponse(401, 'API key not valid')));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'bad-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('401');
+    expect((result as any).error).toContain('API key not valid');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('returns error on Gemini 400', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeErrorResponse(400, 'Invalid prompt')));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('400');
+    expect((result as any).error).toContain('Invalid prompt');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('returns error on Gemini 500', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeErrorResponse(500, 'Internal server error')));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('500');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('returns clear error when geminiApiKey is missing', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1:1' },
+      ctx,
+      makeImagegenCtx(), // no geminiApiKey
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('geminiApiKey');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects WxH size for Gemini', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1024x1024' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('"1024x1024"');
+    expect((result as any).error).toContain('Gemini');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([['1:1'], ['3:4'], ['4:3'], ['9:16'], ['16:9']])(
+    'accepts valid Gemini aspect ratio %s',
+    async (size) => {
+      const ch = makeMockChannel({ name: 'art' });
+      const ctx = makeCtx([ch]);
+
+      const result = await executeImagegenAction(
+        { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size },
+        ctx,
+        makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+      );
+
+      expect(result.ok).toBe(true);
+    },
+  );
+
+  it('uses 1:1 as default size for Gemini when size is omitted', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody.aspect_ratio).toBe('1:1');
+  });
+
+  it('routes dall-e-3 to Gemini via explicit provider override', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'dall-e-3', size: '1:1', provider: 'gemini' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('generativelanguage.googleapis.com'),
+      expect.anything(),
+    );
+  });
+
+  it('routes imagen model to OpenAI via explicit provider override', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-3.0-generate-001', size: '1024x1024', provider: 'openai' },
+      ctx,
+      makeImagegenCtx({ apiKey: 'openai-key' }),
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('api.openai.com'),
+      expect.anything(),
+    );
   });
 });
