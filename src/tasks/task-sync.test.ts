@@ -1,11 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TaskStore } from './store.js';
-import {
-  ensureTaskSyncCoordinator,
-  runTaskSync,
-  wireTaskStoreSyncTriggers,
-} from './task-sync.js';
-import { withDirectTaskLifecycle } from './task-lifecycle.js';
+import { ensureTaskSyncCoordinator, runTaskSync } from './task-sync.js';
 
 vi.mock('./sync-coordinator.js', () => ({
   TaskSyncCoordinator: vi.fn().mockImplementation(() => ({
@@ -73,34 +68,5 @@ describe('task-sync coordinator helpers', () => {
     const result = await runTaskSync(taskCtx, makeRunCtx(), statusPoster);
     expect(result).toEqual(expect.objectContaining({ threadsCreated: 0 }));
     expect(taskCtx.syncCoordinator.sync).toHaveBeenCalledWith(statusPoster);
-  });
-});
-
-describe('wireTaskStoreSyncTriggers', () => {
-  it('wires only trigger events and skips direct-lifecycle-owned updates', async () => {
-    const taskCtx = makeTaskCtx();
-    const syncCoordinator = { sync: vi.fn(async () => null) };
-    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-
-    const wired = wireTaskStoreSyncTriggers(taskCtx as any, syncCoordinator as any, log as any);
-    const task = taskCtx.store.create({ title: 'Test task' });
-
-    // created does not trigger sync
-    const callsAfterCreate = syncCoordinator.sync.mock.calls.length;
-    expect(callsAfterCreate).toBe(0);
-
-    // updated does trigger sync
-    taskCtx.store.update(task.id, { title: 'Updated' });
-    expect(syncCoordinator.sync.mock.calls.length).toBeGreaterThan(callsAfterCreate);
-
-    const callsBeforeOwnedUpdate = syncCoordinator.sync.mock.calls.length;
-    await withDirectTaskLifecycle(task.id, async () => {
-      taskCtx.store.update(task.id, { title: 'Owned update' });
-    });
-    expect(syncCoordinator.sync.mock.calls.length).toBe(callsBeforeOwnedUpdate);
-
-    wired.stop();
-    taskCtx.store.update(task.id, { title: 'Post-stop update' });
-    expect(syncCoordinator.sync.mock.calls.length).toBe(callsBeforeOwnedUpdate);
   });
 });

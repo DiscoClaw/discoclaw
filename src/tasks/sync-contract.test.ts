@@ -2,21 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   TASK_DIRECT_THREAD_ACTIONS,
   TASK_STORE_MUTATION_EVENTS,
-  TASK_SYNC_TRIGGER_EVENTS,
   shouldActionUseDirectThreadLifecycle,
-  shouldTriggerTaskSyncForStoreEvent,
 } from './sync-contract.js';
 
 describe('task sync contract', () => {
   it('defines a stable TaskStore mutation universe', () => {
     expect(TASK_STORE_MUTATION_EVENTS).toEqual(['created', 'updated', 'closed', 'labeled']);
-  });
-
-  it('triggers sync only for updated/closed/labeled mutations', () => {
-    for (const event of TASK_SYNC_TRIGGER_EVENTS) {
-      expect(shouldTriggerTaskSyncForStoreEvent(event)).toBe(true);
-    }
-    expect(shouldTriggerTaskSyncForStoreEvent('created')).toBe(false);
   });
 
   it('marks direct thread lifecycle ownership for create/update/close actions', () => {

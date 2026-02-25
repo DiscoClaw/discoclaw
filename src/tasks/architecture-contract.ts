@@ -3,7 +3,6 @@ import { TASK_STATUSES } from './types.js';
 import {
   TASK_DIRECT_THREAD_ACTIONS,
   TASK_STORE_MUTATION_EVENTS,
-  TASK_SYNC_TRIGGER_EVENTS,
 } from './sync-contract.js';
 
 const ALL_TASK_STATUSES = [...TASK_STATUSES] as readonly TaskStatus[];
@@ -36,7 +35,6 @@ export const TASK_STORE_MUTATION_EVENT_RULES = {
 
 export const TASK_ARCHITECTURE_CONTRACT = {
   storeMutationEvents: TASK_STORE_MUTATION_EVENTS,
-  syncTriggerEvents: TASK_SYNC_TRIGGER_EVENTS,
   directThreadLifecycleActions: TASK_DIRECT_THREAD_ACTIONS,
   statusTransitions: TASK_STORE_ALLOWED_STATUS_TRANSITIONS,
   mutationEventRules: TASK_STORE_MUTATION_EVENT_RULES,

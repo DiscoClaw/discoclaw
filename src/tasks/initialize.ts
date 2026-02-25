@@ -8,9 +8,8 @@ import {
   type TaskRuntimeAdapter,
 } from './runtime-types.js';
 import { createTaskService } from './service.js';
-import { ensureTaskSyncCoordinator, wireTaskStoreSyncTriggers } from './task-sync.js';
-import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
-import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
+import { ensureTaskSyncCoordinator } from './task-sync.js';
+import type { TaskSyncRunContext, TaskSyncRunOptions } from './sync-types.js';
 import { loadTagMap } from './tag-map.js';
 
 /**
@@ -114,13 +113,13 @@ export async function initializeTasksContext(
 }
 
 // ---------------------------------------------------------------------------
-// Post-connect wiring (store event subscriptions + startup sync)
+// Post-connect wiring (startup sync only)
 // ---------------------------------------------------------------------------
 
 export async function wireTaskSync(
   taskCtx: TaskContext,
   runCtx: TaskSyncRunContext,
-): Promise<TaskSyncWiring> {
+): Promise<void> {
   const log = taskCtx.log;
   if (!log) {
     throw new Error('wireTaskSync requires taskCtx.log');
@@ -135,13 +134,4 @@ export async function wireTaskSync(
   syncCoordinator.sync().catch((err) => {
     log.warn({ err }, 'tasks:startup-sync failed');
   });
-
-  const wiring = wireTaskStoreSyncTriggers(taskCtx, syncCoordinator, log);
-
-  log.info(
-    { tasksCwd: taskCtx.tasksCwd, triggerEvents: TASK_SYNC_TRIGGER_EVENTS },
-    'tasks:store-event sync triggers started',
-  );
-
-  return wiring;
 }

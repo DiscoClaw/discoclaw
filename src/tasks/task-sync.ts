@@ -1,13 +1,10 @@
-import type { LoggerLike } from './logger-types.js';
-import type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
+import type { TaskSyncRunContext, TaskSyncRunOptions } from './sync-types.js';
 import type { TaskSyncResult } from './types.js';
 import type { TaskSyncContext, TaskSyncCoordinatorLike, TaskStatusPoster } from './sync-context.js';
 import { TaskSyncCoordinator } from './sync-coordinator.js';
-import { TASK_SYNC_TRIGGER_EVENTS } from './sync-contract.js';
-import { isDirectTaskLifecycleActive } from './task-lifecycle.js';
 
 export type { TaskSyncContext, TaskSyncCoordinatorLike } from './sync-context.js';
-export type { TaskSyncRunContext, TaskSyncRunOptions, TaskSyncWiring } from './sync-types.js';
+export type { TaskSyncRunContext, TaskSyncRunOptions } from './sync-types.js';
 
 export async function ensureTaskSyncCoordinator(
   taskCtx: TaskSyncContext,
@@ -46,34 +43,3 @@ export async function runTaskSync(
   return syncCoordinator.sync(statusPoster);
 }
 
-export function wireTaskStoreSyncTriggers(
-  taskCtx: TaskSyncContext,
-  syncCoordinator: TaskSyncCoordinatorLike,
-  log: LoggerLike,
-): TaskSyncWiring {
-  const triggerSync = (eventName: string, taskId?: string) => {
-    syncCoordinator.sync().catch((err) => {
-      log.warn({ err, eventName, taskId }, 'tasks:store-event sync failed');
-    });
-  };
-
-  const subscriptions = TASK_SYNC_TRIGGER_EVENTS.map((eventName) => {
-    const handler = (task: { id: string }) => {
-      const taskId = task?.id;
-      if (taskId && isDirectTaskLifecycleActive(taskId)) {
-        return;
-      }
-      triggerSync(eventName, taskId);
-    };
-    taskCtx.store.on(eventName, handler);
-    return { eventName, handler };
-  });
-
-  return {
-    stop() {
-      for (const sub of subscriptions) {
-        taskCtx.store.off(sub.eventName, sub.handler);
-      }
-    },
-  };
-}
