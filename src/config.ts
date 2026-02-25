@@ -73,6 +73,9 @@ export type DiscoclawConfig = {
   forgeProgressThrottleMs: number;
   forgeAutoImplement: boolean;
 
+  completionNotifyEnabled: boolean;
+  completionNotifyThresholdMs: number;
+
   // OpenAI-compat adapter config
   openaiApiKey?: string;
   openaiBaseUrl?: string;
@@ -566,6 +569,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       forgeTimeoutMs: parsePositiveNumber(env, 'FORGE_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       forgeProgressThrottleMs: parseNonNegativeInt(env, 'FORGE_PROGRESS_THROTTLE_MS', 3000),
       forgeAutoImplement: parseBoolean(env, 'FORGE_AUTO_IMPLEMENT', true),
+
+      completionNotifyEnabled: parseBoolean(env, 'DISCOCLAW_COMPLETION_NOTIFY', true),
+      completionNotifyThresholdMs: parseNonNegativeInt(env, 'DISCOCLAW_COMPLETION_NOTIFY_THRESHOLD_MS', 30000),
 
       openaiApiKey,
       openaiBaseUrl,
