@@ -28,6 +28,18 @@ import type { CliAdapterStrategy, CliInvokeContext, UniversalCliOpts, ParsedLine
 // Global subprocess tracker shared across all CLI adapters.
 const globalTracker = new SubprocessTracker();
 
+const CONTEXT_OVERFLOW_PHRASES = [
+  'prompt is too long',
+  'context length exceeded',
+  'context_length_exceeded',
+  'context overflow',
+];
+
+function isContextOverflowMessage(text: string): boolean {
+  const lower = text.toLowerCase();
+  return CONTEXT_OVERFLOW_PHRASES.some((phrase) => lower.includes(phrase));
+}
+
 type CliLogLike = {
   info?: (...args: unknown[]) => void;
   debug?: (...args: unknown[]) => void;
@@ -123,10 +135,18 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           params.signal?.addEventListener('abort', onPoolAbort, { once: true });
 
           let fallback = false;
+          let contextOverflow = false;
           try {
             for await (const evt of proc.sendTurn(params.prompt, params.images)) {
               if (evt.type === 'error' && (evt.message.startsWith('long-running:') || evt.message.includes('hang detected'))) {
-                pool.remove(params.sessionKey);
+                if (evt.message.includes('context overflow')) contextOverflow = true;
+                pool.remove(params.sessionKey, contextOverflow ? 'context-overflow' : undefined);
+                fallback = true;
+                break;
+              }
+              if ((evt.type === 'text_delta' || evt.type === 'text_final') && isContextOverflowMessage(evt.text)) {
+                pool.remove(params.sessionKey, 'context-overflow');
+                contextOverflow = true;
                 fallback = true;
                 break;
               }
@@ -138,6 +158,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
           if (sub) globalTracker.delete(sub);
           if (!fallback) return;
+          if (contextOverflow) {
+            cliLog?.info?.({ sessionKey: params.sessionKey }, 'multi-turn: context overflow, session removed');
+            yield { type: 'text_delta', text: '_(Session context limit reached — starting a fresh conversation.)_\n\n' };
+          }
           cliLog?.info?.('multi-turn: process failed, falling back to one-shot');
         }
       } catch (err) {

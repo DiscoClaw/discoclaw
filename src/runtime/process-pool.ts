@@ -73,12 +73,12 @@ export class ProcessPool {
   }
 
   /** Kill and remove a specific session's process. */
-  remove(sessionKey: string): void {
+  remove(sessionKey: string, reason?: string): void {
     const proc = this.pool.get(sessionKey);
     if (proc) {
       this.pool.delete(sessionKey);
       proc.kill();
-      this.log?.info({ sessionKey }, 'process-pool: removed process');
+      this.log?.info({ sessionKey, reason }, 'process-pool: removed process');
     }
   }
 
