@@ -2764,7 +2764,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // Persist counter progress so restarts resume from last known count.
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
               saveSummary(params.summaryDataDir, sessionKey, {
-                summary: summarySection,
+                summary: summarySection.slice(0, params.summaryMaxChars),
                 updatedAt: Date.now(),
                 turnsSinceUpdate: count,
               });
