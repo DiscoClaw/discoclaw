@@ -195,6 +195,11 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       effectiveModel = preRunRecord.modelOverride ?? preRunRecord.model ?? cronDefault;
     }
 
+    // Silent mode: instruct the AI to respond with HEARTBEAT_OK when idle.
+    if (preRunRecord?.silent) {
+      prompt += '\n\nIMPORTANT: If there is nothing actionable to report, respond with exactly `HEARTBEAT_OK` and nothing else.';
+    }
+
     ctx.log?.info(
       { jobId: job.id, name: job.name, channel: job.def.channel, model: effectiveModel, permissionTier: tools.permissionTier },
       'cron:exec start',
@@ -361,15 +366,29 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       return;
     }
 
+    // Silent-mode short-response gate: suppress paraphrased "nothing to report" responses.
+    if (preRunRecord?.silent && collectedImages.length === 0 && strippedText.length <= 80) {
+      ctx.log?.info({ jobId: job.id, name: job.name, len: strippedText.length }, 'cron:exec silent short-response suppressed');
+      if (ctx.statsStore && job.cronId) {
+        try {
+          await ctx.statsStore.recordRun(job.cronId, 'success');
+        } catch {
+          // Best-effort.
+        }
+      }
+      metrics.increment('cron.run.success');
+      return;
+    }
+
     await sendChunks(channelForSend, processedText, collectedImages);
 
     ctx.log?.info({ jobId: job.id, name: job.name, channel: job.def.channel }, 'cron:exec done');
+    metrics.increment('cron.run.success');
 
     // Record successful run.
     if (ctx.statsStore && job.cronId) {
       try {
         await ctx.statsStore.recordRun(job.cronId, 'success');
-        metrics.increment('cron.run.success');
       } catch (statsErr) {
         ctx.log?.warn({ err: statsErr, jobId: job.id }, 'cron:exec stats record failed');
       }

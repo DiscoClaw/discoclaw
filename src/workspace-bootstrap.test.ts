@@ -20,7 +20,6 @@ const ALL_TEMPLATE_FILES = [
   'USER.md',
   'AGENTS.md',
   'TOOLS.md',
-  'HEARTBEAT.md',
   'MEMORY.md',
 ];
 
@@ -267,7 +266,6 @@ describe('ensureWorkspaceBootstrapFiles', () => {
       'SOUL.md': 'My soul',
       'TOOLS.md': 'My tools',
       'USER.md': 'My user',
-      'HEARTBEAT.md': 'My heartbeat',
       'MEMORY.md': 'My memory',
     };
     for (const [file, content] of Object.entries(customFiles)) {

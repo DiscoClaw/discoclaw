@@ -946,3 +946,143 @@ describe('executeCronJob write-ahead status tracking', () => {
     expect(rec?.lastRunStatus).toBe('success');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Silent mode suppression
+// ---------------------------------------------------------------------------
+
+describe('executeCronJob silent mode', () => {
+  let statsDir: string;
+
+  beforeEach(async () => {
+    statsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-silent-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(statsDir, { recursive: true, force: true });
+  });
+
+  function makeCapturingRuntime(response: string) {
+    const invokeSpy = vi.fn();
+    return {
+      runtime: {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(params: any): AsyncIterable<EngineEvent> {
+          invokeSpy(params);
+          yield { type: 'text_final', text: response };
+          yield { type: 'done' };
+        },
+      } as RuntimeAdapter,
+      invokeSpy,
+    };
+  }
+
+  it('injects HEARTBEAT_OK instruction into the prompt when silent is true', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', { silent: true });
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('respond with exactly `HEARTBEAT_OK`');
+  });
+
+  it('suppresses short responses under the threshold when silent is true', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', { silent: true });
+
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime('No task-labeled emails found.') });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(ctx.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: job.id, name: job.name }),
+      'cron:exec silent short-response suppressed',
+    );
+  });
+
+  it('does NOT suppress longer substantive responses when silent is true', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', { silent: true });
+
+    const longResponse = 'Here is a detailed summary of the tasks completed today, including several important updates that need your attention.';
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime(longResponse) });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+    expect(channel.send.mock.calls[0][0].content).toContain(longResponse);
+  });
+
+  it('does not apply short-response gate when silent is false', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', { silent: false });
+
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime('No emails found.') });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT suppress short text when images are present (silent mode)', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', { silent: true });
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Short.' };
+        yield { type: 'image_data', image: { mediaType: 'image/png', base64: 'abc123' } };
+        yield { type: 'done' };
+      },
+    };
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalled();
+  });
+
+  it('records success in statsStore when silent short-response is suppressed', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', { silent: true });
+
+    const recordRunSpy = vi.spyOn(statsStore, 'recordRun');
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime('Nothing to report.') });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(recordRunSpy).toHaveBeenCalledWith('cron-test0001', 'success');
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+});

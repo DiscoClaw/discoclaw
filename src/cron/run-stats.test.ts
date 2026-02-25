@@ -53,7 +53,7 @@ describe('CronRunStats', () => {
   it('creates empty store on missing file', async () => {
     const stats = await loadRunStats(statsPath);
     const store = stats.getStore();
-    expect(store.version).toBe(4);
+    expect(store.version).toBe(5);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
 
@@ -259,7 +259,7 @@ describe('CronRunStats', () => {
 describe('emptyStore', () => {
   it('returns valid initial structure', () => {
     const store = emptyStore();
-    expect(store.version).toBe(4);
+    expect(store.version).toBe(5);
     expect(store.updatedAt).toBeGreaterThan(0);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
@@ -289,7 +289,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(4);
+    expect(stats.getStore().version).toBe(5);
     const rec = stats.getRecord('cron-migrated');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-migrated');
@@ -297,5 +297,37 @@ describe('loadRunStats version migration', () => {
     expect(rec!.lastRunStatus).toBe('success');
     expect(rec!.cadence).toBe('daily');
     expect(rec!.purposeTags).toEqual(['monitoring']);
+  });
+
+  it('migrates a v4 store to v5 with silent undefined on existing records', async () => {
+    const v4Store = {
+      version: 4,
+      updatedAt: Date.now(),
+      jobs: {
+        'cron-v4': {
+          cronId: 'cron-v4',
+          threadId: 'thread-v4',
+          runCount: 3,
+          lastRunAt: '2025-06-01T00:00:00.000Z',
+          lastRunStatus: 'success',
+          cadence: 'hourly',
+          purposeTags: ['email'],
+          disabled: false,
+          model: 'sonnet',
+          triggerType: 'schedule',
+        },
+      },
+    };
+    await fs.writeFile(statsPath, JSON.stringify(v4Store), 'utf-8');
+
+    const stats = await loadRunStats(statsPath);
+
+    expect(stats.getStore().version).toBe(5);
+    const rec = stats.getRecord('cron-v4');
+    expect(rec).toBeDefined();
+    expect(rec!.cronId).toBe('cron-v4');
+    expect(rec!.runCount).toBe(3);
+    expect(rec!.cadence).toBe('hourly');
+    expect(rec!.silent).toBeUndefined();
   });
 });

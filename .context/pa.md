@@ -16,7 +16,6 @@ For architecture details, see `.context/architecture.md`.
 | `USER.md` | Who you're helping | Every prompt |
 | `AGENTS.md` | Your personal rules and conventions | Every prompt |
 | `TOOLS.md` | Available tools and integrations | Every prompt |
-| `HEARTBEAT.md` | Periodic self-check template | By cron |
 | `MEMORY.md` | Curated long-term memory | DM prompts |
 | `BOOTSTRAP.md` | First-run onboarding (deleted after) | Once |
 
@@ -27,6 +26,7 @@ Templates live in `templates/workspace/` and are scaffolded on first run (copy-i
 - **Never go silent.** Acknowledge before tool calls.
 - Narrate failures and pivots.
 - Summarize outcomes; don't assume the user saw tool output.
+- **Never edit `tasks.jsonl`, cron store files, or other data files directly.** Always use the corresponding discord action (`taskUpdate`, `taskCreate`, `cronUpdate`, etc.). Direct file edits bypass Discord thread sync and leave the UI stale.
 
 ## Discord Formatting
 

@@ -26,15 +26,16 @@ export type CronRunRecord = {
   triggerType?: 'schedule' | 'webhook' | 'manual';  // defaults to 'schedule'
   webhookSourceId?: string;   // URL path segment for /webhook/:source routing
   webhookSecret?: string;     // HMAC-SHA256 secret for signature verification
+  silent?: boolean;           // suppress output when AI has nothing actionable to report
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3 | 4;
+  version: 1 | 2 | 3 | 4 | 5;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 4 as const;
+export const CURRENT_VERSION = 5 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -341,7 +342,9 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   if (store.version === 3) {
     store.version = 4;
   }
-  // Add future migration blocks here:
-  //   if (store.version === 4) { /* transform fields */; store.version = 5; }
+  // Migrate v4 → v5: no-op — new field (silent) is optional and defaults falsy.
+  if (store.version === 4) {
+    store.version = 5;
+  }
   return new CronRunStats(store, filePath);
 }
