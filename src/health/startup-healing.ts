@@ -31,6 +31,31 @@ function isDeletedDiscordChannelError(err: unknown): boolean {
 }
 
 /**
+ * Scenario 1: Promote orphaned `running` cron records to `interrupted`.
+ *
+ * On startup, any record whose `lastRunStatus` is `running` was abandoned mid-execution
+ * (e.g. a service restart, crash, or OOM kill). Calls `statsStore.sweepInterrupted()`
+ * to atomically flip those records to `interrupted` and logs each affected cronId as a
+ * warning. Errors from the sweep are caught and logged — never throws (fail-open).
+ */
+export async function healInterruptedCronRuns(
+  statsStore: CronRunStats,
+  log?: LoggerLike,
+): Promise<void> {
+  try {
+    const affected = await statsStore.sweepInterrupted();
+    for (const cronId of affected) {
+      log?.warn({ cronId }, 'startup:heal:cron promoted interrupted run (was running at shutdown)');
+    }
+  } catch (err: unknown) {
+    log?.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'startup:heal:cron sweepInterrupted failed — continuing',
+    );
+  }
+}
+
+/**
  * Scenario 2: Remove stale cron run-stats records for threads that no longer exist.
  *
  * Iterates all records in the persistent stats store. For each record, attempts
