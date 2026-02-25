@@ -18,7 +18,6 @@ vi.mock('./sync-coordinator.js', () => ({
 import { TaskSyncCoordinator } from './sync-coordinator.js';
 import { initializeTasksContext, wireTaskSync } from './initialize.js';
 import { TaskStore } from './store.js';
-import { withDirectTaskLifecycle } from './task-lifecycle.js';
 
 function fakeLog() {
   return {
@@ -145,7 +144,7 @@ describe('initializeTasksContext', () => {
 });
 
 describe('wireTaskSync', () => {
-  it('wires coordinator and store event listeners', async () => {
+  it('wires coordinator and fires startup sync', async () => {
     const log = fakeLog();
     const store = new TaskStore();
     const taskCtx = {
@@ -162,7 +161,7 @@ describe('wireTaskSync', () => {
     const client = {} as any;
     const guild = {} as any;
 
-    const result = await wireTaskSync(taskCtx, { client, guild });
+    await wireTaskSync(taskCtx, { client, guild });
 
     expect(TaskSyncCoordinator).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -179,14 +178,9 @@ describe('wireTaskSync', () => {
     const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
     expect(coordinatorInstance.sync).toHaveBeenCalled();
     expect(taskCtx.syncCoordinator).toBeDefined();
-    expect(result).toHaveProperty('stop');
-    expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ tasksCwd: '/tmp/tasks' }),
-      'tasks:store-event sync triggers started',
-    );
   });
 
-  it('store events trigger coordinator sync', async () => {
+  it('store mutations do not trigger coordinator sync beyond startup call', async () => {
     const log = fakeLog();
     const store = new TaskStore({ prefix: 'test' });
     const taskCtx = {
@@ -203,70 +197,14 @@ describe('wireTaskSync', () => {
     await wireTaskSync(taskCtx, { client: {} as any, guild: {} as any });
 
     const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
+    const syncCallsAfterStartup = coordinatorInstance.sync.mock.calls.length;
 
-    // 'created' is intentionally NOT wired — taskCreate handles thread creation directly.
-    const callsBeforeCreate = coordinatorInstance.sync.mock.calls.length;
+    // Mutate the store — store events are no longer wired, so no additional syncs
     const task = store.create({ title: 'Test task' });
-    expect(coordinatorInstance.sync.mock.calls.length).toBe(callsBeforeCreate);
-
-    // 'updated' IS wired — should trigger sync.
-    const callsBeforeUpdate = coordinatorInstance.sync.mock.calls.length;
     store.update(task.id, { title: 'Updated task' });
-    expect(coordinatorInstance.sync.mock.calls.length).toBeGreaterThan(callsBeforeUpdate);
-  });
+    store.update(task.id, { status: 'closed' });
 
-  it('does not trigger coordinator sync while direct task lifecycle ownership is active', async () => {
-    const log = fakeLog();
-    const store = new TaskStore({ prefix: 'test' });
-    const taskCtx = {
-      tasksCwd: '/tmp/tasks',
-      forumId: 'forum-123',
-      tagMap: { bug: '111' },
-      tagMapPath: '/tmp/tag-map.json',
-      store,
-      log,
-    } as any;
-
-    vi.mocked(TaskSyncCoordinator).mockClear();
-
-    await wireTaskSync(taskCtx, { client: {} as any, guild: {} as any });
-
-    const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
-    const task = store.create({ title: 'Owned lifecycle task' });
-    const callsBeforeUpdate = coordinatorInstance.sync.mock.calls.length;
-
-    await withDirectTaskLifecycle(task.id, async () => {
-      store.update(task.id, { title: 'Updated while owned' });
-    });
-
-    expect(coordinatorInstance.sync.mock.calls.length).toBe(callsBeforeUpdate);
-  });
-
-  it('stop() removes store event listeners', async () => {
-    const log = fakeLog();
-    const store = new TaskStore({ prefix: 'test' });
-    const taskCtx = {
-      tasksCwd: '/tmp/tasks',
-      forumId: 'forum-123',
-      tagMap: { bug: '111' },
-      tagMapPath: '/tmp/tag-map.json',
-      store,
-      log,
-    } as any;
-
-    vi.mocked(TaskSyncCoordinator).mockClear();
-
-    const result = await wireTaskSync(taskCtx, { client: {} as any, guild: {} as any });
-
-    result.stop();
-
-    const coordinatorInstance = vi.mocked(TaskSyncCoordinator).mock.results[0]?.value;
-    const callsAfterStop = coordinatorInstance.sync.mock.calls.length;
-
-    // After stop(), store mutations should NOT trigger additional syncs
-    const task = store.create({ title: 'Another task' });
-    store.update(task.id, { title: 'Modified' });
-    expect(coordinatorInstance.sync.mock.calls.length).toBe(callsAfterStop);
+    expect(coordinatorInstance.sync.mock.calls.length).toBe(syncCallsAfterStartup);
   });
 
   it('propagates tagMapPath to CoordinatorOptions', async () => {
