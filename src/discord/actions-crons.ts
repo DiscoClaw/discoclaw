@@ -297,7 +297,8 @@ export async function executeCronAction(
               await starter.edit({ content: newContent.slice(0, 2000), allowedMentions: { parse: [] } });
             } else {
               // Can't edit user's message — post update note.
-              const note = `**Cron Updated**\n**Schedule:** \`${newSchedule}\` (${newTimezone})\n**Channel:** #${newChannel}\n\nPlease update the starter message to reflect these changes.`;
+              const promptPreview = newPrompt.length > 200 ? `${newPrompt.slice(0, 200)}... (truncated)` : newPrompt;
+              const note = `**Cron Updated**\n**Schedule:** \`${newSchedule}\` (${newTimezone})\n**Channel:** #${newChannel}\n**Prompt:** ${promptPreview}\n\nPlease update the starter message to reflect these changes.`;
               await thread.send({ content: note, allowedMentions: { parse: [] } });
             }
           } catch (err) {
@@ -405,6 +406,11 @@ export async function executeCronAction(
       if (record.lastRunAt) lines.push(`Last run: <t:${Math.floor(new Date(record.lastRunAt).getTime() / 1000)}:R>`);
       if (record.purposeTags.length > 0) lines.push(`Tags: ${record.purposeTags.join(', ')}`);
       if (record.lastErrorMessage) lines.push(`Last error: ${record.lastErrorMessage}`);
+      if (job) {
+        const promptText = job.def.prompt;
+        const truncated = promptText.length > 500 ? `${promptText.slice(0, 500)}... (truncated)` : promptText;
+        lines.push(`Prompt: ${truncated}`);
+      }
 
       return { ok: true, summary: lines.join('\n') };
     }
