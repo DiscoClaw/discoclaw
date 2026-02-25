@@ -17,6 +17,7 @@ export type UpdateOpts = {
   restartCmd?: string;
   projectCwd?: string;
   onProgress?: (msg: string) => void;
+  serviceName?: string;
 };
 
 export type UpdateResult = {
@@ -65,7 +66,7 @@ function mapExitCode(err: ExecFileException | null): number | null {
 const GIT_ENV: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
 
 export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts = {}): Promise<UpdateResult> {
-  const { log, dataDir, userId, restartCmd, projectCwd, onProgress } = opts;
+  const { log, dataDir, userId, restartCmd, projectCwd, onProgress, serviceName } = opts;
 
   const progress = (msg: string): void => {
     onProgress?.(msg);
@@ -165,7 +166,7 @@ export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts =
             if (err) log?.error({ err }, 'update-command: restart failed');
           });
         } else {
-          const [restartBin, restartArgList] = getRestartCmdArgs();
+          const [restartBin, restartArgList] = getRestartCmdArgs(serviceName);
           execFile(restartBin, restartArgList, (err) => {
             if (err) log?.error({ err }, 'update-command: restart failed');
           });
@@ -225,7 +226,7 @@ export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts =
           if (err) log?.error({ err }, 'update-command: restart failed');
         });
       } else {
-        const [restartBin, restartArgList] = getRestartCmdArgs();
+        const [restartBin, restartArgList] = getRestartCmdArgs(serviceName);
         execFile(restartBin, restartArgList, (err) => {
           if (err) log?.error({ err }, 'update-command: restart failed');
         });

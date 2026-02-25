@@ -307,6 +307,25 @@ describe('handleUpdateCommand: apply', () => {
     expect(shCall[1]).toEqual(['-c', 'sudo systemctl restart discoclaw']);
   });
 
+  it('deferred passes custom serviceName to getRestartCmdArgs (git-managed)', async () => {
+    const { execFile } = await import('node:child_process');
+    const mock = mockAllSuccess();
+    (execFile as any).mockImplementation(mock);
+
+    const result = await handleUpdateCommand(
+      { action: 'apply' },
+      { serviceName: 'discoclaw-beta' },
+    );
+    result.deferred!();
+
+    const calls: any[] = (execFile as any).mock.calls;
+    const restartCall = calls.find(
+      ([cmd, args]: [string, string[]]) => cmd === 'systemctl' && args.includes('restart'),
+    );
+    expect(restartCall).toBeDefined();
+    expect(restartCall[1]).toEqual(['--user', 'restart', 'discoclaw-beta']);
+  });
+
   it('calls onProgress callback for each step', async () => {
     const { execFile } = await import('node:child_process');
     (execFile as any).mockImplementation(mockAllSuccess());
@@ -395,5 +414,26 @@ describe('handleUpdateCommand: npm-managed mode', () => {
     const result = await handleUpdateCommand({ action: 'apply' });
     expect(result.reply).toContain('failed');
     expect(result.deferred).toBeUndefined();
+  });
+
+  it('deferred passes custom serviceName to getRestartCmdArgs (npm-managed)', async () => {
+    const { execFile } = await import('node:child_process');
+    (execFile as any).mockImplementation((cmd: string, args: string[], optsOrCb: any, maybeCb?: any) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
+      if (cb) cb(null, '', '');
+    });
+
+    const result = await handleUpdateCommand(
+      { action: 'apply' },
+      { serviceName: 'discoclaw-beta' },
+    );
+    result.deferred!();
+
+    const calls: any[] = (execFile as any).mock.calls;
+    const restartCall = calls.find(
+      ([cmd, args]: [string, string[]]) => cmd === 'systemctl' && args.includes('restart'),
+    );
+    expect(restartCall).toBeDefined();
+    expect(restartCall[1]).toEqual(['--user', 'restart', 'discoclaw-beta']);
   });
 });
