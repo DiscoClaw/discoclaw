@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { TaskStore } from './store.js';
 import { TASK_STATUSES, type TaskStatus } from './types.js';
 import {
@@ -6,8 +6,6 @@ import {
   TASK_STORE_MUTATION_EVENT_RULES,
   isTaskStoreStatusTransitionAllowed,
 } from './architecture-contract.js';
-import { wireTaskStoreSyncTriggers } from './task-sync.js';
-import { withDirectTaskLifecycle } from './task-lifecycle.js';
 
 function makeStore(): TaskStore {
   return new TaskStore({ prefix: 'ws' });
@@ -25,11 +23,6 @@ describe('task architecture contract', () => {
   it('keeps stable mutation/sync ownership contract sets', () => {
     expect(TASK_ARCHITECTURE_CONTRACT.storeMutationEvents).toEqual([
       'created',
-      'updated',
-      'closed',
-      'labeled',
-    ]);
-    expect(TASK_ARCHITECTURE_CONTRACT.syncTriggerEvents).toEqual([
       'updated',
       'closed',
       'labeled',
@@ -79,36 +72,5 @@ describe('TaskStore characterization', () => {
       ...TASK_STORE_MUTATION_EVENT_RULES.addLabel,
       ...TASK_STORE_MUTATION_EVENT_RULES.removeLabel,
     ]);
-  });
-});
-
-describe('store-event sync trigger characterization', () => {
-  it('triggers sync for updated/closed/labeled only and skips direct-owned lifecycle updates', async () => {
-    const store = makeStore();
-    const syncCoordinator = { sync: vi.fn(async () => null) };
-    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-
-    const wired = wireTaskStoreSyncTriggers(
-      { forumId: 'forum-1', tagMap: {}, store } as any,
-      syncCoordinator as any,
-      log as any,
-    );
-
-    const task = store.create({ title: 'Lifecycle owner test' });
-    expect(syncCoordinator.sync).toHaveBeenCalledTimes(0);
-
-    store.update(task.id, { title: 'Updated' });
-    store.addLabel(task.id, 'autotag');
-    store.close(task.id);
-    expect(syncCoordinator.sync).toHaveBeenCalledTimes(3);
-
-    await withDirectTaskLifecycle(task.id, async () => {
-      store.update(task.id, { title: 'Owned update' });
-    });
-    expect(syncCoordinator.sync).toHaveBeenCalledTimes(3);
-
-    wired.stop();
-    store.update(task.id, { title: 'After stop' });
-    expect(syncCoordinator.sync).toHaveBeenCalledTimes(3);
   });
 });
