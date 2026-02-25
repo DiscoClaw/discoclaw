@@ -338,10 +338,25 @@ export class LongRunningProcess {
     }
   }
 
+  private isContextOverflow(text: string): boolean {
+    const lower = text.toLowerCase();
+    return (
+      lower.includes('prompt is too long') ||
+      lower.includes('context length exceeded') ||
+      lower.includes('context_length_exceeded')
+    );
+  }
+
   private finalizeTurn(): void {
     const raw = this.turnResultText.trim() || (this.turnMerged.trim() ? this.turnMerged.trimEnd() : '');
     const final = stripToolUseBlocks(raw);
-    if (final) this.pushEvent({ type: 'text_final', text: final });
+    if (final) {
+      if (this.isContextOverflow(final)) {
+        this.pushEvent({ type: 'error', message: 'long-running: context overflow' });
+      } else {
+        this.pushEvent({ type: 'text_final', text: final });
+      }
+    }
     this.pushDoneOnce();
   }
 
