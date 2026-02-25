@@ -1,5 +1,8 @@
 import { execa } from 'execa';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const _require = createRequire(import.meta.url);
 
@@ -17,29 +20,13 @@ export function getLocalVersion(): string {
 }
 
 /**
- * Returns the npm global node_modules root directory, or null on failure.
- */
-async function getNpmGlobalRoot(): Promise<string | null> {
-  try {
-    const result = await execa('npm', ['root', '-g']);
-    const root = result.stdout.trim();
-    return root || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Returns true when the running process was installed via `npm install -g`.
- * Detection: checks whether process.argv[1] is rooted under the npm global
- * node_modules directory returned by `npm root -g`.
+ * Detection: source installs have a `.git` directory at the package root;
+ * npm-published packages do not (`.git` is excluded from the `files` array).
  */
 export async function isNpmManaged(): Promise<boolean> {
-  const globalRoot = await getNpmGlobalRoot();
-  if (!globalRoot) return false;
-  const script = process.argv[1];
-  if (!script) return false;
-  return script.startsWith(globalRoot);
+  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  return !existsSync(path.join(packageRoot, '.git'));
 }
 
 /**
