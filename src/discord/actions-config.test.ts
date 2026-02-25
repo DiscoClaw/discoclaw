@@ -68,9 +68,12 @@ describe('modelShow', () => {
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // forge-drafter should show runtimeModel since forgeDrafterModel is undefined
-    expect(result.summary).toContain('forge-drafter');
-    expect(result.summary).toContain('capable');
+    // forge-drafter and forge-auditor should show (follows chat) since their models are undefined
+    const lines = result.summary.split('\n');
+    const drafterLine = lines.find(l => l.includes('forge-drafter'));
+    const auditorLine = lines.find(l => l.includes('forge-auditor'));
+    expect(drafterLine).toContain('follows chat');
+    expect(auditorLine).toContain('follows chat');
   });
 
   it('shows explicit forge model override', () => {
@@ -79,6 +82,17 @@ describe('modelShow', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.summary).toContain('sonnet');
+  });
+
+  it('shows explicit forge-drafter model without (follows chat) annotation', () => {
+    const ctx = makeCtx({ forgeDrafterModel: 'sonnet' });
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const lines = result.summary.split('\n');
+    const drafterLine = lines.find(l => l.includes('forge-drafter'));
+    expect(drafterLine).toContain('sonnet');
+    expect(drafterLine).not.toContain('follows chat');
   });
 
   it('resolves tier names to concrete models for claude_code runtime', () => {
@@ -123,9 +137,10 @@ describe('modelShow', () => {
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.summary).toContain('cron-exec');
-    expect(result.summary).toContain('haiku');
-    expect(result.summary).not.toContain('follows chat');
+    const lines = result.summary.split('\n');
+    const cronExecLine = lines.find(l => l.includes('cron-exec'));
+    expect(cronExecLine).toContain('haiku');
+    expect(cronExecLine).not.toContain('follows chat');
   });
 
   it('shows runtime defaultModel when model value is empty', () => {
