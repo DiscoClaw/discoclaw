@@ -33,6 +33,7 @@ describe('parseConfig', () => {
     expect(config.tasksSyncFailureRetryDelayMs).toBe(30_000);
     expect(config.tasksSyncDeferredRetryDelayMs).toBe(30_000);
     expect(config.outputFormat).toBe('text');
+    expect(config.serviceName).toBe('discoclaw');
     expect(warnings.some((w) => w.includes('category flags are ignored'))).toBe(false);
     expect(infos.some((i) => i.includes('category flags are ignored'))).toBe(false);
   });
