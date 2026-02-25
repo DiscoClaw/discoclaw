@@ -15,7 +15,8 @@ export type CronRunRecord = {
   statusMessageId?: string;
   runCount: number;
   lastRunAt: string | null;
-  lastRunStatus: 'success' | 'error' | null;
+  lastRunStatus: 'success' | 'error' | 'running' | 'interrupted' | null;
+  startedAt?: string;
   lastErrorMessage?: string;
   cadence: CadenceTag | null;
   purposeTags: string[];
@@ -28,12 +29,12 @@ export type CronRunRecord = {
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 3 as const;
+export const CURRENT_VERSION = 4 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -220,6 +221,34 @@ export class CronRunStats {
     });
   }
 
+  async recordRunStart(cronId: string): Promise<void> {
+    await this.mutex.run(async () => {
+      const rec = this.store.jobs[cronId];
+      if (!rec) return;
+      rec.lastRunStatus = 'running';
+      rec.startedAt = new Date().toISOString();
+      this.store.updatedAt = Date.now();
+      await this.flush();
+    });
+  }
+
+  async sweepInterrupted(): Promise<string[]> {
+    const affected: string[] = [];
+    await this.mutex.run(async () => {
+      for (const rec of Object.values(this.store.jobs)) {
+        if (rec.lastRunStatus === 'running') {
+          rec.lastRunStatus = 'interrupted';
+          affected.push(rec.cronId);
+        }
+      }
+      if (affected.length > 0) {
+        this.store.updatedAt = Date.now();
+        await this.flush();
+      }
+    });
+    return affected;
+  }
+
   async removeRecord(cronId: string): Promise<boolean> {
     let removed = false;
     await this.mutex.run(async () => {
@@ -308,7 +337,11 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
     }
     store.version = 3;
   }
+  // Migrate v3 → v4: no-op — new fields (startedAt, running/interrupted statuses) are optional/additive.
+  if (store.version === 3) {
+    store.version = 4;
+  }
   // Add future migration blocks here:
-  //   if (store.version === 3) { /* transform fields */; store.version = 4; }
+  //   if (store.version === 4) { /* transform fields */; store.version = 5; }
   return new CronRunStats(store, filePath);
 }
