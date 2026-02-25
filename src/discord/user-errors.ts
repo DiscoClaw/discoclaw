@@ -62,6 +62,10 @@ export function mapRuntimeErrorToUserMessage(raw: string): string {
     );
   }
 
+  if (lc.includes('prompt is too long') || lc.includes('context length exceeded') || lc.includes('context_length_exceeded')) {
+    return 'The conversation context exceeded the model\'s limit. Try a shorter message or start a new conversation.';
+  }
+
   if (!msg) {
     return 'An unexpected runtime error occurred with no additional detail.';
   }

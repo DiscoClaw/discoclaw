@@ -43,4 +43,14 @@ describe('mapRuntimeErrorToUserMessage', () => {
     expect(msg).toContain('DISCOCLAW_STREAM_STALL_TIMEOUT_MS');
     expect(msg).not.toContain('ms /');
   });
+
+  it('maps "Prompt is too long" to context overflow user message', () => {
+    const msg = mapRuntimeErrorToUserMessage('Prompt is too long');
+    expect(msg).toBe('The conversation context exceeded the model\'s limit. Try a shorter message or start a new conversation.');
+  });
+
+  it('maps "context_length_exceeded" to context overflow user message', () => {
+    const msg = mapRuntimeErrorToUserMessage('context_length_exceeded');
+    expect(msg).toBe('The conversation context exceeded the model\'s limit. Try a shorter message or start a new conversation.');
+  });
 });
