@@ -284,7 +284,7 @@ describe('handleUpdateCommand: apply', () => {
       );
       expect(restartCall).toBeDefined();
       expect(restartCall[1]).toContain('-k');
-      expect(restartCall[1].some((a: string) => a.includes('com.discoclaw.agent'))).toBe(true);
+      expect(restartCall[1].some((a: string) => a.includes('com.discoclaw.discoclaw'))).toBe(true);
     } finally {
       Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
       process.getuid = originalGetuid;
