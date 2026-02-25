@@ -383,12 +383,12 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     await sendChunks(channelForSend, processedText, collectedImages);
 
     ctx.log?.info({ jobId: job.id, name: job.name, channel: job.def.channel }, 'cron:exec done');
+    metrics.increment('cron.run.success');
 
     // Record successful run.
     if (ctx.statsStore && job.cronId) {
       try {
         await ctx.statsStore.recordRun(job.cronId, 'success');
-        metrics.increment('cron.run.success');
       } catch (statsErr) {
         ctx.log?.warn({ err: statsErr, jobId: job.id }, 'cron:exec stats record failed');
       }
