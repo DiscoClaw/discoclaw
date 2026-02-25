@@ -155,8 +155,8 @@ export function executeConfigAction(
       const rows: [string, string, string][] = [
         ['chat', bp.runtimeModel, ROLE_DESCRIPTIONS.chat],
         ['summary', bp.summaryModel, ROLE_DESCRIPTIONS.summary],
-        ['forge-drafter', bp.forgeDrafterModel ?? bp.runtimeModel, ROLE_DESCRIPTIONS['forge-drafter']],
-        ['forge-auditor', bp.forgeAuditorModel ?? bp.runtimeModel, ROLE_DESCRIPTIONS['forge-auditor']],
+        ['forge-drafter', bp.forgeDrafterModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-drafter']],
+        ['forge-auditor', bp.forgeAuditorModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-auditor']],
       ];
 
       if (bp.cronCtx) {
