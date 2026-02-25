@@ -11,15 +11,6 @@
 export const TASK_STORE_MUTATION_EVENTS = ['created', 'updated', 'closed', 'labeled'] as const;
 export type TaskStoreMutationEvent = (typeof TASK_STORE_MUTATION_EVENTS)[number];
 
-export const TASK_SYNC_TRIGGER_EVENTS = ['updated', 'closed', 'labeled'] as const;
-export type TaskSyncTriggerEvent = (typeof TASK_SYNC_TRIGGER_EVENTS)[number];
-
-const TASK_SYNC_TRIGGER_EVENT_SET = new Set<TaskStoreMutationEvent>(TASK_SYNC_TRIGGER_EVENTS);
-
-export function shouldTriggerTaskSyncForStoreEvent(event: TaskStoreMutationEvent): boolean {
-  return TASK_SYNC_TRIGGER_EVENT_SET.has(event);
-}
-
 export type TaskLifecycleAction = 'taskCreate' | 'taskUpdate' | 'taskClose' | 'taskShow' | 'taskList' | 'taskSync' | 'tagMapReload';
 
 export const TASK_DIRECT_THREAD_ACTIONS = ['taskCreate', 'taskUpdate', 'taskClose'] as const;
