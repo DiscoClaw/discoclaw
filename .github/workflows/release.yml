@@ -35,10 +35,3 @@ jobs:
           git tag "v${{ steps.pkg.outputs.version }}"
           git push origin "v${{ steps.pkg.outputs.version }}"
 
-  publish:
-    needs: tag
-    if: needs.tag.outputs.new_tag == 'true'
-    uses: ./.github/workflows/publish.yml
-    permissions:
-      contents: read
-      id-token: write
