@@ -43,7 +43,7 @@ describe('init wizard helpers', () => {
     expect(name).toBe('.env.backup.20260221T184512');
   });
 
-  it('builds env content with provider/core/optional sections', () => {
+  it('builds env content with provider/core/defaults sections', () => {
     const content = buildEnvContent(
       {
         DISCORD_TOKEN: 'a.b.c',
@@ -64,8 +64,10 @@ describe('init wizard helpers', () => {
     expect(content).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
     expect(content).toContain('# CORE');
     expect(content).toContain('DISCORD_GUILD_ID=1000000000000000004');
-    expect(content).toContain('# OPTIONAL');
+    expect(content).toContain('# DEFAULTS');
     expect(content).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
+    expect(content).not.toContain('# OPTIONAL');
+    expect(content).not.toContain('DISCOCLAW_STATUS_CHANNEL');
     // Forum IDs are auto-detected, not in REQUIRED
     expect(content).toContain('# AUTO-DETECTED');
     expect(content).toContain('DISCOCLAW_TASKS_FORUM=1000000000000000002');
@@ -76,6 +78,19 @@ describe('init wizard helpers', () => {
     const tasksIdx = content.indexOf('DISCOCLAW_TASKS_FORUM=');
     expect(tasksIdx).toBeGreaterThan(autoDetectedIdx);
     expect(autoDetectedIdx).toBeGreaterThan(requiredIdx);
+  });
+
+  it('always writes DISCOCLAW_DISCORD_ACTIONS=1 in DEFAULTS even when not in vals', () => {
+    const content = buildEnvContent(
+      {
+        DISCORD_TOKEN: 'a.b.c',
+        DISCORD_ALLOW_USER_IDS: '1000000000000000001',
+      },
+      new Date('2026-02-24T00:00:00.000Z'),
+    );
+
+    expect(content).toContain('# DEFAULTS');
+    expect(content).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
   });
 
   it('selects provider defaults in expected precedence order', () => {
@@ -190,11 +205,8 @@ describe('runInitWizard', () => {
       'y', // Overwrite existing .env
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
-      '', // enable skip permissions
-      '', // enable stream-json
-      'n', // configure recommended settings
-      'n', // configure optional features
     ];
 
     fs.writeFileSync(path.join(tmpDir, '.env'), oldEnv, 'utf8');
@@ -222,6 +234,8 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('PRIMARY_RUNTIME=claude');
     expect(newEnv).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
     expect(newEnv).toContain('CLAUDE_OUTPUT_FORMAT=stream-json');
+    expect(newEnv).toContain('DISCORD_GUILD_ID=5000000000000000001');
+    expect(newEnv).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
     expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${path.join(tmpDir, 'data')}`);
     expect(ensureWorkspaceBootstrapFiles).toHaveBeenCalledWith(path.join(tmpDir, 'workspace'));
   });
@@ -236,12 +250,9 @@ describe('runInitWizard', () => {
       // no existing .env
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '5000000000000000001', // DISCORD_GUILD_ID
       '5', // provider selection -> OpenRouter
       'sk-or-test-key', // OPENROUTER_API_KEY
-      '', // OPENROUTER_BASE_URL (optional, skip)
-      '', // OPENROUTER_MODEL (optional, use default)
-      'n', // configure recommended settings
-      'n', // configure optional features
     ];
 
     process.chdir(tmpDir);
@@ -263,6 +274,7 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('PRIMARY_RUNTIME=openrouter');
     expect(newEnv).toContain('OPENROUTER_API_KEY=sk-or-test-key');
     expect(newEnv).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4');
+    expect(newEnv).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
     expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${path.join(tmpDir, 'data')}`);
   });
 
@@ -276,11 +288,8 @@ describe('runInitWizard', () => {
       customDataDir, // data directory (custom path)
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
-      '', // enable skip permissions
-      '', // enable stream-json
-      'n', // configure recommended settings
-      'n', // configure optional features
     ];
 
     process.chdir(tmpDir);
@@ -319,11 +328,8 @@ describe('runInitWizard', () => {
       'y', // Overwrite existing .env
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
-      '', // enable skip permissions
-      '', // enable stream-json
-      'n', // configure recommended settings
-      'n', // configure optional features
     ];
 
     fs.writeFileSync(path.join(tmpDir, '.env'), oldEnv, 'utf8');
@@ -352,6 +358,44 @@ describe('runInitWizard', () => {
     expect(tasksIdx).toBeGreaterThan(autoDetectedIdx);
   });
 
+  it('re-prompts when guild ID is blank or invalid', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
+    const previousCwd = process.cwd();
+    const answers = [
+      '', // install directory (default)
+      '', // Press Enter to continue
+      '', // data directory (default)
+      'a.b.c', // DISCORD_TOKEN
+      '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '', // guild ID (blank — re-prompt)
+      'not-valid', // guild ID (invalid — re-prompt)
+      '5000000000000000001', // guild ID (valid)
+      '', // provider selection -> default (Claude)
+    ];
+    const expectedCallCount = answers.length; // capture before wizard shifts values out
+
+    process.chdir(tmpDir);
+
+    const mockRl = makeReadline(answers);
+    vi.mocked(createInterface).mockReturnValue(mockRl as any);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('binary not found');
+    });
+    vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await runInitWizard();
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
+    expect(newEnv).toContain('DISCORD_GUILD_ID=5000000000000000001');
+    // All answers were consumed, meaning guild ID was re-prompted twice
+    expect(mockRl.question).toHaveBeenCalledTimes(expectedCallCount);
+  });
+
   it('uses a custom install directory when a path is provided', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
     const answers = [
@@ -360,11 +404,8 @@ describe('runInitWizard', () => {
       '', // data directory (default)
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
-      '', // enable skip permissions
-      '', // enable stream-json
-      'n', // configure recommended settings
-      'n', // configure optional features
     ];
 
     vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
@@ -389,11 +430,8 @@ describe('runInitWizard', () => {
       '', // data directory (default)
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
-      '', // enable skip permissions
-      '', // enable stream-json
-      'n', // configure recommended settings
-      'n', // configure optional features
     ];
 
     vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);

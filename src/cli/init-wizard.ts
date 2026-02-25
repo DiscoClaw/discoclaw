@@ -72,15 +72,9 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
     }
   }
 
-  const optionalKeys = ['DISCOCLAW_DISCORD_ACTIONS', 'DISCOCLAW_STATUS_CHANNEL'];
-  const hasOptional = optionalKeys.some((k) => vals[k]);
-  if (hasOptional) {
-    lines.push('# OPTIONAL');
-    for (const k of optionalKeys) {
-      if (vals[k]) lines.push(`${k}=${vals[k]}`);
-    }
-    lines.push('');
-  }
+  lines.push('# DEFAULTS');
+  lines.push(`DISCOCLAW_DISCORD_ACTIONS=${vals.DISCOCLAW_DISCORD_ACTIONS ?? '1'}`);
+  lines.push('');
 
   const autoDetectedKeys = ['DISCOCLAW_TASKS_FORUM', 'DISCOCLAW_CRON_FORUM'];
   const hasAutoDetected = autoDetectedKeys.some((k) => vals[k]);
@@ -154,20 +148,6 @@ export async function runInitWizard(): Promise<void> {
     while (true) {
       if (canceled) return '';
       const val = await ask(prompt);
-      const err = validate(val.trim());
-      if (!err) return val.trim();
-      console.log(`  Error: ${err}. Try again.\n`);
-    }
-  }
-
-  async function askOptional(
-    prompt: string,
-    validate: (val: string) => string | null,
-  ): Promise<string> {
-    while (true) {
-      if (canceled) return '';
-      const val = await ask(prompt);
-      if (!val.trim()) return '';
       const err = validate(val.trim());
       if (!err) return val.trim();
       console.log(`  Error: ${err}. Try again.\n`);
@@ -287,6 +267,18 @@ export async function runInitWizard(): Promise<void> {
     },
   );
 
+  console.log(
+    `\nDiscord Guild ID\n` +
+      `  A Discord guild (server) ID is an 18-19 digit number uniquely identifying your server.\n` +
+      `  To find yours: right-click your server name in the sidebar\n` +
+      `  and choose "Copy Server ID" (requires Developer Mode enabled).\n`,
+  );
+
+  values.DISCORD_GUILD_ID = await askValidated('Discord guild (server) ID: ', (val) => {
+    if (!val) return 'Guild ID is required';
+    return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
+  });
+
   // (DISCOCLAW_TASKS_FORUM and DISCOCLAW_CRON_FORUM are auto-created on first connect)
 
   // ── Runtime detection ─────────────────────────────────────────────────────
@@ -325,23 +317,13 @@ export async function runInitWizard(): Promise<void> {
 
   if (finalChoice === '1') {
     values.PRIMARY_RUNTIME = 'claude';
-    const skipPerms = await ask(
-      'Enable CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS? (required for headless operation) [Y/n] ',
-    );
-    if (skipPerms.toLowerCase() !== 'n') {
-      values.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS = '1';
-    }
-    const streamJson = await ask('Use stream-json output format? (smoother streaming) [Y/n] ');
-    if (streamJson.toLowerCase() !== 'n') {
-      values.CLAUDE_OUTPUT_FORMAT = 'stream-json';
-    }
+    values.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS = '1';
+    values.CLAUDE_OUTPUT_FORMAT = 'stream-json';
   } else if (finalChoice === '2') {
     values.PRIMARY_RUNTIME = 'gemini';
     console.log('  Note: auth is handled by the gemini binary itself (run `gemini` to authenticate).');
-    const gemBin = await askOptional('Gemini binary path [default: gemini]: ', () => null);
-    values.GEMINI_BIN = gemBin || 'gemini';
-    const gemModel = await askOptional('Gemini model [default: gemini-2.5-pro]: ', () => null);
-    values.GEMINI_MODEL = gemModel || 'gemini-2.5-pro';
+    values.GEMINI_BIN = 'gemini';
+    values.GEMINI_MODEL = 'gemini-2.5-pro';
   } else if (finalChoice === '3') {
     values.PRIMARY_RUNTIME = 'openai';
     console.log('  Note: the OpenAI adapter is HTTP-only.');
@@ -351,16 +333,6 @@ export async function runInitWizard(): Promise<void> {
     );
   } else if (finalChoice === '4') {
     values.PRIMARY_RUNTIME = 'codex';
-    const codexBin = await askOptional('Codex binary path [leave empty to use PATH]: ', () => null);
-    if (codexBin) values.CODEX_BIN = codexBin;
-    const codexModel = await askOptional('Codex model [leave empty for default]: ', () => null);
-    if (codexModel) values.CODEX_MODEL = codexModel;
-    const bypassApprovals = await ask(
-      'Enable CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX? [y/N] ',
-    );
-    if (bypassApprovals.toLowerCase() === 'y') {
-      values.CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX = '1';
-    }
   } else if (finalChoice === '5') {
     values.PRIMARY_RUNTIME = 'openrouter';
     console.log('  Note: the OpenRouter adapter is HTTP-only.');
@@ -368,47 +340,10 @@ export async function runInitWizard(): Promise<void> {
       'OpenRouter API key: ',
       (val) => (val ? null : 'API key is required'),
     );
-    const orBaseUrl = await askOptional('OpenRouter base URL [leave empty for default]: ', () => null);
-    if (orBaseUrl) values.OPENROUTER_BASE_URL = orBaseUrl;
-    const orModel = await askOptional(
-      'OpenRouter model [default: anthropic/claude-sonnet-4]: ',
-      () => null,
-    );
-    values.OPENROUTER_MODEL = orModel || 'anthropic/claude-sonnet-4';
+    values.OPENROUTER_MODEL = 'anthropic/claude-sonnet-4';
   }
 
-  // ── Recommended settings ──────────────────────────────────────────────────
-
-  const configRecommended = await ask('\nConfigure recommended settings? [Y/n] ');
-  if (configRecommended.toLowerCase() !== 'n') {
-    const guildId = await askOptional(
-      'Discord guild (server) ID [leave empty to skip]: ',
-      (val) => {
-        if (!val) return null;
-        return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
-      },
-    );
-    if (guildId) values.DISCORD_GUILD_ID = guildId;
-  }
-
-  // ── Optional features ─────────────────────────────────────────────────────
-
-  const configOptional = await ask('\nConfigure optional features? [y/N] ');
-  if (configOptional.toLowerCase() === 'y') {
-    const actions = await ask(
-      'Enable Discord Actions? (lets the AI manage your server) [Y/n] ',
-    );
-    if (actions.toLowerCase() === 'n') {
-      values.DISCOCLAW_DISCORD_ACTIONS = '0';
-    } else {
-      values.DISCOCLAW_DISCORD_ACTIONS = '1';
-    }
-    const statusChannel = await askOptional(
-      'Status channel ID or name [leave empty to skip]: ',
-      () => null,
-    );
-    if (statusChannel) values.DISCOCLAW_STATUS_CHANNEL = statusChannel;
-  }
+  values.DISCOCLAW_DISCORD_ACTIONS = '1';
 
   // ── Write .env ────────────────────────────────────────────────────────────
 
