@@ -344,6 +344,23 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
     processedText = appendParseFailureNotice(processedText, parseFailuresCount);
 
+    // Suppress sentinel outputs (e.g. crons whose prompts say "output nothing if idle").
+    // Mirrors the reaction handler's logic at reaction-handler.ts:662-674.
+    const strippedText = processedText.replace(/\s+/g, ' ').trim();
+    const isSuppressible = strippedText === 'HEARTBEAT_OK' || strippedText === '(no output)';
+    if (isSuppressible && collectedImages.length === 0) {
+      ctx.log?.info({ jobId: job.id, name: job.name, sentinel: strippedText }, 'cron:exec sentinel output suppressed');
+      if (ctx.statsStore && job.cronId) {
+        try {
+          await ctx.statsStore.recordRun(job.cronId, 'success');
+        } catch {
+          // Best-effort.
+        }
+      }
+      metrics.increment('cron.run.success');
+      return;
+    }
+
     await sendChunks(channelForSend, processedText, collectedImages);
 
     ctx.log?.info({ jobId: job.id, name: job.name, channel: job.def.channel }, 'cron:exec done');

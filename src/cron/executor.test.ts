@@ -365,6 +365,66 @@ describe('executeCronJob', () => {
     executeDiscordActionsSpy.mockRestore();
   });
 
+  it('suppresses HEARTBEAT_OK output', async () => {
+    const ctx = makeCtx({ runtime: makeMockRuntime('HEARTBEAT_OK') });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(ctx.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: job.id, sentinel: 'HEARTBEAT_OK' }),
+      'cron:exec sentinel output suppressed',
+    );
+  });
+
+  it('suppresses (no output) output', async () => {
+    const ctx = makeCtx({ runtime: makeMockRuntime('(no output)') });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it('does not suppress HEARTBEAT_OK when images are present', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'HEARTBEAT_OK' };
+        yield { type: 'image_data', image: { mediaType: 'image/png', base64: 'abc123' } };
+        yield { type: 'done' };
+      },
+    };
+    const ctx = makeCtx({ runtime });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalled();
+  });
+
+  it('records success in statsStore when sentinel is suppressed', async () => {
+    const statsStore = {
+      recordRun: vi.fn().mockResolvedValue(undefined),
+      recordRunStart: vi.fn().mockResolvedValue(undefined),
+      getRecord: vi.fn().mockReturnValue(undefined),
+      upsertRecord: vi.fn().mockResolvedValue(undefined),
+    } as any;
+    const ctx = makeCtx({ runtime: makeMockRuntime('HEARTBEAT_OK'), statsStore });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    expect(statsStore.recordRun).toHaveBeenCalledWith('cron-test0001', 'success');
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
   it('does not post if output is empty', async () => {
     const ctx = makeCtx({ runtime: makeMockRuntime('') });
     const job = makeJob();
