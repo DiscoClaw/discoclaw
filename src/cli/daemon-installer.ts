@@ -71,6 +71,7 @@ export function renderSystemdUnit(packageRoot: string, cwd: string): string {
     '',
     '[Service]',
     'Type=simple',
+    'Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin',
     `ExecStart=/usr/bin/node ${entryPoint}`,
     `WorkingDirectory=${cwd}`,
     `EnvironmentFile=${path.join(cwd, '.env')}`,

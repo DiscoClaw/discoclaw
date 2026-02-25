@@ -111,6 +111,13 @@ describe('renderSystemdUnit', () => {
     expect(unit).toContain(`EnvironmentFile=${CWD}/.env`);
   });
 
+  it('includes Environment=PATH with user-local bin directories', () => {
+    const unit = renderSystemdUnit(PACKAGE_ROOT, CWD);
+    expect(unit).toContain('Environment=PATH=');
+    expect(unit).toContain('%h/.local/bin');
+    expect(unit).toContain('%h/.npm-global/bin');
+  });
+
   it('includes standard unit and install sections', () => {
     const unit = renderSystemdUnit(PACKAGE_ROOT, CWD);
     expect(unit).toContain('[Unit]');
