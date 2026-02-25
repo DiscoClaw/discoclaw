@@ -4,7 +4,7 @@
 
 # DiscoClaw
 
-A personal AI orchestrator that turns Discord into a persistent workspace — built on three pillars: **Memory**, **Tasks**, and **Crons**.
+A personal AI orchestrator that turns Discord into a persistent workspace — built on three pillars: **Memory**, **Tasks**, and **Automations**.
 
 DiscoClaw is an orchestrator: it coordinates between a user interface (Discord), one or more AI runtimes (Claude Code, OpenAI, Codex), and local system resources — managing conversation state, task routing, scheduling, and tool access. The intelligence is rented; the coordination is owned.
 
@@ -43,7 +43,7 @@ A lightweight in-process task store that syncs bidirectionally with Discord foru
 
 **Why Discord fits:** forum threads = task cards, archive = done, thread names show live status.
 
-## Crons — the bot acts on its own
+## Automations — the bot acts on its own
 
 Recurring tasks defined as forum threads in plain language — no crontab, no separate scheduler UI.
 
