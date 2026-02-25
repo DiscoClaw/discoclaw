@@ -1,5 +1,22 @@
 name: release
 
+# This workflow creates and pushes a version tag when package.json version changes.
+#
+# IMPORTANT — why publish.yml sometimes doesn't fire automatically:
+# GitHub intentionally prevents workflows triggered by GITHUB_TOKEN from triggering
+# other workflows (to prevent infinite loops). This means the tag push below will NOT
+# fire publish.yml in GitHub Actions.
+#
+# DO NOT add a PAT or any token to work around this — adding any token to the npm
+# publish path breaks the OIDC Trusted Publisher flow and causes ENEEDAUTH.
+#
+# If publish.yml didn't run after a release, retag manually from your local machine:
+#   git tag -d vX.Y.Z
+#   git push origin :refs/tags/vX.Y.Z
+#   git tag vX.Y.Z
+#   git push origin vX.Y.Z
+# A push from a real user (not GITHUB_TOKEN) does trigger publish.yml correctly.
+
 on:
   push:
     branches: [main]
