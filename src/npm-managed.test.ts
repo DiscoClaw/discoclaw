@@ -4,6 +4,10 @@ vi.mock('execa', () => ({
   execa: vi.fn(),
 }));
 
+vi.mock('node:fs', () => ({
+  existsSync: vi.fn(),
+}));
+
 import { getLocalVersion, getLatestNpmVersion, isNpmManaged, npmGlobalUpgrade } from './npm-managed.js';
 
 // ---------------------------------------------------------------------------
@@ -23,45 +27,22 @@ describe('getLocalVersion', () => {
 // ---------------------------------------------------------------------------
 
 describe('isNpmManaged', () => {
-  let mockExeca: ReturnType<typeof vi.fn>;
+  let mockExistsSync: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
-    const mod = await import('execa');
-    mockExeca = mod.execa as unknown as ReturnType<typeof vi.fn>;
-    mockExeca.mockReset();
+    const mod = await import('node:fs');
+    mockExistsSync = mod.existsSync as unknown as ReturnType<typeof vi.fn>;
+    mockExistsSync.mockReset();
   });
 
-  it('returns true when process.argv[1] is under the npm global root', async () => {
-    mockExeca.mockResolvedValueOnce({ stdout: '/usr/local/lib/node_modules\n' });
-    const orig = process.argv[1];
-    process.argv[1] = '/usr/local/lib/node_modules/discoclaw/dist/cli/index.js';
-    try {
-      expect(await isNpmManaged()).toBe(true);
-      expect(mockExeca).toHaveBeenCalledWith('npm', ['root', '-g']);
-    } finally {
-      process.argv[1] = orig;
-    }
-  });
-
-  it('returns false when process.argv[1] is outside the npm global root', async () => {
-    mockExeca.mockResolvedValueOnce({ stdout: '/usr/local/lib/node_modules\n' });
-    const orig = process.argv[1];
-    process.argv[1] = '/home/user/code/discoclaw/src/index.ts';
-    try {
-      expect(await isNpmManaged()).toBe(false);
-    } finally {
-      process.argv[1] = orig;
-    }
-  });
-
-  it('returns false when npm root -g fails', async () => {
-    mockExeca.mockRejectedValueOnce(new Error('npm not found'));
+  it('returns false (source install) when .git exists at the package root', async () => {
+    mockExistsSync.mockReturnValue(true);
     expect(await isNpmManaged()).toBe(false);
   });
 
-  it('returns false when npm root -g returns empty output', async () => {
-    mockExeca.mockResolvedValueOnce({ stdout: '   ' });
-    expect(await isNpmManaged()).toBe(false);
+  it('returns true (npm-managed) when .git does not exist at the package root', async () => {
+    mockExistsSync.mockReturnValue(false);
+    expect(await isNpmManaged()).toBe(true);
   });
 });
 
