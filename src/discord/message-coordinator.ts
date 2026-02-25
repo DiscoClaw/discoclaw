@@ -202,6 +202,7 @@ export type BotParams = {
   existingTasksId?: string;
   completionNotifyEnabled?: boolean;
   completionNotifyThresholdMs?: number;
+  serviceName?: string;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -780,6 +781,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           dataDir: params.dataDir,
           userId: msg.author.id,
           activeForge: getActiveOrchestrator()?.activePlanId,
+          serviceName: params.serviceName,
         });
         await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
         // Deferred action (e.g., restart) runs after the reply is sent.
@@ -796,6 +798,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           projectCwd: params.projectCwd,
           dataDir: params.dataDir,
           restartCmd: params.updateRestartCmd,
+          serviceName: params.serviceName,
         });
         await msg.reply({ content: result.reply, allowedMentions: NO_MENTIONS });
         // Deferred action (e.g., restart after apply) runs after the reply is sent.
