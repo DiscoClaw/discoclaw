@@ -853,4 +853,36 @@ describe('executeCronJob write-ahead status tracking', () => {
     // Should complete without error — no statsStore means no-op on stats paths.
     await expect(executeCronJob(job, ctx)).resolves.toBeUndefined();
   });
+
+  it('execution continues when recordRunStart throws', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    vi.spyOn(statsStore, 'recordRunStart').mockRejectedValueOnce(new Error('disk full'));
+    const recordRunSpy = vi.spyOn(statsStore, 'recordRun');
+
+    const ctx = makeCtx({ statsStore });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    // Execution should complete and post to channel despite recordRunStart failing.
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+    expect(recordRunSpy).toHaveBeenCalledWith('cron-test0001', 'success');
+  });
+
+  it('records success when output is empty and statsStore is set', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime('') });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    const rec = statsStore.getRecord('cron-test0001');
+    expect(rec?.lastRunStatus).toBe('success');
+  });
 });

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  healInterruptedCronRuns,
   healStaleCronRecords,
   healStaleTaskThreadRefs,
   healCorruptedJsonStores,
@@ -27,6 +28,7 @@ function makeMockStatsStore(jobs: Record<string, { cronId: string; threadId: str
   return {
     getStore: () => store,
     removeByThreadId: vi.fn().mockResolvedValue(true),
+    sweepInterrupted: vi.fn().mockResolvedValue([]),
   } as unknown as CronRunStats;
 }
 
@@ -47,6 +49,59 @@ function makeMockClient(fetchImpl?: FetchImpl) {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// healInterruptedCronRuns — Scenario 1
+// ---------------------------------------------------------------------------
+
+describe('healInterruptedCronRuns', () => {
+  it('calls sweepInterrupted and logs a structured warning per affected cronId', async () => {
+    const log = makeMockLog();
+    const statsStore = makeMockStatsStore({});
+    (statsStore.sweepInterrupted as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      'cron-aaa',
+      'cron-bbb',
+    ]);
+
+    await healInterruptedCronRuns(statsStore, log);
+
+    expect(statsStore.sweepInterrupted).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledTimes(2);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ cronId: 'cron-aaa' }),
+      'startup:heal:cron promoted interrupted run (was running at shutdown)',
+    );
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ cronId: 'cron-bbb' }),
+      'startup:heal:cron promoted interrupted run (was running at shutdown)',
+    );
+  });
+
+  it('is a no-op and does not log when the store has no running entries', async () => {
+    const log = makeMockLog();
+    const statsStore = makeMockStatsStore({});
+    // sweepInterrupted already mocked to return [] by default.
+
+    await healInterruptedCronRuns(statsStore, log);
+
+    expect(statsStore.sweepInterrupted).toHaveBeenCalledOnce();
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('catches and logs sweepInterrupted errors without throwing', async () => {
+    const log = makeMockLog();
+    const statsStore = makeMockStatsStore({});
+    (statsStore.sweepInterrupted as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('disk full'),
+    );
+
+    await expect(healInterruptedCronRuns(statsStore, log)).resolves.not.toThrow();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: 'disk full' }),
+      'startup:heal:cron sweepInterrupted failed — continuing',
+    );
+  });
+});
 
 // ---------------------------------------------------------------------------
 // healStaleCronRecords — Scenario 2

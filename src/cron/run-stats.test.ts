@@ -264,3 +264,38 @@ describe('emptyStore', () => {
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
 });
+
+describe('loadRunStats version migration', () => {
+  it('migrates a v3 store to v4 and preserves existing records', async () => {
+    const v3Store = {
+      version: 3,
+      updatedAt: Date.now(),
+      jobs: {
+        'cron-migrated': {
+          cronId: 'cron-migrated',
+          threadId: 'thread-migrate',
+          runCount: 5,
+          lastRunAt: '2025-01-01T00:00:00.000Z',
+          lastRunStatus: 'success',
+          cadence: 'daily',
+          purposeTags: ['monitoring'],
+          disabled: false,
+          model: 'haiku',
+          triggerType: 'schedule',
+        },
+      },
+    };
+    await fs.writeFile(statsPath, JSON.stringify(v3Store), 'utf-8');
+
+    const stats = await loadRunStats(statsPath);
+
+    expect(stats.getStore().version).toBe(4);
+    const rec = stats.getRecord('cron-migrated');
+    expect(rec).toBeDefined();
+    expect(rec!.cronId).toBe('cron-migrated');
+    expect(rec!.runCount).toBe(5);
+    expect(rec!.lastRunStatus).toBe('success');
+    expect(rec!.cadence).toBe('daily');
+    expect(rec!.purposeTags).toEqual(['monitoring']);
+  });
+});
