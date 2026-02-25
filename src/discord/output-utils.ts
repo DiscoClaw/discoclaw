@@ -148,6 +148,10 @@ export function formatElapsed(ms: number): string {
   return `(${minutes}m${seconds}s)`;
 }
 
+export function buildCompletionNotice(elapsedMs: number): string {
+  return `Done ${formatElapsed(elapsedMs)}`;
+}
+
 export function selectStreamingOutput(opts: {
   deltaText: string;
   activityLabel: string;

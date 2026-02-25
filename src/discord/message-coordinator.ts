@@ -52,7 +52,7 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed, buildCompletionNotice } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
@@ -200,6 +200,8 @@ export type BotParams = {
   appendSystemPrompt?: string;
   existingCronsId?: string;
   existingTasksId?: string;
+  completionNotifyEnabled?: boolean;
+  completionNotifyThresholdMs?: number;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -2619,6 +2621,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               try {
                 await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
                 replyFinalized = true;
+                const elapsedMs = Date.now() - t0;
+                if (
+                  params.completionNotifyEnabled &&
+                  followUpDepth === 0 &&
+                  !invokeHadError &&
+                  !abortSignal?.aborted &&
+                  elapsedMs >= (params.completionNotifyThresholdMs ?? 0)
+                ) {
+                  try {
+                    await msg.channel.send({ content: buildCompletionNotice(elapsedMs), allowedMentions: NO_MENTIONS });
+                    params.log?.info({ sessionKey, elapsedMs }, 'discord:completion-notice posted');
+                  } catch { /* best-effort */ }
+                }
               } catch (editErr) {
                 // Thread archived by a taskClose action — the close summary was already
                 // posted inside closeTaskThread, so the only thing lost is Claude's
