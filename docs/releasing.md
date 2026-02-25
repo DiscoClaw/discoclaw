@@ -7,15 +7,19 @@
 3. `release.yml` reads the version from `package.json`, checks if the tag already exists, and creates + pushes the tag if it doesn't.
 4. The tag push triggers `publish.yml` directly, which builds, tests, and publishes to npm.
 
-The tag push from `release.yml` uses `GITHUB_TOKEN`. Normally, tags pushed by Actions
-don't retrigger other workflows — but `publish.yml` fires here because it's triggered by
-`push: tags: v*`, and GitHub *does* fire that event when a workflow pushes a tag (only
-workflow_dispatch and push-to-branch events are suppressed). The OIDC token's ref is
-`refs/tags/vX.Y.Z`, which npmjs.com's Trusted Publisher accepts.
+> **Important:** `release.yml` pushes the tag using `GITHUB_TOKEN`. GitHub intentionally
+> prevents workflows triggered by `GITHUB_TOKEN` from firing other workflows. This means
+> the tag push from `release.yml` does **not** automatically trigger `publish.yml`.
+>
+> After merging a version bump PR, you must retag manually from your local machine to
+> trigger `publish.yml`. See [Manual release](#manual-release-if-needed) below.
+>
+> **Do not add a PAT or any token to work around this.** Adding any token to the publish
+> path breaks the OIDC Trusted Publisher flow and causes ENEEDAUTH.
 
 > **Why not `workflow_call`?** When `release.yml` called `publish.yml` via `workflow_call`,
 > the OIDC token's ref was `refs/heads/main` (the caller's ref), not the tag. npmjs.com
-> rejected it. Direct tag trigger fixes this permanently.
+> rejected it. Direct tag trigger is the only working path.
 
 ## Workflow files
 
@@ -142,7 +146,8 @@ When you're ready to ship, say something like:
 Weston will:
 
 1. Bump the version in `package.json` and open a PR (or commit directly if on a branch)
-2. Once merged, `release.yml` handles tagging and publishing automatically
+2. Once merged, `release.yml` creates the tag automatically
+3. Retag manually from local to trigger `publish.yml` (see [Manual release](#manual-release-if-needed))
 
 ### Version guidance
 
