@@ -6,6 +6,7 @@ import os from 'node:os';
 import { executeCronJob } from './executor.js';
 import { safeCronId } from './job-lock.js';
 import { CronRunControl } from './run-control.js';
+import { loadRunStats } from './run-stats.js';
 import { loadWorkspacePaFiles } from '../discord/prompt-common.js';
 import * as discordActions from '../discord/actions.js';
 import type { ActionCategoryFlags } from '../discord/actions.js';
@@ -767,5 +768,89 @@ describe('executeCronJob workspace PA context', () => {
     const ctx = makeCtx({ runtime, model: 'sonnet' });
     await executeCronJob(makeJob(), ctx);
     expect(invokedModel).toBe('sonnet');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Write-ahead status tracking (statsStore integration)
+// ---------------------------------------------------------------------------
+
+describe('executeCronJob write-ahead status tracking', () => {
+  let statsDir: string;
+
+  beforeEach(async () => {
+    statsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-stats-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(statsDir, { recursive: true, force: true });
+  });
+
+  it('writes running status before execution and success after', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    const recordRunStartSpy = vi.spyOn(statsStore, 'recordRunStart');
+    const recordRunSpy = vi.spyOn(statsStore, 'recordRun');
+
+    const ctx = makeCtx({ statsStore });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    expect(recordRunStartSpy).toHaveBeenCalledWith('cron-test0001');
+    expect(recordRunSpy).toHaveBeenCalledWith('cron-test0001', 'success');
+
+    // recordRunStart must be called before recordRun.
+    const startOrder = recordRunStartSpy.mock.invocationCallOrder[0];
+    const runOrder = recordRunSpy.mock.invocationCallOrder[0];
+    expect(startOrder).toBeLessThan(runOrder);
+  });
+
+  it('writes running status then error on runtime error', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    const recordRunStartSpy = vi.spyOn(statsStore, 'recordRunStart');
+    const recordRunSpy = vi.spyOn(statsStore, 'recordRun');
+
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntimeError('timeout') });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    expect(recordRunStartSpy).toHaveBeenCalledWith('cron-test0001');
+    expect(recordRunSpy).toHaveBeenCalledWith('cron-test0001', 'error', 'timeout');
+  });
+
+  it('persists running status mid-run (visible to a concurrent reader)', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    let statusDuringRun: string | null | undefined = null;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        // Read the on-disk status mid-run to verify the write-ahead record exists.
+        const onDisk = await loadRunStats(statsPath);
+        statusDuringRun = onDisk.getRecord('cron-test0001')?.lastRunStatus ?? null;
+        yield { type: 'text_final', text: 'done' };
+        yield { type: 'done' };
+      },
+    };
+
+    const ctx = makeCtx({ statsStore, runtime });
+    await executeCronJob(makeJob(), ctx);
+
+    expect(statusDuringRun).toBe('running');
+  });
+
+  it('skips recordRunStart when statsStore is not set', async () => {
+    const ctx = makeCtx(); // no statsStore
+    const job = makeJob();
+    // Should complete without error — no statsStore means no-op on stats paths.
+    await expect(executeCronJob(job, ctx)).resolves.toBeUndefined();
   });
 });

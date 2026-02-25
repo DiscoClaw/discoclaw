@@ -184,6 +184,76 @@ describe('CronRunStats', () => {
     await stats.recordRun('nonexistent', 'success');
     // Should not throw
   });
+
+  it('recordRunStart sets running status and startedAt', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-rs1', 'thread-rs1');
+    await stats.recordRunStart('cron-rs1');
+
+    const rec = stats.getRecord('cron-rs1')!;
+    expect(rec.lastRunStatus).toBe('running');
+    expect(rec.startedAt).toBeTruthy();
+  });
+
+  it('recordRunStart does not increment runCount', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-rs2', 'thread-rs2');
+    await stats.recordRunStart('cron-rs2');
+
+    const rec = stats.getRecord('cron-rs2')!;
+    expect(rec.runCount).toBe(0);
+  });
+
+  it('recordRunStart no-ops for unknown cronId', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.recordRunStart('nonexistent');
+    // Should not throw
+  });
+
+  it('sweepInterrupted promotes running entries to interrupted', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-sw1', 'thread-sw1');
+    await stats.upsertRecord('cron-sw2', 'thread-sw2');
+    await stats.recordRunStart('cron-sw1');
+    await stats.recordRunStart('cron-sw2');
+
+    const affected = await stats.sweepInterrupted();
+    expect(affected).toHaveLength(2);
+    expect(affected).toContain('cron-sw1');
+    expect(affected).toContain('cron-sw2');
+
+    expect(stats.getRecord('cron-sw1')!.lastRunStatus).toBe('interrupted');
+    expect(stats.getRecord('cron-sw2')!.lastRunStatus).toBe('interrupted');
+  });
+
+  it('sweepInterrupted leaves non-running entries untouched', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-sw3', 'thread-sw3');
+    await stats.upsertRecord('cron-sw4', 'thread-sw4');
+    await stats.recordRun('cron-sw3', 'success');
+    await stats.recordRun('cron-sw4', 'error', 'oops');
+
+    const affected = await stats.sweepInterrupted();
+    expect(affected).toHaveLength(0);
+    expect(stats.getRecord('cron-sw3')!.lastRunStatus).toBe('success');
+    expect(stats.getRecord('cron-sw4')!.lastRunStatus).toBe('error');
+  });
+
+  it('sweepInterrupted returns empty array when no running entries', async () => {
+    const stats = await loadRunStats(statsPath);
+    const affected = await stats.sweepInterrupted();
+    expect(affected).toHaveLength(0);
+  });
+
+  it('sweepInterrupted persists interrupted status to disk', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-sw5', 'thread-sw5');
+    await stats.recordRunStart('cron-sw5');
+    await stats.sweepInterrupted();
+
+    const stats2 = await loadRunStats(statsPath);
+    expect(stats2.getRecord('cron-sw5')!.lastRunStatus).toBe('interrupted');
+  });
 });
 
 describe('emptyStore', () => {

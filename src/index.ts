@@ -1054,6 +1054,13 @@ if (cronEnabled && effectiveCronForum) {
 
   const cronStats = await loadRunStats(cronStatsPath);
 
+  // Startup sweep: promote any orphaned 'running' entries to 'interrupted'.
+  // These arise when a service restart or crash kills an in-progress cron run.
+  const interruptedIds = await cronStats.sweepInterrupted();
+  if (interruptedIds.length > 0) {
+    log.warn({ cronIds: interruptedIds }, 'cron:startup swept interrupted runs');
+  }
+
   // --- Cron record healing: remove stale stats records for deleted threads ---
   await healStaleCronRecords(cronStats, client, log);
 
