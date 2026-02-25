@@ -25,6 +25,8 @@ function makeParams(workspaceCwd: string) {
   const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   return {
     allowUserIds: new Set(['user-1']),
+    allowBotIds: new Set<string>(),
+    botMessageMemoryWriteEnabled: false,
     dataDir: workspaceCwd,
     botDisplayName: 'Discoclaw',
     requireChannelContext: false,

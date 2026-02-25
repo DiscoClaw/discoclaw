@@ -21,6 +21,8 @@ describe('parseConfig', () => {
     const { config, warnings, infos } = parseConfig(env());
     expect(config.token).toBe('token');
     expect(config.allowUserIds.has('123')).toBe(true);
+    expect(config.allowBotIds).toEqual(new Set());
+    expect(config.botMessageMemoryWriteEnabled).toBe(false);
     expect(config.primaryRuntime).toBe('claude');
     expect(config.runtimeModel).toBe('capable');
     expect(config.summaryModel).toBe('fast');
@@ -33,6 +35,53 @@ describe('parseConfig', () => {
     expect(config.outputFormat).toBe('text');
     expect(warnings.some((w) => w.includes('category flags are ignored'))).toBe(false);
     expect(infos.some((i) => i.includes('category flags are ignored'))).toBe(false);
+  });
+
+  // --- allowBotIds ---
+  it('defaults allowBotIds to empty set', () => {
+    const { config } = parseConfig(env());
+    expect(config.allowBotIds).toEqual(new Set());
+  });
+
+  it('parses DISCORD_ALLOW_BOT_IDS as a set of snowflakes', () => {
+    const { config } = parseConfig(env({ DISCORD_ALLOW_BOT_IDS: '111, 222 333' }));
+    expect(config.allowBotIds).toEqual(new Set(['111', '222', '333']));
+  });
+
+  it('drops non-numeric tokens from DISCORD_ALLOW_BOT_IDS', () => {
+    const { config } = parseConfig(env({ DISCORD_ALLOW_BOT_IDS: 'mybot 999' }));
+    expect(config.allowBotIds).toEqual(new Set(['999']));
+  });
+
+  it('returns empty set for allowBotIds when DISCORD_ALLOW_BOT_IDS is undefined', () => {
+    const { config } = parseConfig(env({ DISCORD_ALLOW_BOT_IDS: undefined }));
+    expect(config.allowBotIds).toEqual(new Set());
+  });
+
+  // --- botMessageMemoryWriteEnabled ---
+  it('defaults botMessageMemoryWriteEnabled to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.botMessageMemoryWriteEnabled).toBe(false);
+  });
+
+  it('sets botMessageMemoryWriteEnabled to true when DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE=true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE: 'true' }));
+    expect(config.botMessageMemoryWriteEnabled).toBe(true);
+  });
+
+  it('sets botMessageMemoryWriteEnabled to true when DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE=1', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE: '1' }));
+    expect(config.botMessageMemoryWriteEnabled).toBe(true);
+  });
+
+  it('leaves botMessageMemoryWriteEnabled false when DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE=false', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE: 'false' }));
+    expect(config.botMessageMemoryWriteEnabled).toBe(false);
+  });
+
+  it('emits a warning when DISCORD_ALLOW_BOT_IDS is set but yields no valid IDs', () => {
+    const { warnings } = parseConfig(env({ DISCORD_ALLOW_BOT_IDS: 'not-a-snowflake' }));
+    expect(warnings.some((w) => w.includes('DISCORD_ALLOW_BOT_IDS was set but no valid IDs were parsed'))).toBe(true);
   });
 
   it('throws on invalid boolean values', () => {

@@ -48,6 +48,8 @@ function makeMsg(content: string, replyId: string) {
 function makeParams(runtime: any, summaryDataDir: string, overrides: Partial<any> = {}) {
   return {
     allowUserIds: new Set(['123']),
+    allowBotIds: new Set<string>(),
+    botMessageMemoryWriteEnabled: false,
     runtime,
     sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
     workspaceCwd: '/tmp',

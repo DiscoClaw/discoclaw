@@ -13,6 +13,8 @@ describe('Discord handler (fail closed)', () => {
     const queue = makeQueue();
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       runtime: { invoke: async function* () { yield { type: 'text_final', text: 'hi' } as any; } } as any,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
       workspaceCwd: '/tmp',
@@ -78,6 +80,8 @@ describe('Discord handler (fail closed)', () => {
     const queue = makeQueue();
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       allowChannelIds: new Set(['allowed']),
       runtime: { invoke: async function* () { yield { type: 'text_final', text: 'hi' } as any; } } as any,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
@@ -144,6 +148,8 @@ describe('Discord handler (fail closed)', () => {
     const queue = makeQueue();
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
       allowChannelIds: new Set(['allowed']),
       runtime: { invoke: async function* () { yield { type: 'text_final', text: 'hi' } as any; } } as any,
       sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,

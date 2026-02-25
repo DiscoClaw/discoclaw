@@ -24,6 +24,8 @@ function makeRuntime(events: EngineEvent[]) {
 function makeParams(runtime: any) {
   return {
     allowUserIds: new Set(['user-1']),
+    allowBotIds: new Set<string>(),
+    botMessageMemoryWriteEnabled: false,
     botDisplayName: 'Discoclaw',
     requireChannelContext: false,
     autoIndexChannelContext: false,

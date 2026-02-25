@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
+import { parseAllowBotIds, parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 
 export const KNOWN_TOOLS = new Set(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch']);
 export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS = 1800;
@@ -14,6 +14,8 @@ type ParseResult = {
 export type DiscoclawConfig = {
   token: string;
   allowUserIds: Set<string>;
+  allowBotIds: Set<string>;
+  botMessageMemoryWriteEnabled: boolean;
   allowChannelIds: Set<string>;
   restrictChannelIds: boolean;
   primaryRuntime: string;
@@ -328,6 +330,13 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('DISCORD_ALLOW_USER_IDS is empty: bot will respond to nobody (fail closed)');
   }
 
+  const allowBotIdsRaw = env.DISCORD_ALLOW_BOT_IDS;
+  const allowBotIds = parseAllowBotIds(allowBotIdsRaw);
+  if ((allowBotIdsRaw ?? '').trim().length > 0 && allowBotIds.size === 0) {
+    warnings.push('DISCORD_ALLOW_BOT_IDS was set but no valid IDs were parsed: trusted-bot allowlist is empty');
+  }
+  const botMessageMemoryWriteEnabled = parseBoolean(env, 'DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE', false);
+
   const allowChannelIdsRaw = env.DISCORD_CHANNEL_IDS;
   const restrictChannelIds = (allowChannelIdsRaw ?? '').trim().length > 0;
   const allowChannelIds = parseAllowChannelIds(allowChannelIdsRaw);
@@ -481,6 +490,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     config: {
       token,
       allowUserIds,
+      allowBotIds,
+      botMessageMemoryWriteEnabled,
       allowChannelIds,
       restrictChannelIds,
       primaryRuntime,
