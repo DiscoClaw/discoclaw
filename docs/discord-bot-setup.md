@@ -109,6 +109,34 @@ Run:
 pnpm dev
 ```
 
+## Multi-instance setup
+
+You can run multiple DiscoClaw instances on the same machine (e.g. one per Discord server or persona) by giving each a unique service name.
+
+```bash
+discoclaw install-daemon --service-name discoclaw-work
+```
+
+The installer automatically writes `DISCOCLAW_SERVICE_NAME=discoclaw-work` to the `.env` in the working directory. On reinstall, any existing `DISCOCLAW_SERVICE_NAME` line is replaced in-place — it is never duplicated.
+
+**Requirements per instance:**
+
+- Each instance needs its own working directory with its own `.env`.
+- The service name must be unique — it becomes the systemd (Linux) or launchd (macOS) unit name.
+- `!restart`, `!update apply`, and other self-management commands read `DISCOCLAW_SERVICE_NAME` from `.env` to target the correct unit, so the value must match the name passed to `install-daemon`.
+
+```
+~/discoclaw-work/     ← working directory for instance "discoclaw-work"
+  .env                ← contains DISCOCLAW_SERVICE_NAME=discoclaw-work
+  workspace/
+
+~/discoclaw-home/     ← working directory for instance "discoclaw-home"
+  .env                ← contains DISCOCLAW_SERVICE_NAME=discoclaw-home
+  workspace/
+```
+
+If `--service-name` is omitted, the default name `discoclaw` is used and no `DISCOCLAW_SERVICE_NAME` line is written to `.env`.
+
 ## 5) Validate
 
 Run through this checklist in order. Each step should produce the expected output before moving on.
