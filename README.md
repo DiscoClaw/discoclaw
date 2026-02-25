@@ -39,7 +39,7 @@ A lightweight in-process task store that syncs bidirectionally with Discord foru
 - **Create from either side** — Ask your assistant in chat or use task commands
 - **Bidirectional sync** — Status, priority, and tags stay in sync between the task store and Discord threads
 - **Status emoji and auto-tagging** — Thread names show live status at a glance
-- **Discord actions** — Your assistant manages tasks through conversation: create channels, send messages, search history, run polls, and more
+- **Discord actions** — Your assistant manages tasks through conversation: create channels, send messages, search history, run polls, and more (see [docs/discord-actions.md](docs/discord-actions.md))
 
 **Why Discord fits:** forum threads = task cards, archive = done, thread names show live status.
 
@@ -56,7 +56,7 @@ Recurring tasks defined as forum threads in plain language — no crontab, no se
 
 ## How it works
 
-DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
+DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with Gemini, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
 2. Assembles context: per-channel rules, conversation history, rolling summary, and durable memory
@@ -93,10 +93,11 @@ Author one recipe file for an integration, share it, then let another user's Dis
 - **Node.js >=20** — check with `node --version`
 - One primary runtime:
   - **Claude CLI** on your `PATH` — check with `claude --version` (see [Claude CLI docs](https://docs.anthropic.com/en/docs/claude-code) to install), or
+  - **Gemini CLI** on your `PATH` — check with `gemini --version`, or
   - **Codex CLI** on your `PATH` — check with `codex --version`, or
   - **OpenAI-compatible API key** via `OPENAI_API_KEY`, or
   - **OpenRouter API key** via `OPENROUTER_API_KEY` (access to many providers)
-- Runtime-specific access for your chosen provider (Anthropic plan/API credits for Claude, OpenAI access for Codex/OpenAI models)
+- Runtime-specific access for your chosen provider (Anthropic plan/API credits for Claude, Google account for Gemini, OpenAI access for Codex/OpenAI models)
 
 **Contributors (from source):**
 - Everything above, plus **pnpm** — enable via Corepack (`corepack enable`) or install separately
@@ -157,6 +158,14 @@ pnpm dev
 ## Updating
 
 **Global install:**
+
+If DiscoClaw is running, update from Discord:
+
+```
+!update apply
+```
+
+Or from the command line:
 
 ```bash
 npm update -g discoclaw
