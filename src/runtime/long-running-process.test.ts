@@ -377,6 +377,28 @@ describe('LongRunningProcess', () => {
     expect(callArgs).not.toContain('--append-system-prompt');
   });
 
+  it('context overflow result emits error event instead of text_final', async () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+
+    const proc = new LongRunningProcess(baseOpts);
+    proc.spawn();
+
+    queueMicrotask(() => {
+      mock.stdout.emit('data', JSON.stringify({ type: 'result', result: 'Prompt is too long' }) + '\n');
+    });
+
+    const events: any[] = [];
+    for await (const evt of proc.sendTurn('tell me everything')) {
+      events.push(evt);
+    }
+
+    expect(events.find((e) => e.type === 'error')?.message).toBe('long-running: context overflow');
+    expect(events.find((e) => e.type === 'done')).toBeTruthy();
+    expect(events.find((e) => e.type === 'text_final')).toBeUndefined();
+    expect(proc.state).toBe('idle');
+  });
+
   it('sendTurn without images writes plain string content (no regression)', async () => {
     const mock = createMockSubprocess();
     (execa as any).mockReturnValue(mock.proc);
