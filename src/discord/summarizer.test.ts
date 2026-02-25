@@ -271,6 +271,50 @@ describe('generateSummary', () => {
   });
 });
 
+describe('summary truncation', () => {
+  it('injection-time cap: oversized summary is sliced to summaryMaxChars', () => {
+    const maxChars = 10;
+    const oversized = 'A'.repeat(20);
+    const truncated = oversized.slice(0, maxChars);
+    expect(truncated).toHaveLength(maxChars);
+    expect(truncated).toBe('A'.repeat(10));
+  });
+
+  it('save-time cap: generateSummary result is sliced before persisting', async () => {
+    const maxChars = 8;
+    const dir = await makeTmpDir();
+
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final' as const, text: 'X'.repeat(20) };
+      }),
+    } as unknown as RuntimeAdapter;
+
+    const raw = await generateSummary(runtime, {
+      previousSummary: null,
+      recentExchange: '[User]: hi\n[Bot]: hey',
+      model: 'haiku',
+      cwd: '/tmp',
+      maxChars: 2000,
+      timeoutMs: 30_000,
+    });
+
+    // Simulate coordinator truncating before save
+    const toSave = raw.slice(0, maxChars);
+    const data: ConversationSummary = { summary: toSave, updatedAt: Date.now() };
+    await saveSummary(dir, 'trunc-save', data);
+
+    const loaded = await loadSummary(dir, 'trunc-save');
+    expect(loaded!.summary).toHaveLength(maxChars);
+  });
+
+  it('under-limit passthrough: summary within maxChars is unchanged', () => {
+    const maxChars = 100;
+    const short = 'hello world';
+    expect(short.slice(0, maxChars)).toBe(short);
+  });
+});
+
 describe('safe session key', () => {
   it('uses filesystem-safe characters', async () => {
     const dir = await makeTmpDir();

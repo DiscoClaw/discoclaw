@@ -2126,7 +2126,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             try {
               const existing = await loadSummary(params.summaryDataDir, sessionKey);
               if (existing) {
-                summarySection = existing.summary;
+                summarySection = existing.summary.slice(0, params.summaryMaxChars);
                 if (!turnCounters.has(sessionKey)) {
                   const raw = existing.turnsSinceUpdate;
                   turnCounters.set(sessionKey, typeof raw === 'number' && raw >= 0 ? raw : 0);
@@ -2764,7 +2764,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // Persist counter progress so restarts resume from last known count.
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
               saveSummary(params.summaryDataDir, sessionKey, {
-                summary: summarySection,
+                summary: summarySection.slice(0, params.summaryMaxChars),
                 updatedAt: Date.now(),
                 turnsSinceUpdate: count,
               });
@@ -2824,7 +2824,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
 
           await saveSummary(params.summaryDataDir, sessionKey, {
-            summary: newSummary,
+            summary: newSummary.slice(0, params.summaryMaxChars),
             updatedAt: Date.now(),
             turnsSinceUpdate: 0,
           });

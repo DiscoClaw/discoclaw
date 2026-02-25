@@ -17,6 +17,7 @@ import { createMessageCreateHandler } from './discord.js';
 import { loadDurableMemory, saveDurableMemory, addItem } from './discord/durable-memory.js';
 import { inlineContextFiles } from './discord/prompt-common.js';
 import type { DurableMemoryStore } from './discord/durable-memory.js';
+import { saveSummary, loadSummary } from './discord/summarizer.js';
 
 const mockedCacheGet = vi.mocked(taskThreadCache.get);
 
@@ -1615,5 +1616,164 @@ describe('bead resolution dispatch wiring', () => {
       const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
       expect(content).toContain(`**Task:** ${inProgressBead.id}`);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Summary hard truncation
+// ---------------------------------------------------------------------------
+
+describe('summary hard truncation', () => {
+  function makeTruncParams(
+    summaryDir: string,
+    summaryMaxChars: number,
+    summaryEveryNTurns: number,
+    overrides?: Partial<any>,
+  ) {
+    let capturedPrompt = '';
+    const runtime = {
+      id: 'test-runtime',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (p: any) {
+        const prompt = String(p.prompt ?? '');
+        capturedPrompt = prompt;
+        if (prompt.includes('Updated summary:')) {
+          // Return an oversized result to confirm the save-time cap is applied.
+          yield { type: 'text_final', text: 'G'.repeat(200) } as any;
+          return;
+        }
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const params: any = {
+      allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
+      runtime,
+      sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
+      workspaceCwd: '/tmp',
+      projectCwd: '/tmp',
+      groupsDir: '/tmp',
+      useGroupDirCwd: false,
+      runtimeModel: 'haiku',
+      runtimeTools: [],
+      runtimeTimeoutMs: 1000,
+      requireChannelContext: false,
+      autoIndexChannelContext: false,
+      autoJoinThreads: false,
+      useRuntimeSessions: true,
+      discordActionsEnabled: false,
+      discordActionsChannels: false,
+      discordActionsMessaging: false,
+      discordActionsGuild: false,
+      discordActionsModeration: false,
+      discordActionsPolls: false,
+      discordActionsTasks: false,
+      discordActionsBotProfile: false,
+      messageHistoryBudget: 0,
+      summaryEnabled: true,
+      summaryModel: 'haiku',
+      summaryMaxChars,
+      summaryEveryNTurns,
+      summaryDataDir: summaryDir,
+      summaryToDurableEnabled: false,
+      shortTermMemoryEnabled: false,
+      shortTermDataDir: '/tmp/shortterm',
+      shortTermMaxEntries: 20,
+      shortTermMaxAgeMs: 21600000,
+      shortTermInjectMaxChars: 1000,
+      durableMemoryEnabled: false,
+      durableDataDir: '/tmp/durable',
+      durableInjectMaxChars: 2000,
+      durableMaxItems: 200,
+      memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
+      reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
+      reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
+      botDisplayName: 'TestBot',
+      ...overrides,
+    };
+
+    return { runtime, params, getPrompt: () => capturedPrompt };
+  }
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  it('injection-time: oversized on-disk summary is capped to summaryMaxChars in the prompt', async () => {
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trunc-inject-'));
+    const summaryMaxChars = 20;
+    const oversized = 'S'.repeat(100);
+
+    // Write an oversized summary directly to disk.
+    await saveSummary(summaryDir, 'discord:channel:trunc-inject', {
+      summary: oversized,
+      updatedAt: Date.now(),
+    });
+
+    const { runtime, params, getPrompt } = makeTruncParams(summaryDir, summaryMaxChars, 999);
+    const handler = createMessageCreateHandler(params, makeQueue());
+    await handler(makeMsg({ channelId: 'trunc-inject' }));
+
+    expect(runtime.invoke).toHaveBeenCalled();
+    const prompt = getPrompt();
+    expect(prompt).toContain('Conversation memory:');
+    // Truncated portion must appear.
+    expect(prompt).toContain('S'.repeat(summaryMaxChars));
+    // Characters beyond the cap must not appear.
+    expect(prompt).not.toContain('S'.repeat(summaryMaxChars + 1));
+  });
+
+  it('save-time (counter): oversized on-disk summary is re-saved truncated to summaryMaxChars', async () => {
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trunc-counter-'));
+    const summaryMaxChars = 15;
+    const oversized = 'C'.repeat(200);
+
+    await saveSummary(summaryDir, 'discord:channel:trunc-counter', {
+      summary: oversized,
+      updatedAt: Date.now(),
+    });
+
+    const { params } = makeTruncParams(summaryDir, summaryMaxChars, 999);
+    const handler = createMessageCreateHandler(params, makeQueue());
+    await handler(makeMsg({ channelId: 'trunc-counter' }));
+
+    // Counter save is fire-and-forget; give it a moment to flush.
+    await sleep(100);
+
+    const saved = await loadSummary(summaryDir, 'discord:channel:trunc-counter');
+    expect(saved).not.toBeNull();
+    expect(saved!.summary.length).toBeLessThanOrEqual(summaryMaxChars);
+  });
+
+  it('save-time (generation): generated summary exceeding summaryMaxChars is capped before writing', async () => {
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trunc-gen-'));
+    const summaryMaxChars = 12;
+
+    // summaryEveryNTurns: 1 ensures generation triggers on the first turn.
+    const { params } = makeTruncParams(summaryDir, summaryMaxChars, 1);
+    const handler = createMessageCreateHandler(params, makeQueue());
+    await handler(makeMsg({ channelId: 'trunc-gen' }));
+
+    // Generation save is fire-and-forget; poll until the file appears.
+    const summaryFile = path.join(summaryDir, 'discord:channel:trunc-gen.json');
+    const deadline = Date.now() + 4000;
+    let saved: { summary: string } | null = null;
+    while (Date.now() < deadline) {
+      try {
+        const raw = await fs.readFile(summaryFile, 'utf8');
+        saved = JSON.parse(raw) as { summary: string };
+        break;
+      } catch {
+        await sleep(20);
+      }
+    }
+
+    expect(saved).not.toBeNull();
+    expect(saved!.summary.length).toBeLessThanOrEqual(summaryMaxChars);
   });
 });
