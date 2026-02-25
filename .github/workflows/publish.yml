@@ -1,10 +1,19 @@
 name: publish
 
+# IMPORTANT: This workflow must ONLY be triggered by a tag push (push.tags).
+# DO NOT call this via workflow_call from another workflow (e.g., release.yml).
+#
+# Why: npm's Trusted Publisher validates the OIDC subject claim, which encodes
+# the exact triggering workflow. When called via workflow_call, the claim
+# reflects the *caller* workflow, not publish.yml — npm rejects it and falls
+# back to token auth, which fails with ENEEDAUTH. The tag push trigger produces
+# the correct claim and is the only path that works.
+#
+# workflow_dispatch is kept for manual emergency publishes from this workflow directly.
 on:
   push:
     tags:
       - "v*"
-  workflow_call:
   workflow_dispatch:
 
 jobs:
