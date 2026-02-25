@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=%h/code/discoclaw
 # Keep secrets local; this file should exist on the host (not committed).
 EnvironmentFile=%h/code/discoclaw/.env
