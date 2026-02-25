@@ -53,7 +53,7 @@ describe('CronRunStats', () => {
   it('creates empty store on missing file', async () => {
     const stats = await loadRunStats(statsPath);
     const store = stats.getStore();
-    expect(store.version).toBe(3);
+    expect(store.version).toBe(4);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
 
@@ -184,13 +184,118 @@ describe('CronRunStats', () => {
     await stats.recordRun('nonexistent', 'success');
     // Should not throw
   });
+
+  it('recordRunStart sets running status and startedAt', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-rs1', 'thread-rs1');
+    await stats.recordRunStart('cron-rs1');
+
+    const rec = stats.getRecord('cron-rs1')!;
+    expect(rec.lastRunStatus).toBe('running');
+    expect(rec.startedAt).toBeTruthy();
+  });
+
+  it('recordRunStart does not increment runCount', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-rs2', 'thread-rs2');
+    await stats.recordRunStart('cron-rs2');
+
+    const rec = stats.getRecord('cron-rs2')!;
+    expect(rec.runCount).toBe(0);
+  });
+
+  it('recordRunStart no-ops for unknown cronId', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.recordRunStart('nonexistent');
+    // Should not throw
+  });
+
+  it('sweepInterrupted promotes running entries to interrupted', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-sw1', 'thread-sw1');
+    await stats.upsertRecord('cron-sw2', 'thread-sw2');
+    await stats.recordRunStart('cron-sw1');
+    await stats.recordRunStart('cron-sw2');
+
+    const affected = await stats.sweepInterrupted();
+    expect(affected).toHaveLength(2);
+    expect(affected).toContain('cron-sw1');
+    expect(affected).toContain('cron-sw2');
+
+    expect(stats.getRecord('cron-sw1')!.lastRunStatus).toBe('interrupted');
+    expect(stats.getRecord('cron-sw2')!.lastRunStatus).toBe('interrupted');
+  });
+
+  it('sweepInterrupted leaves non-running entries untouched', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-sw3', 'thread-sw3');
+    await stats.upsertRecord('cron-sw4', 'thread-sw4');
+    await stats.recordRun('cron-sw3', 'success');
+    await stats.recordRun('cron-sw4', 'error', 'oops');
+
+    const affected = await stats.sweepInterrupted();
+    expect(affected).toHaveLength(0);
+    expect(stats.getRecord('cron-sw3')!.lastRunStatus).toBe('success');
+    expect(stats.getRecord('cron-sw4')!.lastRunStatus).toBe('error');
+  });
+
+  it('sweepInterrupted returns empty array when no running entries', async () => {
+    const stats = await loadRunStats(statsPath);
+    const affected = await stats.sweepInterrupted();
+    expect(affected).toHaveLength(0);
+  });
+
+  it('sweepInterrupted persists interrupted status to disk', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-sw5', 'thread-sw5');
+    await stats.recordRunStart('cron-sw5');
+    await stats.sweepInterrupted();
+
+    const stats2 = await loadRunStats(statsPath);
+    expect(stats2.getRecord('cron-sw5')!.lastRunStatus).toBe('interrupted');
+  });
 });
 
 describe('emptyStore', () => {
   it('returns valid initial structure', () => {
     const store = emptyStore();
-    expect(store.version).toBe(3);
+    expect(store.version).toBe(4);
     expect(store.updatedAt).toBeGreaterThan(0);
     expect(Object.keys(store.jobs)).toHaveLength(0);
+  });
+});
+
+describe('loadRunStats version migration', () => {
+  it('migrates a v3 store to v4 and preserves existing records', async () => {
+    const v3Store = {
+      version: 3,
+      updatedAt: Date.now(),
+      jobs: {
+        'cron-migrated': {
+          cronId: 'cron-migrated',
+          threadId: 'thread-migrate',
+          runCount: 5,
+          lastRunAt: '2025-01-01T00:00:00.000Z',
+          lastRunStatus: 'success',
+          cadence: 'daily',
+          purposeTags: ['monitoring'],
+          disabled: false,
+          model: 'haiku',
+          triggerType: 'schedule',
+        },
+      },
+    };
+    await fs.writeFile(statsPath, JSON.stringify(v3Store), 'utf-8');
+
+    const stats = await loadRunStats(statsPath);
+
+    expect(stats.getStore().version).toBe(4);
+    const rec = stats.getRecord('cron-migrated');
+    expect(rec).toBeDefined();
+    expect(rec!.cronId).toBe('cron-migrated');
+    expect(rec!.runCount).toBe(5);
+    expect(rec!.lastRunStatus).toBe('success');
+    expect(rec!.cadence).toBe('daily');
+    expect(rec!.purposeTags).toEqual(['monitoring']);
   });
 });

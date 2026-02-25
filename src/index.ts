@@ -60,7 +60,7 @@ import {
 } from './discord/inflight-replies.js';
 import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 import { getGitHash } from './version.js';
-import { healCorruptedJsonStores, healStaleCronRecords } from './health/startup-healing.js';
+import { healCorruptedJsonStores, healStaleCronRecords, healInterruptedCronRuns } from './health/startup-healing.js';
 import { validateDiscordToken } from './validate.js';
 import { TaskStore } from './tasks/store.js';
 import { migrateLegacyTaskDataFile, resolveTaskDataPath } from './tasks/path-defaults.js';
@@ -1056,6 +1056,7 @@ if (cronEnabled && effectiveCronForum) {
 
   // --- Cron record healing: remove stale stats records for deleted threads ---
   await healStaleCronRecords(cronStats, client, log);
+  await healInterruptedCronRuns(cronStats, log);
 
   const cronActionFlags: ActionCategoryFlags = {
     channels: discordActionsChannels,

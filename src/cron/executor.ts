@@ -95,6 +95,15 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
   ctx.runControl?.register(job.id, requestCancel);
 
   try {
+    // Best-effort: write running status to persistent store before execution begins.
+    if (ctx.statsStore && job.cronId) {
+      try {
+        await ctx.statsStore.recordRunStart(job.cronId);
+      } catch {
+        // Non-fatal — don't block execution.
+      }
+    }
+
     // Resolve the target channel from the job's owning guild.
     const guild = ctx.client.guilds.cache.get(job.guildId);
     if (!guild) {
@@ -268,6 +277,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     if (!output.trim() && collectedImages.length === 0) {
       metrics.increment('cron.run.skipped');
       ctx.log?.warn({ jobId: job.id }, 'cron:exec empty output');
+      if (ctx.statsStore && job.cronId) {
+        try {
+          await ctx.statsStore.recordRun(job.cronId, 'success');
+        } catch {
+          // Best-effort.
+        }
+      }
       return;
     }
 
