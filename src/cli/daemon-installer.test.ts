@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import {
+  ensureServiceNameInEnv,
   parseEnvFile,
   parseServiceName,
   renderSystemdUnit,
@@ -161,6 +162,61 @@ describe('renderLaunchdPlist', () => {
     expect(plist).toContain('<key>RunAtLoad</key>');
     expect(plist).toContain('<key>KeepAlive</key>');
     expect(plist).toContain('<true/>');
+  });
+});
+
+// ── ensureServiceNameInEnv ─────────────────────────────────────────────────
+
+describe('ensureServiceNameInEnv', () => {
+  const ENV_PATH = '/home/user/bot/.env';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
+  });
+
+  it('default name, no existing line — content is unchanged', () => {
+    vi.mocked(fs.readFileSync).mockReturnValue('DISCORD_TOKEN=abc\n' as any);
+    ensureServiceNameInEnv(ENV_PATH, 'discoclaw');
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it('custom name, no existing line — appends DISCOCLAW_SERVICE_NAME=custom-name', () => {
+    vi.mocked(fs.readFileSync).mockReturnValue('DISCORD_TOKEN=abc\n' as any);
+    ensureServiceNameInEnv(ENV_PATH, 'custom-name');
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      ENV_PATH,
+      'DISCORD_TOKEN=abc\nDISCOCLAW_SERVICE_NAME=custom-name\n',
+      'utf8',
+    );
+  });
+
+  it('custom name, existing stale line — replaces old value in-place, no duplicate', () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      'DISCORD_TOKEN=abc\nDISCOCLAW_SERVICE_NAME=old-name\nFOO=bar\n' as any,
+    );
+    ensureServiceNameInEnv(ENV_PATH, 'new-name');
+    const written = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
+    expect(written).toContain('DISCOCLAW_SERVICE_NAME=new-name');
+    expect(written).not.toContain('DISCOCLAW_SERVICE_NAME=old-name');
+    expect((written.match(/DISCOCLAW_SERVICE_NAME=/g) ?? []).length).toBe(1);
+  });
+
+  it('default name, existing stale line — removes DISCOCLAW_SERVICE_NAME line', () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      'DISCORD_TOKEN=abc\nDISCOCLAW_SERVICE_NAME=old-name\n' as any,
+    );
+    ensureServiceNameInEnv(ENV_PATH, 'discoclaw');
+    const written = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
+    expect(written).not.toContain('DISCOCLAW_SERVICE_NAME');
+  });
+
+  it('custom name matches existing line — no file write (no-op)', () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      'DISCORD_TOKEN=abc\nDISCOCLAW_SERVICE_NAME=custom-name\n' as any,
+    );
+    ensureServiceNameInEnv(ENV_PATH, 'custom-name');
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
   });
 });
 
@@ -380,5 +436,57 @@ describe('runDaemonInstaller', () => {
 
     expect(fs.writeFileSync).not.toHaveBeenCalled();
     expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  it('linux: does not mutate .env when overwrite is declined with custom --service-name', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+    const originalArgv = process.argv;
+    process.argv = ['node', 'discoclaw', 'install-daemon', '--service-name', 'custom'];
+
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      const s = String(p);
+      if (s.endsWith('.env')) return true;
+      if (s.endsWith('dist/index.js')) return true;
+      if (s.endsWith('custom.service')) return true;
+      return false;
+    });
+
+    const rl = makeReadline(['n']); // decline overwrite
+    vi.mocked(createInterface).mockReturnValue(rl as any);
+
+    try {
+      await runDaemonInstaller();
+    } finally {
+      process.argv = originalArgv;
+    }
+
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it('linux: writes DISCOCLAW_SERVICE_NAME=custom to .env before service file when --service-name custom is passed', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+    const originalArgv = process.argv;
+    process.argv = ['node', 'discoclaw', 'install-daemon', '--service-name', 'custom'];
+
+    // .env has no DISCOCLAW_SERVICE_NAME yet
+    vi.mocked(fs.readFileSync).mockReturnValue(SAMPLE_ENV as any);
+
+    try {
+      await runDaemonInstaller();
+    } finally {
+      process.argv = originalArgv;
+    }
+
+    const calls = vi.mocked(fs.writeFileSync).mock.calls;
+    const envWriteIdx = calls.findIndex(([p]) => String(p).endsWith('.env'));
+    const serviceWriteIdx = calls.findIndex(([p]) => String(p).endsWith('custom.service'));
+
+    expect(envWriteIdx).toBeGreaterThanOrEqual(0);
+    expect(calls[envWriteIdx]![1]).toContain('DISCOCLAW_SERVICE_NAME=custom');
+    expect(serviceWriteIdx).toBeGreaterThan(envWriteIdx);
   });
 });

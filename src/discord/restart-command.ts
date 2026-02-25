@@ -13,6 +13,7 @@ export type RestartOpts = {
   dataDir?: string;
   userId?: string;
   activeForge?: string;
+  serviceName?: string;
 };
 
 export function parseRestartCommand(content: string): RestartCommand | null {
@@ -50,21 +51,21 @@ type PlatformCmds = {
   restartCmd: (wasActive: boolean) => [string, string[]];
 };
 
-function getPlatformCommands(): PlatformCmds | null {
+function getPlatformCommands(serviceName = 'discoclaw'): PlatformCmds | null {
   if (process.platform === 'linux') {
     return {
-      statusCmd: ['systemctl', ['--user', 'status', 'discoclaw']],
-      logsCmd: ['journalctl', ['--user', '-u', 'discoclaw', '--no-pager', '-n', '30']],
-      checkActiveCmd: ['systemctl', ['--user', 'status', 'discoclaw']],
+      statusCmd: ['systemctl', ['--user', 'status', serviceName]],
+      logsCmd: ['journalctl', ['--user', '-u', serviceName, '--no-pager', '-n', '30']],
+      checkActiveCmd: ['systemctl', ['--user', 'status', serviceName]],
       isActive: (result) => result.stdout.includes('active (running)'),
-      restartCmd: () => ['systemctl', ['--user', 'restart', 'discoclaw']],
+      restartCmd: () => ['systemctl', ['--user', 'restart', serviceName]],
     };
   }
   if (process.platform === 'darwin') {
     const uid = process.getuid?.() ?? 501;
-    const plistPath = `${os.homedir()}/Library/LaunchAgents/com.discoclaw.agent.plist`;
+    const label = `com.discoclaw.${serviceName}`;
+    const plistPath = `${os.homedir()}/Library/LaunchAgents/${label}.plist`;
     const domain = `gui/${uid}`;
-    const label = 'com.discoclaw.agent';
     return {
       statusCmd: ['launchctl', ['list', label]],
       logsCmd: ['log', ['show', '--predicate', 'process == "node"', '--last', '5m', '--style', 'compact']],
@@ -84,10 +85,10 @@ function getPlatformCommands(): PlatformCmds | null {
  * platform, assuming the service is already running. Falls back to systemctl
  * on unsupported platforms.
  */
-export function getRestartCmdArgs(): [string, string[]] {
-  const pc = getPlatformCommands();
+export function getRestartCmdArgs(serviceName?: string): [string, string[]] {
+  const pc = getPlatformCommands(serviceName);
   if (pc) return pc.restartCmd(true);
-  return ['systemctl', ['--user', 'restart', 'discoclaw']];
+  return ['systemctl', ['--user', 'restart', serviceName ?? 'discoclaw']];
 }
 
 export type RestartResult = {
@@ -106,7 +107,7 @@ export async function handleRestartCommand(cmd: RestartCommand, opts?: RestartOp
   const resolved: RestartOpts = opts && typeof opts === 'object' && 'info' in opts
     ? { log: opts as LoggerLike }
     : (opts as RestartOpts | undefined) ?? {};
-  const { log, dataDir, userId, activeForge } = resolved;
+  const { log, dataDir, userId, activeForge, serviceName = 'discoclaw' } = resolved;
 
   try {
     if (cmd.action === 'help') {
@@ -121,7 +122,7 @@ export async function handleRestartCommand(cmd: RestartCommand, opts?: RestartOp
       };
     }
 
-    const pc = getPlatformCommands();
+    const pc = getPlatformCommands(serviceName);
     if (!pc) {
       return {
         reply: `!restart is not supported on this platform (${process.platform}). Only Linux (systemd) and macOS (launchd) are supported.`,
@@ -153,8 +154,8 @@ export async function handleRestartCommand(cmd: RestartCommand, opts?: RestartOp
     // invokes *after* sending the reply to Discord.
     return {
       reply: wasActive
-        ? 'Restarting discoclaw... back in a moment.'
-        : 'Starting discoclaw...',
+        ? `Restarting ${serviceName}... back in a moment.`
+        : `Starting ${serviceName}...`,
       deferred: () => {
         // Write shutdown context right before triggering restart so it
         // doesn't linger if the deferred never fires or restart fails.

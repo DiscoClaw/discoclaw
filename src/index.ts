@@ -667,6 +667,7 @@ const botParams = {
   workspaceCwd,
   projectCwd: projectRoot,
   updateRestartCmd: process.env.DC_RESTART_CMD,
+  serviceName: cfg.serviceName,
   groupsDir,
   useGroupDirCwd,
   runtimeModel,

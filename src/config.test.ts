@@ -33,6 +33,7 @@ describe('parseConfig', () => {
     expect(config.tasksSyncFailureRetryDelayMs).toBe(30_000);
     expect(config.tasksSyncDeferredRetryDelayMs).toBe(30_000);
     expect(config.outputFormat).toBe('text');
+    expect(config.serviceName).toBe('discoclaw');
     expect(warnings.some((w) => w.includes('category flags are ignored'))).toBe(false);
     expect(infos.some((i) => i.includes('category flags are ignored'))).toBe(false);
   });
@@ -846,5 +847,21 @@ describe('parseConfig', () => {
   it('parses DISCOCLAW_WEBHOOK_CONFIG when set', () => {
     const { config } = parseConfig(env({ DISCOCLAW_WEBHOOK_CONFIG: '/etc/discoclaw/webhooks.json' }));
     expect(config.webhookConfigPath).toBe('/etc/discoclaw/webhooks.json');
+  });
+
+  // --- serviceName ---
+  it('defaults serviceName to "discoclaw"', () => {
+    const { config } = parseConfig(env());
+    expect(config.serviceName).toBe('discoclaw');
+  });
+
+  it('parses DISCOCLAW_SERVICE_NAME when set', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_SERVICE_NAME: 'discoclaw-dev' }));
+    expect(config.serviceName).toBe('discoclaw-dev');
+  });
+
+  it('returns default serviceName when DISCOCLAW_SERVICE_NAME is whitespace-only', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_SERVICE_NAME: '   ' }));
+    expect(config.serviceName).toBe('discoclaw');
   });
 });

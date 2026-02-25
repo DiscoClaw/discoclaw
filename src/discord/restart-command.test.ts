@@ -150,7 +150,7 @@ describe('handleRestartCommand - macOS', () => {
     const statusCall = calls.find((c: any[]) => c[0] === 'launchctl');
     expect(statusCall).toBeDefined();
     expect(statusCall[1]).toContain('list');
-    expect(statusCall[1]).toContain('com.discoclaw.agent');
+    expect(statusCall[1]).toContain('com.discoclaw.discoclaw');
     // Must NOT call systemctl
     expect(calls.every((c: any[]) => c[0] !== 'systemctl')).toBe(true);
   });
@@ -182,7 +182,7 @@ describe('handleRestartCommand - macOS', () => {
     );
     expect(kickstartCall).toBeDefined();
     expect(kickstartCall[1]).toContain('-k');
-    expect(kickstartCall[1]).toContain('gui/501/com.discoclaw.agent');
+    expect(kickstartCall[1]).toContain('gui/501/com.discoclaw.discoclaw');
   });
 
   it('restart uses launchctl bootstrap in deferred when service is inactive', async () => {
@@ -205,8 +205,117 @@ describe('handleRestartCommand - macOS', () => {
     expect(bootstrapCall).toBeDefined();
     expect(bootstrapCall[1]).toContain('gui/501');
     expect(bootstrapCall[1]).toContain(
-      '/Users/testuser/Library/LaunchAgents/com.discoclaw.agent.plist',
+      '/Users/testuser/Library/LaunchAgents/com.discoclaw.discoclaw.plist',
     );
+  });
+});
+
+describe('handleRestartCommand - custom serviceName (Linux)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
+  });
+
+  it('default serviceName still targets discoclaw in systemctl args', async () => {
+    const { execFile } = await import('node:child_process');
+    await handleRestartCommand({ action: 'status' });
+    const calls = (execFile as any).mock.calls;
+    const statusCall = calls.find((c: any[]) => c[0] === 'systemctl');
+    expect(statusCall[1]).toContain('discoclaw');
+  });
+
+  it('default restart reply still says "Restarting discoclaw..."', async () => {
+    const result = await handleRestartCommand({ action: 'restart' });
+    expect(result.reply).toBe('Restarting discoclaw... back in a moment.');
+  });
+
+  it('custom serviceName threads into systemctl status args', async () => {
+    const { execFile } = await import('node:child_process');
+    await handleRestartCommand({ action: 'status' }, { serviceName: 'discoclaw-beta' });
+    const calls = (execFile as any).mock.calls;
+    const statusCall = calls.find((c: any[]) => c[0] === 'systemctl' && c[1].includes('status'));
+    expect(statusCall[1]).toContain('discoclaw-beta');
+    expect(statusCall[1]).not.toContain('discoclaw-beta'.replace('discoclaw-beta', 'discoclaw'));
+  });
+
+  it('custom serviceName threads into journalctl logs args', async () => {
+    const { execFile } = await import('node:child_process');
+    await handleRestartCommand({ action: 'logs' }, { serviceName: 'discoclaw-beta' });
+    const calls = (execFile as any).mock.calls;
+    const logsCall = calls.find((c: any[]) => c[0] === 'journalctl');
+    expect(logsCall).toBeDefined();
+    expect(logsCall[1]).toContain('discoclaw-beta');
+  });
+
+  it('custom serviceName threads into systemctl restart args and reply string', async () => {
+    const { execFile } = await import('node:child_process');
+    const result = await handleRestartCommand({ action: 'restart' }, { serviceName: 'discoclaw-beta' });
+    expect(result.reply).toBe('Restarting discoclaw-beta... back in a moment.');
+    result.deferred!();
+    const calls = (execFile as any).mock.calls;
+    const restartCall = calls.find((c: any[]) => c[0] === 'systemctl' && c[1].includes('restart'));
+    expect(restartCall).toBeDefined();
+    expect(restartCall[1]).toContain('discoclaw-beta');
+  });
+});
+
+describe('handleRestartCommand - custom serviceName (macOS)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    vi.spyOn(process as any, 'getuid').mockReturnValue(501);
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
+    vi.restoreAllMocks();
+  });
+
+  it('custom serviceName threads into launchctl label and plist path', async () => {
+    const { execFile } = await import('node:child_process');
+    const result = await handleRestartCommand({ action: 'restart' }, { serviceName: 'discoclaw-beta' });
+    expect(result.reply).toBe('Restarting discoclaw-beta... back in a moment.');
+    result.deferred!();
+    const calls = (execFile as any).mock.calls;
+    const kickstartCall = calls.find(
+      (c: any[]) => c[0] === 'launchctl' && c[1].includes('kickstart'),
+    );
+    expect(kickstartCall).toBeDefined();
+    expect(kickstartCall[1]).toContain('gui/501/com.discoclaw.discoclaw-beta');
+  });
+
+  it('custom serviceName uses correct plist path on bootstrap', async () => {
+    const { execFile } = await import('node:child_process');
+    (execFile as any).mockImplementationOnce(
+      (cmd: string, args: string[], opts: any, cb: any) => {
+        const err = Object.assign(new Error('not loaded'), { code: 1 });
+        cb(err, '', '');
+      },
+    );
+    const result = await handleRestartCommand({ action: 'restart' }, { serviceName: 'discoclaw-beta' });
+    expect(result.reply).toBe('Starting discoclaw-beta...');
+    result.deferred!();
+    const calls = (execFile as any).mock.calls;
+    const bootstrapCall = calls.find(
+      (c: any[]) => c[0] === 'launchctl' && c[1].includes('bootstrap'),
+    );
+    expect(bootstrapCall).toBeDefined();
+    expect(bootstrapCall[1]).toContain(
+      '/Users/testuser/Library/LaunchAgents/com.discoclaw.discoclaw-beta.plist',
+    );
+  });
+
+  it('custom serviceName threads into launchctl list (status)', async () => {
+    const { execFile } = await import('node:child_process');
+    await handleRestartCommand({ action: 'status' }, { serviceName: 'discoclaw-beta' });
+    const calls = (execFile as any).mock.calls;
+    const listCall = calls.find((c: any[]) => c[0] === 'launchctl' && c[1].includes('list'));
+    expect(listCall).toBeDefined();
+    expect(listCall[1]).toContain('com.discoclaw.discoclaw-beta');
   });
 });
 

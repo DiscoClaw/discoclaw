@@ -129,11 +129,44 @@ export function renderLaunchdPlist(
   return lines.join('\n');
 }
 
+// ── Env helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Ensures DISCOCLAW_SERVICE_NAME in the .env file reflects serviceName.
+ * - Default ('discoclaw'): removes any existing DISCOCLAW_SERVICE_NAME line.
+ * - Non-default: replaces existing line in-place, or appends a new one.
+ * Only writes if content actually changed.
+ */
+export function ensureServiceNameInEnv(envPath: string, serviceName: string): void {
+  const content = fs.readFileSync(envPath, 'utf8');
+  const KEY = 'DISCOCLAW_SERVICE_NAME';
+  const lineRegex = /^DISCOCLAW_SERVICE_NAME=.*$/m;
+
+  let newContent: string;
+
+  if (serviceName === 'discoclaw') {
+    if (!lineRegex.test(content)) return;
+    newContent = content.replace(/^DISCOCLAW_SERVICE_NAME=.*\n?/m, '');
+  } else {
+    if (lineRegex.test(content)) {
+      newContent = content.replace(lineRegex, `${KEY}=${serviceName}`);
+    } else {
+      const sep = content.endsWith('\n') ? '' : '\n';
+      newContent = `${content}${sep}${KEY}=${serviceName}\n`;
+    }
+  }
+
+  if (newContent !== content) {
+    fs.writeFileSync(envPath, newContent, 'utf8');
+  }
+}
+
 // ── Platform installers ────────────────────────────────────────────────────
 
 async function installSystemd(
   packageRoot: string,
   cwd: string,
+  envPath: string,
   serviceName: string,
   ask: (prompt: string) => Promise<string>,
 ): Promise<void> {
@@ -148,6 +181,13 @@ async function installSystemd(
       console.log('Aborted.\n');
       return;
     }
+  }
+
+  try {
+    ensureServiceNameInEnv(envPath, serviceName);
+  } catch (err) {
+    console.error(`Failed to update .env: ${(err as Error).message}\n`);
+    process.exit(1);
   }
 
   const unit = renderSystemdUnit(packageRoot, cwd);
@@ -196,6 +236,13 @@ async function installLaunchd(
       console.log('Aborted.\n');
       return;
     }
+  }
+
+  try {
+    ensureServiceNameInEnv(envPath, serviceName);
+  } catch (err) {
+    console.error(`Failed to update .env: ${(err as Error).message}\n`);
+    process.exit(1);
   }
 
   const envContent = fs.readFileSync(envPath, 'utf8');
@@ -280,7 +327,7 @@ export async function runDaemonInstaller(): Promise<void> {
 
   try {
     if (platform === 'linux') {
-      await installSystemd(packageRoot, cwd, serviceName, ask);
+      await installSystemd(packageRoot, cwd, envPath, serviceName, ask);
     } else {
       await installLaunchd(packageRoot, cwd, envPath, serviceName, ask);
     }

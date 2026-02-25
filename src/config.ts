@@ -178,6 +178,8 @@ export type DiscoclawConfig = {
   botActivity?: string;
   botActivityType?: 'Playing' | 'Listening' | 'Watching' | 'Competing' | 'Custom';
   botAvatar?: string;
+
+  serviceName: string;
 };
 
 function parseBoolean(
@@ -665,6 +667,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       botActivity: parseTrimmedString(env, 'DISCOCLAW_BOT_ACTIVITY'),
       botActivityType: parseEnum(env, 'DISCOCLAW_BOT_ACTIVITY_TYPE', ['Playing', 'Listening', 'Watching', 'Competing', 'Custom'] as const, 'Playing'),
       botAvatar: parseAvatarPath(env, 'DISCOCLAW_BOT_AVATAR'),
+
+      serviceName: parseTrimmedString(env, 'DISCOCLAW_SERVICE_NAME') ?? 'discoclaw',
     },
     warnings,
     infos,
