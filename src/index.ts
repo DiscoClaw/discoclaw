@@ -33,7 +33,6 @@ import type { MemoryContext } from './discord/actions-memory.js';
 import type { ImagegenContext } from './discord/actions-imagegen.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
 import { initializeTasksContext, wireTaskSync } from './tasks/initialize.js';
-import type { TaskSyncWiring } from './tasks/sync-types.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
 import { resolveTasksForum } from './tasks/thread-ops.js';
 import { initTasksForumGuard } from './tasks/forum-guard.js';
@@ -157,7 +156,6 @@ let startupCtx: Awaited<ReturnType<typeof readAndClearShutdownContext>>;
 
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
-let taskSyncWiring: TaskSyncWiring | null = null;
 let cronTagMapWatcher: { stop(): void } | null = null;
 let taskForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
@@ -193,7 +191,6 @@ const shutdown = async () => {
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
   taskForumCountSync?.stop();
   cronForumCountSync?.stop();
-  taskSyncWiring?.stop();
   cronTagMapWatcher?.stop();
   cronScheduler?.stopAll();
   clearInterval(memorySamplerInterval);
@@ -938,8 +935,7 @@ if (taskCtx) {
     }
 
     // Wire coordinator + sync triggers + startup sync (now uses correct tag map).
-    const wired = await wireTaskSync(activeTaskCtx, { client, guild });
-    taskSyncWiring = wired;
+    await wireTaskSync(activeTaskCtx, { client, guild });
   } else {
     log.warn({ resolvedGuildId }, 'tasks:sync wiring skipped; guild not in cache');
   }
