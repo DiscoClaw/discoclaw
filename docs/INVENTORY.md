@@ -136,7 +136,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | First-run scaffolding | `src/workspace-bootstrap.ts` | **done** |
-| Templates (SOUL, IDENTITY, USER, AGENTS, TOOLS, HEARTBEAT) | `templates/workspace/` | **done** |
+| Templates (SOUL, IDENTITY, USER, AGENTS, TOOLS) | `templates/workspace/` | **done** |
 | Dropbox-backed symlinks (content, workspace, exports) | filesystem | **done** |
 
 ## 12. Status & Observability

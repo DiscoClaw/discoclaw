@@ -13,7 +13,6 @@ const TEMPLATE_FILES = [
   'USER.md',
   'AGENTS.md',
   'TOOLS.md',
-  'HEARTBEAT.md',
   'MEMORY.md',
 ];
 
