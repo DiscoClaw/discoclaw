@@ -5,16 +5,22 @@
 1. **Bump the version** in `package.json` via a PR — this is the only manual step.
 2. **Merge the PR** — `release.yml` fires on push to `main`.
 3. `release.yml` reads the version from `package.json`, checks if the tag already exists, and creates + pushes the tag if it doesn't.
-4. `release.yml` then calls `publish.yml` directly (via `workflow_call`) to build, test, and publish to npm.
+4. The tag push triggers `publish.yml` directly, which builds, tests, and publishes to npm.
 
-The two-job structure avoids the GitHub Actions limitation where `GITHUB_TOKEN`-pushed tags
-don't trigger other workflows. `publish.yml` is never triggered by the tag push from CI —
-only by an explicit `workflow_call` from `release.yml` (or a manually pushed tag).
+The tag push from `release.yml` uses `GITHUB_TOKEN`. Normally, tags pushed by Actions
+don't retrigger other workflows — but `publish.yml` fires here because it's triggered by
+`push: tags: v*`, and GitHub *does* fire that event when a workflow pushes a tag (only
+workflow_dispatch and push-to-branch events are suppressed). The OIDC token's ref is
+`refs/tags/vX.Y.Z`, which npmjs.com's Trusted Publisher accepts.
+
+> **Why not `workflow_call`?** When `release.yml` called `publish.yml` via `workflow_call`,
+> the OIDC token's ref was `refs/heads/main` (the caller's ref), not the tag. npmjs.com
+> rejected it. Direct tag trigger fixes this permanently.
 
 ## Workflow files
 
-- **`release.yml`** — triggers on `main` push. Tags HEAD if the version is new, then calls `publish.yml`.
-- **`publish.yml`** — does the actual build/test/publish. Triggered by `release.yml` (workflow_call) or a manually pushed tag.
+- **`release.yml`** — triggers on `main` push. Tags HEAD if the version is new.
+- **`publish.yml`** — does the actual build/test/publish. Triggered by a tag push matching `v*`.
 
 ## Manual release (if needed)
 
@@ -120,8 +126,7 @@ After pushing, verify:
 
 ## Verifying a publish succeeded
 
-- **GitHub Actions tab** — the `release` workflow run should show both jobs green.
-  Expand the `publish` job → `npm publish` step to see confirmation.
+- **GitHub Actions tab** — two separate workflow runs will appear: `release` (tags HEAD) and `publish` (builds and publishes). Both should be green. Expand the `publish` run → `npm publish` step to see confirmation.
 - **npm registry:**
   ```bash
   npm view discoclaw version
