@@ -159,8 +159,8 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           if (sub) globalTracker.delete(sub);
           if (!fallback) return;
           if (contextOverflow) {
-            cliLog?.info?.({ sessionKey: params.sessionKey }, 'multi-turn: context overflow, session removed');
-            yield { type: 'text_delta', text: '_(Session context limit reached — starting a fresh conversation.)_\n\n' };
+            cliLog?.info?.({ sessionKey: params.sessionKey }, 'multi-turn: context overflow, resetting session and retrying');
+            yield { type: 'text_delta', text: '*(Session reset — conversation context limit reached. Starting fresh.)*\n\n' };
           }
           cliLog?.info?.('multi-turn: process failed, falling back to one-shot');
         }
