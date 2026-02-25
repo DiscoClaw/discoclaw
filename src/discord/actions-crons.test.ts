@@ -577,6 +577,60 @@ describe('executeCronAction', () => {
     }
   });
 
+  it('cronShow includes Prompt line with job prompt text', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('Prompt: Test');
+    }
+  });
+
+  it('cronShow truncates prompt longer than 500 chars', async () => {
+    const cronCtx = makeCronCtx();
+    const job = cronCtx.scheduler.getJob('thread-1');
+    job!.def.prompt = 'x'.repeat(600);
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('... (truncated)');
+      expect(result.summary).not.toContain('x'.repeat(600));
+    }
+  });
+
+  it('cronShow omits Prompt line when scheduler job is missing', async () => {
+    const cronCtx = makeCronCtx({ scheduler: makeScheduler([]) });
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).not.toContain('Prompt:');
+    }
+  });
+
+  it('cronUpdate fallback note includes prompt when starter is not bot-owned', async () => {
+    const cronCtx = makeCronCtx();
+    const threadSend = vi.fn(async () => ({}));
+    const mockThread = {
+      id: 'thread-1',
+      isThread: () => true,
+      send: threadSend,
+      fetchStarterMessage: vi.fn(async () => ({ author: { id: 'other-user' }, edit: vi.fn() })),
+      setArchived: vi.fn(),
+    };
+    (cronCtx.client.channels.cache.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) =>
+      id === 'thread-1' ? mockThread : undefined,
+    );
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', prompt: 'New prompt text' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(threadSend).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('New prompt text') }),
+    );
+  });
+
   it('cronTagMapReload failure returns error', async () => {
     const { reloadCronTagMapInPlace } = await import('../cron/tag-map.js');
     vi.mocked(reloadCronTagMapInPlace).mockRejectedValue(new Error('bad json'));
