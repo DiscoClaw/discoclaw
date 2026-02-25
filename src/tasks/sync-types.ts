@@ -8,7 +8,3 @@ export type TaskSyncRunContext = {
 export type TaskSyncRunOptions = {
   skipPhase5?: boolean;
 };
-
-export type TaskSyncWiring = {
-  stop(): void;
-};
