@@ -15,6 +15,12 @@ vi.mock('node:child_process', () => ({
   }),
 }));
 
+vi.mock('../npm-managed.js', () => ({
+  isNpmManaged: vi.fn().mockResolvedValue(false),
+  getLocalVersion: vi.fn().mockReturnValue('1.0.0'),
+  getLatestNpmVersion: vi.fn().mockResolvedValue(null),
+}));
+
 // ---------------------------------------------------------------------------
 // parseUpdateCommand
 // ---------------------------------------------------------------------------
@@ -316,5 +322,78 @@ describe('handleUpdateCommand: apply', () => {
     expect(progress.some((m) => m.includes('pull') || m.includes('Pulling'))).toBe(true);
     expect(progress.some((m) => m.includes('install'))).toBe(true);
     expect(progress.some((m) => m.includes('build'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleUpdateCommand — npm-managed mode
+// ---------------------------------------------------------------------------
+
+describe('handleUpdateCommand: npm-managed mode', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.spyOn(registry, 'getActiveOrchestrator').mockReturnValue(null);
+    vi.spyOn(registry, 'getRunningPlanIds').mockReturnValue(new Set());
+
+    const mod = await import('../npm-managed.js');
+    (mod.isNpmManaged as any).mockResolvedValue(true);
+    (mod.getLocalVersion as any).mockReturnValue('1.2.3');
+    (mod.getLatestNpmVersion as any).mockResolvedValue('1.2.3');
+  });
+
+  it('check reports "already on latest" when versions match', async () => {
+    const result = await handleUpdateCommand({ action: 'check' });
+    expect(result.reply).toContain('Already on latest');
+    expect(result.reply).toContain('1.2.3');
+    expect(result.deferred).toBeUndefined();
+  });
+
+  it('check reports available update when behind', async () => {
+    const mod = await import('../npm-managed.js');
+    (mod.getLatestNpmVersion as any).mockResolvedValue('1.3.0');
+    const result = await handleUpdateCommand({ action: 'check' });
+    expect(result.reply).toContain('1.2.3');
+    expect(result.reply).toContain('1.3.0');
+    expect(result.deferred).toBeUndefined();
+  });
+
+  it('check handles npm view failure gracefully', async () => {
+    const mod = await import('../npm-managed.js');
+    (mod.getLatestNpmVersion as any).mockResolvedValue(null);
+    const result = await handleUpdateCommand({ action: 'check' });
+    expect(result.reply).toContain('Failed');
+    expect(result.deferred).toBeUndefined();
+  });
+
+  it('apply runs npm install -g discoclaw@latest and returns deferred restart', async () => {
+    const { execFile } = await import('node:child_process');
+    (execFile as any).mockImplementation((cmd: string, args: string[], opts: any, cb: any) => {
+      cb(null, '', '');
+    });
+    const result = await handleUpdateCommand({ action: 'apply' });
+    expect(result.reply).toContain('Restarting discoclaw');
+    expect(typeof result.deferred).toBe('function');
+    const calls: any[] = (execFile as any).mock.calls;
+    const installCall = calls.find(
+      ([cmd, args]: [string, string[]]) =>
+        cmd === 'npm' && args.includes('install') && args.includes('discoclaw@latest'),
+    );
+    expect(installCall).toBeDefined();
+  });
+
+  it('apply reports error on install failure', async () => {
+    const { execFile } = await import('node:child_process');
+    (execFile as any).mockImplementation((cmd: string, args: string[], opts: any, cb: any) => {
+      if (cmd === 'npm') {
+        const err: any = new Error('install failed');
+        err.code = 1;
+        cb(err, '', 'install failed');
+      } else {
+        cb(null, '', '');
+      }
+    });
+    const result = await handleUpdateCommand({ action: 'apply' });
+    expect(result.reply).toContain('failed');
+    expect(result.deferred).toBeUndefined();
   });
 });

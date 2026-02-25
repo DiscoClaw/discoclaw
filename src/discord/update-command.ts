@@ -4,6 +4,7 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import { writeShutdownContext } from './shutdown-context.js';
 import { getRestartCmdArgs } from './restart-command.js';
 import { getActiveOrchestrator, getRunningPlanIds } from './forge-plan-registry.js';
+import { isNpmManaged, getLocalVersion, getLatestNpmVersion } from '../npm-managed.js';
 
 export type UpdateCommand = {
   action: 'check' | 'apply' | 'help';
@@ -71,7 +72,19 @@ export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts =
     log?.info({}, `update-command: ${msg}`);
   };
 
+  const npmMode = await isNpmManaged();
+
   if (cmd.action === 'help') {
+    if (npmMode) {
+      return {
+        reply: [
+          '**!update commands (npm):**',
+          '- `!update` — check for available updates on npm',
+          '- `!update apply` — upgrade discoclaw via npm and restart',
+          '- `!update help` — this message',
+        ].join('\n'),
+      };
+    }
     return {
       reply: [
         '**!update commands:**',
@@ -83,6 +96,18 @@ export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts =
   }
 
   if (cmd.action === 'check') {
+    if (npmMode) {
+      const installed = getLocalVersion();
+      const latest = await getLatestNpmVersion();
+      if (latest === null) {
+        return { reply: 'Failed to fetch latest version from npm registry.' };
+      }
+      if (installed === latest) {
+        return { reply: `Already on latest version (${installed}).` };
+      }
+      return { reply: `Update available: ${installed} → ${latest}. Run \`!update apply\` to upgrade.` };
+    }
+
     progress('Fetching from origin...');
     const fetch = await run('git', ['fetch'], { cwd: projectCwd, env: GIT_ENV, timeout: 60_000 });
     if (fetch.exitCode !== 0) {
@@ -111,6 +136,42 @@ export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts =
   }
   if (getRunningPlanIds().size > 0) {
     return { reply: 'Cannot update: a plan run is in progress. Wait for it to finish first.' };
+  }
+
+  if (npmMode) {
+    progress('Installing latest version from npm...');
+    const install = await run('npm', ['install', '-g', 'discoclaw@latest'], { timeout: 120_000 });
+    if (install.exitCode !== 0) {
+      const detail = (install.stderr || install.stdout).trim().slice(0, 500);
+      return { reply: `\`npm install -g discoclaw@latest\` failed:\n\`\`\`\n${detail}\n\`\`\`` };
+    }
+    return {
+      reply: 'Update complete. Restarting discoclaw... back in a moment.',
+      deferred: () => {
+        if (dataDir) {
+          const ctx = {
+            reason: 'restart-command' as const,
+            message: 'User requested via !update apply',
+            timestamp: new Date().toISOString(),
+            requestedBy: userId,
+          };
+          writeShutdownContext(dataDir, ctx).catch((err) => {
+            log?.warn({ err }, 'update-command: failed to write shutdown context');
+          });
+        }
+
+        if (restartCmd) {
+          execFile('/bin/sh', ['-c', restartCmd], (err) => {
+            if (err) log?.error({ err }, 'update-command: restart failed');
+          });
+        } else {
+          const [restartBin, restartArgList] = getRestartCmdArgs();
+          execFile(restartBin, restartArgList, (err) => {
+            if (err) log?.error({ err }, 'update-command: restart failed');
+          });
+        }
+      },
+    };
   }
 
   // 2. Check for dirty tree.
