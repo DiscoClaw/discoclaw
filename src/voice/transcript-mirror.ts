@@ -38,6 +38,20 @@ export class TranscriptMirror {
   }
 
   /**
+   * Factory — returns a TranscriptMirror if channelId is provided, undefined otherwise.
+   * Channel resolution is deferred to first use (lazy).
+   */
+  static async resolve(
+    client: Client,
+    channelId: string | undefined,
+    log: LoggerLike,
+  ): Promise<TranscriptMirror | undefined> {
+    if (!channelId) return undefined;
+    log.info({ channelId }, 'transcript-mirror: initialized');
+    return new TranscriptMirror({ client, channelId, log });
+  }
+
+  /**
    * Post a user's speech transcription to the transcript channel.
    */
   async postUserTranscription(username: string, text: string): Promise<void> {
