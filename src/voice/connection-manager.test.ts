@@ -18,11 +18,20 @@ import { VoiceConnectionManager } from './connection-manager.js';
 type StatusLike = { status: string };
 type StateChangeListener = (oldState: StatusLike, newState: StatusLike) => void;
 
-function createMockConnection(initialStatus = VoiceConnectionStatus.Signalling) {
+function createMockConnection(
+  initialStatus = VoiceConnectionStatus.Signalling,
+  joinConfigOverrides: Partial<{ channelId: string; guildId: string; selfMute: boolean; selfDeaf: boolean }> = {},
+) {
   const stateListeners: StateChangeListener[] = [];
   const conn = {
     rejoinAttempts: 0,
     state: { status: initialStatus } as StatusLike,
+    joinConfig: {
+      channelId: joinConfigOverrides.channelId ?? 'ch1',
+      guildId: joinConfigOverrides.guildId ?? 'g1',
+      selfMute: joinConfigOverrides.selfMute ?? false,
+      selfDeaf: joinConfigOverrides.selfDeaf ?? false,
+    },
     on: vi.fn((event: string, listener: StateChangeListener) => {
       if (event === 'stateChange') stateListeners.push(listener);
       return conn;
@@ -32,8 +41,11 @@ function createMockConnection(initialStatus = VoiceConnectionStatus.Signalling) 
       conn.state = { status: VoiceConnectionStatus.Destroyed };
       for (const l of stateListeners) l(old, conn.state);
     }),
-    rejoin: vi.fn(() => {
+    rejoin: vi.fn((opts?: { selfMute?: boolean; selfDeaf?: boolean; channelId?: string }) => {
       conn.rejoinAttempts++;
+      if (opts?.selfMute !== undefined) conn.joinConfig.selfMute = opts.selfMute;
+      if (opts?.selfDeaf !== undefined) conn.joinConfig.selfDeaf = opts.selfDeaf;
+      if (opts?.channelId !== undefined) conn.joinConfig.channelId = opts.channelId;
       return true;
     }),
     /** Simulate a state transition in tests. */
@@ -198,5 +210,132 @@ describe('VoiceConnectionManager', () => {
     // External destroy (e.g. adapter disconnect)
     conn._transition(VoiceConnectionStatus.Destroyed);
     expect(mgr.getState('g1')).toBeUndefined();
+  });
+
+  it('mute updates selfMute via rejoin', () => {
+    const conn = createMockConnection();
+    mockJoin.mockReturnValue(conn as never);
+
+    const mgr = new VoiceConnectionManager(createLogger());
+    mgr.join({ channelId: 'ch1', guildId: 'g1', adapterCreator: fakeAdapter });
+
+    mgr.mute('g1', true);
+    expect(conn.rejoin).toHaveBeenCalledWith({ channelId: 'ch1', selfMute: true, selfDeaf: false });
+    expect(conn.joinConfig.selfMute).toBe(true);
+
+    mgr.mute('g1', false);
+    expect(conn.rejoin).toHaveBeenCalledWith({ channelId: 'ch1', selfMute: false, selfDeaf: false });
+    expect(conn.joinConfig.selfMute).toBe(false);
+  });
+
+  it('mute is a no-op for unknown guild', () => {
+    const mgr = new VoiceConnectionManager(createLogger());
+    mgr.mute('unknown', true); // should not throw
+  });
+
+  it('deafen updates selfDeaf via rejoin', () => {
+    const conn = createMockConnection();
+    mockJoin.mockReturnValue(conn as never);
+
+    const mgr = new VoiceConnectionManager(createLogger());
+    mgr.join({ channelId: 'ch1', guildId: 'g1', adapterCreator: fakeAdapter });
+
+    mgr.deafen('g1', true);
+    expect(conn.rejoin).toHaveBeenCalledWith({ channelId: 'ch1', selfMute: false, selfDeaf: true });
+    expect(conn.joinConfig.selfDeaf).toBe(true);
+
+    mgr.deafen('g1', false);
+    expect(conn.rejoin).toHaveBeenCalledWith({ channelId: 'ch1', selfMute: false, selfDeaf: false });
+    expect(conn.joinConfig.selfDeaf).toBe(false);
+  });
+
+  it('deafen is a no-op for unknown guild', () => {
+    const mgr = new VoiceConnectionManager(createLogger());
+    mgr.deafen('unknown', true); // should not throw
+  });
+
+  it('getStatus returns connection metadata', () => {
+    const conn = createMockConnection(VoiceConnectionStatus.Signalling, {
+      channelId: 'ch1',
+      guildId: 'g1',
+    });
+    mockJoin.mockReturnValue(conn as never);
+
+    const mgr = new VoiceConnectionManager(createLogger());
+    mgr.join({ channelId: 'ch1', guildId: 'g1', adapterCreator: fakeAdapter });
+    conn._transition(VoiceConnectionStatus.Ready);
+
+    const status = mgr.getStatus('g1');
+    expect(status).toEqual({
+      channelId: 'ch1',
+      state: 'ready',
+      selfMute: false,
+      selfDeaf: false,
+    });
+  });
+
+  it('getStatus reflects mute/deafen changes', () => {
+    const conn = createMockConnection();
+    mockJoin.mockReturnValue(conn as never);
+
+    const mgr = new VoiceConnectionManager(createLogger());
+    mgr.join({ channelId: 'ch1', guildId: 'g1', adapterCreator: fakeAdapter });
+    conn._transition(VoiceConnectionStatus.Ready);
+
+    mgr.mute('g1', true);
+    mgr.deafen('g1', true);
+
+    const status = mgr.getStatus('g1');
+    expect(status).toEqual({
+      channelId: 'ch1',
+      state: 'ready',
+      selfMute: true,
+      selfDeaf: true,
+    });
+  });
+
+  it('getStatus returns undefined for unknown guild', () => {
+    const mgr = new VoiceConnectionManager(createLogger());
+    expect(mgr.getStatus('nonexistent')).toBeUndefined();
+  });
+
+  it('listConnections returns all active connections with status', () => {
+    const conn1 = createMockConnection(VoiceConnectionStatus.Signalling, {
+      channelId: 'ch1',
+      guildId: 'g1',
+    });
+    const conn2 = createMockConnection(VoiceConnectionStatus.Signalling, {
+      channelId: 'ch2',
+      guildId: 'g2',
+    });
+    mockJoin.mockReturnValueOnce(conn1 as never).mockReturnValueOnce(conn2 as never);
+
+    const mgr = new VoiceConnectionManager(createLogger());
+    mgr.join({ channelId: 'ch1', guildId: 'g1', adapterCreator: fakeAdapter });
+    mgr.join({ channelId: 'ch2', guildId: 'g2', adapterCreator: fakeAdapter });
+
+    conn1._transition(VoiceConnectionStatus.Ready);
+    conn2._transition(VoiceConnectionStatus.Ready);
+
+    const all = mgr.listConnections();
+    expect(all.size).toBe(2);
+    expect(all.get('g1')).toEqual({
+      channelId: 'ch1',
+      state: 'ready',
+      selfMute: false,
+      selfDeaf: false,
+    });
+    expect(all.get('g2')).toEqual({
+      channelId: 'ch2',
+      state: 'ready',
+      selfMute: false,
+      selfDeaf: false,
+    });
+  });
+
+  it('listConnections returns empty map when no connections exist', () => {
+    const mgr = new VoiceConnectionManager(createLogger());
+    const all = mgr.listConnections();
+    expect(all.size).toBe(0);
   });
 });

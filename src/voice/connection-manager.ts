@@ -13,6 +13,13 @@ export type VoiceConnectionState =
   | 'disconnected'
   | 'destroyed';
 
+export type VoiceConnectionInfo = {
+  channelId: string;
+  state: VoiceConnectionState;
+  selfMute: boolean;
+  selfDeaf: boolean;
+};
+
 export type VoiceConnectionManagerOpts = {
   reconnectRetryLimit?: number;
 };
@@ -74,6 +81,41 @@ export class VoiceConnectionManager {
     const connection = this.connections.get(guildId);
     if (!connection) return undefined;
     return connection.state.status as VoiceConnectionState;
+  }
+
+  mute(guildId: string, muted: boolean): void {
+    const connection = this.connections.get(guildId);
+    if (!connection) return;
+    const { channelId, selfDeaf } = connection.joinConfig;
+    connection.rejoin({ channelId: channelId!, selfMute: muted, selfDeaf });
+  }
+
+  deafen(guildId: string, deafened: boolean): void {
+    const connection = this.connections.get(guildId);
+    if (!connection) return;
+    const { channelId, selfMute } = connection.joinConfig;
+    connection.rejoin({ channelId: channelId!, selfMute, selfDeaf: deafened });
+  }
+
+  getStatus(guildId: string): VoiceConnectionInfo | undefined {
+    const connection = this.connections.get(guildId);
+    if (!connection) return undefined;
+    const config = connection.joinConfig;
+    return {
+      channelId: config.channelId ?? '',
+      state: connection.state.status as VoiceConnectionState,
+      selfMute: config.selfMute,
+      selfDeaf: config.selfDeaf,
+    };
+  }
+
+  listConnections(): Map<string, VoiceConnectionInfo> {
+    const result = new Map<string, VoiceConnectionInfo>();
+    for (const [guildId] of this.connections) {
+      const status = this.getStatus(guildId);
+      if (status) result.set(guildId, status);
+    }
+    return result;
   }
 
   destroy(): void {
