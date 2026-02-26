@@ -18,6 +18,7 @@ Core instructions live in `CLAUDE.md` at the repo root.
 | **Task tracking** | `tasks.md` |
 | **Architecture / system overview** | `architecture.md` |
 | **Tool capabilities / browser automation** | `tools.md` |
+| **Voice system (STT/TTS, audio pipeline, actions)** | `voice.md` |
 | **Forge/plan standing constraints** | `project.md` *(auto-loaded by forge)* |
 | **Plan & Forge commands** | `plan-and-forge.md` *(in docs/, not .context/)* |
 
@@ -38,5 +39,6 @@ Core instructions live in `CLAUDE.md` at the repo root.
 - **architecture.md** — System overview, data flow, directory layout, key concepts
 - **bot-setup.md** — One-time bot creation and invite guide
 - **tools.md** — Available tools: browser automation (agent-browser), escalation ladder, CDP connect, security guardrails
+- **voice.md** — Voice subsystem: module map, audio data flow, dependencies (`@discordjs/opus`, `@discordjs/voice`), config reference
 - **project.md** — Standing constraints auto-loaded by forge drafter and auditor
 - **docs/plan-and-forge.md** — Canonical reference for `!plan` and `!forge` commands (lives in `docs/`, not `.context/` — human/developer reference, not auto-loaded into agent context)
