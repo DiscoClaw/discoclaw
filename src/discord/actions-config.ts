@@ -9,7 +9,7 @@ import { resolveDefaultModel, resolveProvider } from './actions-imagegen.js';
 // Types
 // ---------------------------------------------------------------------------
 
-export type ModelRole = 'chat' | 'fast' | 'forge-drafter' | 'forge-auditor' | 'summary' | 'cron' | 'cron-exec';
+export type ModelRole = 'chat' | 'fast' | 'forge-drafter' | 'forge-auditor' | 'summary' | 'cron' | 'cron-exec' | 'voice';
 
 export type ConfigActionRequest =
   | { type: 'modelSet'; role: ModelRole; model: string }
@@ -49,6 +49,7 @@ export type ConfigMutableParams = {
   planCtx?: { model?: string; runtime?: RuntimeAdapter };
   deferOpts?: { runtime: RuntimeAdapter };
   imagegenCtx?: ImagegenContext;
+  voiceModelCtx?: { model: string };
 };
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ const ROLE_DESCRIPTIONS: Record<ModelRole, string> = {
   summary: 'Rolling summaries only',
   cron: 'Cron auto-tagging and model classification',
   'cron-exec': 'Default model for cron job execution (overridden by per-job settings)',
+  voice: 'Voice channel AI responses',
 };
 
 // ---------------------------------------------------------------------------
@@ -175,6 +177,14 @@ export function executeConfigAction(
             return { ok: false, error: 'Cron subsystem not configured' };
           }
           break;
+        case 'voice':
+          if (bp.voiceModelCtx) {
+            bp.voiceModelCtx.model = model;
+            changes.push(`voice → ${model}`);
+          } else {
+            return { ok: false, error: 'Voice subsystem not configured' };
+          }
+          break;
         default:
           return { ok: false, error: `Unknown role: ${String(action.role)}` };
       }
@@ -213,6 +223,10 @@ export function executeConfigAction(
         rows.push(['imagegen', igModel, `Image generation (${igProvider})`]);
       }
 
+      if (bp.voiceModelCtx) {
+        rows.push(['voice', bp.voiceModelCtx.model || `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS.voice]);
+      }
+
       const adapterDefault = configCtx.runtime.defaultModel;
       const lines = rows.map(([role, model, desc]) => {
         const resolved = resolveModel(model, rid);
@@ -247,7 +261,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"chat","model":"sonnet"}</discord-action>
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
-- \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`.
+- \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
 - \`model\` (required): Model tier (\`fast\`, \`capable\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` role, swaps the active runtime adapter), or \`default\` (for cron-exec only, to revert to following chat).
 
 **Roles:**
@@ -260,6 +274,7 @@ export function configActionsPromptSection(): string {
 | \`summary\` | Rolling summaries only (overrides fast) |
 | \`cron\` | Cron auto-tagging and model classification (overrides fast) |
 | \`cron-exec\` | Default model for cron job execution; per-job overrides (via \`cronUpdate\`) take priority |
+| \`voice\` | Voice channel AI responses |
 
 Changes are **ephemeral** — they take effect immediately but revert on restart. Use env vars for persistent configuration.
 
