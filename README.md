@@ -56,7 +56,7 @@ Recurring tasks defined as forum threads in plain language — no crontab, no se
 
 ## How it works
 
-DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with Gemini, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
+DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with Gemini, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). The OpenAI-compatible and OpenRouter adapters support optional tool use (function calling) when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
 2. Assembles context: per-channel rules, conversation history, rolling summary, and durable memory

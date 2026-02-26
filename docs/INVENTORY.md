@@ -37,7 +37,9 @@ Legend: **done** | *stub* | ~~cut~~
 |-----------|---------|--------|
 | `RuntimeAdapter` interface | `src/runtime/types.ts` | **done** |
 | Claude Code CLI adapter (text + stream-json) | `src/runtime/claude-code-cli.ts` | **done** |
-| OpenAI-compatible adapter (SSE streaming, text-only, API key) | `src/runtime/openai-compat.ts` | **done** |
+| OpenAI-compatible adapter (SSE streaming, optional function-calling tool use, API key) | `src/runtime/openai-compat.ts` | **done** |
+| OpenAI tool schemas (tool definitions & name mappings for function-calling) | `src/runtime/openai-tool-schemas.ts` | **done** |
+| OpenAI tool execution (server-side tool handlers with path security) | `src/runtime/openai-tool-exec.ts` | **done** |
 | Codex CLI adapter (subprocess, `tools_fs` capable) | `src/runtime/codex-cli.ts` | **done** |
 | Runtime registry (name → adapter lookup) | `src/runtime/registry.ts` | **done** |
 | Adapter selection via env (`FORGE_AUDITOR_RUNTIME`) | `src/index.ts` | **done** |
@@ -162,7 +164,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 |------|-------|--------|
 | Core (pidlock, bootstrap, permissions) | 3 tests | **done** |
 | Discord subsystem | 14 tests | **done** |
-| Runtime adapters (Claude CLI + OpenAI-compat + Codex CLI + registry) | 4 tests | **done** |
+| Runtime adapters (Claude CLI + OpenAI-compat + Codex CLI + registry + tool schemas + tool exec) | 6 tests | **done** |
 | Beads subsystem | 3 test files | **done** |
 | Tasks subsystem (`TaskStore`, migration) | 2 test files | **done** |
 | Cron subsystem | 3 tests | **done** |
