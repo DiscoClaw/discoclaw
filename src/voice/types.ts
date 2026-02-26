@@ -11,11 +11,12 @@
 
 export type VoiceConfig = {
   enabled: boolean;
-  sttProvider: 'deepgram' | 'whisper';
-  ttsProvider: 'cartesia' | 'kokoro';
+  sttProvider: 'deepgram' | 'whisper' | 'openai';
+  ttsProvider: 'cartesia' | 'kokoro' | 'openai';
   homeChannel?: string;
   deepgramApiKey?: string;
   cartesiaApiKey?: string;
+  openaiApiKey?: string;
 };
 
 // ---------------------------------------------------------------------------
