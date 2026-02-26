@@ -1125,7 +1125,12 @@ describe('executePhase', () => {
     opts.signal = ac.signal;
 
     await executePhase(phase, SAMPLE_PLAN, basePhases, opts);
-    expect(capturedSignal).toBe(ac.signal);
+    // Loop detection composes a combined signal via AbortSignal.any(),
+    // so it won't be the same reference — but aborting the caller should propagate.
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal!.aborted).toBe(false);
+    ac.abort();
+    expect(capturedSignal!.aborted).toBe(true);
   });
 
   it('returns failed when signal is already aborted', async () => {

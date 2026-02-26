@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import type { RuntimeAdapter, RuntimeInvokeParams, EngineEvent } from '../runtime/types.js';
+import { LoopDetector, type LoopDetectorOpts } from '../runtime/loop-detector.js';
 
 export type StepContext = {
   stepIndex: number;
@@ -85,6 +86,14 @@ export type PipelineDef = {
   onProgress?: (message: string) => void;
   /** Must be true for any shell step with confirm=true to be allowed. */
   confirmAllowed?: boolean;
+  /**
+   * Loop detection for prompt steps. When not `false`, a `LoopDetector` monitors
+   * `tool_start` events for degenerate patterns (consecutive repeats, ping-pong,
+   * frequency dominance). If the critical threshold is hit, the runtime stream is
+   * aborted. Pass a partial `LoopDetectorOpts` to override thresholds, or `false`
+   * to disable. Enabled by default.
+   */
+  loopDetect?: false | LoopDetectorOpts;
 };
 
 export type PipelineResult = {
@@ -144,21 +153,67 @@ function interpolateDeep(
   return value;
 }
 
-/** Drain a runtime event stream, collecting final text. Throws on error events. */
-async function collectText(events: AsyncIterable<EngineEvent>, signal?: AbortSignal): Promise<string> {
+/**
+ * Drain a runtime event stream, collecting final text. Throws on error events.
+ *
+ * When `loopDetect` is not `false`, a `LoopDetector` monitors `tool_start`
+ * events for degenerate patterns. If the critical threshold is hit, the stream
+ * is aborted via a composed signal.
+ */
+async function collectText(
+  events: AsyncIterable<EngineEvent>,
+  signal?: AbortSignal,
+  loopDetect?: false | LoopDetectorOpts,
+): Promise<string> {
+  // --- Loop detection setup ---
+  const loopEnabled = loopDetect !== false;
+  const loopAc = loopEnabled ? new AbortController() : undefined;
+  let loopPattern: string | undefined;
+
+  const detector = loopEnabled
+    ? new LoopDetector({
+        ...(typeof loopDetect === 'object' ? loopDetect : {}),
+        onCritical(pattern) {
+          loopPattern = pattern;
+          loopAc!.abort();
+        },
+      })
+    : undefined;
+
+  // Compose caller signal with loop-detector signal so either can cancel.
+  const combinedSignal =
+    loopAc && signal
+      ? AbortSignal.any([signal, loopAc.signal])
+      : loopAc
+        ? loopAc.signal
+        : signal;
+
   let finalText = '';
   let deltaText = '';
-  for await (const evt of events) {
-    if (evt.type === 'text_final') {
-      finalText = evt.text;
-    } else if (evt.type === 'text_delta') {
-      deltaText += evt.text;
-    } else if (evt.type === 'error') {
-      throw new Error(evt.message);
+  try {
+    for await (const evt of events) {
+      // Feed event to loop detector before any other processing.
+      detector?.onEvent(evt);
+
+      if (evt.type === 'text_final') {
+        finalText = evt.text;
+      } else if (evt.type === 'text_delta') {
+        deltaText += evt.text;
+      } else if (evt.type === 'error') {
+        throw new Error(evt.message);
+      }
+      // Check abort after processing the current event so we don't discard it.
+      if (combinedSignal?.aborted) break;
     }
-    // Check abort after processing the current event so we don't discard it.
-    if (signal?.aborted) break;
+  } finally {
+    detector?.dispose();
   }
+
+  // If the loop detector triggered the abort, throw a descriptive error.
+  if (loopPattern) {
+    throw new Error(`Runtime aborted: runaway tool-calling loop detected — ${loopPattern}`);
+  }
+
   return finalText || deltaText;
 }
 
@@ -167,7 +222,7 @@ async function collectText(events: AsyncIterable<EngineEvent>, signal?: AbortSig
  * available as context for subsequent steps.
  */
 export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
-  const { steps, runtime, cwd, model, signal, onProgress, confirmAllowed } = def;
+  const { steps, runtime, cwd, model, signal, onProgress, confirmAllowed, loopDetect } = def;
   const outputs: string[] = [];
 
   // Validate step IDs — duplicates are rejected up-front.
@@ -311,7 +366,7 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
 
     let text: string;
     try {
-      text = await collectText(stepRuntime.invoke(invokeParams), signal);
+      text = await collectText(stepRuntime.invoke(invokeParams), signal, loopDetect);
     } catch (err) {
       if (step.onError === 'skip') {
         outputs.push('');
