@@ -48,10 +48,22 @@ User speaks in Discord voice channel
 ## Key Patterns
 
 - **Allowlist gating** — `AudioReceiver` only subscribes to users in `DISCORD_ALLOW_USER_IDS`. Empty allowlist = ignore everyone (fail-closed).
+- **Dual-flag voice actions** — Voice action execution requires both `VOICE_ENABLED` and `DISCORD_ACTIONS_VOICE`. The `buildVoiceActionFlags()` function intersects a voice-specific allowlist (messaging, tasks, memory) with env config; all other action categories are hard-disabled.
 - **Generation-based cancellation** — `VoiceResponder` increments a generation counter on each new transcription. If a newer transcription arrives mid-pipeline, the older one is silently abandoned.
 - **Barge-in** — `AudioReceiver.onUserSpeaking` fires on every speaking burst. If the responder is playing, playback stops and the generation counter advances.
 - **Re-entrancy guard** — `AudioPipelineManager.startPipeline` uses a `starting` set because `VoiceConnection.subscribe()` synchronously fires a Ready state change.
 - **Error containment** — `VoiceConnectionManager` catches connection errors and destroys the connection to prevent process crashes (e.g. DAVE handshake failures).
+
+## Wiring (`src/index.ts`)
+
+When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes the voice subsystem in order:
+
+1. **`TranscriptMirror.resolve()`** — resolves the voice home channel for text mirroring (may be `null` if unconfigured).
+2. **`voiceInvokeAi`** closure — builds the AI invocation function that prepends channel context, PA prompt, durable memory, voice system prompt, and action instructions to user speech. Supports up to 2 follow-up rounds for action results.
+3. **`AudioPipelineManager`** — instantiated with voice config, allowlist, decoder factory, `voiceInvokeAi`, transcript mirror, and a transcription logging callback.
+4. **`VoiceConnectionManager`** — instantiated with `onReady` → `audioPipeline.startPipeline()` and `onDestroyed` → `audioPipeline.stopPipeline()` callbacks.
+5. **`botParams.voiceCtx`** — set when `DISCORD_ACTIONS_VOICE` is enabled, exposing `voiceManager` to Discord action handlers (`voiceJoin`, `voiceLeave`, etc.).
+6. **`VoicePresenceHandler`** — created and registered on the Discord client only when `VOICE_AUTO_JOIN` is enabled.
 
 ## Config (env vars)
 
