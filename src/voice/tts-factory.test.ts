@@ -3,6 +3,7 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import type { VoiceConfig } from './types.js';
 import { createTtsProvider } from './tts-factory.js';
 import { CartesiaTtsProvider } from './tts-cartesia.js';
+import { OpenaiTtsProvider } from './tts-openai.js';
 
 // Stub globalThis.WebSocket so CartesiaTtsProvider constructor doesn't throw
 class StubWebSocket {
@@ -39,6 +40,20 @@ describe('createTtsProvider', () => {
     expect(() =>
       createTtsProvider(baseConfig({ cartesiaApiKey: undefined }), createLogger()),
     ).toThrow('cartesiaApiKey is required');
+  });
+
+  it('returns an OpenaiTtsProvider for openai config', () => {
+    const provider = createTtsProvider(
+      baseConfig({ ttsProvider: 'openai', openaiApiKey: 'sk-test' }),
+      createLogger(),
+    );
+    expect(provider).toBeInstanceOf(OpenaiTtsProvider);
+  });
+
+  it('throws when openaiApiKey is missing for openai provider', () => {
+    expect(() =>
+      createTtsProvider(baseConfig({ ttsProvider: 'openai' }), createLogger()),
+    ).toThrow('openaiApiKey is required');
   });
 
   it('throws not-implemented for kokoro provider', () => {

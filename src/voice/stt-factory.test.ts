@@ -3,6 +3,7 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import type { VoiceConfig } from './types.js';
 import { createSttProvider } from './stt-factory.js';
 import { DeepgramSttProvider } from './stt-deepgram.js';
+import { OpenaiSttProvider } from './stt-openai.js';
 
 // Stub globalThis.WebSocket so DeepgramSttProvider constructor doesn't throw
 class StubWebSocket {
@@ -39,6 +40,20 @@ describe('createSttProvider', () => {
     expect(() =>
       createSttProvider(baseConfig({ deepgramApiKey: undefined }), createLogger()),
     ).toThrow('deepgramApiKey is required');
+  });
+
+  it('returns an OpenaiSttProvider for openai config', () => {
+    const provider = createSttProvider(
+      baseConfig({ sttProvider: 'openai', openaiApiKey: 'sk-test' }),
+      createLogger(),
+    );
+    expect(provider).toBeInstanceOf(OpenaiSttProvider);
+  });
+
+  it('throws when openaiApiKey is missing for openai provider', () => {
+    expect(() =>
+      createSttProvider(baseConfig({ sttProvider: 'openai' }), createLogger()),
+    ).toThrow('openaiApiKey is required');
   });
 
   it('throws not-implemented for whisper provider', () => {
