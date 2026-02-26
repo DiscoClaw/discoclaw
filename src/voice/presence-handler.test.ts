@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Collection } from 'discord.js';
+import { ChannelType, Collection } from 'discord.js';
 import type { GuildMember, VoiceBasedChannel, VoiceState } from 'discord.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { VoicePresenceHandler } from './presence-handler.js';
+import type { VoiceStateEventSource } from './presence-handler.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -19,10 +20,11 @@ function createMember(id: string, bot = false): GuildMember {
 function createChannel(
   id: string,
   members: GuildMember[] = [],
+  type: number = ChannelType.GuildVoice,
 ): VoiceBasedChannel {
   const col = new Collection<string, GuildMember>();
   for (const m of members) col.set(m.id, m);
-  return { id, name: `channel-${id}`, members: col } as unknown as VoiceBasedChannel;
+  return { id, name: `channel-${id}`, members: col, type } as unknown as VoiceBasedChannel;
 }
 
 const fakeAdapter = (() => ({
@@ -57,11 +59,23 @@ function createVoiceState(opts: {
   } as unknown as VoiceState;
 }
 
-function createHandler(voiceManager: MockVoiceManager, log?: LoggerLike) {
+function createMockClient(): VoiceStateEventSource & { removeListener: ReturnType<typeof vi.fn> } {
+  return {
+    on: vi.fn(),
+    removeListener: vi.fn(),
+  };
+}
+
+function createHandler(
+  voiceManager: MockVoiceManager,
+  opts?: { log?: LoggerLike; allowUserIds?: Set<string>; guildId?: string },
+) {
   return new VoicePresenceHandler({
-    log: log ?? createLogger(),
+    log: opts?.log ?? createLogger(),
     voiceManager: voiceManager as never,
     botUserId: 'bot-1',
+    allowUserIds: opts?.allowUserIds ?? new Set(['user-1', 'user-2']),
+    guildId: opts?.guildId,
   });
 }
 
@@ -439,11 +453,183 @@ describe('VoicePresenceHandler', () => {
     });
   });
 
+  describe('allowlist enforcement', () => {
+    it('ignores events from users not in allowUserIds', () => {
+      const mgr = createVoiceManager();
+      const handler = createHandler(mgr, { allowUserIds: new Set(['other-user']) });
+
+      const user = createMember('user-1'); // not in allowlist
+      const channel = createChannel('ch-1', [user]);
+
+      const oldState = createVoiceState({
+        guildId: 'g1',
+        channelId: null,
+        channel: null,
+        member: user,
+      });
+      const newState = createVoiceState({
+        guildId: 'g1',
+        channelId: 'ch-1',
+        channel,
+        member: user,
+      });
+
+      handler.handleVoiceStateUpdate(oldState, newState);
+
+      expect(mgr.join).not.toHaveBeenCalled();
+    });
+
+    it('ignores all events when allowUserIds is empty (fail closed)', () => {
+      const mgr = createVoiceManager();
+      const handler = createHandler(mgr, { allowUserIds: new Set() });
+
+      const user = createMember('user-1');
+      const channel = createChannel('ch-1', [user]);
+
+      const oldState = createVoiceState({
+        guildId: 'g1',
+        channelId: null,
+        channel: null,
+        member: user,
+      });
+      const newState = createVoiceState({
+        guildId: 'g1',
+        channelId: 'ch-1',
+        channel,
+        member: user,
+      });
+
+      handler.handleVoiceStateUpdate(oldState, newState);
+
+      expect(mgr.join).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('guild scoping', () => {
+    it('ignores events from a different guild when guildId is set', () => {
+      const mgr = createVoiceManager();
+      const handler = createHandler(mgr, { guildId: 'g1' });
+
+      const user = createMember('user-1');
+      const channel = createChannel('ch-1', [user]);
+
+      const oldState = createVoiceState({
+        guildId: 'g2', // different guild
+        channelId: null,
+        channel: null,
+        member: user,
+      });
+      const newState = createVoiceState({
+        guildId: 'g2',
+        channelId: 'ch-1',
+        channel,
+        member: user,
+      });
+
+      handler.handleVoiceStateUpdate(oldState, newState);
+
+      expect(mgr.join).not.toHaveBeenCalled();
+    });
+
+    it('processes events from the configured guild', () => {
+      const mgr = createVoiceManager();
+      const handler = createHandler(mgr, { guildId: 'g1' });
+
+      const user = createMember('user-1');
+      const channel = createChannel('ch-1', [user]);
+
+      const oldState = createVoiceState({
+        guildId: 'g1',
+        channelId: null,
+        channel: null,
+        member: user,
+      });
+      const newState = createVoiceState({
+        guildId: 'g1',
+        channelId: 'ch-1',
+        channel,
+        member: user,
+      });
+
+      handler.handleVoiceStateUpdate(oldState, newState);
+
+      expect(mgr.join).toHaveBeenCalled();
+    });
+  });
+
+  describe('stage channel exclusion', () => {
+    it('does not auto-join stage channels', () => {
+      const mgr = createVoiceManager();
+      const handler = createHandler(mgr);
+
+      const user = createMember('user-1');
+      const stageChannel = createChannel('ch-1', [user], ChannelType.GuildStageVoice);
+
+      const oldState = createVoiceState({
+        guildId: 'g1',
+        channelId: null,
+        channel: null,
+        member: user,
+      });
+      const newState = createVoiceState({
+        guildId: 'g1',
+        channelId: 'ch-1',
+        channel: stageChannel,
+        member: user,
+      });
+
+      handler.handleVoiceStateUpdate(oldState, newState);
+
+      expect(mgr.join).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('register / destroy', () => {
+    it('register() attaches the voiceStateUpdate listener', () => {
+      const mgr = createVoiceManager();
+      const handler = createHandler(mgr);
+      const mockClient = createMockClient();
+
+      handler.register(mockClient);
+
+      expect(mockClient.on).toHaveBeenCalledWith('voiceStateUpdate', expect.any(Function));
+    });
+
+    it('destroy() detaches the voiceStateUpdate listener', () => {
+      const mgr = createVoiceManager();
+      const handler = createHandler(mgr);
+      const mockClient = createMockClient();
+
+      handler.register(mockClient);
+      handler.destroy();
+
+      expect(mockClient.removeListener).toHaveBeenCalledWith('voiceStateUpdate', expect.any(Function));
+    });
+
+    it('destroy() is safe to call without register()', () => {
+      const mgr = createVoiceManager();
+      const handler = createHandler(mgr);
+
+      // Should not throw.
+      handler.destroy();
+    });
+
+    it('register() throws if already registered', () => {
+      const mgr = createVoiceManager();
+      const handler = createHandler(mgr);
+      const mockClient = createMockClient();
+
+      handler.register(mockClient);
+
+      expect(() => handler.register(mockClient)).toThrow('already registered');
+    });
+  });
+
   describe('logging', () => {
     it('logs when auto-joining', () => {
       const mgr = createVoiceManager();
       const log = createLogger();
-      const handler = createHandler(mgr, log);
+      const handler = createHandler(mgr, { log });
 
       const user = createMember('user-1');
       const channel = createChannel('ch-1', [user]);
@@ -473,7 +659,7 @@ describe('VoicePresenceHandler', () => {
       const mgr = createVoiceManager();
       mgr.getConnection.mockReturnValue({ joinConfig: { channelId: 'ch-1' } });
       const log = createLogger();
-      const handler = createHandler(mgr, log);
+      const handler = createHandler(mgr, { log });
 
       const user = createMember('user-1');
       const channel = createChannel('ch-1', []);

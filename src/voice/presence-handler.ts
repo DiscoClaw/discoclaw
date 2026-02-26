@@ -7,6 +7,7 @@
  * - Auto-leaves when the last non-bot user leaves the channel the bot is in.
  */
 
+import { ChannelType } from 'discord.js';
 import type { VoiceState, Collection, GuildMember } from 'discord.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { VoiceConnectionManager } from './connection-manager.js';
@@ -15,11 +16,21 @@ import type { VoiceConnectionManager } from './connection-manager.js';
 // Types
 // ---------------------------------------------------------------------------
 
+/** Minimal interface for attaching/detaching the voiceStateUpdate listener. */
+export type VoiceStateEventSource = {
+  on(event: 'voiceStateUpdate', handler: (oldState: VoiceState, newState: VoiceState) => void): unknown;
+  removeListener(event: 'voiceStateUpdate', handler: (oldState: VoiceState, newState: VoiceState) => void): unknown;
+};
+
 export type VoicePresenceHandlerOpts = {
   log: LoggerLike;
   voiceManager: VoiceConnectionManager;
   /** The bot's own user ID — used for self-identification in logs. */
   botUserId: string;
+  /** Only react to voice events from these user IDs (fail closed: empty set = ignore everyone). */
+  allowUserIds: Set<string>;
+  /** If set, only react to events in this guild. */
+  guildId?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -30,20 +41,39 @@ export class VoicePresenceHandler {
   private readonly log: LoggerLike;
   private readonly voiceManager: VoiceConnectionManager;
   private readonly botUserId: string;
+  private readonly allowUserIds: Set<string>;
+  private readonly guildId: string | undefined;
+  private client: VoiceStateEventSource | null = null;
+  private boundHandler: ((oldState: VoiceState, newState: VoiceState) => void) | null = null;
 
   constructor(opts: VoicePresenceHandlerOpts) {
     this.log = opts.log;
     this.voiceManager = opts.voiceManager;
     this.botUserId = opts.botUserId;
+    this.allowUserIds = opts.allowUserIds;
+    this.guildId = opts.guildId;
+  }
+
+  /** Attach the `voiceStateUpdate` listener to the given client. */
+  register(client: VoiceStateEventSource): void {
+    if (this.client) throw new Error('VoicePresenceHandler already registered');
+    this.client = client;
+    this.boundHandler = (oldState, newState) => this.handleVoiceStateUpdate(oldState, newState);
+    client.on('voiceStateUpdate', this.boundHandler);
+  }
+
+  /** Detach the `voiceStateUpdate` listener. Safe to call multiple times. */
+  destroy(): void {
+    if (this.client && this.boundHandler) {
+      this.client.removeListener('voiceStateUpdate', this.boundHandler);
+    }
+    this.client = null;
+    this.boundHandler = null;
   }
 
   /**
-   * Handle a Discord `voiceStateUpdate` event. Call this from the client's
-   * event listener:
-   *
-   * ```ts
-   * client.on('voiceStateUpdate', (old, cur) => handler.handleVoiceStateUpdate(old, cur));
-   * ```
+   * Handle a Discord `voiceStateUpdate` event. Usually called via `register()`,
+   * but can be invoked directly for testing.
    */
   handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState): void {
     const member = newState.member ?? oldState.member;
@@ -52,7 +82,14 @@ export class VoicePresenceHandler {
     // Ignore bot users (including ourselves).
     if (member.user.bot) return;
 
+    // Fail closed: empty allowlist = ignore everyone.
+    if (this.allowUserIds.size === 0 || !this.allowUserIds.has(member.user.id)) return;
+
     const guildId = newState.guild.id;
+
+    // Filter by guild if configured.
+    if (this.guildId && guildId !== this.guildId) return;
+
     const oldChannelId = oldState.channelId;
     const newChannelId = newState.channelId;
 
@@ -77,6 +114,9 @@ export class VoicePresenceHandler {
 
     const channel = state.channel;
     if (!channel) return;
+
+    // Skip stage channels (out of scope).
+    if (channel.type === ChannelType.GuildStageVoice) return;
 
     this.log.info(
       { guildId, channelId: channel.id, userId: state.member?.id },

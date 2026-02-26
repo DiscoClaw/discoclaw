@@ -961,6 +961,27 @@ describe('parseConfig', () => {
     expect(warnings.some((w) => w.includes('DEEPGRAM_API_KEY'))).toBe(false);
   });
 
+  // --- voiceAutoJoin ---
+  it('defaults voiceAutoJoin to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.voiceAutoJoin).toBe(false);
+  });
+
+  it('parses DISCOCLAW_VOICE_AUTO_JOIN=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_VOICE_AUTO_JOIN: '1' }));
+    expect(config.voiceAutoJoin).toBe(true);
+  });
+
+  it('parses DISCOCLAW_VOICE_AUTO_JOIN=true as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_VOICE_AUTO_JOIN: 'true' }));
+    expect(config.voiceAutoJoin).toBe(true);
+  });
+
+  it('parses DISCOCLAW_VOICE_AUTO_JOIN=0 as false', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_VOICE_AUTO_JOIN: '0' }));
+    expect(config.voiceAutoJoin).toBe(false);
+  });
+
   it('warns when voice enabled with cartesia TTS but CARTESIA_API_KEY missing', () => {
     const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', DEEPGRAM_API_KEY: 'dg-key' }));
     expect(warnings.some((w) => w.includes('CARTESIA_API_KEY'))).toBe(true);
