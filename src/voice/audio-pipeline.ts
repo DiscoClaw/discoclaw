@@ -30,6 +30,14 @@ export type AudioPipelineOpts = {
   createStt?: (config: VoiceConfig, log: LoggerLike) => SttProvider;
   /** AI runtime invocation for voice responses. When provided, enables the full conversation loop. */
   invokeAi?: InvokeAiFn;
+  /** AI runtime identifier (e.g. 'claude-code', 'openai'). Gates voice-response creation. */
+  runtime?: string;
+  /** Model to use for the AI runtime. */
+  runtimeModel?: string;
+  /** Working directory for the AI runtime. */
+  runtimeCwd?: string;
+  /** Timeout in milliseconds for AI runtime invocations. */
+  runtimeTimeoutMs?: number;
   /** Override TTS provider creation for testing. */
   createTts?: (config: VoiceConfig, log: LoggerLike) => TtsProvider;
 };
@@ -52,6 +60,10 @@ export class AudioPipelineManager {
   private readonly onTranscription?: (guildId: string, result: TranscriptionResult) => void;
   private readonly createStt: (config: VoiceConfig, log: LoggerLike) => SttProvider;
   private readonly invokeAi?: InvokeAiFn;
+  private readonly runtime?: string;
+  private readonly runtimeModel?: string;
+  private readonly runtimeCwd?: string;
+  private readonly runtimeTimeoutMs?: number;
   private readonly createTts: (config: VoiceConfig, log: LoggerLike) => TtsProvider;
   private readonly pipelines = new Map<string, GuildPipeline>();
 
@@ -63,6 +75,10 @@ export class AudioPipelineManager {
     this.onTranscription = opts.onTranscription;
     this.createStt = opts.createStt ?? createSttProvider;
     this.invokeAi = opts.invokeAi;
+    this.runtime = opts.runtime;
+    this.runtimeModel = opts.runtimeModel;
+    this.runtimeCwd = opts.runtimeCwd;
+    this.runtimeTimeoutMs = opts.runtimeTimeoutMs;
     this.createTts = opts.createTts ?? createTtsProvider;
   }
 
@@ -110,7 +126,7 @@ export class AudioPipelineManager {
           });
           this.log.info({ guildId }, 'voice responder created');
         } catch (err) {
-          this.log.error({ guildId, err }, 'failed to create voice responder (continuing without TTS)');
+          this.log.warn({ guildId, err }, 'failed to create voice responder — continuing with STT-only mode');
         }
       }
 
