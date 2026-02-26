@@ -12,6 +12,7 @@ import type { TaskContext } from '../tasks/task-context.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import type { RuntimeCapability } from '../runtime/types.js';
 import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';
+import { inferModelTier, filterToolsByTier } from '../runtime/tool-tiers.js';
 
 // ---------------------------------------------------------------------------
 // Root policy preamble
@@ -151,8 +152,9 @@ export async function resolveEffectiveTools(opts: {
   runtimeTools: string[];
   runtimeCapabilities?: ReadonlySet<RuntimeCapability>;
   runtimeId?: string;
+  model?: string;
   log?: LoggerLike;
-}): Promise<{ effectiveTools: string[]; permissionTier: string; permissionNote?: string; runtimeCapabilityNote?: string }> {
+}): Promise<{ effectiveTools: string[]; permissionTier: string; permissionNote?: string; runtimeCapabilityNote?: string; toolTierNote?: string }> {
   const permissions = await loadWorkspacePermissions(opts.workspaceCwd, opts.log);
   const configuredTools = resolveTools(permissions, opts.runtimeTools);
   let effectiveTools = configuredTools;
@@ -176,6 +178,28 @@ export async function resolveEffectiveTools(opts: {
     }
   }
 
+  // Model-tier filtering: reduce tool surface for less-capable models.
+  let toolTierNote: string | undefined;
+  if (opts.model) {
+    const tier = inferModelTier(opts.model);
+    const tierFiltered = filterToolsByTier(effectiveTools, tier);
+    effectiveTools = tierFiltered.tools;
+    if (tierFiltered.dropped.length > 0) {
+      toolTierNote =
+        `model ${opts.model} (tier: ${tier}) is restricted from tools: ${tierFiltered.dropped.join(', ')}`;
+      opts.log?.info(
+        {
+          workspaceCwd: opts.workspaceCwd,
+          model: opts.model,
+          tier,
+          droppedTools: tierFiltered.dropped,
+          allowedTools: tierFiltered.tools,
+        },
+        'model tier filter dropped tools',
+      );
+    }
+  }
+
   // Audit: detect effective-tools changes between invocations.
   const fingerprint = effectiveTools.slice().sort().join(',');
   const prev = toolsFingerprintMap.get(opts.workspaceCwd);
@@ -192,6 +216,7 @@ export async function resolveEffectiveTools(opts: {
     permissionTier: permissions?.tier ?? 'env',
     permissionNote: permissions?.note,
     runtimeCapabilityNote,
+    toolTierNote,
   };
 }
 

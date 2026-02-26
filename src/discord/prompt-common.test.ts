@@ -494,6 +494,84 @@ describe('resolveEffectiveTools audit logging', () => {
     expect(log.warn).not.toHaveBeenCalled();
   });
 
+  it('reduces tools when model is haiku (fast tier)', async () => {
+    const workspace = await tmpDir();
+    await fs.writeFile(path.join(workspace, 'PERMISSIONS.json'), '{"tier":"full"}');
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const result = await resolveEffectiveTools({
+      workspaceCwd: workspace,
+      runtimeTools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch'],
+      model: 'haiku',
+      log,
+    });
+
+    // Fast tier keeps only read-only tools
+    expect(result.effectiveTools).toContain('Read');
+    expect(result.effectiveTools).toContain('Glob');
+    expect(result.effectiveTools).toContain('Grep');
+    expect(result.effectiveTools).toContain('WebSearch');
+    expect(result.effectiveTools).not.toContain('Bash');
+    expect(result.effectiveTools).not.toContain('Write');
+    expect(result.effectiveTools).not.toContain('Edit');
+  });
+
+  it('keeps all tools when model is opus (capable tier)', async () => {
+    const workspace = await tmpDir();
+    await fs.writeFile(path.join(workspace, 'PERMISSIONS.json'), '{"tier":"full"}');
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const result = await resolveEffectiveTools({
+      workspaceCwd: workspace,
+      runtimeTools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch'],
+      model: 'opus',
+      log,
+    });
+
+    expect(result.effectiveTools).toContain('Bash');
+    expect(result.effectiveTools).toContain('Read');
+    expect(result.effectiveTools).toContain('Write');
+    expect(result.effectiveTools).toContain('Edit');
+    expect(result.effectiveTools).toContain('WebSearch');
+    expect(result.toolTierNote).toBeUndefined();
+  });
+
+  it('populates toolTierNote when tools are dropped by tier filter', async () => {
+    const workspace = await tmpDir();
+    await fs.writeFile(path.join(workspace, 'PERMISSIONS.json'), '{"tier":"full"}');
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const result = await resolveEffectiveTools({
+      workspaceCwd: workspace,
+      runtimeTools: ['Bash', 'Read', 'Grep'],
+      model: 'haiku',
+      log,
+    });
+
+    expect(result.toolTierNote).toBeDefined();
+    expect(result.toolTierNote).toContain('haiku');
+    expect(result.toolTierNote).toContain('basic');
+    expect(result.toolTierNote).toContain('Bash');
+  });
+
+  it('does not apply tier filtering when model param is omitted', async () => {
+    const workspace = await tmpDir();
+    await fs.writeFile(path.join(workspace, 'PERMISSIONS.json'), '{"tier":"full"}');
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const result = await resolveEffectiveTools({
+      workspaceCwd: workspace,
+      runtimeTools: ['Bash', 'Read', 'Write'],
+      log,
+    });
+
+    // All tools should be present (full tier, no model filtering)
+    expect(result.effectiveTools).toContain('Bash');
+    expect(result.effectiveTools).toContain('Read');
+    expect(result.effectiveTools).toContain('Write');
+    expect(result.toolTierNote).toBeUndefined();
+  });
+
   it('drops tools unsupported by runtime capabilities', async () => {
     const workspace = await tmpDir();
     await fs.writeFile(path.join(workspace, 'PERMISSIONS.json'), '{"tier":"full"}');
