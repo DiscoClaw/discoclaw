@@ -129,7 +129,8 @@ export class CartesiaTtsProvider implements TtsProvider {
         const msg = JSON.parse(String(event.data));
 
         // Handle error responses from Cartesia
-        if (msg.error || msg.status_code) {
+        // status_code 206 = partial content (normal streaming chunk) — only error on 4xx/5xx
+        if (msg.error || (msg.status_code && msg.status_code >= 400)) {
           log.error({ cartesiaError: msg.error, statusCode: msg.status_code }, 'Cartesia TTS error response');
           error = new Error(`Cartesia TTS error: ${msg.error ?? `status ${msg.status_code}`}`);
           done = true;
@@ -151,7 +152,7 @@ export class CartesiaTtsProvider implements TtsProvider {
         }
 
         // Log unrecognized messages that have no data/done/error fields
-        if (!msg.data && !msg.done && !msg.error && !msg.status_code) {
+        if (!msg.data && !msg.done && !msg.error && !(msg.status_code && msg.status_code < 400)) {
           log.warn({ msgType: msg.type, keys: Object.keys(msg).join(',') }, 'Cartesia TTS: unrecognized message');
         }
       } catch {
