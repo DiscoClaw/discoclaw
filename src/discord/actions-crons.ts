@@ -24,7 +24,7 @@ import { getDefaultTimezone } from '../cron/default-timezone.js';
 
 export type CronActionRequest =
   | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string }
-  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string }
+  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean }
   | { type: 'cronList'; status?: string }
   | { type: 'cronShow'; cronId: string }
   | { type: 'cronPause'; cronId: string }
@@ -256,6 +256,12 @@ export async function executeCronAction(
       const updates: Partial<typeof record> = {};
       const changes: string[] = [];
 
+      // Silent mode.
+      if (action.silent !== undefined) {
+        updates.silent = action.silent;
+        changes.push(`silent → ${action.silent}`);
+      }
+
       // Model override.
       if (action.model) {
         updates.modelOverride = action.model;
@@ -412,6 +418,7 @@ export async function executeCronAction(
         lines.push(`Runtime: \uD83D\uDD04 running`);
       }
       lines.push(`Model: ${record.modelOverride ?? record.model ?? 'N/A'}${record.modelOverride ? ' (override)' : ''}`);
+      if (record.silent) lines.push(`Silent: yes`);
       lines.push(`Cadence: ${record.cadence ?? 'N/A'}`);
       lines.push(`Runs: ${record.runCount} | Last: ${record.lastRunStatus ?? 'never'}`);
       if (record.lastRunAt) lines.push(`Last run: <t:${Math.floor(new Date(record.lastRunAt).getTime() / 1000)}:R>`);
@@ -674,6 +681,7 @@ export function cronActionsPromptSection(): string {
 \`\`\`
 - \`cronId\` (required): The stable cron ID.
 - \`schedule\`, \`timezone\`, \`channel\`, \`prompt\`, \`model\`, \`tags\` (optional).
+- \`silent\` (optional): Boolean. When true, suppresses short "nothing to report" responses.
 
 **cronList** — List all cron jobs:
 \`\`\`

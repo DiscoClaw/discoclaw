@@ -375,6 +375,20 @@ describe('executeCronAction', () => {
     expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith('cron-test0001', 'thread-1', expect.objectContaining({ modelOverride: 'opus' }));
   });
 
+  it('cronUpdate with silent sets silent flag', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronUpdate', cronId: 'cron-test0001', silent: true }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith('cron-test0001', 'thread-1', expect.objectContaining({ silent: true }));
+  });
+
+  it('cronUpdate with silent false clears silent flag', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronUpdate', cronId: 'cron-test0001', silent: false }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith('cron-test0001', 'thread-1', expect.objectContaining({ silent: false }));
+  });
+
   it('cronUpdate rejects invalid schedule before thread edits or scheduler mutation', async () => {
     const cronCtx = makeCronCtx();
     const thread = (cronCtx.client.channels.cache.get as ReturnType<typeof vi.fn>)('thread-1');
