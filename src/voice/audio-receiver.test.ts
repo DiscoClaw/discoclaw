@@ -399,6 +399,106 @@ describe('AudioReceiver', () => {
     speakingEmitter.emit('start', '111');
     expect(subscribeFn).not.toHaveBeenCalled();
   });
+
+  describe('onUserSpeaking callback', () => {
+    it('fires for allowlisted user on speaking start', () => {
+      const { connection, speakingEmitter } = createMockConnection();
+      const onUserSpeaking = vi.fn();
+      const recv = new AudioReceiver({
+        connection,
+        allowedUserIds: new Set(['111']),
+        sttProvider: createMockStt(),
+        log: createLogger(),
+        createDecoder: createMockDecoder,
+        onUserSpeaking,
+      });
+
+      recv.start();
+      speakingEmitter.emit('start', '111');
+
+      expect(onUserSpeaking).toHaveBeenCalledWith('111');
+    });
+
+    it('fires even when user is already subscribed', () => {
+      const { connection, speakingEmitter } = createMockConnection();
+      const onUserSpeaking = vi.fn();
+      const recv = new AudioReceiver({
+        connection,
+        allowedUserIds: new Set(['111']),
+        sttProvider: createMockStt(),
+        log: createLogger(),
+        createDecoder: createMockDecoder,
+        onUserSpeaking,
+      });
+
+      recv.start();
+      speakingEmitter.emit('start', '111'); // subscribes
+      speakingEmitter.emit('start', '111'); // already subscribed
+
+      expect(onUserSpeaking).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not fire for non-allowlisted user', () => {
+      const { connection, speakingEmitter } = createMockConnection();
+      const onUserSpeaking = vi.fn();
+      const recv = new AudioReceiver({
+        connection,
+        allowedUserIds: new Set(['111']),
+        sttProvider: createMockStt(),
+        log: createLogger(),
+        createDecoder: createMockDecoder,
+        onUserSpeaking,
+      });
+
+      recv.start();
+      speakingEmitter.emit('start', '999');
+
+      expect(onUserSpeaking).not.toHaveBeenCalled();
+    });
+
+    it('does not fire after stop', () => {
+      const { connection, speakingEmitter } = createMockConnection();
+      const onUserSpeaking = vi.fn();
+      const recv = new AudioReceiver({
+        connection,
+        allowedUserIds: new Set(['111']),
+        sttProvider: createMockStt(),
+        log: createLogger(),
+        createDecoder: createMockDecoder,
+        onUserSpeaking,
+      });
+
+      recv.start();
+      recv.stop();
+      speakingEmitter.emit('start', '111');
+
+      expect(onUserSpeaking).not.toHaveBeenCalled();
+    });
+
+    it('does not block subscription if callback throws', () => {
+      const { connection, speakingEmitter, subscribeFn } = createMockConnection();
+      const log = createLogger();
+      const onUserSpeaking = vi.fn(() => { throw new Error('callback boom'); });
+      const recv = new AudioReceiver({
+        connection,
+        allowedUserIds: new Set(['111']),
+        sttProvider: createMockStt(),
+        log,
+        createDecoder: createMockDecoder,
+        onUserSpeaking,
+      });
+
+      recv.start();
+      speakingEmitter.emit('start', '111');
+
+      // Callback threw but subscription should still proceed
+      expect(subscribeFn).toHaveBeenCalledWith('111', expect.anything());
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: '111' }),
+        'onUserSpeaking callback error',
+      );
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -339,6 +339,36 @@ describe('VoiceResponder', () => {
     });
   });
 
+  describe('isPlaying', () => {
+    it('returns false when idle', () => {
+      const { responder, player } = createResponder();
+      player.state = { status: 'idle' };
+      expect(responder.isPlaying).toBe(false);
+    });
+
+    it('returns true when playing', () => {
+      const { responder, player } = createResponder();
+      player.state = { status: 'playing' };
+      expect(responder.isPlaying).toBe(true);
+    });
+
+    it('returns true when buffering', () => {
+      const { responder, player } = createResponder();
+      player.state = { status: 'buffering' };
+      expect(responder.isPlaying).toBe(true);
+    });
+
+    it('returns false after stop', () => {
+      const { responder, player } = createResponder();
+      player.state = { status: 'playing' };
+      expect(responder.isPlaying).toBe(true);
+
+      responder.stop();
+      // stop() calls player.stop() which transitions state to idle
+      expect(responder.isPlaying).toBe(false);
+    });
+  });
+
   describe('destroy', () => {
     it('calls stop', () => {
       const { responder, player } = createResponder();
