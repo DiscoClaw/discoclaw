@@ -13,7 +13,7 @@ export type VoiceConfig = {
   enabled: boolean;
   sttProvider: 'deepgram' | 'whisper';
   ttsProvider: 'cartesia' | 'kokoro';
-  transcriptChannel?: string;
+  homeChannel?: string;
   deepgramApiKey?: string;
   cartesiaApiKey?: string;
 };
