@@ -2,23 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } from './actions-config.js';
 import type { ConfigActionRequest, ConfigContext, ConfigMutableParams } from './actions-config.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import { RuntimeRegistry } from '../runtime/registry.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function makeBotParams(overrides?: Partial<ConfigMutableParams>): ConfigMutableParams {
-  return {
-    runtimeModel: 'capable',
-    summaryModel: 'fast',
-    forgeDrafterModel: undefined,
-    forgeAuditorModel: undefined,
-    cronCtx: { autoTagModel: 'fast', executorCtx: { model: 'capable' } },
-    taskCtx: { autoTagModel: 'fast' },
-    ...overrides,
-  };
-}
 
 const stubRuntime: RuntimeAdapter = {
   id: 'claude_code',
@@ -26,10 +15,40 @@ const stubRuntime: RuntimeAdapter = {
   async *invoke() { /* no-op */ },
 };
 
+const openrouterRuntime: RuntimeAdapter = {
+  id: 'openrouter',
+  capabilities: new Set(),
+  defaultModel: 'anthropic/claude-sonnet-4',
+  async *invoke() { /* no-op */ },
+};
+
+function makeRegistry(...entries: [string, RuntimeAdapter][]): RuntimeRegistry {
+  const reg = new RuntimeRegistry();
+  for (const [name, adapter] of entries) {
+    reg.register(name, adapter);
+  }
+  return reg;
+}
+
+function makeBotParams(overrides?: Partial<ConfigMutableParams>): ConfigMutableParams {
+  return {
+    runtimeModel: 'capable',
+    summaryModel: 'fast',
+    runtime: stubRuntime,
+    forgeDrafterModel: undefined,
+    forgeAuditorModel: undefined,
+    cronCtx: { autoTagModel: 'fast', runtime: stubRuntime, executorCtx: { model: 'capable', runtime: stubRuntime } },
+    taskCtx: { autoTagModel: 'fast' },
+    ...overrides,
+  };
+}
+
 function makeCtx(overrides?: Partial<ConfigMutableParams>): ConfigContext {
   return {
     botParams: makeBotParams(overrides),
     runtime: stubRuntime,
+    runtimeRegistry: makeRegistry(),
+    runtimeName: 'claude_code',
   };
 }
 
@@ -153,6 +172,8 @@ describe('modelShow', () => {
     const ctx: ConfigContext = {
       botParams: makeBotParams({ runtimeModel: '', summaryModel: '' }),
       runtime: codexRuntime,
+      runtimeRegistry: makeRegistry(),
+      runtimeName: 'codex',
     };
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
@@ -170,6 +191,8 @@ describe('modelShow', () => {
     const ctx: ConfigContext = {
       botParams: makeBotParams({ runtimeModel: '', summaryModel: '' }),
       runtime: codexRuntime,
+      runtimeRegistry: makeRegistry(),
+      runtimeName: 'codex',
     };
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
@@ -346,14 +369,14 @@ describe('modelSet', () => {
 
   it('chat propagates to planCtx.model', () => {
     const ctx = makeCtx();
-    ctx.botParams.planCtx = { model: 'old' };
+    ctx.botParams.planCtx = { model: 'old', runtime: stubRuntime };
     executeConfigAction({ type: 'modelSet', role: 'chat', model: 'sonnet' }, ctx);
     expect(ctx.botParams.planCtx!.model).toBe('sonnet');
   });
 
   it('chat propagates to cronCtx.executorCtx.model', () => {
     const ctx = makeCtx();
-    ctx.botParams.cronCtx!.executorCtx = { model: 'old' };
+    ctx.botParams.cronCtx!.executorCtx = { model: 'old', runtime: stubRuntime };
     executeConfigAction({ type: 'modelSet', role: 'chat', model: 'sonnet' }, ctx);
     expect(ctx.botParams.cronCtx!.executorCtx!.model).toBe('sonnet');
   });
@@ -404,6 +427,114 @@ describe('modelSet', () => {
     const ctx = makeCtx({ cronCtx: undefined });
     const result = executeConfigAction({ type: 'modelSet', role: 'cron-exec', model: 'haiku' }, ctx);
     expect(result.ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// modelSet — runtime swap
+// ---------------------------------------------------------------------------
+
+describe('modelSet runtime swap', () => {
+  it('swaps all runtime refs and sets default model for a registered runtime name', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    ctx.botParams.planCtx = { model: 'capable', runtime: stubRuntime };
+    ctx.botParams.deferOpts = { runtime: stubRuntime };
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'openrouter' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Runtime swapped everywhere
+    expect(ctx.botParams.runtime).toBe(openrouterRuntime);
+    expect(ctx.runtime).toBe(openrouterRuntime);
+    expect(ctx.runtimeName).toBe('openrouter');
+    expect(ctx.botParams.runtimeModel).toBe('anthropic/claude-sonnet-4');
+    expect(ctx.botParams.planCtx!.runtime).toBe(openrouterRuntime);
+    expect(ctx.botParams.planCtx!.model).toBe('anthropic/claude-sonnet-4');
+    expect(ctx.botParams.cronCtx!.runtime).toBe(openrouterRuntime);
+    expect(ctx.botParams.cronCtx!.executorCtx!.runtime).toBe(openrouterRuntime);
+    expect(ctx.botParams.cronCtx!.executorCtx!.model).toBe('anthropic/claude-sonnet-4');
+    expect(ctx.botParams.deferOpts!.runtime).toBe(openrouterRuntime);
+    expect(result.summary).toContain('runtime → openrouter');
+    expect(result.summary).toContain('adapter default');
+  });
+
+  it('does not swap runtime for a plain model name like opus', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'opus' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.runtime).toBe(stubRuntime);
+    expect(ctx.runtime).toBe(stubRuntime);
+    expect(ctx.runtimeName).toBe('claude_code');
+    expect(ctx.botParams.runtimeModel).toBe('opus');
+  });
+
+  it('passes through unregistered name as model string without error', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'mistral' }, ctx);
+    expect(result.ok).toBe(true);
+    // No swap — treated as model string
+    expect(ctx.botParams.runtime).toBe(stubRuntime);
+    expect(ctx.botParams.runtimeModel).toBe('mistral');
+  });
+
+  it('case-insensitive matching — OpenRouter matches openrouter', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'OpenRouter' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.runtime).toBe(openrouterRuntime);
+    expect(ctx.runtimeName).toBe('openrouter');
+  });
+
+  it('swap then set model name — runtime stays swapped, model changes', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    // First swap runtime
+    executeConfigAction({ type: 'modelSet', role: 'chat', model: 'openrouter' }, ctx);
+    expect(ctx.botParams.runtime).toBe(openrouterRuntime);
+    // Then set a plain model name — runtime stays
+    executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gpt-4o' }, ctx);
+    expect(ctx.botParams.runtime).toBe(openrouterRuntime);
+    expect(ctx.botParams.runtimeModel).toBe('gpt-4o');
+  });
+
+  it('propagation to syncCoordinator.setRuntime is called when present', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    let capturedRuntime: RuntimeAdapter | undefined;
+    ctx.botParams.cronCtx!.syncCoordinator = {
+      setAutoTagModel: () => {},
+      setRuntime: (rt: RuntimeAdapter) => { capturedRuntime = rt; },
+    };
+    executeConfigAction({ type: 'modelSet', role: 'chat', model: 'openrouter' }, ctx);
+    expect(capturedRuntime).toBe(openrouterRuntime);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// modelShow — runtime line
+// ---------------------------------------------------------------------------
+
+describe('modelShow runtime line', () => {
+  it('displays active runtime name', () => {
+    const ctx = makeCtx();
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('runtime');
+    expect(result.summary).toContain('claude_code');
+  });
+
+  it('displays swapped runtime name after swap', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    executeConfigAction({ type: 'modelSet', role: 'chat', model: 'openrouter' }, ctx);
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('openrouter');
   });
 });
 

@@ -132,4 +132,13 @@ describe('CronSyncCoordinator', () => {
     const callArgs = mockRunCronSync.mock.calls[0][0];
     expect(callArgs.autoTagModel).toBe('opus');
   });
+
+  it('setRuntime updates the runtime used by subsequent syncs', async () => {
+    const newRuntime = { id: 'openrouter' } as any;
+    const coordinator = new CronSyncCoordinator(makeOpts());
+    coordinator.setRuntime(newRuntime);
+    await coordinator.sync();
+    const callArgs = mockRunCronSync.mock.calls[0][0];
+    expect(callArgs.runtime).toBe(newRuntime);
+  });
 });
