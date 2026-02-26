@@ -198,6 +198,12 @@ async function loadThreadAsCron(
         cadence,
         // Preserve existing disabled state.
         disabled: existingRecord?.disabled ?? false,
+        // Persist parsed definition so future boots skip AI re-parsing.
+        schedule: def.schedule,
+        timezone: def.timezone,
+        channel: def.channel,
+        prompt: def.prompt,
+        authorId: starterAuthorId,
       });
 
       // Restore disabled state from stats.
@@ -261,6 +267,47 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
   let loaded = 0;
   for (const thread of activeThreads.values()) {
     if (thread.archived) continue;
+
+    // Fast path: if the stats store already has a parsed definition for this
+    // thread, reconstruct the ParsedCronDef and register directly — skipping
+    // the AI parser entirely.  This avoids wasted AI calls on every boot and
+    // prevents parse-failure errors on threads whose starters aren't parseable
+    // (e.g. bot-formatted messages created by cronCreate).
+    if (statsStore) {
+      const record = statsStore.getRecordByThreadId(thread.id);
+      if (record && record.channel && record.prompt &&
+          (record.schedule || (record.triggerType !== undefined && record.triggerType !== 'schedule'))) {
+        // Authorization: verify stored author is still permitted.
+        const authorId = record.authorId ?? '';
+        const botUserId = client.user?.id ?? '';
+        const isBotAuthored = botUserId !== '' && authorId === botUserId;
+        if (!authorId || (!allowUserIds.has(authorId) && !isBotAuthored)) {
+          // Author not authorized — fall through to loadThreadAsCron which
+          // will reject and disable through its existing path.
+        } else {
+          const def: ParsedCronDef = {
+            triggerType: record.triggerType ?? 'schedule',
+            schedule: record.schedule,
+            timezone: record.timezone ?? 'UTC',
+            channel: record.channel,
+            prompt: record.prompt,
+          };
+          try {
+            scheduler.register(thread.id, thread.id, guildId, thread.name, def, record.cronId);
+            if (record.disabled) {
+              scheduler.disable(thread.id);
+              log?.info({ threadId: thread.id, cronId: record.cronId }, 'cron:forum fast-path restored disabled state');
+            }
+            loaded++;
+            log?.info({ threadId: thread.id, cronId: record.cronId }, 'cron:forum fast-path loaded from stored definition');
+            continue;
+          } catch (err) {
+            log?.warn({ err, threadId: thread.id, cronId: record.cronId }, 'cron:forum fast-path register failed, falling through to AI parse');
+          }
+        }
+      }
+    }
+
     const ok = await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false, allowUserIds, statsStore });
     if (ok) loaded++;
   }
