@@ -53,7 +53,7 @@ describe('CronRunStats', () => {
   it('creates empty store on missing file', async () => {
     const stats = await loadRunStats(statsPath);
     const store = stats.getStore();
-    expect(store.version).toBe(5);
+    expect(store.version).toBe(6);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
 
@@ -259,7 +259,7 @@ describe('CronRunStats', () => {
 describe('emptyStore', () => {
   it('returns valid initial structure', () => {
     const store = emptyStore();
-    expect(store.version).toBe(5);
+    expect(store.version).toBe(6);
     expect(store.updatedAt).toBeGreaterThan(0);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
@@ -289,7 +289,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(5);
+    expect(stats.getStore().version).toBe(6);
     const rec = stats.getRecord('cron-migrated');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-migrated');
@@ -322,12 +322,50 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(5);
+    expect(stats.getStore().version).toBe(6);
     const rec = stats.getRecord('cron-v4');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v4');
     expect(rec!.runCount).toBe(3);
     expect(rec!.cadence).toBe('hourly');
     expect(rec!.silent).toBeUndefined();
+  });
+
+  it('migrates a v5 store to v6 with definition fields undefined on existing records', async () => {
+    const v5Store = {
+      version: 5,
+      updatedAt: Date.now(),
+      jobs: {
+        'cron-v5': {
+          cronId: 'cron-v5',
+          threadId: 'thread-v5',
+          runCount: 7,
+          lastRunAt: '2025-08-01T00:00:00.000Z',
+          lastRunStatus: 'success',
+          cadence: 'daily',
+          purposeTags: ['greeting'],
+          disabled: false,
+          model: 'haiku',
+          triggerType: 'schedule',
+          silent: true,
+        },
+      },
+    };
+    await fs.writeFile(statsPath, JSON.stringify(v5Store), 'utf-8');
+
+    const stats = await loadRunStats(statsPath);
+
+    expect(stats.getStore().version).toBe(6);
+    const rec = stats.getRecord('cron-v5');
+    expect(rec).toBeDefined();
+    expect(rec!.cronId).toBe('cron-v5');
+    expect(rec!.runCount).toBe(7);
+    expect(rec!.cadence).toBe('daily');
+    expect(rec!.silent).toBe(true);
+    expect(rec!.schedule).toBeUndefined();
+    expect(rec!.timezone).toBeUndefined();
+    expect(rec!.channel).toBeUndefined();
+    expect(rec!.prompt).toBeUndefined();
+    expect(rec!.authorId).toBeUndefined();
   });
 });
