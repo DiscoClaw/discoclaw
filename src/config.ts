@@ -86,6 +86,14 @@ export type DiscoclawConfig = {
   imagegenGeminiApiKey?: string;
   imagegenDefaultModel?: string;
 
+  // Voice config
+  voiceEnabled: boolean;
+  voiceSttProvider: 'deepgram' | 'whisper';
+  voiceTtsProvider: 'cartesia' | 'kokoro';
+  voiceTranscriptChannel?: string;
+  deepgramApiKey?: string;
+  cartesiaApiKey?: string;
+
   forgeDrafterRuntime?: string;
   forgeAuditorRuntime?: string;
 
@@ -466,6 +474,19 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     }
   }
 
+  const voiceEnabled = parseBoolean(env, 'DISCOCLAW_VOICE_ENABLED', false);
+  const voiceSttProvider = parseEnum(env, 'DISCOCLAW_STT_PROVIDER', ['deepgram', 'whisper'] as const, 'deepgram')!;
+  const voiceTtsProvider = parseEnum(env, 'DISCOCLAW_TTS_PROVIDER', ['cartesia', 'kokoro'] as const, 'cartesia')!;
+  const voiceTranscriptChannel = parseTrimmedString(env, 'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL');
+  const deepgramApiKey = parseTrimmedString(env, 'DEEPGRAM_API_KEY');
+  const cartesiaApiKey = parseTrimmedString(env, 'CARTESIA_API_KEY');
+  if (voiceEnabled && voiceSttProvider === 'deepgram' && !deepgramApiKey) {
+    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with STT provider "deepgram" but DEEPGRAM_API_KEY is not set; voice STT will fail at runtime.');
+  }
+  if (voiceEnabled && voiceTtsProvider === 'cartesia' && !cartesiaApiKey) {
+    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with TTS provider "cartesia" but CARTESIA_API_KEY is not set; voice TTS will fail at runtime.');
+  }
+
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
   const openrouterBaseUrl = parseTrimmedString(env, 'OPENROUTER_BASE_URL');
   const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'anthropic/claude-sonnet-4';
@@ -583,6 +604,14 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiCompatToolsEnabled,
       imagegenGeminiApiKey,
       imagegenDefaultModel,
+
+      voiceEnabled,
+      voiceSttProvider,
+      voiceTtsProvider,
+      voiceTranscriptChannel,
+      deepgramApiKey,
+      cartesiaApiKey,
+
       forgeDrafterRuntime,
       forgeAuditorRuntime,
 

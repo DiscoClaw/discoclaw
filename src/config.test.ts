@@ -864,4 +864,115 @@ describe('parseConfig', () => {
     const { config } = parseConfig(env({ DISCOCLAW_SERVICE_NAME: '   ' }));
     expect(config.serviceName).toBe('discoclaw');
   });
+
+  // --- Voice config ---
+  it('defaults voiceEnabled to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.voiceEnabled).toBe(false);
+  });
+
+  it('parses DISCOCLAW_VOICE_ENABLED=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', DEEPGRAM_API_KEY: 'dg-key', CARTESIA_API_KEY: 'ca-key' }));
+    expect(config.voiceEnabled).toBe(true);
+  });
+
+  it('defaults voiceSttProvider to "deepgram"', () => {
+    const { config } = parseConfig(env());
+    expect(config.voiceSttProvider).toBe('deepgram');
+  });
+
+  it('parses DISCOCLAW_STT_PROVIDER=whisper', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_STT_PROVIDER: 'whisper' }));
+    expect(config.voiceSttProvider).toBe('whisper');
+  });
+
+  it('parses STT provider case-insensitively', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_STT_PROVIDER: 'Deepgram' }));
+    expect(config.voiceSttProvider).toBe('deepgram');
+  });
+
+  it('throws on invalid STT provider', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_STT_PROVIDER: 'invalid' })))
+      .toThrow(/DISCOCLAW_STT_PROVIDER must be one of deepgram\|whisper/);
+  });
+
+  it('defaults voiceTtsProvider to "cartesia"', () => {
+    const { config } = parseConfig(env());
+    expect(config.voiceTtsProvider).toBe('cartesia');
+  });
+
+  it('parses DISCOCLAW_TTS_PROVIDER=kokoro', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_TTS_PROVIDER: 'kokoro' }));
+    expect(config.voiceTtsProvider).toBe('kokoro');
+  });
+
+  it('parses TTS provider case-insensitively', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_TTS_PROVIDER: 'Cartesia' }));
+    expect(config.voiceTtsProvider).toBe('cartesia');
+  });
+
+  it('throws on invalid TTS provider', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_TTS_PROVIDER: 'elevenlabs' })))
+      .toThrow(/DISCOCLAW_TTS_PROVIDER must be one of cartesia\|kokoro/);
+  });
+
+  it('parses DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL when set', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL: 'voice-log' }));
+    expect(config.voiceTranscriptChannel).toBe('voice-log');
+  });
+
+  it('returns undefined for voiceTranscriptChannel when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.voiceTranscriptChannel).toBeUndefined();
+  });
+
+  it('parses DEEPGRAM_API_KEY when set', () => {
+    const { config } = parseConfig(env({ DEEPGRAM_API_KEY: 'dg-key' }));
+    expect(config.deepgramApiKey).toBe('dg-key');
+  });
+
+  it('returns undefined for deepgramApiKey when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.deepgramApiKey).toBeUndefined();
+  });
+
+  it('parses CARTESIA_API_KEY when set', () => {
+    const { config } = parseConfig(env({ CARTESIA_API_KEY: 'ca-key' }));
+    expect(config.cartesiaApiKey).toBe('ca-key');
+  });
+
+  it('returns undefined for cartesiaApiKey when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.cartesiaApiKey).toBeUndefined();
+  });
+
+  it('warns when voice enabled with deepgram STT but DEEPGRAM_API_KEY missing', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', CARTESIA_API_KEY: 'ca-key' }));
+    expect(warnings.some((w) => w.includes('DEEPGRAM_API_KEY'))).toBe(true);
+  });
+
+  it('does not warn about DEEPGRAM_API_KEY when voice disabled', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '0' }));
+    expect(warnings.some((w) => w.includes('DEEPGRAM_API_KEY'))).toBe(false);
+  });
+
+  it('does not warn about DEEPGRAM_API_KEY when STT provider is whisper', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', DISCOCLAW_STT_PROVIDER: 'whisper', CARTESIA_API_KEY: 'ca-key' }));
+    expect(warnings.some((w) => w.includes('DEEPGRAM_API_KEY'))).toBe(false);
+  });
+
+  it('warns when voice enabled with cartesia TTS but CARTESIA_API_KEY missing', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', DEEPGRAM_API_KEY: 'dg-key' }));
+    expect(warnings.some((w) => w.includes('CARTESIA_API_KEY'))).toBe(true);
+  });
+
+  it('does not warn about CARTESIA_API_KEY when voice disabled', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '0' }));
+    expect(warnings.some((w) => w.includes('CARTESIA_API_KEY'))).toBe(false);
+  });
+
+  it('does not warn about CARTESIA_API_KEY when TTS provider is kokoro', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', DISCOCLAW_TTS_PROVIDER: 'kokoro', DEEPGRAM_API_KEY: 'dg-key' }));
+    expect(warnings.some((w) => w.includes('CARTESIA_API_KEY'))).toBe(false);
+  });
 });
