@@ -36,6 +36,8 @@ import { executeReactionPromptAction as executeReactionPrompt, REACTION_PROMPT_A
 import type { ReactionPromptRequest } from './reaction-prompts.js';
 import { IMAGEGEN_ACTION_TYPES, executeImagegenAction, imagegenActionsPromptSection } from './actions-imagegen.js';
 import type { ImagegenActionRequest, ImagegenContext } from './actions-imagegen.js';
+import { VOICE_ACTION_TYPES, executeVoiceAction, voiceActionsPromptSection } from './actions-voice.js';
+import type { VoiceActionRequest, VoiceContext } from './actions-voice.js';
 import { describeDestructiveConfirmationRequirement } from './destructive-confirmation.js';
 
 // ---------------------------------------------------------------------------
@@ -72,6 +74,7 @@ export type ActionCategoryFlags = {
   defer: boolean;
   config: boolean;
   imagegen?: boolean;
+  voice?: boolean;
 };
 
 export type DiscordActionRequest =
@@ -89,7 +92,8 @@ export type DiscordActionRequest =
   | DeferActionRequest
   | ConfigActionRequest
   | ReactionPromptRequest
-  | ImagegenActionRequest;
+  | ImagegenActionRequest
+  | VoiceActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -105,6 +109,7 @@ export type SubsystemContexts = {
   memoryCtx?: MemoryContext;
   configCtx?: ConfigContext;
   imagegenCtx?: ImagegenContext;
+  voiceCtx?: VoiceContext;
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +133,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.defer) for (const t of DEFER_ACTION_TYPES) types.add(t);
   if (flags.config) for (const t of CONFIG_ACTION_TYPES) types.add(t);
   if (flags.imagegen) for (const t of IMAGEGEN_ACTION_TYPES) types.add(t);
+  if (flags.voice) for (const t of VOICE_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -588,6 +594,12 @@ export async function executeDiscordActions(
         } else {
           result = await executeImagegenAction(action as ImagegenActionRequest, ctx, effectiveSubs.imagegenCtx);
         }
+      } else if (VOICE_ACTION_TYPES.has(action.type)) {
+        if (!effectiveSubs.voiceCtx) {
+          result = { ok: false, error: 'Voice subsystem not configured' };
+        } else {
+          result = await executeVoiceAction(action as VoiceActionRequest, ctx, effectiveSubs.voiceCtx);
+        }
       } else {
         result = { ok: false, error: `Unknown action type: ${String(action.type ?? 'unknown')}` };
       }
@@ -703,12 +715,16 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
     sections.push(imagegenActionsPromptSection());
   }
 
+  if (flags.voice) {
+    sections.push(voiceActionsPromptSection());
+  }
+
   sections.push(`### Rules
 - Only the action types listed above are supported.
 - Never emit an action with empty, placeholder, or missing values for required parameters. If you don't have the value (e.g., no messageId for react), skip the action entirely.
 - Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
 - Action blocks are removed from the displayed message; results are appended automatically.
-- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
+- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow, voiceStatus) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
 - Include all needed actions in a single response when possible (e.g., a channelList and multiple channelDelete blocks together).
 
 ### Permissions
