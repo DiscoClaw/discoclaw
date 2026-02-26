@@ -137,6 +137,7 @@ describe('CartesiaTtsProvider', () => {
     // Verify the synthesis request JSON
     expect(lastCreatedWs!.sent).toHaveLength(1);
     const req = JSON.parse(lastCreatedWs!.sent[0] as string);
+    expect(req.context_id).toMatch(/^[a-f0-9]{32}$/);
     expect(req.model_id).toBe('sonic-3');
     expect(req.transcript).toBe('hello');
     expect(req.output_format.container).toBe('raw');

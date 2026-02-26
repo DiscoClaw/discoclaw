@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { AudioFrame, TtsProvider } from './types.js';
 
@@ -54,6 +55,7 @@ export class CartesiaTtsProvider implements TtsProvider {
 
       ws.send(
         JSON.stringify({
+          context_id: crypto.randomUUID().replace(/-/g, ''),
           model_id: this.modelId,
           transcript: text,
           voice: { mode: 'id', id: this.voiceId },
