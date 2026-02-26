@@ -23,7 +23,6 @@ import type { MemoryContext } from './actions-memory.js';
 import type { ConfigContext } from './actions-config.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import type { VoiceContext } from './actions-voice.js';
-import type { TranscriptMirrorLike, ActionResult as TranscriptActionResult } from '../voice/transcript-mirror.js';
 import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -2912,113 +2911,5 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       metrics.increment('discord.message.handler_wrapper_error');
       params.log?.error({ err }, 'discord:messageCreate failed');
     }
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Voice action pipeline — shared action execution for the voice AI path
-// ---------------------------------------------------------------------------
-
-/** Options for processing Discord actions from a voice AI response. */
-export type VoiceActionPipelineOpts = {
-  actionFlags: ActionCategoryFlags;
-  guild: Guild;
-  client: Client;
-  channelId: string;
-  log?: LoggerLike;
-  botDisplayName: string;
-  /** Subsystem contexts for action execution (tasks, memory, etc.). */
-  taskCtx?: TaskContext;
-  memoryCtx?: MemoryContext;
-  /** Transcript mirror for logging actions to the voice home channel. */
-  transcriptMirror?: TranscriptMirrorLike;
-};
-
-/** Result of processing voice response actions. */
-export type VoiceActionPipelineResult = {
-  /** Response text with action tags stripped. */
-  cleanText: string;
-  /** Whether actions were found and executed. */
-  hadActions: boolean;
-  /** Action execution results (empty if no actions). */
-  results: DiscordActionResult[];
-  /** Whether a follow-up AI invocation is recommended. */
-  needsFollowUp: boolean;
-  /** Pre-built follow-up prompt if needsFollowUp is true. */
-  followUpPrompt?: string;
-};
-
-/**
- * Parse and execute Discord actions from a voice AI response.
- *
- * Mirrors the action pipeline used by text chat (parseDiscordActions →
- * executeDiscordActions → follow-up check) but tailored for the voice path:
- * - `sendFile` actions are filtered out (no user-attached file context in voice)
- * - Action context uses `automated` confirmation mode
- * - Only voice-allowed subsystem contexts are passed (tasks, memory)
- */
-export async function processVoiceResponseActions(
-  responseText: string,
-  opts: VoiceActionPipelineOpts,
-): Promise<VoiceActionPipelineResult> {
-  const { actionFlags, guild, client, channelId, log, taskCtx, memoryCtx, transcriptMirror } = opts;
-
-  const parsed = parseDiscordActions(responseText, actionFlags);
-
-  // sendFile deny-filter: voice is bot-originated (no user-attached file context).
-  const actions = parsed.actions.filter(a => a.type !== 'sendFile');
-
-  if (actions.length === 0) {
-    return {
-      cleanText: parsed.cleanText,
-      hadActions: false,
-      results: [],
-      needsFollowUp: false,
-    };
-  }
-
-  const actCtx: ActionContext = {
-    guild,
-    client,
-    channelId,
-    // Empty messageId — mirrors cron executor pattern; prevents sendMessage same-channel suppression.
-    messageId: '',
-    confirmation: { mode: 'automated' as const },
-  };
-
-  const actionResults = await executeDiscordActions(
-    actions as Parameters<typeof executeDiscordActions>[0],
-    actCtx,
-    log,
-    { taskCtx, memoryCtx },
-  );
-
-  // Log actions to transcript mirror (fire-and-forget).
-  if (transcriptMirror?.postActionsExecuted) {
-    const mirrorResults: TranscriptActionResult[] = actionResults.map(r => ({
-      success: r.ok,
-      message: r.ok ? (r as { summary: string }).summary : (r as { error: string }).error,
-    }));
-    transcriptMirror.postActionsExecuted(actions, mirrorResults).catch(() => {});
-  }
-
-  // Check whether a follow-up invocation is warranted (e.g. query actions).
-  const needsFollowUp = shouldTriggerFollowUp(actions, actionResults);
-
-  let followUpPrompt: string | undefined;
-  if (needsFollowUp) {
-    const followUpLines = buildAllResultLines(actionResults);
-    followUpPrompt =
-      `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
-      followUpLines.join('\n') +
-      `\n\nContinue your analysis based on these results. If you need additional information, you may emit further query actions.`;
-  }
-
-  return {
-    cleanText: parsed.cleanText,
-    hadActions: true,
-    results: actionResults,
-    needsFollowUp,
-    followUpPrompt,
   };
 }
