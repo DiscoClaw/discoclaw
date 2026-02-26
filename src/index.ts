@@ -39,6 +39,7 @@ import { initTasksForumGuard } from './tasks/forum-guard.js';
 import { reloadTagMapInPlace } from './tasks/tag-map.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { probeWorkspacePermissions } from './workspace-permissions.js';
+import { detectMcpServers } from './mcp-detect.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
 import { loadCronTagMapStrict } from './cron/tag-map.js';
@@ -323,6 +324,29 @@ if (permProbe.status === 'missing') {
   );
 } else {
   log.info({ workspaceCwd, tier: permProbe.permissions.tier }, 'workspace permissions loaded');
+}
+
+// --- Detect MCP servers (startup health visibility) ---
+const mcpResult = await detectMcpServers(workspaceCwd);
+if (mcpResult.status === 'missing') {
+  log.debug({ workspaceCwd }, 'mcp: no .mcp.json found');
+} else if (mcpResult.status === 'invalid') {
+  log.warn({ workspaceCwd, reason: mcpResult.reason }, 'mcp: .mcp.json is invalid — MCP servers will not load');
+} else {
+  const serverNames = mcpResult.servers.map((s) => s.name);
+  const claudeInUse = primaryRuntimeName === 'claude'
+    || cfg.forgeDrafterRuntime === 'claude'
+    || cfg.forgeAuditorRuntime === 'claude';
+  let msg = serverNames.length === 0
+    ? 'mcp: .mcp.json found but no servers configured'
+    : `mcp: ${serverNames.length} server${serverNames.length === 1 ? '' : 's'} configured: ${serverNames.join(', ')}`;
+  if (serverNames.length > 0 && !claudeInUse) {
+    msg += ' (MCP servers only active with Claude runtime)';
+  }
+  log.info(
+    { servers: serverNames, count: serverNames.length, strictMcpConfig: cfg.strictMcpConfig },
+    msg,
+  );
 }
 
 // --- Resolve bot display name ---
