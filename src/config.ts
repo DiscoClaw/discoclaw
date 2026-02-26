@@ -80,6 +80,7 @@ export type DiscoclawConfig = {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   openaiModel: string;
+  openaiCompatToolsEnabled: boolean;
 
   // Imagegen provider keys
   imagegenGeminiApiKey?: string;
@@ -442,6 +443,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
   const openaiBaseUrl = parseTrimmedString(env, 'OPENAI_BASE_URL');
   const openaiModel = parseTrimmedString(env, 'OPENAI_MODEL') ?? 'gpt-4o';
+  const openaiCompatToolsEnabled = parseBoolean(env, 'OPENAI_COMPAT_TOOLS_ENABLED', false);
   const imagegenGeminiApiKey = parseTrimmedString(env, 'IMAGEGEN_GEMINI_API_KEY');
   const imagegenDefaultModel = parseTrimmedString(env, 'IMAGEGEN_DEFAULT_MODEL');
   if (primaryRuntime === 'openai' && !openaiApiKey) {
@@ -578,6 +580,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiApiKey,
       openaiBaseUrl,
       openaiModel,
+      openaiCompatToolsEnabled,
       imagegenGeminiApiKey,
       imagegenDefaultModel,
       forgeDrafterRuntime,

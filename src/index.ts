@@ -503,6 +503,7 @@ if (cfg.openaiApiKey) {
     baseUrl: cfg.openaiBaseUrl ?? 'https://api.openai.com/v1',
     apiKey: cfg.openaiApiKey,
     defaultModel: cfg.openaiModel,
+    enableTools: cfg.openaiCompatToolsEnabled,
     log,
   });
   const openaiRuntime = withConcurrencyLimit(openaiRuntimeRaw, {
@@ -519,6 +520,7 @@ if (cfg.openrouterApiKey) {
     baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1',
     apiKey: cfg.openrouterApiKey,
     defaultModel: cfg.openrouterModel,
+    enableTools: cfg.openaiCompatToolsEnabled,
     log,
   });
   const openrouterRuntime = withConcurrencyLimit(openrouterRuntimeRaw, {
