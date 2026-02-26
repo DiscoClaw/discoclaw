@@ -7,11 +7,14 @@ import type { OpusDecoder } from './audio-receiver.js';
 
 const mockDecode = vi.fn();
 
+const MockOpusEncoder = vi.fn().mockImplementation(() => ({
+  decode: mockDecode,
+  encode: vi.fn(),
+}));
+
 vi.mock('@discordjs/opus', () => ({
-  OpusEncoder: vi.fn().mockImplementation(() => ({
-    decode: mockDecode,
-    encode: vi.fn(),
-  })),
+  default: { OpusEncoder: MockOpusEncoder },
+  OpusEncoder: MockOpusEncoder,
 }));
 
 // Import after mock is set up
