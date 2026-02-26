@@ -121,26 +121,33 @@ export class CartesiaTtsProvider implements TtsProvider {
     }
 
     ws.onmessage = (event: MessageEvent) => {
-      // Binary messages are audio data
-      if (event.data instanceof ArrayBuffer) {
-        pending.push({
-          buffer: Buffer.from(event.data),
-          sampleRate,
-          channels: 1,
-        });
-        wake();
-        return;
-      }
-
-      // String messages are JSON control frames
+      // Cartesia sends JSON messages with base64-encoded audio in msg.data
       try {
         const msg = JSON.parse(String(event.data));
+        if (msg.data) {
+          pending.push({
+            buffer: Buffer.from(msg.data, 'base64'),
+            sampleRate,
+            channels: 1,
+          });
+          wake();
+        }
         if (msg.done) {
           done = true;
           wake();
         }
-      } catch (err) {
-        log.error({ err }, 'Failed to parse Cartesia TTS message');
+      } catch {
+        // Fallback: raw binary frame (future-proofing)
+        if (event.data instanceof ArrayBuffer) {
+          pending.push({
+            buffer: Buffer.from(event.data),
+            sampleRate,
+            channels: 1,
+          });
+          wake();
+        } else {
+          log.error('Unexpected Cartesia TTS message format');
+        }
       }
     };
 

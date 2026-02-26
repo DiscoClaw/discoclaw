@@ -38,10 +38,10 @@ class MockWebSocket {
     this.readyState = MockWebSocket.CLOSED;
   }
 
-  // Test helpers
+  // Test helpers — sends audio as JSON with base64 (matching real Cartesia API)
   _receiveAudio(data: number[]): void {
-    const ab = new Uint8Array(data).buffer;
-    this.onmessage?.({ data: ab } as unknown);
+    const b64 = Buffer.from(data).toString('base64');
+    this.onmessage?.({ data: JSON.stringify({ type: 'chunk', data: b64 }) } as unknown);
   }
 
   _receiveJson(obj: unknown): void {
