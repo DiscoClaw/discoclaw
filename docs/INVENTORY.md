@@ -48,6 +48,7 @@ Legend: **done** | *stub* | ~~cut~~
 | CLI strategy interface (contract for Claude/Codex/Gemini strategies) | `src/runtime/cli-strategy.ts` | **done** |
 | Template strategy (documents how to add a new CLI runtime) | `src/runtime/strategies/template-strategy.ts` | **done** |
 | OpenRouter runtime (OpenAI-compat adapter at `openrouter.ai/api/v1`, `id: 'openrouter'`) | `src/runtime/openai-compat.ts`, `src/health/credential-check.ts` | **done** |
+| Loop detector (detects runaway tool-calling patterns and aborts degenerate runs) | `src/runtime/loop-detector.ts`, `src/runtime/loop-detector.test.ts` | **done** |
 
 ## 4. Memory Systems
 

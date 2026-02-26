@@ -101,10 +101,34 @@ describe('collectRuntimeText signal', () => {
     );
 
     expect(calls).toHaveLength(1);
+    // Loop detection composes a combined signal via AbortSignal.any(),
+    // so it won't be the same reference — but aborting the caller should propagate.
+    expect(calls[0]!.signal).toBeInstanceOf(AbortSignal);
+    expect(calls[0]!.signal!.aborted).toBe(false);
+    ac.abort();
+    expect(calls[0]!.signal!.aborted).toBe(true);
+  });
+
+  it('passes caller signal directly when loop detection is disabled', async () => {
+    const { runtime, calls } = makeCaptureRuntime();
+    const ac = new AbortController();
+
+    await collectRuntimeText(
+      runtime,
+      'hello',
+      'test-model',
+      '/tmp',
+      ['Read'],
+      [],
+      30000,
+      { signal: ac.signal, loopDetect: false },
+    );
+
+    expect(calls).toHaveLength(1);
     expect(calls[0]!.signal).toBe(ac.signal);
   });
 
-  it('does not include signal when opts has no signal', async () => {
+  it('provides loop-detector signal when opts has no caller signal', async () => {
     const { runtime, calls } = makeCaptureRuntime();
 
     await collectRuntimeText(
@@ -116,6 +140,25 @@ describe('collectRuntimeText signal', () => {
       [],
       30000,
       { requireFinalEvent: true },
+    );
+
+    expect(calls).toHaveLength(1);
+    // Loop detector creates its own AbortController, so a signal is always present.
+    expect(calls[0]!.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('does not include signal when opts has no signal and loop detection is disabled', async () => {
+    const { runtime, calls } = makeCaptureRuntime();
+
+    await collectRuntimeText(
+      runtime,
+      'hello',
+      'test-model',
+      '/tmp',
+      ['Read'],
+      [],
+      30000,
+      { requireFinalEvent: true, loopDetect: false },
     );
 
     expect(calls).toHaveLength(1);
