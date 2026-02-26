@@ -15,7 +15,7 @@ describe('Voice types', () => {
       enabled: true,
       sttProvider: 'deepgram',
       ttsProvider: 'cartesia',
-      transcriptChannel: '123456789',
+      homeChannel: '123456789',
       deepgramApiKey: 'key-dg',
       cartesiaApiKey: 'key-cart',
     };
@@ -29,7 +29,7 @@ describe('Voice types', () => {
       sttProvider: 'whisper',
       ttsProvider: 'kokoro',
     };
-    expect(cfg.transcriptChannel).toBeUndefined();
+    expect(cfg.homeChannel).toBeUndefined();
     expect(cfg.deepgramApiKey).toBeUndefined();
     expect(cfg.cartesiaApiKey).toBeUndefined();
   });
