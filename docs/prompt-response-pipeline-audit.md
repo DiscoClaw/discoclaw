@@ -59,6 +59,19 @@ Targeted tests currently passing:
 
 ## Findings (Severity Ordered)
 
+### Resolved: OpenAI-Compat Adapter Sent Entire Prompt As Single User Message
+
+- Location:
+  - `src/runtime/openai-compat.ts` (both tool-loop and streaming paths)
+- What happened:
+  - The OpenAI-compat adapter packed the entire assembled prompt (system policy, workspace context, memory, conversation history, and user message) into a single `user`-role message with no `system` message.
+  - Non-Claude models (Gemini Flash via OpenRouter, etc.) treated behavioral instructions as user content, leading to sycophancy, broken action block emission, and identity confusion.
+- Resolution (ws-1004, c862755):
+  - Added `splitSystemPrompt()` that auto-detects the sentinel delimiter (`---\nThe sections above are internal system context.`) and splits the prompt into proper `system` + `user` messages.
+  - Both the tool-loop path and streaming text path now use the split.
+  - Added optional `systemPrompt` field to `RuntimeInvokeParams` for explicit caller override.
+  - Tests cover: explicit systemPrompt, sentinel-based auto-split, no-sentinel passthrough.
+
 ### High: Streaming Keepalive/Tool Queue Cleanup Leak On Thrown Runtime Invocation
 
 - Location:

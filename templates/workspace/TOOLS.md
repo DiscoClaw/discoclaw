@@ -430,3 +430,5 @@ Changes are **ephemeral** -- they take effect immediately but revert on restart.
 Set `cron-exec` to `default` to clear the override and fall back to the chat model.
 
 Note: The `cron` role controls auto-tagging only. Use `cron-exec` to set the default execution model for all cron jobs.
+
+**Scope:** `modelSet` changes the model within the *current* runtime adapter (e.g., switching from `sonnet` to `opus` within the Claude adapter, or switching between models on OpenRouter). Setting `model` to a runtime name like `openrouter` or `gemini` on the `chat` role swaps the active adapter entirely. However, there is no per-message prefix routing (e.g., `/sonnet` or `/gemini-flash` in a message does nothing) — all messages in a session use the active runtime until changed via `modelSet`.
