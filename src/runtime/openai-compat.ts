@@ -141,7 +141,9 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
               const response = await fetchWithAuth(url, body, controller.signal);
 
               if (!response.ok) {
-                yield { type: 'error', message: `OpenAI API error: ${response.status} ${response.statusText}` };
+                let detail = '';
+                try { const errBody = await response.json(); detail = `: ${JSON.stringify(errBody.error ?? errBody)}`; } catch { /* ignore */ }
+                yield { type: 'error', message: `OpenAI API error: ${response.status} ${response.statusText}${detail}` };
                 yield { type: 'done' };
                 return;
               }
@@ -224,7 +226,9 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
             const response = await fetchWithAuth(url, body, controller.signal);
 
             if (!response.ok) {
-              yield { type: 'error', message: `OpenAI API error: ${response.status} ${response.statusText}` };
+              let detail = '';
+              try { const errBody = await response.json(); detail = `: ${JSON.stringify(errBody.error ?? errBody)}`; } catch { /* ignore */ }
+              yield { type: 'error', message: `OpenAI API error: ${response.status} ${response.statusText}${detail}` };
               yield { type: 'done' };
               return;
             }
