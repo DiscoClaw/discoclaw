@@ -363,6 +363,272 @@ describe('initCronForum', () => {
     );
   });
 
+  it('skips AI parse when stats store has stored definition (fast path)', async () => {
+    const thread = makeThread();
+    // fetchStarterMessage should NOT be called — fast path bypasses loadThreadAsCron entirely.
+    thread.fetchStarterMessage.mockResolvedValue(null);
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue({
+        cronId: 'cron-stored',
+        threadId: 'thread-1',
+        disabled: false,
+        schedule: '0 7 * * *',
+        timezone: 'America/New_York',
+        channel: 'general',
+        prompt: 'Say good morning.',
+        authorId: 'u-allowed',
+        triggerType: 'schedule',
+      }),
+      getRecord: vi.fn(),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statsStore: statsStore as any,
+    });
+
+    // AI parser should never be called.
+    expect(parseCronDefinition).not.toHaveBeenCalled();
+    // scheduler.register should receive the stored values.
+    expect(scheduler.register).toHaveBeenCalledWith(
+      'thread-1', 'thread-1', 'guild-1', 'Job 1',
+      expect.objectContaining({
+        triggerType: 'schedule',
+        schedule: '0 7 * * *',
+        timezone: 'America/New_York',
+        channel: 'general',
+        prompt: 'Say good morning.',
+      }),
+      'cron-stored',
+    );
+    // fetchStarterMessage should not have been called (fast path skips loadThreadAsCron).
+    expect(thread.fetchStarterMessage).not.toHaveBeenCalled();
+  });
+
+  it('falls through to AI parse when stats store record lacks definition fields', async () => {
+    const thread = makeThread();
+    thread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: 'every day at 7am post to #general say hello',
+      author: { id: 'u-allowed' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    thread.messages.fetch = vi.fn().mockResolvedValue(new Map());
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
+      schedule: '0 7 * * *',
+      timezone: 'UTC',
+      channel: 'general',
+      prompt: 'Say hello.',
+    });
+
+    // Record exists but has no stored definition fields (pre-upgrade record).
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue({
+        cronId: 'cron-old',
+        threadId: 'thread-1',
+        disabled: false,
+      }),
+      getRecord: vi.fn().mockReturnValue({
+        cronId: 'cron-old',
+        threadId: 'thread-1',
+        disabled: false,
+      }),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statsStore: statsStore as any,
+    });
+
+    // Should fall through to AI parse since record lacks definition fields.
+    expect(parseCronDefinition).toHaveBeenCalled();
+  });
+
+  it('falls through to AI parse when fast-path register throws', async () => {
+    const thread = makeThread();
+    thread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: 'every day at 7am post to #general say hello',
+      author: { id: 'u-allowed' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    thread.messages.fetch = vi.fn().mockResolvedValue(new Map());
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+
+    // First call (fast path) throws; second call (loadThreadAsCron fallback) succeeds.
+    scheduler.register
+      .mockImplementationOnce(() => { throw new Error('corrupt schedule'); })
+      .mockReturnValueOnce({ cron: { nextRun: () => new Date() } });
+
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
+      schedule: '0 7 * * *',
+      timezone: 'UTC',
+      channel: 'general',
+      prompt: 'Say hello.',
+    });
+
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue({
+        cronId: 'cron-corrupt',
+        threadId: 'thread-1',
+        disabled: false,
+        schedule: 'BAD SCHEDULE',
+        timezone: 'UTC',
+        channel: 'general',
+        prompt: 'Say hello.',
+        authorId: 'u-allowed',
+      }),
+      getRecord: vi.fn().mockReturnValue({
+        cronId: 'cron-corrupt',
+        threadId: 'thread-1',
+        disabled: false,
+      }),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statsStore: statsStore as any,
+    });
+
+    // Fast path failed, should fall through to AI parse.
+    expect(parseCronDefinition).toHaveBeenCalled();
+    // scheduler.register should have been called twice (fast path + fallback).
+    expect(scheduler.register).toHaveBeenCalledTimes(2);
+  });
+
+  it('disabled state restored via fast path', async () => {
+    const thread = makeThread();
+    thread.fetchStarterMessage.mockResolvedValue(null);
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue({
+        cronId: 'cron-disabled-fp',
+        threadId: 'thread-1',
+        disabled: true,
+        schedule: '0 7 * * *',
+        timezone: 'UTC',
+        channel: 'general',
+        prompt: 'Say hello.',
+        authorId: 'u-allowed',
+      }),
+      getRecord: vi.fn(),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statsStore: statsStore as any,
+    });
+
+    // Should register then immediately disable.
+    expect(scheduler.register).toHaveBeenCalledOnce();
+    expect(scheduler.disable).toHaveBeenCalledWith('thread-1');
+    // AI parser should NOT be called.
+    expect(parseCronDefinition).not.toHaveBeenCalled();
+  });
+
+  it('falls through when stored authorId is not in allowlist', async () => {
+    const thread = makeThread();
+    thread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: 'every day at 7am post to #general say hello',
+      author: { id: 'u-not-allowed' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    thread.messages.fetch = vi.fn().mockResolvedValue(new Map());
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue({
+        cronId: 'cron-unauth',
+        threadId: 'thread-1',
+        disabled: false,
+        schedule: '0 7 * * *',
+        timezone: 'UTC',
+        channel: 'general',
+        prompt: 'Say hello.',
+        authorId: 'u-not-allowed',
+      }),
+      getRecord: vi.fn(),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statsStore: statsStore as any,
+    });
+
+    // Should fall through to loadThreadAsCron which will reject and disable.
+    // fetchStarterMessage is called by loadThreadAsCron.
+    expect(thread.fetchStarterMessage).toHaveBeenCalled();
+    // scheduler.register should NOT be called (auth fails in loadThreadAsCron too).
+    expect(scheduler.register).not.toHaveBeenCalled();
+    expect(scheduler.disable).toHaveBeenCalledWith('thread-1');
+  });
+
 	  it('restores disabled state from stats store', async () => {
 	    const thread = makeThread();
 	    thread.fetchStarterMessage.mockResolvedValue({

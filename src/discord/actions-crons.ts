@@ -222,6 +222,11 @@ export async function executeCronAction(
         cadence,
         purposeTags,
         model,
+        schedule: action.schedule,
+        timezone,
+        channel: action.channel,
+        prompt: action.prompt,
+        authorId: cronCtx.client.user?.id,
       });
 
       // Create status message.
@@ -313,6 +318,12 @@ export async function executeCronAction(
           const msg = err instanceof Error ? err.message : String(err);
           return { ok: false, error: `Invalid cron definition: ${msg}` };
         }
+
+        // Persist updated definition fields.
+        updates.schedule = newSchedule;
+        updates.timezone = newTimezone;
+        updates.channel = newChannel;
+        updates.prompt = newPrompt;
       }
 
       await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, updates);

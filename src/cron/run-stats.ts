@@ -27,15 +27,21 @@ export type CronRunRecord = {
   webhookSourceId?: string;   // URL path segment for /webhook/:source routing
   webhookSecret?: string;     // HMAC-SHA256 secret for signature verification
   silent?: boolean;           // suppress output when AI has nothing actionable to report
+  // Persisted cron definition fields — stored on parse so boots can skip AI re-parsing.
+  schedule?: string;
+  timezone?: string;
+  channel?: string;
+  prompt?: string;
+  authorId?: string;
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3 | 4 | 5;
+  version: 1 | 2 | 3 | 4 | 5 | 6;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 5 as const;
+export const CURRENT_VERSION = 6 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -345,6 +351,11 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   // Migrate v4 → v5: no-op — new field (silent) is optional and defaults falsy.
   if (store.version === 4) {
     store.version = 5;
+  }
+  // Migrate v5 → v6: no-op — new persisted definition fields (schedule, timezone, channel, prompt, authorId) are optional.
+  // Absent records fall through to AI parsing on first boot after upgrade.
+  if (store.version === 5) {
+    store.version = 6;
   }
   return new CronRunStats(store, filePath);
 }
