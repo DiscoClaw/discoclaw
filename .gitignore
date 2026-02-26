@@ -23,6 +23,16 @@ data/memory/
 groups/*
 !groups/README.md
 
+# Audit reports (point-in-time, kept locally but not shipped)
+docs/code-review/
+docs/release-audit/
+docs/prompt-response-pipeline-audit.md
+docs/regex-reliability-audit.md
+docs/regex-reliability-tracker.md
+docs/token-efficiency.md
+docs/webhook-exposure.md
+docs/tasks-ground-zero-post-hard-cut-plan.md
+
 # Legacy plan files (not shipped)
 plans/*.md
 plans/community/*
