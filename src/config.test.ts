@@ -916,14 +916,29 @@ describe('parseConfig', () => {
       .toThrow(/DISCOCLAW_TTS_PROVIDER must be one of cartesia\|kokoro/);
   });
 
-  it('parses DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL when set', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL: 'voice-log' }));
-    expect(config.voiceTranscriptChannel).toBe('voice-log');
+  it('parses DISCOCLAW_VOICE_HOME_CHANNEL when set', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_VOICE_HOME_CHANNEL: 'voice-log' }));
+    expect(config.voiceHomeChannel).toBe('voice-log');
   });
 
-  it('returns undefined for voiceTranscriptChannel when unset', () => {
+  it('falls back to DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL with deprecation warning', () => {
+    const { config, warnings } = parseConfig(env({ DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL: 'legacy-ch' }));
+    expect(config.voiceHomeChannel).toBe('legacy-ch');
+    expect(warnings).toContain('DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL is deprecated; use DISCOCLAW_VOICE_HOME_CHANNEL instead.');
+  });
+
+  it('prefers DISCOCLAW_VOICE_HOME_CHANNEL over legacy TRANSCRIPT_CHANNEL', () => {
+    const { config, warnings } = parseConfig(env({
+      DISCOCLAW_VOICE_HOME_CHANNEL: 'new-ch',
+      DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL: 'old-ch',
+    }));
+    expect(config.voiceHomeChannel).toBe('new-ch');
+    expect(warnings).not.toContain('DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL is deprecated; use DISCOCLAW_VOICE_HOME_CHANNEL instead.');
+  });
+
+  it('returns undefined for voiceHomeChannel when unset', () => {
     const { config } = parseConfig(env());
-    expect(config.voiceTranscriptChannel).toBeUndefined();
+    expect(config.voiceHomeChannel).toBeUndefined();
   });
 
   it('parses DEEPGRAM_API_KEY when set', () => {
