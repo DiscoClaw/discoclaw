@@ -516,7 +516,7 @@ Only one forge can run at a time per DM handler instance. The `forgeOrchestrator
 
 ### Model and runtime selection
 
-The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTIME_MODEL`. The auditor uses `FORGE_AUDITOR_MODEL` if set, otherwise the main model. The drafter/reviser gets read-only tools (Read, Glob, Grep); the auditor also gets read-only tools when its runtime declares the `tools_fs` capability (Claude and Codex both do). Runtimes without `tools_fs` (e.g., the OpenAI HTTP adapter) get a text-only prompt instead.
+The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTIME_MODEL`. The auditor uses `FORGE_AUDITOR_MODEL` if set, otherwise the main model. The drafter/reviser gets read-only tools (Read, Glob, Grep); the auditor also gets read-only tools when its runtime declares the `tools_fs` capability (Claude and Codex both do). Runtimes without `tools_fs` (e.g., the OpenAI HTTP adapter when `OPENAI_COMPAT_TOOLS_ENABLED` is off) get a text-only prompt instead.
 
 **Multi-provider auditor:** The auditor can optionally use a non-Claude runtime via `FORGE_AUDITOR_RUNTIME`. Two adapters are available:
 
@@ -526,7 +526,7 @@ The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTI
 This enables cross-model auditing — the plan is drafted by one model family and audited by another.
 
 When the auditor uses a non-Claude runtime:
-- Tool access depends on the adapter's capabilities. The Codex CLI adapter declares `tools_fs` and receives read-only tools (Read, Glob, Grep) just like Claude. The OpenAI HTTP adapter does not — it gets a text-only "no codebase access" prompt instead.
+- Tool access depends on the adapter's capabilities. The Codex CLI adapter declares `tools_fs` and receives read-only tools (Read, Glob, Grep) just like Claude. The OpenAI HTTP adapter gets a text-only "no codebase access" prompt by default; when `OPENAI_COMPAT_TOOLS_ENABLED=1` it declares `tools_fs` + `tools_exec` and receives tools like the other adapters.
 - Session persistence depends on the adapter's capabilities. Adapters that declare the `sessions` capability (Claude and Codex CLI) maintain conversation context across audit rounds — the auditor remembers previous concerns and the drafter remembers previous revisions. The Codex CLI adapter maps session keys to Codex thread IDs in memory, using `codex exec resume <thread_id>` for subsequent calls. Session state is in-memory only and resets on service restart. Adapters without `sessions` (e.g., the OpenAI HTTP adapter) start fresh each round.
 - If `FORGE_AUDITOR_MODEL` is not set, the model defaults to the adapter's `defaultModel`: for codex, `CODEX_MODEL` (default `gpt-5.3-codex`); for openai, `OPENAI_MODEL` (default `gpt-4o`)
 
@@ -1045,7 +1045,7 @@ These steps mirror the rebuild workflow in `AGENTS.md`/`TOOLS.md` and ensure we 
 | `src/discord/streaming-progress.ts` | `createStreamingProgress()` — reusable controller that wires a `ToolAwareQueue` to a Discord progress message; drives live tool-activity labels and streaming text preview via `selectStreamingOutput` at 1250ms; used by forge create, forge resume, and plan-run paths in `discord.ts` |
 | `src/discord.ts` | Discord message handler: command dispatch for both `!plan` and `!forge`, writer lock, forge lifecycle management |
 | `src/config.ts` | All plan/forge env var parsing |
-| `src/runtime/openai-compat.ts` | OpenAI-compatible runtime adapter (SSE streaming, text-only — no tool support) |
+| `src/runtime/openai-compat.ts` | OpenAI-compatible runtime adapter (SSE streaming; optional function-calling tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1`) |
 | `src/runtime/codex-cli.ts` | Codex CLI runtime adapter (subprocess, supports read-only tools via `tools_fs` and session persistence via `sessions` capability) |
 | `src/runtime/registry.ts` | Runtime adapter registry (name → adapter lookup) |
 | `src/runtime/types.ts` | `RuntimeAdapter` interface, `EngineEvent` types |

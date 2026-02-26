@@ -114,10 +114,54 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
   | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4` | Default model (provider-namespaced) |
 - Model naming: OpenRouter uses provider-namespaced IDs — e.g. `anthropic/claude-sonnet-4`, `openai/gpt-4o`, `google/gemini-2.5-pro`. Never use bare model names.
 - Capabilities:
-  - `streaming_text` only
-  - No tool execution
+  - `streaming_text` only (unless `OPENAI_COMPAT_TOOLS_ENABLED=1` — see [OpenAI-Compat Tool Use](#openai-compat-tool-use) below)
+  - No tool execution (unless `OPENAI_COMPAT_TOOLS_ENABLED=1`)
   - No sessions / multi-turn
 - Health system: credential presence checked via `checkOpenRouterKey` — returns `skip` if key is missing, `fail` if key is present but invalid/expired.
+
+## OpenAI-Compat Tool Use
+
+The OpenAI-compatible and OpenRouter adapters support optional server-side tool use via the standard OpenAI function-calling protocol. Disabled by default; enable with `OPENAI_COMPAT_TOOLS_ENABLED=1`.
+
+| Env Var | Default | Purpose |
+|---------|---------|---------|
+| `OPENAI_COMPAT_TOOLS_ENABLED` | `0` | Enable tool use (function calling) for OpenAI-compat and OpenRouter adapters |
+
+When enabled, the adapter:
+1. Declares `tools_fs` + `tools_exec` capabilities (making it eligible for tool-bearing prompts).
+2. Sends OpenAI function-calling tool definitions alongside the chat completion request.
+3. Runs a synchronous (non-streaming) tool loop: model returns `tool_calls` → server executes them → results fed back → repeat until the model returns a final text response or the safety cap (25 rounds) is reached.
+
+### Available tools
+
+The tool surface is the same as the configured `RUNTIME_TOOLS` set, mapped to OpenAI function names:
+
+| Discoclaw tool | OpenAI function | Notes |
+|----------------|-----------------|-------|
+| Read | `read_file` | Read file contents (with optional offset/limit) |
+| Write | `write_file` | Create or overwrite a file |
+| Edit | `edit_file` | Exact string replacement in a file |
+| Glob | `list_files` | Find files matching a glob pattern |
+| Grep | `search_content` | Regex search over file contents |
+| Bash | `bash` | Execute a shell command (30s timeout, 100KB output cap) |
+| WebFetch | `web_fetch` | Fetch a web page (15s timeout, 512KB cap, SSRF-protected) |
+| WebSearch | `web_search` | **Stub — not yet implemented.** Returns an error message. |
+
+Schemas: `src/runtime/openai-tool-schemas.ts`. Execution handlers: `src/runtime/openai-tool-exec.ts`.
+
+### Security
+
+- **Path scoping:** File/path tools (Read, Write, Edit, Glob, Grep, Bash) are scoped to the workspace CWD (`WORKSPACE_CWD`) **plus** any additional directories from `--add-dir` / group CWD configuration. Symlink-escape protection via `fs.realpath`.
+- **SSRF protection:** `web_fetch` blocks private/loopback IPs and localhost hostnames; HTTPS only with redirect rejection.
+- **Bash sandboxing:** 30s timeout, 100KB output cap per stream (stdout/stderr).
+
+### Key files
+
+| File | Role |
+|------|------|
+| `src/runtime/openai-compat.ts` | Adapter: tool loop logic, capability declaration |
+| `src/runtime/openai-tool-schemas.ts` | Discoclaw → OpenAI function name mapping and JSON Schema definitions |
+| `src/runtime/openai-tool-exec.ts` | Server-side tool execution handlers with path validation |
 
 ## Tool Surface
 - Default tools: `Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch` (8 tools).
@@ -125,9 +169,9 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
 - `Write` enables proper file creation (previously required Bash echo/cat workarounds).
 - Non-Claude adapters use a **capability gate** (`tools_fs`) to determine tool access:
   - Codex CLI adapter: declares `tools_fs` — receives read-only tools (Read, Glob, Grep) in auditor role.
-  - OpenAI HTTP adapter: text-only (`streaming_text` only) — no tool execution.
+  - OpenAI HTTP adapter: when `OPENAI_COMPAT_TOOLS_ENABLED=1`, declares `tools_fs` + `tools_exec` and runs a server-side tool loop (see below). Otherwise text-only (`streaming_text` only).
   - Gemini CLI adapter: text-only (`streaming_text` only) — no tool execution, no fs tools (Phase 1).
-  - OpenRouter adapter: text-only (`streaming_text` only) — no tool execution.
+  - OpenRouter adapter: when `OPENAI_COMPAT_TOOLS_ENABLED=1`, declares `tools_fs` + `tools_exec` (same adapter, same flag). Otherwise text-only (`streaming_text` only).
 
 ## Per-Workspace Permissions
 - `workspace/PERMISSIONS.json` controls the tool surface per workspace.
