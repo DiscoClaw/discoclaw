@@ -9,9 +9,11 @@
 
 import { VoiceConnectionStatus, type VoiceConnection } from '@discordjs/voice';
 import type { LoggerLike } from '../logging/logger-like.js';
-import type { SttProvider, TranscriptionResult, VoiceConfig } from './types.js';
+import type { SttProvider, TtsProvider, TranscriptionResult, VoiceConfig } from './types.js';
 import { AudioReceiver, type OpusDecoderFactory } from './audio-receiver.js';
 import { createSttProvider } from './stt-factory.js';
+import { createTtsProvider } from './tts-factory.js';
+import { VoiceResponder, type InvokeAiFn } from './voice-responder.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,11 +28,16 @@ export type AudioPipelineOpts = {
   onTranscription?: (guildId: string, result: TranscriptionResult) => void;
   /** Override STT provider creation for testing. */
   createStt?: (config: VoiceConfig, log: LoggerLike) => SttProvider;
+  /** AI runtime invocation for voice responses. When provided, enables the full conversation loop. */
+  invokeAi?: InvokeAiFn;
+  /** Override TTS provider creation for testing. */
+  createTts?: (config: VoiceConfig, log: LoggerLike) => TtsProvider;
 };
 
 type GuildPipeline = {
   sttProvider: SttProvider;
   receiver: AudioReceiver;
+  responder?: VoiceResponder;
 };
 
 // ---------------------------------------------------------------------------
@@ -44,6 +51,8 @@ export class AudioPipelineManager {
   private readonly createDecoder: OpusDecoderFactory;
   private readonly onTranscription?: (guildId: string, result: TranscriptionResult) => void;
   private readonly createStt: (config: VoiceConfig, log: LoggerLike) => SttProvider;
+  private readonly invokeAi?: InvokeAiFn;
+  private readonly createTts: (config: VoiceConfig, log: LoggerLike) => TtsProvider;
   private readonly pipelines = new Map<string, GuildPipeline>();
 
   constructor(opts: AudioPipelineOpts) {
@@ -53,6 +62,8 @@ export class AudioPipelineManager {
     this.createDecoder = opts.createDecoder;
     this.onTranscription = opts.onTranscription;
     this.createStt = opts.createStt ?? createSttProvider;
+    this.invokeAi = opts.invokeAi;
+    this.createTts = opts.createTts ?? createTtsProvider;
   }
 
   /**
@@ -86,9 +97,36 @@ export class AudioPipelineManager {
     try {
       const sttProvider = this.createStt(this.voiceConfig, this.log);
 
-      if (this.onTranscription) {
-        const cb = this.onTranscription;
-        sttProvider.onTranscription((result) => cb(guildId, result));
+      // Create VoiceResponder for the full conversation loop if invokeAi is configured
+      let responder: VoiceResponder | undefined;
+      if (this.invokeAi) {
+        try {
+          const tts = this.createTts(this.voiceConfig, this.log);
+          responder = new VoiceResponder({
+            log: this.log,
+            tts,
+            connection,
+            invokeAi: this.invokeAi,
+          });
+          this.log.info({ guildId }, 'voice responder created');
+        } catch (err) {
+          this.log.error({ guildId, err }, 'failed to create voice responder (continuing without TTS)');
+        }
+      }
+
+      // Wire transcription callback — fires both the external callback and the responder
+      const onTranscriptionCb = this.onTranscription;
+      if (onTranscriptionCb || responder) {
+        sttProvider.onTranscription((result) => {
+          if (onTranscriptionCb) {
+            onTranscriptionCb(guildId, result);
+          }
+          if (responder && result.isFinal && result.text.trim()) {
+            responder.handleTranscription(result.text).catch((err) => {
+              this.log.error({ guildId, err }, 'voice-responder: handleTranscription failed');
+            });
+          }
+        });
       }
 
       await sttProvider.start();
@@ -103,7 +141,7 @@ export class AudioPipelineManager {
 
       receiver.start();
 
-      this.pipelines.set(guildId, { sttProvider, receiver });
+      this.pipelines.set(guildId, { sttProvider, receiver, responder });
       this.log.info({ guildId }, 'audio pipeline started');
     } catch (err) {
       this.log.error({ guildId, err }, 'failed to start audio pipeline');
@@ -117,6 +155,7 @@ export class AudioPipelineManager {
 
     this.pipelines.delete(guildId);
 
+    pipeline.responder?.destroy();
     pipeline.receiver.stop();
 
     try {
