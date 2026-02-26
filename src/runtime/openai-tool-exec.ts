@@ -307,6 +307,7 @@ async function handleSearchContent(
     ? await resolveAndCheck(searchPath, allowedRoots)
     : allowedRoots[0];
 
+  // Try rg first, fall back to grep if rg isn't installed
   const rgArgs = ['--no-heading', '--line-number', '--color', 'never'];
   if (caseInsensitive) rgArgs.push('-i');
   if (glob) rgArgs.push('--glob', glob);
@@ -324,9 +325,38 @@ async function handleSearchContent(
     if (e.code === 1) {
       return { result: 'No matches found', ok: true };
     }
-    // rg not installed
+    // rg not installed — fall back to grep
     if (e.message?.includes('ENOENT')) {
-      return { result: 'ripgrep (rg) is not installed — search_content requires rg', ok: false };
+      return searchWithGrep(pattern, baseDir, { caseInsensitive, glob });
+    }
+    return { result: e.stderr || e.message || 'search failed', ok: false };
+  }
+}
+
+/** Fallback grep-based search when ripgrep is not available. */
+async function searchWithGrep(
+  pattern: string,
+  baseDir: string,
+  opts: { caseInsensitive?: boolean; glob?: string },
+): Promise<ToolResult> {
+  const grepArgs = ['-rn', '--color=never'];
+  if (opts.caseInsensitive) grepArgs.push('-i');
+  if (opts.glob) {
+    grepArgs.push('--include', opts.glob);
+  }
+  grepArgs.push('--', pattern, baseDir);
+
+  try {
+    const { stdout } = await execFileAsync('grep', grepArgs, {
+      timeout: BASH_TIMEOUT_MS,
+      maxBuffer: BASH_MAX_OUTPUT,
+    });
+    return { result: stdout || 'No matches found', ok: true };
+  } catch (err: unknown) {
+    const e = err as { code?: number; stdout?: string; stderr?: string; message?: string };
+    // grep exits 1 when no matches found — not an error
+    if (e.code === 1) {
+      return { result: 'No matches found', ok: true };
     }
     return { result: e.stderr || e.message || 'search failed', ok: false };
   }
