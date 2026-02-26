@@ -1,5 +1,6 @@
 import type { DiscordActionResult } from './actions.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import type { RuntimeRegistry } from '../runtime/registry.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import { resolveDefaultModel, resolveProvider } from './actions-imagegen.js';
@@ -25,21 +26,28 @@ export type ConfigContext = {
   botParams: ConfigMutableParams;
   /** The primary runtime, for resolveModel display. */
   runtime: RuntimeAdapter;
+  /** Registry of all available runtime adapters. When set, modelSet chat can swap runtimes. */
+  runtimeRegistry?: RuntimeRegistry;
+  /** Human-readable name of the active runtime (e.g. 'claude_code', 'openrouter'). */
+  runtimeName?: string;
 };
 
 /** The subset of BotParams fields that modelSet/modelShow reads and mutates. */
 export type ConfigMutableParams = {
   runtimeModel: string;
   summaryModel: string;
+  runtime?: RuntimeAdapter;
   forgeDrafterModel?: string;
   forgeAuditorModel?: string;
   cronCtx?: {
     autoTagModel: string;
-    syncCoordinator?: { setAutoTagModel(model: string): void };
-    executorCtx?: { model: string; cronExecModel?: string };
+    runtime?: RuntimeAdapter;
+    syncCoordinator?: { setAutoTagModel(model: string): void; setRuntime?(runtime: RuntimeAdapter): void };
+    executorCtx?: { model: string; cronExecModel?: string; runtime?: RuntimeAdapter };
   };
   taskCtx?: { autoTagModel: string };
-  planCtx?: { model?: string };
+  planCtx?: { model?: string; runtime?: RuntimeAdapter };
+  deferOpts?: { runtime: RuntimeAdapter };
   imagegenCtx?: ImagegenContext;
 };
 
@@ -86,12 +94,40 @@ export function executeConfigAction(
       const changes: string[] = [];
 
       switch (action.role) {
-        case 'chat':
-          bp.runtimeModel = model;
-          if (bp.planCtx) bp.planCtx.model = model;
-          if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = model;
-          changes.push(`chat → ${model}`);
+        case 'chat': {
+          // Check if the model string is actually a runtime name.
+          const normalized = model.toLowerCase();
+          const newRuntime = configCtx.runtimeRegistry?.get(normalized);
+          if (newRuntime) {
+            // Swap runtime across all invocation paths.
+            const runtimeModel = newRuntime.defaultModel ?? '';
+            bp.runtime = newRuntime;
+            bp.runtimeModel = runtimeModel;
+            configCtx.runtime = newRuntime;
+            configCtx.runtimeName = normalized;
+            if (bp.cronCtx) {
+              bp.cronCtx.runtime = newRuntime;
+              bp.cronCtx.syncCoordinator?.setRuntime?.(newRuntime);
+              if (bp.cronCtx.executorCtx) {
+                bp.cronCtx.executorCtx.runtime = newRuntime;
+                bp.cronCtx.executorCtx.model = runtimeModel;
+              }
+            }
+            if (bp.planCtx) {
+              bp.planCtx.runtime = newRuntime;
+              bp.planCtx.model = runtimeModel;
+            }
+            if (bp.deferOpts) bp.deferOpts.runtime = newRuntime;
+            changes.push(`runtime → ${normalized}`);
+            if (runtimeModel) changes.push(`chat → ${runtimeModel} (adapter default)`);
+          } else {
+            bp.runtimeModel = model;
+            if (bp.planCtx) bp.planCtx.model = model;
+            if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = model;
+            changes.push(`chat → ${model}`);
+          }
           break;
+        }
         case 'fast':
           bp.summaryModel = model;
           changes.push(`summary → ${model}`);
@@ -152,7 +188,9 @@ export function executeConfigAction(
       const bp = configCtx.botParams;
       const rid = configCtx.runtime.id;
 
+      const runtimeName = configCtx.runtimeName ?? rid;
       const rows: [string, string, string][] = [
+        ['runtime', runtimeName, `Active runtime adapter (${rid})`],
         ['chat', bp.runtimeModel, ROLE_DESCRIPTIONS.chat],
         ['summary', bp.summaryModel, ROLE_DESCRIPTIONS.summary],
         ['forge-drafter', bp.forgeDrafterModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-drafter']],
@@ -210,7 +248,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
 - \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), or \`default\` (for cron-exec only, to revert to following chat).
+- \`model\` (required): Model tier (\`fast\`, \`capable\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` role, swaps the active runtime adapter), or \`default\` (for cron-exec only, to revert to following chat).
 
 **Roles:**
 | Role | What it controls |
