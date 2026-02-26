@@ -51,6 +51,7 @@
     "review:full-audit": "pnpm review:sections --with-gates && pnpm review:long-chunks && pnpm review:chunk-risks && pnpm review:chunk-audit && pnpm review:finalize"
   },
   "dependencies": {
+    "@discordjs/voice": "^0.19.0",
     "croner": "^10.0.1",
     "discord.js": "^14.19.3",
     "dotenv": "^16.4.5",
