@@ -139,6 +139,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 |-----------|---------|--------|
 | First-run scaffolding | `src/workspace-bootstrap.ts` | **done** |
 | Templates (SOUL, IDENTITY, USER, AGENTS, TOOLS) | `templates/workspace/` | **done** |
+| MCP config template | `templates/mcp.json` | **done** |
 | Dropbox-backed symlinks (content, workspace, exports) | filesystem | **done** |
 
 ## 12. Status & Observability
@@ -146,6 +147,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | Status channel messages (boot-report/offline/error) | `src/discord/status-channel.ts` | **done** |
+| MCP server detection (startup health logging) | `src/mcp-detect.ts`, `src/mcp-detect.test.ts` | **done** |
 | Pino structured logging | throughout | **done** |
 | Metrics / dashboard | — | *stub — not started* |
 
@@ -184,6 +186,8 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Plan & Forge reference | `docs/plan-and-forge.md` | **done** |
 | Post-hard-cut tasks refactor plan | `docs/tasks-ground-zero-post-hard-cut-plan.md` | **done** |
 | Webhook exposure guide | `docs/webhook-exposure.md` | **done** |
+| MCP guide (config, examples, troubleshooting) | `docs/mcp.md` | **done** |
+| MCP example template | `templates/mcp.json` | **done** |
 | Releasing / npm publish guide | `docs/releasing.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
