@@ -28,6 +28,8 @@ export type VoiceResponderOpts = {
   tts: TtsProvider;
   connection: VoiceConnection;
   invokeAi: InvokeAiFn;
+  /** Called with the AI response text after a successful invocation. */
+  onBotResponse?: (text: string) => void;
   /** Override for testing — supply a custom AudioPlayer factory. */
   createPlayer?: () => AudioPlayer;
 };
@@ -37,6 +39,7 @@ export class VoiceResponder {
   private readonly tts: TtsProvider;
   private readonly connection: VoiceConnection;
   private readonly invokeAi: InvokeAiFn;
+  private readonly onBotResponse?: (text: string) => void;
   private readonly player: AudioPlayer;
   private generation = 0;
   private _processing = false;
@@ -46,8 +49,20 @@ export class VoiceResponder {
     this.tts = opts.tts;
     this.connection = opts.connection;
     this.invokeAi = opts.invokeAi;
+    this.onBotResponse = opts.onBotResponse;
     this.player = opts.createPlayer ? opts.createPlayer() : createAudioPlayer();
-    this.connection.subscribe(this.player);
+    const subscription = this.connection.subscribe(this.player);
+    this.log.info(
+      { subscribed: !!subscription },
+      'voice-responder: player subscription result',
+    );
+
+    this.player.on('stateChange', (oldState, newState) => {
+      this.log.info(
+        { from: oldState.status, to: newState.status },
+        'voice-responder: player state change',
+      );
+    });
 
     this.player.on('error', (err: Error) => {
       this.log.error({ err }, 'voice-responder: audio player error');
@@ -77,6 +92,13 @@ export class VoiceResponder {
         return;
       }
 
+      // Notify transcript mirror (fire-and-forget)
+      try {
+        this.onBotResponse?.(response);
+      } catch (err) {
+        this.log.warn({ err }, 'voice-responder: onBotResponse callback error');
+      }
+
       // Step 2: Synthesize TTS (buffer all frames)
       this.log.info({ responseLength: response.length }, 'voice-responder: starting TTS');
       const frames: Buffer[] = [];
@@ -93,7 +115,7 @@ export class VoiceResponder {
       const discordBuffer = upsampleToDiscord(ttsBuffer, sampleRate, 1);
 
       // Step 3: Play audio through the voice connection
-      const stream = Readable.from([discordBuffer]);
+      const stream = Readable.from([discordBuffer], { objectMode: false });
       const resource = createAudioResource(stream, {
         inputType: StreamType.Raw,
       });
@@ -121,6 +143,12 @@ export class VoiceResponder {
   /** Whether a response pipeline is currently active. */
   get isProcessing(): boolean {
     return this._processing;
+  }
+
+  /** Whether the bot is audibly speaking (Playing or Buffering). */
+  get isPlaying(): boolean {
+    const status = this.player.state.status;
+    return status === AudioPlayerStatus.Playing || status === AudioPlayerStatus.Buffering;
   }
 
   /** Interrupt any in-flight pipeline and stop playback. */
