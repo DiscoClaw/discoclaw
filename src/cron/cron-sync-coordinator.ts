@@ -39,6 +39,11 @@ export class CronSyncCoordinator {
     this.opts = { ...this.opts, autoTagModel: model };
   }
 
+  /** Swap the runtime adapter at runtime (called by modelSet runtime-swap propagation). */
+  setRuntime(runtime: RuntimeAdapter): void {
+    this.opts = { ...this.opts, runtime };
+  }
+
   /**
    * Run sync with concurrency guard.
    * Returns null when coalesced into a running sync's follow-up.

@@ -1026,6 +1026,8 @@ if (taskCtx) {
     botParams.configCtx = {
       botParams,
       runtime: limitedRuntime,
+      runtimeRegistry,
+      runtimeName: primaryRuntimeName,
     };
     log.info('config:action context initialized');
   }
