@@ -203,6 +203,13 @@ export type BotParams = {
   completionNotifyEnabled?: boolean;
   completionNotifyThresholdMs?: number;
   serviceName?: string;
+  // Voice subsystem config — threaded from DiscoclawConfig.
+  voiceEnabled?: boolean;
+  voiceSttProvider?: 'deepgram' | 'whisper';
+  voiceTtsProvider?: 'cartesia' | 'kokoro';
+  voiceTranscriptChannel?: string;
+  deepgramApiKey?: string;
+  cartesiaApiKey?: string;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
