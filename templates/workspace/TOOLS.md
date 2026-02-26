@@ -167,6 +167,69 @@ When the user asks for "a rebuild," follow a consistent sequence and wait for co
 
 If the user separately asks for a restart, only then execute `systemctl --user restart discoclaw`, following the existing restart procedure (status → restart → status/logs). Never restart before the rebuild workflow has succeeded and been confirmed; the rebuild must be confirmed first, then the restart follows as a distinct, second step.
 
+## Webhook Server
+
+Discoclaw includes an inbound webhook server that lets external services (GitHub, monitoring tools, etc.) trigger AI-powered responses in Discord channels.
+
+### Enabling
+
+Set these environment variables:
+
+- `DISCOCLAW_WEBHOOK_ENABLED=1` — enables the server
+- `DISCOCLAW_WEBHOOK_PORT=9400` — TCP port (default: 9400)
+- `DISCOCLAW_WEBHOOK_CONFIG=/absolute/path/to/webhooks.json` — path to the source config file
+
+### Config format
+
+The config file is a JSON object mapping source names to their settings:
+
+```json
+{
+  "github": {
+    "secret": "your-hmac-secret",
+    "channel": "dev-updates",
+    "prompt": "A GitHub event was received from {{source}}:\n\n{{body}}\n\nSummarize what happened."
+  },
+  "monitoring": {
+    "secret": "another-secret",
+    "channel": "alerts"
+  }
+}
+```
+
+**Fields per source:**
+- `secret` (required): HMAC-SHA256 secret for verifying `X-Hub-Signature-256` headers (same convention as GitHub webhooks).
+- `channel` (required): Discord channel name or ID where the webhook posts.
+- `prompt` (optional): Instruction sent to the runtime. Supports `{{body}}` (raw request body) and `{{source}}` (source name) placeholders. If omitted, a default prompt is built from the source name and payload.
+
+### How it works
+
+1. External service sends `POST /webhook/<source>` with an HMAC signature header.
+2. Server verifies the signature, returns 202 immediately.
+3. Dispatches through the cron execution pipeline — same runtime invocation, channel routing, and logging as automations.
+4. Webhook executions run with Discord actions and tools disabled for security.
+
+### Endpoint format
+
+```
+POST http://localhost:9400/webhook/<source-name>
+X-Hub-Signature-256: sha256=<hex-hmac-digest>
+Content-Type: application/json
+
+{ ... payload ... }
+```
+
+### Exposure
+
+The server binds to `127.0.0.1` by default (loopback only). To receive webhooks from external services like GitHub, you need to expose the port. Options include reverse proxies, Tailscale Funnel, or Cloudflare Tunnels.
+
+### Security notes
+
+- Unknown sources return 404 (doesn't leak which sources exist).
+- Failed signature verification returns 401.
+- Max request body: 256 KB.
+- Webhook jobs run without Discord action permissions or tool access.
+
 ## Plan-Audit-Implement Workflow
 
 A structured dev workflow for producing audited plans before writing code. Use this for any non-trivial change — features, bug fixes, refactors. Triggered by **"plan this"**, **"let's plan"**, or the `!plan` / `!forge` Discord commands.
