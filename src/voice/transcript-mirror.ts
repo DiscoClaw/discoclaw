@@ -14,9 +14,15 @@ import type { LoggerLike } from '../logging/logger-like.js';
 
 type Sendable = { send(content: string | { content: string; allowedMentions?: MessageMentionOptions }): Promise<unknown> };
 
+/** Interface for transcript mirror consumers — allows simple test doubles. */
+export interface TranscriptMirrorLike {
+  postUserTranscription(username: string, text: string): Promise<void>;
+  postBotResponse(botName: string, text: string): Promise<void>;
+}
+
 export type TranscriptMirrorOpts = {
   client: Client;
-  channelId: string;
+  nameOrId: string;
   log: LoggerLike;
 };
 
@@ -24,31 +30,31 @@ export type TranscriptMirrorOpts = {
 // TranscriptMirror
 // ---------------------------------------------------------------------------
 
-export class TranscriptMirror {
+export class TranscriptMirror implements TranscriptMirrorLike {
   private readonly client: Client;
-  private readonly channelId: string;
+  private readonly nameOrId: string;
   private readonly log: LoggerLike;
   private resolvedChannel: Sendable | null = null;
   private resolveFailed = false;
 
   constructor(opts: TranscriptMirrorOpts) {
     this.client = opts.client;
-    this.channelId = opts.channelId;
+    this.nameOrId = opts.nameOrId;
     this.log = opts.log;
   }
 
   /**
-   * Factory — returns a TranscriptMirror if channelId is provided, undefined otherwise.
+   * Factory — returns a TranscriptMirror if nameOrId is provided, undefined otherwise.
    * Channel resolution is deferred to first use (lazy).
    */
   static async resolve(
     client: Client,
-    channelId: string | undefined,
+    nameOrId: string | undefined,
     log: LoggerLike,
   ): Promise<TranscriptMirror | undefined> {
-    if (!channelId) return undefined;
-    log.info({ channelId }, 'transcript-mirror: initialized');
-    return new TranscriptMirror({ client, channelId, log });
+    if (!nameOrId) return undefined;
+    log.info({ channelId: nameOrId }, 'transcript-mirror: initialized');
+    return new TranscriptMirror({ client, nameOrId, log });
   }
 
   /**
@@ -80,7 +86,7 @@ export class TranscriptMirror {
     try {
       await channel.send({ content: truncate(content, 2000), allowedMentions: NO_MENTIONS });
     } catch (err) {
-      this.log.warn({ err, channelId: this.channelId }, 'transcript-mirror: failed to send message');
+      this.log.warn({ err, channelId: this.nameOrId }, 'transcript-mirror: failed to send message');
     }
   }
 
@@ -89,18 +95,32 @@ export class TranscriptMirror {
     if (this.resolveFailed) return null;
 
     try {
-      const cached = this.client.channels.cache.get(this.channelId);
-      const ch = cached ?? (await this.client.channels.fetch(this.channelId).catch(() => null));
-      if (ch?.isTextBased() && !ch.isDMBased() && 'send' in ch) {
-        this.resolvedChannel = ch as Sendable;
-        this.log.info({ channelId: this.channelId }, 'transcript-mirror: channel resolved');
+      // Try by ID: cache first, then API fetch
+      const cached = this.client.channels.cache.get(this.nameOrId);
+      const byId = cached ?? (await this.client.channels.fetch(this.nameOrId).catch(() => null));
+      if (byId?.isTextBased() && !byId.isDMBased() && 'send' in byId) {
+        this.resolvedChannel = byId as Sendable;
+        this.log.info({ channelId: this.nameOrId }, 'transcript-mirror: channel resolved');
         return this.resolvedChannel;
       }
-      this.log.warn({ channelId: this.channelId }, 'transcript-mirror: channel not found or not text-based');
+
+      // Fall back to scanning guild caches by name
+      for (const guild of this.client.guilds.cache.values()) {
+        const ch = guild.channels.cache.find(
+          (c) => c.isTextBased() && c.name === this.nameOrId,
+        );
+        if (ch && ch.isTextBased() && 'send' in ch) {
+          this.resolvedChannel = ch as Sendable;
+          this.log.info({ channelId: this.nameOrId }, 'transcript-mirror: channel resolved by name');
+          return this.resolvedChannel;
+        }
+      }
+
+      this.log.warn({ channelId: this.nameOrId }, 'transcript-mirror: channel not found or not text-based');
       this.resolveFailed = true;
       return null;
     } catch (err) {
-      this.log.warn({ err, channelId: this.channelId }, 'transcript-mirror: failed to resolve channel');
+      this.log.warn({ err, channelId: this.nameOrId }, 'transcript-mirror: failed to resolve channel');
       this.resolveFailed = true;
       return null;
     }

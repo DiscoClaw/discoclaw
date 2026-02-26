@@ -309,6 +309,66 @@ describe('VoiceResponder', () => {
     });
   });
 
+  describe('onBotResponse', () => {
+    it('fires with the AI response text after invokeAi resolves', async () => {
+      const onBotResponse = vi.fn();
+      const { responder } = createResponder({ onBotResponse });
+
+      await responder.handleTranscription('hello');
+
+      expect(onBotResponse).toHaveBeenCalledWith('AI says hello');
+    });
+
+    it('does not fire for empty AI responses', async () => {
+      const onBotResponse = vi.fn();
+      const invokeAi = vi.fn(async () => '');
+      const { responder } = createResponder({ invokeAi, onBotResponse });
+
+      await responder.handleTranscription('hello');
+
+      expect(onBotResponse).not.toHaveBeenCalled();
+    });
+
+    it('does not fire when generation is superseded', async () => {
+      const onBotResponse = vi.fn();
+      let resolveFirst!: (value: string) => void;
+      let callCount = 0;
+      const invokeAi = vi.fn(() => {
+        callCount++;
+        if (callCount === 1) {
+          return new Promise<string>((r) => { resolveFirst = r; });
+        }
+        return Promise.resolve('second response');
+      });
+      const { responder } = createResponder({ invokeAi, onBotResponse });
+
+      const first = responder.handleTranscription('first');
+      const second = responder.handleTranscription('second');
+
+      resolveFirst('first response');
+      await Promise.all([first, second]);
+
+      // Only the second invocation should have triggered the callback
+      expect(onBotResponse).toHaveBeenCalledTimes(1);
+      expect(onBotResponse).toHaveBeenCalledWith('second response');
+    });
+
+    it('does not prevent TTS playback when callback throws', async () => {
+      const onBotResponse = vi.fn(() => { throw new Error('callback error'); });
+      const { responder, tts, player, log } = createResponder({ onBotResponse });
+
+      await responder.handleTranscription('hello');
+
+      expect(onBotResponse).toHaveBeenCalledWith('AI says hello');
+      expect(tts.synthesize).toHaveBeenCalled();
+      expect(player.play).toHaveBeenCalled();
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'voice-responder: onBotResponse callback error',
+      );
+    });
+  });
+
   describe('stop', () => {
     it('interrupts in-flight pipeline', async () => {
       let resolveAi!: (value: string) => void;

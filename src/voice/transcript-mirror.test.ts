@@ -29,6 +29,9 @@ function createMockClient(channel: ReturnType<typeof createMockChannel> | null =
       },
       fetch: vi.fn(async (id: string) => cache.get(id) ?? null),
     },
+    guilds: {
+      cache: new Map(),
+    },
   };
 }
 
@@ -38,7 +41,7 @@ function createMirror(overrides: Partial<TranscriptMirrorOpts> = {}) {
   const log = createLogger();
   const mirror = new TranscriptMirror({
     client: client as unknown as TranscriptMirrorOpts['client'],
-    channelId: channel.id,
+    nameOrId: channel.id,
     log,
     ...overrides,
   });
@@ -127,7 +130,7 @@ describe('TranscriptMirror', () => {
       const log = createLogger();
       const mirror = new TranscriptMirror({
         client: client as unknown as TranscriptMirrorOpts['client'],
-        channelId: channel.id,
+        nameOrId: channel.id,
         log,
       });
 
@@ -148,12 +151,52 @@ describe('TranscriptMirror', () => {
       expect(channel.send).toHaveBeenCalledTimes(2);
     });
 
+    it('resolves channel by name from guild cache when ID lookup fails', async () => {
+      const channel = {
+        ...createMockChannel(),
+        name: 'voice-transcripts',
+      };
+      // Client where ID-based lookup fails but guild cache has the channel by name
+      const client = {
+        channels: {
+          cache: { get: vi.fn(() => undefined) },
+          fetch: vi.fn(async () => null),
+        },
+        guilds: {
+          cache: new Map([
+            ['guild1', {
+              channels: {
+                cache: {
+                  find: vi.fn((pred: (c: unknown) => boolean) => pred(channel) ? channel : undefined),
+                },
+              },
+            }],
+          ]),
+        },
+      };
+
+      const log = createLogger();
+      const mirror = new TranscriptMirror({
+        client: client as unknown as TranscriptMirrorOpts['client'],
+        nameOrId: 'voice-transcripts',
+        log,
+      });
+
+      await mirror.postUserTranscription('Alice', 'hello');
+
+      expect(channel.send).toHaveBeenCalled();
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({ channelId: 'voice-transcripts' }),
+        'transcript-mirror: channel resolved by name',
+      );
+    });
+
     it('warns and gives up when channel cannot be found', async () => {
       const client = createMockClient();
       const log = createLogger();
       const mirror = new TranscriptMirror({
         client: client as unknown as TranscriptMirrorOpts['client'],
-        channelId: 'nonexistent',
+        nameOrId: 'nonexistent',
         log,
       });
 
@@ -170,7 +213,7 @@ describe('TranscriptMirror', () => {
       const log = createLogger();
       const mirror = new TranscriptMirror({
         client: client as unknown as TranscriptMirrorOpts['client'],
-        channelId: 'nonexistent',
+        nameOrId: 'nonexistent',
         log,
       });
 
@@ -187,7 +230,7 @@ describe('TranscriptMirror', () => {
       const log = createLogger();
       const mirror = new TranscriptMirror({
         client: client as unknown as TranscriptMirrorOpts['client'],
-        channelId: 'bad-id',
+        nameOrId: 'bad-id',
         log,
       });
 
@@ -205,7 +248,7 @@ describe('TranscriptMirror', () => {
       const log = createLogger();
       const mirror = new TranscriptMirror({
         client: client as unknown as TranscriptMirrorOpts['client'],
-        channelId: channel.id,
+        nameOrId: channel.id,
         log,
       });
 
