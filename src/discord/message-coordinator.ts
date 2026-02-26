@@ -210,7 +210,7 @@ export type BotParams = {
   voiceEnabled?: boolean;
   voiceSttProvider?: 'deepgram' | 'whisper';
   voiceTtsProvider?: 'cartesia' | 'kokoro';
-  voiceTranscriptChannel?: string;
+  voiceHomeChannel?: string;
   deepgramApiKey?: string;
   cartesiaApiKey?: string;
 };
