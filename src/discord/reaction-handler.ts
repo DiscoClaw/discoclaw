@@ -381,6 +381,7 @@ function createReactionHandler(
             config: params.discordActionsConfig ?? false,
             defer: !isDm && (params.discordActionsDefer ?? false),
             imagegen: params.discordActionsImagegen ?? false,
+            voice: params.discordActionsVoice ?? false,
           };
 
           if (params.discordActionsEnabled && !isDm) {
@@ -618,6 +619,7 @@ function createReactionHandler(
                 memoryCtx: perEventMemoryCtx,
                 configCtx: params.configCtx,
                 imagegenCtx: params.imagegenCtx,
+                voiceCtx: params.voiceCtx,
               });
               actionResults = results;
               for (const result of results) {

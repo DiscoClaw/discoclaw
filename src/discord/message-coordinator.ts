@@ -22,6 +22,7 @@ import type { PlanContext } from './actions-plan.js';
 import type { MemoryContext } from './actions-memory.js';
 import type { ConfigContext } from './actions-config.js';
 import type { ImagegenContext } from './actions-imagegen.js';
+import type { VoiceContext } from './actions-voice.js';
 import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -138,6 +139,7 @@ export type BotParams = {
   discordActionsConfig?: boolean;
   discordActionsDefer?: boolean;
   discordActionsImagegen?: boolean;
+  discordActionsVoice?: boolean;
   deferMaxDelaySeconds?: number;
   deferMaxConcurrent?: number;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
@@ -148,6 +150,7 @@ export type BotParams = {
   memoryCtx?: MemoryContext;
   configCtx?: ConfigContext;
   imagegenCtx?: ImagegenContext;
+  voiceCtx?: VoiceContext;
   messageHistoryBudget: number;
   summaryEnabled: boolean;
   summaryModel: string;
@@ -618,6 +621,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         config: params.discordActionsConfig ?? false,
         defer: !isDm && (params.discordActionsDefer ?? false),
         imagegen: params.discordActionsImagegen ?? false,
+        voice: params.discordActionsVoice ?? false,
       };
 
       if (isBotMessage) {
@@ -633,6 +637,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         actionFlags.crons = false;
         actionFlags.tasks = false;
         actionFlags.imagegen = false;
+        actionFlags.voice = false;
         actionFlags.polls = false;
         actionFlags.messaging = true;
       }
@@ -2028,6 +2033,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               memoryCtx: perMessageMemoryCtx,
               configCtx: params.configCtx,
               imagegenCtx: params.imagegenCtx,
+              voiceCtx: params.voiceCtx,
             });
             const displayLines = buildDisplayResultLines([confirmAction], actionResults);
             const content = displayLines.length > 0
@@ -2565,6 +2571,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   memoryCtx: perMessageMemoryCtx,
                   configCtx: params.configCtx,
                   imagegenCtx: params.imagegenCtx,
+                  voiceCtx: params.voiceCtx,
                 });
                 for (const result of actionResults) {
                   metrics.recordActionResult(result.ok);
