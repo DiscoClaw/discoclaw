@@ -208,11 +208,12 @@ export type BotParams = {
   serviceName?: string;
   // Voice subsystem config — threaded from DiscoclawConfig.
   voiceEnabled?: boolean;
-  voiceSttProvider?: 'deepgram' | 'whisper';
-  voiceTtsProvider?: 'cartesia' | 'kokoro';
+  voiceSttProvider?: 'deepgram' | 'whisper' | 'openai';
+  voiceTtsProvider?: 'cartesia' | 'kokoro' | 'openai';
   voiceHomeChannel?: string;
   deepgramApiKey?: string;
   cartesiaApiKey?: string;
+  openaiApiKey?: string;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
