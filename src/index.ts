@@ -702,6 +702,7 @@ const botParams = {
   memoryCtx: undefined as MemoryContext | undefined,
   imagegenCtx: undefined as ImagegenContext | undefined,
   configCtx: undefined as import('./discord/actions-config.js').ConfigContext | undefined,
+  deferOpts: undefined as ConfigureDeferredSchedulerOpts | undefined,
   messageHistoryBudget,
   summaryEnabled,
   summaryModel,
@@ -817,6 +818,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
   };
   const deferScheduler = configureDeferredScheduler(deferOpts);
   botParams.deferScheduler = deferScheduler;
+  botParams.deferOpts = deferOpts;
 }
 
 let client!: Awaited<ReturnType<typeof startDiscordBot>>['client'], status!: Awaited<ReturnType<typeof startDiscordBot>>['status'], system!: Awaited<ReturnType<typeof startDiscordBot>>['system'];
