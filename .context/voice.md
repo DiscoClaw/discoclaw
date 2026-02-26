@@ -75,5 +75,7 @@ When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes t
 | `DISCOCLAW_STT_PROVIDER` | `deepgram` | STT backend |
 | `DISCOCLAW_TTS_PROVIDER` | `cartesia` | TTS backend |
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | — | Transcript mirror target + prompt context source |
+| `DISCOCLAW_VOICE_MODEL` | `capable` | AI model tier for voice responses |
+| `DISCOCLAW_VOICE_SYSTEM_PROMPT` | — | Custom system prompt for voice invocations (max 4000 chars) |
 | `DEEPGRAM_API_KEY` | — | Required for deepgram STT |
 | `CARTESIA_API_KEY` | — | Required for cartesia TTS |

@@ -70,6 +70,21 @@ Set `PRIMARY_RUNTIME=openrouter` to route requests through [OpenRouter](https://
 
 Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`) and `OPENROUTER_MODEL` (default: `anthropic/claude-sonnet-4`). See `.env.example` for the full reference.
 
+## Voice — the bot talks back
+
+DiscoClaw can join Discord voice channels for real-time conversation: listen via speech-to-text, think with the AI runtime, and speak the response via text-to-speech.
+
+- **STT** — Deepgram Nova-3 streaming transcription (WebSocket)
+- **TTS** — Cartesia Sonic-3 speech synthesis (WebSocket, 24 kHz PCM)
+- **Barge-in** — interrupt the bot mid-sentence by speaking; playback stops immediately
+- **Auto-join** — optionally join/leave channels automatically when you enter or leave
+- **Transcript mirror** — voice conversations are mirrored to a text channel for persistence
+- **Voice actions** — the AI can execute a restricted action subset (messaging, tasks, memory) during voice
+
+Voice is **off by default**. Enable with `DISCOCLAW_VOICE_ENABLED=1` plus API keys for your STT/TTS providers. Requires Node 22+ (for native WebSocket used by Cartesia TTS) and C++ build tools (for the `@discordjs/opus` native addon).
+
+Full setup guide: [docs/voice.md](docs/voice.md)
+
 ## Customization
 
 ### Shareable integration recipes
