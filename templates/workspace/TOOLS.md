@@ -167,6 +167,73 @@ When the user asks for "a rebuild," follow a consistent sequence and wait for co
 
 If the user separately asks for a restart, only then execute `systemctl --user restart discoclaw`, following the existing restart procedure (status → restart → status/logs). Never restart before the rebuild workflow has succeeded and been confirmed; the rebuild must be confirmed first, then the restart follows as a distinct, second step.
 
+## Webhook Server
+
+Discoclaw includes an inbound webhook server that lets external services (GitHub, monitoring tools, etc.) trigger AI-powered responses in Discord channels.
+
+### Enabling
+
+Set these environment variables:
+
+- `DISCOCLAW_WEBHOOK_ENABLED=1` — enables the server
+- `DISCOCLAW_WEBHOOK_PORT=9400` — TCP port (default: 9400)
+- `DISCOCLAW_WEBHOOK_CONFIG=/absolute/path/to/webhooks.json` — path to the source config file
+
+### Config format
+
+The config file is a JSON object mapping source names to their settings:
+
+```json
+{
+  "github": {
+    "secret": "your-hmac-secret",
+    "channel": "dev-updates",
+    "prompt": "A GitHub event was received from {{source}}:\n\n{{body}}\n\nSummarize what happened."
+  },
+  "monitoring": {
+    "secret": "another-secret",
+    "channel": "alerts"
+  }
+}
+```
+
+**Fields per source:**
+- `secret` (required): HMAC-SHA256 secret for verifying `X-Hub-Signature-256` headers (same convention as GitHub webhooks).
+- `channel` (required): Discord channel name or ID where the webhook posts.
+- `prompt` (optional): Instruction sent to the runtime. Supports `{{body}}` (raw request body) and `{{source}}` (source name) placeholders. If omitted, a default prompt is built from the source name and payload.
+
+### How it works
+
+1. External service sends `POST /webhook/<source>` with an HMAC signature header.
+2. Server verifies the signature, returns 202 immediately.
+3. Dispatches through the cron execution pipeline — same runtime invocation, channel routing, and logging as automations.
+4. Webhook executions run with Discord actions and tools disabled for security.
+
+### Endpoint format
+
+```
+POST http://localhost:9400/webhook/<source-name>
+X-Hub-Signature-256: sha256=<hex-hmac-digest>
+Content-Type: application/json
+
+{ ... payload ... }
+```
+
+### Exposure
+
+The server binds to `127.0.0.1` by default (loopback only). To receive webhooks from external services like GitHub, you need to expose the port. See `docs/webhook-exposure.md` for setup instructions covering Tailscale Funnel, ngrok, and Caddy reverse proxy.
+
+### Security notes
+
+- Unknown sources return 404 (doesn't leak which sources exist).
+- Failed signature verification returns 401.
+- Max request body: 256 KB.
+- Webhook jobs run without Discord action permissions or tool access.
+
+### Webhooks vs. Automations
+
+Webhooks and automations (crons) are two trigger mechanisms for the same execution pipeline. Automations are **time-driven** — they fire on a cron schedule (e.g., "every weekday at 7 AM"). Webhooks are **event-driven** — they fire when an external service sends an HTTP POST. Both dispatch through the same `executeCronJob` pipeline, sharing runtime invocation, channel routing, model selection, and logging. If you're setting up one, you should know the other exists — see the [Cron Actions](#cron-actions-automations) section below for time-driven automations.
+
 ## Plan-Audit-Implement Workflow
 
 A structured dev workflow for producing audited plans before writing code. Use this for any non-trivial change — features, bug fixes, refactors. Triggered by **"plan this"**, **"let's plan"**, or the `!plan` / `!forge` Discord commands.
@@ -339,7 +406,7 @@ Use taskList to check existing tasks before creating duplicates. Use taskShow/ta
 
 ### Cron Actions (Automations)
 
-**Automations** is the user-facing name for crons. Each automation lives as a thread in a dedicated Discord forum channel (typically called "automations"). When a user says "create an automation," "set up a scheduled task," or "run X every morning/weekly/etc.," respond with `cronCreate`. Use `cronList` to check what's already running before creating a new one.
+**Automations** is the user-facing name for crons. Each automation lives as a thread in a dedicated Discord forum channel (typically called "automations"). When a user says "create an automation," "set up a scheduled task," or "run X every morning/weekly/etc.," respond with `cronCreate`. Use `cronList` to check what's already running before creating a new one. For event-driven triggers (external HTTP POSTs from GitHub, monitoring, etc.), see the [Webhook Server](#webhook-server) section above.
 
 **cronCreate** — Create a new scheduled task:
 ```
@@ -430,3 +497,5 @@ Changes are **ephemeral** -- they take effect immediately but revert on restart.
 Set `cron-exec` to `default` to clear the override and fall back to the chat model.
 
 Note: The `cron` role controls auto-tagging only. Use `cron-exec` to set the default execution model for all cron jobs.
+
+**Scope:** `modelSet` changes the model within the *current* runtime adapter (e.g., switching from `sonnet` to `opus` within the Claude adapter, or switching between models on OpenRouter). Setting `model` to a runtime name like `openrouter` or `gemini` on the `chat` role swaps the active adapter entirely. However, there is no per-message prefix routing (e.g., `/sonnet` or `/gemini-flash` in a message does nothing) — all messages in a session use the active runtime until changed via `modelSet`.

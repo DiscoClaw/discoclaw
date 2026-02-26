@@ -87,6 +87,10 @@ DiscoClaw supports a shareable markdown recipe format for passing integrations b
 
 Author one recipe file for an integration, share it, then let another user's DiscoClaw agent consume it and produce a local implementation checklist before coding.
 
+### MCP (Model Context Protocol)
+
+When using the Claude runtime, you can connect external tool servers via MCP. Place a `.mcp.json` file in your workspace directory to configure servers — their tools become available during conversations. See [docs/mcp.md](docs/mcp.md) for the config format, examples, and troubleshooting.
+
 ## Prerequisites
 
 **End users:**
