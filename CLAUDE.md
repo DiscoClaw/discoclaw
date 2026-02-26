@@ -29,6 +29,7 @@ Never auto-load all `.context/` modules. Read only what the task requires.
 | Task tracking | `.context/tasks.md` |
 | Architecture / system overview | `.context/architecture.md` |
 | Tool capabilities / browser automation | `.context/tools.md` |
+| Voice system (STT/TTS, audio pipeline, actions) | `.context/voice.md` |
 
 See `.context/README.md` for details.
 

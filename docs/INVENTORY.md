@@ -91,6 +91,7 @@ All actions are gated by category env flags (off by default except channels).
 | Memory (durable memory mutation) | remember, forget, show | `actions-memory.ts` | **done** |
 | Defer scheduler (in-process timers with concurrency limits) | — | `src/discord/defer-scheduler.ts` | **done** |
 | Deferred runner (wires defer action type into action/runtime pipeline) | — | `src/discord/deferred-runner.ts` | **done** |
+| Voice (session control) | join, leave, status, mute, deafen | `actions-voice.ts` | **done** |
 
 ## 7. Task Sync Subsystem (`src/tasks/`)
 
@@ -190,6 +191,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | MCP guide (config, examples, troubleshooting) | `docs/mcp.md` | **done** |
 | MCP example template | `templates/mcp.json` | **done** |
 | Releasing / npm publish guide | `docs/releasing.md` | **done** |
+| Voice setup guide | `docs/voice.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
 
@@ -271,6 +273,29 @@ CI/CD pipeline for publishing DiscoClaw to npm on versioned releases.
 |-----------|---------|--------|
 | GitHub Actions publish workflow (triggered on `v*` tags, OIDC Trusted Publishing) | `.github/workflows/publish.yml` | **done** |
 | Releasing guide | `docs/releasing.md` | **done** |
+
+## 22. Voice System (`src/voice/`)
+
+Real-time voice chat: STT transcription, AI response generation, TTS synthesis, and Discord voice playback. See `docs/voice.md` for setup.
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| Voice types (`VoiceConfig`, `AudioFrame`, `SttProvider`, `TtsProvider`) | `src/voice/types.ts` | **done** |
+| Voice connection manager (per-guild connections, reconnect logic) | `src/voice/connection-manager.ts` | **done** |
+| Audio pipeline manager (orchestrates STT/TTS/responder lifecycle per guild) | `src/voice/audio-pipeline.ts` | **done** |
+| Audio receiver (Opus decode, 48kHz→16kHz downsample, feed STT) | `src/voice/audio-receiver.ts` | **done** |
+| Voice responder (AI invoke → TTS → audio playback, generation-based cancellation) | `src/voice/voice-responder.ts` | **done** |
+| Deepgram STT provider (Nova-3 streaming via WebSocket) | `src/voice/stt-deepgram.ts` | **done** |
+| Cartesia TTS provider (Sonic-3 via WebSocket, PCM s16le output) | `src/voice/tts-cartesia.ts` | **done** |
+| Opus decoder factory (`@discordjs/opus` wrapper) | `src/voice/opus.ts` | **done** |
+| STT provider factory | `src/voice/stt-factory.ts` | **done** |
+| TTS provider factory | `src/voice/tts-factory.ts` | **done** |
+| Presence handler (auto-join/leave based on user voice state) | `src/voice/presence-handler.ts` | **done** |
+| Transcript mirror (posts voice conversation text to Discord channel) | `src/voice/transcript-mirror.ts` | **done** |
+| Voice action flags (restricted action subset for voice invocations) | `src/voice/voice-action-flags.ts` | **done** |
+| Voice actions (join/leave/status/mute/deafen) | `src/discord/actions-voice.ts` | **done** |
+
+Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DISCOCLAW_TTS_PROVIDER`, `DISCOCLAW_VOICE_HOME_CHANNEL`, `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY`.
 
 ---
 

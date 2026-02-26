@@ -91,6 +91,7 @@ const BASE_CRON_ACTION_FLAGS: ActionCategoryFlags = {
   memory: false,
   config: false,
   defer: false,
+  voice: false,
 };
 
 function makeCronActionFlags(overrides?: Partial<ActionCategoryFlags>): ActionCategoryFlags {
@@ -361,6 +362,34 @@ describe('executeCronJob', () => {
     expect(executeDiscordActionsSpy).toHaveBeenCalledOnce();
     const subsArg = executeDiscordActionsSpy.mock.calls[0][3];
     expect(subsArg).toMatchObject({ imagegenCtx });
+
+    executeDiscordActionsSpy.mockRestore();
+  });
+
+  it('passes voiceCtx to executeDiscordActions when present', async () => {
+    const executeDiscordActionsSpy = vi.spyOn(discordActions, 'executeDiscordActions');
+    const responseWithAction = '<discord-action>{"type":"voiceStatus"}</discord-action>';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: responseWithAction };
+        yield { type: 'done' };
+      },
+    };
+    const voiceCtx = { voiceManager: { join: vi.fn(), leave: vi.fn(), getState: vi.fn(), getConnection: vi.fn() } } as any;
+    const ctx = makeCtx({
+      runtime,
+      discordActionsEnabled: true,
+      actionFlags: makeCronActionFlags({ voice: true } as any),
+      voiceCtx,
+    });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    expect(executeDiscordActionsSpy).toHaveBeenCalledOnce();
+    const subsArg = executeDiscordActionsSpy.mock.calls[0][3];
+    expect(subsArg).toMatchObject({ voiceCtx });
 
     executeDiscordActionsSpy.mockRestore();
   });

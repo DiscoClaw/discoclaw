@@ -54,6 +54,21 @@ Recurring tasks defined as forum threads in plain language — no crontab, no se
 
 **Why Discord fits:** forum threads = job definitions, archive/unarchive = pause/resume, no separate scheduler UI needed.
 
+## Voice — the bot talks back
+
+DiscoClaw can join Discord voice channels for real-time conversation: listen via speech-to-text, think with the AI runtime, and speak the response via text-to-speech.
+
+- **STT** — Deepgram Nova-3 streaming transcription (WebSocket)
+- **TTS** — Cartesia Sonic-3 speech synthesis (WebSocket, 24 kHz PCM)
+- **Barge-in** — interrupt the bot mid-sentence by speaking; playback stops immediately
+- **Auto-join** — optionally join/leave channels automatically when you enter or leave
+- **Transcript mirror** — voice conversations are mirrored to a text channel for persistence
+- **Voice actions** — the AI can execute a restricted action subset (messaging, tasks, memory) during voice
+
+Voice is **off by default**. Enable with `DISCOCLAW_VOICE_ENABLED=1` plus API keys for your STT/TTS providers. Requires Node 22+ (for native WebSocket used by Cartesia TTS) and C++ build tools (for the `@discordjs/opus` native addon).
+
+Full setup guide: [docs/voice.md](docs/voice.md)
+
 ## How it works
 
 DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with Gemini, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). The OpenAI-compatible and OpenRouter adapters support optional tool use (function calling) when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:

@@ -30,6 +30,8 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'modelShow',
   // Forge
   'forgeStatus',
+  // Voice
+  'voiceStatus',
 ]);
 
 export function hasQueryAction(actionTypes: string[]): boolean {

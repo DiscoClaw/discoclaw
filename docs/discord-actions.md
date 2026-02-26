@@ -43,6 +43,7 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/defer-scheduler.ts` (defer scheduler implementation)
 - `src/discord/actions-config.ts`
 - `src/discord/actions-imagegen.ts`
+- `src/discord/actions-voice.ts`
 - `src/discord/reaction-prompts.ts`
 
 Channel action types (in `src/discord/actions-channels.ts`):
@@ -81,6 +82,9 @@ Config action types (in `src/discord/actions-config.ts`):
 
 Imagegen action types (in `src/discord/actions-imagegen.ts`):
 - `generateImage`
+
+Voice action types (in `src/discord/actions-voice.ts`):
+- `voiceJoin`, `voiceLeave`, `voiceStatus`, `voiceMute`, `voiceDeafen`
 
 Reaction prompt types (in `src/discord/reaction-prompts.ts`):
 - `reactionPrompt` (gated under messaging flag — only available when messaging actions are enabled)
@@ -299,6 +303,22 @@ Env: `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0). Requires at least one of 
 Context: Requires `ImagegenContext` with `apiKey` (OpenAI), `geminiApiKey`, `baseUrl`, and `defaultModel`.
 Available in cron flows when `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` is set — follows the env flag rather than being hardcoded off.
 
+### Voice Actions (`actions-voice.ts`)
+
+Allow the model to control voice channel presence and state.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `voiceJoin` | Join a voice channel by name or ID | Yes |
+| `voiceLeave` | Leave the current voice connection | Yes |
+| `voiceStatus` | Check current voice connection state | No |
+| `voiceMute` | Mute or unmute the bot in voice | Yes |
+| `voiceDeafen` | Deafen or undeafen the bot in voice | Yes |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_VOICE` (default 0, requires `DISCOCLAW_VOICE_ENABLED=1`).
+Context: Requires `VoiceContext` with a `VoiceConnectionManager` instance.
+Disabled in cron flows — voice actions require a live Discord guild context.
+
 ### Reaction Prompt Actions (`reaction-prompts.ts`)
 
 Allow the model to present an emoji-based multiple-choice question to the user without requiring a typed reply.
@@ -321,6 +341,7 @@ When actions are executed within a cron job (via `src/cron/executor.ts`), the fo
 - `memory` — no user context in cron flows
 - `config` — no relevant runtime context in cron flows
 - `defer` — deferred runs target Discord message flows, not cron flows
+- `voice` — voice actions require a live Discord guild context
 
 The following categories are **enabled** in cron flows (gated by their respective env flags):
 

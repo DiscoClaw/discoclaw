@@ -109,6 +109,7 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.DirectMessages,
       ...((params.reactionHandlerEnabled || params.reactionRemoveHandlerEnabled) ? [GatewayIntentBits.GuildMessageReactions] : []),
+      ...(params.voiceEnabled ? [GatewayIntentBits.GuildVoiceStates] : []),
     ],
     partials: [
       Partials.Channel,

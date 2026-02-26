@@ -4,6 +4,7 @@ import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection
 import type { ActionCategoryFlags, DiscordActionResult } from './actions.js';
 import { TaskStore } from '../tasks/store.js';
 import { _resetDestructiveConfirmationForTest } from './destructive-confirmation.js';
+import { shouldTriggerFollowUp } from './action-categories.js';
 
 const ALL_FLAGS: ActionCategoryFlags = {
   channels: true,
@@ -298,6 +299,27 @@ describe('parseDiscordActions', () => {
     expect(actions).toHaveLength(0);
     expect(strippedUnrecognizedTypes).toEqual(['generateImage']);
   });
+
+  it('includes voice action types when voice flag is true', () => {
+    const input = '<discord-action>{"type":"voiceJoin","channel":"voice-chat"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, { ...ALL_FLAGS, voice: true });
+    expect(actions).toEqual([{ type: 'voiceJoin', channel: 'voice-chat' }]);
+    expect(strippedUnrecognizedTypes).toEqual([]);
+  });
+
+  it('excludes voice action types when voice flag is false', () => {
+    const input = '<discord-action>{"type":"voiceJoin","channel":"voice-chat"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, { ...ALL_FLAGS, voice: false });
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toEqual(['voiceJoin']);
+  });
+
+  it('excludes voice action types when voice flag is omitted', () => {
+    const input = '<discord-action>{"type":"voiceLeave"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(0);
+    expect(strippedUnrecognizedTypes).toEqual(['voiceLeave']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -537,6 +559,15 @@ describe('executeDiscordActions', () => {
     expect(results[0].error).toContain('Channel');
   });
 
+  it('returns voice not-configured error when voiceCtx is absent', async () => {
+    const results = await executeDiscordActions(
+      [{ type: 'voiceJoin', channel: 'voice-chat' } as any],
+      makeCtx(makeMockGuild([])),
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({ ok: false, error: 'Voice subsystem not configured' });
+  });
+
   it('allows destructive actions with bypassDestructive confirmation context', async () => {
     const ban = vi.fn(async () => {});
     const guild = {
@@ -711,5 +742,19 @@ describe('discordActionsPromptSection', () => {
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS');
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT');
     expect(prompt).toContain('forces `defer` off');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shouldTriggerFollowUp — voice query actions
+// ---------------------------------------------------------------------------
+
+describe('shouldTriggerFollowUp (voice)', () => {
+  it('returns true when voiceStatus succeeds', () => {
+    const result = shouldTriggerFollowUp(
+      [{ type: 'voiceStatus' }],
+      [{ ok: true }],
+    );
+    expect(result).toBe(true);
   });
 });
