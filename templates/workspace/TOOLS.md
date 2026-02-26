@@ -221,7 +221,7 @@ Content-Type: application/json
 
 ### Exposure
 
-The server binds to `127.0.0.1` by default (loopback only). To receive webhooks from external services like GitHub, you need to expose the port. Options include reverse proxies, Tailscale Funnel, or Cloudflare Tunnels.
+The server binds to `127.0.0.1` by default (loopback only). To receive webhooks from external services like GitHub, you need to expose the port. See `docs/webhook-exposure.md` for setup instructions covering Tailscale Funnel, ngrok, and Caddy reverse proxy.
 
 ### Security notes
 
@@ -229,6 +229,10 @@ The server binds to `127.0.0.1` by default (loopback only). To receive webhooks 
 - Failed signature verification returns 401.
 - Max request body: 256 KB.
 - Webhook jobs run without Discord action permissions or tool access.
+
+### Webhooks vs. Automations
+
+Webhooks and automations (crons) are two trigger mechanisms for the same execution pipeline. Automations are **time-driven** — they fire on a cron schedule (e.g., "every weekday at 7 AM"). Webhooks are **event-driven** — they fire when an external service sends an HTTP POST. Both dispatch through the same `executeCronJob` pipeline, sharing runtime invocation, channel routing, model selection, and logging. If you're setting up one, you should know the other exists — see the [Cron Actions](#cron-actions-automations) section below for time-driven automations.
 
 ## Plan-Audit-Implement Workflow
 
@@ -402,7 +406,7 @@ Use taskList to check existing tasks before creating duplicates. Use taskShow/ta
 
 ### Cron Actions (Automations)
 
-**Automations** is the user-facing name for crons. Each automation lives as a thread in a dedicated Discord forum channel (typically called "automations"). When a user says "create an automation," "set up a scheduled task," or "run X every morning/weekly/etc.," respond with `cronCreate`. Use `cronList` to check what's already running before creating a new one.
+**Automations** is the user-facing name for crons. Each automation lives as a thread in a dedicated Discord forum channel (typically called "automations"). When a user says "create an automation," "set up a scheduled task," or "run X every morning/weekly/etc.," respond with `cronCreate`. Use `cronList` to check what's already running before creating a new one. For event-driven triggers (external HTTP POSTs from GitHub, monitoring, etc.), see the [Webhook Server](#webhook-server) section above.
 
 **cronCreate** — Create a new scheduled task:
 ```
