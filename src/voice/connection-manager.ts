@@ -66,6 +66,10 @@ export class VoiceConnectionManager {
     }
   }
 
+  getConnection(guildId: string): VoiceConnection | undefined {
+    return this.connections.get(guildId);
+  }
+
   getState(guildId: string): VoiceConnectionState | undefined {
     const connection = this.connections.get(guildId);
     if (!connection) return undefined;
