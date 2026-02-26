@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { LoggerLike } from '../logging/logger-like.js';
-import { TranscriptMirror, type TranscriptMirrorOpts } from './transcript-mirror.js';
+import { TranscriptMirror, type TranscriptMirrorOpts, type ActionResult } from './transcript-mirror.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -272,6 +272,57 @@ describe('TranscriptMirror', () => {
       const sentContent = (channel.send as ReturnType<typeof vi.fn>).mock.calls[0][0].content as string;
       expect(sentContent.length).toBe(2000);
       expect(sentContent.endsWith('\u2026')).toBe(true);
+    });
+  });
+
+  describe('postActionsExecuted', () => {
+    it('formats mixed success/failure results as a bulleted list', async () => {
+      const { mirror, channel } = createMirror();
+      const actions = [
+        { type: 'send_message' },
+        { type: 'create_task' },
+        { type: 'memory_store' },
+      ];
+      const results: ActionResult[] = [
+        { success: true, message: 'sent to #general' },
+        { success: false, message: 'permission denied' },
+        { success: true },
+      ];
+
+      await mirror.postActionsExecuted(actions, results);
+
+      const sentContent = (channel.send as ReturnType<typeof vi.fn>).mock.calls[0][0].content as string;
+      expect(sentContent).toContain('**Actions executed:**');
+      expect(sentContent).toContain('\u2705 **send_message** — sent to #general');
+      expect(sentContent).toContain('\u274c **create_task** — permission denied');
+      expect(sentContent).toContain('\u2705 **memory_store**');
+      // memory_store has no message, so no dash
+      expect(sentContent).not.toContain('**memory_store** —');
+    });
+
+    it('sends nothing for empty arrays', async () => {
+      const { mirror, channel } = createMirror();
+
+      await mirror.postActionsExecuted([], []);
+
+      expect(channel.send).not.toHaveBeenCalled();
+    });
+
+    it('truncates large result sets to 15 items with a count of remaining', async () => {
+      const { mirror, channel } = createMirror();
+      const actions = Array.from({ length: 20 }, (_, i) => ({ type: `action_${i}` }));
+      const results: ActionResult[] = actions.map(() => ({ success: true }));
+
+      await mirror.postActionsExecuted(actions, results);
+
+      const sentContent = (channel.send as ReturnType<typeof vi.fn>).mock.calls[0][0].content as string;
+      // Should contain first 15 items
+      expect(sentContent).toContain('**action_0**');
+      expect(sentContent).toContain('**action_14**');
+      // Should NOT contain items beyond the limit
+      expect(sentContent).not.toContain('**action_15**');
+      // Should show overflow count
+      expect(sentContent).toContain('\u2026 and 5 more');
     });
   });
 });

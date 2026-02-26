@@ -18,7 +18,10 @@ type Sendable = { send(content: string | { content: string; allowedMentions?: Me
 export interface TranscriptMirrorLike {
   postUserTranscription(username: string, text: string): Promise<void>;
   postBotResponse(botName: string, text: string): Promise<void>;
+  postActionsExecuted?(actions: { type: string }[], results: ActionResult[]): Promise<void>;
 }
+
+export type ActionResult = { success: boolean; message?: string };
 
 export type TranscriptMirrorOpts = {
   client: Client;
@@ -72,6 +75,30 @@ export class TranscriptMirror implements TranscriptMirrorLike {
   async postBotResponse(botName: string, text: string): Promise<void> {
     if (!text.trim()) return;
     const content = `**${sanitizeUsername(botName)}** (voice reply): ${text}`;
+    await this.send(content);
+  }
+
+  /**
+   * Post a summary of executed actions to the transcript channel.
+   * Formats each action as a bulleted line with success/failure status.
+   */
+  async postActionsExecuted(actions: { type: string }[], results: ActionResult[]): Promise<void> {
+    if (actions.length === 0) return;
+
+    const MAX_ITEMS = 15;
+    const items = actions.slice(0, MAX_ITEMS);
+    const lines = items.map((action, i) => {
+      const result = results[i];
+      const status = result?.success ? '\u2705' : '\u274c';
+      const detail = result?.message ? ` — ${result.message}` : '';
+      return `\u2022 ${status} **${action.type}**${detail}`;
+    });
+
+    if (actions.length > MAX_ITEMS) {
+      lines.push(`\u2026 and ${actions.length - MAX_ITEMS} more`);
+    }
+
+    const content = `**Actions executed:**\n${lines.join('\n')}`;
     await this.send(content);
   }
 
