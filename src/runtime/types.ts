@@ -31,6 +31,7 @@ export type RuntimeId = 'claude_code' | 'openai' | 'openrouter' | 'codex' | 'gem
 
 export type RuntimeInvokeParams = {
   prompt: string;
+  systemPrompt?: string;
   model: string;
   cwd: string;
   sessionId?: string | null;

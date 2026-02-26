@@ -1,4 +1,4 @@
-import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeId } from './types.js';
+import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeId, RuntimeInvokeParams } from './types.js';
 import type { ChatGptTokenProvider } from './openai-auth.js';
 import { buildToolSchemas, OPENAI_TO_DISCO_NAME } from './openai-tool-schemas.js';
 import { executeToolCall } from './openai-tool-exec.js';
@@ -24,6 +24,35 @@ type ChatGptOAuthOpts = CommonOpts & {
 export type OpenAICompatOpts = ApiKeyOpts | ChatGptOAuthOpts;
 
 const TOOL_LOOP_CAP = 25;
+
+const SYSTEM_SENTINEL = '---\nThe sections above are internal system context.';
+
+/**
+ * Split a combined prompt into system + user messages.
+ * If `params.systemPrompt` is explicitly set, use that directly.
+ * Otherwise, auto-detect by scanning for the sentinel delimiter.
+ */
+export function splitSystemPrompt(params: Pick<RuntimeInvokeParams, 'prompt' | 'systemPrompt'>): { system: string | undefined; user: string } {
+  if (params.systemPrompt) {
+    return { system: params.systemPrompt, user: params.prompt };
+  }
+
+  const idx = params.prompt.indexOf(SYSTEM_SENTINEL);
+  if (idx === -1) {
+    return { system: undefined, user: params.prompt };
+  }
+
+  const splitPoint = idx + SYSTEM_SENTINEL.length;
+  // Skip a single trailing newline after the sentinel if present
+  const afterSentinel = splitPoint < params.prompt.length && params.prompt[splitPoint] === '\n'
+    ? splitPoint + 1
+    : splitPoint;
+
+  return {
+    system: params.prompt.slice(0, splitPoint),
+    user: params.prompt.slice(afterSentinel),
+  };
+}
 
 /**
  * Returns true for models that require `max_completion_tokens` instead of `max_tokens`.
@@ -119,15 +148,17 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
 
         if (params.signal?.aborted) controller.abort();
 
+        const { system: sysContent, user: userContent } = splitSystemPrompt(params);
+
         try {
           opts.log?.debug({ url, model }, 'openai-compat: request');
 
           if (useTools) {
             // ── Tool-loop path (non-streaming rounds) ──────────────────
             const allowedRoots = [params.cwd, ...(params.addDirs ?? [])].filter(s => s !== '');
-            const messages: Array<Record<string, unknown>> = [
-              { role: 'user', content: params.prompt },
-            ];
+            const messages: Array<Record<string, unknown>> = [];
+            if (sysContent) messages.push({ role: 'system', content: sysContent });
+            messages.push({ role: 'user', content: userContent });
 
             for (let round = 0; round < TOOL_LOOP_CAP; round++) {
               const body = JSON.stringify({
@@ -214,9 +245,13 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
             yield { type: 'done' };
           } else {
             // ── Streaming text path (no tools) ─────────────────────────
+            const streamMessages: Array<Record<string, unknown>> = [];
+            if (sysContent) streamMessages.push({ role: 'system', content: sysContent });
+            streamMessages.push({ role: 'user', content: userContent });
+
             const body = JSON.stringify({
               model,
-              messages: [{ role: 'user', content: params.prompt }],
+              messages: streamMessages,
               stream: true,
               ...tokenField,
             });
