@@ -231,6 +231,36 @@ Allow the model to manage scheduled tasks: create, update, pause/resume, delete,
 | `cronSync` | Run full bidirectional sync (tags, names, status messages) | Yes |
 | `cronTagMapReload` | Reload the tag map from disk | Yes |
 
+#### `cronCreate` Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Display name for the cron job |
+| `schedule` | string | Yes | Cron expression (e.g. `0 9 * * 1-5`) |
+| `prompt` | string | Yes | Prompt text sent to the AI runtime each run |
+| `model` | string | No | Override model for this cron's executions |
+| `tags` | string[] | No | Forum tags to apply to the backing thread |
+| `allowedActions` | string | No | Comma-separated list of action type names permitted during this job's execution (e.g. `"sendMessage,taskCreate"`). Narrows the globally-enabled set — cannot grant types that are disabled by env flags. Omit or set to `""` to allow all globally-enabled types. |
+
+#### `cronUpdate` Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | Cron job ID to update |
+| `name` | string | No | New display name |
+| `schedule` | string | No | New cron expression |
+| `prompt` | string | No | New prompt text |
+| `model` | string | No | New model override (pass `""` to clear) |
+| `tags` | string[] | No | Replacement tag list |
+| `allowedActions` | string | No | Replacement `allowedActions` value. Same comma-separated format as `cronCreate`. Pass `""` to clear the restriction and restore full access to globally-enabled action types. |
+
+#### `allowedActions` Semantics
+
+- **Format:** comma-separated action type name strings, e.g. `"sendMessage,taskCreate,taskUpdate"`. Whitespace around commas is ignored.
+- **Narrowing only:** `allowedActions` can only restrict the set that global env flags permit. Listing a type that is disabled by its env flag (or excluded from cron flows entirely) has no effect — those types remain unavailable.
+- **Clearing:** set `allowedActions` to `""` (empty string) on `cronUpdate` to remove the restriction. When cleared, the job inherits the full set of globally-enabled, cron-permitted action types.
+- **Enforcement:** the cron executor (`src/cron/executor.ts`) reads the stored `allowedActions` value at execution time and intersects it with the global `cronActionFlags` before building the action prompt and running the job.
+
 Env: `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1, requires cron subsystem enabled).
 Context: Requires `CronContext` with scheduler, forum channel, tag map, stats store, and runtime.
 Cron-to-cron restriction: Cron jobs themselves cannot emit cron actions (the `crons` flag is forced to `false` in the cron executor's action flags to prevent self-modification loops).
