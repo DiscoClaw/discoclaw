@@ -268,6 +268,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | `!plan` | Plan management subcommands | `src/discord/plan-commands.ts` | **done** |
 | `!forge` | Forge control subcommands | `src/discord/forge-commands.ts` | **done** |
 | `!voice` | Voice subsystem commands: `status` (connection + config), `set <name>` (switch Deepgram TTS voice at runtime, ephemeral), `help` | `src/discord/voice-command.ts` (primary), `src/discord/voice-status-command.ts` (status renderer) | **done** |
+| `!secret` | DM-only command to securely set/unset `.env` secrets (e.g. API keys); bypasses AI runtime, no echo | `src/discord/secret-command.ts` | **done** |
 
 ## 21. npm Publishing
 
