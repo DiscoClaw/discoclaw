@@ -264,7 +264,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | `!memory` | Memory read/write subcommands (see section 4) | `src/discord/memory-commands.ts` | **done** |
 | `!plan` | Plan management subcommands | `src/discord/plan-commands.ts` | **done** |
 | `!forge` | Forge control subcommands | `src/discord/forge-commands.ts` | **done** |
-| `!voice status` | Reports voice subsystem state: connection, STT/TTS provider+model, auto-join flag | `src/discord/voice-commands.ts` | **done** |
+| `!voice status` | Reports voice subsystem state: connection, STT/TTS provider+model, auto-join flag | `src/discord/voice-status-command.ts` | **done** |
 
 ## 21. npm Publishing
 

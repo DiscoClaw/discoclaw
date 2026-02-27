@@ -20,6 +20,8 @@ export type VoiceStatusSnapshot = {
   autoJoin: boolean;
   actionsEnabled: boolean;
   connections: VoiceConnectionEntry[];
+  deepgramSttModel?: string;
+  deepgramTtsVoice?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -48,7 +50,8 @@ export function renderVoiceStatusReport(
   // STT
   if (snapshot.sttProvider === 'deepgram') {
     const keyLabel = snapshot.deepgramKeySet ? 'key: set' : 'key: MISSING';
-    lines.push(`STT: ${snapshot.sttProvider} (${keyLabel})`);
+    const modelLabel = snapshot.deepgramSttModel ? `, model: ${snapshot.deepgramSttModel}` : '';
+    lines.push(`STT: ${snapshot.sttProvider} (${keyLabel}${modelLabel})`);
   } else {
     lines.push(`STT: ${snapshot.sttProvider}`);
   }
@@ -56,7 +59,8 @@ export function renderVoiceStatusReport(
   // TTS
   if (snapshot.ttsProvider === 'deepgram') {
     const keyLabel = snapshot.deepgramKeySet ? 'key: set' : 'key: MISSING';
-    lines.push(`TTS: ${snapshot.ttsProvider} (${keyLabel})`);
+    const voiceLabel = snapshot.deepgramTtsVoice ? `, voice: ${snapshot.deepgramTtsVoice}` : '';
+    lines.push(`TTS: ${snapshot.ttsProvider} (${keyLabel}${voiceLabel})`);
   } else if (snapshot.ttsProvider === 'cartesia') {
     const keyLabel = snapshot.cartesiaKeySet ? 'key: set' : 'key: MISSING';
     lines.push(`TTS: ${snapshot.ttsProvider} (${keyLabel})`);

@@ -793,11 +793,14 @@ const botParams = {
   healthCommandsEnabled,
   healthVerboseAllowlist,
   voiceEnabled: cfg.voiceEnabled,
+  voiceAutoJoin: cfg.voiceAutoJoin,
   voiceModelCtx: voiceModelRef,
   voiceSttProvider: cfg.voiceSttProvider,
   voiceTtsProvider: cfg.voiceTtsProvider,
   voiceHomeChannel: cfg.voiceHomeChannel,
   deepgramApiKey: cfg.deepgramApiKey,
+  deepgramSttModel: cfg.deepgramSttModel,
+  deepgramTtsVoice: cfg.deepgramTtsVoice,
   cartesiaApiKey: cfg.cartesiaApiKey,
   botStatus: cfg.botStatus,
   botActivity: cfg.botActivity,
@@ -1316,6 +1319,8 @@ if (taskCtx) {
         });
       },
     });
+
+    botParams.voiceStatusCtx = { voiceManager };
 
     if (cfg.discordActionsVoice) {
       botParams.voiceCtx = { voiceManager };

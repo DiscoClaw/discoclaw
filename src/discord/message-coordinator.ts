@@ -215,8 +215,12 @@ export type BotParams = {
   voiceTtsProvider?: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
   voiceHomeChannel?: string;
   deepgramApiKey?: string;
+  deepgramSttModel?: string;
+  deepgramTtsVoice?: string;
   cartesiaApiKey?: string;
   openaiApiKey?: string;
+  /** Always-present voice manager ref for status command — set when voiceEnabled, independent of discordActionsVoice. */
+  voiceStatusCtx?: VoiceContext;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -717,11 +721,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         return;
       }
 
-      // Handle !voice / !voice status — voice subsystem status report, gated behind voiceEnabled.
-      if (!isBotMessage && params.voiceEnabled) {
+      // Handle !voice / !voice status — voice subsystem status report.
+      if (!isBotMessage) {
         const voiceContent = String(msg.content ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
         if (voiceContent === '!voice' || parseVoiceStatusCommand(String(msg.content ?? ''))) {
-          const connMap = params.voiceCtx?.voiceManager.listConnections() ?? new Map();
+          if (!params.voiceEnabled) {
+            await msg.reply({ content: 'Voice is disabled. Set `DISCOCLAW_VOICE_ENABLED=1` to enable.', allowedMentions: NO_MENTIONS });
+            return;
+          }
+          const connMap = (params.voiceCtx ?? params.voiceStatusCtx)?.voiceManager.listConnections() ?? new Map();
           const voiceSnapshot: VoiceStatusSnapshot = {
             enabled: true,
             sttProvider: params.voiceSttProvider ?? 'deepgram',
@@ -731,6 +739,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             cartesiaKeySet: Boolean(params.cartesiaApiKey),
             autoJoin: params.voiceAutoJoin ?? false,
             actionsEnabled: params.discordActionsVoice ?? false,
+            deepgramSttModel: params.deepgramSttModel,
+            deepgramTtsVoice: params.deepgramTtsVoice,
             connections: [...connMap.entries()].map(([guildId, info]) => ({
               guildId,
               channelId: info.channelId,

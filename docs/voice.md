@@ -23,7 +23,7 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Channel name or ID for transcript mirroring and prompt context loading |
 | `DISCOCLAW_VOICE_MODEL` | No | — | AI model override for voice response invocations |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations |
-| `DEEPGRAM_STT_MODEL` | No | `nova-3` | Deepgram STT model to use (see [STT Models](#deepgram-stt-models)) |
+| `DEEPGRAM_STT_MODEL` | No | `nova-3-conversationalai` | Deepgram STT model to use (see [STT Models](#deepgram-stt-models)) |
 | `DEEPGRAM_TTS_VOICE` | No | `aura-2-asteria-en` | Deepgram TTS voice to use (see [TTS Voices](#deepgram-tts-voices-aura-2)) |
 | `DEEPGRAM_API_KEY` | Yes* | — | Deepgram API key (*required when `DISCOCLAW_STT_PROVIDER=deepgram` or `DISCOCLAW_TTS_PROVIDER=deepgram`) |
 | `CARTESIA_API_KEY` | Yes* | — | Cartesia API key (*required when `DISCOCLAW_TTS_PROVIDER=cartesia`) |
@@ -37,7 +37,7 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 2. Generate an API key in the Deepgram console
 3. Set `DEEPGRAM_API_KEY=<your-key>` in `.env`
 
-The STT provider streams audio to Deepgram via WebSocket (`wss://api.deepgram.com/v1/listen`) as linear16 PCM at 16 kHz. The model is selected by `DEEPGRAM_STT_MODEL` (default: `nova-3`). See [STT Models](#deepgram-stt-models) for available options.
+The STT provider streams audio to Deepgram via WebSocket (`wss://api.deepgram.com/v1/listen`) as linear16 PCM at 16 kHz. The model is selected by `DEEPGRAM_STT_MODEL` (default: `nova-3-conversationalai`). See [STT Models](#deepgram-stt-models) for available options.
 
 ### Deepgram (TTS — Aura REST)
 
@@ -70,11 +70,11 @@ Provider selection is handled by factory functions in `src/voice/stt-factory.ts`
 
 ## Deepgram STT Models
 
-Set via `DEEPGRAM_STT_MODEL`. Default: `nova-3`.
+Set via `DEEPGRAM_STT_MODEL`. Default: `nova-3-conversationalai`.
 
 | Model | Description |
 |-------|-------------|
-| `nova-3` | General-purpose, highest accuracy (default) |
+| `nova-3` | General-purpose, highest accuracy |
 | `nova-3-conversationalai` | Optimised for conversational/assistant use cases |
 | `nova-3-medical` | Optimised for medical terminology and dictation |
 | `nova-3-finance` | Optimised for financial terminology |
@@ -122,7 +122,7 @@ The `!voice status` bang command reports the current voice subsystem state witho
 
 **Requires:** `DISCOCLAW_VOICE_ENABLED=1`. If voice is disabled, the command returns a brief disabled notice.
 
-This command is handled by the voice commands handler (`src/discord/voice-commands.ts`) and does not require `DISCOCLAW_DISCORD_ACTIONS_VOICE=1`.
+This command is handled by `src/discord/voice-status-command.ts` (parser + renderer) and `src/discord/message-coordinator.ts` (handler wiring), and does not require `DISCOCLAW_DISCORD_ACTIONS_VOICE=1`.
 
 ## Discord Permissions
 
