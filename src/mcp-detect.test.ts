@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { detectMcpServers, logMcpDetection } from './mcp-detect.js';
+import { detectMcpServers, logMcpDetection, MCP_SERVER_NAME_MAX_LENGTH, validateMcpServerNames } from './mcp-detect.js';
 
 function mockLog() {
   return { info: vi.fn(), warn: vi.fn() };
@@ -145,6 +145,26 @@ describe('detectMcpServers', () => {
       status: 'found',
       servers: [{ name: 'simple', command: '/usr/local/bin/mcp-server' }],
     });
+  });
+});
+
+describe('validateMcpServerNames', () => {
+  it('returns no warnings for a server name under the limit', () => {
+    const servers = [{ name: 'short', command: 'npx' }];
+    expect(validateMcpServerNames(servers)).toEqual([]);
+  });
+
+  it('returns no warnings for a server name at exactly the limit', () => {
+    const servers = [{ name: 'a'.repeat(MCP_SERVER_NAME_MAX_LENGTH), command: 'npx' }];
+    expect(validateMcpServerNames(servers)).toEqual([]);
+  });
+
+  it('returns a warning containing the server name when name exceeds the limit', () => {
+    const longName = 'a'.repeat(MCP_SERVER_NAME_MAX_LENGTH + 1);
+    const servers = [{ name: longName, command: 'npx' }];
+    const warnings = validateMcpServerNames(servers);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(longName);
   });
 });
 

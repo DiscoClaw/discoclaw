@@ -13,6 +13,26 @@ export type McpDetectResult =
   | { status: 'invalid'; reason: string };
 
 /**
+ * Maximum MCP server name length that avoids exceeding the 200-char API limit for
+ * tool_use.name. MCP tool names follow the pattern `mcp__<server>__<tool>`, so
+ * 64 chars for the server name leaves 129 chars for the tool name portion.
+ */
+export const MCP_SERVER_NAME_MAX_LENGTH = 64;
+
+/**
+ * Returns warning strings for any server whose name exceeds MCP_SERVER_NAME_MAX_LENGTH.
+ * Pure function — no logging side-effects.
+ */
+export function validateMcpServerNames(servers: McpServerEntry[]): string[] {
+  return servers
+    .filter((s) => s.name.length > MCP_SERVER_NAME_MAX_LENGTH)
+    .map(
+      (s) =>
+        `MCP server name "${s.name}" is ${s.name.length} chars, exceeding the ${MCP_SERVER_NAME_MAX_LENGTH}-char limit — tool_use.name may exceed the 200-char API limit`,
+    );
+}
+
+/**
  * Detect MCP servers configured in the workspace `.mcp.json` file.
  * Returns structured info for startup health logging.
  */

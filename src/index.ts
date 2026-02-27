@@ -49,7 +49,7 @@ import { initTasksForumGuard } from './tasks/forum-guard.js';
 import { reloadTagMapInPlace } from './tasks/tag-map.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { probeWorkspacePermissions } from './workspace-permissions.js';
-import { detectMcpServers } from './mcp-detect.js';
+import { detectMcpServers, validateMcpServerNames } from './mcp-detect.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
 import { loadCronTagMapStrict } from './cron/tag-map.js';
@@ -366,6 +366,11 @@ if (mcpResult.status === 'missing') {
     { servers: serverNames, count: serverNames.length, strictMcpConfig: cfg.strictMcpConfig },
     msg,
   );
+}
+if (mcpResult.status === 'found' && mcpResult.servers.length > 0) {
+  for (const warning of validateMcpServerNames(mcpResult.servers)) {
+    log.warn({}, warning);
+  }
 }
 
 // --- Resolve bot display name ---

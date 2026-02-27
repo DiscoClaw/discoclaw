@@ -53,4 +53,18 @@ describe('mapRuntimeErrorToUserMessage', () => {
     const msg = mapRuntimeErrorToUserMessage('context_length_exceeded');
     expect(msg).toBe('The conversation context exceeded the model\'s limit. Try a shorter message or start a new conversation.');
   });
+
+  it('maps Anthropic tool_use.name 200-char error to MCP server name guidance', () => {
+    const msg = mapRuntimeErrorToUserMessage(
+      'messages.0.content.0.tool_use.name: String should have at most 200 characters'
+    );
+    expect(msg).toContain('tool name exceeded the Anthropic API 200-character limit');
+    expect(msg).toContain('.mcp.json');
+  });
+
+  it('does not false-match unrelated strings mentioning 200 characters', () => {
+    const msg = mapRuntimeErrorToUserMessage('response must be at most 200 characters');
+    expect(msg).toContain('Runtime error:');
+    expect(msg).not.toContain('tool name exceeded');
+  });
 });
