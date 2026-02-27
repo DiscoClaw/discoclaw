@@ -54,6 +54,7 @@ Recurring tasks defined as forum threads in plain language — no crontab, no se
 
 **Why Discord fits:** forum threads = job definitions, archive/unarchive = pause/resume, no separate scheduler UI needed.
 
+<!-- source-of-truth: docs/voice.md -->
 ## Voice — the bot talks back
 
 DiscoClaw can join Discord voice channels for real-time conversation: listen via speech-to-text, think with the AI runtime, and speak the response via text-to-speech.
@@ -121,6 +122,7 @@ When using the Claude runtime, you can connect external tool servers via MCP. Pl
 **Contributors (from source):**
 - Everything above, plus **pnpm** — enable via Corepack (`corepack enable`) or install separately
 
+<!-- source-of-truth: docs/discord-bot-setup.md -->
 ## Quick start
 
 ### Discord setup (private server + bot)
@@ -139,6 +141,31 @@ When using the Claude runtime, you can connect external tool servers via MCP. Pl
    - `DISCORD_GUILD_ID=<server id>` (recommended; required for auto-creating forum channels)
 
 Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
+
+## Documentation
+
+### Getting Started
+
+- [Discord bot setup](docs/discord-bot-setup.md) — create a bot, invite it, configure permissions
+- [MCP (Model Context Protocol)](docs/mcp.md) — connect external tool servers
+
+### Features & Usage
+
+- [Plan & Forge](docs/plan-and-forge.md) — autonomous planning and code generation
+- [Discord actions](docs/discord-actions.md) — channels, messaging, moderation, tasks, crons
+- [Voice](docs/voice.md) — real-time voice chat setup (STT/TTS)
+- [Shareable recipes](docs/discoclaw-recipe-spec.md) — integration recipe format spec
+
+### Development
+
+- [Philosophy](docs/philosophy.md) — design principles and trade-offs
+- [Releasing](docs/releasing.md) — npm publish workflow and versioning
+- [Inventory](docs/INVENTORY.md) — full component inventory and MVP status
+
+### Operations
+
+- [Webhook exposure](docs/webhook-exposure.md) — tunnel/proxy setup and webhook security
+- [Data migration](docs/data-migration.md) — migrating task data between formats
 
 ### Install and run
 

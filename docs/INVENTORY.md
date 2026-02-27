@@ -187,16 +187,14 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Bot setup guide | `docs/discord-bot-setup.md` | **done** |
 | Discord actions | `docs/discord-actions.md` | **done** |
 | Context modules | `.context/*.md` | **done** |
-| Token usage & efficiency | `docs/token-efficiency.md` | **done** |
 | Plan & Forge reference | `docs/plan-and-forge.md` | **done** |
-| Post-hard-cut tasks refactor plan | `docs/tasks-ground-zero-post-hard-cut-plan.md` | **done** |
 | Webhook exposure guide | `docs/webhook-exposure.md` | **done** |
 | MCP guide (config, examples, troubleshooting) | `docs/mcp.md` | **done** |
 | MCP example template | `templates/mcp.json` | **done** |
 | Releasing / npm publish guide | `docs/releasing.md` | **done** |
 | Voice setup guide | `docs/voice.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
-| README for new users | `README.md` | *needs rewrite for MVP audience* |
+| README for new users | `README.md` | **done** |
 
 ## 16. Pipeline Engine (`src/pipeline/`)
 
@@ -261,14 +259,14 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | `!health [verbose\|tools]` | Renders runtime metrics, config snapshot, and tool reports | `src/discord/health-command.ts`, `src/discord/health-command.test.ts` | **done** |
 | `!status` | Shows bot status summary | `src/discord/status-command.ts` | **done** |
 | `!restart` | Triggers graceful restart | `src/discord/restart-command.ts` | **done** |
-| `!stop` | Shuts down the bot process | `src/discord/stop-command.ts` | **done** |
+| `!stop` | Shuts down the bot process | `src/discord/message-coordinator.ts` | **done** |
 | `!models` | Lists registered runtime adapters | `src/discord/models-command.ts` | **done** |
 | `!update` | Pulls latest code and restarts | `src/discord/update-command.ts` | **done** |
 | `!memory` | Memory read/write subcommands (see section 4) | `src/discord/memory-commands.ts` | **done** |
 | `!plan` | Plan management subcommands | `src/discord/plan-commands.ts` | **done** |
 | `!forge` | Forge control subcommands | `src/discord/forge-commands.ts` | **done** |
 | `!voice` | Voice subsystem commands: `status` (connection + config), `set <name>` (switch Deepgram TTS voice at runtime, ephemeral), `help` | `src/discord/voice-command.ts` (primary), `src/discord/voice-status-command.ts` (status renderer) | **done** |
-| `!secret` | DM-only command to securely set/unset `.env` secrets (e.g. API keys); bypasses AI runtime, no echo | `src/discord/secret-command.ts` | **done** |
+| `!secret` | DM-only command to securely set/unset `.env` secrets (e.g. API keys); bypasses AI runtime, no echo | `src/discord/secret-commands.ts` | **done** |
 
 ## 21. npm Publishing
 
