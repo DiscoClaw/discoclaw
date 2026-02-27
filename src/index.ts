@@ -1260,7 +1260,7 @@ if (taskCtx) {
       && resolvedVoiceChannelId != null
       && Object.values(voiceActionFlags).some(v => v);
 
-    const voiceActionFollowupDepth = 2;
+    const voiceActionFollowupDepth = 1;
 
     const voiceInvokeAi = async (text: string): Promise<string> => {
       // Resolve model at invoke time so tier names (fast/capable) always resolve correctly
@@ -1312,14 +1312,24 @@ if (taskCtx) {
       for (let followUpDepth = 0; followUpDepth <= voiceActionFollowupDepth; followUpDepth++) {
         let result = '';
         let invokeHadError = false;
-        for await (const evt of limitedRuntime.invoke({
-          prompt: currentPrompt,
-          model: resolvedVoiceModel,
-          cwd: workspaceCwd,
-          tools: [],
-        })) {
-          if (evt.type === 'text_delta') result += evt.text;
-          if (evt.type === 'error') invokeHadError = true;
+        try {
+          for await (const evt of limitedRuntime.invoke({
+            prompt: currentPrompt,
+            model: resolvedVoiceModel,
+            cwd: workspaceCwd,
+            tools: [],
+            signal: AbortSignal.timeout(runtimeTimeoutMs),
+          })) {
+            if (evt.type === 'text_delta') result += evt.text;
+            if (evt.type === 'error') invokeHadError = true;
+          }
+        } catch (err: unknown) {
+          if (err instanceof Error && err.name === 'AbortError') {
+            log.warn('voice-responder: AI invocation timed out');
+            invokeHadError = true;
+          } else {
+            throw err;
+          }
         }
 
         // Action parsing and execution.
