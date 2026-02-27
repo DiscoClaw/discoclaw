@@ -129,14 +129,15 @@ For `medium/high`, include these fenced blocks.
 }
 ```
 
-If `low` risk recipes omit JSON contracts, prose must still clearly state:
+If `low` risk recipes omit JSON contracts, prose must still include the following exact labels:
 
-- Files to add/modify
-- Environment/config changes
-- Behavior changes
-- Out-of-scope constraints
-- Test scenarios and expected outcomes
-- Required checks (`pnpm build`, `pnpm test`)
+- `Files to add:`
+- `Files to modify:`
+- `Environment changes:`
+- `Runtime behavior changes:`
+- `Out of scope:`
+- `Scenarios:`
+- `Required checks:`
 
 ## Safety Requirements
 
