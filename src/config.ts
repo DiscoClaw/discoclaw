@@ -536,7 +536,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
 
   const fastModel = parseTrimmedString(env, 'DISCOCLAW_FAST_MODEL') ?? 'fast';
-  const voiceModel = voiceModelRaw ?? fastModel;
+  const runtimeModel = parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'capable';
+  const voiceModel = voiceModelRaw ?? runtimeModel;
 
   const tasksCwdOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_CWD');
   const tasksTagMapPathOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_TAG_MAP');
@@ -560,7 +561,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       restrictChannelIds,
       primaryRuntime,
 
-      runtimeModel: parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'capable',
+      runtimeModel,
       runtimeTools: parseRuntimeTools(env, warnings),
       runtimeTimeoutMs: parsePositiveNumber(env, 'RUNTIME_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       runtimeFallbackModel: parseTrimmedString(env, 'RUNTIME_FALLBACK_MODEL'),
