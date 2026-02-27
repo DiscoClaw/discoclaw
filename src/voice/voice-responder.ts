@@ -4,7 +4,7 @@
  * response, synthesizes speech, and plays it back into the voice channel.
  */
 
-import { Readable } from 'node:stream';
+import { PassThrough } from 'node:stream';
 import {
   createAudioPlayer,
   createAudioResource,
@@ -23,7 +23,7 @@ const DISCORD_CHANNELS = 2;
 /** Grace period (ms) after playback starts before barge-in detection kicks in.
  *  Discord speaking events can lag behind actual speech, so stale events from
  *  the user's original utterance can arrive right as playback begins. */
-const BARGE_IN_GRACE_MS = 500;
+const BARGE_IN_GRACE_MS = 1500;
 
 /** Callback to invoke the AI runtime and return a text response. */
 export type InvokeAiFn = (text: string) => Promise<string>;
@@ -105,37 +105,60 @@ export class VoiceResponder {
         this.log.warn({ err }, 'voice-responder: onBotResponse callback error');
       }
 
-      // Step 2: Synthesize TTS (buffer all frames)
+      // Step 2 & 3: Stream TTS -> upsample -> play incrementally
       this.log.info({ responseLength: response.length }, 'voice-responder: starting TTS');
-      const frames: Buffer[] = [];
-      let sampleRate = DISCORD_RATE;
-      for await (const frame of this.tts.synthesize(response)) {
-        if (gen !== this.generation) return;
-        frames.push(frame.buffer);
-        sampleRate = frame.sampleRate;
-      }
-
-      if (frames.length === 0 || gen !== this.generation) return;
-
-      const ttsBuffer = Buffer.concat(frames);
-      const discordBuffer = upsampleToDiscord(ttsBuffer, sampleRate, 1);
-
-      // Step 3: Play audio through the voice connection
-      const stream = Readable.from([discordBuffer], { objectMode: false });
+      const stream = new PassThrough();
       const resource = createAudioResource(stream, {
         inputType: StreamType.Raw,
       });
 
-      if (gen !== this.generation) return;
-
       this.player.play(resource);
       this._playbackStartedAt = Date.now();
-      this.log.info({ bufferSize: discordBuffer.length }, 'voice-responder: playback started');
+      this.log.info({}, 'voice-responder: streaming playback started');
+
+      let carry = Buffer.alloc(0);
+      let totalBytes = 0;
+
+      try {
+        for await (const frame of this.tts.synthesize(response)) {
+          if (gen !== this.generation) {
+            stream.destroy();
+            this.player.stop();
+            return;
+          }
+
+          // PCM alignment: prepend carry-over bytes from previous chunk
+          let chunk = frame.buffer;
+          if (carry.length > 0) {
+            chunk = Buffer.concat([carry, chunk]);
+            carry = Buffer.alloc(0);
+          }
+
+          // Trailing byte from an odd-length chunk is a partial s16le sample
+          const remainder = chunk.length % 2;
+          if (remainder !== 0) {
+            carry = chunk.subarray(chunk.length - remainder);
+            chunk = chunk.subarray(0, chunk.length - remainder);
+          }
+
+          if (chunk.length > 0) {
+            const upsampled = upsampleToDiscord(chunk, frame.sampleRate, 1);
+            stream.write(upsampled);
+            totalBytes += upsampled.length;
+          }
+        }
+
+        stream.end();
+      } catch (streamErr) {
+        stream.destroy();
+        this.player.stop();
+        throw streamErr;
+      }
 
       await waitForPlayerIdle(this.player);
 
       if (gen === this.generation) {
-        this.log.info({}, 'voice-responder: playback complete');
+        this.log.info({ totalBytes }, 'voice-responder: playback complete');
       }
     } catch (err) {
       if (gen !== this.generation) return;
