@@ -1,7 +1,7 @@
 /** Shared constants and utilities for sanitizing external content before passing it to the AI model. */
 
 /** Max characters of external content to include. */
-export const MAX_EXTERNAL_CONTENT_CHARS = 25_000;
+export const MAX_EXTERNAL_CONTENT_CHARS = 50_000;
 
 /**
  * Prompt injection detection patterns.
