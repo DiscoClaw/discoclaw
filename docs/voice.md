@@ -187,6 +187,13 @@ These are role permissions configured in Server Settings > Roles > (bot role). T
 
 Set this to the name or ID of a text channel. The transcript mirror resolves the channel lazily on first use (by ID first, then by name scan across guild caches).
 
+When voice is enabled, the server scaffold automatically creates two channels:
+
+- `voice` — the voice channel users join to speak with the bot
+- `voice-log` — a paired text channel for transcript mirroring
+
+`voice-log` is the recommended value for `DISCOCLAW_VOICE_HOME_CHANNEL` on new installs.
+
 ## Voice Actions
 
 Five Discord action types control voice session state:
