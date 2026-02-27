@@ -20,7 +20,8 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | `DISCOCLAW_VOICE_AUTO_JOIN` | No | `0` | Auto-join voice channels when an allowlisted user enters |
 | `DISCOCLAW_STT_PROVIDER` | No | `deepgram` | Speech-to-text provider: `deepgram` or `whisper` |
 | `DISCOCLAW_TTS_PROVIDER` | No | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, `openai`, or `kokoro` |
-| `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Channel name or ID for transcript mirroring and prompt context loading |
+| `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Voice audio channel name or ID used for prompt context loading |
+| `DISCOCLAW_VOICE_LOG_CHANNEL` | No | `voice-log` | Text channel name or ID where the transcript mirror posts conversation records |
 | `DISCOCLAW_VOICE_MODEL` | No | — | AI model override for voice response invocations |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations |
 | `DEEPGRAM_STT_MODEL` | No | `nova-3-conversationalai` | Deepgram STT model to use (see [STT Models](#deepgram-stt-models)) |
@@ -180,19 +181,25 @@ These are role permissions configured in Server Settings > Roles > (bot role). T
 
 ## Voice Home Channel
 
-`DISCOCLAW_VOICE_HOME_CHANNEL` serves a dual purpose:
+`DISCOCLAW_VOICE_HOME_CHANNEL` identifies the voice audio channel. It is used exclusively as a **prompt context source** — PA files, per-channel context, and durable memory are loaded from this channel's context when building prompts for voice AI invocations.
 
-1. **Transcript mirror target** — user speech transcriptions and bot responses are posted to this text channel, creating a persistent text record of voice conversations
-2. **Prompt context source** — PA files, per-channel context, and durable memory are loaded from this channel's context when building prompts for voice AI invocations
+Set this to the name or ID of the voice channel (e.g. `voice`).
 
-Set this to the name or ID of a text channel. The transcript mirror resolves the channel lazily on first use (by ID first, then by name scan across guild caches).
+## Transcript Mirror
+
+`TranscriptMirror` posts user speech transcriptions and bot responses to a dedicated text channel, creating a persistent record of voice conversations. The target channel is resolved in this order:
+
+1. `DISCOCLAW_VOICE_LOG_CHANNEL` — explicit name or ID override
+2. `voice-log` — the bootstrap-created paired text channel (zero-config default)
+
+The channel is resolved lazily on first use (by ID first, then by name scan across guild caches).
 
 When voice is enabled, the server scaffold automatically creates two channels:
 
 - `voice` — the voice channel users join to speak with the bot
-- `voice-log` — a paired text channel for transcript mirroring
+- `voice-log` — a paired text channel for transcript mirroring (the default log target)
 
-`voice-log` is the recommended value for `DISCOCLAW_VOICE_HOME_CHANNEL` on new installs.
+`DISCOCLAW_VOICE_HOME_CHANNEL` and `DISCOCLAW_VOICE_LOG_CHANNEL` are intentionally separate: the home channel provides AI prompt context from the voice audio channel, while the log channel is where transcript text is written.
 
 ## Voice Actions
 
@@ -247,7 +254,7 @@ User speaks
           -> TtsProvider (Cartesia Sonic-3 WebSocket | Deepgram Aura REST)
             -> AudioPlayer (24kHz->48kHz upsample, Discord playback)
 
-TranscriptMirror posts text records to the home channel at each stage.
+TranscriptMirror posts text records to the log channel (DISCOCLAW_VOICE_LOG_CHANNEL / voice-log) at each stage.
 ```
 
 - **ConnectionManager** (`connection-manager.ts`) — manages per-guild voice connections with reconnect logic
