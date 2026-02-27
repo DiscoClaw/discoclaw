@@ -2945,6 +2945,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               guildId: msg.guildId ?? undefined,
               channelName: String(ch?.name ?? '') || undefined,
               shadowSupersession: params.durableSupersessionShadow,
+              log: params.log,
             });
           }
         })

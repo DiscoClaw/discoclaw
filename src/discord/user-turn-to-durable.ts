@@ -1,4 +1,5 @@
 import type { RuntimeAdapter } from '../runtime/types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import type { DurableItem } from './durable-memory.js';
 import { loadDurableMemory, saveDurableMemory, addItem, deprecateItems, selectItemsForInjection } from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
@@ -139,6 +140,7 @@ export type ApplyUserTurnToDurableOpts = {
   guildId?: string;
   channelName?: string;
   shadowSupersession?: boolean;
+  log?: LoggerLike;
 };
 
 export async function applyUserTurnToDurable(opts: ApplyUserTurnToDurableOpts): Promise<void> {
@@ -169,8 +171,9 @@ export async function applyUserTurnToDurable(opts: ApplyUserTurnToDurableOpts): 
               it.text.toLowerCase().includes(needle) &&
               needle.length >= it.text.length * 0.6,
           ).length;
-          console.log(
-            `[shadowSupersession] item="${item.text}" supersedes="${item.supersedes}" matchCount=${matchCount}`,
+          opts.log?.info(
+            { item: item.text, supersedes: item.supersedes, matchCount },
+            '[shadowSupersession]',
           );
         } else {
           deprecateItems(store, item.supersedes);

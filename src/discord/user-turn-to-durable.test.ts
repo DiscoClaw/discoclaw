@@ -96,6 +96,18 @@ describe('parseExtractionResult', () => {
     const items = parseExtractionResult(raw);
     expect(items).toEqual([{ kind: 'preference', text: 'Uses Neovim as editor' }]);
   });
+
+  it('treats supersedes with empty string as absent (no supersedes field)', () => {
+    const raw = '[{"kind":"preference","text":"Uses Neovim as editor","supersedes":""}]';
+    const items = parseExtractionResult(raw);
+    expect(items).toEqual([{ kind: 'preference', text: 'Uses Neovim as editor' }]);
+  });
+
+  it('treats supersedes with whitespace-only string as absent', () => {
+    const raw = '[{"kind":"preference","text":"Uses Neovim as editor","supersedes":"   "}]';
+    const items = parseExtractionResult(raw);
+    expect(items).toEqual([{ kind: 'preference', text: 'Uses Neovim as editor' }]);
+  });
 });
 
 describe('EXTRACTION_PROMPT', () => {
