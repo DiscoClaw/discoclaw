@@ -465,6 +465,22 @@ describe('parseConfig', () => {
     expect(config.summaryToDurableEnabled).toBe(true);
   });
 
+  // --- Durable supersession shadow ---
+  it('defaults durableSupersessionShadow to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.durableSupersessionShadow).toBe(false);
+  });
+
+  it('parses DISCOCLAW_DURABLE_SUPERSESSION_SHADOW=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_DURABLE_SUPERSESSION_SHADOW: '1' }));
+    expect(config.durableSupersessionShadow).toBe(true);
+  });
+
+  it('parses DISCOCLAW_DURABLE_SUPERSESSION_SHADOW=0 as false', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_DURABLE_SUPERSESSION_SHADOW: '0' }));
+    expect(config.durableSupersessionShadow).toBe(false);
+  });
+
   // --- Short-term memory ---
   it('defaults shortTermMemoryEnabled to true', () => {
     const { config } = parseConfig(env());
