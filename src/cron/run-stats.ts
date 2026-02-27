@@ -27,6 +27,7 @@ export type CronRunRecord = {
   webhookSourceId?: string;   // URL path segment for /webhook/:source routing
   webhookSecret?: string;     // HMAC-SHA256 secret for signature verification
   silent?: boolean;           // suppress output when AI has nothing actionable to report
+  routingMode?: 'default' | 'json';  // how AI output is routed to Discord channels
   // Persisted cron definition fields — stored on parse so boots can skip AI re-parsing.
   schedule?: string;
   timezone?: string;
@@ -36,12 +37,12 @@ export type CronRunRecord = {
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3 | 4 | 5 | 6;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 6 as const;
+export const CURRENT_VERSION = 7 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -356,6 +357,10 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   // Absent records fall through to AI parsing on first boot after upgrade.
   if (store.version === 5) {
     store.version = 6;
+  }
+  // Migrate v6 → v7: no-op — new field (routingMode) is optional and defaults to 'default' behavior.
+  if (store.version === 6) {
+    store.version = 7;
   }
   return new CronRunStats(store, filePath);
 }

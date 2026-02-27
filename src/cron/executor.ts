@@ -1,4 +1,4 @@
-import type { Client } from 'discord.js';
+import type { Client, Guild } from 'discord.js';
 import type { RuntimeAdapter, ImageData, EngineEvent } from '../runtime/types.js';
 import type { CronJob } from './types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
@@ -24,6 +24,8 @@ import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import { buildCronPromptBody } from './cron-prompt.js';
+import { handleJsonRouteOutput } from './json-router.js';
 
 export type CronExecutorContext = {
   client: Client;
@@ -51,6 +53,7 @@ export type CronExecutorContext = {
   lockDir?: string;
   runControl?: CronRunControl;
 };
+
 
 async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string): Promise<void> {
   if (ctx.statsStore && job.cronId) {
@@ -165,13 +168,20 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       ctx.log?.warn?.({ jobId: job.id, err: paErr }, 'cron:exec PA file loading failed, continuing without context');
     }
 
+    // Fetch run record early — needed for prompt flags (silent, routingMode) and model selection.
+    const preRunRecord = ctx.statsStore && job.cronId ? ctx.statsStore.getRecord(job.cronId) : undefined;
+
     let prompt =
-      buildPromptPreamble(inlinedContext) + '\n\n' +
-      `You are executing a scheduled cron job named "${job.name}".\n\n` +
-      `Instruction: ${job.def.prompt}\n\n` +
-      `Your output will be posted automatically to the Discord channel #${job.def.channel}. ` +
-      `Do NOT explain how to post or suggest using bots/webhooks — just write the message content directly. ` +
-      `Keep your response concise and focused on the instruction above.`;
+      buildPromptPreamble(inlinedContext) +
+      '\n\n' +
+      buildCronPromptBody({
+        jobName: job.name,
+        promptTemplate: job.def.prompt,
+        channel: job.def.channel,
+        channelId: channelForSend.id,
+        silent: preRunRecord?.silent,
+        routingMode: preRunRecord?.routingMode === 'json' ? 'json' : undefined,
+      });
 
     const tools = await resolveEffectiveTools({
       workspaceCwd: ctx.cwd,
@@ -192,14 +202,8 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     // Per-cron model selection: per-job override > AI-classified > cron-exec default > chat fallback.
     const cronDefault = ctx.cronExecModel || ctx.model;
     let effectiveModel = cronDefault;
-    const preRunRecord = ctx.statsStore && job.cronId ? ctx.statsStore.getRecord(job.cronId) : undefined;
     if (preRunRecord) {
       effectiveModel = preRunRecord.modelOverride ?? preRunRecord.model ?? cronDefault;
-    }
-
-    // Silent mode: instruct the AI to respond with HEARTBEAT_OK when idle.
-    if (preRunRecord?.silent) {
-      prompt += '\n\nIMPORTANT: If there is nothing actionable to report, respond with exactly `HEARTBEAT_OK` and nothing else.';
     }
 
     ctx.log?.info(
@@ -370,7 +374,9 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
 
     // Silent-mode short-response gate: suppress paraphrased "nothing to report" responses.
-    if (preRunRecord?.silent && collectedImages.length === 0 && strippedText.length <= 80) {
+    // Skip in JSON routing mode — handleJsonRouteOutput already treats [] as a no-op,
+    // and short JSON payloads (e.g. a single-entry array) contain real content.
+    if (preRunRecord?.silent && preRunRecord?.routingMode !== 'json' && collectedImages.length === 0 && strippedText.length <= 80) {
       ctx.log?.info({ jobId: job.id, name: job.name, len: strippedText.length }, 'cron:exec silent short-response suppressed');
       if (ctx.statsStore && job.cronId) {
         try {
@@ -383,7 +389,30 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       return;
     }
 
-    await sendChunks(channelForSend, processedText, collectedImages);
+    if (preRunRecord?.routingMode === 'json') {
+      const resolveJsonChannel = (ref: string) => {
+        const ch = resolveChannel(guild, ref);
+        if (!ch) return undefined;
+        if (ctx.allowChannelIds) {
+          const chObj = ch as unknown as { id?: string; parentId?: string | null; isThread?: () => boolean };
+          const chId = chObj.id ?? '';
+          const isThread = typeof chObj.isThread === 'function' ? chObj.isThread() : false;
+          const parentId = isThread ? String(chObj.parentId ?? '') : '';
+          const allowed = ctx.allowChannelIds.has(chId) || (Boolean(parentId) && ctx.allowChannelIds.has(parentId));
+          if (!allowed) {
+            ctx.log?.warn({ jobId: job.id, channel: ref }, 'cron:json-routing channel not allowlisted, skipping');
+            return undefined;
+          }
+        }
+        return ch as unknown as typeof channelForSend;
+      };
+      await handleJsonRouteOutput(output, resolveJsonChannel, channelForSend, {
+        log: ctx.log,
+        jobId: job.id,
+      });
+    } else {
+      await sendChunks(channelForSend, processedText, collectedImages);
+    }
 
     ctx.log?.info({ jobId: job.id, name: job.name, channel: job.def.channel }, 'cron:exec done');
     metrics.increment('cron.run.success');
