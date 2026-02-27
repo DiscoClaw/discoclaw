@@ -463,7 +463,7 @@ describe('template content — AGENTS.md', () => {
   it('contains Discord action batching rules', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
     expect(agents).toContain('Discord Action Batching');
-    expect(agents).toContain('one action per type per response');
+    expect(agents).toContain('Multiple actions of the same type in a single response are fully supported');
   });
 
   it('contains response economy guidance', async () => {

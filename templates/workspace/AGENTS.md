@@ -151,10 +151,9 @@ Discoclaw has a built-in task tracker backed by Discord forum threads. Use `task
 
 ## Discord Action Batching
 
-The action system processes **one action per type per response**. If you emit 7 `taskCreate` actions, only the first fires -- the rest are silently dropped. No error, no feedback.
+Multiple actions of the same type in a single response are fully supported and processed sequentially. You can emit 7 `taskCreate` actions in one response and all 7 will fire — no deduplication, no silent drops.
 
 **Rules:**
-- When creating multiple items of the same type, send them across separate responses (the system handles this naturally when each action gets its own follow-up)
 - After any bulk operation, always verify with a list action before reporting success
 - Never say "done" for batch operations without checking
 

@@ -320,6 +320,11 @@ describe('parseDiscordActions', () => {
     expect(actions).toHaveLength(0);
     expect(strippedUnrecognizedTypes).toEqual(['voiceLeave']);
   });
+
+  it('prompt Rules section confirms multiple same-type actions are supported', () => {
+    const prompt = discordActionsPromptSection(ALL_FLAGS, 'ClawBot');
+    expect(prompt).toContain('Multiple actions of the same type are fully supported');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -593,6 +598,22 @@ describe('executeDiscordActions', () => {
     expect(results).toEqual([{ ok: true, summary: 'Banned User42' }]);
     expect(guild.members.fetch).toHaveBeenCalledWith('42');
     expect(ban).toHaveBeenCalledOnce();
+  });
+
+  it('parses three same-type channelCreate actions and executes all three', async () => {
+    const input =
+      '<discord-action>{"type":"channelCreate","name":"alpha"}</discord-action>' +
+      '<discord-action>{"type":"channelCreate","name":"beta"}</discord-action>' +
+      '<discord-action>{"type":"channelCreate","name":"gamma"}</discord-action>';
+    const { actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(3);
+
+    const guild = makeMockGuild([]);
+    const results = await executeDiscordActions(actions, makeCtx(guild));
+    expect(results).toHaveLength(3);
+    expect(results[0]).toEqual({ ok: true, summary: 'Created #alpha' });
+    expect(results[1]).toEqual({ ok: true, summary: 'Created #beta' });
+    expect(results[2]).toEqual({ ok: true, summary: 'Created #gamma' });
   });
 });
 
