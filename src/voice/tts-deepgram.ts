@@ -2,7 +2,7 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import type { AudioFrame, TtsProvider } from './types.js';
 
 const DEEPGRAM_SPEECH_URL = 'https://api.deepgram.com/v1/speak';
-const DEFAULT_MODEL = 'aura-2-thalia-en';
+const DEFAULT_MODEL = 'aura-2-asteria-en';
 const DEFAULT_SAMPLE_RATE = 24000;
 
 export type DeepgramTtsOpts = {

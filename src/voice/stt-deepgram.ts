@@ -10,6 +10,8 @@ export type DeepgramSttOpts = {
   apiKey: string;
   sampleRate: number;
   log: LoggerLike;
+  /** Deepgram STT model name. Defaults to 'nova-3-conversationalai'. */
+  model?: string;
   /** Override WebSocket constructor for testing. */
   wsFactory?: (url: string, headers: Record<string, string>) => WebSocket;
 };
@@ -17,6 +19,7 @@ export type DeepgramSttOpts = {
 export class DeepgramSttProvider implements SttProvider {
   private readonly apiKey: string;
   private readonly sampleRate: number;
+  private readonly model: string;
   private readonly log: LoggerLike;
   private readonly wsFactory: (url: string, headers: Record<string, string>) => WebSocket;
 
@@ -29,6 +32,7 @@ export class DeepgramSttProvider implements SttProvider {
   constructor(opts: DeepgramSttOpts) {
     this.apiKey = opts.apiKey;
     this.sampleRate = opts.sampleRate;
+    this.model = opts.model ?? 'nova-3-conversationalai';
     this.log = opts.log;
     this.wsFactory =
       opts.wsFactory ?? ((url, headers) => new WebSocket(url, { headers }));
@@ -69,7 +73,7 @@ export class DeepgramSttProvider implements SttProvider {
 
   private buildUrl(): string {
     const params = new URLSearchParams({
-      model: 'nova-3',
+      model: this.model,
       encoding: 'linear16',
       sample_rate: String(this.sampleRate),
     });
