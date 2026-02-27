@@ -165,6 +165,7 @@ export type BotParams = {
   durableDataDir: string;
   durableInjectMaxChars: number;
   durableMaxItems: number;
+  durableSupersessionShadow?: boolean;
   memoryCommandsEnabled: boolean;
   planCommandsEnabled?: boolean;
   planPhasesEnabled?: boolean;
@@ -2943,6 +2944,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               messageId: msg.id,
               guildId: msg.guildId ?? undefined,
               channelName: String(ch?.name ?? '') || undefined,
+              shadowSupersession: params.durableSupersessionShadow,
+              log: params.log,
             });
           }
         })

@@ -287,6 +287,7 @@ const forgeAutoImplement = cfg.forgeAutoImplement;
 const completionNotifyEnabled = cfg.completionNotifyEnabled;
 const completionNotifyThresholdMs = cfg.completionNotifyThresholdMs;
 const summaryToDurableEnabled = cfg.summaryToDurableEnabled;
+const durableSupersessionShadow = cfg.durableSupersessionShadow;
 const shortTermMemoryEnabled = cfg.shortTermMemoryEnabled;
 const shortTermDataDir = cfg.shortTermDataDirOverride
   || (dataDir ? path.join(dataDir, 'memory', 'shortterm') : path.join(__dirname, '..', 'data', 'memory', 'shortterm'));
@@ -863,6 +864,7 @@ const botParams = {
   drafterRuntime,
   auditorRuntime,
   summaryToDurableEnabled,
+  durableSupersessionShadow,
   shortTermMemoryEnabled,
   shortTermDataDir,
   shortTermMaxEntries,

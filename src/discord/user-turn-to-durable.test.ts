@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { parseExtractionResult, applyUserTurnToDurable, EXTRACTION_PROMPT } from './user-turn-to-durable.js';
+import { parseExtractionResult, applyUserTurnToDurable, extractFromUserTurn, EXTRACTION_PROMPT } from './user-turn-to-durable.js';
 import { loadDurableMemory, addItem, saveDurableMemory } from './durable-memory.js';
 import type { DurableMemoryStore } from './durable-memory.js';
 
@@ -83,6 +83,30 @@ describe('parseExtractionResult', () => {
     const raw = 'Result below:\n```json\n[{"kind":"workflow","text":"Use squash merges"}]\n```\nThanks!';
     const items = parseExtractionResult(raw);
     expect(items).toEqual([{ kind: 'workflow', text: 'Use squash merges' }]);
+  });
+
+  it('extracts supersedes field when present', () => {
+    const raw = '[{"kind":"preference","text":"Uses Neovim as editor","supersedes":"Uses Vim as editor"}]';
+    const items = parseExtractionResult(raw);
+    expect(items).toEqual([{ kind: 'preference', text: 'Uses Neovim as editor', supersedes: 'Uses Vim as editor' }]);
+  });
+
+  it('omits supersedes field when absent', () => {
+    const raw = '[{"kind":"preference","text":"Uses Neovim as editor"}]';
+    const items = parseExtractionResult(raw);
+    expect(items).toEqual([{ kind: 'preference', text: 'Uses Neovim as editor' }]);
+  });
+
+  it('treats supersedes with empty string as absent (no supersedes field)', () => {
+    const raw = '[{"kind":"preference","text":"Uses Neovim as editor","supersedes":""}]';
+    const items = parseExtractionResult(raw);
+    expect(items).toEqual([{ kind: 'preference', text: 'Uses Neovim as editor' }]);
+  });
+
+  it('treats supersedes with whitespace-only string as absent', () => {
+    const raw = '[{"kind":"preference","text":"Uses Neovim as editor","supersedes":"   "}]';
+    const items = parseExtractionResult(raw);
+    expect(items).toEqual([{ kind: 'preference', text: 'Uses Neovim as editor' }]);
   });
 });
 
@@ -317,5 +341,140 @@ describe('applyUserTurnToDurable', () => {
 
     const store = await loadDurableMemory(dir, '42');
     expect(store).toBeNull();
+  });
+
+  it('deprecates matching items when supersedes is returned by the model', async () => {
+    const dir = await makeTmpDir();
+
+    const existing: DurableMemoryStore = { version: 1, updatedAt: 0, items: [] };
+    addItem(existing, 'Uses Vim as editor', { type: 'summary' }, 200, 'preference');
+    await saveDurableMemory(dir, '42', existing);
+
+    const runtime = makeRuntime('[{"kind":"preference","text":"Uses Neovim as editor","supersedes":"Uses Vim as editor"}]');
+    await applyUserTurnToDurable({
+      runtime,
+      userMessageText: 'I switched to Neovim',
+      userId: '42',
+      durableDataDir: dir,
+      durableMaxItems: 200,
+      model: 'haiku',
+      cwd: '/tmp',
+    });
+
+    const store = await loadDurableMemory(dir, '42');
+    expect(store).not.toBeNull();
+    const active = store!.items.filter((it) => it.status === 'active');
+    const deprecated = store!.items.filter((it) => it.status === 'deprecated');
+    expect(active).toHaveLength(1);
+    expect(active[0].text).toBe('Uses Neovim as editor');
+    expect(deprecated).toHaveLength(1);
+    expect(deprecated[0].text).toBe('Uses Vim as editor');
+  });
+
+  it('does not deprecate when shadowSupersession is true', async () => {
+    const dir = await makeTmpDir();
+
+    const existing: DurableMemoryStore = { version: 1, updatedAt: 0, items: [] };
+    addItem(existing, 'Uses Vim as editor', { type: 'summary' }, 200, 'preference');
+    await saveDurableMemory(dir, '42', existing);
+
+    const runtime = makeRuntime('[{"kind":"preference","text":"Uses Neovim as editor","supersedes":"Uses Vim as editor"}]');
+    await applyUserTurnToDurable({
+      runtime,
+      userMessageText: 'I switched to Neovim',
+      userId: '42',
+      durableDataDir: dir,
+      durableMaxItems: 200,
+      model: 'haiku',
+      cwd: '/tmp',
+      shadowSupersession: true,
+    });
+
+    const store = await loadDurableMemory(dir, '42');
+    expect(store).not.toBeNull();
+    const vimItem = store!.items.find((it) => it.text === 'Uses Vim as editor');
+    expect(vimItem?.status).toBe('active');
+    expect(store!.items.some((it) => it.text === 'Uses Neovim as editor')).toBe(true);
+  });
+
+  it('ignores supersedes when substring does not match any active item', async () => {
+    const dir = await makeTmpDir();
+
+    const existing: DurableMemoryStore = { version: 1, updatedAt: 0, items: [] };
+    addItem(existing, 'Likes TypeScript', { type: 'summary' }, 200, 'preference');
+    await saveDurableMemory(dir, '42', existing);
+
+    const runtime = makeRuntime('[{"kind":"preference","text":"Uses Neovim","supersedes":"nonexistent item text that matches nothing"}]');
+    await applyUserTurnToDurable({
+      runtime,
+      userMessageText: 'something',
+      userId: '42',
+      durableDataDir: dir,
+      durableMaxItems: 200,
+      model: 'haiku',
+      cwd: '/tmp',
+    });
+
+    const store = await loadDurableMemory(dir, '42');
+    expect(store).not.toBeNull();
+    const tsItem = store!.items.find((it) => it.text === 'Likes TypeScript');
+    expect(tsItem?.status).toBe('active');
+    expect(store!.items.some((it) => it.text === 'Uses Neovim')).toBe(true);
+  });
+});
+
+describe('extractFromUserTurn', () => {
+  it('includes existing memories in the prompt when a store exists for the user', async () => {
+    const dir = await makeTmpDir();
+
+    const existing: DurableMemoryStore = { version: 1, updatedAt: 0, items: [] };
+    addItem(existing, 'Prefers dark mode', { type: 'summary' }, 200, 'preference');
+    await saveDurableMemory(dir, '42', existing);
+
+    let capturedPrompt = '';
+    const runtime = {
+      invoke: async function* ({ prompt }: { prompt: string }) {
+        capturedPrompt = prompt;
+        yield { type: 'text_final' as const, text: '[]' };
+      },
+    } as any;
+
+    await extractFromUserTurn(runtime, {
+      userMessageText: 'hello',
+      model: 'haiku',
+      cwd: '/tmp',
+      durableDataDir: dir,
+      userId: '42',
+    });
+
+    expect(capturedPrompt).toContain('Prefers dark mode');
+  });
+
+  it('injects memory as raw item.text lines without kind prefix or metadata suffix', async () => {
+    const dir = await makeTmpDir();
+
+    const existing: DurableMemoryStore = { version: 1, updatedAt: 0, items: [] };
+    addItem(existing, 'Prefers dark mode', { type: 'summary' }, 200, 'preference');
+    await saveDurableMemory(dir, '42', existing);
+
+    let capturedPrompt = '';
+    const runtime = {
+      invoke: async function* ({ prompt }: { prompt: string }) {
+        capturedPrompt = prompt;
+        yield { type: 'text_final' as const, text: '[]' };
+      },
+    } as any;
+
+    await extractFromUserTurn(runtime, {
+      userMessageText: 'hello',
+      model: 'haiku',
+      cwd: '/tmp',
+      durableDataDir: dir,
+      userId: '42',
+    });
+
+    expect(capturedPrompt).toContain('Prefers dark mode');
+    expect(capturedPrompt).not.toContain('[preference]');
+    expect(capturedPrompt).not.toContain('(src:');
   });
 });
