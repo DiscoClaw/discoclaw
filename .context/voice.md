@@ -75,7 +75,8 @@ When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes t
 | `DISCOCLAW_VOICE_AUTO_JOIN` | `0` | Auto-join when allowlisted user enters |
 | `DISCOCLAW_STT_PROVIDER` | `deepgram` | STT backend |
 | `DISCOCLAW_TTS_PROVIDER` | `cartesia` | TTS backend (`cartesia`, `deepgram`, `openai`, `kokoro`) |
-| `DISCOCLAW_VOICE_HOME_CHANNEL` | — | Transcript mirror target + prompt context source |
+| `DISCOCLAW_VOICE_HOME_CHANNEL` | — | Voice audio channel name/ID used for prompt context (not transcript mirroring) |
+| `DISCOCLAW_VOICE_LOG_CHANNEL` | — | Text channel name/ID where `TranscriptMirror` posts user transcriptions and bot responses; falls back to bootstrap-provided `voiceLogChannelId` if unset |
 | `DISCOCLAW_VOICE_MODEL` | `capable` | AI model tier for voice responses |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | — | Custom system prompt for voice invocations (max 4000 chars) |
 | `DEEPGRAM_API_KEY` | — | Required for deepgram STT and TTS |
