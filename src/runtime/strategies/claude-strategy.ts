@@ -5,6 +5,26 @@ import type { EngineEvent, RuntimeCapability } from '../types.js';
 import type { CliAdapterStrategy, CliInvokeContext, ParsedLineResult, UniversalCliOpts } from '../cli-strategy.js';
 import { extractResultText, extractResultContentBlocks } from '../cli-output-parsers.js';
 
+// ---------------------------------------------------------------------------
+// tool_use.name length error detection
+//
+// Anthropic API returns HTTP 400 with a message like:
+//   "messages.N.content.0.tool_use.name: String should have at most 200 characters"
+// when conversation history contains a tool_use block whose name field is >200 chars.
+// MCP tools follow the pattern mcp__<server>__<tool>, so a long server name in
+// workspace/.mcp.json is the primary cause in this stack.
+// ---------------------------------------------------------------------------
+
+/** Returns true when both key fragments of the API 400 are present in the text. */
+function isToolUseNameLengthError(text: string): boolean {
+  return text.includes('tool_use.name') && text.includes('200 characters');
+}
+
+const TOOL_USE_NAME_LENGTH_GUIDANCE =
+  'Anthropic API error: MCP tool name too long (tool_use.name exceeds 200 chars). ' +
+  'Rename MCP server(s) in workspace/.mcp.json — server names must be ≤64 chars ' +
+  '(pattern: mcp__<server>__<tool> must not exceed 200 chars total).';
+
 /**
  * Compact safety reminder prepended to every forge and planRun phase prompt.
  * Mirrors the destructive patterns guarded by the tool-call gate so the model
@@ -115,6 +135,17 @@ export const claudeStrategy: CliAdapterStrategy = {
     }
 
     return args;
+  },
+
+  handleExitError(_exitCode: number, stderr: string, stdout: string): string | null {
+    const combined = stderr + stdout;
+    if (isToolUseNameLengthError(combined)) return TOOL_USE_NAME_LENGTH_GUIDANCE;
+    return null;
+  },
+
+  sanitizeError(raw: string): string {
+    if (isToolUseNameLengthError(raw)) return TOOL_USE_NAME_LENGTH_GUIDANCE;
+    return raw;
   },
 
   buildStdinPayload(ctx: CliInvokeContext): string | null {

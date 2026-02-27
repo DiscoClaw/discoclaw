@@ -1407,3 +1407,56 @@ describe('progress stall timer (thinking spiral guard)', () => {
     await drainPromise;
   });
 });
+
+describe('tool_use.name length error detection', () => {
+  it('converts API 400 tool_use.name error to actionable guidance (text mode)', async () => {
+    const execaMock = execa as any;
+    const apiError =
+      'Error: 400 {"type":"error","error":{"type":"invalid_request_error",' +
+      '"message":"messages.0.content.0.tool_use.name: String should have at most 200 characters"}}';
+    execaMock.mockImplementation(() =>
+      makeProcessText({ stdout: '', stderr: apiError, exitCode: 1 }),
+    );
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'sonnet', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    const err = events.find((e) => e.type === 'error');
+    expect(err).toBeDefined();
+    expect(err.message).toContain('MCP tool name too long');
+    expect(err.message).toContain('workspace/.mcp.json');
+    expect(err.message).toContain('64 chars');
+  });
+
+  it('passes through unrelated API errors unchanged (text mode)', async () => {
+    const execaMock = execa as any;
+    const otherError = 'Error: 429 rate limit exceeded';
+    execaMock.mockImplementation(() =>
+      makeProcessText({ stdout: '', stderr: otherError, exitCode: 1 }),
+    );
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: false,
+      outputFormat: 'text',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'sonnet', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    const err = events.find((e) => e.type === 'error');
+    expect(err).toBeDefined();
+    expect(err.message).toContain('rate limit');
+    expect(err.message).not.toContain('MCP tool name too long');
+  });
+});
