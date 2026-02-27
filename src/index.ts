@@ -77,6 +77,8 @@ import { migrateLegacyTaskDataFile, resolveTaskDataPath } from './tasks/path-def
 import { resolveCronTagBootstrapForumId, resolveSessionStorePath } from './index.paths.js';
 import { collectActiveProviders, logRuntimeDebugConfig, resolveForgeRuntimes } from './index.runtime.js';
 import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupChecks } from './index.post-connect.js';
+import { loadOverrides, saveOverrides, clearOverrides, resolveOverridesPath, type RuntimeOverrides } from './runtime-overrides.js';
+import type { ModelRole } from './discord/actions-config.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -114,6 +116,7 @@ const runtimeTools = cfg.runtimeTools;
 const runtimeTimeoutMs = cfg.runtimeTimeoutMs;
 
 const dataDir = cfg.dataDir;
+const overridesPath = resolveOverridesPath(dataDir, projectRoot);
 
 // --- PID lock: prevent duplicate bot instances ---
 const pidLockDir = dataDir ?? path.join(__dirname, '..', 'data');
@@ -641,6 +644,81 @@ cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, runtime.id);
   tasksAutoTagModel = resolveModel(cfg.tasksAutoTagModel, runtime.id);
 const voiceModel = resolveModel(cfg.voiceModel, runtime.id);
 const voiceModelRef = { model: voiceModel };
+
+// --- Load runtime-overrides.json (persistent overlay on top of .env defaults) ---
+const overrides = await loadOverrides(overridesPath, (msg, data) => log.warn(data ?? {}, msg));
+let currentOverridesState: RuntimeOverrides = {
+  ...overrides,
+  models: overrides.models ? { ...overrides.models } : undefined,
+};
+const overrideModels = overrides.models ?? {};
+
+// Apply model overrides to live variables. 'fast' is applied before 'summary'/'cron' so
+// that individual-role overrides win if both are present.
+if (overrideModels['chat']) {
+  runtimeModel = overrideModels['chat'];
+  log.info({ runtimeModel }, 'runtime-overrides: chat model override applied');
+}
+if (overrideModels['voice']) {
+  voiceModelRef.model = overrideModels['voice'];
+  log.info({ voiceModel: overrideModels['voice'] }, 'runtime-overrides: voice model override applied');
+}
+if (overrideModels['fast']) {
+  summaryModel = overrideModels['fast'];
+  cronAutoTagModel = overrideModels['fast'];
+  tasksAutoTagModel = overrideModels['fast'];
+  log.info({ fastModel: overrideModels['fast'] }, 'runtime-overrides: fast model override applied');
+}
+if (overrideModels['summary']) {
+  summaryModel = overrideModels['summary'];
+  log.info({ summaryModel }, 'runtime-overrides: summary model override applied');
+}
+if (overrideModels['cron']) {
+  cronAutoTagModel = overrideModels['cron'];
+  log.info({ cronAutoTagModel }, 'runtime-overrides: cron model override applied');
+}
+if (overrides.ttsVoice) {
+  log.info({ ttsVoice: overrides.ttsVoice }, 'runtime-overrides: ttsVoice override will be applied');
+}
+
+// Track which roles have active file-backed overrides (used by !models show).
+const overrideSources: Partial<Record<ModelRole, boolean>> = {};
+for (const role of Object.keys(overrideModels) as ModelRole[]) {
+  overrideSources[role] = true;
+}
+
+// Persist callback: updates the overrides file for all model roles.
+const persistOverride = (role: ModelRole, model: string): void => {
+  if (!currentOverridesState.models) currentOverridesState.models = {};
+  currentOverridesState.models[role] = model;
+  saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+    log.warn({ err, role, model }, 'runtime-overrides: save failed'),
+  );
+};
+
+// Clear callback: removes one or all role overrides from the file.
+// When clearing all roles, ttsVoice is preserved so !voice set survives !models reset.
+const clearOverride = (role?: ModelRole): void => {
+  if (!role) {
+    currentOverridesState = currentOverridesState.ttsVoice
+      ? { ttsVoice: currentOverridesState.ttsVoice }
+      : {};
+    saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+      log.warn({ err }, 'runtime-overrides: clear failed'),
+    );
+  } else {
+    if (currentOverridesState.models) {
+      delete currentOverridesState.models[role];
+      if (Object.keys(currentOverridesState.models).length === 0) {
+        delete currentOverridesState.models;
+      }
+    }
+    saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+      log.warn({ err, role }, 'runtime-overrides: clear role failed'),
+    );
+  }
+};
+
 log.info(
   { primaryRuntime: primaryRuntimeName, runtimeId: runtime.id, model: runtimeModel },
   'runtime:primary selected',
@@ -856,6 +934,16 @@ const botParams = {
     activeProviders,
   },
 };
+
+// Apply forge-drafter and forge-auditor overrides — their source vars are const so botParams must be patched here.
+if (overrideModels['forge-drafter']) {
+  botParams.forgeDrafterModel = overrideModels['forge-drafter'];
+  log.info({ forgeDrafterModel: overrideModels['forge-drafter'] }, 'runtime-overrides: forge-drafter model override applied');
+}
+if (overrideModels['forge-auditor']) {
+  botParams.forgeAuditorModel = overrideModels['forge-auditor'];
+  log.info({ forgeAuditorModel: overrideModels['forge-auditor'] }, 'runtime-overrides: forge-auditor model override applied');
+}
 
 let deferOpts: ConfigureDeferredSchedulerOpts | undefined;
 if (discordActionsEnabled && cfg.discordActionsDefer) {
@@ -1087,6 +1175,20 @@ if (taskCtx) {
       runtime: limitedRuntime,
       runtimeRegistry,
       runtimeName: primaryRuntimeName,
+      // Env-default models — used by !models reset to revert live state.
+      envDefaults: {
+        chat: resolveModel(cfg.runtimeModel, runtime.id),
+        fast: resolveModel(cfg.summaryModel, runtime.id),
+        summary: resolveModel(cfg.summaryModel, runtime.id),
+        'forge-drafter': cfg.forgeDrafterModel ?? '',
+        'forge-auditor': cfg.forgeAuditorModel ?? '',
+        cron: resolveModel(cfg.cronAutoTagModel, runtime.id),
+        'cron-exec': '',
+        voice: resolveModel(cfg.voiceModel, runtime.id),
+      },
+      overrideSources,
+      persistOverride,
+      clearOverride,
     };
     log.info('config:action context initialized');
   }
@@ -1293,7 +1395,7 @@ if (taskCtx) {
         homeChannel: cfg.voiceHomeChannel,
         deepgramApiKey: cfg.deepgramApiKey,
         deepgramSttModel: cfg.deepgramSttModel,
-        deepgramTtsVoice: cfg.deepgramTtsVoice,
+        deepgramTtsVoice: overrides.ttsVoice ?? cfg.deepgramTtsVoice,
         cartesiaApiKey: cfg.cartesiaApiKey,
         openaiApiKey: cfg.openaiApiKey,
       },
@@ -1331,6 +1433,10 @@ if (taskCtx) {
     botParams.setTtsVoice = async (voice: string) => {
       const count = await audioPipeline!.setTtsVoice(voice);
       botParams.deepgramTtsVoice = voice;
+      currentOverridesState.ttsVoice = voice;
+      saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+        log.warn({ err, voice }, 'runtime-overrides: ttsVoice save failed'),
+      );
       return count;
     };
     botParams.getTtsVoice = () => audioPipeline!.ttsVoice;
@@ -1453,6 +1559,12 @@ if (cronEnabled && effectiveCronForum) {
 
   savedCronExecCtx = cronExecCtx;
   cronCtx.executorCtx = cronExecCtx;
+
+  // Apply cron-exec model override now that cronExecCtx exists.
+  if (overrideModels['cron-exec']) {
+    cronExecCtx.cronExecModel = overrideModels['cron-exec'];
+    log.info({ cronExecModel: overrideModels['cron-exec'] }, 'runtime-overrides: cron-exec model override applied');
+  }
 
   botParams.cronCtx = cronCtx;
   botParams.statusCommandContext.cronScheduler = cronScheduler;

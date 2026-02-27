@@ -29,6 +29,7 @@ export type VoiceCommandOpts = {
    * Pipeline-level setter — updates the voice config and restarts all active
    * pipelines in one step. When provided, preferred over voiceConfig +
    * restartPipelines. Returns the number of pipelines restarted.
+   * Persistence to runtime-overrides.json is handled internally by this callback.
    */
   setTtsVoice?: (voice: string) => Promise<number>;
   botDisplayName?: string;

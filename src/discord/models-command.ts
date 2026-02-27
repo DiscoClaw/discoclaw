@@ -8,6 +8,7 @@ import { executeConfigAction } from './actions-config.js';
 export type ModelsCommand =
   | { action: 'show' }
   | { action: 'set'; role: ModelRole; model: string }
+  | { action: 'reset'; role?: ModelRole }
   | { action: 'help' };
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,17 @@ export function parseModelsCommand(content: string): ModelsCommand | null {
   const subcommand = tokens[1]!.toLowerCase();
   if (subcommand === 'show' && tokens.length === 2) return { action: 'show' };
   if (subcommand === 'help' && tokens.length === 2) return { action: 'help' };
+
+  if (subcommand === 'reset') {
+    if (tokens.length === 2) return { action: 'reset' };
+    if (tokens.length === 3) {
+      const role = tokens[2]!.toLowerCase();
+      if (!VALID_ROLES.has(role)) return null;
+      return { action: 'reset', role: role as ModelRole };
+    }
+    return null;
+  }
+
   if (subcommand !== 'set' || tokens.length !== 4) return null;
 
   const role = tokens[2]!.toLowerCase();
@@ -57,7 +69,9 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '**!models commands:**',
       '- `!models` — show current model assignments for all roles',
       '- `!models show` — same as above',
-      '- `!models set <role> <model>` — change the model for a role at runtime',
+      '- `!models set <role> <model>` — change the model for a role at runtime (persisted)',
+      '- `!models reset` — revert all roles to env-var defaults',
+      '- `!models reset <role>` — revert a specific role to its env-var default',
       '- `!models help` — this message',
       '',
       '**Roles:** `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`',
@@ -74,6 +88,8 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models set cron-exec haiku` — run crons on a cheaper model',
       '- `!models set cron-exec default` — revert to following chat model',
       '- `!models set voice sonnet` — use a specific model for voice responses',
+      '- `!models reset` — clear all overrides and revert to env defaults',
+      '- `!models reset chat` — revert only the chat model to its env default',
       '',
       '**Note:** Image generation (imagegen) configuration is shown automatically in `!models` when enabled, but is not switchable via `!models set` — configure it via environment variables instead.',
       '',
@@ -83,6 +99,11 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
 
   if (cmd.action === 'show') {
     const result = executeConfigAction({ type: 'modelShow' }, configCtx);
+    return result.ok ? result.summary : `Error: ${result.error}`;
+  }
+
+  if (cmd.action === 'reset') {
+    const result = executeConfigAction({ type: 'modelReset', role: cmd.role }, configCtx);
     return result.ok ? result.summary : `Error: ${result.error}`;
   }
 
