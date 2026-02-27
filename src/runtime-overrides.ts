@@ -2,8 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export type RuntimeOverrides = {
-  runtimeModel?: string;
-  voiceModel?: string;
+  /** Model overrides keyed by ModelRole (chat, fast, forge-drafter, etc.). */
+  models?: Record<string, string>;
   ttsVoice?: string;
 };
 
@@ -23,8 +23,12 @@ export function resolveOverridesPath(dataDir: string | undefined, projectRoot: s
  * Load runtime overrides from the JSON overlay file.
  * Returns an empty object if the file does not exist or cannot be parsed.
  * Only known string-typed fields are accepted; unknown/wrong-typed fields are silently dropped.
+ * Calls onWarn for corrupt JSON or wrong root type (ENOENT is silently ignored — first-run normal case).
  */
-export async function loadOverrides(filePath: string): Promise<RuntimeOverrides> {
+export async function loadOverrides(
+  filePath: string,
+  onWarn?: (msg: string, data?: unknown) => void,
+): Promise<RuntimeOverrides> {
   let raw: string;
   try {
     raw = await fs.readFile(filePath, 'utf-8');
@@ -37,17 +41,27 @@ export async function loadOverrides(filePath: string): Promise<RuntimeOverrides>
   try {
     parsed = JSON.parse(raw);
   } catch {
+    onWarn?.('runtime-overrides: corrupt JSON in overrides file — discarding', { filePath });
     return {};
   }
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    onWarn?.('runtime-overrides: overrides file root is not an object — discarding', { filePath });
     return {};
   }
 
   const obj = parsed as Record<string, unknown>;
   const overrides: RuntimeOverrides = {};
-  if (typeof obj['runtimeModel'] === 'string') overrides.runtimeModel = obj['runtimeModel'];
-  if (typeof obj['voiceModel'] === 'string') overrides.voiceModel = obj['voiceModel'];
+
+  if (typeof obj['models'] === 'object' && obj['models'] !== null && !Array.isArray(obj['models'])) {
+    const rawModels = obj['models'] as Record<string, unknown>;
+    const models: Record<string, string> = {};
+    for (const [key, val] of Object.entries(rawModels)) {
+      if (typeof val === 'string') models[key] = val;
+    }
+    if (Object.keys(models).length > 0) overrides.models = models;
+  }
+
   if (typeof obj['ttsVoice'] === 'string') overrides.ttsVoice = obj['ttsVoice'];
   return overrides;
 }

@@ -104,6 +104,8 @@ export function executeConfigAction(
 
       const bp = configCtx.botParams;
       const changes: string[] = [];
+      // Runtime swaps (chat role with a runtime name) are ephemeral — not written to the override file.
+      let skipPersist = false;
 
       switch (action.role) {
         case 'chat': {
@@ -111,6 +113,7 @@ export function executeConfigAction(
           const normalized = model.toLowerCase();
           const newRuntime = configCtx.runtimeRegistry?.get(normalized);
           if (newRuntime) {
+            skipPersist = true; // Don't persist runtime swaps; persisting the runtime name as a model string would break on reload.
             // Swap runtime across all invocation paths.
             const runtimeModel = newRuntime.defaultModel ?? '';
             bp.runtime = newRuntime;
@@ -199,7 +202,9 @@ export function executeConfigAction(
           return { ok: false, error: `Unknown role: ${String((action as { role: unknown }).role)}` };
       }
 
-      configCtx.persistOverride?.(action.role, model);
+      if (!skipPersist) {
+        configCtx.persistOverride?.(action.role, model);
+      }
       if (configCtx.overrideSources) {
         configCtx.overrideSources[action.role] = true;
       }
