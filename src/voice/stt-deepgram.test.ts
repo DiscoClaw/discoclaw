@@ -105,7 +105,7 @@ describe('DeepgramSttProvider', () => {
     expect(url.protocol).toBe('wss:');
     expect(url.hostname).toBe('api.deepgram.com');
     expect(url.pathname).toBe('/v1/listen');
-    expect(url.searchParams.get('model')).toBe('nova-3');
+    expect(url.searchParams.get('model')).toBe('nova-3-conversationalai');
     expect(url.searchParams.get('encoding')).toBe('linear16');
     expect(url.searchParams.get('sample_rate')).toBe('48000');
     // Auth is via header, not query param

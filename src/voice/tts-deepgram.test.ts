@@ -86,7 +86,7 @@ describe('DeepgramTtsProvider', () => {
     expect(url).toContain('encoding=linear16');
     expect(url).toContain('sample_rate=24000');
     expect(url).toContain('container=none');
-    expect(url).toContain('model=aura-2-thalia-en');
+    expect(url).toContain('model=aura-2-asteria-en');
     expect((init!.headers as Record<string, string>).Authorization).toBe(
       'Token dg-my-key',
     );

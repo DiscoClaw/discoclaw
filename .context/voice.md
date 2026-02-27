@@ -79,4 +79,6 @@ When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes t
 | `DISCOCLAW_VOICE_MODEL` | `capable` | AI model tier for voice responses |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | — | Custom system prompt for voice invocations (max 4000 chars) |
 | `DEEPGRAM_API_KEY` | — | Required for deepgram STT and TTS |
+| `DEEPGRAM_STT_MODEL` | `nova-3-conversationalai` | Deepgram STT model name |
+| `DEEPGRAM_TTS_VOICE` | `aura-2-asteria-en` | Deepgram TTS voice name |
 | `CARTESIA_API_KEY` | — | Required for cartesia TTS |
