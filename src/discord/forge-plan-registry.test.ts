@@ -8,6 +8,7 @@ import {
   removeRunningPlan,
   isPlanRunning,
   getRunningPlanIds,
+  getForgeStatusSummary,
   _resetForTest,
 } from './forge-plan-registry.js';
 
@@ -143,6 +144,48 @@ describe('running plan IDs', () => {
     addRunningPlan('plan-001');
     addRunningPlan('plan-001');
     expect(getRunningPlanIds().size).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getForgeStatusSummary
+// ---------------------------------------------------------------------------
+
+describe('getForgeStatusSummary', () => {
+  it('reports no forge and no plan runs', () => {
+    expect(getForgeStatusSummary()).toBe('No forge is currently running.');
+  });
+
+  it('reports active forge with plan ID and no plan runs', () => {
+    setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-001' } as any);
+    expect(getForgeStatusSummary()).toBe('Forge is running: plan-001.');
+  });
+
+  it('reports active forge without plan ID', () => {
+    setActiveOrchestrator({ isRunning: true, activePlanId: undefined } as any);
+    expect(getForgeStatusSummary()).toBe('Forge is running.');
+  });
+
+  it('reports plan runs when no forge is running', () => {
+    addRunningPlan('plan-042');
+    addRunningPlan('plan-305');
+    const summary = getForgeStatusSummary();
+    expect(summary).toContain('No forge is currently running.');
+    expect(summary).toContain('plan-042');
+    expect(summary).toContain('plan-305');
+  });
+
+  it('reports both forge and plan runs when both are active', () => {
+    setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-007' } as any);
+    addRunningPlan('plan-099');
+    const summary = getForgeStatusSummary();
+    expect(summary).toContain('Forge is running: plan-007.');
+    expect(summary).toContain('plan-099');
+  });
+
+  it('does not report plan runs suffix when none are active', () => {
+    setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-007' } as any);
+    expect(getForgeStatusSummary()).toBe('Forge is running: plan-007.');
   });
 });
 
