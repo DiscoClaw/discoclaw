@@ -53,7 +53,7 @@ describe('CronRunStats', () => {
   it('creates empty store on missing file', async () => {
     const stats = await loadRunStats(statsPath);
     const store = stats.getStore();
-    expect(store.version).toBe(6);
+    expect(store.version).toBe(7);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
 
@@ -259,7 +259,7 @@ describe('CronRunStats', () => {
 describe('emptyStore', () => {
   it('returns valid initial structure', () => {
     const store = emptyStore();
-    expect(store.version).toBe(6);
+    expect(store.version).toBe(7);
     expect(store.updatedAt).toBeGreaterThan(0);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
@@ -289,7 +289,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(6);
+    expect(stats.getStore().version).toBe(7);
     const rec = stats.getRecord('cron-migrated');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-migrated');
@@ -322,7 +322,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(6);
+    expect(stats.getStore().version).toBe(7);
     const rec = stats.getRecord('cron-v4');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v4');
@@ -355,7 +355,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(6);
+    expect(stats.getStore().version).toBe(7);
     const rec = stats.getRecord('cron-v5');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v5');
@@ -367,5 +367,40 @@ describe('loadRunStats version migration', () => {
     expect(rec!.channel).toBeUndefined();
     expect(rec!.prompt).toBeUndefined();
     expect(rec!.authorId).toBeUndefined();
+  });
+
+  it('migrates a v6 store to v7 with allowedActions undefined on existing records', async () => {
+    const v6Store = {
+      version: 6,
+      updatedAt: Date.now(),
+      jobs: {
+        'cron-v6': {
+          cronId: 'cron-v6',
+          threadId: 'thread-v6',
+          runCount: 2,
+          lastRunAt: '2025-10-01T00:00:00.000Z',
+          lastRunStatus: 'success',
+          cadence: 'weekly',
+          purposeTags: ['report'],
+          disabled: false,
+          model: 'sonnet',
+          triggerType: 'schedule',
+          silent: false,
+          schedule: '0 9 * * 1',
+          timezone: 'UTC',
+        },
+      },
+    };
+    await fs.writeFile(statsPath, JSON.stringify(v6Store), 'utf-8');
+
+    const stats = await loadRunStats(statsPath);
+
+    expect(stats.getStore().version).toBe(7);
+    const rec = stats.getRecord('cron-v6');
+    expect(rec).toBeDefined();
+    expect(rec!.cronId).toBe('cron-v6');
+    expect(rec!.runCount).toBe(2);
+    expect(rec!.cadence).toBe('weekly');
+    expect(rec!.allowedActions).toBeUndefined();
   });
 });
