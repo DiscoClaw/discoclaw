@@ -164,6 +164,13 @@ export class AudioPipelineManager {
           if (onTranscriptionCb) {
             onTranscriptionCb(guildId, result);
           }
+          // STT-confirmed barge-in: any transcription (interim or final) with
+          // non-empty text stops ongoing playback. Echo produces empty
+          // transcriptions; real speech produces non-empty ones.
+          if (result.text.trim() && responder?.isPlaying) {
+            this.log.info({ guildId }, 'barge-in detected');
+            responder.stop();
+          }
           if (result.isFinal && result.text.trim()) {
             if (mirror) {
               mirror.postUserTranscription('User', result.text).catch((err) => {
@@ -187,11 +194,10 @@ export class AudioPipelineManager {
         sttProvider,
         log: this.log,
         createDecoder: this.createDecoder,
-        onUserSpeaking: (userId) => {
-          if (responder?.isPlaying) {
-            this.log.info({ guildId, userId }, 'barge-in detected — stopping playback');
-            responder.stop();
-          }
+        onUserSpeaking: (_userId) => {
+          // Barge-in is now gated on STT transcription (see onTranscription
+          // callback above). This callback is kept for AudioReceiver
+          // subscription management.
         },
       });
 

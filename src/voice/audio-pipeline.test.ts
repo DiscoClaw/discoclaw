@@ -612,10 +612,10 @@ describe('AudioPipelineManager', () => {
       };
     }
 
-    it('calls responder.stop() when user speaks while playing', async () => {
+    it('calls responder.stop() on non-empty transcription while playing', async () => {
       const stt = createMockStt();
       const log = createLogger();
-      const { connection, speakingEmitter } = createMockConnection();
+      const { connection } = createMockConnection();
 
       const mgr = new AudioPipelineManager({
         log,
@@ -636,20 +636,81 @@ describe('AudioPipelineManager', () => {
       // Simulate the player being in "playing" state (mid-playback)
       player.state = { status: 'playing' };
 
-      // User starts speaking — should trigger barge-in
-      speakingEmitter.emit('start', '111');
+      // Non-empty transcription arrives — should trigger barge-in
+      stt.transcriptionCb!({ text: 'stop that', isFinal: false, confidence: 0.9 });
 
       expect(player.stop).toHaveBeenCalled();
       expect(log.info).toHaveBeenCalledWith(
-        expect.objectContaining({ guildId: 'g1', userId: '111' }),
-        'barge-in detected — stopping playback',
+        expect.objectContaining({ guildId: 'g1' }),
+        'barge-in detected',
+      );
+    });
+
+    it('does not trigger barge-in for empty transcription while playing (echo case)', async () => {
+      const stt = createMockStt();
+      const log = createLogger();
+      const { connection } = createMockConnection();
+
+      const mgr = new AudioPipelineManager({
+        log,
+        voiceConfig: baseVoiceConfig(),
+        allowedUserIds: new Set(['111']),
+        createDecoder: () => createMockDecoder(),
+        createStt: () => stt,
+        invokeAi: async () => 'response',
+        createTts: () => createMockTts(),
+      });
+
+      await mgr.startPipeline('g1', connection);
+
+      const player = lastMockPlayer!;
+      player.state = { status: 'playing' };
+      player.stop.mockClear();
+
+      // Empty transcription (echo) — must not trigger barge-in
+      stt.transcriptionCb!({ text: '', isFinal: false, confidence: 0.0 });
+
+      expect(player.stop).not.toHaveBeenCalled();
+      expect(log.info).not.toHaveBeenCalledWith(
+        expect.objectContaining({ guildId: 'g1' }),
+        'barge-in detected',
+      );
+    });
+
+    it('triggers barge-in on interim (non-final) non-empty transcription while playing', async () => {
+      const stt = createMockStt();
+      const log = createLogger();
+      const { connection } = createMockConnection();
+
+      const mgr = new AudioPipelineManager({
+        log,
+        voiceConfig: baseVoiceConfig(),
+        allowedUserIds: new Set(['111']),
+        createDecoder: () => createMockDecoder(),
+        createStt: () => stt,
+        invokeAi: async () => 'response',
+        createTts: () => createMockTts(),
+      });
+
+      await mgr.startPipeline('g1', connection);
+
+      const player = lastMockPlayer!;
+      player.state = { status: 'playing' };
+
+      // Interim transcription with non-empty text — should trigger barge-in
+      stt.transcriptionCb!({ text: 'hey wait', isFinal: false, confidence: 0.8 });
+
+      expect(player.stop).toHaveBeenCalled();
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({ guildId: 'g1' }),
+        'barge-in detected',
       );
     });
 
     it('does not interrupt when player is idle', async () => {
       const stt = createMockStt();
       const log = createLogger();
-      const { connection, speakingEmitter } = createMockConnection();
+      const { connection } = createMockConnection();
 
       const mgr = new AudioPipelineManager({
         log,
@@ -666,24 +727,21 @@ describe('AudioPipelineManager', () => {
       const player = lastMockPlayer!;
       // Player is idle (default state)
       expect(player.state.status).toBe('idle');
-
-      // Clear mocks to isolate the speaking-event call
       player.stop.mockClear();
 
-      // User starts speaking — no barge-in needed
-      speakingEmitter.emit('start', '111');
+      // Non-empty transcription while idle — no barge-in needed
+      stt.transcriptionCb!({ text: 'hello', isFinal: false, confidence: 0.9 });
 
-      // player.stop() should NOT have been called by barge-in
-      // (it may have been called by handleTranscription elsewhere, but not by the onUserSpeaking callback)
+      expect(player.stop).not.toHaveBeenCalled();
       expect(log.info).not.toHaveBeenCalledWith(
         expect.objectContaining({ guildId: 'g1' }),
-        'barge-in detected — stopping playback',
+        'barge-in detected',
       );
     });
 
     it('works without a responder (no invokeAi configured)', async () => {
       const stt = createMockStt();
-      const { connection, speakingEmitter } = createMockConnection();
+      const { connection } = createMockConnection();
 
       const mgr = new AudioPipelineManager({
         log: createLogger(),
@@ -691,13 +749,16 @@ describe('AudioPipelineManager', () => {
         allowedUserIds: new Set(['111']),
         createDecoder: () => createMockDecoder(),
         createStt: () => stt,
+        onTranscription: () => {},
         // No invokeAi — no responder created
       });
 
       await mgr.startPipeline('g1', connection);
 
-      // User speaks — should not throw even though there's no responder
-      expect(() => speakingEmitter.emit('start', '111')).not.toThrow();
+      // Non-empty transcription — should not throw even though there's no responder
+      expect(() =>
+        stt.transcriptionCb!({ text: 'hello', isFinal: false, confidence: 0.9 }),
+      ).not.toThrow();
     });
   });
 });

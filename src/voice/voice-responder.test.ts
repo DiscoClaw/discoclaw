@@ -530,26 +530,10 @@ describe('VoiceResponder', () => {
       expect(responder.isPlaying).toBe(false);
     });
 
-    it('suppresses barge-in during grace period (1500ms)', () => {
-      vi.useFakeTimers();
-      try {
-        const { responder, player } = createResponder();
-        player.state = { status: 'playing' };
-        (responder as unknown as { _playbackStartedAt: number })._playbackStartedAt = Date.now();
-
-        // Within grace period — isPlaying returns false to suppress barge-in
-        expect(responder.isPlaying).toBe(false);
-
-        // Still within grace period at 1499ms
-        vi.advanceTimersByTime(1499);
-        expect(responder.isPlaying).toBe(false);
-
-        // At exactly 1500ms — grace period elapsed, barge-in allowed
-        vi.advanceTimersByTime(1);
-        expect(responder.isPlaying).toBe(true);
-      } finally {
-        vi.useRealTimers();
-      }
+    it('returns true immediately when playing (no grace period)', () => {
+      const { responder, player } = createResponder();
+      player.state = { status: 'playing' };
+      expect(responder.isPlaying).toBe(true);
     });
   });
 

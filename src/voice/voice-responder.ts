@@ -20,11 +20,6 @@ import type { TtsProvider } from './types.js';
 const DISCORD_RATE = 48_000;
 const DISCORD_CHANNELS = 2;
 
-/** Grace period (ms) after playback starts before barge-in detection kicks in.
- *  Discord speaking events can lag behind actual speech, so stale events from
- *  the user's original utterance can arrive right as playback begins. */
-const BARGE_IN_GRACE_MS = 1500;
-
 /** Callback to invoke the AI runtime and return a text response. */
 export type InvokeAiFn = (text: string) => Promise<string>;
 
@@ -48,7 +43,6 @@ export class VoiceResponder {
   private readonly player: AudioPlayer;
   private generation = 0;
   private _processing = false;
-  private _playbackStartedAt = 0;
 
   constructor(opts: VoiceResponderOpts) {
     this.log = opts.log;
@@ -113,7 +107,6 @@ export class VoiceResponder {
       });
 
       this.player.play(resource);
-      this._playbackStartedAt = Date.now();
       this.log.info({}, 'voice-responder: streaming playback started');
 
       let carry = Buffer.alloc(0);
@@ -175,19 +168,10 @@ export class VoiceResponder {
     return this._processing;
   }
 
-  /** Whether the bot is audibly speaking (Playing or Buffering).
-   *  Returns false during the barge-in grace period so stale speaking events
-   *  from the user's previous utterance don't immediately kill playback. */
+  /** Whether the bot is audibly speaking (Playing or Buffering). */
   get isPlaying(): boolean {
     const status = this.player.state.status;
-    if (status !== AudioPlayerStatus.Playing && status !== AudioPlayerStatus.Buffering) {
-      return false;
-    }
-    // Suppress barge-in for the first BARGE_IN_GRACE_MS of playback
-    if (Date.now() - this._playbackStartedAt < BARGE_IN_GRACE_MS) {
-      return false;
-    }
-    return true;
+    return status === AudioPlayerStatus.Playing || status === AudioPlayerStatus.Buffering;
   }
 
   /** Interrupt any in-flight pipeline and stop playback. */

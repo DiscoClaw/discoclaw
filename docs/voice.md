@@ -237,9 +237,13 @@ When `DISCOCLAW_VOICE_AUTO_JOIN=1`, the presence handler (`src/voice/presence-ha
 
 ## Barge-In Support
 
-When a user starts speaking while the bot is playing TTS audio, the audio pipeline detects this as a "barge-in" and immediately stops playback. This allows natural conversational interruption.
+When a user speaks while the bot is playing TTS audio, the pipeline detects this as a "barge-in" and immediately stops playback, allowing natural conversational interruption.
 
-The barge-in signal comes from the `AudioReceiver`'s `onUserSpeaking` callback, which fires on every speaking burst from an allowlisted user. If the `VoiceResponder` is currently playing, its playback is stopped and the generation counter is incremented to abandon the in-flight pipeline.
+Barge-in is **STT-confirmed**: playback is only interrupted when the STT provider returns a non-empty final transcription. The raw Discord VAD `speaking.start` event is not used as the trigger because it also fires on echo — the bot's own TTS audio leaking back through the user's microphone produces VAD activity but an empty transcription. Gating on a non-empty transcript eliminates these false positives entirely.
+
+**Latency tradeoff:** STT confirmation adds approximately 1–2 seconds to the response time of an intentional interrupt (the time for the STT provider to return a final result). This is a deliberate tradeoff — the alternative (VAD-based triggering) caused longer responses to be cut off mid-playback by echo, which is a worse failure mode than a slightly delayed interrupt response.
+
+When a non-empty transcript arrives while `VoiceResponder` is playing, playback is stopped and the generation counter is incremented to abandon the in-flight pipeline. The transcript is then processed as a new voice turn.
 
 ## Architecture Overview
 
