@@ -48,6 +48,7 @@ export type AudioPipelineOpts = {
 };
 
 type GuildPipeline = {
+  connection: VoiceConnection;
   sttProvider: SttProvider;
   receiver: AudioReceiver;
   responder?: VoiceResponder;
@@ -59,7 +60,7 @@ type GuildPipeline = {
 
 export class AudioPipelineManager {
   private readonly log: LoggerLike;
-  private readonly voiceConfig: VoiceConfig;
+  private voiceConfig: VoiceConfig;
   private readonly allowedUserIds: Set<string>;
   private readonly createDecoder: OpusDecoderFactory;
   private readonly onTranscription?: (guildId: string, result: TranscriptionResult) => void;
@@ -196,7 +197,7 @@ export class AudioPipelineManager {
 
       receiver.start();
 
-      this.pipelines.set(guildId, { sttProvider, receiver, responder });
+      this.pipelines.set(guildId, { connection, sttProvider, receiver, responder });
       this.log.info({ guildId }, 'audio pipeline started');
     } catch (err) {
       this.log.error({ guildId, err }, 'failed to start audio pipeline');
@@ -238,5 +239,24 @@ export class AudioPipelineManager {
   /** Number of active pipelines. */
   get activePipelineCount(): number {
     return this.pipelines.size;
+  }
+
+  /** Current Deepgram TTS voice model name. */
+  get ttsVoice(): string | undefined {
+    return this.voiceConfig.deepgramTtsVoice;
+  }
+
+  /**
+   * Update the Deepgram TTS voice and restart all active pipelines so the
+   * new voice takes effect immediately.
+   * @returns The number of pipelines that were restarted.
+   */
+  async setTtsVoice(voice: string): Promise<number> {
+    this.voiceConfig = { ...this.voiceConfig, deepgramTtsVoice: voice };
+    this.log.info({ voice }, 'TTS voice updated — restarting active pipelines');
+
+    const entries = [...this.pipelines.entries()];
+    await Promise.all(entries.map(([guildId, pipeline]) => this.startPipeline(guildId, pipeline.connection)));
+    return entries.length;
   }
 }
