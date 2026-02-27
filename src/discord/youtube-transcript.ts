@@ -91,18 +91,49 @@ export function truncateTranscript(text: string): string {
 /**
  * Extract the captionTracks array from a YouTube video page's HTML.
  * Returns the parsed array, or null if not found or not parseable.
+ *
+ * Uses bracket-counting rather than a lazy regex so that arbitrarily nested
+ * arrays (e.g. translationLanguages) do not cause premature truncation.
  */
 export function extractCaptionTracksFromHtml(html: string): CaptionTrack[] | null {
-  // Match "captionTracks":[...] — YouTube embeds this JSON directly in the page.
-  // The lazy .*? stops at the first ] which is reliable because captionTracks items
-  // only contain strings and objects (no nested arrays).
-  const match = html.match(/"captionTracks":(\[.*?\])/s);
-  if (!match) return null;
-  try {
-    return JSON.parse(match[1]) as CaptionTrack[];
-  } catch {
-    return null;
+  const prefix = '"captionTracks":[';
+  const prefixIdx = html.indexOf(prefix);
+  if (prefixIdx === -1) return null;
+
+  // Start at the opening '[' of the captionTracks array.
+  const start = prefixIdx + prefix.length - 1;
+  let depth = 0;
+  let inString = false;
+  let i = start;
+
+  while (i < html.length) {
+    const ch = html[i];
+    if (inString) {
+      if (ch === '\\') {
+        i += 2; // skip escaped character (e.g. \", \\)
+        continue;
+      }
+      if (ch === '"') inString = false;
+    } else {
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === '[') {
+        depth++;
+      } else if (ch === ']') {
+        depth--;
+        if (depth === 0) {
+          try {
+            return JSON.parse(html.slice(start, i + 1)) as CaptionTrack[];
+          } catch {
+            return null;
+          }
+        }
+      }
+    }
+    i++;
   }
+
+  return null; // no matching closing bracket found
 }
 
 /**
@@ -141,7 +172,8 @@ export async function fetchTranscriptForVideo(videoId: string): Promise<string> 
     const pageResponse = await fetch(pageUrl, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible)',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
       },
     });

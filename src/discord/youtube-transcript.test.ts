@@ -220,6 +220,38 @@ describe('extractCaptionTracksFromHtml', () => {
     expect(result).toHaveLength(2);
     expect(result?.[1].languageCode).toBe('fr');
   });
+
+  it('correctly handles captionTracks with nested translationLanguages arrays', () => {
+    // Regression: the old lazy regex (\[.*?\]) stopped at the first ] inside
+    // a nested translationLanguages array, producing invalid JSON. The
+    // bracket-counting extractor must return the full parsed structure.
+    const tracks = [
+      {
+        baseUrl: 'https://www.youtube.com/api/timedtext?v=test&lang=en',
+        languageCode: 'en',
+        name: { simpleText: 'English' },
+        translationLanguages: [
+          { languageCode: 'fr', languageName: { simpleText: 'French' } },
+          { languageCode: 'de', languageName: { simpleText: 'German' } },
+        ],
+      },
+      {
+        baseUrl: 'https://www.youtube.com/api/timedtext?v=test&lang=es',
+        languageCode: 'es',
+        name: { simpleText: 'Spanish' },
+        translationLanguages: [
+          { languageCode: 'en', languageName: { simpleText: 'English' } },
+        ],
+      },
+    ];
+    const html = makeCaptionHtml(tracks);
+    const result = extractCaptionTracksFromHtml(html);
+    expect(result).toEqual(tracks);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((result?.[0] as any).translationLanguages).toHaveLength(2);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((result?.[1] as any).translationLanguages[0].languageCode).toBe('en');
+  });
 });
 
 // --- parseTranscriptXml ---
