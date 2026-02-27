@@ -66,6 +66,13 @@ export function mapRuntimeErrorToUserMessage(raw: string): string {
     return 'The conversation context exceeded the model\'s limit. Try a shorter message or start a new conversation.';
   }
 
+  if (lc.includes('tool_use.name') && lc.includes('at most 200 characters')) {
+    return (
+      'A tool name exceeded the Anthropic API 200-character limit. ' +
+      'MCP tool names are composed as `mcp__<server_name>__<tool_name>` — shorten the server name in `.mcp.json` and restart.'
+    );
+  }
+
   if (!msg) {
     return 'An unexpected runtime error occurred with no additional detail.';
   }
