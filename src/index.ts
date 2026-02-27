@@ -746,6 +746,7 @@ const botParams = {
   imagegenCtx: undefined as ImagegenContext | undefined,
   voiceCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
   voiceStatusCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
+  setTtsVoice: undefined as ((voice: string) => Promise<number>) | undefined,
   configCtx: undefined as import('./discord/actions-config.js').ConfigContext | undefined,
   deferOpts: undefined as ConfigureDeferredSchedulerOpts | undefined,
   messageHistoryBudget,
@@ -1322,6 +1323,12 @@ if (taskCtx) {
     });
 
     botParams.voiceStatusCtx = { voiceManager };
+
+    botParams.setTtsVoice = async (voice: string) => {
+      const count = await audioPipeline!.setTtsVoice(voice);
+      botParams.deepgramTtsVoice = voice;
+      return count;
+    };
 
     if (cfg.discordActionsVoice) {
       botParams.voiceCtx = { voiceManager };

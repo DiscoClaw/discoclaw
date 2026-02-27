@@ -70,6 +70,7 @@ import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './user-e
 import { parseHelpCommand, handleHelpCommand } from './help-command.js';
 import { parseVoiceStatusCommand, renderVoiceStatusReport } from './voice-status-command.js';
 import type { VoiceStatusSnapshot } from './voice-status-command.js';
+import { parseVoiceCommand, handleVoiceCommand } from './voice-command.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './health-command.js';
 import { parseStatusCommand, collectStatusSnapshot, renderStatusReport } from './status-command.js';
 import type { StatusCommandContext } from './status-command.js';
@@ -221,6 +222,8 @@ export type BotParams = {
   openaiApiKey?: string;
   /** Always-present voice manager ref for status command — set when voiceEnabled, independent of discordActionsVoice. */
   voiceStatusCtx?: VoiceContext;
+  /** Update the Deepgram TTS voice on the live audio pipeline — set when voiceEnabled. */
+  setTtsVoice?: (voice: string) => Promise<number>;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -721,17 +724,32 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         return;
       }
 
-      // Handle !voice / !voice status — voice subsystem status report.
+      // Handle !voice commands — status, set, help.
       if (!isBotMessage) {
-        const voiceContent = String(msg.content ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-        if (voiceContent === '!voice' || parseVoiceStatusCommand(String(msg.content ?? ''))) {
-          if (!params.voiceEnabled) {
-            await msg.reply({ content: 'Voice is disabled. Set `DISCOCLAW_VOICE_ENABLED=1` to enable.', allowedMentions: NO_MENTIONS });
+        const voiceCmd = parseVoiceCommand(String(msg.content ?? ''));
+        if (voiceCmd) {
+          if (voiceCmd.action === 'set') {
+            // !voice set <name> — switch the active Deepgram TTS voice at runtime.
+            if (params.voiceTtsProvider !== 'deepgram') {
+              await msg.reply({ content: `Voice name switching requires \`deepgram\` TTS provider (current: \`${params.voiceTtsProvider ?? 'cartesia'}\`).`, allowedMentions: NO_MENTIONS });
+              return;
+            }
+            if (!params.setTtsVoice) {
+              await msg.reply({ content: 'Voice set is unavailable — audio pipeline not initialized.', allowedMentions: NO_MENTIONS });
+              return;
+            }
+            const restarted = await params.setTtsVoice(voiceCmd.voice);
+            const reply = restarted > 0
+              ? `Voice set to \`${voiceCmd.voice}\`. ${restarted === 1 ? '1 active pipeline' : `${restarted} active pipelines`} restarted.`
+              : `Voice set to \`${voiceCmd.voice}\`. Will take effect on the next pipeline start.`;
+            await msg.reply({ content: reply, allowedMentions: NO_MENTIONS });
             return;
           }
+
+          // status / help — delegate to handleVoiceCommand.
           const connMap = (params.voiceCtx ?? params.voiceStatusCtx)?.voiceManager.listConnections() ?? new Map();
           const voiceSnapshot: VoiceStatusSnapshot = {
-            enabled: true,
+            enabled: params.voiceEnabled ?? false,
             sttProvider: params.voiceSttProvider ?? 'deepgram',
             ttsProvider: params.voiceTtsProvider ?? 'cartesia',
             homeChannel: params.voiceHomeChannel,
@@ -749,8 +767,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               selfDeaf: info.selfDeaf,
             })),
           };
-          const voiceReport = renderVoiceStatusReport(voiceSnapshot, params.botDisplayName);
-          await msg.reply({ content: voiceReport, allowedMentions: NO_MENTIONS });
+          const voiceReply = await handleVoiceCommand(voiceCmd, {
+            voiceEnabled: params.voiceEnabled ?? false,
+            ttsProvider: params.voiceTtsProvider ?? 'cartesia',
+            statusSnapshot: voiceSnapshot,
+            botDisplayName: params.botDisplayName,
+          });
+          await msg.reply({ content: voiceReply, allowedMentions: NO_MENTIONS });
           return;
         }
       }

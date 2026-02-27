@@ -76,6 +76,8 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models set voice sonnet` — use a specific model for voice responses',
       '',
       '**Note:** Image generation (imagegen) configuration is shown automatically in `!models` when enabled, but is not switchable via `!models set` — configure it via environment variables instead.',
+      '',
+      '**TTS voice:** Use `!voice set <name>` to switch the Deepgram TTS voice at runtime (e.g. `!voice set aura-2-luna-en`). See `!voice help` for details.',
     ].join('\n');
   }
 
