@@ -4,6 +4,7 @@ import type { AudioFrame, TtsProvider } from './types.js';
 const DEEPGRAM_SPEECH_URL = 'https://api.deepgram.com/v1/speak';
 const DEFAULT_MODEL = 'aura-2-asteria-en';
 const DEFAULT_SAMPLE_RATE = 24000;
+export const DEEPGRAM_MAX_CHARS = 2000;
 
 export type DeepgramTtsOpts = {
   apiKey: string;
@@ -37,6 +38,24 @@ export class DeepgramTtsProvider implements TtsProvider {
 
   async *synthesize(text: string): AsyncGenerator<AudioFrame> {
     if (!text.trim()) return;
+
+    if (text.length > DEEPGRAM_MAX_CHARS) {
+      const originalLength = text.length;
+      const slice = text.slice(0, DEEPGRAM_MAX_CHARS);
+      const sentenceEnd = Math.max(
+        slice.lastIndexOf('. '),
+        slice.lastIndexOf('! '),
+        slice.lastIndexOf('? '),
+        slice.lastIndexOf('.\n'),
+        slice.lastIndexOf('!\n'),
+        slice.lastIndexOf('?\n'),
+      );
+      text = sentenceEnd > 0 ? slice.slice(0, sentenceEnd + 1) : (slice.lastIndexOf(' ') > 0 ? slice.slice(0, slice.lastIndexOf(' ')) : slice);
+      this.log.warn(
+        { originalLength, truncatedLength: text.length },
+        'Deepgram TTS: text truncated to prevent HTTP 413',
+      );
+    }
 
     const params = new URLSearchParams({
       model: this.model,
