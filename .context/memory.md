@@ -51,6 +51,19 @@ Bot:   Given your preference for Rust in systems work, I'd lean that way —
        especially since this is a low-level networking tool.
 ```
 
+#### Consolidation
+
+When the active item count for a user crosses a threshold (`DISCOCLAW_DURABLE_CONSOLIDATION_THRESHOLD`, default `100`), consolidation can be triggered to prune and merge the list. A single `fast`-tier model call receives all active items and is asked to return a revised list — removing exact duplicates, merging near-duplicates, dropping clearly stale items, and preserving everything that is still plausibly useful. The model must not invent new facts or change the meaning of existing ones.
+
+The revised list is applied atomically: items absent from the model's output are deprecated via `deprecateItems()`; new or rewritten items are written via `addItem()`. Items present verbatim in the output are left untouched (no unnecessary writes).
+
+**Safety guards:**
+- The revised list must contain at least 50 % of the original count. If the model returns fewer items than that floor, consolidation is aborted and a warning is logged — no writes occur.
+- Consolidation runs at most once per session per user, regardless of how many writes happen. This prevents runaway API calls.
+- All mutations flow through the existing durable write queue, so consolidation is serialized with concurrent `!memory remember` / auto-extraction writes.
+
+**Config:** `DISCOCLAW_DURABLE_CONSOLIDATION_THRESHOLD=100` sets the item count at which consolidation becomes eligible. `DISCOCLAW_DURABLE_CONSOLIDATION_MODEL=fast` selects the model tier used for the consolidation call.
+
 ### 3. Memory Commands — user-facing control surface
 
 `src/discord/memory-commands.ts`
@@ -258,6 +271,8 @@ Short-term entries also store `channelId` alongside the existing `channelName`.
 | `DISCOCLAW_MEMORY_COMMANDS_ENABLED` | `true` | Memory commands |
 | `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED` | `true` | Auto-extraction |
 | `DISCOCLAW_DURABLE_SUPERSESSION_SHADOW` | `false` | Auto-extraction |
+| `DISCOCLAW_DURABLE_CONSOLIDATION_THRESHOLD` | `100` | Durable memory |
+| `DISCOCLAW_DURABLE_CONSOLIDATION_MODEL` | `fast` | Durable memory |
 | `DISCOCLAW_SHORTTERM_MEMORY_ENABLED` | `true` | Short-term memory |
 | `DISCOCLAW_SHORTTERM_MAX_ENTRIES` | `20` | Short-term memory |
 | `DISCOCLAW_SHORTTERM_MAX_AGE_HOURS` | `6` | Short-term memory |

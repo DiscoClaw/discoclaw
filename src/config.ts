@@ -61,6 +61,8 @@ export type DiscoclawConfig = {
   durableInjectMaxChars: number;
   durableMaxItems: number;
   durableSupersessionShadow: boolean;
+  memoryConsolidationThreshold: number;
+  memoryConsolidationModel: string;
   memoryCommandsEnabled: boolean;
   planCommandsEnabled: boolean;
   planPhasesEnabled: boolean;
@@ -631,6 +633,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       durableInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_DURABLE_INJECT_MAX_CHARS', 2000),
       durableMaxItems: parsePositiveInt(env, 'DISCOCLAW_DURABLE_MAX_ITEMS', 200),
       durableSupersessionShadow: parseBoolean(env, 'DISCOCLAW_DURABLE_SUPERSESSION_SHADOW', false),
+      memoryConsolidationThreshold: parsePositiveInt(env, 'DISCOCLAW_MEMORY_CONSOLIDATION_THRESHOLD', 50),
+      memoryConsolidationModel: parseTrimmedString(env, 'DISCOCLAW_MEMORY_CONSOLIDATION_MODEL') ?? fastModel,
       memoryCommandsEnabled: parseBoolean(env, 'DISCOCLAW_MEMORY_COMMANDS_ENABLED', true),
       planCommandsEnabled: parseBoolean(env, 'DISCOCLAW_PLAN_COMMANDS_ENABLED', true),
       planPhasesEnabled: parseBoolean(env, 'PLAN_PHASES_ENABLED', true),

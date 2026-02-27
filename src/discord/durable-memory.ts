@@ -8,7 +8,7 @@ export type DurableItem = {
   text: string;
   tags: string[];
   status: 'active' | 'deprecated';
-  source: { type: 'discord' | 'manual' | 'summary'; channelId?: string; messageId?: string; guildId?: string; channelName?: string };
+  source: { type: 'discord' | 'manual' | 'summary' | 'consolidation'; channelId?: string; messageId?: string; guildId?: string; channelName?: string };
   createdAt: number;
   updatedAt: number;
 };
@@ -203,4 +203,8 @@ function formatItemLine(item: DurableItem): string {
 
 export function formatDurableSection(items: DurableItem[]): string {
   return items.map(formatItemLine).join('\n');
+}
+
+export function getActiveItemCount(store: DurableMemoryStore): number {
+  return store.items.filter((item) => item.status === 'active').length;
 }
