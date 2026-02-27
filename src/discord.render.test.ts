@@ -578,8 +578,9 @@ describe('selectStreamingOutput', () => {
       showPreview: false,
       elapsedMs: 42000,
     });
-    expect(out).toBe('**(42s) Thinking.**');
-    expect(out).not.toContain('```');
+    expect(out).toContain('**(42s) Thinking.**');
+    expect(out).toContain('```text');
+    expect(out).toContain('streaming text');
   });
 
   it('showPreview=false + elapsedMs: prefix renders in activity label', () => {
