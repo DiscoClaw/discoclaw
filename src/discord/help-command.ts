@@ -11,6 +11,7 @@ export function handleHelpCommand(): string {
     '- `!forge <task>` — start a forge run (AI-drafted + audited plan); `!forge help` for details',
     '- `!plan <task>` — create and manage phased plans; `!plan help` for details',
     '- `!memory` — view or edit durable memory; `!memory help` for details',
+    '- `!secret` — manage API keys and secrets via DM; `!secret help` for details',
     '- `!models` — show or change model assignments; `!models help` for details',
     '- `!health` — show bot health and metrics; `!health verbose` for full config',
     '- `!status` — show live runtime status (uptime, crons, memory, API connectivity)',

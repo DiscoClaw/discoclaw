@@ -29,6 +29,7 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import { fetchMessageHistory } from './message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
+import { parseSecretCommand, handleSecretCommand } from './secret-commands.js';
 import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './plan-commands.js';
 import { handlePlanAudit } from './audit-handler.js';
 import type { PlanAuditResult } from './audit-handler.js';
@@ -530,6 +531,7 @@ function isQueueLevelCommand(m: CoordinatorMessage, params: Omit<BotParams, 'tok
   if (params.planCommandsEnabled && parsePlanCommand(content)) return true;
   if (params.forgeCommandsEnabled && parseForgeCommand(content)) return true;
   if (parseConfirmToken(content)) return true;
+  if (parseSecretCommand(content)) return true;
   return false;
 }
 
@@ -1298,6 +1300,25 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (cmd.action === 'reset-rolling') {
                 turnCounters.delete(sessionKey);
               }
+              await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+              return;
+            }
+          }
+
+          // Handle !secret commands (DM-only, bypasses runtime entirely).
+          if (!isBotMessage) {
+            const secretCmd = parseSecretCommand(String(msg.content ?? ''));
+            if (secretCmd) {
+              if (!isDm) {
+                await msg.reply({
+                  content: '`!secret` is only available in DMs. Please DM me to manage secrets.',
+                  allowedMentions: NO_MENTIONS,
+                });
+                return;
+              }
+              const response = await handleSecretCommand(secretCmd, {
+                envPath: path.join(params.projectCwd, '.env'),
+              });
               await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
               return;
             }
