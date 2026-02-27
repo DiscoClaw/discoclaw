@@ -427,6 +427,50 @@ describe('ensureSystemScaffold', () => {
     const agentsCh = (guild.__cache as Map<string, any>).get('agents-1');
     expect(agentsCh.edit).toHaveBeenCalledWith(expect.objectContaining({ name: 'automations' }));
   });
+
+  it('creates voice + voice-log channels when ensureVoiceChannel is true', async () => {
+    const guild = makeMockGuild([]);
+    const res = await ensureSystemScaffold({ guild, ensureTasks: false, ensureVoiceChannel: true });
+    expect(res).not.toBeNull();
+    expect(res?.voiceChannelId).toBeTruthy();
+    expect(res?.voiceLogChannelId).toBeTruthy();
+
+    // Verify the created channels have the correct names and types.
+    const voiceCh = [...(guild.__cache as Map<string, any>).values()].find(
+      (c) => c.name === 'voice' && c.type === ChannelType.GuildVoice,
+    );
+    expect(voiceCh).toBeDefined();
+    expect(voiceCh.id).toBe(res?.voiceChannelId);
+
+    const voiceLogCh = [...(guild.__cache as Map<string, any>).values()].find(
+      (c) => c.name === 'voice-log' && c.type === ChannelType.GuildText,
+    );
+    expect(voiceLogCh).toBeDefined();
+    expect(voiceLogCh.id).toBe(res?.voiceLogChannelId);
+
+    // 5 creates: category + status + automations + voice + voice-log
+    expect(guild.__create).toHaveBeenCalledTimes(5);
+  });
+
+  it('finds existing voice-chat channel by legacy name and renames to voice', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: 'voice-old', name: 'voice-chat', type: ChannelType.GuildVoice, parentId: 'cat-sys' },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const res = await ensureSystemScaffold({ guild, ensureTasks: false, ensureVoiceChannel: true });
+    expect(res).not.toBeNull();
+    expect(res?.voiceChannelId).toBe('voice-old');
+
+    // No new voice channel should have been created.
+    const createCalls = guild.__create.mock.calls;
+    const voiceCreateCalls = createCalls.filter((c: any) => c[0]?.type === ChannelType.GuildVoice);
+    expect(voiceCreateCalls).toHaveLength(0);
+
+    // The existing voice-chat channel should have been renamed to 'voice'.
+    const voiceCh = (guild.__cache as Map<string, any>).get('voice-old');
+    expect(voiceCh.edit).toHaveBeenCalledWith(expect.objectContaining({ name: 'voice' }));
+  });
 });
 
 describe('ensureForumTags', () => {

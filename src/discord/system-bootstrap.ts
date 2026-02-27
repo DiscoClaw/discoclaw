@@ -11,6 +11,7 @@ export type SystemScaffold = {
   cronsForumId?: string;
   tasksForumId?: string;
   voiceChannelId?: string;
+  voiceLogChannelId?: string;
 };
 
 type EditableBootstrapChannel = GuildBasedChannel & {
@@ -329,15 +330,25 @@ export async function ensureSystemScaffold(
   }
 
   let voice: { id?: string; created: boolean; moved: boolean } | null = null;
+  let voiceLog: { id?: string; created: boolean; moved: boolean } | null = null;
   if (params.ensureVoiceChannel) {
     voice = await ensureChild(
       guild,
       system.id,
-      { name: 'voice-chat', type: ChannelType.GuildVoice },
+      { name: 'voice', type: ChannelType.GuildVoice, legacyNames: ['voice-chat'] },
       log,
     );
-    if (voice.created) created.push('voice-chat');
-    if (voice.moved) moved.push('voice-chat');
+    if (voice.created) created.push('voice');
+    if (voice.moved) moved.push('voice');
+
+    voiceLog = await ensureChild(
+      guild,
+      system.id,
+      { name: 'voice-log', type: ChannelType.GuildText, topic: 'Voice conversation transcripts.' },
+      log,
+    );
+    if (voiceLog.created) created.push('voice-log');
+    if (voiceLog.moved) moved.push('voice-log');
   }
 
   if (created.length > 0 || moved.length > 0) {
@@ -360,6 +371,7 @@ export async function ensureSystemScaffold(
   if (crons.id) result.cronsForumId = crons.id;
   if (tasks?.id) result.tasksForumId = tasks.id;
   if (voice?.id) result.voiceChannelId = voice.id;
+  if (voiceLog?.id) result.voiceLogChannelId = voiceLog.id;
   return result;
 }
 
