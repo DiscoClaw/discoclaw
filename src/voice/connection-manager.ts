@@ -57,6 +57,7 @@ export class VoiceConnectionManager {
       guildId: opts.guildId,
       adapterCreator: opts.adapterCreator,
       selfDeaf: false,
+      decryptionFailureTolerance: 999_999,
     });
 
     this.connections.set(opts.guildId, connection);
@@ -163,6 +164,12 @@ export class VoiceConnectionManager {
     // Catch errors from the voice networking layer (e.g. DAVE handshake failures)
     // to prevent them from crashing the process as uncaught exceptions.
     connection.on('error', (err: Error) => {
+      if (isDaveDecryptionError(err)) {
+        // DAVE decryption errors are transient packet-level failures; dropping the
+        // packet is safe and the stream should continue. Do NOT destroy the connection.
+        this.log.warn({ guildId, err }, 'voice DAVE decryption error (packet dropped)');
+        return;
+      }
       this.log.error({ guildId, err }, 'voice connection error');
       try {
         connection.destroy();
@@ -172,4 +179,9 @@ export class VoiceConnectionManager {
       this.connections.delete(guildId);
     });
   }
+}
+
+function isDaveDecryptionError(err: unknown): boolean {
+  const msg = (err instanceof Error ? `${err.name} ${err.message}` : String(err));
+  return /DecryptionFailed|Unencrypted|DAVE/i.test(msg);
 }
