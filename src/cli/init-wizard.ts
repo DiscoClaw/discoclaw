@@ -76,16 +76,6 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   lines.push(`DISCOCLAW_DISCORD_ACTIONS=${vals.DISCOCLAW_DISCORD_ACTIONS ?? '1'}`);
   lines.push('');
 
-  const autoDetectedKeys = ['DISCOCLAW_TASKS_FORUM', 'DISCOCLAW_CRON_FORUM'];
-  const hasAutoDetected = autoDetectedKeys.some((k) => vals[k]);
-  if (hasAutoDetected) {
-    lines.push('# AUTO-DETECTED');
-    for (const k of autoDetectedKeys) {
-      if (vals[k]) lines.push(`${k}=${vals[k]}`);
-    }
-    lines.push('');
-  }
-
   // Voice
   const voiceKeys = [
     'DISCOCLAW_VOICE_ENABLED',
@@ -98,6 +88,16 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   if (hasVoice) {
     lines.push('# VOICE');
     for (const k of voiceKeys) {
+      if (vals[k]) lines.push(`${k}=${vals[k]}`);
+    }
+    lines.push('');
+  }
+
+  const autoDetectedKeys = ['DISCOCLAW_TASKS_FORUM', 'DISCOCLAW_CRON_FORUM'];
+  const hasAutoDetected = autoDetectedKeys.some((k) => vals[k]);
+  if (hasAutoDetected) {
+    lines.push('# AUTO-DETECTED');
+    for (const k of autoDetectedKeys) {
       if (vals[k]) lines.push(`${k}=${vals[k]}`);
     }
     lines.push('');
