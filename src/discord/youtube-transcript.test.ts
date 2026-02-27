@@ -332,7 +332,7 @@ describe('fetchYouTubeTranscripts', () => {
 // Uses vi.importActual to bypass the module-level vi.mock and hit the real InnerTube API.
 
 describe('fetchTranscriptForVideo (integration)', () => {
-  it(
+  it.skipIf(!!process.env.CI)(
     'fetches a real transcript from YouTube',
     async () => {
       const { fetchTranscript: realFetchTranscript } =
