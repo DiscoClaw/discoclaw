@@ -413,6 +413,7 @@ export async function runInitWizard(): Promise<void> {
   console.log('Configuration complete!\n');
   console.log('Next steps:');
   console.log('  Note: The bot will auto-create its forum channels on first connect.');
+  console.log('  Tip: To add API keys or secrets later, DM the bot: !secret set KEY=value');
   if (values.PRIMARY_RUNTIME === 'claude') {
     console.log(`  ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'gemini') {
