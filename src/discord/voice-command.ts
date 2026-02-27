@@ -31,6 +31,8 @@ export type VoiceCommandOpts = {
    * restartPipelines. Returns the number of pipelines restarted.
    */
   setTtsVoice?: (voice: string) => Promise<number>;
+  /** Callback to persist the TTS voice override to the overrides file. Wired in index.ts. */
+  persistVoiceOverride?: (voice: string) => void;
   botDisplayName?: string;
 };
 
@@ -95,6 +97,7 @@ export async function handleVoiceCommand(
       }
       if (opts.setTtsVoice) {
         const restarted = await opts.setTtsVoice(cmd.voice);
+        opts.persistVoiceOverride?.(cmd.voice);
         const pipelineLabel = restarted === 1 ? '1 active pipeline' : `${restarted} active pipelines`;
         return restarted > 0
           ? `Voice set to \`${cmd.voice}\`. ${pipelineLabel} restarted.`
@@ -103,6 +106,7 @@ export async function handleVoiceCommand(
       if (opts.voiceConfig) {
         opts.voiceConfig.deepgramTtsVoice = cmd.voice;
       }
+      opts.persistVoiceOverride?.(cmd.voice);
       const pipelineCount = opts.activePipelineCount ?? 0;
       if (pipelineCount > 0 && opts.restartPipelines) {
         await opts.restartPipelines();

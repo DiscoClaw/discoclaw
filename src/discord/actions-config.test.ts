@@ -60,7 +60,8 @@ describe('CONFIG_ACTION_TYPES', () => {
   it('includes modelSet and modelShow', () => {
     expect(CONFIG_ACTION_TYPES.has('modelSet')).toBe(true);
     expect(CONFIG_ACTION_TYPES.has('modelShow')).toBe(true);
-    expect(CONFIG_ACTION_TYPES.size).toBe(2);
+    expect(CONFIG_ACTION_TYPES.has('modelReset')).toBe(true);
+    expect(CONFIG_ACTION_TYPES.size).toBe(3);
   });
 });
 
@@ -552,6 +553,7 @@ describe('configActionsPromptSection', () => {
     expect(section).toContain('fast');
     expect(section).toContain('forge-drafter');
     expect(section).toContain('forge-auditor');
-    expect(section).toContain('ephemeral');
+    expect(section).toContain('persisted');
+    expect(section).toContain('modelReset');
   });
 });
