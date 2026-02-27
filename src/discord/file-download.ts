@@ -1,4 +1,5 @@
 import type { AttachmentLike } from './image-download.js';
+import { sanitizeExternalContent } from '../sanitize-external.js';
 
 // Keep in sync with image-download.ts
 const ALLOWED_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net']);
@@ -329,10 +330,9 @@ export async function downloadTextAttachments(
       // Truncate if exceeding per-file limit
       if (buffer.length > MAX_FILE_BYTES) {
         const truncated = content.slice(0, MAX_FILE_BYTES);
-        texts.push({ name, content: truncated + '\n[truncated at 100KB]' });
-      } else {
-        texts.push({ name, content });
+        content = truncated + '\n[truncated at 100KB]';
       }
+      texts.push({ name, content: sanitizeExternalContent(content, `Attached file: ${name}`) });
     } catch (err: unknown) {
       const errObj = err instanceof Error ? err : null;
       if (errObj?.name === 'TimeoutError' || errObj?.name === 'AbortError') {
