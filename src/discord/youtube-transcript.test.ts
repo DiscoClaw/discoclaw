@@ -185,7 +185,7 @@ describe('fetchYouTubeTranscripts', () => {
 
   it('truncates long transcripts', async () => {
     const longWord = 'word ';
-    const segments = Array.from({ length: 2000 }, (_, i) => ({
+    const segments = Array.from({ length: 6000 }, (_, i) => ({
       text: longWord,
       duration: 1,
       offset: i,
