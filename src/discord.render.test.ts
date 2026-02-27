@@ -435,7 +435,7 @@ describe('selectStreamingOutput', () => {
 
   // -- showPreview: false (delay streaming code block) --
 
-  it('showPreview=false + deltaText → label only (no code block)', () => {
+  it('showPreview=false + deltaText → renders code block with deltaText content', () => {
     const out = selectStreamingOutput({
       deltaText: 'streaming text',
       activityLabel: '',
@@ -443,9 +443,9 @@ describe('selectStreamingOutput', () => {
       statusTick: 1,
       showPreview: false,
     });
-    expect(out).toBe('**Thinking..**');
-    expect(out).not.toContain('```');
-    expect(out).not.toContain('streaming text');
+    expect(out).toContain('**Thinking..**');
+    expect(out).toContain('```text');
+    expect(out).toContain('streaming text');
   });
 
   it('showPreview=false + activityLabel → label only (no code block)', () => {
@@ -481,6 +481,18 @@ describe('selectStreamingOutput', () => {
       showPreview: false,
     });
     expect(out).toBe('**Thinking...**');
+    expect(out).not.toContain('```');
+  });
+
+  it('showPreview=false + no deltaText + no finalText → still returns label only', () => {
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 1,
+      showPreview: false,
+    });
+    expect(out).toBe('**Thinking..**');
     expect(out).not.toContain('```');
   });
 
@@ -566,8 +578,9 @@ describe('selectStreamingOutput', () => {
       showPreview: false,
       elapsedMs: 42000,
     });
-    expect(out).toBe('**(42s) Thinking.**');
-    expect(out).not.toContain('```');
+    expect(out).toContain('**(42s) Thinking.**');
+    expect(out).toContain('```text');
+    expect(out).toContain('streaming text');
   });
 
   it('showPreview=false + elapsedMs: prefix renders in activity label', () => {

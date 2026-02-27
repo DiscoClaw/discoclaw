@@ -20,7 +20,7 @@ function collect() {
 describe('ToolAwareQueue', () => {
   it('text-only response: text deltas buffered then streamed after flush delay', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'text_delta', text: 'Hello ' });
     taq.handleEvent({ type: 'text_delta', text: 'world' });
@@ -29,7 +29,7 @@ describe('ToolAwareQueue', () => {
     expect(actions).toHaveLength(0);
 
     // After flush timer fires.
-    vi.advanceTimersByTime(2000);
+    vi.advanceTimersByTime(800);
 
     expect(actions).toHaveLength(1);
     expect(actions[0]).toEqual({ type: 'stream_text', text: 'Hello world' });
@@ -44,7 +44,7 @@ describe('ToolAwareQueue', () => {
 
   it('text then tool: narration discarded, activity shown', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'text_delta', text: 'Let me read the file...' });
     taq.handleEvent({ type: 'tool_start', name: 'Read', input: { file_path: '/tmp/foo.ts' } });
@@ -59,7 +59,7 @@ describe('ToolAwareQueue', () => {
 
   it('tool then text: activity during tool, text streams after', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'tool_start', name: 'Bash' });
 
@@ -81,7 +81,7 @@ describe('ToolAwareQueue', () => {
 
   it('multiple sequential tools: each shows its label, final text streams', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     // First tool.
     taq.handleEvent({ type: 'tool_start', name: 'Read', input: { file_path: '/a/b.ts' } });
@@ -109,7 +109,7 @@ describe('ToolAwareQueue', () => {
 
   it('text_final overrides everything', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'text_delta', text: 'buffered' });
     taq.handleEvent({ type: 'text_final', text: 'The final answer.' });
@@ -145,7 +145,7 @@ describe('ToolAwareQueue', () => {
 
   it('dispose() cancels timers', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'text_delta', text: 'will be lost' });
     taq.dispose();
@@ -156,7 +156,7 @@ describe('ToolAwareQueue', () => {
 
   it('post-tool delay prevents flashing narration between tools', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'tool_start', name: 'Read' });
     taq.handleEvent({ type: 'tool_end', name: 'Read', ok: true });
@@ -178,7 +178,7 @@ describe('ToolAwareQueue', () => {
 
   it('events after dispose() are silently ignored', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'text_delta', text: 'before' });
     taq.dispose();
@@ -197,14 +197,14 @@ describe('ToolAwareQueue', () => {
 
   it('tool_end without prior tool_start does not crash', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     // Orphan tool_end — should be silently ignored (state is idle, not tool_active).
     taq.handleEvent({ type: 'tool_end', name: 'Bash', ok: true });
 
     // Queue should still function normally after the orphan.
     taq.handleEvent({ type: 'text_delta', text: 'hello' });
-    vi.advanceTimersByTime(2000);
+    vi.advanceTimersByTime(800);
 
     expect(actions).toHaveLength(1);
     expect(actions[0]).toEqual({ type: 'stream_text', text: 'hello' });
@@ -214,7 +214,7 @@ describe('ToolAwareQueue', () => {
 
   it('multiple text_final events: only first is emitted as set_final', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'text_final', text: 'first final' });
     taq.handleEvent({ type: 'text_final', text: 'second final' });
@@ -230,7 +230,7 @@ describe('ToolAwareQueue', () => {
 
   it('text deltas during tool_active are discarded on next tool_start', () => {
     const { actions, emit } = collect();
-    const taq = new ToolAwareQueue(emit, { flushDelayMs: 2000, postToolDelayMs: 500 });
+    const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'tool_start', name: 'Read' });
     taq.handleEvent({ type: 'text_delta', text: 'I found...' });
