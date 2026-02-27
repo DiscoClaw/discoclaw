@@ -480,7 +480,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1 but neither OPENAI_API_KEY nor IMAGEGEN_GEMINI_API_KEY is set; imagegen will fail at runtime.');
   }
   if (imagegenDefaultModel) {
-    if (imagegenDefaultModel.startsWith('imagen-') && !imagegenGeminiApiKey) {
+    if ((imagegenDefaultModel.startsWith('imagen-') || imagegenDefaultModel.startsWith('gemini-')) && !imagegenGeminiApiKey) {
       warnings.push(`IMAGEGEN_DEFAULT_MODEL="${imagegenDefaultModel}" requires IMAGEGEN_GEMINI_API_KEY but it is not set; imagegen will fail at runtime.`);
     } else if ((imagegenDefaultModel.startsWith('dall-e-') || imagegenDefaultModel.startsWith('gpt-image-')) && !openaiApiKey) {
       warnings.push(`IMAGEGEN_DEFAULT_MODEL="${imagegenDefaultModel}" requires OPENAI_API_KEY but it is not set; imagegen will fail at runtime.`);
