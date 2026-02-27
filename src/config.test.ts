@@ -913,7 +913,7 @@ describe('parseConfig', () => {
 
   it('throws on invalid TTS provider', () => {
     expect(() => parseConfig(env({ DISCOCLAW_TTS_PROVIDER: 'elevenlabs' })))
-      .toThrow(/DISCOCLAW_TTS_PROVIDER must be one of cartesia\|kokoro/);
+      .toThrow(/DISCOCLAW_TTS_PROVIDER must be one of cartesia\|deepgram\|kokoro\|openai/);
   });
 
   it('parses DISCOCLAW_VOICE_HOME_CHANNEL when set', () => {

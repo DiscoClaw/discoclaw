@@ -209,7 +209,7 @@ export type BotParams = {
   // Voice subsystem config — threaded from DiscoclawConfig.
   voiceEnabled?: boolean;
   voiceSttProvider?: 'deepgram' | 'whisper' | 'openai';
-  voiceTtsProvider?: 'cartesia' | 'kokoro' | 'openai';
+  voiceTtsProvider?: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
   voiceHomeChannel?: string;
   deepgramApiKey?: string;
   cartesiaApiKey?: string;
