@@ -303,6 +303,64 @@ describe('AudioReceiver', () => {
     );
   });
 
+  it('logs DAVE DecryptionFailed error at warn and cleans up user', () => {
+    const { connection, speakingEmitter, streams } = createMockConnection();
+    const decoder = createMockDecoder();
+    const log = createLogger();
+    const recv = new AudioReceiver({
+      connection,
+      allowedUserIds: new Set(['111']),
+      sttProvider: createMockStt(),
+      log,
+      createDecoder: () => decoder,
+    });
+
+    recv.start();
+    speakingEmitter.emit('start', '111');
+
+    const stream = streams.get('111')!;
+    const err = new Error('DecryptionFailed(UnencryptedWhenPassthroughDisabled)');
+    stream.emit('error', err);
+
+    // Should log at warn, not error
+    expect(log.warn).toHaveBeenCalledWith(
+      { err, userId: '111' },
+      'audio receive stream DAVE decryption error (stream cleaned up)',
+    );
+    expect(log.error).not.toHaveBeenCalled();
+    // Cleanup still happens
+    expect(decoder.destroy).toHaveBeenCalled();
+  });
+
+  it('logs non-DAVE stream error at error level and cleans up user', () => {
+    const { connection, speakingEmitter, streams } = createMockConnection();
+    const decoder = createMockDecoder();
+    const log = createLogger();
+    const recv = new AudioReceiver({
+      connection,
+      allowedUserIds: new Set(['111']),
+      sttProvider: createMockStt(),
+      log,
+      createDecoder: () => decoder,
+    });
+
+    recv.start();
+    speakingEmitter.emit('start', '111');
+
+    const stream = streams.get('111')!;
+    const err = new Error('socket hang up');
+    stream.emit('error', err);
+
+    // Should log at error
+    expect(log.error).toHaveBeenCalledWith(
+      { err, userId: '111' },
+      'audio receive stream error',
+    );
+    expect(log.warn).not.toHaveBeenCalled();
+    // Cleanup still happens
+    expect(decoder.destroy).toHaveBeenCalled();
+  });
+
   it('logs decode errors without crashing', () => {
     const { connection, speakingEmitter, streams } = createMockConnection();
     const stt = createMockStt();

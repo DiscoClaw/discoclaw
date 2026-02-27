@@ -17,12 +17,14 @@ import { VoiceConnectionManager } from './connection-manager.js';
 
 type StatusLike = { status: string };
 type StateChangeListener = (oldState: StatusLike, newState: StatusLike) => void;
+type ErrorListener = (err: Error) => void;
 
 function createMockConnection(
   initialStatus = VoiceConnectionStatus.Signalling,
   joinConfigOverrides: Partial<{ channelId: string; guildId: string; selfMute: boolean; selfDeaf: boolean }> = {},
 ) {
   const stateListeners: StateChangeListener[] = [];
+  const errorListeners: ErrorListener[] = [];
   const conn = {
     rejoinAttempts: 0,
     state: { status: initialStatus } as StatusLike,
@@ -32,8 +34,9 @@ function createMockConnection(
       selfMute: joinConfigOverrides.selfMute ?? false,
       selfDeaf: joinConfigOverrides.selfDeaf ?? false,
     },
-    on: vi.fn((event: string, listener: StateChangeListener) => {
-      if (event === 'stateChange') stateListeners.push(listener);
+    on: vi.fn((event: string, listener: StateChangeListener | ErrorListener) => {
+      if (event === 'stateChange') stateListeners.push(listener as StateChangeListener);
+      if (event === 'error') errorListeners.push(listener as ErrorListener);
       return conn;
     }),
     destroy: vi.fn(() => {
@@ -53,6 +56,10 @@ function createMockConnection(
       const old = { ...conn.state };
       conn.state = { status };
       for (const l of stateListeners) l(old, conn.state);
+    },
+    /** Simulate an error event in tests. */
+    _error(err: Error) {
+      for (const l of errorListeners) l(err);
     },
   };
   return conn;
@@ -337,5 +344,58 @@ describe('VoiceConnectionManager', () => {
     const mgr = new VoiceConnectionManager(createLogger());
     const all = mgr.listConnections();
     expect(all.size).toBe(0);
+  });
+
+  it('joinVoiceChannel is called with decryptionFailureTolerance', () => {
+    const conn = createMockConnection();
+    mockJoin.mockReturnValue(conn as never);
+
+    const mgr = new VoiceConnectionManager(createLogger());
+    mgr.join({ channelId: 'ch1', guildId: 'g1', adapterCreator: fakeAdapter });
+
+    expect(mockJoin).toHaveBeenCalledWith(
+      expect.objectContaining({ decryptionFailureTolerance: 999_999 }),
+    );
+  });
+
+  it('DAVE DecryptionFailed error: connection is NOT destroyed and logged at warn', () => {
+    const conn = createMockConnection();
+    mockJoin.mockReturnValue(conn as never);
+    const log = createLogger();
+
+    const mgr = new VoiceConnectionManager(log);
+    mgr.join({ channelId: 'ch1', guildId: 'g1', adapterCreator: fakeAdapter });
+
+    const daveErr = new Error('DecryptionFailed(UnencryptedWhenPassthroughDisabled)');
+    conn._error(daveErr);
+
+    expect(conn.destroy).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ guildId: 'g1', err: daveErr }),
+      expect.stringContaining('DAVE'),
+    );
+    expect(log.error).not.toHaveBeenCalled();
+    // Connection still tracked
+    expect(mgr.getConnection('g1')).toBe(conn);
+  });
+
+  it('non-DAVE error: connection is destroyed and logged at error', () => {
+    const conn = createMockConnection();
+    mockJoin.mockReturnValue(conn as never);
+    const log = createLogger();
+
+    const mgr = new VoiceConnectionManager(log);
+    mgr.join({ channelId: 'ch1', guildId: 'g1', adapterCreator: fakeAdapter });
+
+    const genericErr = new Error('UDP socket closed unexpectedly');
+    conn._error(genericErr);
+
+    expect(conn.destroy).toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ guildId: 'g1', err: genericErr }),
+      'voice connection error',
+    );
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(mgr.getConnection('g1')).toBeUndefined();
   });
 });
