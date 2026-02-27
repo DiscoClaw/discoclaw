@@ -178,6 +178,7 @@ describe('fetchYouTubeTranscripts', () => {
     const result = await fetchYouTubeTranscripts('check out https://youtu.be/dQw4w9WgXcQ');
     expect(result.transcripts).toHaveLength(1);
     expect(result.transcripts[0].videoId).toBe('dQw4w9WgXcQ');
+    expect(result.transcripts[0].text).toContain('[EXTERNAL CONTENT:');
     expect(result.transcripts[0].text).toContain('Hello world');
     expect(result.errors).toHaveLength(0);
   });

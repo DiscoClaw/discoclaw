@@ -268,7 +268,8 @@ describe('web_fetch', () => {
       [tmpDir],
     );
     expect(r.ok).toBe(true);
-    expect(r.result).toBe('page content');
+    expect(r.result).toContain('[EXTERNAL CONTENT:');
+    expect(r.result).toContain('page content');
   });
 
   it('rejects HTTP (non-HTTPS) URLs', async () => {

@@ -327,10 +327,9 @@ export async function downloadTextAttachments(
         continue;
       }
 
-      // Truncate if exceeding per-file limit
+      // Truncate if exceeding per-file limit (sanitizeExternalContent will add [truncated] marker)
       if (buffer.length > MAX_FILE_BYTES) {
-        const truncated = content.slice(0, MAX_FILE_BYTES);
-        content = truncated + '\n[truncated at 100KB]';
+        content = content.slice(0, MAX_FILE_BYTES);
       }
       texts.push({ name, content: sanitizeExternalContent(content, `Attached file: ${name}`) });
     } catch (err: unknown) {
