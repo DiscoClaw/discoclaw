@@ -15,6 +15,8 @@ export type VoiceConfig = {
   ttsProvider: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
   homeChannel?: string;
   deepgramApiKey?: string;
+  deepgramSttModel?: string;
+  deepgramTtsVoice?: string;
   cartesiaApiKey?: string;
   openaiApiKey?: string;
 };

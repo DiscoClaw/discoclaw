@@ -96,6 +96,8 @@ export type DiscoclawConfig = {
   voiceTtsProvider: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
   voiceHomeChannel?: string;
   deepgramApiKey?: string;
+  deepgramSttModel: string;
+  deepgramTtsVoice: string;
   cartesiaApiKey?: string;
 
   forgeDrafterRuntime?: string;
@@ -495,6 +497,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     }
   }
   const deepgramApiKey = parseTrimmedString(env, 'DEEPGRAM_API_KEY');
+  const deepgramSttModel = parseTrimmedString(env, 'DEEPGRAM_STT_MODEL') ?? 'nova-3-conversationalai';
+  const deepgramTtsVoice = parseTrimmedString(env, 'DEEPGRAM_TTS_VOICE') ?? 'aura-2-asteria-en';
   const cartesiaApiKey = parseTrimmedString(env, 'CARTESIA_API_KEY');
   const voiceModelRaw = parseTrimmedString(env, 'DISCOCLAW_VOICE_MODEL');
   const voiceSystemPrompt = (() => {
@@ -651,6 +655,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       voiceTtsProvider,
       voiceHomeChannel,
       deepgramApiKey,
+      deepgramSttModel,
+      deepgramTtsVoice,
       cartesiaApiKey,
 
       forgeDrafterRuntime,

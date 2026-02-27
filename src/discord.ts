@@ -170,7 +170,7 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
     const guild = selectBootstrapGuild(client, params.guildId, params.log);
     if (guild) {
       system = await ensureSystemScaffold(
-        { guild, ensureTasks: Boolean(params.bootstrapEnsureTasksForum), botDisplayName: params.botDisplayName, existingCronsId: params.existingCronsId, existingTasksId: params.existingTasksId },
+        { guild, ensureTasks: Boolean(params.bootstrapEnsureTasksForum), ensureVoiceChannel: Boolean(params.voiceEnabled), botDisplayName: params.botDisplayName, existingCronsId: params.existingCronsId, existingTasksId: params.existingTasksId },
         params.log,
       );
     }

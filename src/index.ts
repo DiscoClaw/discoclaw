@@ -1283,6 +1283,8 @@ if (taskCtx) {
         ttsProvider: cfg.voiceTtsProvider,
         homeChannel: cfg.voiceHomeChannel,
         deepgramApiKey: cfg.deepgramApiKey,
+        deepgramSttModel: cfg.deepgramSttModel,
+        deepgramTtsVoice: cfg.deepgramTtsVoice,
         cartesiaApiKey: cfg.cartesiaApiKey,
         openaiApiKey: cfg.openaiApiKey,
       },
