@@ -68,6 +68,8 @@ import type { ThreadLikeChannel } from './thread-context.js';
 import { downloadTextAttachments } from './file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { parseHelpCommand, handleHelpCommand } from './help-command.js';
+import { parseVoiceStatusCommand, renderVoiceStatusReport } from './voice-status-command.js';
+import type { VoiceStatusSnapshot } from './voice-status-command.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './health-command.js';
 import { parseStatusCommand, collectStatusSnapshot, renderStatusReport } from './status-command.js';
 import type { StatusCommandContext } from './status-command.js';
@@ -208,6 +210,7 @@ export type BotParams = {
   serviceName?: string;
   // Voice subsystem config — threaded from DiscoclawConfig.
   voiceEnabled?: boolean;
+  voiceAutoJoin?: boolean;
   voiceSttProvider?: 'deepgram' | 'whisper' | 'openai';
   voiceTtsProvider?: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
   voiceHomeChannel?: string;
@@ -712,6 +715,34 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const report = renderStatusReport(snapshot, params.botDisplayName);
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
         return;
+      }
+
+      // Handle !voice / !voice status — voice subsystem status report, gated behind voiceEnabled.
+      if (!isBotMessage && params.voiceEnabled) {
+        const voiceContent = String(msg.content ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+        if (voiceContent === '!voice' || parseVoiceStatusCommand(String(msg.content ?? ''))) {
+          const connMap = params.voiceCtx?.voiceManager.listConnections() ?? new Map();
+          const voiceSnapshot: VoiceStatusSnapshot = {
+            enabled: true,
+            sttProvider: params.voiceSttProvider ?? 'deepgram',
+            ttsProvider: params.voiceTtsProvider ?? 'cartesia',
+            homeChannel: params.voiceHomeChannel,
+            deepgramKeySet: Boolean(params.deepgramApiKey),
+            cartesiaKeySet: Boolean(params.cartesiaApiKey),
+            autoJoin: params.voiceAutoJoin ?? false,
+            actionsEnabled: params.discordActionsVoice ?? false,
+            connections: [...connMap.entries()].map(([guildId, info]) => ({
+              guildId,
+              channelId: info.channelId,
+              state: info.state,
+              selfMute: info.selfMute,
+              selfDeaf: info.selfDeaf,
+            })),
+          };
+          const voiceReport = renderVoiceStatusReport(voiceSnapshot, params.botDisplayName);
+          await msg.reply({ content: voiceReport, allowedMentions: NO_MENTIONS });
+          return;
+        }
       }
 
       const healthMode = (params.healthCommandsEnabled ?? true)
