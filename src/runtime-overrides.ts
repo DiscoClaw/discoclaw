@@ -4,6 +4,7 @@ import path from 'node:path';
 export type RuntimeOverrides = {
   runtimeModel?: string;
   voiceModel?: string;
+  ttsVoice?: string;
 };
 
 const OVERRIDES_FILENAME = 'runtime-overrides.json';
@@ -47,6 +48,7 @@ export async function loadOverrides(filePath: string): Promise<RuntimeOverrides>
   const overrides: RuntimeOverrides = {};
   if (typeof obj['runtimeModel'] === 'string') overrides.runtimeModel = obj['runtimeModel'];
   if (typeof obj['voiceModel'] === 'string') overrides.voiceModel = obj['voiceModel'];
+  if (typeof obj['ttsVoice'] === 'string') overrides.ttsVoice = obj['ttsVoice'];
   return overrides;
 }
 
