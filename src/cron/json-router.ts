@@ -53,7 +53,14 @@ export function parseJsonRouteEntries(output: string): JsonRouteEntry[] | null {
   try {
     parsed = JSON.parse(text);
   } catch {
-    return null;
+    // Attempt to extract a bare JSON array from anywhere within the text.
+    const arrayMatch = text.match(/\[[\s\S]*\]/);
+    if (!arrayMatch) return null;
+    try {
+      parsed = JSON.parse(arrayMatch[0]);
+    } catch {
+      return null;
+    }
   }
 
   if (!Array.isArray(parsed)) return null;

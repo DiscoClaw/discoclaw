@@ -24,6 +24,8 @@ import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import { buildCronPromptBody } from './cron-prompt.js';
+import { handleJsonRouteOutput } from './json-router.js';
 
 export type CronExecutorContext = {
   client: Client;
@@ -52,131 +54,6 @@ export type CronExecutorContext = {
   runControl?: CronRunControl;
 };
 
-// ---------------------------------------------------------------------------
-// Prompt builder
-// ---------------------------------------------------------------------------
-
-export type BuildCronSystemPromptOpts = {
-  preamble: string;
-  jobName: string;
-  jobPrompt: string;
-  defaultChannel: string;
-  defaultChannelId?: string;
-  silent?: boolean;
-  routingMode?: 'default' | 'json';
-};
-
-export function buildCronSystemPrompt(opts: BuildCronSystemPromptOpts): string {
-  // Expand {{channel}} / {{channelId}} placeholders in the job prompt.
-  const expandedPrompt = opts.jobPrompt
-    .replace(/\{\{channel\}\}/g, opts.defaultChannel)
-    .replace(/\{\{channelId\}\}/g, opts.defaultChannelId ?? '');
-
-  let prompt =
-    opts.preamble + '\n\n' +
-    `You are executing a scheduled cron job named "${opts.jobName}".\n\n` +
-    `Instruction: ${expandedPrompt}\n\n`;
-
-  if (opts.routingMode === 'json') {
-    prompt +=
-      'Respond with a JSON array of routing entries, one per target channel. ' +
-      'Each entry must have the form {"channel":"<channel-name-or-id>","content":"<message content>"}. ' +
-      'Emit only the JSON array — no surrounding text or markdown fences.';
-  } else {
-    prompt +=
-      `Your output will be posted automatically to the Discord channel #${opts.defaultChannel}. ` +
-      `Do NOT explain how to post or suggest using bots/webhooks — just write the message content directly. ` +
-      `Keep your response concise and focused on the instruction above.`;
-  }
-
-  if (opts.silent) {
-    prompt +=
-      '\n\nIMPORTANT: If there is nothing actionable to report, respond with exactly `HEARTBEAT_OK` and nothing else.';
-  }
-
-  return prompt;
-}
-
-// ---------------------------------------------------------------------------
-// JSON routing helpers
-// ---------------------------------------------------------------------------
-
-type JsonRoutingEntry = { channel: string; content: string };
-
-function isValidRoutingEntry(e: unknown): e is JsonRoutingEntry {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    typeof (e as Record<string, unknown>).channel === 'string' &&
-    typeof (e as Record<string, unknown>).content === 'string'
-  );
-}
-
-function parseJsonRoutingResponse(output: string): JsonRoutingEntry[] | null {
-  const cleaned = output.trim();
-  // Attempt 1: direct parse.
-  try {
-    const parsed: unknown = JSON.parse(cleaned);
-    if (Array.isArray(parsed) && parsed.every(isValidRoutingEntry)) return parsed;
-  } catch { /* fall through */ }
-  // Attempt 2: extract from a markdown code block.
-  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    try {
-      const parsed: unknown = JSON.parse(codeBlockMatch[1].trim());
-      if (Array.isArray(parsed) && parsed.every(isValidRoutingEntry)) return parsed;
-    } catch { /* fall through */ }
-  }
-  // Attempt 3: extract a bare JSON array from the text.
-  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (arrayMatch) {
-    try {
-      const parsed: unknown = JSON.parse(arrayMatch[0]);
-      if (Array.isArray(parsed) && parsed.every(isValidRoutingEntry)) return parsed;
-    } catch { /* fall through */ }
-  }
-  return null;
-}
-
-async function executeJsonRouting(
-  entries: JsonRoutingEntry[],
-  guild: Guild,
-  ctx: CronExecutorContext,
-  job: CronJob,
-): Promise<{ anySucceeded: boolean }> {
-  let anySucceeded = false;
-  for (const entry of entries) {
-    const ch = resolveChannel(guild, entry.channel);
-    if (!ch) {
-      ctx.log?.warn({ jobId: job.id, channel: entry.channel }, 'cron:json-routing channel not found, skipping');
-      continue;
-    }
-    if (ctx.allowChannelIds) {
-      const chId = (ch as unknown as { id?: string }).id ?? '';
-      const chParentId = (ch as unknown as { parentId?: string | null }).parentId;
-      const isThread =
-        typeof (ch as unknown as { isThread?: () => boolean }).isThread === 'function'
-          ? (ch as unknown as { isThread: () => boolean }).isThread()
-          : false;
-      const parentId = isThread ? String(chParentId ?? '') : '';
-      const allowed = ctx.allowChannelIds.has(chId) || (Boolean(parentId) && ctx.allowChannelIds.has(parentId));
-      if (!allowed) {
-        ctx.log?.warn({ jobId: job.id, channel: entry.channel }, 'cron:json-routing channel not allowlisted, skipping');
-        continue;
-      }
-    }
-    const channelForSend = ch as unknown as {
-      send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown>;
-    };
-    try {
-      await sendChunks(channelForSend, entry.content);
-      anySucceeded = true;
-    } catch (err) {
-      ctx.log?.warn({ jobId: job.id, channel: entry.channel, err }, 'cron:json-routing send failed');
-    }
-  }
-  return { anySucceeded };
-}
 
 async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string): Promise<void> {
   if (ctx.statsStore && job.cronId) {
@@ -294,15 +171,17 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     // Fetch run record early — needed for prompt flags (silent, routingMode) and model selection.
     const preRunRecord = ctx.statsStore && job.cronId ? ctx.statsStore.getRecord(job.cronId) : undefined;
 
-    let prompt = buildCronSystemPrompt({
-      preamble: buildPromptPreamble(inlinedContext),
-      jobName: job.name,
-      jobPrompt: job.def.prompt,
-      defaultChannel: job.def.channel,
-      defaultChannelId: channelForSend.id,
-      silent: preRunRecord?.silent,
-      routingMode: preRunRecord?.routingMode,
-    });
+    let prompt =
+      buildPromptPreamble(inlinedContext) +
+      '\n\n' +
+      buildCronPromptBody({
+        jobName: job.name,
+        promptTemplate: job.def.prompt,
+        channel: job.def.channel,
+        channelId: channelForSend.id,
+        silent: preRunRecord?.silent,
+        routingMode: preRunRecord?.routingMode === 'json' ? 'json' : undefined,
+      });
 
     const tools = await resolveEffectiveTools({
       workspaceCwd: ctx.cwd,
@@ -495,7 +374,9 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
 
     // Silent-mode short-response gate: suppress paraphrased "nothing to report" responses.
-    if (preRunRecord?.silent && collectedImages.length === 0 && strippedText.length <= 80) {
+    // Skip in JSON routing mode — handleJsonRouteOutput already treats [] as a no-op,
+    // and short JSON payloads (e.g. a single-entry array) contain real content.
+    if (preRunRecord?.silent && preRunRecord?.routingMode !== 'json' && collectedImages.length === 0 && strippedText.length <= 80) {
       ctx.log?.info({ jobId: job.id, name: job.name, len: strippedText.length }, 'cron:exec silent short-response suppressed');
       if (ctx.statsStore && job.cronId) {
         try {
@@ -509,20 +390,26 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
 
     if (preRunRecord?.routingMode === 'json') {
-      const entries = parseJsonRoutingResponse(output);
-      if (entries !== null && entries.length > 0) {
-        const { anySucceeded } = await executeJsonRouting(entries, guild, ctx, job);
-        if (!anySucceeded) {
-          ctx.log?.warn({ jobId: job.id }, 'cron:json-routing all sends failed, falling back to default channel');
-          await sendChunks(channelForSend, processedText, collectedImages);
+      const resolveJsonChannel = (ref: string) => {
+        const ch = resolveChannel(guild, ref);
+        if (!ch) return undefined;
+        if (ctx.allowChannelIds) {
+          const chObj = ch as unknown as { id?: string; parentId?: string | null; isThread?: () => boolean };
+          const chId = chObj.id ?? '';
+          const isThread = typeof chObj.isThread === 'function' ? chObj.isThread() : false;
+          const parentId = isThread ? String(chObj.parentId ?? '') : '';
+          const allowed = ctx.allowChannelIds.has(chId) || (Boolean(parentId) && ctx.allowChannelIds.has(parentId));
+          if (!allowed) {
+            ctx.log?.warn({ jobId: job.id, channel: ref }, 'cron:json-routing channel not allowlisted, skipping');
+            return undefined;
+          }
         }
-      } else {
-        ctx.log?.warn(
-          { jobId: job.id, parseReturned: entries === null ? 'null' : 'empty-array' },
-          'cron:json-routing parse failed or empty, falling back to default channel',
-        );
-        await sendChunks(channelForSend, processedText, collectedImages);
-      }
+        return ch as unknown as typeof channelForSend;
+      };
+      await handleJsonRouteOutput(output, resolveJsonChannel, channelForSend, {
+        log: ctx.log,
+        jobId: job.id,
+      });
     } else {
       await sendChunks(channelForSend, processedText, collectedImages);
     }
