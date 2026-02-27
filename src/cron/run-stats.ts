@@ -28,6 +28,7 @@ export type CronRunRecord = {
   webhookSecret?: string;     // HMAC-SHA256 secret for signature verification
   silent?: boolean;           // suppress output when AI has nothing actionable to report
   routingMode?: 'default' | 'json';  // how AI output is routed to Discord channels
+  allowedActions?: string[];  // restrict which Discord action types the AI may emit during this job
   // Persisted cron definition fields — stored on parse so boots can skip AI re-parsing.
   schedule?: string;
   timezone?: string;
@@ -186,7 +187,16 @@ export class CronRunStats {
         if (existing.threadId !== threadId) {
           this.threadIndex.delete(existing.threadId);
         }
-        if (updates) Object.assign(existing, updates);
+        if (updates) {
+          Object.assign(existing, updates);
+          // Object.assign copies undefined values but keeps the key in the object,
+          // diverging from JSON round-trip (which omits undefined properties).
+          // Explicitly delete allowedActions when it is being cleared so in-memory
+          // state matches what would be loaded from disk after a flush + reload.
+          if ('allowedActions' in updates && updates.allowedActions === undefined) {
+            delete existing.allowedActions;
+          }
+        }
         existing.threadId = threadId;
         if (prevStatusMessageId && prevStatusMessageId !== existing.statusMessageId) {
           this.statusMessageIndex.delete(prevStatusMessageId);
@@ -358,7 +368,7 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   if (store.version === 5) {
     store.version = 6;
   }
-  // Migrate v6 → v7: no-op — new field (routingMode) is optional and defaults to 'default' behavior.
+  // Migrate v6 → v7: no-op — new fields (routingMode, allowedActions) are optional and default to absent.
   if (store.version === 6) {
     store.version = 7;
   }

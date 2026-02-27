@@ -305,9 +305,25 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     // Handle Discord actions if enabled.
     if (ctx.discordActionsEnabled) {
       const parsed = discordActions.parseDiscordActions(processedText, ctx.actionFlags);
-      const { cleanText, actions } = parsed;
+      const { cleanText, actions: parsedActions } = parsed;
       strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
       parseFailuresCount = parsed.parseFailures;
+
+      // Per-job action type filtering: if the stats record declares allowedActions,
+      // strip any action type not in that set before execution.
+      const blockedActionTypes: string[] = [];
+      const actions = (() => {
+        const allowed = preRunRecord?.allowedActions;
+        if (!allowed || allowed.length === 0) return parsedActions;
+        const allowedSet = new Set(allowed);
+        return parsedActions.filter((action) => {
+          if (allowedSet.has(action.type)) return true;
+          ctx.log?.warn({ jobId: job.id, cronId: job.cronId, actionType: action.type }, 'cron:exec action blocked by allowedActions');
+          blockedActionTypes.push(action.type);
+          return false;
+        });
+      })();
+
       if (actions.length > 0) {
         const actCtx = {
           guild,
@@ -351,6 +367,14 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         }
       } else {
         processedText = cleanText;
+      }
+
+      // Append a notice for each action type denied by allowedActions.
+      if (blockedActionTypes.length > 0) {
+        const blockedLines = blockedActionTypes.map(
+          (type) => `Blocked action \`${type}\` (not in this job's allowedActions).`,
+        );
+        processedText = processedText.trimEnd() + '\n\n' + blockedLines.join('\n');
       }
     }
     processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);

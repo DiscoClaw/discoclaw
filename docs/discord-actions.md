@@ -244,10 +244,11 @@ Both actions share the same writeable field set:
 | `model` | No | Model override for this job |
 | `tags` | No | Forum thread tags to apply |
 | `routingMode` | No | Set to `"json"` to enable JSON routing mode (see below) |
+| `allowedActions` | No | Comma-separated action types permitted during execution (see below) |
 
 `cronUpdate` additionally requires `id` (the cron job ID to update). Only supplied fields are changed.
 
-`cronShow` output includes `routingMode` when it is set on the job.
+`cronShow` output includes `routingMode` and `allowedActions` when set on the job.
 
 #### JSON Routing Mode
 
@@ -274,6 +275,13 @@ Cron prompts support two built-in placeholders that are expanded at execution ti
 | `{{channelId}}` | The job's target channel ID |
 
 These allow prompts to reference their own delivery context without hardcoding channel names or IDs.
+
+#### `allowedActions` Semantics
+
+- **Format:** comma-separated action type name strings, e.g. `"sendMessage,taskCreate,taskUpdate"`. Whitespace around commas is ignored.
+- **Narrowing only:** `allowedActions` can only restrict the set that global env flags permit. Listing a type that is disabled by its env flag (or excluded from cron flows entirely) has no effect — those types remain unavailable.
+- **Clearing:** set `allowedActions` to `""` (empty string) on `cronUpdate` to remove the restriction. When cleared, the job inherits the full set of globally-enabled, cron-permitted action types.
+- **Enforcement:** the cron executor (`src/cron/executor.ts`) reads the stored `allowedActions` value at execution time and intersects it with the global `cronActionFlags` before building the action prompt and running the job.
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1, requires cron subsystem enabled).
 Context: Requires `CronContext` with scheduler, forum channel, tag map, stats store, and runtime.

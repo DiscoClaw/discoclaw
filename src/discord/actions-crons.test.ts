@@ -698,6 +698,43 @@ describe('executeCronAction', () => {
     );
   });
 
+  it('cronCreate with allowedActions persists to stats store', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'Restricted Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something', allowedActions: 'cronList,cronShow' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ allowedActions: ['cronList', 'cronShow'] }),
+    );
+  });
+
+  it('cronCreate rejects unrecognized allowedActions entries', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'Bad Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Test', allowedActions: 'cronList,fakeAction' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('fakeAction');
+  });
+
+  it('cronCreate rejects allowedActions with no valid entries', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'Empty Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Test', allowedActions: '  ,  ' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('at least one entry');
+  });
+
   it('cronUpdate with routingMode "json" sets it', async () => {
     const cronCtx = makeCronCtx();
     const result = await executeCronAction(
@@ -741,6 +778,71 @@ describe('executeCronAction', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.summary).not.toContain('Routing:');
+    }
+  });
+
+  it('cronUpdate with allowedActions persists to stats store', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', allowedActions: 'cronList,cronShow' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      'cron-test0001',
+      'thread-1',
+      expect.objectContaining({ allowedActions: ['cronList', 'cronShow'] }),
+    );
+  });
+
+  it('cronUpdate with empty allowedActions clears the field', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ allowedActions: ['cronList'] })]),
+    });
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', allowedActions: '' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      'cron-test0001',
+      'thread-1',
+      expect.objectContaining({ allowedActions: undefined }),
+    );
+  });
+
+  it('cronUpdate rejects unrecognized allowedActions entries', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', allowedActions: 'cronList,badType' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('badType');
+  });
+
+  it('cronShow includes allowedActions when configured', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ allowedActions: ['cronList', 'cronShow'] })]),
+    });
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('cronList');
+      expect(result.summary).toContain('cronShow');
+      expect(result.summary).toContain('Allowed actions:');
+    }
+  });
+
+  it('cronShow omits Allowed actions line when not configured', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).not.toContain('Allowed actions:');
     }
   });
 });

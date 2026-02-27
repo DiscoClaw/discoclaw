@@ -17,14 +17,29 @@ import type { TagMap } from '../cron/discord-sync.js';
 import type { CronSyncCoordinator } from '../cron/cron-sync-coordinator.js';
 import { reloadCronTagMapInPlace } from '../cron/tag-map.js';
 import { getDefaultTimezone } from '../cron/default-timezone.js';
+import { CHANNEL_ACTION_TYPES } from './actions-channels.js';
+import { MESSAGING_ACTION_TYPES } from './actions-messaging.js';
+import { GUILD_ACTION_TYPES } from './actions-guild.js';
+import { MODERATION_ACTION_TYPES } from './actions-moderation.js';
+import { POLL_ACTION_TYPES } from './actions-poll.js';
+import { TASK_ACTION_TYPES } from '../tasks/task-actions.js';
+import { BOT_PROFILE_ACTION_TYPES } from './actions-bot-profile.js';
+import { FORGE_ACTION_TYPES } from './actions-forge.js';
+import { PLAN_ACTION_TYPES } from './actions-plan.js';
+import { MEMORY_ACTION_TYPES } from './actions-memory.js';
+import { DEFER_ACTION_TYPES } from './actions-defer.js';
+import { CONFIG_ACTION_TYPES } from './actions-config.js';
+import { REACTION_PROMPT_ACTION_TYPES } from './reaction-prompts.js';
+import { IMAGEGEN_ACTION_TYPES } from './actions-imagegen.js';
+import { VOICE_ACTION_TYPES } from './actions-voice.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type CronActionRequest =
-  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string; routingMode?: 'json' }
-  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean; routingMode?: 'json' }
+  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string; routingMode?: 'json'; allowedActions?: string }
+  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean; routingMode?: 'json'; allowedActions?: string }
   | { type: 'cronList'; status?: string }
   | { type: 'cronShow'; cronId: string }
   | { type: 'cronPause'; cronId: string }
@@ -47,6 +62,26 @@ const CRON_TYPE_MAP: Record<CronActionRequest['type'], true> = {
   cronTagMapReload: true,
 };
 export const CRON_ACTION_TYPES = new Set<string>(Object.keys(CRON_TYPE_MAP));
+
+// Combined set of all known action types, used to validate allowedActions entries.
+const ALL_KNOWN_ACTION_TYPES: ReadonlySet<string> = new Set([
+  ...CHANNEL_ACTION_TYPES,
+  ...MESSAGING_ACTION_TYPES,
+  ...REACTION_PROMPT_ACTION_TYPES,
+  ...GUILD_ACTION_TYPES,
+  ...MODERATION_ACTION_TYPES,
+  ...POLL_ACTION_TYPES,
+  ...TASK_ACTION_TYPES,
+  ...CRON_ACTION_TYPES,
+  ...BOT_PROFILE_ACTION_TYPES,
+  ...FORGE_ACTION_TYPES,
+  ...PLAN_ACTION_TYPES,
+  ...MEMORY_ACTION_TYPES,
+  ...DEFER_ACTION_TYPES,
+  ...CONFIG_ACTION_TYPES,
+  ...IMAGEGEN_ACTION_TYPES,
+  ...VOICE_ACTION_TYPES,
+]);
 
 export type CronContext = {
   scheduler: CronScheduler;
@@ -137,6 +172,20 @@ export async function executeCronAction(
         return { ok: false, error: `Invalid cron definition: ${validationError}` };
       }
       const cadence = detectCadence(def.schedule);
+
+      // Validate allowedActions if provided.
+      let parsedAllowedActions: string[] | undefined;
+      if (action.allowedActions !== undefined) {
+        const parts = action.allowedActions.split(',').map((s) => s.trim()).filter(Boolean);
+        if (parts.length === 0) {
+          return { ok: false, error: 'allowedActions requires at least one entry if provided' };
+        }
+        const unknown = parts.filter((p) => !ALL_KNOWN_ACTION_TYPES.has(p));
+        if (unknown.length > 0) {
+          return { ok: false, error: `allowedActions contains unrecognized action types: ${unknown.join(', ')}` };
+        }
+        parsedAllowedActions = parts;
+      }
 
       // Create forum thread.
       const forum = await resolveForumChannel(cronCtx.client, cronCtx.forumId);
@@ -233,6 +282,7 @@ export async function executeCronAction(
         prompt: action.prompt,
         authorId: cronCtx.client.user?.id,
         ...(action.routingMode ? { routingMode: action.routingMode } : {}),
+        ...(parsedAllowedActions !== undefined && { allowedActions: parsedAllowedActions }),
       });
 
       // Create status message.
@@ -287,6 +337,25 @@ export async function executeCronAction(
         }
         updates.routingMode = action.routingMode || undefined;
         changes.push(`routingMode → ${action.routingMode || 'cleared'}`);
+      }
+
+      // Allowed actions override.
+      if (action.allowedActions !== undefined) {
+        if (action.allowedActions === '') {
+          updates.allowedActions = undefined;
+          changes.push('allowedActions cleared');
+        } else {
+          const parts = action.allowedActions.split(',').map((s) => s.trim()).filter(Boolean);
+          if (parts.length === 0) {
+            return { ok: false, error: 'allowedActions requires at least one entry if provided' };
+          }
+          const unknown = parts.filter((p) => !ALL_KNOWN_ACTION_TYPES.has(p));
+          if (unknown.length > 0) {
+            return { ok: false, error: `allowedActions contains unrecognized action types: ${unknown.join(', ')}` };
+          }
+          updates.allowedActions = parts;
+          changes.push(`allowedActions → ${parts.join(', ')}`);
+        }
       }
 
       // Definition changes (schedule, timezone, channel, prompt).
@@ -439,6 +508,7 @@ export async function executeCronAction(
       lines.push(`Runs: ${record.runCount} | Last: ${record.lastRunStatus ?? 'never'}`);
       if (record.lastRunAt) lines.push(`Last run: <t:${Math.floor(new Date(record.lastRunAt).getTime() / 1000)}:R>`);
       if (record.purposeTags.length > 0) lines.push(`Tags: ${record.purposeTags.join(', ')}`);
+      if (record.allowedActions && record.allowedActions.length > 0) lines.push(`Allowed actions: ${record.allowedActions.join(', ')}`);
       if (record.lastErrorMessage) lines.push(`Last error: ${record.lastErrorMessage}`);
       if (job) {
         const promptText = job.def.prompt;
@@ -691,6 +761,7 @@ export function cronActionsPromptSection(): string {
 - \`tags\` (optional): Comma-separated purpose tags.
 - \`model\` (optional): "fast" or "capable" (auto-classified if omitted).
 - \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode. In this mode the executor uses the JSON router to dispatch structured responses. The prompt may contain \`{{channel}}\` and \`{{channelId}}\` placeholders which are expanded to the target channel name and ID at runtime.
+- \`allowedActions\` (optional): Comma-separated list of Discord action types this job may emit (e.g., "cronList,cronShow"). Restricts the AI to only these action types during execution. Rejects unrecognized type names. Requires at least one entry if provided.
 
 **cronUpdate** — Update a cron's settings:
 \`\`\`
@@ -700,6 +771,7 @@ export function cronActionsPromptSection(): string {
 - \`schedule\`, \`timezone\`, \`channel\`, \`prompt\`, \`model\`, \`tags\` (optional).
 - \`silent\` (optional): Boolean. When true, suppresses short "nothing to report" responses.
 - \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode, or omit/pass empty string to clear.
+- \`allowedActions\` (optional): Update the allowed action types list. Empty string clears the restriction.
 
 **cronList** — List all cron jobs:
 \`\`\`
