@@ -18,6 +18,7 @@ import { loadWorkspacePaFiles, buildContextFiles, inlineContextFiles, buildDurab
 import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildAllResultLines } from './discord/actions.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
+import { VOICE_STYLE_INSTRUCTION } from './voice/voice-style-prompt.js';
 import type { SubsystemContexts } from './discord/actions.js';
 import { shouldTriggerFollowUp } from './discord/action-categories.js';
 import type { DeferScheduler } from './discord/defer-scheduler.js';
@@ -1291,6 +1292,7 @@ if (taskCtx) {
           (cfg.voiceSystemPrompt
             ? cfg.voiceSystemPrompt + '\n\n'
             : '') +
+          VOICE_STYLE_INSTRUCTION + '\n\n' +
           (durableSection
             ? `---\nDurable memory (user-specific notes):\n${durableSection}\n\n`
             : '') +
@@ -1298,7 +1300,10 @@ if (taskCtx) {
           text;
       } else if (cfg.voiceSystemPrompt) {
         // No channel context, but voice system prompt is set — prepend it directly.
-        prompt = cfg.voiceSystemPrompt + '\n\n' + text;
+        prompt = VOICE_STYLE_INSTRUCTION + '\n\n' + cfg.voiceSystemPrompt + '\n\n' + text;
+      } else {
+        // No channel context and no voice system prompt — still inject style instruction.
+        prompt = VOICE_STYLE_INSTRUCTION + '\n\n' + text;
       }
 
       let currentPrompt = prompt;
