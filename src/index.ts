@@ -745,6 +745,7 @@ const botParams = {
   memoryCtx: undefined as MemoryContext | undefined,
   imagegenCtx: undefined as ImagegenContext | undefined,
   voiceCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
+  voiceStatusCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
   configCtx: undefined as import('./discord/actions-config.js').ConfigContext | undefined,
   deferOpts: undefined as ConfigureDeferredSchedulerOpts | undefined,
   messageHistoryBudget,
