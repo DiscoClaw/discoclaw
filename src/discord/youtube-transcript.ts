@@ -1,3 +1,13 @@
+import {
+  fetchTranscript,
+  YoutubeTranscriptDisabledError,
+  YoutubeTranscriptNotAvailableError,
+  YoutubeTranscriptVideoUnavailableError,
+  YoutubeTranscriptNotAvailableLanguageError,
+  YoutubeTranscriptTooManyRequestError,
+  YoutubeTranscriptInvalidVideoIdError,
+} from 'youtube-transcript-plus';
+
 /** Max characters of transcript text to include per video. */
 export const MAX_TRANSCRIPT_CHARS = 8_000;
 
@@ -6,9 +16,6 @@ export const MAX_VIDEOS_PER_MESSAGE = 3;
 
 /** Per-request timeout for YouTube fetches (15 seconds). */
 const FETCH_TIMEOUT_MS = 15_000;
-
-/** Allowed hosts for caption track URLs (SSRF protection). */
-const ALLOWED_CAPTION_HOSTS = new Set(['www.youtube.com', 'youtube.com']);
 
 /**
  * Prompt injection detection patterns applied to transcript text.
@@ -43,12 +50,6 @@ const YT_URL_REGEXES: RegExp[] = [
   // Legacy redirect URL (/e/)
   /(?:https?:\/\/)?(?:www\.)?youtube\.com\/e\/([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/g,
 ];
-
-export type CaptionTrack = {
-  baseUrl: string;
-  languageCode?: string;
-  name?: { simpleText?: string };
-};
 
 export type TranscriptResult = {
   transcripts: Array<{ videoId: string; text: string }>;
@@ -89,148 +90,44 @@ export function truncateTranscript(text: string): string {
 }
 
 /**
- * Extract the captionTracks array from a YouTube video page's HTML.
- * Returns the parsed array, or null if not found or not parseable.
+ * Fetch the plain-text transcript for a YouTube video ID using the InnerTube API.
  *
- * Uses bracket-counting rather than a lazy regex so that arbitrarily nested
- * arrays (e.g. translationLanguages) do not cause premature truncation.
- */
-export function extractCaptionTracksFromHtml(html: string): CaptionTrack[] | null {
-  const prefix = '"captionTracks":[';
-  const prefixIdx = html.indexOf(prefix);
-  if (prefixIdx === -1) return null;
-
-  // Start at the opening '[' of the captionTracks array.
-  const start = prefixIdx + prefix.length - 1;
-  let depth = 0;
-  let inString = false;
-  let i = start;
-
-  while (i < html.length) {
-    const ch = html[i];
-    if (inString) {
-      if (ch === '\\') {
-        i += 2; // skip escaped character (e.g. \", \\)
-        continue;
-      }
-      if (ch === '"') inString = false;
-    } else {
-      if (ch === '"') {
-        inString = true;
-      } else if (ch === '[') {
-        depth++;
-      } else if (ch === ']') {
-        depth--;
-        if (depth === 0) {
-          try {
-            return JSON.parse(html.slice(start, i + 1)) as CaptionTrack[];
-          } catch {
-            return null;
-          }
-        }
-      }
-    }
-    i++;
-  }
-
-  return null; // no matching closing bracket found
-}
-
-/**
- * Parse YouTube timedtext XML into plain text.
- * Decodes HTML entities and joins <text> elements with spaces.
- */
-export function parseTranscriptXml(xml: string): string {
-  const parts: string[] = [];
-  const textRegex = /<text[^>]*>([^<]*)<\/text>/g;
-  let match: RegExpExecArray | null;
-  while ((match = textRegex.exec(xml)) !== null) {
-    const decoded = match[1]
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\n/g, ' ')
-      .trim();
-    if (decoded) parts.push(decoded);
-  }
-  return parts.join(' ');
-}
-
-/**
- * Fetch the plain-text transcript for a YouTube video ID.
- *
- * Fetches the video page to discover the caption track URL, then fetches and
- * parses the timedtext XML. Throws a descriptive Error on any failure.
+ * Wraps the youtube-transcript-plus library with a 15-second timeout.
+ * Throws a descriptive Error on any failure.
  */
 export async function fetchTranscriptForVideo(videoId: string): Promise<string> {
-  // --- Step 1: fetch the video page ---
-  const pageUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  let html: string;
+  let segments: Awaited<ReturnType<typeof fetchTranscript>>;
+
   try {
-    const pageResponse = await fetch(pageUrl, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
-    });
-    if (!pageResponse.ok) {
-      throw new Error(`HTTP ${pageResponse.status}`);
-    }
-    html = await pageResponse.text();
+    segments = await Promise.race([
+      fetchTranscript(videoId),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('timed out')), FETCH_TIMEOUT_MS)
+      ),
+    ]);
   } catch (err: unknown) {
     const e = err instanceof Error ? err : null;
-    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') throw new Error('timed out');
+    if (e?.message === 'timed out' || e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+      throw new Error('timed out');
+    }
+    if (
+      err instanceof YoutubeTranscriptDisabledError ||
+      err instanceof YoutubeTranscriptNotAvailableError ||
+      err instanceof YoutubeTranscriptVideoUnavailableError ||
+      err instanceof YoutubeTranscriptNotAvailableLanguageError ||
+      err instanceof YoutubeTranscriptTooManyRequestError ||
+      err instanceof YoutubeTranscriptInvalidVideoIdError
+    ) {
+      throw new Error('no captions available');
+    }
     throw err;
   }
 
-  // --- Step 2: extract caption tracks from the page HTML ---
-  const tracks = extractCaptionTracksFromHtml(html);
-  if (!tracks || tracks.length === 0) {
-    throw new Error('no captions available');
+  if (segments.length === 0) {
+    throw new Error('transcript is empty');
   }
 
-  // Prefer English, fall back to first available track
-  const track =
-    tracks.find(t => t.languageCode === 'en') ??
-    tracks.find(t => t.languageCode?.startsWith('en')) ??
-    tracks[0];
-
-  if (typeof track.baseUrl !== 'string' || !track.baseUrl) {
-    throw new Error('no captions available');
-  }
-
-  // SSRF protection: only fetch from youtube.com
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(track.baseUrl);
-  } catch {
-    throw new Error('no captions available');
-  }
-  if (parsedUrl.protocol !== 'https:' || !ALLOWED_CAPTION_HOSTS.has(parsedUrl.hostname)) {
-    throw new Error('caption URL blocked (not from youtube.com)');
-  }
-
-  // --- Step 3: fetch and parse the timedtext XML ---
-  let xml: string;
-  try {
-    const captionsResponse = await fetch(track.baseUrl, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!captionsResponse.ok) {
-      throw new Error(`captions fetch failed (HTTP ${captionsResponse.status})`);
-    }
-    xml = await captionsResponse.text();
-  } catch (err: unknown) {
-    const e = err instanceof Error ? err : null;
-    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') throw new Error('timed out');
-    throw err;
-  }
-
-  const text = parseTranscriptXml(xml);
+  const text = segments.map(s => s.text).join(' ').trim();
   if (!text) {
     throw new Error('transcript is empty');
   }
