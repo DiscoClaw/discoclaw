@@ -1027,4 +1027,14 @@ describe('parseConfig', () => {
     const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', DISCOCLAW_TTS_PROVIDER: 'kokoro', DEEPGRAM_API_KEY: 'dg-key' }));
     expect(warnings.some((w) => w.includes('CARTESIA_API_KEY'))).toBe(false);
   });
+
+  it('warns when voice enabled but DISCOCLAW_VOICE_HOME_CHANNEL is unset', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', DEEPGRAM_API_KEY: 'dg-key', CARTESIA_API_KEY: 'ca-key' }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_VOICE_HOME_CHANNEL'))).toBe(true);
+  });
+
+  it('does not warn about DISCOCLAW_VOICE_HOME_CHANNEL when both voice and home channel are set', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', DISCOCLAW_VOICE_HOME_CHANNEL: '1000000000000000003', DEEPGRAM_API_KEY: 'dg-key', CARTESIA_API_KEY: 'ca-key' }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_VOICE_HOME_CHANNEL'))).toBe(false);
+  });
 });
