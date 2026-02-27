@@ -76,6 +76,28 @@ export function getRunningPlanIds(): ReadonlySet<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Combined status summary
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a human-readable status summary combining the active forge
+ * orchestrator state with any running plan phase IDs. Used by the
+ * forgeStatus action so both sources of activity are always reported
+ * together, even when no forge orchestrator is running but a plan phase
+ * is actively executing via planRun.
+ */
+export function getForgeStatusSummary(): string {
+  const planRunsSuffix = _runningPlanIds.size > 0
+    ? ` Plan runs active: ${[..._runningPlanIds].join(', ')}.`
+    : '';
+  if (_activeOrchestrator?.isRunning) {
+    const activeId = _activeOrchestrator.activePlanId;
+    return `Forge is running${activeId ? `: ${activeId}` : ''}.${planRunsSuffix}`;
+  }
+  return `No forge is currently running.${planRunsSuffix}`;
+}
+
+// ---------------------------------------------------------------------------
 // Test helper — reset all state (for test isolation)
 // ---------------------------------------------------------------------------
 

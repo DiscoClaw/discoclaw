@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { FORGE_ACTION_TYPES, executeForgeAction, forgeActionsPromptSection } from './actions-forge.js';
 import type { ForgeContext } from './actions-forge.js';
 import type { ActionContext } from './actions.js';
-import { _resetForTest, setActiveOrchestrator } from './forge-plan-registry.js';
+import { _resetForTest, setActiveOrchestrator, addRunningPlan } from './forge-plan-registry.js';
 import { TaskStore } from '../tasks/store.js';
 
 // ---------------------------------------------------------------------------
@@ -232,6 +232,59 @@ describe('executeForgeAction', () => {
       if (result.ok) {
         expect(result.summary).toContain('running');
         expect(result.summary).toContain('plan-007');
+      }
+    });
+
+    it('reports plan runs when no forge is running', async () => {
+      addRunningPlan('plan-042');
+      addRunningPlan('plan-305');
+
+      const result = await executeForgeAction(
+        { type: 'forgeStatus' },
+        makeCtx(),
+        makeForgeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('No forge');
+        expect(result.summary).toContain('plan-042');
+        expect(result.summary).toContain('plan-305');
+      }
+    });
+
+    it('reports both forge and plan runs when both are active', async () => {
+      const runningOrch = makeMockOrchestrator({ isRunning: true, activePlanId: 'plan-007' });
+      setActiveOrchestrator(runningOrch as any);
+      addRunningPlan('plan-099');
+
+      const result = await executeForgeAction(
+        { type: 'forgeStatus' },
+        makeCtx(),
+        makeForgeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('running');
+        expect(result.summary).toContain('plan-007');
+        expect(result.summary).toContain('plan-099');
+      }
+    });
+
+    it('reports all IDs when multiple plan runs are active', async () => {
+      addRunningPlan('plan-010');
+      addRunningPlan('plan-020');
+      addRunningPlan('plan-030');
+
+      const result = await executeForgeAction(
+        { type: 'forgeStatus' },
+        makeCtx(),
+        makeForgeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('plan-010');
+        expect(result.summary).toContain('plan-020');
+        expect(result.summary).toContain('plan-030');
       }
     });
   });

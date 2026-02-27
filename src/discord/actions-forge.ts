@@ -10,6 +10,7 @@ import {
   getActiveForgeId,
   acquireWriterLock,
   setActiveOrchestrator,
+  getRunningPlanIds,
 } from './forge-plan-registry.js';
 
 // ---------------------------------------------------------------------------
@@ -134,11 +135,15 @@ export async function executeForgeAction(
 
     case 'forgeStatus': {
       const orch = getActiveOrchestrator();
+      const runningPlanIds = getRunningPlanIds();
+      const planRunsSuffix = runningPlanIds.size > 0
+        ? ` Plan runs active: ${[...runningPlanIds].join(', ')}.`
+        : '';
       if (orch?.isRunning) {
         const activeId = getActiveForgeId();
-        return { ok: true, summary: `Forge is running${activeId ? `: ${activeId}` : ''}` };
+        return { ok: true, summary: `Forge is running${activeId ? `: ${activeId}` : ''}.${planRunsSuffix}` };
       }
-      return { ok: true, summary: 'No forge is currently running.' };
+      return { ok: true, summary: `No forge is currently running.${planRunsSuffix}` };
     }
 
     case 'forgeCancel': {
