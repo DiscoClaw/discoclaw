@@ -10,6 +10,8 @@ export type SystemScaffold = {
   statusChannelId?: string;
   cronsForumId?: string;
   tasksForumId?: string;
+  voiceChannelId?: string;
+  voiceLogChannelId?: string;
 };
 
 type EditableBootstrapChannel = GuildBasedChannel & {
@@ -136,7 +138,7 @@ export async function ensureSystemCategory(guild: Guild, log?: LoggerLike): Prom
 async function ensureChild(
   guild: Guild,
   parentCategoryId: string,
-  spec: { name: string; type: ChannelType.GuildText | ChannelType.GuildForum; topic?: string; legacyNames?: string[] },
+  spec: { name: string; type: ChannelType.GuildText | ChannelType.GuildForum | ChannelType.GuildVoice; topic?: string; legacyNames?: string[] },
   log?: LoggerLike,
   existingId?: string,
 ): Promise<{ id?: string; created: boolean; moved: boolean }> {
@@ -275,7 +277,7 @@ async function ensureChild(
 }
 
 export async function ensureSystemScaffold(
-  params: { guild: Guild; ensureTasks: boolean; botDisplayName?: string; existingCronsId?: string; existingTasksId?: string; tasksTagMapPath?: string },
+  params: { guild: Guild; ensureTasks: boolean; ensureVoiceChannel?: boolean; botDisplayName?: string; existingCronsId?: string; existingTasksId?: string; tasksTagMapPath?: string },
   log?: LoggerLike,
 ): Promise<SystemScaffold | null> {
   const { guild, ensureTasks } = params;
@@ -327,6 +329,28 @@ export async function ensureSystemScaffold(
     }
   }
 
+  let voice: { id?: string; created: boolean; moved: boolean } | null = null;
+  let voiceLog: { id?: string; created: boolean; moved: boolean } | null = null;
+  if (params.ensureVoiceChannel) {
+    voice = await ensureChild(
+      guild,
+      system.id,
+      { name: 'voice', type: ChannelType.GuildVoice, legacyNames: ['voice-chat'] },
+      log,
+    );
+    if (voice.created) created.push('voice');
+    if (voice.moved) moved.push('voice');
+
+    voiceLog = await ensureChild(
+      guild,
+      system.id,
+      { name: 'voice-log', type: ChannelType.GuildText, topic: 'Voice conversation transcripts.' },
+      log,
+    );
+    if (voiceLog.created) created.push('voice-log');
+    if (voiceLog.moved) moved.push('voice-log');
+  }
+
   if (created.length > 0 || moved.length > 0) {
     log?.info(
       {
@@ -346,6 +370,8 @@ export async function ensureSystemScaffold(
   if (status.id) result.statusChannelId = status.id;
   if (crons.id) result.cronsForumId = crons.id;
   if (tasks?.id) result.tasksForumId = tasks.id;
+  if (voice?.id) result.voiceChannelId = voice.id;
+  if (voiceLog?.id) result.voiceLogChannelId = voiceLog.id;
   return result;
 }
 

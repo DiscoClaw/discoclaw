@@ -22,6 +22,7 @@ export function createSttProvider(config: VoiceConfig, log: LoggerLike): SttProv
       return new DeepgramSttProvider({
         apiKey: config.deepgramApiKey,
         sampleRate: 16000,
+        model: config.deepgramSttModel,
         log,
       });
     }

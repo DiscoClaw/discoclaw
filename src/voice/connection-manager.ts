@@ -22,16 +22,22 @@ export type VoiceConnectionInfo = {
 
 export type VoiceConnectionManagerOpts = {
   reconnectRetryLimit?: number;
+  onReady?: (guildId: string, connection: VoiceConnection) => void;
+  onDestroyed?: (guildId: string) => void;
 };
 
 export class VoiceConnectionManager {
   private readonly log: LoggerLike;
   private readonly reconnectRetryLimit: number;
+  private readonly onReady?: (guildId: string, connection: VoiceConnection) => void;
+  private readonly onDestroyed?: (guildId: string) => void;
   private readonly connections = new Map<string, VoiceConnection>();
 
   constructor(log: LoggerLike, opts: VoiceConnectionManagerOpts = {}) {
     this.log = log;
     this.reconnectRetryLimit = opts.reconnectRetryLimit ?? 5;
+    this.onReady = opts.onReady;
+    this.onDestroyed = opts.onDestroyed;
   }
 
   join(opts: {
@@ -128,6 +134,7 @@ export class VoiceConnectionManager {
 
       if (status === VoiceConnectionStatus.Ready) {
         this.log.info({ guildId }, 'voice connection ready');
+        this.onReady?.(guildId, connection);
       }
 
       if (status === VoiceConnectionStatus.Disconnected) {
@@ -149,7 +156,20 @@ export class VoiceConnectionManager {
 
       if (status === VoiceConnectionStatus.Destroyed) {
         this.connections.delete(guildId);
+        this.onDestroyed?.(guildId);
       }
+    });
+
+    // Catch errors from the voice networking layer (e.g. DAVE handshake failures)
+    // to prevent them from crashing the process as uncaught exceptions.
+    connection.on('error', (err: Error) => {
+      this.log.error({ guildId, err }, 'voice connection error');
+      try {
+        connection.destroy();
+      } catch {
+        // Already destroyed.
+      }
+      this.connections.delete(guildId);
     });
   }
 }

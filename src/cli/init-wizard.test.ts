@@ -149,6 +149,40 @@ describe('init wizard helpers', () => {
     expect(content).not.toContain('# AUTO-DETECTED');
   });
 
+  it('includes voice section when voice vars are provided', () => {
+    const content = buildEnvContent(
+      {
+        DISCORD_TOKEN: 'a.b.c',
+        DISCORD_ALLOW_USER_IDS: '1000000000000000001',
+        DISCOCLAW_VOICE_ENABLED: '1',
+        DEEPGRAM_API_KEY: 'dg-key',
+        DISCOCLAW_DISCORD_ACTIONS_VOICE: '1',
+        DISCOCLAW_STT_PROVIDER: 'deepgram',
+        DISCOCLAW_TTS_PROVIDER: 'deepgram',
+      },
+      new Date('2026-02-26T00:00:00.000Z'),
+    );
+
+    expect(content).toContain('# VOICE');
+    expect(content).toContain('DISCOCLAW_VOICE_ENABLED=1');
+    expect(content).toContain('DEEPGRAM_API_KEY=dg-key');
+    expect(content).toContain('DISCOCLAW_STT_PROVIDER=deepgram');
+    expect(content).toContain('DISCOCLAW_TTS_PROVIDER=deepgram');
+  });
+
+  it('omits voice section when no voice vars are provided', () => {
+    const content = buildEnvContent(
+      {
+        DISCORD_TOKEN: 'a.b.c',
+        DISCORD_ALLOW_USER_IDS: '1000000000000000001',
+      },
+      new Date('2026-02-26T00:00:00.000Z'),
+    );
+
+    expect(content).not.toContain('# VOICE');
+    expect(content).not.toContain('DISCOCLAW_VOICE_ENABLED');
+  });
+
   it('omits auto-detected section when no forum IDs are present', () => {
     const content = buildEnvContent(
       {
@@ -207,6 +241,7 @@ describe('runInitWizard', () => {
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
       '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
+      'n', // enable voice -> no
     ];
 
     fs.writeFileSync(path.join(tmpDir, '.env'), oldEnv, 'utf8');
@@ -253,6 +288,7 @@ describe('runInitWizard', () => {
       '5000000000000000001', // DISCORD_GUILD_ID
       '5', // provider selection -> OpenRouter
       'sk-or-test-key', // OPENROUTER_API_KEY
+      'n', // enable voice -> no
     ];
 
     process.chdir(tmpDir);
@@ -290,6 +326,7 @@ describe('runInitWizard', () => {
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
       '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
+      'n', // enable voice -> no
     ];
 
     process.chdir(tmpDir);
@@ -330,6 +367,7 @@ describe('runInitWizard', () => {
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
       '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
+      'n', // enable voice -> no
     ];
 
     fs.writeFileSync(path.join(tmpDir, '.env'), oldEnv, 'utf8');
@@ -371,6 +409,7 @@ describe('runInitWizard', () => {
       'not-valid', // guild ID (invalid — re-prompt)
       '5000000000000000001', // guild ID (valid)
       '', // provider selection -> default (Claude)
+      'n', // enable voice -> no
     ];
     const expectedCallCount = answers.length; // capture before wizard shifts values out
 
@@ -406,6 +445,7 @@ describe('runInitWizard', () => {
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
       '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
+      'n', // enable voice -> no
     ];
 
     vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
@@ -432,6 +472,7 @@ describe('runInitWizard', () => {
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
       '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
+      'n', // enable voice -> no
     ];
 
     vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
@@ -446,5 +487,44 @@ describe('runInitWizard', () => {
     expect(fs.existsSync(newDir)).toBe(true);
     expect(fs.existsSync(path.join(newDir, '.env'))).toBe(true);
     expect(ensureWorkspaceBootstrapFiles).toHaveBeenCalledWith(path.join(newDir, 'workspace'));
+  });
+
+  it('writes voice config when user enables voice chat', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
+    const previousCwd = process.cwd();
+    const answers = [
+      '', // install directory (default)
+      '', // Press Enter to continue
+      '', // data directory (default)
+      'a.b.c', // DISCORD_TOKEN
+      '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '5000000000000000001', // DISCORD_GUILD_ID
+      '', // provider selection -> default (Claude)
+      'y', // enable voice -> yes
+      'dg-test-key', // Deepgram API key
+    ];
+
+    process.chdir(tmpDir);
+
+    vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('binary not found');
+    });
+    vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await runInitWizard();
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
+    expect(newEnv).toContain('# VOICE');
+    expect(newEnv).toContain('DISCOCLAW_VOICE_ENABLED=1');
+    expect(newEnv).toContain('DEEPGRAM_API_KEY=dg-test-key');
+    expect(newEnv).toContain('DISCOCLAW_STT_PROVIDER=deepgram');
+    expect(newEnv).toContain('DISCOCLAW_TTS_PROVIDER=deepgram');
+    expect(newEnv).toContain('DISCOCLAW_DISCORD_ACTIONS_VOICE=1');
   });
 });

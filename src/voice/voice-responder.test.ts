@@ -164,11 +164,11 @@ describe('VoiceResponder', () => {
         'voice-responder: invoking AI',
       );
       expect(log.info).toHaveBeenCalledWith(
-        expect.objectContaining({ bufferSize: expect.any(Number) }),
-        'voice-responder: playback started',
+        {},
+        'voice-responder: streaming playback started',
       );
       expect(log.info).toHaveBeenCalledWith(
-        {},
+        expect.objectContaining({ totalBytes: expect.any(Number) }),
         'voice-responder: playback complete',
       );
     });
@@ -236,7 +236,8 @@ describe('VoiceResponder', () => {
         expect.objectContaining({ err: expect.any(Error) }),
         'voice-responder: error in response pipeline',
       );
-      expect(player.play).not.toHaveBeenCalled();
+      // In streaming mode, play() is called before TTS iteration begins
+      expect(player.play).toHaveBeenCalled();
     });
 
     it('sets isProcessing during pipeline execution', async () => {
@@ -299,13 +300,114 @@ describe('VoiceResponder', () => {
       expect(player.play).toHaveBeenCalled();
     });
 
-    it('skips playback when TTS yields no frames', async () => {
+    it('plays stream even when TTS yields no frames (streaming)', async () => {
       const tts = createMockTts([]);
       const { responder, player } = createResponder({ tts });
 
       await responder.handleTranscription('hello');
 
-      expect(player.play).not.toHaveBeenCalled();
+      // In streaming mode, play() is called before TTS iteration begins
+      expect(player.play).toHaveBeenCalled();
+    });
+
+    it('starts playback before TTS synthesis completes (streaming)', async () => {
+      let playCalledBeforeTtsYield = false;
+      let playerRef: ReturnType<typeof createMockPlayer>;
+      const tts: TtsProvider = {
+        synthesize: vi.fn(async function* () {
+          // Check that player.play was called before the first TTS frame yields
+          playCalledBeforeTtsYield = playerRef.play.mock.calls.length > 0;
+          yield { buffer: Buffer.alloc(480, 0x42), sampleRate: 24000, channels: 1 };
+        }),
+      };
+      const { responder, player } = createResponder({ tts });
+      playerRef = player;
+
+      await responder.handleTranscription('hello');
+
+      expect(playCalledBeforeTtsYield).toBe(true);
+    });
+
+    it('cancels mid-stream playback on new transcription and destroys the stream', async () => {
+      let resolveSecondFrame!: () => void;
+      let ttsCallCount = 0;
+      const tts: TtsProvider = {
+        synthesize: vi.fn(async function* () {
+          ttsCallCount++;
+          if (ttsCallCount === 1) {
+            yield { buffer: Buffer.alloc(480, 0x42), sampleRate: 24000, channels: 1 };
+            // Hang to simulate slow TTS — gives the test time to trigger cancellation
+            await new Promise<void>((r) => { resolveSecondFrame = r; });
+            yield { buffer: Buffer.alloc(480, 0x43), sampleRate: 24000, channels: 1 };
+          } else {
+            yield { buffer: Buffer.alloc(480, 0x44), sampleRate: 24000, channels: 1 };
+          }
+        }),
+      };
+      const { responder, log } = createResponder({ tts });
+
+      const first = responder.handleTranscription('first');
+
+      // Let the first pipeline reach the hanging point in the TTS generator
+      await new Promise((r) => setImmediate(r));
+
+      // Start second pipeline — bumps generation counter, cancelling the first
+      const second = responder.handleTranscription('second');
+
+      // Let the first TTS continue — it should detect stale generation and return
+      resolveSecondFrame();
+
+      await Promise.all([first, second]);
+
+      // Both pipelines invoked TTS
+      expect(tts.synthesize).toHaveBeenCalledTimes(2);
+      // Only the second pipeline should log 'playback complete'
+      const completeCalls = (log.info as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (args: unknown[]) => args[1] === 'voice-responder: playback complete',
+      );
+      expect(completeCalls).toHaveLength(1);
+    });
+
+    it('destroys stream and stops player on TTS error mid-stream', async () => {
+      const tts: TtsProvider = {
+        synthesize: vi.fn(async function* () {
+          yield { buffer: Buffer.alloc(480, 0x42), sampleRate: 24000, channels: 1 };
+          throw new Error('TTS stream error');
+        }),
+      };
+      const { responder, log, player } = createResponder({ tts });
+
+      await responder.handleTranscription('hello');
+
+      // play() was called before the error (streaming mode)
+      expect(player.play).toHaveBeenCalled();
+      // player.stop() is called in the stream error handler
+      expect(player.stop).toHaveBeenCalled();
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'voice-responder: error in response pipeline',
+      );
+    });
+
+    it('handles odd-byte chunks via PCM carry-over buffer', async () => {
+      const tts: TtsProvider = {
+        synthesize: vi.fn(async function* () {
+          // 3-byte chunk: 1 aligned sample (2 bytes) + 1 carry byte
+          yield { buffer: Buffer.from([0x01, 0x02, 0x03]), sampleRate: 24000, channels: 1 };
+          // 5-byte chunk: carry (1) + 5 = 6 bytes → 3 aligned samples, 0 carry
+          yield { buffer: Buffer.from([0x04, 0x05, 0x06, 0x07, 0x08]), sampleRate: 24000, channels: 1 };
+        }),
+      };
+      const { responder, log } = createResponder({ tts });
+
+      await responder.handleTranscription('hello');
+
+      // Should complete without errors — carry-over buffer handles alignment
+      expect(log.error).not.toHaveBeenCalled();
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({ totalBytes: expect.any(Number) }),
+        'voice-responder: playback complete',
+      );
     });
   });
 
@@ -426,6 +528,28 @@ describe('VoiceResponder', () => {
       responder.stop();
       // stop() calls player.stop() which transitions state to idle
       expect(responder.isPlaying).toBe(false);
+    });
+
+    it('suppresses barge-in during grace period (1500ms)', () => {
+      vi.useFakeTimers();
+      try {
+        const { responder, player } = createResponder();
+        player.state = { status: 'playing' };
+        (responder as unknown as { _playbackStartedAt: number })._playbackStartedAt = Date.now();
+
+        // Within grace period — isPlaying returns false to suppress barge-in
+        expect(responder.isPlaying).toBe(false);
+
+        // Still within grace period at 1499ms
+        vi.advanceTimersByTime(1499);
+        expect(responder.isPlaying).toBe(false);
+
+        // At exactly 1500ms — grace period elapsed, barge-in allowed
+        vi.advanceTimersByTime(1);
+        expect(responder.isPlaying).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

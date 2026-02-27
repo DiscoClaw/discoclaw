@@ -68,6 +68,9 @@ import type { ThreadLikeChannel } from './thread-context.js';
 import { downloadTextAttachments } from './file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { parseHelpCommand, handleHelpCommand } from './help-command.js';
+import { parseVoiceStatusCommand, renderVoiceStatusReport } from './voice-status-command.js';
+import type { VoiceStatusSnapshot } from './voice-status-command.js';
+import { parseVoiceCommand, handleVoiceCommand } from './voice-command.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './health-command.js';
 import { parseStatusCommand, collectStatusSnapshot, renderStatusReport } from './status-command.js';
 import type { StatusCommandContext } from './status-command.js';
@@ -208,12 +211,21 @@ export type BotParams = {
   serviceName?: string;
   // Voice subsystem config — threaded from DiscoclawConfig.
   voiceEnabled?: boolean;
+  voiceAutoJoin?: boolean;
   voiceSttProvider?: 'deepgram' | 'whisper' | 'openai';
-  voiceTtsProvider?: 'cartesia' | 'kokoro' | 'openai';
+  voiceTtsProvider?: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
   voiceHomeChannel?: string;
   deepgramApiKey?: string;
+  deepgramSttModel?: string;
+  deepgramTtsVoice?: string;
   cartesiaApiKey?: string;
   openaiApiKey?: string;
+  /** Always-present voice manager ref for status command — set when voiceEnabled, independent of discordActionsVoice. */
+  voiceStatusCtx?: VoiceContext;
+  /** Update the Deepgram TTS voice on the live audio pipeline — set when voiceEnabled. */
+  setTtsVoice?: (voice: string) => Promise<number>;
+  /** Read the current live Deepgram TTS voice directly from the audio pipeline. */
+  getTtsVoice?: () => string | undefined;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -712,6 +724,42 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const report = renderStatusReport(snapshot, params.botDisplayName);
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
         return;
+      }
+
+      // Handle !voice commands — status, set, help.
+      if (!isBotMessage) {
+        const voiceCmd = parseVoiceCommand(String(msg.content ?? ''));
+        if (voiceCmd) {
+          const connMap = (params.voiceCtx ?? params.voiceStatusCtx)?.voiceManager.listConnections() ?? new Map();
+          const voiceSnapshot: VoiceStatusSnapshot = {
+            enabled: params.voiceEnabled ?? false,
+            sttProvider: params.voiceSttProvider ?? 'deepgram',
+            ttsProvider: params.voiceTtsProvider ?? 'cartesia',
+            homeChannel: params.voiceHomeChannel,
+            deepgramKeySet: Boolean(params.deepgramApiKey),
+            cartesiaKeySet: Boolean(params.cartesiaApiKey),
+            autoJoin: params.voiceAutoJoin ?? false,
+            actionsEnabled: params.discordActionsVoice ?? false,
+            deepgramSttModel: params.deepgramSttModel,
+            deepgramTtsVoice: params.getTtsVoice?.() ?? params.deepgramTtsVoice,
+            connections: [...connMap.entries()].map(([guildId, info]) => ({
+              guildId,
+              channelId: info.channelId,
+              state: info.state,
+              selfMute: info.selfMute,
+              selfDeaf: info.selfDeaf,
+            })),
+          };
+          const voiceReply = await handleVoiceCommand(voiceCmd, {
+            voiceEnabled: params.voiceEnabled ?? false,
+            ttsProvider: params.voiceTtsProvider ?? 'cartesia',
+            statusSnapshot: voiceSnapshot,
+            botDisplayName: params.botDisplayName,
+            setTtsVoice: params.setTtsVoice,
+          });
+          await msg.reply({ content: voiceReply, allowedMentions: NO_MENTIONS });
+          return;
+        }
       }
 
       const healthMode = (params.healthCommandsEnabled ?? true)

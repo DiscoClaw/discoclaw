@@ -119,8 +119,8 @@ describe('modelShow', () => {
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // 'capable' resolves to 'opus' for claude_code
-    expect(result.summary).toContain('opus');
+    // 'capable' resolves to 'sonnet' for claude_code
+    expect(result.summary).toContain('sonnet');
     // 'fast' resolves to 'haiku' for claude_code
     expect(result.summary).toContain('haiku');
   });
@@ -345,7 +345,7 @@ describe('modelSet', () => {
     const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'capable' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.summary).toContain('resolves to opus');
+    expect(result.summary).toContain('resolves to sonnet');
   });
 
   it('fast role succeeds when cronCtx and taskCtx are missing', () => {

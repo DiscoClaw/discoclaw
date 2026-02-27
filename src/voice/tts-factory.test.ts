@@ -3,6 +3,7 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import type { VoiceConfig } from './types.js';
 import { createTtsProvider } from './tts-factory.js';
 import { CartesiaTtsProvider } from './tts-cartesia.js';
+import { DeepgramTtsProvider } from './tts-deepgram.js';
 import { OpenaiTtsProvider } from './tts-openai.js';
 
 // Stub globalThis.WebSocket so CartesiaTtsProvider constructor doesn't throw
@@ -40,6 +41,20 @@ describe('createTtsProvider', () => {
     expect(() =>
       createTtsProvider(baseConfig({ cartesiaApiKey: undefined }), createLogger()),
     ).toThrow('cartesiaApiKey is required');
+  });
+
+  it('returns a DeepgramTtsProvider for deepgram config', () => {
+    const provider = createTtsProvider(
+      baseConfig({ ttsProvider: 'deepgram', deepgramApiKey: 'dg-test' }),
+      createLogger(),
+    );
+    expect(provider).toBeInstanceOf(DeepgramTtsProvider);
+  });
+
+  it('throws when deepgramApiKey is missing for deepgram provider', () => {
+    expect(() =>
+      createTtsProvider(baseConfig({ ttsProvider: 'deepgram' }), createLogger()),
+    ).toThrow('deepgramApiKey is required');
   });
 
   it('returns an OpenaiTtsProvider for openai config', () => {

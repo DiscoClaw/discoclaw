@@ -95,6 +95,23 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
     lines.push('');
   }
 
+  // Voice
+  const voiceKeys = [
+    'DISCOCLAW_VOICE_ENABLED',
+    'DEEPGRAM_API_KEY',
+    'DISCOCLAW_DISCORD_ACTIONS_VOICE',
+    'DISCOCLAW_STT_PROVIDER',
+    'DISCOCLAW_TTS_PROVIDER',
+  ];
+  const hasVoice = voiceKeys.some((k) => vals[k]);
+  if (hasVoice) {
+    lines.push('# VOICE');
+    for (const k of voiceKeys) {
+      if (vals[k]) lines.push(`${k}=${vals[k]}`);
+    }
+    lines.push('');
+  }
+
   lines.push('# For all options, see .env.example.full');
   lines.push('');
 

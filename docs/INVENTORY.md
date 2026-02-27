@@ -264,6 +264,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | `!memory` | Memory read/write subcommands (see section 4) | `src/discord/memory-commands.ts` | **done** |
 | `!plan` | Plan management subcommands | `src/discord/plan-commands.ts` | **done** |
 | `!forge` | Forge control subcommands | `src/discord/forge-commands.ts` | **done** |
+| `!voice` | Voice subsystem commands: `status` (connection + config), `set <name>` (switch Deepgram TTS voice at runtime, ephemeral), `help` | `src/discord/voice-command.ts` (primary), `src/discord/voice-status-command.ts` (status renderer) | **done** |
 
 ## 21. npm Publishing
 
@@ -287,6 +288,7 @@ Real-time voice chat: STT transcription, AI response generation, TTS synthesis, 
 | Voice responder (AI invoke → TTS → audio playback, generation-based cancellation) | `src/voice/voice-responder.ts` | **done** |
 | Deepgram STT provider (Nova-3 streaming via WebSocket) | `src/voice/stt-deepgram.ts` | **done** |
 | Cartesia TTS provider (Sonic-3 via WebSocket, PCM s16le output) | `src/voice/tts-cartesia.ts` | **done** |
+| Deepgram TTS provider (Aura REST streaming, PCM s16le output) | `src/voice/tts-deepgram.ts` | **done** |
 | Opus decoder factory (`@discordjs/opus` wrapper) | `src/voice/opus.ts` | **done** |
 | STT provider factory | `src/voice/stt-factory.ts` | **done** |
 | TTS provider factory | `src/voice/tts-factory.ts` | **done** |
@@ -295,7 +297,7 @@ Real-time voice chat: STT transcription, AI response generation, TTS synthesis, 
 | Voice action flags (restricted action subset for voice invocations) | `src/voice/voice-action-flags.ts` | **done** |
 | Voice actions (join/leave/status/mute/deafen) | `src/discord/actions-voice.ts` | **done** |
 
-Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DISCOCLAW_TTS_PROVIDER`, `DISCOCLAW_VOICE_HOME_CHANNEL`, `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY`.
+Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL`, `DISCOCLAW_TTS_PROVIDER`, `DEEPGRAM_TTS_VOICE`, `DISCOCLAW_VOICE_HOME_CHANNEL`, `DEEPGRAM_API_KEY` (STT + TTS), `CARTESIA_API_KEY`.
 
 ---
 

@@ -27,8 +27,8 @@ describe('resolveModel', () => {
       expect(resolveModel('fast', 'claude_code')).toBe('haiku');
     });
 
-    it('resolves capable → opus', () => {
-      expect(resolveModel('capable', 'claude_code')).toBe('opus');
+    it('resolves capable → sonnet', () => {
+      expect(resolveModel('capable', 'claude_code')).toBe('sonnet');
     });
   });
 
@@ -94,7 +94,7 @@ describe('initTierOverrides', () => {
 
   it('leaves unrelated tiers and runtimes at their defaults', () => {
     initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_FAST: 'sonnet' });
-    expect(resolveModel('capable', 'claude_code')).toBe('opus');
+    expect(resolveModel('capable', 'claude_code')).toBe('sonnet');
     expect(resolveModel('fast', 'gemini')).toBe('gemini-2.5-flash');
     expect(resolveModel('capable', 'gemini')).toBe('gemini-2.5-pro');
   });
@@ -116,7 +116,7 @@ describe('initTierOverrides', () => {
     initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_FAST: 'sonnet' });
     initTierOverrides({});
     expect(resolveModel('fast', 'claude_code')).toBe('haiku');
-    expect(resolveModel('capable', 'claude_code')).toBe('opus');
+    expect(resolveModel('capable', 'claude_code')).toBe('sonnet');
   });
 
   it('ignores env vars with unrecognised tier suffixes', () => {

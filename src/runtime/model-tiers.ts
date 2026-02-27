@@ -15,7 +15,7 @@ export function isModelTier(s: string): s is ModelTier {
  * Empty string = adapter-default sentinel (adapter uses its own defaultModel).
  */
 const defaults: Record<string, Record<ModelTier, string>> = {
-  claude_code: { fast: 'haiku', capable: 'opus' },
+  claude_code: { fast: 'haiku', capable: 'sonnet' },
   gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro' },
   openai: { fast: '', capable: '' },
   codex: { fast: '', capable: '' },

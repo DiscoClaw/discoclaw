@@ -76,6 +76,23 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   lines.push(`DISCOCLAW_DISCORD_ACTIONS=${vals.DISCOCLAW_DISCORD_ACTIONS ?? '1'}`);
   lines.push('');
 
+  // Voice
+  const voiceKeys = [
+    'DISCOCLAW_VOICE_ENABLED',
+    'DEEPGRAM_API_KEY',
+    'DISCOCLAW_DISCORD_ACTIONS_VOICE',
+    'DISCOCLAW_STT_PROVIDER',
+    'DISCOCLAW_TTS_PROVIDER',
+  ];
+  const hasVoice = voiceKeys.some((k) => vals[k]);
+  if (hasVoice) {
+    lines.push('# VOICE');
+    for (const k of voiceKeys) {
+      if (vals[k]) lines.push(`${k}=${vals[k]}`);
+    }
+    lines.push('');
+  }
+
   const autoDetectedKeys = ['DISCOCLAW_TASKS_FORUM', 'DISCOCLAW_CRON_FORUM'];
   const hasAutoDetected = autoDetectedKeys.some((k) => vals[k]);
   if (hasAutoDetected) {
@@ -344,6 +361,23 @@ export async function runInitWizard(): Promise<void> {
   }
 
   values.DISCOCLAW_DISCORD_ACTIONS = '1';
+
+  // ── Voice setup ───────────────────────────────────────────────────────────
+
+  const enableVoice = await ask(
+    '\nEnable voice chat? (requires a Deepgram API key — you can skip this and enable later) [y/N] ',
+  );
+  if (enableVoice.toLowerCase() === 'y') {
+    const deepgramKey = await askValidated(
+      'Deepgram API key: ',
+      (val) => (val ? null : 'Deepgram API key is required'),
+    );
+    values.DISCOCLAW_VOICE_ENABLED = '1';
+    values.DEEPGRAM_API_KEY = deepgramKey;
+    values.DISCOCLAW_DISCORD_ACTIONS_VOICE = '1';
+    values.DISCOCLAW_STT_PROVIDER = 'deepgram';
+    values.DISCOCLAW_TTS_PROVIDER = 'deepgram';
+  }
 
   // ── Write .env ────────────────────────────────────────────────────────────
 

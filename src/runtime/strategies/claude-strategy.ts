@@ -28,7 +28,7 @@ function getToolState(ctx: CliInvokeContext): ToolTrackState {
 export const claudeStrategy: CliAdapterStrategy = {
   id: 'claude_code',
   binaryDefault: 'claude',
-  defaultModel: 'opus',
+  defaultModel: 'sonnet',
   capabilities: [
     'streaming_text',
     'sessions',
