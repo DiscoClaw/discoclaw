@@ -77,6 +77,48 @@ describe('CronRunStats', () => {
     expect(updated.model).toBe('haiku');
   });
 
+  it('upserts with allowedActions and retrieves it', async () => {
+    const stats = await loadRunStats(statsPath);
+    const rec = await stats.upsertRecord('cron-aa1', 'thread-aa1', { allowedActions: ['sendMessage', 'cronList'] });
+    expect(rec.allowedActions).toEqual(['sendMessage', 'cronList']);
+
+    const fetched = stats.getRecord('cron-aa1');
+    expect(fetched!.allowedActions).toEqual(['sendMessage', 'cronList']);
+  });
+
+  it('persists allowedActions through disk reload', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-aa2', 'thread-aa2', { allowedActions: ['cronShow'] });
+
+    const stats2 = await loadRunStats(statsPath);
+    const rec = stats2.getRecord('cron-aa2');
+    expect(rec).toBeDefined();
+    expect(rec!.allowedActions).toEqual(['cronShow']);
+  });
+
+  it('clears allowedActions when upserted with undefined and removes the key in-memory', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-aa3', 'thread-aa3', { allowedActions: ['cronList'] });
+    expect(stats.getRecord('cron-aa3')!.allowedActions).toEqual(['cronList']);
+
+    await stats.upsertRecord('cron-aa3', 'thread-aa3', { allowedActions: undefined });
+    const rec = stats.getRecord('cron-aa3')!;
+    expect(rec.allowedActions).toBeUndefined();
+    // Key must not be present in-memory (not just set to undefined).
+    expect('allowedActions' in rec).toBe(false);
+  });
+
+  it('cleared allowedActions does not reappear after disk reload', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-aa4', 'thread-aa4', { allowedActions: ['sendMessage'] });
+    await stats.upsertRecord('cron-aa4', 'thread-aa4', { allowedActions: undefined });
+
+    const stats2 = await loadRunStats(statsPath);
+    const rec = stats2.getRecord('cron-aa4')!;
+    expect(rec.allowedActions).toBeUndefined();
+    expect('allowedActions' in rec).toBe(false);
+  });
+
   it('retrieves records by threadId', async () => {
     const stats = await loadRunStats(statsPath);
     await stats.upsertRecord('cron-a', 'thread-100');

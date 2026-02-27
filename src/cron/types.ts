@@ -17,4 +17,5 @@ export type CronJob = {
   def: ParsedCronDef;
   cron: Cron | null;  // croner instance (null when disabled)
   running: boolean;   // overlap guard
+  allowedActions?: string[];  // per-job restriction: only these Discord action types may be emitted; undefined = unrestricted
 };

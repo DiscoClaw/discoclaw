@@ -186,7 +186,16 @@ export class CronRunStats {
         if (existing.threadId !== threadId) {
           this.threadIndex.delete(existing.threadId);
         }
-        if (updates) Object.assign(existing, updates);
+        if (updates) {
+          Object.assign(existing, updates);
+          // Object.assign copies undefined values but keeps the key in the object,
+          // diverging from JSON round-trip (which omits undefined properties).
+          // Explicitly delete allowedActions when it is being cleared so in-memory
+          // state matches what would be loaded from disk after a flush + reload.
+          if ('allowedActions' in updates && updates.allowedActions === undefined) {
+            delete existing.allowedActions;
+          }
+        }
         existing.threadId = threadId;
         if (prevStatusMessageId && prevStatusMessageId !== existing.statusMessageId) {
           this.statusMessageIndex.delete(prevStatusMessageId);
