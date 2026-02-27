@@ -24,7 +24,7 @@ export class ToolAwareQueue {
 
   constructor(emit: (action: DisplayAction) => void, opts?: ToolAwareQueueOpts) {
     this.emit = emit;
-    this.flushDelayMs = opts?.flushDelayMs ?? 2000;
+    this.flushDelayMs = opts?.flushDelayMs ?? 800;
     this.postToolDelayMs = opts?.postToolDelayMs ?? 500;
   }
 
