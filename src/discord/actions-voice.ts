@@ -147,7 +147,7 @@ export function voiceActionsPromptSection(): string {
 
 **voiceJoin** — Join a voice channel:
 \`\`\`
-<discord-action>{"type":"voiceJoin","channel":"voice-chat"}</discord-action>
+<discord-action>{"type":"voiceJoin","channel":"voice"}</discord-action>
 \`\`\`
 - \`channel\` (required): Voice channel name or ID. Accepts voice and stage channels.
 
