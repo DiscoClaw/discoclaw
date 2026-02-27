@@ -61,7 +61,7 @@ User speaks in Discord voice channel
 When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes the voice subsystem in order:
 
 1. **`TranscriptMirror.resolve()`** — resolves the voice home channel for text mirroring (may be `null` if unconfigured).
-2. **`voiceInvokeAi`** closure — builds the AI invocation function that prepends channel context, PA prompt, durable memory, voice system prompt, and action instructions to user speech. Supports up to 2 follow-up rounds for action results.
+2. **`voiceInvokeAi`** closure — builds the AI invocation function that prepends channel context, PA prompt, durable memory, voice system prompt, and action instructions to user speech. Supports up to 1 follow-up round for action results. `runtimeTimeoutMs` is applied to each invocation as a safety net against runaway queries.
 3. **`AudioPipelineManager`** — instantiated with voice config, allowlist, decoder factory, `voiceInvokeAi`, transcript mirror, and a transcription logging callback.
 4. **`VoiceConnectionManager`** — instantiated with `onReady` → `audioPipeline.startPipeline()` and `onDestroyed` → `audioPipeline.stopPipeline()` callbacks.
 5. **`botParams.voiceCtx`** — set when `DISCORD_ACTIONS_VOICE` is enabled, exposing `voiceManager` to Discord action handlers (`voiceJoin`, `voiceLeave`, etc.).
