@@ -25,6 +25,12 @@ export type VoiceCommandOpts = {
   activePipelineCount?: number;
   /** Callback to restart all active pipelines (called when activePipelineCount > 0). */
   restartPipelines?: () => Promise<void>;
+  /**
+   * Pipeline-level setter — updates the voice config and restarts all active
+   * pipelines in one step. When provided, preferred over voiceConfig +
+   * restartPipelines. Returns the number of pipelines restarted.
+   */
+  setTtsVoice?: (voice: string) => Promise<number>;
   botDisplayName?: string;
 };
 
@@ -86,6 +92,13 @@ export async function handleVoiceCommand(
     case 'set': {
       if (opts.ttsProvider !== 'deepgram') {
         return `Voice name switching requires \`deepgram\` TTS provider (current: \`${opts.ttsProvider}\`).`;
+      }
+      if (opts.setTtsVoice) {
+        const restarted = await opts.setTtsVoice(cmd.voice);
+        const pipelineLabel = restarted === 1 ? '1 active pipeline' : `${restarted} active pipelines`;
+        return restarted > 0
+          ? `Voice set to \`${cmd.voice}\`. ${pipelineLabel} restarted.`
+          : `Voice set to \`${cmd.voice}\`. Will take effect on the next pipeline start.`;
       }
       if (opts.voiceConfig) {
         opts.voiceConfig.deepgramTtsVoice = cmd.voice;

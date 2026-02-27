@@ -224,6 +224,8 @@ export type BotParams = {
   voiceStatusCtx?: VoiceContext;
   /** Update the Deepgram TTS voice on the live audio pipeline — set when voiceEnabled. */
   setTtsVoice?: (voice: string) => Promise<number>;
+  /** Read the current live Deepgram TTS voice directly from the audio pipeline. */
+  getTtsVoice?: () => string | undefined;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -728,25 +730,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       if (!isBotMessage) {
         const voiceCmd = parseVoiceCommand(String(msg.content ?? ''));
         if (voiceCmd) {
-          if (voiceCmd.action === 'set') {
-            // !voice set <name> — switch the active Deepgram TTS voice at runtime.
-            if (params.voiceTtsProvider !== 'deepgram') {
-              await msg.reply({ content: `Voice name switching requires \`deepgram\` TTS provider (current: \`${params.voiceTtsProvider ?? 'cartesia'}\`).`, allowedMentions: NO_MENTIONS });
-              return;
-            }
-            if (!params.setTtsVoice) {
-              await msg.reply({ content: 'Voice set is unavailable — audio pipeline not initialized.', allowedMentions: NO_MENTIONS });
-              return;
-            }
-            const restarted = await params.setTtsVoice(voiceCmd.voice);
-            const reply = restarted > 0
-              ? `Voice set to \`${voiceCmd.voice}\`. ${restarted === 1 ? '1 active pipeline' : `${restarted} active pipelines`} restarted.`
-              : `Voice set to \`${voiceCmd.voice}\`. Will take effect on the next pipeline start.`;
-            await msg.reply({ content: reply, allowedMentions: NO_MENTIONS });
-            return;
-          }
-
-          // status / help — delegate to handleVoiceCommand.
           const connMap = (params.voiceCtx ?? params.voiceStatusCtx)?.voiceManager.listConnections() ?? new Map();
           const voiceSnapshot: VoiceStatusSnapshot = {
             enabled: params.voiceEnabled ?? false,
@@ -758,7 +741,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             autoJoin: params.voiceAutoJoin ?? false,
             actionsEnabled: params.discordActionsVoice ?? false,
             deepgramSttModel: params.deepgramSttModel,
-            deepgramTtsVoice: params.deepgramTtsVoice,
+            deepgramTtsVoice: params.getTtsVoice?.() ?? params.deepgramTtsVoice,
             connections: [...connMap.entries()].map(([guildId, info]) => ({
               guildId,
               channelId: info.channelId,
@@ -772,6 +755,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             ttsProvider: params.voiceTtsProvider ?? 'cartesia',
             statusSnapshot: voiceSnapshot,
             botDisplayName: params.botDisplayName,
+            setTtsVoice: params.setTtsVoice,
           });
           await msg.reply({ content: voiceReply, allowedMentions: NO_MENTIONS });
           return;

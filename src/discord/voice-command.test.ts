@@ -288,6 +288,61 @@ describe('handleVoiceCommand', () => {
     });
   });
 
+  // Set — via setTtsVoice (pipeline-level)
+  describe('set — via setTtsVoice', () => {
+    it('calls setTtsVoice with the new voice name', async () => {
+      const setTtsVoice = vi.fn().mockResolvedValue(1);
+      await handleVoiceCommand(
+        { action: 'set', voice: 'aura-2-luna-en' },
+        makeOpts({ setTtsVoice }),
+      );
+      expect(setTtsVoice).toHaveBeenCalledWith('aura-2-luna-en');
+    });
+
+    it('returns "1 active pipeline restarted" when setTtsVoice returns 1', async () => {
+      const setTtsVoice = vi.fn().mockResolvedValue(1);
+      const result = await handleVoiceCommand(
+        { action: 'set', voice: 'aura-2-luna-en' },
+        makeOpts({ setTtsVoice }),
+      );
+      expect(result).toContain('aura-2-luna-en');
+      expect(result).toContain('1 active pipeline');
+      expect(result).toContain('restarted');
+    });
+
+    it('returns "N active pipelines restarted" when setTtsVoice returns N > 1', async () => {
+      const setTtsVoice = vi.fn().mockResolvedValue(3);
+      const result = await handleVoiceCommand(
+        { action: 'set', voice: 'aura-2-asteria-en' },
+        makeOpts({ setTtsVoice }),
+      );
+      expect(result).toContain('3 active pipelines');
+      expect(result).toContain('restarted');
+    });
+
+    it('returns "will take effect on next pipeline start" when setTtsVoice returns 0', async () => {
+      const setTtsVoice = vi.fn().mockResolvedValue(0);
+      const result = await handleVoiceCommand(
+        { action: 'set', voice: 'aura-2-luna-en' },
+        makeOpts({ setTtsVoice }),
+      );
+      expect(result).toContain('aura-2-luna-en');
+      expect(result).toContain('next pipeline start');
+    });
+
+    it('prefers setTtsVoice over voiceConfig + restartPipelines', async () => {
+      const setTtsVoice = vi.fn().mockResolvedValue(1);
+      const restartPipelines = vi.fn().mockResolvedValue(undefined);
+      const voiceConfig = { deepgramTtsVoice: 'aura-2-asteria-en' };
+      await handleVoiceCommand(
+        { action: 'set', voice: 'aura-2-luna-en' },
+        makeOpts({ setTtsVoice, restartPipelines, voiceConfig, activePipelineCount: 1 }),
+      );
+      expect(setTtsVoice).toHaveBeenCalledOnce();
+      expect(restartPipelines).not.toHaveBeenCalled();
+    });
+  });
+
   // Set — non-deepgram provider
   describe('set — non-deepgram TTS provider', () => {
     it('returns error message naming the current provider', async () => {
