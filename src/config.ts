@@ -496,7 +496,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
   const deepgramApiKey = parseTrimmedString(env, 'DEEPGRAM_API_KEY');
   const cartesiaApiKey = parseTrimmedString(env, 'CARTESIA_API_KEY');
-  const voiceModel = parseTrimmedString(env, 'DISCOCLAW_VOICE_MODEL') ?? 'sonnet';
+  const voiceModelRaw = parseTrimmedString(env, 'DISCOCLAW_VOICE_MODEL');
   const voiceSystemPrompt = (() => {
     const raw = parseTrimmedString(env, 'DISCOCLAW_VOICE_SYSTEM_PROMPT');
     if (raw == null) return undefined;
@@ -536,6 +536,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
 
   const fastModel = parseTrimmedString(env, 'DISCOCLAW_FAST_MODEL') ?? 'fast';
+  const voiceModel = voiceModelRaw ?? fastModel;
 
   const tasksCwdOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_CWD');
   const tasksTagMapPathOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_TAG_MAP');
