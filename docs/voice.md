@@ -103,11 +103,18 @@ Set via `DEEPGRAM_TTS_VOICE`. Default: `aura-2-asteria-en`.
 
 All Aura-2 voices are English (`-en`). The full list is maintained in the [Deepgram docs](https://developers.deepgram.com/docs/tts-models).
 
-## `!voice status` Command
+## `!voice` Commands
 
-The `!voice status` bang command reports the current voice subsystem state without invoking the AI.
+The `!voice` family of bang commands controls the voice subsystem at runtime without AI invocation. All subcommands require `DISCOCLAW_VOICE_ENABLED=1`. If voice is disabled, every subcommand returns a brief disabled notice.
+
+All three subcommands are handled by `src/discord/voice-command.ts` (parser + handler) and wired in `src/discord/message-coordinator.ts`. They do not require `DISCOCLAW_DISCORD_ACTIONS_VOICE=1`.
+
+### `!voice` / `!voice status`
+
+Reports the current voice subsystem state.
 
 ```
+!voice
 !voice status
 ```
 
@@ -120,9 +127,46 @@ The `!voice status` bang command reports the current voice subsystem state witho
 - Whether auto-join is active (`DISCOCLAW_VOICE_AUTO_JOIN`)
 - Home channel name/ID (`DISCOCLAW_VOICE_HOME_CHANNEL`)
 
-**Requires:** `DISCOCLAW_VOICE_ENABLED=1`. If voice is disabled, the command returns a brief disabled notice.
+### `!voice set <name>`
 
-This command is handled by `src/discord/voice-status-command.ts` (parser + renderer) and `src/discord/message-coordinator.ts` (handler wiring), and does not require `DISCOCLAW_DISCORD_ACTIONS_VOICE=1`.
+Switches the Deepgram TTS voice at runtime.
+
+```
+!voice set aura-2-asteria-en
+!voice set aura-2-luna-en
+```
+
+**Behaviour:**
+
+- Requires `DISCOCLAW_TTS_PROVIDER=deepgram`.
+- Updates the in-process voice config immediately and restarts all active audio pipelines.
+- **Ephemeral** — the change is not written to `.env`. The voice reverts to `DEEPGRAM_TTS_VOICE` on the next service restart. To make it permanent, update `DEEPGRAM_TTS_VOICE` in `.env` and restart the service.
+
+See [Deepgram TTS Voices](#deepgram-tts-voices-aura-2) for the full list of accepted voice names.
+
+### `!voice help`
+
+Displays the inline help text for all `!voice` subcommands.
+
+```
+!voice help
+```
+
+**Help text format:**
+
+```
+**!voice commands:**
+- `!voice` — show voice subsystem status
+- `!voice status` — same as above
+- `!voice set <name>` — switch the Deepgram TTS voice at runtime
+- `!voice help` — this message
+
+**Examples:**
+- `!voice set aura-2-asteria-en`
+- `!voice set aura-2-luna-en`
+
+**Note:** Voice name switching requires the Deepgram TTS provider (`DISCOCLAW_TTS_PROVIDER=deepgram`).
+```
 
 ## Discord Permissions
 
