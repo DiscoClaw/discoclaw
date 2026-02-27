@@ -1,3 +1,4 @@
+import WebSocket from 'ws';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { AudioFrame, SttProvider, TranscriptionResult } from './types.js';
 
@@ -5,39 +6,32 @@ const DEEPGRAM_STREAMING_URL = 'wss://api.deepgram.com/v1/listen';
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 500;
 
-type WsConstructor = new (url: string | URL) => WebSocket;
-
 export type DeepgramSttOpts = {
   apiKey: string;
   sampleRate: number;
   log: LoggerLike;
   /** Override WebSocket constructor for testing. */
-  wsConstructor?: WsConstructor;
+  wsFactory?: (url: string, headers: Record<string, string>) => WebSocket;
 };
 
 export class DeepgramSttProvider implements SttProvider {
   private readonly apiKey: string;
   private readonly sampleRate: number;
   private readonly log: LoggerLike;
-  private readonly WsCtor: WsConstructor;
+  private readonly wsFactory: (url: string, headers: Record<string, string>) => WebSocket;
 
   private ws: WebSocket | null = null;
   private callback: ((result: TranscriptionResult) => void) | null = null;
   private state: 'idle' | 'starting' | 'open' | 'stopped' = 'idle';
   private retryCount = 0;
+  private feedCount = 0;
 
   constructor(opts: DeepgramSttOpts) {
-    if (typeof globalThis.WebSocket === 'undefined' && !opts.wsConstructor) {
-      throw new Error(
-        'globalThis.WebSocket is not available. ' +
-          'Node 22+ includes WebSocket natively. ' +
-          'Upgrade to Node 22+ or pass a wsConstructor option.',
-      );
-    }
     this.apiKey = opts.apiKey;
     this.sampleRate = opts.sampleRate;
     this.log = opts.log;
-    this.WsCtor = opts.wsConstructor ?? globalThis.WebSocket;
+    this.wsFactory =
+      opts.wsFactory ?? ((url, headers) => new WebSocket(url, { headers }));
   }
 
   async start(): Promise<void> {
@@ -50,6 +44,10 @@ export class DeepgramSttProvider implements SttProvider {
   feedAudio(frame: AudioFrame): void {
     if (this.state !== 'open') {
       throw new Error('Cannot feedAudio before start() or after stop()');
+    }
+    this.feedCount++;
+    if (this.feedCount === 1 || this.feedCount % 100 === 0) {
+      this.log.info({ feedCount: this.feedCount, bufferSize: frame.buffer.length }, 'stt:feedAudio');
     }
     this.ws!.send(frame.buffer);
   }
@@ -74,7 +72,6 @@ export class DeepgramSttProvider implements SttProvider {
       model: 'nova-3',
       encoding: 'linear16',
       sample_rate: String(this.sampleRate),
-      token: this.apiKey,
     });
     return `${DEEPGRAM_STREAMING_URL}?${params.toString()}`;
   }
@@ -82,48 +79,67 @@ export class DeepgramSttProvider implements SttProvider {
   private connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const url = this.buildUrl();
-      const ws = new this.WsCtor(url);
+      const ws = this.wsFactory(url, {
+        Authorization: `Token ${this.apiKey}`,
+      });
       this.ws = ws;
 
-      ws.onopen = () => {
+      ws.on('open', () => {
         this.state = 'open';
         this.log.info({ url: DEEPGRAM_STREAMING_URL }, 'Deepgram STT connected');
         resolve();
-      };
+      });
 
-      ws.onmessage = (event: MessageEvent) => {
-        this.handleMessage(event);
-      };
+      ws.on('message', (data: WebSocket.Data) => {
+        this.handleMessage(data);
+      });
 
-      ws.onerror = (event: Event) => {
-        this.log.error({ error: event }, 'Deepgram STT WebSocket error');
-      };
+      ws.on('error', (err: Error) => {
+        this.log.error({ err: err.message }, 'Deepgram STT WebSocket error');
+      });
 
-      ws.onclose = (event: CloseEvent) => {
+      ws.on('close', (code: number, reason: Buffer) => {
         if (this.state === 'stopped') return;
 
         // If we were still in the initial connect, reject
         if (this.state === 'starting') {
-          reject(new Error(`WebSocket closed during connect: code=${event.code}`));
+          reject(
+            new Error(
+              `WebSocket closed during connect: code=${code} reason=${reason.toString()}`,
+            ),
+          );
           return;
         }
 
         this.handleUnexpectedClose();
-      };
+      });
     });
   }
 
-  private handleMessage(event: MessageEvent): void {
-    if (!this.callback) return;
+  private handleMessage(data: WebSocket.Data): void {
     try {
-      const data = JSON.parse(String(event.data));
-      const alt = data?.channel?.alternatives?.[0];
+      const parsed = JSON.parse(String(data));
+
+      // Log all Deepgram messages for debugging
+      const alt = parsed?.channel?.alternatives?.[0];
+      const transcript = alt?.transcript ?? '';
+      this.log.info(
+        {
+          type: parsed.type,
+          isFinal: parsed.is_final,
+          speechFinal: parsed.speech_final,
+          transcript: transcript.slice(0, 80),
+        },
+        'stt:deepgram message',
+      );
+
+      if (!this.callback) return;
       if (!alt) return;
 
       const result: TranscriptionResult = {
-        text: alt.transcript ?? '',
+        text: transcript,
         confidence: alt.confidence,
-        isFinal: Boolean(data.is_final && data.speech_final),
+        isFinal: Boolean(parsed.is_final && parsed.speech_final),
       };
       this.callback(result);
     } catch (err) {

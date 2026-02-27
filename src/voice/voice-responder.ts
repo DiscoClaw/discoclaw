@@ -137,7 +137,7 @@ export class VoiceResponder {
           // Trailing byte from an odd-length chunk is a partial s16le sample
           const remainder = chunk.length % 2;
           if (remainder !== 0) {
-            carry = chunk.subarray(chunk.length - remainder);
+            carry = chunk.subarray(chunk.length - remainder) as Buffer<ArrayBuffer>;
             chunk = chunk.subarray(0, chunk.length - remainder);
           }
 

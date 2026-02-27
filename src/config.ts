@@ -45,6 +45,7 @@ export type DiscoclawConfig = {
   discordActionsMemory: boolean;
   discordActionsDefer: boolean;
   discordActionsImagegen: boolean;
+  discordActionsVoice: boolean;
 
   deferMaxDelaySeconds: number;
   deferMaxConcurrent: number;
@@ -88,9 +89,12 @@ export type DiscoclawConfig = {
 
   // Voice config
   voiceEnabled: boolean;
-  voiceSttProvider: 'deepgram' | 'whisper';
-  voiceTtsProvider: 'cartesia' | 'kokoro';
-  voiceTranscriptChannel?: string;
+  voiceAutoJoin: boolean;
+  voiceModel: string;
+  voiceSystemPrompt?: string;
+  voiceSttProvider: 'deepgram' | 'whisper' | 'openai';
+  voiceTtsProvider: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
+  voiceHomeChannel?: string;
   deepgramApiKey?: string;
   cartesiaApiKey?: string;
 
@@ -393,6 +397,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsMemory = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', true);
   const discordActionsDefer = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER', true);
   const discordActionsImagegen = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', false);
+  const discordActionsVoice = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_VOICE', false);
   const deferMaxDelaySeconds = parsePositiveNumber(
     env,
     'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS',
@@ -419,6 +424,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       { name: 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', enabled: discordActionsMemory },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_DEFER', enabled: discordActionsDefer },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', enabled: discordActionsImagegen },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_VOICE', enabled: discordActionsVoice },
     ]
       .filter((entry) => (env[entry.name] ?? '').trim().length > 0 && entry.enabled)
       .map((entry) => entry.name);
@@ -475,16 +481,45 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
 
   const voiceEnabled = parseBoolean(env, 'DISCOCLAW_VOICE_ENABLED', false);
-  const voiceSttProvider = parseEnum(env, 'DISCOCLAW_STT_PROVIDER', ['deepgram', 'whisper'] as const, 'deepgram')!;
-  const voiceTtsProvider = parseEnum(env, 'DISCOCLAW_TTS_PROVIDER', ['cartesia', 'kokoro'] as const, 'cartesia')!;
-  const voiceTranscriptChannel = parseTrimmedString(env, 'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL');
+  const voiceAutoJoin = parseBoolean(env, 'DISCOCLAW_VOICE_AUTO_JOIN', false);
+  const voiceSttProvider = parseEnum(env, 'DISCOCLAW_STT_PROVIDER', ['deepgram', 'whisper', 'openai'] as const, 'deepgram')!;
+  const voiceTtsProvider = parseEnum(env, 'DISCOCLAW_TTS_PROVIDER', ['cartesia', 'deepgram', 'kokoro', 'openai'] as const, 'cartesia')!;
+  let voiceHomeChannel = parseTrimmedString(env, 'DISCOCLAW_VOICE_HOME_CHANNEL');
+  if (!voiceHomeChannel) {
+    const legacy = parseTrimmedString(env, 'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL');
+    if (legacy) {
+      voiceHomeChannel = legacy;
+      warnings.push(
+        'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL is deprecated; use DISCOCLAW_VOICE_HOME_CHANNEL instead.',
+      );
+    }
+  }
   const deepgramApiKey = parseTrimmedString(env, 'DEEPGRAM_API_KEY');
   const cartesiaApiKey = parseTrimmedString(env, 'CARTESIA_API_KEY');
+  const voiceModel = parseTrimmedString(env, 'DISCOCLAW_VOICE_MODEL') ?? 'sonnet';
+  const voiceSystemPrompt = (() => {
+    const raw = parseTrimmedString(env, 'DISCOCLAW_VOICE_SYSTEM_PROMPT');
+    if (raw == null) return undefined;
+    if (raw.length > 4000) {
+      throw new Error(`DISCOCLAW_VOICE_SYSTEM_PROMPT exceeds 4000 char limit (got ${raw.length})`);
+    }
+    return raw;
+  })();
+
   if (voiceEnabled && voiceSttProvider === 'deepgram' && !deepgramApiKey) {
     warnings.push('DISCOCLAW_VOICE_ENABLED=1 with STT provider "deepgram" but DEEPGRAM_API_KEY is not set; voice STT will fail at runtime.');
   }
+  if (voiceEnabled && voiceSttProvider === 'openai' && !openaiApiKey) {
+    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with STT provider "openai" but OPENAI_API_KEY is not set; voice STT will fail at runtime.');
+  }
   if (voiceEnabled && voiceTtsProvider === 'cartesia' && !cartesiaApiKey) {
     warnings.push('DISCOCLAW_VOICE_ENABLED=1 with TTS provider "cartesia" but CARTESIA_API_KEY is not set; voice TTS will fail at runtime.');
+  }
+  if (voiceEnabled && voiceTtsProvider === 'deepgram' && !deepgramApiKey) {
+    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with TTS provider "deepgram" but DEEPGRAM_API_KEY is not set; voice TTS will fail at runtime.');
+  }
+  if (voiceEnabled && voiceTtsProvider === 'openai' && !openaiApiKey) {
+    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with TTS provider "openai" but OPENAI_API_KEY is not set; voice TTS will fail at runtime.');
   }
 
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
@@ -567,6 +602,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsMemory,
       discordActionsDefer,
       discordActionsImagegen,
+      discordActionsVoice,
 
       deferMaxDelaySeconds,
       deferMaxConcurrent,
@@ -606,9 +642,12 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       imagegenDefaultModel,
 
       voiceEnabled,
+      voiceAutoJoin,
+      voiceModel,
+      voiceSystemPrompt,
       voiceSttProvider,
       voiceTtsProvider,
-      voiceTranscriptChannel,
+      voiceHomeChannel,
       deepgramApiKey,
       cartesiaApiKey,
 

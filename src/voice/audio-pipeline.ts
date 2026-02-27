@@ -14,6 +14,7 @@ import { AudioReceiver, type OpusDecoderFactory } from './audio-receiver.js';
 import { createSttProvider } from './stt-factory.js';
 import { createTtsProvider } from './tts-factory.js';
 import { VoiceResponder, type InvokeAiFn } from './voice-responder.js';
+import type { TranscriptMirrorLike } from './transcript-mirror.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +41,10 @@ export type AudioPipelineOpts = {
   runtimeTimeoutMs?: number;
   /** Override TTS provider creation for testing. */
   createTts?: (config: VoiceConfig, log: LoggerLike) => TtsProvider;
+  /** Optional transcript mirror for posting voice conversation text to a Discord channel. */
+  transcriptMirror?: TranscriptMirrorLike;
+  /** Bot display name for transcript mirror messages. */
+  botDisplayName?: string;
 };
 
 type GuildPipeline = {
@@ -65,7 +70,11 @@ export class AudioPipelineManager {
   private readonly runtimeCwd?: string;
   private readonly runtimeTimeoutMs?: number;
   private readonly createTts: (config: VoiceConfig, log: LoggerLike) => TtsProvider;
+  private readonly transcriptMirror?: TranscriptMirrorLike;
+  private readonly botDisplayName: string;
   private readonly pipelines = new Map<string, GuildPipeline>();
+  /** Re-entrancy guard: VoiceConnection.subscribe() can synchronously fire stateChange→Ready. */
+  private readonly starting = new Set<string>();
 
   constructor(opts: AudioPipelineOpts) {
     this.log = opts.log;
@@ -80,6 +89,8 @@ export class AudioPipelineManager {
     this.runtimeCwd = opts.runtimeCwd;
     this.runtimeTimeoutMs = opts.runtimeTimeoutMs;
     this.createTts = opts.createTts ?? createTtsProvider;
+    this.transcriptMirror = opts.transcriptMirror;
+    this.botDisplayName = opts.botDisplayName ?? 'Bot';
   }
 
   /**
@@ -104,6 +115,12 @@ export class AudioPipelineManager {
 
   /** Start the audio receive pipeline for a guild. */
   async startPipeline(guildId: string, connection: VoiceConnection): Promise<void> {
+    // Re-entrancy guard: VoiceConnection.subscribe() (called when wiring the
+    // AudioPlayer) synchronously fires a stateChange→Ready event, which would
+    // re-invoke startPipeline and recurse infinitely.
+    if (this.starting.has(guildId)) return;
+    this.starting.add(guildId);
+
     // Stop any existing pipeline first
     if (this.pipelines.has(guildId)) {
       this.log.info({ guildId }, 'stopping existing pipeline before restart');
@@ -112,17 +129,26 @@ export class AudioPipelineManager {
 
     try {
       const sttProvider = this.createStt(this.voiceConfig, this.log);
+      const mirror = this.transcriptMirror;
 
       // Create VoiceResponder for the full conversation loop if invokeAi is configured
       let responder: VoiceResponder | undefined;
       if (this.invokeAi) {
         try {
           const tts = this.createTts(this.voiceConfig, this.log);
+          const botName = this.botDisplayName;
           responder = new VoiceResponder({
             log: this.log,
             tts,
             connection,
             invokeAi: this.invokeAi,
+            onBotResponse: mirror
+              ? (text) => {
+                  mirror.postBotResponse(botName, text).catch((err) => {
+                    this.log.warn({ guildId, err }, 'transcript-mirror: failed to post bot response');
+                  });
+                }
+              : undefined,
           });
           this.log.info({ guildId }, 'voice responder created');
         } catch (err) {
@@ -130,17 +156,24 @@ export class AudioPipelineManager {
         }
       }
 
-      // Wire transcription callback — fires both the external callback and the responder
+      // Wire transcription callback — fires the external callback, transcript mirror, and responder
       const onTranscriptionCb = this.onTranscription;
-      if (onTranscriptionCb || responder) {
+      if (onTranscriptionCb || responder || mirror) {
         sttProvider.onTranscription((result) => {
           if (onTranscriptionCb) {
             onTranscriptionCb(guildId, result);
           }
-          if (responder && result.isFinal && result.text.trim()) {
-            responder.handleTranscription(result.text).catch((err) => {
-              this.log.error({ guildId, err }, 'voice-responder: handleTranscription failed');
-            });
+          if (result.isFinal && result.text.trim()) {
+            if (mirror) {
+              mirror.postUserTranscription('User', result.text).catch((err) => {
+                this.log.warn({ guildId, err }, 'transcript-mirror: failed to post user transcription');
+              });
+            }
+            if (responder) {
+              responder.handleTranscription(result.text).catch((err) => {
+                this.log.error({ guildId, err }, 'voice-responder: handleTranscription failed');
+              });
+            }
           }
         });
       }
@@ -153,6 +186,12 @@ export class AudioPipelineManager {
         sttProvider,
         log: this.log,
         createDecoder: this.createDecoder,
+        onUserSpeaking: (userId) => {
+          if (responder?.isPlaying) {
+            this.log.info({ guildId, userId }, 'barge-in detected — stopping playback');
+            responder.stop();
+          }
+        },
       });
 
       receiver.start();
@@ -161,6 +200,8 @@ export class AudioPipelineManager {
       this.log.info({ guildId }, 'audio pipeline started');
     } catch (err) {
       this.log.error({ guildId, err }, 'failed to start audio pipeline');
+    } finally {
+      this.starting.delete(guildId);
     }
   }
 

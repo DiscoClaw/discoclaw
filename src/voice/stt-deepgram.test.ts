@@ -1,31 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'node:events';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { AudioFrame, TranscriptionResult } from './types.js';
 import { DeepgramSttProvider } from './stt-deepgram.js';
 
 // ---------------------------------------------------------------------------
-// Mock WebSocket
+// Mock WebSocket (ws-library style: EventEmitter with readyState)
 // ---------------------------------------------------------------------------
 
-type WsEventHandler = (event: unknown) => void;
-
-class MockWebSocket {
+class MockWebSocket extends EventEmitter {
   static readonly OPEN = 1;
   static readonly CLOSED = 3;
 
   readonly url: string;
+  readonly headers: Record<string, string>;
   readyState = MockWebSocket.OPEN;
-  onopen: WsEventHandler | null = null;
-  onmessage: WsEventHandler | null = null;
-  onerror: WsEventHandler | null = null;
-  onclose: WsEventHandler | null = null;
 
   sent: unknown[] = [];
 
-  constructor(url: string | URL) {
-    this.url = String(url);
+  constructor(url: string, headers: Record<string, string>) {
+    super();
+    this.url = url;
+    this.headers = headers;
     // Auto-open on next microtask so callers can attach handlers
-    queueMicrotask(() => this.onopen?.({ type: 'open' }));
+    queueMicrotask(() => this.emit('open'));
   }
 
   send(data: unknown): void {
@@ -38,27 +36,18 @@ class MockWebSocket {
 
   // Test helpers
   _receiveMessage(data: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(data) } as unknown);
+    this.emit('message', JSON.stringify(data));
   }
 
   _triggerClose(code = 1006): void {
     this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.({ code } as unknown);
+    this.emit('close', code, Buffer.from(''));
   }
 
-  _triggerError(): void {
-    this.onerror?.({ type: 'error' } as unknown);
+  _triggerError(msg = 'test error'): void {
+    this.emit('error', new Error(msg));
   }
 }
-
-// Patch class-level constants onto prototype for readyState comparisons
-// (WebSocket.OPEN is used in the provider)
-Object.defineProperty(MockWebSocket, 'OPEN', { value: 1 });
-Object.defineProperty(MockWebSocket, 'CLOSED', { value: 3 });
-
-// We also need to make the global WebSocket constants available since the
-// provider references WebSocket.OPEN for readyState checks.
-(globalThis as Record<string, unknown>).WebSocket = MockWebSocket;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -70,26 +59,32 @@ function createLogger(): LoggerLike {
 
 let lastCreatedWs: MockWebSocket | null = null;
 
-function wsFactory(url: string | URL): MockWebSocket {
-  const ws = new MockWebSocket(url);
+function mockWsFactory(url: string, headers: Record<string, string>): MockWebSocket {
+  const ws = new MockWebSocket(url, headers);
   lastCreatedWs = ws;
   return ws;
 }
 
-const WsConstructor = wsFactory as unknown as new (url: string | URL) => WebSocket;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const typedWsFactory = mockWsFactory as any;
 
-function makeProvider(overrides: Partial<{ apiKey: string; sampleRate: number; log: LoggerLike }> = {}) {
+function makeProvider(
+  overrides: Partial<{ apiKey: string; sampleRate: number; log: LoggerLike }> = {},
+) {
   return new DeepgramSttProvider({
     apiKey: overrides.apiKey ?? 'test-key',
     sampleRate: overrides.sampleRate ?? 16000,
     log: overrides.log ?? createLogger(),
-    wsConstructor: WsConstructor,
+    wsFactory: typedWsFactory,
   });
 }
 
 function makeFrame(data: number[] = [0, 1, 2, 3]): AudioFrame {
   return { buffer: Buffer.from(data), sampleRate: 16000, channels: 1 };
 }
+
+// Re-export for the retry test's backoff calculation
+const BASE_BACKOFF_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -101,7 +96,7 @@ beforeEach(() => {
 });
 
 describe('DeepgramSttProvider', () => {
-  it('start opens connection with correct URL including query params', async () => {
+  it('start opens connection with correct URL and auth header', async () => {
     const provider = makeProvider({ apiKey: 'my-key', sampleRate: 48000 });
     await provider.start();
 
@@ -113,7 +108,9 @@ describe('DeepgramSttProvider', () => {
     expect(url.searchParams.get('model')).toBe('nova-3');
     expect(url.searchParams.get('encoding')).toBe('linear16');
     expect(url.searchParams.get('sample_rate')).toBe('48000');
-    expect(url.searchParams.get('token')).toBe('my-key');
+    // Auth is via header, not query param
+    expect(url.searchParams.get('token')).toBeNull();
+    expect(lastCreatedWs!.headers.Authorization).toBe('Token my-key');
   });
 
   it('feedAudio sends binary data', async () => {
@@ -237,9 +234,13 @@ describe('DeepgramSttProvider', () => {
     // Fourth close — retries exhausted
     lastCreatedWs!._triggerClose(1006);
     expect(log.error).toHaveBeenCalled();
-    expect(vi.mocked(log.error).mock.calls.some(
-      (c) => typeof c[1] === 'string' && c[1].includes('exhausted'),
-    )).toBe(true);
+    expect(
+      vi
+        .mocked(log.error)
+        .mock.calls.some(
+          (c) => typeof c[1] === 'string' && c[1].includes('exhausted'),
+        ),
+    ).toBe(true);
 
     vi.useRealTimers();
   });
@@ -266,25 +267,4 @@ describe('DeepgramSttProvider', () => {
 
     vi.useRealTimers();
   });
-
-  it('constructor throws if WebSocket is unavailable and no wsConstructor given', () => {
-    const original = globalThis.WebSocket;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (globalThis as any).WebSocket = undefined;
-      expect(
-        () =>
-          new DeepgramSttProvider({
-            apiKey: 'key',
-            sampleRate: 16000,
-            log: createLogger(),
-          }),
-      ).toThrow('Node 22+');
-    } finally {
-      (globalThis as any).WebSocket = original;
-    }
-  });
 });
-
-// Re-export for the retry test's backoff calculation
-const BASE_BACKOFF_MS = 500;

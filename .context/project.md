@@ -26,7 +26,7 @@ Standing constraints for planning and auditing. These apply to all forge/plan op
 Plans that grow too large fail — they blow past token limits, cause audit/revise loops to diverge, and produce specs no human will review. These constraints prevent that.
 
 ### Scope limits
-- A plan should target **3–5 files** max. If a feature touches more, decompose into multiple sequential plans before drafting.
+- A plan should target **3–5 source modules** max (not counting co-located test files, lockfiles, or other generated artifacts). If a feature touches more source modules than that, decompose into multiple sequential plans before drafting.
 
 ### Size limits
 - Plan content (excluding the Audit Log section) should not exceed **200 lines**. If the draft exceeds this, the scope is too large.
@@ -40,4 +40,4 @@ Plans that grow too large fail — they blow past token limits, cause audit/revi
 ### Auditor guidance
 - Do NOT flag "underspecified implementation details" as medium/high. The plan describes intent and scope — the implementing agent fills in the details.
 - DO flag: missing scope items, incorrect assumptions about existing code, safety/correctness issues, missing error handling for external boundaries.
-- If a plan is too large or touches too many files, flag that as **high severity** with recommendation to split.
+- If a plan is too large or touches too many source modules, flag that as **high severity** with recommendation to split. Co-located test files, lockfile changes from dependency additions, and doc/inventory updates do not count toward the scope cap.

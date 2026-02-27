@@ -6,7 +6,8 @@
  * pre-configured for that format.
  */
 
-import { OpusEncoder } from '@discordjs/opus';
+import opus from '@discordjs/opus';
+const { OpusEncoder } = opus;
 import type { OpusDecoder, OpusDecoderFactory } from './audio-receiver.js';
 
 /** Discord native Opus decode rate. */

@@ -16,7 +16,7 @@ const DISCORD_CHANNELS = 2;
 /** Target sample rate for STT providers. */
 const STT_RATE = 16_000;
 /** Silence timeout before ending a per-user receive stream (ms). */
-const SILENCE_TIMEOUT_MS = 1_000;
+const SILENCE_TIMEOUT_MS = 3_000;
 
 // ---------------------------------------------------------------------------
 // OpusDecoder — injectable Opus → PCM bridge
@@ -42,6 +42,8 @@ export type AudioReceiverOpts = {
   log: LoggerLike;
   /** Factory to create per-user Opus decoders. Required — no built-in default. */
   createDecoder: OpusDecoderFactory;
+  /** Called every time an allowlisted user begins a speaking burst (barge-in signal). */
+  onUserSpeaking?: (userId: string) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -54,6 +56,7 @@ export class AudioReceiver {
   private readonly stt: SttProvider;
   private readonly log: LoggerLike;
   private readonly createDecoder: OpusDecoderFactory;
+  private readonly onUserSpeaking?: (userId: string) => void;
   private readonly decoders = new Map<string, OpusDecoder>();
   private running = false;
 
@@ -63,6 +66,7 @@ export class AudioReceiver {
     this.stt = opts.sttProvider;
     this.log = opts.log;
     this.createDecoder = opts.createDecoder;
+    this.onUserSpeaking = opts.onUserSpeaking;
   }
 
   /** Begin listening for audio from allowlisted users. */
@@ -102,6 +106,13 @@ export class AudioReceiver {
     if (this.allowed.size === 0 || !this.allowed.has(userId)) {
       this.log.info({ userId }, 'ignoring audio from non-allowlisted user');
       return;
+    }
+
+    // Barge-in signal — fires every speaking burst, even if already subscribed
+    try {
+      this.onUserSpeaking?.(userId);
+    } catch (err) {
+      this.log.error({ err, userId }, 'onUserSpeaking callback error');
     }
 
     // Don't double-subscribe
