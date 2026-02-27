@@ -416,12 +416,27 @@ describe('modelSet', () => {
 
   it('cron-exec "default" clears the override', () => {
     const ctx = makeCtx();
+    ctx.envDefaults = { 'cron-exec': 'capable' };
     ctx.botParams.cronCtx!.executorCtx!.cronExecModel = 'haiku';
     const result = executeConfigAction({ type: 'modelSet', role: 'cron-exec', model: 'default' }, ctx);
     expect(result.ok).toBe(true);
-    expect(ctx.botParams.cronCtx!.executorCtx!.cronExecModel).toBeUndefined();
+    expect(ctx.botParams.cronCtx!.executorCtx!.cronExecModel).toBe('capable');
     if (!result.ok) return;
-    expect(result.summary).toContain('follows chat');
+    expect(result.summary).toContain('cron-exec → capable');
+  });
+
+  it('cron-exec "default" calls clearOverride not persistOverride', () => {
+    let persistCalled = false;
+    let clearCalledWith: string | undefined;
+    const ctx = makeCtx();
+    ctx.envDefaults = { 'cron-exec': 'capable' };
+    ctx.persistOverride = () => { persistCalled = true; };
+    ctx.clearOverride = (role) => { clearCalledWith = role; };
+    ctx.botParams.cronCtx!.executorCtx!.cronExecModel = 'haiku';
+    const result = executeConfigAction({ type: 'modelSet', role: 'cron-exec', model: 'default' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(persistCalled).toBe(false);
+    expect(clearCalledWith).toBe('cron-exec');
   });
 
   it('cron-exec fails when cron subsystem not configured', () => {
@@ -511,6 +526,33 @@ describe('modelSet runtime swap', () => {
     };
     executeConfigAction({ type: 'modelSet', role: 'chat', model: 'openrouter' }, ctx);
     expect(capturedRuntime).toBe(openrouterRuntime);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// modelReset
+// ---------------------------------------------------------------------------
+
+describe('modelReset', () => {
+  it('cron-exec modelReset sets cronExecModel to env default', () => {
+    const ctx = makeCtx();
+    ctx.envDefaults = { 'cron-exec': 'capable' };
+    ctx.botParams.cronCtx!.executorCtx!.cronExecModel = 'haiku';
+    const result = executeConfigAction({ type: 'modelReset', role: 'cron-exec' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.cronCtx!.executorCtx!.cronExecModel).toBe('capable');
+  });
+
+  it('cron-exec modelReset clears override source', () => {
+    const ctx = makeCtx();
+    ctx.envDefaults = { 'cron-exec': 'capable' };
+    ctx.overrideSources = { 'cron-exec': true };
+    let clearedRole: string | undefined;
+    ctx.clearOverride = (role) => { clearedRole = role; };
+    const result = executeConfigAction({ type: 'modelReset', role: 'cron-exec' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.overrideSources['cron-exec']).toBeUndefined();
+    expect(clearedRole).toBe('cron-exec');
   });
 });
 

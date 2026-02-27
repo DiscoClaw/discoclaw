@@ -180,8 +180,11 @@ export function executeConfigAction(
         case 'cron-exec':
           if (bp.cronCtx?.executorCtx) {
             if (model === 'default') {
-              bp.cronCtx.executorCtx.cronExecModel = undefined;
-              changes.push(`cron-exec → (follows chat)`);
+              const envDefault = configCtx.envDefaults?.['cron-exec'];
+              bp.cronCtx.executorCtx.cronExecModel = envDefault || undefined;
+              changes.push(`cron-exec → ${envDefault || '(follows chat)'}`);
+              skipPersist = true;
+              configCtx.clearOverride?.('cron-exec');
             } else {
               bp.cronCtx.executorCtx.cronExecModel = model;
               changes.push(`cron-exec → ${model}`);
@@ -366,7 +369,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
 - \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` role, swaps the active runtime adapter), or \`default\` (for cron-exec only, to revert to following chat).
+- \`model\` (required): Model tier (\`fast\`, \`capable\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` role, swaps the active runtime adapter), or \`default\` (for cron-exec only, to revert to the env-configured default (Sonnet by default)).
 
 **Roles:**
 | Role | What it controls |
@@ -390,5 +393,5 @@ Changes are **persisted** to \`runtime-overrides.json\` and survive restart. Use
 - Omit \`role\` to reset all roles.
 
 **Cron model priority:** per-job override (cronUpdate) > AI-classified model > cron-exec default > chat fallback.
-Set \`cron-exec\` to \`default\` to clear the override and fall back to the chat model.`;
+Set \`cron-exec\` to \`default\` to clear the override and revert to the env-configured default (Sonnet by default).`;
 }

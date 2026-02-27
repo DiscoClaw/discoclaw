@@ -86,7 +86,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models set fast haiku`',
       '- `!models set forge-drafter opus`',
       '- `!models set cron-exec haiku` — run crons on a cheaper model',
-      '- `!models set cron-exec default` — revert to following chat model',
+      '- `!models set cron-exec default` — revert to env default (Sonnet by default)',
       '- `!models set voice sonnet` — use a specific model for voice responses',
       '- `!models reset` — clear all overrides and revert to env defaults',
       '- `!models reset chat` — revert only the chat model to its env default',

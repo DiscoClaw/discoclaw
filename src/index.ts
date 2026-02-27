@@ -643,6 +643,7 @@ cronModel = resolveModel(cfg.cronModel, runtime.id);
 cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, runtime.id);
   tasksAutoTagModel = resolveModel(cfg.tasksAutoTagModel, runtime.id);
 const voiceModel = resolveModel(cfg.voiceModel, runtime.id);
+const cronExecModel = resolveModel(cfg.cronExecModel, runtime.id);
 const voiceModelRef = { model: voiceModel };
 
 // --- Load runtime-overrides.json (persistent overlay on top of .env defaults) ---
@@ -1183,7 +1184,7 @@ if (taskCtx) {
         'forge-drafter': cfg.forgeDrafterModel ?? '',
         'forge-auditor': cfg.forgeAuditorModel ?? '',
         cron: resolveModel(cfg.cronAutoTagModel, runtime.id),
-        'cron-exec': '',
+        'cron-exec': cronExecModel,
         voice: resolveModel(cfg.voiceModel, runtime.id),
       },
       overrideSources,
@@ -1536,7 +1537,7 @@ if (cronEnabled && effectiveCronForum) {
     client,
     runtime,
     model: runtimeModel,
-    cronExecModel: undefined as string | undefined,
+    cronExecModel: cronExecModel,
     cwd: workspaceCwd,
     tools: runtimeTools,
     timeoutMs: runtimeTimeoutMs,

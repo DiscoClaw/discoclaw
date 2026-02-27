@@ -138,6 +138,7 @@ export type DiscoclawConfig = {
   cronModel: string;
   cronAutoTag: boolean;
   cronAutoTagModel: string;
+  cronExecModel: string;
   cronStatsDirOverride?: string;
   cronTagMapPathOverride?: string;
 
@@ -697,6 +698,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       cronModel: parseTrimmedString(env, 'DISCOCLAW_CRON_MODEL') ?? fastModel,
       cronAutoTag: parseBoolean(env, 'DISCOCLAW_CRON_AUTO_TAG', true),
       cronAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_CRON_AUTO_TAG_MODEL') ?? fastModel,
+      cronExecModel: parseTrimmedString(env, 'DISCOCLAW_CRON_EXEC_MODEL') ?? 'capable',
       cronStatsDirOverride: parseTrimmedString(env, 'DISCOCLAW_CRON_STATS_DIR'),
       cronTagMapPathOverride: parseTrimmedString(env, 'DISCOCLAW_CRON_TAG_MAP'),
 
