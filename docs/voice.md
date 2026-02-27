@@ -265,6 +265,14 @@ TranscriptMirror posts text records to the log channel (DISCOCLAW_VOICE_LOG_CHAN
 - **TranscriptMirror** (`transcript-mirror.ts`) — posts user transcriptions and bot responses to a text channel
 - **PresenceHandler** (`presence-handler.ts`) — auto-join/leave based on user voice presence
 
+## Telegraphic Style (Built-In Voice Directive)
+
+Every voice AI invocation includes a hardcoded system directive that enforces telegraphic style. This is distinct from `DISCOCLAW_VOICE_SYSTEM_PROMPT` and cannot be disabled — it is always present for voice responses and has no effect on chat or text interactions.
+
+The directive instructs the model to: answer first then explain (if at all), drop preambles and filler phrases, avoid markdown syntax, keep responses to one or two sentences unless the question strictly demands more, and prefer concrete words over hedges. These constraints exist because TTS latency compounds with response length — a shorter response means faster time-to-first-word — and listeners cannot skim audio the way readers skim text.
+
+`DISCOCLAW_VOICE_SYSTEM_PROMPT` layers additional instructions on top of the built-in directive. Use it to set persona, topic scope, or domain-specific tone. Any instructions it contains are appended after the telegraphic style directive, so they can refine but not override the core brevity requirement.
+
 ## Troubleshooting
 
 ### Missing API Keys

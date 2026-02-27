@@ -83,3 +83,4 @@ When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes t
 | `DEEPGRAM_STT_MODEL` | `nova-3-conversationalai` | Deepgram STT model name |
 | `DEEPGRAM_TTS_VOICE` | `aura-2-asteria-en` | Deepgram TTS voice name |
 | `CARTESIA_API_KEY` | — | Required for cartesia TTS |
+| *(built-in)* | — | Telegraphic style instruction hardcoded into every voice AI invocation — front-loads the answer, strips preambles/markdown/filler, keeps responses short for TTS latency. Not an env var; not overridable by `DISCOCLAW_VOICE_SYSTEM_PROMPT`. |
