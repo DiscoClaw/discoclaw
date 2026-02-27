@@ -103,7 +103,15 @@ Bot:   Cool, platform work! What's your first project?
   [tool]  Works with Kubernetes and Terraform
 ```
 
+**Supersession:** When extraction runs, active durable items for the user are appended
+to the prompt. The model may return a `supersedes` field on any extracted item, containing
+the content hash of the old item it replaces. The old item is then deprecated atomically
+before the new item is written — no additional API call required. This prevents stale
+preferences from accumulating (e.g. "I prefer Vim" is deprecated when "I switched to
+Neovim" is later extracted).
+
 **Config:** `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED=false` to disable.
+`DISCOCLAW_SUPERSESSION_ENABLED=false` to keep extraction but disable supersession.
 
 ### 5. Short-Term Memory — cross-channel awareness
 
@@ -248,6 +256,7 @@ Short-term entries also store `channelId` alongside the existing `channelName`.
 | `DISCOCLAW_DURABLE_MAX_ITEMS` | `200` | Durable memory |
 | `DISCOCLAW_MEMORY_COMMANDS_ENABLED` | `true` | Memory commands |
 | `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED` | `true` | Auto-extraction |
+| `DISCOCLAW_SUPERSESSION_ENABLED` | `true` | Auto-extraction |
 | `DISCOCLAW_SHORTTERM_MEMORY_ENABLED` | `true` | Short-term memory |
 | `DISCOCLAW_SHORTTERM_MAX_ENTRIES` | `20` | Short-term memory |
 | `DISCOCLAW_SHORTTERM_MAX_AGE_HOURS` | `6` | Short-term memory |
