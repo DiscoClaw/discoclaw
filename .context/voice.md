@@ -22,6 +22,7 @@ Two native npm packages power the Discord voice integration:
 | `src/voice/voice-responder.ts` | AI invoke → TTS synthesis → `AudioPlayer` playback; generation-based cancellation for barge-in |
 | `src/voice/stt-deepgram.ts` | Deepgram Nova-3 streaming STT via WebSocket |
 | `src/voice/tts-cartesia.ts` | Cartesia Sonic-3 TTS via WebSocket, outputs PCM s16le at 24 kHz |
+| `src/voice/tts-deepgram.ts` | Deepgram Aura TTS via WebSocket, outputs PCM s16le at 24 kHz |
 | `src/voice/stt-factory.ts` | STT provider factory (deepgram or whisper stub) |
 | `src/voice/tts-factory.ts` | TTS provider factory (cartesia or kokoro stub) |
 | `src/voice/presence-handler.ts` | Auto-join/leave on `voiceStateUpdate` (allowlisted users only) |
@@ -73,9 +74,9 @@ When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes t
 | `DISCOCLAW_DISCORD_ACTIONS_VOICE` | `0` | Enable voice action types |
 | `DISCOCLAW_VOICE_AUTO_JOIN` | `0` | Auto-join when allowlisted user enters |
 | `DISCOCLAW_STT_PROVIDER` | `deepgram` | STT backend |
-| `DISCOCLAW_TTS_PROVIDER` | `cartesia` | TTS backend |
+| `DISCOCLAW_TTS_PROVIDER` | `cartesia` | TTS backend (`cartesia`, `deepgram`) |
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | — | Transcript mirror target + prompt context source |
 | `DISCOCLAW_VOICE_MODEL` | `capable` | AI model tier for voice responses |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | — | Custom system prompt for voice invocations (max 4000 chars) |
-| `DEEPGRAM_API_KEY` | — | Required for deepgram STT |
+| `DEEPGRAM_API_KEY` | — | Required for deepgram STT and TTS |
 | `CARTESIA_API_KEY` | — | Required for cartesia TTS |
