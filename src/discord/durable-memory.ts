@@ -204,3 +204,7 @@ function formatItemLine(item: DurableItem): string {
 export function formatDurableSection(items: DurableItem[]): string {
   return items.map(formatItemLine).join('\n');
 }
+
+export function getActiveItemCount(store: DurableMemoryStore): number {
+  return store.items.filter((item) => item.status === 'active').length;
+}
