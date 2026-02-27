@@ -1102,7 +1102,10 @@ if (taskCtx) {
   }
 
   if (cfg.voiceEnabled) {
-    const transcriptMirror = await TranscriptMirror.resolve(client, cfg.voiceHomeChannel, log);
+    const voiceLogChannelRef = cfg.voiceLogChannel ?? system?.voiceLogChannelId;
+    const transcriptMirror = voiceLogChannelRef
+      ? await TranscriptMirror.resolve(client, voiceLogChannelRef, log)
+      : undefined;
 
     // Resolve voice home channel context for prompt building.
     let voiceChannelContextPath: string | null = null;
