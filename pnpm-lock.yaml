@@ -41,6 +41,9 @@ importers:
       ws:
         specifier: ^8.19.0
         version: 8.19.0
+      youtube-transcript-plus:
+        specifier: ^1.2.0
+        version: 1.2.0
     devDependencies:
       '@types/node':
         specifier: ^22.13.1
@@ -1336,6 +1339,10 @@ packages:
     resolution: {integrity: sha512-CzhO+pFNo8ajLM2d2IW/R93ipy99LWjtwblvC1RsoSUMZgyLbYFr221TnSNT7GjGdYui6P459mw9JH/g/zW2ug==}
     engines: {node: '>=18'}
 
+  youtube-transcript-plus@1.2.0:
+    resolution: {integrity: sha512-SRjVft8V+vUulMKgakgfzC+pnFLSy4tolX7xGnSvp9juUNocikMFmUx5GlhzLDILzxYrijcYtmNqz0qyklnPmA==}
+    engines: {node: '>=18.0.0'}
+
 snapshots:
 
   '@discordjs/builders@1.13.1':
@@ -2421,3 +2428,5 @@ snapshots:
   yallist@4.0.0: {}
 
   yoctocolors@2.1.2: {}
+
+  youtube-transcript-plus@1.2.0: {}
