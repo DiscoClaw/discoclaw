@@ -32,6 +32,10 @@ Your assistant carries context across every conversation, channel, and restart.
 
 **Why Discord fits:** channels = context boundaries, DMs = private deep context, conversation history is the raw material.
 
+### YouTube transcripts
+
+When you share a YouTube link in a message, DiscoClaw automatically fetches the video's transcript and injects it into the AI's context. This lets the bot answer questions about video content, summarize talks, or reference specific points — without you needing to copy-paste anything. Up to 3 videos per message are processed, with a 15-second timeout per fetch. Transcripts are sanitized before injection to prevent prompt manipulation.
+
 ## Tasks — the bot tracks your work
 
 A lightweight in-process task store that syncs bidirectionally with Discord forum threads.
@@ -80,11 +84,37 @@ DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by 
 4. Streams the response back, chunked to fit Discord's message limits
 5. Parses and executes any Discord actions the assistant emitted
 
+### Message batching
+
+When multiple messages arrive while the bot is thinking (i.e., an AI invocation is already active for that session), they're automatically combined into a single prompt rather than queued individually. This means rapid follow-up messages are processed together, giving the bot full context in one shot. Commands (`!`-prefixed messages) bypass batching and are always processed individually.
+
 ### OpenRouter
 
 Set `PRIMARY_RUNTIME=openrouter` to route requests through [OpenRouter](https://openrouter.ai), which provides access to models from Anthropic, OpenAI, Google, and others via a single API key — useful if you want to switch models without managing multiple provider accounts.
 
 Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`) and `OPENROUTER_MODEL` (default: `anthropic/claude-sonnet-4`). See `.env.example` for the full reference.
+
+## Model Overrides
+
+The `!models` command lets you view and swap AI models per role at runtime — no restart needed, and changes persist across restarts.
+
+**Roles:** `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`
+
+| Command | Description |
+|---------|-------------|
+| `!models` | Show current model assignments |
+| `!models set <role> <model>` | Change the model for a role |
+| `!models reset` | Revert all roles to env-var defaults |
+| `!models reset <role>` | Revert a specific role |
+
+**Examples:**
+- `!models set chat claude-sonnet-4` — use Sonnet for chat
+- `!models set chat openrouter` — switch chat to the OpenRouter runtime
+- `!models set cron-exec haiku` — run crons on a cheaper model
+- `!models set voice sonnet` — use a specific model for voice
+- `!models reset` — clear all overrides
+
+Setting the `chat` role to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) switches the active runtime adapter for that role.
 
 ## Customization
 
@@ -151,8 +181,11 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 
 ### Features & Usage
 
+- [Memory system](docs/memory.md) — five-layer memory architecture, tuning, and troubleshooting
 - [Plan & Forge](docs/plan-and-forge.md) — autonomous planning and code generation
 - [Discord actions](docs/discord-actions.md) — channels, messaging, moderation, tasks, crons
+- [Cron / automations](docs/cron.md) — recurring task setup, advanced options, debugging
+- [Tasks](docs/tasks.md) — task lifecycle, bidirectional sync, tag maps
 - [Voice](docs/voice.md) — real-time voice chat setup (STT/TTS)
 - [Shareable recipes](docs/discoclaw-recipe-spec.md) — integration recipe format spec
 
@@ -164,6 +197,7 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 
 ### Operations
 
+- [Configuration reference](docs/configuration.md) — all environment variables indexed by category
 - [Webhook exposure](docs/webhook-exposure.md) — tunnel/proxy setup and webhook security
 - [Data migration](docs/data-migration.md) — migrating task data between formats
 

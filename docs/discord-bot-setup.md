@@ -178,3 +178,43 @@ Run through this checklist in order. Each step should produce the expected outpu
 
 7. **Channel context auto-scaffold (optional):**
    - Create a new channel and post once. DiscoClaw should auto-create a stub context file under `content/discord/channels/` and add it to `content/discord/DISCORD.md`.
+
+## Secret Management
+
+The `!secret` command lets you securely manage `.env` entries (API keys, tokens, etc.) without leaving Discord. It is **DM-only** — the message coordinator rejects `!secret` in guild channels to prevent accidental exposure.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `!secret set KEY=value` | Add or update a `.env` entry |
+| `!secret unset KEY` | Remove a `.env` entry |
+| `!secret list` | List key names in `.env` (values are never shown) |
+| `!secret help` | Show help text |
+
+### Security
+
+- **Values are never echoed** — the bot confirms the key name but never displays the value.
+- **Atomic writes** — changes are written to a temporary file, then atomically renamed to `.env`, preventing partial writes from corrupting the file.
+- **DM-only** — enforced by the message coordinator. Attempting `!secret` in a guild channel is silently ignored.
+- **Valid key format** — keys must match `[A-Za-z_][A-Za-z0-9_]*` (standard env var naming).
+- **No newlines** — values containing newlines are rejected.
+
+### Important
+
+**Bot restart required.** The `!secret` command writes to the `.env` file on disk, but the running process does not reload environment variables. After setting or unsetting a secret, restart the bot (`!restart` or `systemctl --user restart discoclaw.service`) for changes to take effect.
+
+## Operations
+
+### Startup Healing
+
+DiscoClaw runs automatic self-healing checks on every boot to recover from crashes, unclean shutdowns, or manual data edits. This is invisible during normal operation but important after failures.
+
+**What it does:**
+
+- **Promotes interrupted cron runs** — any cron job that was mid-execution when the process stopped has its status changed from `running` to `interrupted`, preventing it from being stuck permanently.
+- **Removes stale cron stats** — if a cron forum thread has been deleted in Discord, the orphaned stats record is cleaned up.
+- **Detects stale task thread references** — if a task's linked Discord thread no longer exists, a warning is logged. The next task sync will recreate the thread.
+- **Repairs corrupted JSON stores** — if a JSON data file (run stats, task store, etc.) has been corrupted (e.g., partial write during a crash), it's backed up to a `.corrupt.<timestamp>` file and removed. Downstream loaders handle missing files gracefully, so the net effect is a safe reset.
+
+**When it matters:** after crashes, OOM kills, unclean shutdowns, or manual edits to data files. During normal operation, startup healing completes silently with no user-visible output.

@@ -355,6 +355,20 @@ Env: `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0). Requires at least one of 
 Context: Requires `ImagegenContext` with `apiKey` (OpenAI), `geminiApiKey`, `baseUrl`, and `defaultModel`.
 Available in cron flows when `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` is set — follows the env flag rather than being hardcoded off.
 
+**Example action blocks:**
+
+```xml
+<discord-action>{"type":"generateImage","prompt":"a serene mountain lake at sunset"}</discord-action>
+```
+
+```xml
+<discord-action>{"type":"generateImage","prompt":"a friendly robot waving","model":"gpt-image-1","size":"1024x1024","caption":"Here's your robot!"}</discord-action>
+```
+
+```xml
+<discord-action>{"type":"generateImage","prompt":"abstract geometric pattern","provider":"gemini","model":"imagen-4.0-generate-001","size":"16:9"}</discord-action>
+```
+
 ### Voice Actions (`actions-voice.ts`)
 
 Allow the model to control voice channel presence and state.
