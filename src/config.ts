@@ -497,7 +497,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     }
   }
   const deepgramApiKey = parseTrimmedString(env, 'DEEPGRAM_API_KEY');
-  const deepgramSttModel = parseTrimmedString(env, 'DEEPGRAM_STT_MODEL') ?? 'nova-3-conversationalai';
+  const deepgramSttModel = parseTrimmedString(env, 'DEEPGRAM_STT_MODEL') ?? 'nova-3-general';
   const deepgramTtsVoice = parseTrimmedString(env, 'DEEPGRAM_TTS_VOICE') ?? 'aura-2-asteria-en';
   const cartesiaApiKey = parseTrimmedString(env, 'CARTESIA_API_KEY');
   const voiceModelRaw = parseTrimmedString(env, 'DISCOCLAW_VOICE_MODEL');
