@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import matter from 'gray-matter';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
+import type { Root, Nodes, Parents } from 'mdast';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,8 +39,8 @@ const REQUIRED_METADATA_KEYS = [
 
 const processor = unified().use(remarkParse);
 
-function parseMarkdown(content: string) {
-  return processor.parse(content);
+function parseMarkdown(content: string): Root {
+  return processor.parse(content) as Root;
 }
 
 function getHeadingLevel(heading: string): number {
@@ -51,18 +52,15 @@ function getHeadingTextFromString(heading: string): string {
   return heading.replace(/^#{1,6}\s+/, '');
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getNodeText(node: any): string {
-  if (node.type === 'text') return node.value as string;
+function getNodeText(node: Nodes): string {
+  if (node.type === 'text') return node.value;
   if ('children' in node) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (node.children as any[]).map(getNodeText).join('');
+    return (node as Parents).children.map(getNodeText).join('');
   }
   return '';
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function countHeadings(tree: ReturnType<typeof parseMarkdown>, heading: string): number {
+function countHeadings(tree: Root, heading: string): number {
   const level = getHeadingLevel(heading);
   const text = getHeadingTextFromString(heading);
   let count = 0;
@@ -77,7 +75,7 @@ function countHeadings(tree: ReturnType<typeof parseMarkdown>, heading: string):
 // Uses AST position offsets to slice raw content — fixes the \Z regex bug where
 // the last section was unreliable. Collects all nodes after the target heading
 // up to the next heading of equal or lesser depth (or end of document).
-function getSectionContent(content: string, tree: ReturnType<typeof parseMarkdown>, heading: string): string {
+function getSectionContent(content: string, tree: Root, heading: string): string {
   const level = getHeadingLevel(heading);
   const text = getHeadingTextFromString(heading);
 
