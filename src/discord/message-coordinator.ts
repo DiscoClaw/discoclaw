@@ -66,6 +66,7 @@ import type { MessageWithReference } from './reply-reference.js';
 import { resolveThreadContext } from './thread-context.js';
 import type { ThreadLikeChannel } from './thread-context.js';
 import { downloadTextAttachments } from './file-download.js';
+import { fetchYouTubeTranscripts } from './youtube-transcript.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { parseHelpCommand, handleHelpCommand } from './help-command.js';
 import { parseVoiceStatusCommand, renderVoiceStatusReport } from './voice-status-command.js';
@@ -2362,6 +2363,24 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             } catch (err) {
               params.log?.warn({ err }, 'discord:text attachment download failed');
             }
+          }
+
+          // Fetch YouTube transcripts for URLs found in the message.
+          try {
+            const ytResult = await fetchYouTubeTranscripts(msg.content ?? '');
+            if (ytResult.transcripts.length > 0) {
+              const sections = ytResult.transcripts.map(
+                t => `[YouTube transcript: ${t.videoId}]\n${t.text}`,
+              );
+              prompt += '\n\n' + sections.join('\n\n');
+              params.log?.info({ videoCount: ytResult.transcripts.length }, 'discord:youtube transcripts fetched');
+            }
+            if (ytResult.errors.length > 0) {
+              prompt += '\n(' + ytResult.errors.join('; ') + ')';
+              params.log?.info({ errors: ytResult.errors }, 'discord:youtube transcript notes');
+            }
+          } catch (err) {
+            params.log?.warn({ err }, 'discord:youtube transcript fetch failed');
           }
 
           let currentPrompt = prompt;

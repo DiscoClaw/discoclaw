@@ -20,6 +20,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Image input (Discord attachments → Claude) | `src/discord/image-download.ts` | **done** |
 | Message batching (combine queued messages into single prompt during active invocation) | `src/discord/message-batching.ts` | **done** |
 | Startup self-healing (missing workspace files, stale cron/task thread refs, corrupted JSON stores) | `src/health/startup-healing.ts`, `src/workspace-bootstrap.ts` | **done** |
+| YouTube transcript fetching (auto-fetch transcripts from YouTube URLs in messages, inject into prompt) | `src/discord/youtube-transcript.ts` | *not started* |
 
 ## 2. Security
 
@@ -30,6 +31,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Workspace permissions (readonly/standard/full/custom) | `src/workspace-permissions.ts` | **done** |
 | External content = data, not instructions | CLAUDE.md + prompts | **done** |
 | Image download SSRF protection (host allowlist, redirect rejection) | `src/discord/image-download.ts` | **done** |
+| YouTube transcript injection scanning (sanitize fetched transcript content before prompt injection) | `src/discord/youtube-transcript.ts` | *not started* |
 
 ## 3. Runtime Adapters (`src/runtime/`)
 
