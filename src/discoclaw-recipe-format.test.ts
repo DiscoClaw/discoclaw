@@ -1,7 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import matter from 'gray-matter';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import type { Root, Nodes, Parents } from 'mdast';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,46 +37,66 @@ const REQUIRED_METADATA_KEYS = [
   'risk_level',
 ];
 
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const processor = unified().use(remarkParse);
+
+function parseMarkdown(content: string): Root {
+  return processor.parse(content) as Root;
 }
 
-function stripQuotes(value: string): string {
-  const trimmed = value.trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1).trim();
+function getHeadingLevel(heading: string): number {
+  const match = heading.match(/^(#{1,6})\s/);
+  return match ? match[1].length : 0;
+}
+
+function getHeadingTextFromString(heading: string): string {
+  return heading.replace(/^#{1,6}\s+/, '');
+}
+
+function getNodeText(node: Nodes): string {
+  if (node.type === 'text') return node.value;
+  if ('children' in node) {
+    return (node as Parents).children.map(getNodeText).join('');
   }
-  return trimmed;
+  return '';
 }
 
-function parseFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n/);
-  if (!match) return {};
-
-  const lines = match[1].split('\n');
-  const out: Record<string, string> = {};
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf(':');
-    if (idx <= 0) continue;
-    const key = trimmed.slice(0, idx).trim();
-    const value = stripQuotes(trimmed.slice(idx + 1));
-    out[key] = value;
+function countHeadings(tree: Root, heading: string): number {
+  const level = getHeadingLevel(heading);
+  const text = getHeadingTextFromString(heading);
+  let count = 0;
+  for (const node of tree.children) {
+    if (node.type === 'heading' && node.depth === level && getNodeText(node) === text) {
+      count++;
+    }
   }
-  return out;
+  return count;
 }
 
-function headingCount(content: string, heading: string): number {
-  const re = new RegExp(`^${escapeRegExp(heading)}$`, 'gm');
-  return [...content.matchAll(re)].length;
-}
+// Uses AST position offsets to slice raw content — fixes the \Z regex bug where
+// the last section was unreliable. Collects all nodes after the target heading
+// up to the next heading of equal or lesser depth (or end of document).
+function getSectionContent(content: string, tree: Root, heading: string): string {
+  const level = getHeadingLevel(heading);
+  const text = getHeadingTextFromString(heading);
 
-function getSection(content: string, heading: string): string {
-  const escaped = escapeRegExp(heading);
-  const re = new RegExp(`^${escaped}\\n([\\s\\S]*?)(?=^## |\\Z)`, 'm');
-  const match = content.match(re);
-  return (match?.[1] ?? '').trim();
+  let sectionStart = -1;
+  let sectionEnd = content.length;
+
+  for (const node of tree.children) {
+    if (node.type === 'heading') {
+      if (sectionStart === -1) {
+        if (node.depth === level && getNodeText(node) === text) {
+          sectionStart = node.position!.end.offset!;
+        }
+      } else if (node.depth <= level) {
+        sectionEnd = node.position!.start.offset!;
+        break;
+      }
+    }
+  }
+
+  if (sectionStart === -1) return '';
+  return content.slice(sectionStart, sectionEnd).trim();
 }
 
 async function findRecipeFiles(dir: string): Promise<string[]> {
@@ -99,35 +123,52 @@ async function loadRecipeFiles(): Promise<string[]> {
   ];
 }
 
-describe('discoclaw-recipe format', () => {
-  it('enforces frontmatter metadata, required headings, and risk-gated contract rules', async () => {
-    const files = await loadRecipeFiles();
-    expect(files.length).toBeGreaterThan(1);
+describe('discoclaw-recipe format', async () => {
+  const files = await loadRecipeFiles();
+  expect(files.length).toBeGreaterThan(1);
 
-    for (const filePath of files) {
-      const content = await fs.readFile(filePath, 'utf-8');
-      const metadata = parseFrontmatter(content);
+  const fileEntries = files.map((f) => [path.relative(REPO_ROOT, f), f] as [string, string]);
 
+  describe.each(fileEntries)('%s', (relPath, filePath) => {
+    let content: string;
+    let tree: ReturnType<typeof parseMarkdown>;
+    let metadata: Record<string, unknown>;
+
+    beforeAll(async () => {
+      content = await fs.readFile(filePath, 'utf-8');
+      tree = parseMarkdown(content);
+      metadata = matter(content).data as Record<string, unknown>;
+    });
+
+    it('has all required frontmatter keys present', () => {
       for (const key of REQUIRED_METADATA_KEYS) {
-        expect(metadata[key], `${path.relative(REPO_ROOT, filePath)} missing frontmatter key: ${key}`).toBeTruthy();
+        expect(metadata[key], `${relPath} missing frontmatter key: ${key}`).toBeTruthy();
       }
+    });
 
-      expect(metadata.spec_version, `${path.relative(REPO_ROOT, filePath)} invalid spec_version`).toBe('1.0');
-      expect(['runtime', 'actions', 'context']).toContain(metadata.integration_type);
-      expect(['low', 'medium', 'high']).toContain(metadata.risk_level);
+    it('has valid field constraints', () => {
+      expect(String(metadata.spec_version), `${relPath} invalid spec_version`).toBe('1.0');
+      expect(['runtime', 'actions', 'context'], `${relPath} invalid integration_type`).toContain(metadata.integration_type);
+      expect(['low', 'medium', 'high'], `${relPath} invalid risk_level`).toContain(metadata.risk_level);
+    });
 
+    it('has each required heading exactly once', () => {
       for (const heading of REQUIRED_HEADINGS) {
-        expect(headingCount(content, heading), `${path.relative(REPO_ROOT, filePath)} heading count for ${heading}`).toBe(1);
+        expect(countHeadings(tree, heading), `${relPath} heading count for "${heading}"`).toBe(1);
       }
+    });
 
-      const isTemplate = path.relative(REPO_ROOT, filePath) === 'templates/recipes/integration.discoclaw-recipe.md';
+    it('plan_id matches filename', () => {
+      const isTemplate = relPath === 'templates/recipes/integration.discoclaw-recipe.md';
       if (!isTemplate) {
         const expectedPlanId = path.basename(filePath, '.discoclaw-recipe.md');
-        expect(metadata.plan_id, `${path.relative(REPO_ROOT, filePath)} plan_id should match filename`).toBe(expectedPlanId);
+        expect(metadata.plan_id, `${relPath} plan_id should match filename`).toBe(expectedPlanId);
       }
+    });
 
-      const integrationSection = getSection(content, '## Integration Contract');
-      const acceptanceSection = getSection(content, '## Acceptance Tests');
+    it('satisfies risk-gated contract rules', () => {
+      const integrationSection = getSectionContent(content, tree, '## Integration Contract');
+      const acceptanceSection = getSectionContent(content, tree, '## Acceptance Tests');
 
       const hasIntegrationJson = integrationSection.includes('```json');
       const hasAcceptanceJson = acceptanceSection.includes('```json');
@@ -140,15 +181,14 @@ describe('discoclaw-recipe format', () => {
           expect(integrationSection).toMatch(/Runtime behavior changes:/);
           expect(integrationSection).toMatch(/Out of scope:/);
         }
-
         if (!hasAcceptanceJson) {
           expect(acceptanceSection).toMatch(/Scenarios:/);
           expect(acceptanceSection).toMatch(/Required checks:/);
         }
       } else {
-        expect(hasIntegrationJson, `${path.relative(REPO_ROOT, filePath)} medium/high plan missing integration JSON`).toBe(true);
-        expect(hasAcceptanceJson, `${path.relative(REPO_ROOT, filePath)} medium/high plan missing acceptance JSON`).toBe(true);
+        expect(hasIntegrationJson, `${relPath} medium/high plan missing integration JSON`).toBe(true);
+        expect(hasAcceptanceJson, `${relPath} medium/high plan missing acceptance JSON`).toBe(true);
       }
-    }
+    });
   });
 });
