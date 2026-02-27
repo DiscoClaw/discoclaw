@@ -19,11 +19,11 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | `DISCOCLAW_DISCORD_ACTIONS_VOICE` | No | `0` | Enables voice action types (join/leave/status/mute/deafen); requires `DISCOCLAW_VOICE_ENABLED=1` |
 | `DISCOCLAW_VOICE_AUTO_JOIN` | No | `0` | Auto-join voice channels when an allowlisted user enters |
 | `DISCOCLAW_STT_PROVIDER` | No | `deepgram` | Speech-to-text provider: `deepgram` or `whisper` |
-| `DISCOCLAW_TTS_PROVIDER` | No | `cartesia` | Text-to-speech provider: `cartesia` or `kokoro` |
+| `DISCOCLAW_TTS_PROVIDER` | No | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, or `kokoro` |
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Channel name or ID for transcript mirroring and prompt context loading |
 | `DISCOCLAW_VOICE_MODEL` | No | — | AI model override for voice response invocations |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations |
-| `DEEPGRAM_API_KEY` | Yes* | — | Deepgram API key (*required when `DISCOCLAW_STT_PROVIDER=deepgram`) |
+| `DEEPGRAM_API_KEY` | Yes* | — | Deepgram API key (*required when `DISCOCLAW_STT_PROVIDER=deepgram` or `DISCOCLAW_TTS_PROVIDER=deepgram`) |
 | `CARTESIA_API_KEY` | Yes* | — | Cartesia API key (*required when `DISCOCLAW_TTS_PROVIDER=cartesia`) |
 
 ## API Key Setup
@@ -35,6 +35,12 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 3. Set `DEEPGRAM_API_KEY=<your-key>` in `.env`
 
 The STT provider uses Deepgram's Nova-3 model via WebSocket streaming (`wss://api.deepgram.com/v1/listen`). Audio is sent as linear16 PCM at 16 kHz.
+
+### Deepgram (TTS — Aura REST)
+
+The TTS provider reuses the same `DEEPGRAM_API_KEY` configured for STT — no additional key is needed. Set `DISCOCLAW_TTS_PROVIDER=deepgram` in `.env` to select it.
+
+The provider POSTs to Deepgram's `/v1/speak` endpoint requesting `linear16` encoding with `container=none` (raw PCM s16le). The response body is streamed and yielded as audio frames for low-latency playback. Default model: `aura-2-thalia-en` at 24 kHz.
 
 ### Cartesia (TTS — Sonic-3 WebSocket)
 
@@ -51,6 +57,7 @@ The TTS provider uses Cartesia's Sonic-3 model via WebSocket (`wss://api.cartesi
 | STT | `deepgram` (Nova-3 streaming) | **Implemented** — `src/voice/stt-deepgram.ts` |
 | STT | `whisper` | Stub — not yet implemented |
 | TTS | `cartesia` (Sonic-3 WebSocket) | **Implemented** — `src/voice/tts-cartesia.ts` |
+| TTS | `deepgram` (Aura REST streaming) | **Implemented** — `src/voice/tts-deepgram.ts` |
 | TTS | `kokoro` | Stub — not yet implemented |
 
 Provider selection is handled by factory functions in `src/voice/stt-factory.ts` and `src/voice/tts-factory.ts`. Selecting a stub provider will throw an error at startup.
@@ -124,7 +131,7 @@ User speaks
     -> SttProvider (Deepgram Nova-3, WebSocket streaming)
       -> TranscriptionResult (final transcript)
         -> VoiceResponder (AI invoke -> TTS -> playback)
-          -> TtsProvider (Cartesia Sonic-3, WebSocket)
+          -> TtsProvider (Cartesia Sonic-3 WebSocket | Deepgram Aura REST)
             -> AudioPlayer (24kHz->48kHz upsample, Discord playback)
 
 TranscriptMirror posts text records to the home channel at each stage.
