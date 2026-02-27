@@ -657,4 +657,90 @@ describe('executeCronAction', () => {
   it('CRON_ACTION_TYPES includes cronTagMapReload', () => {
     expect(CRON_ACTION_TYPES.has('cronTagMapReload')).toBe(true);
   });
+
+  it('cronCreate with routingMode "json" persists it', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'JSON Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something', routingMode: 'json' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ routingMode: 'json' }),
+    );
+  });
+
+  it('cronCreate with invalid routingMode rejects', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'Bad Routing', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something', routingMode: 'xml' as any },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('"xml"');
+  });
+
+  it('cronCreate without routingMode does not set it', async () => {
+    const cronCtx = makeCronCtx();
+    await executeCronAction(
+      { type: 'cronCreate', name: 'Plain Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.not.objectContaining({ routingMode: expect.anything() }),
+    );
+  });
+
+  it('cronUpdate with routingMode "json" sets it', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', routingMode: 'json' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      'cron-test0001',
+      'thread-1',
+      expect.objectContaining({ routingMode: 'json' }),
+    );
+  });
+
+  it('cronUpdate with invalid routingMode rejects', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', routingMode: 'xml' as any },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('"xml"');
+  });
+
+  it('cronShow includes Routing line when routingMode is set', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ routingMode: 'json' })]),
+    });
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('Routing: json');
+    }
+  });
+
+  it('cronShow omits Routing line when routingMode is absent', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).not.toContain('Routing:');
+    }
+  });
 });

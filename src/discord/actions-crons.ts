@@ -23,8 +23,8 @@ import { getDefaultTimezone } from '../cron/default-timezone.js';
 // ---------------------------------------------------------------------------
 
 export type CronActionRequest =
-  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string }
-  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean }
+  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string; routingMode?: 'json' }
+  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean; routingMode?: 'json' }
   | { type: 'cronList'; status?: string }
   | { type: 'cronShow'; cronId: string }
   | { type: 'cronPause'; cronId: string }
@@ -180,6 +180,11 @@ export async function executeCronAction(
         }
       }
 
+      // Validate routing mode.
+      if (action.routingMode !== undefined && action.routingMode !== 'json') {
+        return { ok: false, error: `Invalid routingMode "${action.routingMode}": must be "json"` };
+      }
+
       // Resolve tag IDs for forum.
       const allTagNames = [...purposeTags, cadence];
       const appliedTagIds = allTagNames.map((t) => tagMap[t]).filter(Boolean);
@@ -227,6 +232,7 @@ export async function executeCronAction(
         channel: action.channel,
         prompt: action.prompt,
         authorId: cronCtx.client.user?.id,
+        ...(action.routingMode ? { routingMode: action.routingMode } : {}),
       });
 
       // Create status message.
@@ -235,7 +241,7 @@ export async function executeCronAction(
       } catch {}
 
       cronCtx.forumCountSync?.requestUpdate();
-      return { ok: true, summary: `Cron "${action.name}" created (${cronId}), schedule: ${action.schedule}, model: ${model}` };
+      return { ok: true, summary: `Cron "${action.name}" created (${cronId}), schedule: ${action.schedule}, model: ${model}${action.routingMode ? `, routing: ${action.routingMode}` : ''}` };
     }
 
     case 'cronUpdate': {
@@ -272,6 +278,15 @@ export async function executeCronAction(
       if (action.tags) {
         updates.purposeTags = action.tags.split(',').map((t) => t.trim()).filter(Boolean);
         changes.push(`tags → ${updates.purposeTags.join(', ')}`);
+      }
+
+      // Routing mode.
+      if (action.routingMode !== undefined) {
+        if (action.routingMode && action.routingMode !== 'json') {
+          return { ok: false, error: `Invalid routingMode "${action.routingMode}": must be "json"` };
+        }
+        updates.routingMode = action.routingMode || undefined;
+        changes.push(`routingMode → ${action.routingMode || 'cleared'}`);
       }
 
       // Definition changes (schedule, timezone, channel, prompt).
@@ -419,6 +434,7 @@ export async function executeCronAction(
       }
       lines.push(`Model: ${record.modelOverride ?? record.model ?? 'N/A'}${record.modelOverride ? ' (override)' : ''}`);
       if (record.silent) lines.push(`Silent: yes`);
+      if (record.routingMode) lines.push(`Routing: ${record.routingMode}`);
       lines.push(`Cadence: ${record.cadence ?? 'N/A'}`);
       lines.push(`Runs: ${record.runCount} | Last: ${record.lastRunStatus ?? 'never'}`);
       if (record.lastRunAt) lines.push(`Last run: <t:${Math.floor(new Date(record.lastRunAt).getTime() / 1000)}:R>`);
@@ -674,6 +690,7 @@ export function cronActionsPromptSection(): string {
 - \`timezone\` (optional, default: system timezone, or DEFAULT_TIMEZONE env if set): IANA timezone.
 - \`tags\` (optional): Comma-separated purpose tags.
 - \`model\` (optional): "fast" or "capable" (auto-classified if omitted).
+- \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode. In this mode the executor uses the JSON router to dispatch structured responses. The prompt may contain \`{{channel}}\` and \`{{channelId}}\` placeholders which are expanded to the target channel name and ID at runtime.
 
 **cronUpdate** — Update a cron's settings:
 \`\`\`
@@ -682,6 +699,7 @@ export function cronActionsPromptSection(): string {
 - \`cronId\` (required): The stable cron ID.
 - \`schedule\`, \`timezone\`, \`channel\`, \`prompt\`, \`model\`, \`tags\` (optional).
 - \`silent\` (optional): Boolean. When true, suppresses short "nothing to report" responses.
+- \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode, or omit/pass empty string to clear.
 
 **cronList** — List all cron jobs:
 \`\`\`
