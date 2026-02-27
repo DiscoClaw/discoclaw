@@ -48,7 +48,7 @@ export function resolveDefaultModel(imagegenCtx: ImagegenContext): string {
 
 export function resolveProvider(model: string, explicit?: 'openai' | 'gemini'): 'openai' | 'gemini' {
   if (explicit !== undefined) return explicit;
-  if (model.startsWith('imagen-')) return 'gemini';
+  if (model.startsWith('imagen-') || model.startsWith('gemini-')) return 'gemini';
   if (model.startsWith('dall-e-') || model.startsWith('gpt-image-')) return 'openai';
   return 'openai';
 }
@@ -176,6 +176,67 @@ async function callGemini(
   return { ok: true, b64 };
 }
 
+async function callGeminiNative(
+  prompt: string,
+  model: string,
+  geminiApiKey: string,
+): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': geminiApiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `generateImage: API request failed: ${msg}` };
+  }
+
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const errBody = await response.json() as { error?: { message?: string } };
+      detail = errBody.error?.message ?? '';
+    } catch {
+      // ignore parse error
+    }
+    return { ok: false, error: `generateImage: API error ${response.status}${detail ? `: ${detail}` : ''}` };
+  }
+
+  type GeminiNativeResponse = {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ inlineData?: { mimeType?: string; data?: string }; text?: string }>;
+      };
+    }>;
+  };
+  let data: GeminiNativeResponse;
+  try {
+    data = await response.json() as GeminiNativeResponse;
+  } catch {
+    return { ok: false, error: 'generateImage: failed to parse API response' };
+  }
+
+  const parts = data.candidates?.[0]?.content?.parts ?? [];
+  const imagePart = parts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
+  if (!imagePart?.inlineData?.data) {
+    return { ok: false, error: 'generateImage: API returned no image data' };
+  }
+
+  return { ok: true, b64: imagePart.inlineData.data };
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -197,7 +258,7 @@ export async function executeImagegenAction(
 
       // Per-provider size validation
       if (provider === 'gemini') {
-        if (!GEMINI_VALID_SIZES.has(size)) {
+        if (!model.startsWith('gemini-') && !GEMINI_VALID_SIZES.has(size)) {
           return { ok: false, error: `Invalid size "${size}" for Gemini. Allowed: ${[...GEMINI_VALID_SIZES].join(', ')}` };
         }
       } else if (model.startsWith('gpt-image-')) {
@@ -244,7 +305,11 @@ export async function executeImagegenAction(
       // Call provider
       let result: { ok: true; b64: string } | { ok: false; error: string };
       if (provider === 'gemini') {
-        result = await callGemini(action.prompt.trim(), model, size, imagegenCtx.geminiApiKey!);
+        if (model.startsWith('gemini-')) {
+          result = await callGeminiNative(action.prompt.trim(), model, imagegenCtx.geminiApiKey!);
+        } else {
+          result = await callGemini(action.prompt.trim(), model, size, imagegenCtx.geminiApiKey!);
+        }
       } else {
         const baseUrl = imagegenCtx.baseUrl ?? 'https://api.openai.com/v1';
         result = await callOpenAI(action.prompt.trim(), model, size, quality, imagegenCtx.apiKey!, baseUrl);
@@ -287,12 +352,14 @@ export function imagegenActionsPromptSection(): string {
 - \`channel\` (optional): Channel name (with or without #) or channel ID to post the image to. Defaults to the current channel/thread if omitted.
 - \`model\` (optional): Model to use. Default depends on configuration (auto-detected from available API keys). Available models:
   - OpenAI: \`dall-e-3\`, \`gpt-image-1\`
-  - Gemini: \`imagen-4.0-generate-001\`, \`imagen-4.0-fast-generate-001\`, \`imagen-4.0-ultra-generate-001\`
+  - Gemini (Imagen): \`imagen-4.0-generate-001\`, \`imagen-4.0-fast-generate-001\`, \`imagen-4.0-ultra-generate-001\`
+  - Gemini (native): \`gemini-3.1-flash-image-preview\`, \`gemini-3-pro-image-preview\`
 - \`provider\` (optional): \`openai\` or \`gemini\`. Auto-detected from model prefix if omitted.
 - \`size\` (optional): Depends on provider:
   - OpenAI dall-e-3 / dall-e-2: pixel dimensions — \`1024x1024\` (default), \`1024x1792\`, \`1792x1024\`, \`256x256\`, \`512x512\`
   - OpenAI gpt-image-1: pixel dimensions as above, plus \`auto\`
-  - Gemini: aspect ratios — \`1:1\` (default), \`3:4\`, \`4:3\`, \`9:16\`, \`16:9\`
+  - Gemini (Imagen): aspect ratios — \`1:1\` (default), \`3:4\`, \`4:3\`, \`9:16\`, \`16:9\`
+  - Gemini (native): size/aspect-ratio params do not apply — omit \`size\` for these models
 - \`quality\` (optional): \`standard\` (default) or \`hd\` — applies to OpenAI dall-e-3 only.
 - \`caption\` (optional): Text message to accompany the image in the channel.`;
 }
