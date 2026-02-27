@@ -154,7 +154,11 @@ export class AudioReceiver {
     });
 
     stream.on('error', (err: Error) => {
-      this.log.error({ err, userId }, 'audio receive stream error');
+      if (isDaveDecryptionError(err)) {
+        this.log.warn({ err, userId }, 'audio receive stream DAVE decryption error (stream cleaned up)');
+      } else {
+        this.log.error({ err, userId }, 'audio receive stream error');
+      }
       this.cleanupUser(userId);
     });
   }
@@ -167,6 +171,15 @@ export class AudioReceiver {
       this.log.info({ userId }, 'cleaned up user audio decoder');
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// DAVE decryption error detection
+// ---------------------------------------------------------------------------
+
+function isDaveDecryptionError(err: unknown): boolean {
+  const msg = (err instanceof Error ? `${err.name} ${err.message}` : String(err));
+  return /DecryptionFailed|Unencrypted|DAVE/i.test(msg);
 }
 
 // ---------------------------------------------------------------------------
