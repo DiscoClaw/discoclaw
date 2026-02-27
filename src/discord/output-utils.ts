@@ -163,7 +163,7 @@ export function selectStreamingOutput(opts: {
   const preview = opts.showPreview ?? true;
   const prefix = opts.elapsedMs !== undefined ? formatElapsed(opts.elapsedMs) + ' ' : '';
   // finalText always bypasses the gate — completion/error output renders immediately.
-  if (!preview && !opts.finalText) {
+  if (!preview && !opts.finalText && !opts.deltaText) {
     if (opts.activityLabel) return formatBoldLabel(prefix + opts.activityLabel);
     return formatBoldLabel(prefix + thinkingLabel(opts.statusTick));
   }

@@ -2478,7 +2478,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     // eslint-disable-next-line @typescript-eslint/no-floating-promises
                     maybeEdit(true);
                   }
-                }, { flushDelayMs: 2000, postToolDelayMs: 500 })
+                }, { flushDelayMs: 800, postToolDelayMs: 500 })
               : null;
 
             try {
