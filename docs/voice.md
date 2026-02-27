@@ -23,6 +23,8 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Channel name or ID for transcript mirroring and prompt context loading |
 | `DISCOCLAW_VOICE_MODEL` | No | — | AI model override for voice response invocations |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations |
+| `DEEPGRAM_STT_MODEL` | No | `nova-3` | Deepgram STT model to use (see [STT Models](#deepgram-stt-models)) |
+| `DEEPGRAM_TTS_VOICE` | No | `aura-2-asteria-en` | Deepgram TTS voice to use (see [TTS Voices](#deepgram-tts-voices-aura-2)) |
 | `DEEPGRAM_API_KEY` | Yes* | — | Deepgram API key (*required when `DISCOCLAW_STT_PROVIDER=deepgram` or `DISCOCLAW_TTS_PROVIDER=deepgram`) |
 | `CARTESIA_API_KEY` | Yes* | — | Cartesia API key (*required when `DISCOCLAW_TTS_PROVIDER=cartesia`) |
 | `OPENAI_API_KEY` | Yes* | — | OpenAI API key (*required when `DISCOCLAW_TTS_PROVIDER=openai`) |
@@ -35,13 +37,15 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 2. Generate an API key in the Deepgram console
 3. Set `DEEPGRAM_API_KEY=<your-key>` in `.env`
 
-The STT provider uses Deepgram's Nova-3 model via WebSocket streaming (`wss://api.deepgram.com/v1/listen`). Audio is sent as linear16 PCM at 16 kHz.
+The STT provider streams audio to Deepgram via WebSocket (`wss://api.deepgram.com/v1/listen`) as linear16 PCM at 16 kHz. The model is selected by `DEEPGRAM_STT_MODEL` (default: `nova-3`). See [STT Models](#deepgram-stt-models) for available options.
 
 ### Deepgram (TTS — Aura REST)
 
 The TTS provider reuses the same `DEEPGRAM_API_KEY` configured for STT — no additional key is needed. Set `DISCOCLAW_TTS_PROVIDER=deepgram` in `.env` to select it.
 
-The provider POSTs to Deepgram's `/v1/speak` endpoint requesting `linear16` encoding with `container=none` (raw PCM s16le). The response body is streamed and yielded as audio frames for low-latency playback. Default model: `aura-2-thalia-en` at 24 kHz.
+The provider POSTs to Deepgram's `/v1/speak` endpoint requesting `linear16` encoding with `container=none` (raw PCM s16le). The response body is streamed and yielded as audio frames for low-latency playback. The voice is selected by `DEEPGRAM_TTS_VOICE` (default: `aura-2-asteria-en`) at 24 kHz. See [TTS Voices](#deepgram-tts-voices-aura-2) for available voices.
+
+> **Note:** The default voice was changed from `aura-2-thalia-en` to `aura-2-asteria-en`. Update your `.env` if you want to keep the previous voice.
 
 ### Cartesia (TTS — Sonic-3 WebSocket)
 
@@ -63,6 +67,62 @@ The TTS provider uses Cartesia's Sonic-3 model via WebSocket (`wss://api.cartesi
 | TTS | `kokoro` | Stub — not yet implemented |
 
 Provider selection is handled by factory functions in `src/voice/stt-factory.ts` and `src/voice/tts-factory.ts`. Selecting a stub provider will throw an error at startup.
+
+## Deepgram STT Models
+
+Set via `DEEPGRAM_STT_MODEL`. Default: `nova-3`.
+
+| Model | Description |
+|-------|-------------|
+| `nova-3` | General-purpose, highest accuracy (default) |
+| `nova-3-conversationalai` | Optimised for conversational/assistant use cases |
+| `nova-3-medical` | Optimised for medical terminology and dictation |
+| `nova-3-finance` | Optimised for financial terminology |
+| `nova-3-automotive` | Optimised for automotive / in-vehicle voice |
+| `nova-3-drivethru` | Optimised for quick-service / drive-through ordering |
+| `nova-3-phonecall` | Optimised for telephony audio quality |
+| `nova-2` | Previous generation — lower latency, slightly lower accuracy |
+
+## Deepgram TTS Voices (Aura-2)
+
+Set via `DEEPGRAM_TTS_VOICE`. Default: `aura-2-asteria-en`.
+
+| Voice | Gender | Notes |
+|-------|--------|-------|
+| `aura-2-asteria-en` | Female | Default — clear, professional |
+| `aura-2-luna-en` | Female | Warm, conversational |
+| `aura-2-stella-en` | Female | Upbeat, energetic |
+| `aura-2-thalia-en` | Female | Previous default — neutral |
+| `aura-2-hera-en` | Female | Authoritative |
+| `aura-2-orion-en` | Male | Deep, confident |
+| `aura-2-arcas-en` | Male | Casual, friendly |
+| `aura-2-perseus-en` | Male | Clear, neutral |
+| `aura-2-angus-en` | Male | Warm, Irish-accented |
+| `aura-2-helios-en` | Male | British-accented |
+| `aura-2-zeus-en` | Male | Commanding |
+
+All Aura-2 voices are English (`-en`). The full list is maintained in the [Deepgram docs](https://developers.deepgram.com/docs/tts-models).
+
+## `!voice status` Command
+
+The `!voice status` bang command reports the current voice subsystem state without invoking the AI.
+
+```
+!voice status
+```
+
+**Output includes:**
+
+- Whether the voice subsystem is enabled (`DISCOCLAW_VOICE_ENABLED`)
+- Active voice connection per guild (channel name + guild name, or "not connected")
+- Configured STT provider and model (`DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL`)
+- Configured TTS provider and voice (`DISCOCLAW_TTS_PROVIDER`, `DEEPGRAM_TTS_VOICE`)
+- Whether auto-join is active (`DISCOCLAW_VOICE_AUTO_JOIN`)
+- Home channel name/ID (`DISCOCLAW_VOICE_HOME_CHANNEL`)
+
+**Requires:** `DISCOCLAW_VOICE_ENABLED=1`. If voice is disabled, the command returns a brief disabled notice.
+
+This command is handled by the voice commands handler (`src/discord/voice-commands.ts`) and does not require `DISCOCLAW_DISCORD_ACTIONS_VOICE=1`.
 
 ## Discord Permissions
 

@@ -264,6 +264,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | `!memory` | Memory read/write subcommands (see section 4) | `src/discord/memory-commands.ts` | **done** |
 | `!plan` | Plan management subcommands | `src/discord/plan-commands.ts` | **done** |
 | `!forge` | Forge control subcommands | `src/discord/forge-commands.ts` | **done** |
+| `!voice status` | Reports voice subsystem state: connection, STT/TTS provider+model, auto-join flag | `src/discord/voice-commands.ts` | **done** |
 
 ## 21. npm Publishing
 
@@ -296,7 +297,7 @@ Real-time voice chat: STT transcription, AI response generation, TTS synthesis, 
 | Voice action flags (restricted action subset for voice invocations) | `src/voice/voice-action-flags.ts` | **done** |
 | Voice actions (join/leave/status/mute/deafen) | `src/discord/actions-voice.ts` | **done** |
 
-Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DISCOCLAW_TTS_PROVIDER`, `DISCOCLAW_VOICE_HOME_CHANNEL`, `DEEPGRAM_API_KEY` (STT + TTS), `CARTESIA_API_KEY`.
+Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL`, `DISCOCLAW_TTS_PROVIDER`, `DEEPGRAM_TTS_VOICE`, `DISCOCLAW_VOICE_HOME_CHANNEL`, `DEEPGRAM_API_KEY` (STT + TTS), `CARTESIA_API_KEY`.
 
 ---
 
