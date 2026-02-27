@@ -10,6 +10,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { sanitizeExternalContent } from '../sanitize-external.js';
+
 const execFileAsync = promisify(execFile);
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -442,7 +444,7 @@ async function handleWebFetch(
       };
     }
 
-    return { result: buffer.toString('utf-8'), ok: true };
+    return { result: sanitizeExternalContent(buffer.toString('utf-8'), `Web page: ${url}`), ok: true };
   } catch (err: unknown) {
     const e = err instanceof Error ? err : null;
     if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
