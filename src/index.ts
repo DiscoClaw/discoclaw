@@ -1360,21 +1360,13 @@ if (taskCtx) {
               subs,
             );
 
-            // Log actions to transcript mirror (fire-and-forget).
-            if (transcriptMirror?.postActionsExecuted) {
-              const mirrorResults = actionResults.map(r => ({
-                success: r.ok,
-                message: r.ok ? (r as { summary: string }).summary : (r as { error: string }).error,
-              }));
-              transcriptMirror.postActionsExecuted(actions, mirrorResults).catch(() => {});
-            }
-
             responseText = parsed.cleanText;
 
             // Follow-up check.
             if (followUpDepth < voiceActionFollowupDepth && shouldTriggerFollowUp(actions, actionResults)) {
               const followUpLines = buildAllResultLines(actionResults);
               currentPrompt =
+                VOICE_STYLE_INSTRUCTION + '\n\n' +
                 `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
                 followUpLines.join('\n') +
                 `\n\nContinue your analysis based on these results. If you need additional information, you may emit further query actions.`;

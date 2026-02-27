@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { AudioFrame } from './types.js';
-import { DeepgramTtsProvider } from './tts-deepgram.js';
+import { DeepgramTtsProvider, DEEPGRAM_MAX_CHARS } from './tts-deepgram.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -170,6 +170,84 @@ describe('DeepgramTtsProvider', () => {
     await expect(collectFrames(provider.synthesize('test'))).rejects.toThrow(
       'response has no body stream',
     );
+  });
+
+  describe('text truncation', () => {
+    it('passes through text under the limit unchanged', async () => {
+      const fetchFn = mockFetch();
+      const provider = makeProvider({ fetchFn });
+      const shortText = 'a'.repeat(DEEPGRAM_MAX_CHARS - 1);
+
+      await collectFrames(provider.synthesize(shortText));
+
+      const [, init] = vi.mocked(fetchFn).mock.calls[0]!;
+      expect(JSON.parse(init!.body as string).text).toBe(shortText);
+    });
+
+    it('passes through text exactly at the limit unchanged', async () => {
+      const fetchFn = mockFetch();
+      const provider = makeProvider({ fetchFn });
+      const exactText = 'a'.repeat(DEEPGRAM_MAX_CHARS);
+
+      await collectFrames(provider.synthesize(exactText));
+
+      const [, init] = vi.mocked(fetchFn).mock.calls[0]!;
+      expect(JSON.parse(init!.body as string).text).toBe(exactText);
+    });
+
+    it('truncates text over the limit to at most DEEPGRAM_MAX_CHARS chars', async () => {
+      const fetchFn = mockFetch();
+      const provider = makeProvider({ fetchFn });
+      const longText = 'a'.repeat(DEEPGRAM_MAX_CHARS + 500);
+
+      await collectFrames(provider.synthesize(longText));
+
+      const [, init] = vi.mocked(fetchFn).mock.calls[0]!;
+      const sentText = JSON.parse(init!.body as string).text as string;
+      expect(sentText.length).toBeLessThanOrEqual(DEEPGRAM_MAX_CHARS);
+    });
+
+    it('cuts at the last sentence boundary when truncating', async () => {
+      const fetchFn = mockFetch();
+      const log = createLogger();
+      const provider = makeProvider({ fetchFn, log });
+      // Build text with a sentence boundary well before the limit
+      const prefix = 'Hello world. ';
+      const filler = 'x'.repeat(DEEPGRAM_MAX_CHARS - prefix.length + 100);
+      const longText = prefix + filler;
+
+      await collectFrames(provider.synthesize(longText));
+
+      const [, init] = vi.mocked(fetchFn).mock.calls[0]!;
+      const sentText = JSON.parse(init!.body as string).text as string;
+      expect(sentText).toBe('Hello world.');
+      expect(sentText.length).toBeLessThanOrEqual(DEEPGRAM_MAX_CHARS);
+    });
+
+    it('logs a warning with original and truncated lengths when truncating', async () => {
+      const fetchFn = mockFetch();
+      const log = createLogger();
+      const provider = makeProvider({ fetchFn, log });
+      const longText = 'a'.repeat(DEEPGRAM_MAX_CHARS + 100);
+
+      await collectFrames(provider.synthesize(longText));
+
+      expect(log.warn).toHaveBeenCalledTimes(1);
+      const [meta, msg] = vi.mocked(log.warn).mock.calls[0]!;
+      expect((meta as Record<string, unknown>).originalLength).toBe(longText.length);
+      expect((meta as Record<string, unknown>).truncatedLength).toBeLessThanOrEqual(DEEPGRAM_MAX_CHARS);
+      expect(msg).toContain('truncated');
+    });
+
+    it('does not log a warning for text within the limit', async () => {
+      const fetchFn = mockFetch();
+      const log = createLogger();
+      const provider = makeProvider({ fetchFn, log });
+
+      await collectFrames(provider.synthesize('short text'));
+
+      expect(log.warn).not.toHaveBeenCalled();
+    });
   });
 
   it('single large chunk yields one frame', async () => {
