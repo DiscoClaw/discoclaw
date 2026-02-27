@@ -27,6 +27,7 @@ export type CronRunRecord = {
   webhookSourceId?: string;   // URL path segment for /webhook/:source routing
   webhookSecret?: string;     // HMAC-SHA256 secret for signature verification
   silent?: boolean;           // suppress output when AI has nothing actionable to report
+  routingMode?: 'json';       // when set, executor uses JSON router instead of direct prompt
   // Persisted cron definition fields — stored on parse so boots can skip AI re-parsing.
   schedule?: string;
   timezone?: string;
