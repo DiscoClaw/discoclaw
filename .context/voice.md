@@ -54,6 +54,7 @@ User speaks in Discord voice channel
 - **Barge-in** — `AudioReceiver.onUserSpeaking` fires on every speaking burst. If the responder is playing, playback stops and the generation counter advances.
 - **Re-entrancy guard** — `AudioPipelineManager.startPipeline` uses a `starting` set because `VoiceConnection.subscribe()` synchronously fires a Ready state change.
 - **Error containment** — `VoiceConnectionManager` catches connection errors and destroys the connection to prevent process crashes (e.g. DAVE handshake failures).
+- **Deepgram TTS 2000-char limit** — Deepgram Aura REST TTS returns HTTP 413 (silent failure) for inputs exceeding ~2000 characters. `tts-deepgram.ts` truncates the input to 2000 chars before sending to prevent silent audio dropouts. If the AI response is unexpectedly long (e.g. from a missing `VOICE_STYLE_INSTRUCTION`), the user will still hear a truncated response rather than silence.
 
 ## Wiring (`src/index.ts`)
 
