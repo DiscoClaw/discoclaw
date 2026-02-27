@@ -95,6 +95,7 @@ export type DiscoclawConfig = {
   voiceSttProvider: 'deepgram' | 'whisper' | 'openai';
   voiceTtsProvider: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
   voiceHomeChannel?: string;
+  voiceLogChannel?: string;
   deepgramApiKey?: string;
   deepgramSttModel: string;
   deepgramTtsVoice: string;
@@ -496,6 +497,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       );
     }
   }
+  const voiceLogChannel = parseTrimmedString(env, 'DISCOCLAW_VOICE_LOG_CHANNEL');
   const deepgramApiKey = parseTrimmedString(env, 'DEEPGRAM_API_KEY');
   const deepgramSttModel = parseTrimmedString(env, 'DEEPGRAM_STT_MODEL') ?? 'nova-3-general';
   const deepgramTtsVoice = parseTrimmedString(env, 'DEEPGRAM_TTS_VOICE') ?? 'aura-2-asteria-en';
@@ -654,6 +656,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       voiceSttProvider,
       voiceTtsProvider,
       voiceHomeChannel,
+      voiceLogChannel,
       deepgramApiKey,
       deepgramSttModel,
       deepgramTtsVoice,
