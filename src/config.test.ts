@@ -28,6 +28,7 @@ describe('parseConfig', () => {
     expect(config.summaryModel).toBe('fast');
     expect(config.cronModel).toBe('fast');
     expect(config.cronAutoTagModel).toBe('fast');
+    expect(config.cronExecModel).toBe('capable');
     expect(config.tasksAutoTagModel).toBe('fast');
     expect(config.tasksSyncFailureRetryEnabled).toBe(true);
     expect(config.tasksSyncFailureRetryDelayMs).toBe(30_000);
@@ -656,6 +657,11 @@ describe('parseConfig', () => {
   it('does not validate cronForum when cronEnabled=false', () => {
     const { config } = parseConfig(env({ DISCOCLAW_CRON_ENABLED: '0' }));
     expect(config.cronEnabled).toBe(false);
+  });
+
+  it('DISCOCLAW_CRON_EXEC_MODEL overrides cronExecModel default', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_CRON_EXEC_MODEL: 'fast' }));
+    expect(config.cronExecModel).toBe('fast');
   });
 
   it('allows missing tasksForum when tasksEnabled (bootstrap will auto-create)', () => {

@@ -231,6 +231,58 @@ Allow the model to manage scheduled tasks: create, update, pause/resume, delete,
 | `cronSync` | Run full bidirectional sync (tags, names, status messages) | Yes |
 | `cronTagMapReload` | Reload the tag map from disk | Yes |
 
+#### `cronCreate` / `cronUpdate` Fields
+
+Both actions share the same writeable field set:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes (create) | Human-readable name for the cron job |
+| `schedule` | Yes (create) | Cron expression (e.g. `"0 9 * * 1"`) |
+| `prompt` | Yes (create) | Prompt text sent to the AI runtime at each execution |
+| `channel` | Yes (create) | Target channel name or ID for output |
+| `model` | No | Model override for this job |
+| `tags` | No | Forum thread tags to apply |
+| `routingMode` | No | Set to `"json"` to enable JSON routing mode (see below) |
+| `allowedActions` | No | Comma-separated action types permitted during execution (see below) |
+
+`cronUpdate` additionally requires `id` (the cron job ID to update). Only supplied fields are changed.
+
+`cronShow` output includes `routingMode` and `allowedActions` when set on the job.
+
+#### JSON Routing Mode
+
+When `routingMode: "json"` is set on a cron job, the executor instructs the AI runtime to return output as a JSON array of `{"channel", "content"}` objects instead of posting a single reply to the job's default channel.
+
+Example response the AI is expected to produce:
+
+```json
+[
+  {"channel": "general", "content": "Good morning! Today's summary: ..."},
+  {"channel": "alerts",  "content": "Heads-up: threshold exceeded"}
+]
+```
+
+The orchestrator iterates the array and sends each `content` string to the named `channel`. If JSON parsing fails or every entry fails to send, raw output falls back to the default channel.
+
+#### Channel Placeholder Expansion
+
+Cron prompts support two built-in placeholders that are expanded at execution time:
+
+| Placeholder | Expands to |
+|-------------|------------|
+| `{{channel}}` | The job's target channel name |
+| `{{channelId}}` | The job's target channel ID |
+
+These allow prompts to reference their own delivery context without hardcoding channel names or IDs.
+
+#### `allowedActions` Semantics
+
+- **Format:** comma-separated action type name strings, e.g. `"sendMessage,taskCreate,taskUpdate"`. Whitespace around commas is ignored.
+- **Narrowing only:** `allowedActions` can only restrict the set that global env flags permit. Listing a type that is disabled by its env flag (or excluded from cron flows entirely) has no effect — those types remain unavailable.
+- **Clearing:** set `allowedActions` to `""` (empty string) on `cronUpdate` to remove the restriction. When cleared, the job inherits the full set of globally-enabled, cron-permitted action types.
+- **Enforcement:** the cron executor (`src/cron/executor.ts`) reads the stored `allowedActions` value at execution time and intersects it with the global `cronActionFlags` before building the action prompt and running the job.
+
 Env: `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1, requires cron subsystem enabled).
 Context: Requires `CronContext` with scheduler, forum channel, tag map, stats store, and runtime.
 Cron-to-cron restriction: Cron jobs themselves cannot emit cron actions (the `crons` flag is forced to `false` in the cron executor's action flags to prevent self-modification loops).

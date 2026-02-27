@@ -1115,3 +1115,117 @@ describe('executeCronJob silent mode', () => {
     expect(channel.send).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// allowedActions filtering
+// ---------------------------------------------------------------------------
+
+describe('executeCronJob allowedActions filtering', () => {
+  let statsDir: string;
+
+  beforeEach(async () => {
+    statsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-allowed-actions-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(statsDir, { recursive: true, force: true });
+  });
+
+  it('executes permitted action and blocks denied action when allowedActions is set', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', { allowedActions: ['sendMessage'] });
+
+    const executeDiscordActionsSpy = vi.spyOn(discordActions, 'executeDiscordActions');
+
+    // Response with sendMessage (permitted) + channelCreate (blocked).
+    const responseWithActions = [
+      'Doing some work.',
+      '<discord-action>{"type":"sendMessage","channel":"general","content":"hello"}</discord-action>',
+      '<discord-action>{"type":"channelCreate","name":"new-channel"}</discord-action>',
+    ].join('\n');
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: responseWithActions };
+        yield { type: 'done' };
+      },
+    };
+
+    const ctx = makeCtx({
+      runtime,
+      statsStore,
+      discordActionsEnabled: true,
+      actionFlags: makeCronActionFlags({ messaging: true, channels: true }),
+    });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    // Only sendMessage should have been passed to executeDiscordActions.
+    expect(executeDiscordActionsSpy).toHaveBeenCalledOnce();
+    const actionsArg = executeDiscordActionsSpy.mock.calls[0][0];
+    expect(actionsArg).toHaveLength(1);
+    expect(actionsArg[0].type).toBe('sendMessage');
+
+    // Blocked action should have been logged.
+    expect(ctx.log?.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ actionType: 'channelCreate' }),
+      'cron:exec action blocked by allowedActions',
+    );
+
+    // Output should contain blocked notice.
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    const allContent = channel.send.mock.calls.map((c: any) => c[0].content).join('\n');
+    expect(allContent).toContain('Blocked action `channelCreate`');
+
+    executeDiscordActionsSpy.mockRestore();
+  });
+
+  it('executes all actions when allowedActions is undefined', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    // No allowedActions set — all actions should pass through.
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    const executeDiscordActionsSpy = vi.spyOn(discordActions, 'executeDiscordActions');
+
+    const responseWithActions = [
+      'Doing some work.',
+      '<discord-action>{"type":"sendMessage","channel":"general","content":"hello"}</discord-action>',
+    ].join('\n');
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: responseWithActions };
+        yield { type: 'done' };
+      },
+    };
+
+    const ctx = makeCtx({
+      runtime,
+      statsStore,
+      discordActionsEnabled: true,
+      actionFlags: makeCronActionFlags({ messaging: true }),
+    });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    // All parsed actions should be executed unfiltered.
+    expect(executeDiscordActionsSpy).toHaveBeenCalledOnce();
+    const actionsArg = executeDiscordActionsSpy.mock.calls[0][0];
+    expect(actionsArg).toHaveLength(1);
+    expect(actionsArg[0].type).toBe('sendMessage');
+
+    // No blocked-action warnings.
+    const warnCalls = (ctx.log?.warn as ReturnType<typeof vi.fn>).mock.calls;
+    const blockedWarn = warnCalls.find((c: any[]) => c[1] === 'cron:exec action blocked by allowedActions');
+    expect(blockedWarn).toBeUndefined();
+
+    executeDiscordActionsSpy.mockRestore();
+  });
+});

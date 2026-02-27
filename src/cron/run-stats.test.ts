@@ -53,7 +53,7 @@ describe('CronRunStats', () => {
   it('creates empty store on missing file', async () => {
     const stats = await loadRunStats(statsPath);
     const store = stats.getStore();
-    expect(store.version).toBe(6);
+    expect(store.version).toBe(7);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
 
@@ -75,6 +75,48 @@ describe('CronRunStats', () => {
     const updated = await stats.upsertRecord('cron-test2', 'thread-2', { cadence: 'daily', model: 'haiku' });
     expect(updated.cadence).toBe('daily');
     expect(updated.model).toBe('haiku');
+  });
+
+  it('upserts with allowedActions and retrieves it', async () => {
+    const stats = await loadRunStats(statsPath);
+    const rec = await stats.upsertRecord('cron-aa1', 'thread-aa1', { allowedActions: ['sendMessage', 'cronList'] });
+    expect(rec.allowedActions).toEqual(['sendMessage', 'cronList']);
+
+    const fetched = stats.getRecord('cron-aa1');
+    expect(fetched!.allowedActions).toEqual(['sendMessage', 'cronList']);
+  });
+
+  it('persists allowedActions through disk reload', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-aa2', 'thread-aa2', { allowedActions: ['cronShow'] });
+
+    const stats2 = await loadRunStats(statsPath);
+    const rec = stats2.getRecord('cron-aa2');
+    expect(rec).toBeDefined();
+    expect(rec!.allowedActions).toEqual(['cronShow']);
+  });
+
+  it('clears allowedActions when upserted with undefined and removes the key in-memory', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-aa3', 'thread-aa3', { allowedActions: ['cronList'] });
+    expect(stats.getRecord('cron-aa3')!.allowedActions).toEqual(['cronList']);
+
+    await stats.upsertRecord('cron-aa3', 'thread-aa3', { allowedActions: undefined });
+    const rec = stats.getRecord('cron-aa3')!;
+    expect(rec.allowedActions).toBeUndefined();
+    // Key must not be present in-memory (not just set to undefined).
+    expect('allowedActions' in rec).toBe(false);
+  });
+
+  it('cleared allowedActions does not reappear after disk reload', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-aa4', 'thread-aa4', { allowedActions: ['sendMessage'] });
+    await stats.upsertRecord('cron-aa4', 'thread-aa4', { allowedActions: undefined });
+
+    const stats2 = await loadRunStats(statsPath);
+    const rec = stats2.getRecord('cron-aa4')!;
+    expect(rec.allowedActions).toBeUndefined();
+    expect('allowedActions' in rec).toBe(false);
   });
 
   it('retrieves records by threadId', async () => {
@@ -259,7 +301,7 @@ describe('CronRunStats', () => {
 describe('emptyStore', () => {
   it('returns valid initial structure', () => {
     const store = emptyStore();
-    expect(store.version).toBe(6);
+    expect(store.version).toBe(7);
     expect(store.updatedAt).toBeGreaterThan(0);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
@@ -289,7 +331,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(6);
+    expect(stats.getStore().version).toBe(7);
     const rec = stats.getRecord('cron-migrated');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-migrated');
@@ -322,7 +364,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(6);
+    expect(stats.getStore().version).toBe(7);
     const rec = stats.getRecord('cron-v4');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v4');
@@ -355,7 +397,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(6);
+    expect(stats.getStore().version).toBe(7);
     const rec = stats.getRecord('cron-v5');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v5');
@@ -367,5 +409,39 @@ describe('loadRunStats version migration', () => {
     expect(rec!.channel).toBeUndefined();
     expect(rec!.prompt).toBeUndefined();
     expect(rec!.authorId).toBeUndefined();
+  });
+
+  it('migrates a v6 store to v7 with routingMode and allowedActions undefined on existing records', async () => {
+    const v6Store = {
+      version: 6,
+      updatedAt: Date.now(),
+      jobs: {
+        'cron-v6': {
+          cronId: 'cron-v6',
+          threadId: 'thread-v6',
+          runCount: 2,
+          lastRunAt: '2026-01-01T00:00:00.000Z',
+          lastRunStatus: 'success',
+          cadence: 'daily',
+          purposeTags: [],
+          disabled: false,
+          model: 'sonnet',
+          triggerType: 'schedule',
+          silent: false,
+          channel: 'general',
+        },
+      },
+    };
+    await fs.writeFile(statsPath, JSON.stringify(v6Store), 'utf-8');
+
+    const stats = await loadRunStats(statsPath);
+
+    expect(stats.getStore().version).toBe(7);
+    const rec = stats.getRecord('cron-v6');
+    expect(rec).toBeDefined();
+    expect(rec!.cronId).toBe('cron-v6');
+    expect(rec!.runCount).toBe(2);
+    expect(rec!.routingMode).toBeUndefined();
+    expect(rec!.allowedActions).toBeUndefined();
   });
 });

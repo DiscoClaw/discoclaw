@@ -27,6 +27,8 @@ export type CronRunRecord = {
   webhookSourceId?: string;   // URL path segment for /webhook/:source routing
   webhookSecret?: string;     // HMAC-SHA256 secret for signature verification
   silent?: boolean;           // suppress output when AI has nothing actionable to report
+  routingMode?: 'default' | 'json';  // how AI output is routed to Discord channels
+  allowedActions?: string[];  // restrict which Discord action types the AI may emit during this job
   // Persisted cron definition fields — stored on parse so boots can skip AI re-parsing.
   schedule?: string;
   timezone?: string;
@@ -36,12 +38,12 @@ export type CronRunRecord = {
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3 | 4 | 5 | 6;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 6 as const;
+export const CURRENT_VERSION = 7 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -185,7 +187,16 @@ export class CronRunStats {
         if (existing.threadId !== threadId) {
           this.threadIndex.delete(existing.threadId);
         }
-        if (updates) Object.assign(existing, updates);
+        if (updates) {
+          Object.assign(existing, updates);
+          // Object.assign copies undefined values but keeps the key in the object,
+          // diverging from JSON round-trip (which omits undefined properties).
+          // Explicitly delete allowedActions when it is being cleared so in-memory
+          // state matches what would be loaded from disk after a flush + reload.
+          if ('allowedActions' in updates && updates.allowedActions === undefined) {
+            delete existing.allowedActions;
+          }
+        }
         existing.threadId = threadId;
         if (prevStatusMessageId && prevStatusMessageId !== existing.statusMessageId) {
           this.statusMessageIndex.delete(prevStatusMessageId);
@@ -356,6 +367,10 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   // Absent records fall through to AI parsing on first boot after upgrade.
   if (store.version === 5) {
     store.version = 6;
+  }
+  // Migrate v6 → v7: no-op — new fields (routingMode, allowedActions) are optional and default to absent.
+  if (store.version === 6) {
+    store.version = 7;
   }
   return new CronRunStats(store, filePath);
 }
