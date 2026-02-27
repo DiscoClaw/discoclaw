@@ -6,7 +6,7 @@ import { OpenaiSttProvider } from './stt-openai.js';
 /**
  * Create an STT provider based on the voice config.
  *
- * Currently supported: `deepgram` (Nova-3 streaming via WebSocket),
+ * Currently supported: `deepgram` (Nova-3 General streaming via WebSocket),
  * `openai` (Whisper API via REST).
  * Planned: `whisper` (local Whisper model, Phase 2b).
  *

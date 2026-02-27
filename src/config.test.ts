@@ -941,6 +941,16 @@ describe('parseConfig', () => {
     expect(config.voiceHomeChannel).toBeUndefined();
   });
 
+  it('parses DISCOCLAW_VOICE_LOG_CHANNEL when set', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_VOICE_LOG_CHANNEL: 'voice-log' }));
+    expect(config.voiceLogChannel).toBe('voice-log');
+  });
+
+  it('returns undefined for voiceLogChannel when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.voiceLogChannel).toBeUndefined();
+  });
+
   it('parses DEEPGRAM_API_KEY when set', () => {
     const { config } = parseConfig(env({ DEEPGRAM_API_KEY: 'dg-key' }));
     expect(config.deepgramApiKey).toBe('dg-key');

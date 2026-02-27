@@ -10,7 +10,7 @@ export type DeepgramSttOpts = {
   apiKey: string;
   sampleRate: number;
   log: LoggerLike;
-  /** Deepgram STT model name. Defaults to 'nova-3-conversationalai'. */
+  /** Deepgram STT model name. Defaults to 'nova-3-general'. */
   model?: string;
   /** Override WebSocket constructor for testing. */
   wsFactory?: (url: string, headers: Record<string, string>) => WebSocket;
@@ -32,7 +32,7 @@ export class DeepgramSttProvider implements SttProvider {
   constructor(opts: DeepgramSttOpts) {
     this.apiKey = opts.apiKey;
     this.sampleRate = opts.sampleRate;
-    this.model = opts.model ?? 'nova-3-conversationalai';
+    this.model = opts.model ?? 'nova-3-general';
     this.log = opts.log;
     this.wsFactory =
       opts.wsFactory ?? ((url, headers) => new WebSocket(url, { headers }));
