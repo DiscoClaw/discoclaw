@@ -34,10 +34,14 @@ const YT_URL_REGEXES: RegExp[] = [
   /(?:https?:\/\/)?(?:www\.|m\.)?youtube\.com\/watch\?(?:[^&\s]*&)*v=([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/g,
   // Short URL
   /(?:https?:\/\/)?(?:www\.)?youtu\.be\/([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/g,
-  // Embed URL
+  // Embed URL (/embed/)
   /(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/g,
-  // Shorts URL
+  // Shorts URL (/shorts/)
   /(?:https?:\/\/)?(?:www\.)?youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/g,
+  // Legacy Flash embed URL (/v/)
+  /(?:https?:\/\/)?(?:www\.)?youtube\.com\/v\/([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/g,
+  // Legacy redirect URL (/e/)
+  /(?:https?:\/\/)?(?:www\.)?youtube\.com\/e\/([a-zA-Z0-9_-]{11})(?![a-zA-Z0-9_-])/g,
 ];
 
 export type CaptionTrack = {

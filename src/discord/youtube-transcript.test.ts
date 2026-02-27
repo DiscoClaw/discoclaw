@@ -45,6 +45,14 @@ describe('extractYouTubeIds', () => {
     expect(extractYouTubeIds('https://www.youtube.com/shorts/dQw4w9WgXcQ')).toEqual(['dQw4w9WgXcQ']);
   });
 
+  it('extracts ID from legacy /v/ embed URL', () => {
+    expect(extractYouTubeIds('https://www.youtube.com/v/dQw4w9WgXcQ')).toEqual(['dQw4w9WgXcQ']);
+  });
+
+  it('extracts ID from legacy /e/ redirect URL', () => {
+    expect(extractYouTubeIds('https://www.youtube.com/e/dQw4w9WgXcQ')).toEqual(['dQw4w9WgXcQ']);
+  });
+
   it('extracts ID from mobile URL (m.youtube.com)', () => {
     expect(extractYouTubeIds('https://m.youtube.com/watch?v=dQw4w9WgXcQ')).toEqual(['dQw4w9WgXcQ']);
   });
