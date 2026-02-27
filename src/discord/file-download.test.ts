@@ -238,7 +238,8 @@ describe('downloadTextAttachments', () => {
 
     expect(result.texts).toHaveLength(1);
     expect(result.texts[0].name).toBe('hello.txt');
-    expect(result.texts[0].content).toBe('hello world');
+    expect(result.texts[0].content).toContain('[EXTERNAL CONTENT:');
+    expect(result.texts[0].content).toContain('hello world');
     expect(result.errors).toHaveLength(0);
   });
 
@@ -282,7 +283,7 @@ describe('downloadTextAttachments', () => {
     ]);
 
     expect(result.texts).toHaveLength(1);
-    expect(result.texts[0].content).toContain('[truncated at 100KB]');
+    expect(result.texts[0].content).toContain('[truncated]');
     expect(result.texts[0].content.length).toBeLessThan(bigContent.length);
   });
 
@@ -380,6 +381,7 @@ describe('downloadTextAttachments', () => {
     ]);
 
     expect(result.texts).toHaveLength(1);
-    expect(result.texts[0].content).toBe('{"key":"value"}');
+    expect(result.texts[0].content).toContain('[EXTERNAL CONTENT:');
+    expect(result.texts[0].content).toContain('{"key":"value"}');
   });
 });

@@ -7,33 +7,13 @@ import {
   YoutubeTranscriptTooManyRequestError,
   YoutubeTranscriptInvalidVideoIdError,
 } from 'youtube-transcript-plus';
-
-/** Max characters of transcript text to include per video. */
-export const MAX_TRANSCRIPT_CHARS = 8_000;
+import { sanitizeExternalContent } from '../sanitize-external.js';
 
 /** Max number of YouTube videos to process per message. */
 export const MAX_VIDEOS_PER_MESSAGE = 3;
 
 /** Per-request timeout for YouTube fetches (15 seconds). */
 const FETCH_TIMEOUT_MS = 15_000;
-
-/**
- * Prompt injection detection patterns applied to transcript text.
- * Transcripts containing these patterns are blocked.
- */
-const INJECTION_PATTERNS: RegExp[] = [
-  /ignore\s+(all\s+)?previous\s+instructions?/i,
-  /new\s+system\s+prompt/i,
-  /disregard\s+(your\s+)?(previous\s+)?instructions?/i,
-  /override\s+(your\s+)?(previous\s+)?instructions?/i,
-  /forget\s+(your\s+)?(previous\s+)?instructions?/i,
-  /you\s+are\s+now\s+(a|an)\s+/i,
-  /act\s+as\s+(a|an)\s+/i,
-  /<\s*\/?\s*(system|instruction|prompt)\s*>/i,
-  /\[INST\]/i,
-  /###\s*(human|assistant|system)/i,
-  /jailbreak/i,
-];
 
 /** YouTube URL regex patterns — each has one capture group for the video ID. */
 const YT_URL_REGEXES: RegExp[] = [
@@ -71,22 +51,6 @@ export function extractYouTubeIds(text: string): string[] {
     }
   }
   return [...ids].slice(0, MAX_VIDEOS_PER_MESSAGE);
-}
-
-/**
- * Check whether transcript text contains prompt injection patterns.
- * Returns true if a potential injection attempt is detected.
- */
-export function containsInjection(text: string): boolean {
-  return INJECTION_PATTERNS.some(p => p.test(text));
-}
-
-/**
- * Truncate transcript text to MAX_TRANSCRIPT_CHARS, appending a marker when truncated.
- */
-export function truncateTranscript(text: string): string {
-  if (text.length <= MAX_TRANSCRIPT_CHARS) return text;
-  return text.slice(0, MAX_TRANSCRIPT_CHARS) + `\n[transcript truncated at ${MAX_TRANSCRIPT_CHARS} chars]`;
 }
 
 /**
@@ -139,8 +103,7 @@ export async function fetchTranscriptForVideo(videoId: string): Promise<string> 
  * Fetch YouTube transcripts for all YouTube URLs found in a Discord message.
  *
  * - Extracts up to MAX_VIDEOS_PER_MESSAGE video IDs
- * - Scans each transcript for prompt injection — blocked transcripts produce an error entry
- * - Truncates transcripts exceeding MAX_TRANSCRIPT_CHARS
+ * - Sanitizes each transcript via sanitizeExternalContent (strips injection patterns, caps length, adds DATA label)
  *
  * Returns transcript blocks and any error/warning strings suitable for appending to a prompt.
  */
@@ -154,13 +117,7 @@ export async function fetchYouTubeTranscripts(messageText: string): Promise<Tran
   for (const videoId of videoIds) {
     try {
       const raw = await fetchTranscriptForVideo(videoId);
-
-      if (containsInjection(raw)) {
-        errors.push(`youtube:${videoId}: blocked (potential prompt injection in transcript)`);
-        continue;
-      }
-
-      transcripts.push({ videoId, text: truncateTranscript(raw) });
+      transcripts.push({ videoId, text: sanitizeExternalContent(raw, `YouTube transcript: ${videoId}`) });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'unknown error';
       errors.push(`youtube:${videoId}: ${msg}`);
