@@ -1367,9 +1367,10 @@ if (taskCtx) {
               const followUpLines = buildAllResultLines(actionResults);
               currentPrompt =
                 VOICE_STYLE_INSTRUCTION + '\n\n' +
-                `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
+                `The user asked: "${text}"\n\n` +
+                `Your previous response queried Discord. Results:\n\n` +
                 followUpLines.join('\n') +
-                `\n\nContinue your analysis based on these results. If you need additional information, you may emit further query actions.`;
+                `\n\nAnswer the user's question using these results. If you need more data, emit additional query actions.`;
               continue;
             }
 
