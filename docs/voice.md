@@ -19,12 +19,13 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | `DISCOCLAW_DISCORD_ACTIONS_VOICE` | No | `0` | Enables voice action types (join/leave/status/mute/deafen); requires `DISCOCLAW_VOICE_ENABLED=1` |
 | `DISCOCLAW_VOICE_AUTO_JOIN` | No | `0` | Auto-join voice channels when an allowlisted user enters |
 | `DISCOCLAW_STT_PROVIDER` | No | `deepgram` | Speech-to-text provider: `deepgram` or `whisper` |
-| `DISCOCLAW_TTS_PROVIDER` | No | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, or `kokoro` |
+| `DISCOCLAW_TTS_PROVIDER` | No | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, `openai`, or `kokoro` |
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Channel name or ID for transcript mirroring and prompt context loading |
 | `DISCOCLAW_VOICE_MODEL` | No | — | AI model override for voice response invocations |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations |
 | `DEEPGRAM_API_KEY` | Yes* | — | Deepgram API key (*required when `DISCOCLAW_STT_PROVIDER=deepgram` or `DISCOCLAW_TTS_PROVIDER=deepgram`) |
 | `CARTESIA_API_KEY` | Yes* | — | Cartesia API key (*required when `DISCOCLAW_TTS_PROVIDER=cartesia`) |
+| `OPENAI_API_KEY` | Yes* | — | OpenAI API key (*required when `DISCOCLAW_TTS_PROVIDER=openai`) |
 
 ## API Key Setup
 
@@ -58,6 +59,7 @@ The TTS provider uses Cartesia's Sonic-3 model via WebSocket (`wss://api.cartesi
 | STT | `whisper` | Stub — not yet implemented |
 | TTS | `cartesia` (Sonic-3 WebSocket) | **Implemented** — `src/voice/tts-cartesia.ts` |
 | TTS | `deepgram` (Aura REST streaming) | **Implemented** — `src/voice/tts-deepgram.ts` |
+| TTS | `openai` (TTS API REST streaming) | **Implemented** — `src/voice/tts-openai.ts` |
 | TTS | `kokoro` | Stub — not yet implemented |
 
 Provider selection is handled by factory functions in `src/voice/stt-factory.ts` and `src/voice/tts-factory.ts`. Selecting a stub provider will throw an error at startup.
