@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { ChannelType } from 'discord.js';
 import {
   SPAWN_ACTION_TYPES,
   executeSpawnAction,
@@ -13,9 +14,26 @@ import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeCtx(): ActionContext {
+function makeMockChannel() {
   return {
-    guild: {} as any,
+    id: 'ch-general',
+    name: 'general',
+    type: ChannelType.GuildText,
+    send: vi.fn(async () => ({ id: 'sent-1' })),
+  };
+}
+
+function makeCtx(channel?: ReturnType<typeof makeMockChannel>): ActionContext {
+  const ch = channel ?? makeMockChannel();
+  return {
+    guild: {
+      channels: {
+        cache: {
+          get: (id: string) => id === ch.id ? ch : undefined,
+          find: (fn: (c: any) => boolean) => fn(ch) ? ch : undefined,
+        },
+      },
+    } as any,
     client: {} as any,
     channelId: 'test-channel',
     messageId: 'test-message',
@@ -66,15 +84,29 @@ describe('executeSpawnAction', () => {
   });
 
   describe('spawnAgent', () => {
-    it('returns agent text output as summary', async () => {
+    it('posts agent text output to target channel', async () => {
+      const channel = makeMockChannel();
       const result = await executeSpawnAction(
         { type: 'spawnAgent', channel: 'general', prompt: 'Say hello' },
-        makeCtx(),
+        makeCtx(channel),
+        makeSpawnCtx(),
+      );
+      expect(result.ok).toBe(true);
+      expect(channel.send).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'Agent output' }),
+      );
+    });
+
+    it('returns summary indicating agent posted to channel', async () => {
+      const channel = makeMockChannel();
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Say hello' },
+        makeCtx(channel),
         makeSpawnCtx(),
       );
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.summary).toContain('Agent output');
+        expect(result.summary).toContain('#general');
       }
     });
 
@@ -118,6 +150,42 @@ describe('executeSpawnAction', () => {
       if (!result.ok) expect(result.error).toContain('requires a non-empty prompt');
     });
 
+    it('fails when channel is not found', async () => {
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'nonexistent', prompt: 'Do something' },
+        makeCtx(),
+        makeSpawnCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('not found');
+    });
+
+    it('fails when channel is a non-text type', async () => {
+      const forumChannel = { id: 'ch-forum', name: 'ideas', type: ChannelType.GuildForum, send: vi.fn() };
+      const ctx: ActionContext = {
+        guild: {
+          channels: {
+            cache: {
+              get: (id: string) => id === forumChannel.id ? forumChannel : undefined,
+              find: (fn: (c: any) => boolean) => fn(forumChannel) ? forumChannel : undefined,
+            },
+          },
+        } as any,
+        client: {} as any,
+        channelId: 'test-channel',
+        messageId: 'test-message',
+      };
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'ideas', prompt: 'Do something' },
+        ctx,
+        makeSpawnCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toContain('forum');
+      }
+    });
+
     it('blocks at recursion depth >= 1', async () => {
       const result = await executeSpawnAction(
         { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
@@ -142,35 +210,41 @@ describe('executeSpawnAction', () => {
       }
     });
 
-    it('prefers text_final over accumulated text_delta', async () => {
+    it('prefers text_final over accumulated text_delta and posts to channel', async () => {
       const runtime = makeRuntime([
         { type: 'text_delta', text: 'partial ' },
         { type: 'text_delta', text: 'output' },
         { type: 'text_final', text: 'Final output' },
         { type: 'done' },
       ]);
+      const channel = makeMockChannel();
       const result = await executeSpawnAction(
         { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
-        makeCtx(),
+        makeCtx(channel),
         makeSpawnCtx({ runtime }),
       );
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.summary).toBe('Final output');
+      expect(channel.send).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'Final output' }),
+      );
     });
 
-    it('accumulates multiple text_delta events', async () => {
+    it('accumulates multiple text_delta events and posts combined text to channel', async () => {
       const runtime = makeRuntime([
         { type: 'text_delta', text: 'Hello ' },
         { type: 'text_delta', text: 'world' },
         { type: 'done' },
       ]);
+      const channel = makeMockChannel();
       const result = await executeSpawnAction(
         { type: 'spawnAgent', channel: 'general', prompt: 'Greet' },
-        makeCtx(),
+        makeCtx(channel),
         makeSpawnCtx({ runtime }),
       );
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.summary).toBe('Hello world');
+      expect(channel.send).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'Hello world' }),
+      );
     });
 
     it('handles runtime throw as error result', async () => {
@@ -190,29 +264,35 @@ describe('executeSpawnAction', () => {
       if (!result.ok) expect(result.error).toContain('connection failed');
     });
 
-    it('returns fallback message with label when agent outputs nothing', async () => {
+    it('posts fallback message with label to channel when agent outputs nothing', async () => {
       const runtime = makeRuntime([{ type: 'done' }]);
+      const channel = makeMockChannel();
       const result = await executeSpawnAction(
         { type: 'spawnAgent', channel: 'general', prompt: 'Do something', label: 'silent-agent' },
-        makeCtx(),
+        makeCtx(channel),
         makeSpawnCtx({ runtime }),
       );
       expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.summary).toContain('silent-agent');
-        expect(result.summary).toContain('no output');
-      }
+      expect(channel.send).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('silent-agent') }),
+      );
+      expect(channel.send).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('no output') }),
+      );
     });
 
     it('uses "agent" as default label in fallback message', async () => {
       const runtime = makeRuntime([{ type: 'done' }]);
+      const channel = makeMockChannel();
       const result = await executeSpawnAction(
         { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
-        makeCtx(),
+        makeCtx(channel),
         makeSpawnCtx({ runtime }),
       );
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.summary).toContain('agent');
+      expect(channel.send).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('agent') }),
+      );
     });
 
     it('invokes runtime with correct model, cwd, and prompt', async () => {
@@ -277,6 +357,30 @@ describe('executeSpawnAction', () => {
       expect(runtime.invoke).toHaveBeenCalledWith(
         expect.objectContaining({ timeoutMs: 120_000 }),
       );
+    });
+
+    it('posts output without allowed mentions', async () => {
+      const channel = makeMockChannel();
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Say hello' },
+        makeCtx(channel),
+        makeSpawnCtx(),
+      );
+      expect(result.ok).toBe(true);
+      expect(channel.send).toHaveBeenCalledWith(
+        expect.objectContaining({ allowedMentions: expect.objectContaining({ parse: [] }) }),
+      );
+    });
+
+    it('handles channel.send error as error result', async () => {
+      const channel = { ...makeMockChannel(), send: vi.fn(async () => { throw new Error('Missing Access'); }) };
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
+        makeCtx(channel),
+        makeSpawnCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('Missing Access');
     });
   });
 });

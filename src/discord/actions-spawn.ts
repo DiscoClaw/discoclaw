@@ -1,6 +1,9 @@
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
+import { NO_MENTIONS } from './allowed-mentions.js';
+import { splitDiscord } from './output-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,6 +53,17 @@ export async function executeSpawnAction(
         return { ok: false, error: 'spawnAgent requires a non-empty prompt' };
       }
 
+      // Resolve the target channel before the expensive runtime call.
+      const targetChannel = resolveChannel(ctx.guild, action.channel);
+      if (!targetChannel) {
+        const raw = findChannelRaw(ctx.guild, action.channel);
+        if (raw) {
+          const kind = describeChannelType(raw);
+          return { ok: false, error: `spawnAgent: "${action.channel}" is a ${kind} channel (use a text channel)` };
+        }
+        return { ok: false, error: `spawnAgent: channel "${action.channel}" not found` };
+      }
+
       const label = action.label?.trim() || 'agent';
       const timeoutMs = spawnCtx.timeoutMs ?? 120_000;
       const model = action.model ?? spawnCtx.model;
@@ -73,10 +87,15 @@ export async function executeSpawnAction(
           }
         }
 
-        const trimmed = text.trim();
+        const outputText = text.trim() || `Agent (${label}) completed with no output.`;
+        const chunks = splitDiscord(outputText);
+        for (const chunk of chunks) {
+          await targetChannel.send({ content: chunk, allowedMentions: NO_MENTIONS });
+        }
+
         return {
           ok: true,
-          summary: trimmed || `Agent (${label}) completed with no output.`,
+          summary: `Agent (${label}) posted to #${targetChannel.name}`,
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
