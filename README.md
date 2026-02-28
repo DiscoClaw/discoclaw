@@ -221,6 +221,18 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    npm install -g discoclaw
    ```
 
+   > **Fedora 43+ / GCC 14+ — `@discordjs/opus` build failure**
+   >
+   > GCC 14 promotes `-Wincompatible-pointer-types` to a hard error by default. The upstream opus C source triggers this, causing `npm install` to fail with an error like:
+   > ```
+   > error: incompatible pointer types passing ...
+   > ```
+   > **Workaround** — set the flag before installing:
+   > ```bash
+   > CFLAGS="-Wno-error=incompatible-pointer-types" npm install -g discoclaw
+   > ```
+   > This is a known upstream issue in the `@discordjs/opus` native addon. It only requires the flag override at install time; runtime behavior is unaffected.
+
 2. **Run the interactive setup wizard** (creates `.env` and scaffolds your workspace):
    ```bash
    discoclaw init
