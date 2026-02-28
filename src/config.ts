@@ -513,7 +513,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const deepgramTtsVoice = parseTrimmedString(env, 'DEEPGRAM_TTS_VOICE') ?? 'aura-2-asteria-en';
   const deepgramTtsSpeed = (() => {
     const raw = parseTrimmedString(env, 'DEEPGRAM_TTS_SPEED');
-    if (raw == null) return undefined;
+    if (raw == null) return 1.3;
     const n = parseFloat(raw);
     if (!Number.isFinite(n) || n < 0.5 || n > 1.5) {
       throw new Error(`DEEPGRAM_TTS_SPEED must be a number between 0.5 and 1.5, got "${raw}"`);

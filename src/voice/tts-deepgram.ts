@@ -10,7 +10,7 @@ export type DeepgramTtsOpts = {
   apiKey: string;
   model?: string;
   sampleRate?: number;
-  /** TTS playback speed in range [0.5, 1.5]. Defaults to Deepgram's default (1.0). */
+  /** TTS playback speed in range [0.5, 1.5]. Defaults to 1.3. */
   speed?: number;
   log: LoggerLike;
   /** Override fetch for testing. */
