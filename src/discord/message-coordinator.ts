@@ -2111,6 +2111,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               configCtx: params.configCtx,
               imagegenCtx: params.imagegenCtx,
               voiceCtx: params.voiceCtx,
+              spawnCtx: params.spawnCtx,
             });
             const displayLines = buildDisplayResultLines([confirmAction], actionResults);
             const content = displayLines.length > 0
