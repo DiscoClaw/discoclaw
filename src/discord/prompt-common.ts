@@ -241,7 +241,8 @@ export function buildOpenTasksSection(store: TaskStore | undefined): string {
   let truncated = false;
 
   for (const t of tasks) {
-    const line = `${t.id}: ${t.status}, "${t.title}"\n`;
+    const safeTitle = t.title.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    const line = `${t.id}: ${t.status}, "${safeTitle}"\n`;
     if (header.length + body.length + line.length > OPEN_TASKS_MAX_CHARS) {
       truncated = true;
       break;

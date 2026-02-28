@@ -2293,7 +2293,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               ? `---\nRecent activity (cross-channel):\n${shortTermSection}\n\n`
               : '') +
             (openTasksSection
-              ? `---\nOpen tasks (live snapshot):\n${openTasksSection}\n\n`
+              ? `---\n${openTasksSection}\n\n`
               : '') +
             (summarySection
               ? `---\nConversation memory:\n${summarySection}\n\n`

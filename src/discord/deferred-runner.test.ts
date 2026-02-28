@@ -224,13 +224,25 @@ describe('deferred-runner observability', () => {
     expect(status.actionFailed).toHaveBeenCalledWith('sendMessage', 'Permission denied');
   });
 
-  it('calls buildOpenTasksSection during prompt assembly', async () => {
+  it('injects buildOpenTasksSection result into prompt', async () => {
     const { buildOpenTasksSection } = await import('./prompt-common.js');
     const mockBuildOpenTasks = buildOpenTasksSection as ReturnType<typeof vi.fn>;
     mockBuildOpenTasks.mockClear();
+    mockBuildOpenTasks.mockReturnValue('Open tasks:\nws-001: open, "Test task"\n');
 
     const taskStore = { getAll: vi.fn(() => []) };
+    const invokeSpy = vi.fn();
+    const runtime = {
+      id: 'test',
+      capabilities: new Set() as ReadonlySet<never>,
+      async *invoke(p: unknown): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' } as EngineEvent;
+        yield { type: 'done' } as EngineEvent;
+      },
+    };
     const opts = makeOpts({
+      runtime,
       state: { ...makeState(), taskCtx: { store: taskStore } },
     });
 
@@ -239,6 +251,9 @@ describe('deferred-runner observability', () => {
     await vi.advanceTimersByTimeAsync(2000);
 
     expect(mockBuildOpenTasks).toHaveBeenCalledWith(taskStore);
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('Open tasks:');
+    expect(prompt).toContain('ws-001: open, "Test task"');
   });
 
   it('null status does not throw on runtime error', async () => {

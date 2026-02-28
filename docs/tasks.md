@@ -23,7 +23,7 @@ Each task gets a unique ID with a configurable prefix (default `ws`, e.g., `ws-4
 
 Open tasks are injected into every prompt at invocation time, sourced directly from the TaskStore. This means every new session starts with accurate task state regardless of rolling-summary freshness — the AI always knows which tasks are currently open without relying on stale summary text.
 
-The injection is controlled by `DISCOCLAW_OPEN_TASKS_INJECT_ENABLED` (default `true`) with a character budget of `DISCOCLAW_OPEN_TASKS_INJECT_MAX_CHARS` (default `1000`).
+The injection is always active when the TaskStore is available, with a hardcoded character budget of 600 chars.
 
 ## Bidirectional Sync
 

@@ -127,11 +127,11 @@ Each layer has its own character budget. Empty layers are omitted entirely (no h
 | Rolling summary | 2000 chars | on |
 | Message history | 3000 chars | on |
 | Short-term memory | 1000 chars | on |
-| Open tasks | 1000 chars | on |
+| Open tasks | 600 chars | on |
 | Auto-extraction | n/a (write-side only) | on |
 | Workspace files | no budget | on (DMs only) |
 
-With all layers at default settings, worst-case memory overhead is ~9000 chars (~2250 tokens). In practice most prompts use far less — a user with 5 durable items and a short summary might add ~500 chars total.
+With all layers at default settings, worst-case memory overhead is ~8600 chars (~2150 tokens). In practice most prompts use far less — a user with 5 durable items and a short summary might add ~500 chars total.
 
 ## How to Tune Memory
 
@@ -140,14 +140,12 @@ With all layers at default settings, worst-case memory overhead is ~9000 chars (
 - `DISCOCLAW_SUMMARY_MAX_CHARS` — longer rolling summaries
 - `DISCOCLAW_MESSAGE_HISTORY_BUDGET` — more message history
 - `DISCOCLAW_SHORTTERM_INJECT_MAX_CHARS` — more cross-channel context
-- `DISCOCLAW_OPEN_TASKS_INJECT_MAX_CHARS` — more open-task context per prompt
 
 **Want less memory overhead?** Disable layers you don't need:
 - `DISCOCLAW_DURABLE_MEMORY_ENABLED=false` — no long-term facts
 - `DISCOCLAW_SUMMARY_ENABLED=false` — no rolling summaries
 - `DISCOCLAW_SHORTTERM_MEMORY_ENABLED=false` — no cross-channel awareness
 - `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED=false` — no auto-extraction
-- `DISCOCLAW_OPEN_TASKS_INJECT_ENABLED=false` — no live open-tasks injection
 
 **Control auto-extraction aggressiveness:**
 - `DISCOCLAW_SUMMARY_EVERY_N_TURNS` — how often extraction runs (default 5)
