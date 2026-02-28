@@ -85,7 +85,7 @@ function makeActionCtx(): ActionContext {
 }
 
 function makeCronCtx(overrides?: Partial<CronContext>): CronContext {
-  const forumThread = { id: 'new-thread', isThread: () => true, send: vi.fn(), fetchStarterMessage: vi.fn() };
+  const forumThread = { id: 'new-thread', isThread: () => true, send: vi.fn(async () => ({ id: 'prompt-msg-1', pin: vi.fn(async () => {}) })), fetchStarterMessage: vi.fn() };
   const forum = {
     id: 'forum-1',
     type: 15, // ChannelType.GuildForum
@@ -98,7 +98,7 @@ function makeCronCtx(overrides?: Partial<CronContext>): CronContext {
       cache: {
         get: vi.fn((id: string) => {
           if (id === 'forum-1') return forum;
-          if (id === 'thread-1') return { id: 'thread-1', isThread: () => true, send: vi.fn(), fetchStarterMessage: vi.fn(), setArchived: vi.fn() };
+          if (id === 'thread-1') return { id: 'thread-1', isThread: () => true, send: vi.fn(async () => ({ id: 'prompt-msg-2', pin: vi.fn(async () => {}), edit: vi.fn(async () => {}) })), fetchStarterMessage: vi.fn(), setArchived: vi.fn(), messages: { fetch: vi.fn(async () => ({ edit: vi.fn(async () => {}) })) } };
           return undefined;
         }),
       },
@@ -600,15 +600,18 @@ describe('executeCronAction', () => {
     }
   });
 
-  it('cronShow truncates prompt longer than 500 chars', async () => {
-    const cronCtx = makeCronCtx();
+  it('cronShow returns full prompt without truncation', async () => {
+    const longPrompt = 'x'.repeat(600);
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ prompt: longPrompt })]),
+    });
     const job = cronCtx.scheduler.getJob('thread-1');
-    job!.def.prompt = 'x'.repeat(600);
+    job!.def.prompt = longPrompt;
     const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.summary).toContain('... (truncated)');
-      expect(result.summary).not.toContain('x'.repeat(600));
+      expect(result.summary).toContain(longPrompt);
+      expect(result.summary).not.toContain('(truncated)');
     }
   });
 
