@@ -102,11 +102,14 @@ export async function executeSpawnActions(
   let i = 0;
   while (i < actions.length) {
     const batch = actions.slice(i, i + maxConcurrent);
-    const batchResults = await Promise.all(
+    const settled = await Promise.allSettled(
       batch.map((action) => executeSpawnAction(action, ctx, spawnCtx)),
     );
-    for (let j = 0; j < batchResults.length; j++) {
-      results[i + j] = batchResults[j]!;
+    for (let j = 0; j < settled.length; j++) {
+      const item = settled[j]!;
+      results[i + j] = item.status === 'fulfilled'
+        ? item.value
+        : { ok: false, error: item.reason instanceof Error ? item.reason.message : String(item.reason) };
     }
     i += maxConcurrent;
   }

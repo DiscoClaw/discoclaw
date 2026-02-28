@@ -38,6 +38,8 @@ import { IMAGEGEN_ACTION_TYPES, executeImagegenAction, imagegenActionsPromptSect
 import type { ImagegenActionRequest, ImagegenContext } from './actions-imagegen.js';
 import { VOICE_ACTION_TYPES, executeVoiceAction, voiceActionsPromptSection } from './actions-voice.js';
 import type { VoiceActionRequest, VoiceContext } from './actions-voice.js';
+import { SPAWN_ACTION_TYPES, executeSpawnActions, spawnActionsPromptSection } from './actions-spawn.js';
+import type { SpawnActionRequest, SpawnContext } from './actions-spawn.js';
 import { describeDestructiveConfirmationRequirement } from './destructive-confirmation.js';
 
 // ---------------------------------------------------------------------------
@@ -75,6 +77,7 @@ export type ActionCategoryFlags = {
   config: boolean;
   imagegen?: boolean;
   voice?: boolean;
+  spawn?: boolean;
 };
 
 export type DiscordActionRequest =
@@ -93,7 +96,8 @@ export type DiscordActionRequest =
   | ConfigActionRequest
   | ReactionPromptRequest
   | ImagegenActionRequest
-  | VoiceActionRequest;
+  | VoiceActionRequest
+  | SpawnActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -110,6 +114,7 @@ export type SubsystemContexts = {
   configCtx?: ConfigContext;
   imagegenCtx?: ImagegenContext;
   voiceCtx?: VoiceContext;
+  spawnCtx?: SpawnContext;
 };
 
 // ---------------------------------------------------------------------------
@@ -134,6 +139,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.config) for (const t of CONFIG_ACTION_TYPES) types.add(t);
   if (flags.imagegen) for (const t of IMAGEGEN_ACTION_TYPES) types.add(t);
   if (flags.voice) for (const t of VOICE_ACTION_TYPES) types.add(t);
+  if (flags.spawn) for (const t of SPAWN_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -522,10 +528,40 @@ export async function executeDiscordActions(
 ): Promise<DiscordActionResult[]> {
   const effectiveSubs = subs ?? {};
 
+  // --- Spawn pre-pass: collect all spawnAgent actions and run in parallel ---
+  const spawnResultByIndex = new Map<number, DiscordActionResult>();
+  if (effectiveSubs.spawnCtx) {
+    const spawnActions: SpawnActionRequest[] = [];
+    const spawnIndices: number[] = [];
+    for (let i = 0; i < actions.length; i++) {
+      if (SPAWN_ACTION_TYPES.has(actions[i]!.type)) {
+        spawnActions.push(actions[i]! as SpawnActionRequest);
+        spawnIndices.push(i);
+      }
+    }
+    if (spawnActions.length > 0) {
+      const spawnResults = await executeSpawnActions(spawnActions, ctx, effectiveSubs.spawnCtx);
+      for (let i = 0; i < spawnIndices.length; i++) {
+        spawnResultByIndex.set(spawnIndices[i]!, spawnResults[i]!);
+      }
+    }
+  }
+
   const results: DiscordActionResult[] = [];
 
-  for (const action of actions) {
+  for (let actionIdx = 0; actionIdx < actions.length; actionIdx++) {
+    const action = actions[actionIdx]!;
     try {
+      // Spawn actions were executed in parallel in the pre-pass above.
+      if (spawnResultByIndex.has(actionIdx)) {
+        const result = spawnResultByIndex.get(actionIdx)!;
+        results.push(result);
+        if (result.ok) {
+          log?.info({ action: action.type, summary: result.summary }, `discord:action ${action.type}`);
+        }
+        continue;
+      }
+
       let result: DiscordActionResult;
 
       const destructiveCheck = describeDestructiveConfirmationRequirement(action as unknown as { type: string }, ctx.confirmation);
@@ -600,6 +636,9 @@ export async function executeDiscordActions(
         } else {
           result = await executeVoiceAction(action as VoiceActionRequest, ctx, effectiveSubs.voiceCtx);
         }
+      } else if (SPAWN_ACTION_TYPES.has(action.type)) {
+        // spawnCtx not configured — would have been handled in pre-pass otherwise.
+        result = { ok: false, error: 'Spawn subsystem not configured' };
       } else {
         result = { ok: false, error: `Unknown action type: ${String(action.type ?? 'unknown')}` };
       }
@@ -717,6 +756,10 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
 
   if (flags.voice) {
     sections.push(voiceActionsPromptSection());
+  }
+
+  if (flags.spawn) {
+    sections.push(spawnActionsPromptSection());
   }
 
   sections.push(`### Rules
