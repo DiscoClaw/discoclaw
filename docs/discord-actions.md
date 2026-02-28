@@ -127,7 +127,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
   - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
-  - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0; requires Phase 2 config wiring — not active at runtime until wired)
+  - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 5)
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
   - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
 
@@ -437,8 +437,7 @@ This prevents unbounded parallel agent trees from a single top-level message.
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0).
 Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). No separate subsystem context object.
-
-> **Phase 2 required:** The env flag, `BotParams` threading, and index-level registration for `spawnAgent` are implemented in Phase 2. Until then, `actions-spawn.ts` is built and tested in isolation but no runtime code path enables it. If a model emits a `spawnAgent` block before Phase 2 is wired, the parser will silently drop it as an unrecognized type.
+Concurrency: At most `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` (default 5) spawned agents may be dispatched per response. Additional `spawnAgent` blocks beyond this limit are dropped with an error summary.
 
 ### Cron Flow Restrictions
 

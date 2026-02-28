@@ -95,6 +95,7 @@ All actions are gated by category env flags (off by default except channels).
 | Defer scheduler (in-process timers with concurrency limits) | — | `src/discord/defer-scheduler.ts` | **done** |
 | Deferred runner (wires defer action type into action/runtime pipeline) | — | `src/discord/deferred-runner.ts` | **done** |
 | Voice (session control) | join, leave, status, mute, deafen | `actions-voice.ts` | **done** |
+| Spawn (parallel sub-agent invocations) | spawnAgent | `actions-spawn.ts` | **done** |
 
 ## 7. Task Sync Subsystem (`src/tasks/`)
 
