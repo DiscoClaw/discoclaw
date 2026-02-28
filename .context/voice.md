@@ -83,6 +83,6 @@ When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes t
 | `DEEPGRAM_API_KEY` | — | Required for deepgram STT and TTS |
 | `DEEPGRAM_STT_MODEL` | `nova-3-conversationalai` | Deepgram STT model name |
 | `DEEPGRAM_TTS_VOICE` | `aura-2-asteria-en` | Deepgram TTS voice name |
-| `DEEPGRAM_TTS_SPEED` | `1.0` | Deepgram TTS playback speed (range 0.5–1.5) |
+| `DEEPGRAM_TTS_SPEED` | `1.3` | Deepgram TTS playback speed (range 0.5–1.5) |
 | `CARTESIA_API_KEY` | — | Required for cartesia TTS |
 | *(built-in)* | — | Telegraphic style instruction hardcoded into every voice AI invocation — front-loads the answer, strips preambles/markdown/filler, keeps responses short for TTS latency. Not an env var; not overridable by `DISCOCLAW_VOICE_SYSTEM_PROMPT`. |

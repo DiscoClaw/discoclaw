@@ -26,7 +26,7 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations |
 | `DEEPGRAM_STT_MODEL` | No | `nova-3-conversationalai` | Deepgram STT model to use (see [STT Models](#deepgram-stt-models)) |
 | `DEEPGRAM_TTS_VOICE` | No | `aura-2-asteria-en` | Deepgram TTS voice to use (see [TTS Voices](#deepgram-tts-voices-aura-2)) |
-| `DEEPGRAM_TTS_SPEED` | No | `1.0` | Deepgram TTS playback speed multiplier (range: 0.5–1.5) |
+| `DEEPGRAM_TTS_SPEED` | No | `1.3` | Deepgram TTS playback speed multiplier (range: 0.5–1.5) |
 | `DEEPGRAM_API_KEY` | Yes* | — | Deepgram API key (*required when `DISCOCLAW_STT_PROVIDER=deepgram` or `DISCOCLAW_TTS_PROVIDER=deepgram`) |
 | `CARTESIA_API_KEY` | Yes* | — | Cartesia API key (*required when `DISCOCLAW_TTS_PROVIDER=cartesia`) |
 | `OPENAI_API_KEY` | Yes* | — | OpenAI API key (*required when `DISCOCLAW_TTS_PROVIDER=openai`) |
@@ -45,7 +45,7 @@ The STT provider streams audio to Deepgram via WebSocket (`wss://api.deepgram.co
 
 The TTS provider reuses the same `DEEPGRAM_API_KEY` configured for STT — no additional key is needed. Set `DISCOCLAW_TTS_PROVIDER=deepgram` in `.env` to select it.
 
-The provider POSTs to Deepgram's `/v1/speak` endpoint requesting `linear16` encoding with `container=none` (raw PCM s16le). The response body is streamed and yielded as audio frames for low-latency playback. The voice is selected by `DEEPGRAM_TTS_VOICE` (default: `aura-2-asteria-en`) at 24 kHz. See [TTS Voices](#deepgram-tts-voices-aura-2) for available voices. Playback speed is controlled by `DEEPGRAM_TTS_SPEED` (default: `1.0`, range: 0.5–1.5).
+The provider POSTs to Deepgram's `/v1/speak` endpoint requesting `linear16` encoding with `container=none` (raw PCM s16le). The response body is streamed and yielded as audio frames for low-latency playback. The voice is selected by `DEEPGRAM_TTS_VOICE` (default: `aura-2-asteria-en`) at 24 kHz. See [TTS Voices](#deepgram-tts-voices-aura-2) for available voices. Playback speed is controlled by `DEEPGRAM_TTS_SPEED` (default: `1.3`, range: 0.5–1.5).
 
 > **Note:** The default voice was changed from `aura-2-thalia-en` to `aura-2-asteria-en`. Update your `.env` if you want to keep the previous voice.
 
