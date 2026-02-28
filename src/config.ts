@@ -408,7 +408,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsImagegen = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', false);
   const discordActionsVoice = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_VOICE', false);
   const discordActionsSpawn = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN', false);
-  const spawnMaxConcurrent = parsePositiveInt(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT', 8);
+  const spawnMaxConcurrent = parsePositiveInt(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT', 4);
   const deferMaxDelaySeconds = parsePositiveNumber(
     env,
     'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS',

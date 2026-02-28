@@ -120,7 +120,7 @@ export async function executeSpawnActions(
 ): Promise<DiscordActionResult[]> {
   if (actions.length === 0) return [];
 
-  const maxConcurrent = spawnCtx.maxConcurrent ?? 8;
+  const maxConcurrent = spawnCtx.maxConcurrent ?? 4;
   const results: DiscordActionResult[] = new Array(actions.length);
 
   let i = 0;
