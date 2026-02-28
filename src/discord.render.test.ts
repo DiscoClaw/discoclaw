@@ -7,6 +7,7 @@ import {
   truncateCodeBlocks,
   thinkingLabel,
   selectStreamingOutput,
+  stripActionTags,
   formatElapsed,
 } from './discord.js';
 
@@ -594,6 +595,54 @@ describe('selectStreamingOutput', () => {
     });
     expect(out).toBe('**(1m30s) Reading file...**');
     expect(out).not.toContain('```');
+  });
+
+  it('strips <discord-action> tags from deltaText before rendering', () => {
+    const out = selectStreamingOutput({
+      deltaText: 'Done closing task.\n<discord-action>{"type":"taskClose","taskId":"ws-001"}</discord-action>',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 0,
+    });
+    expect(out).not.toContain('discord-action');
+    expect(out).not.toContain('taskClose');
+    expect(out).toContain('Done closing task');
+  });
+
+  it('strips <discord-action> tags from finalText before rendering', () => {
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: '',
+      finalText: 'All done.\n<discord-action>{"type":"taskClose","taskId":"ws-001"}</discord-action>',
+      statusTick: 0,
+    });
+    expect(out).not.toContain('discord-action');
+    expect(out).not.toContain('taskClose');
+    expect(out).toContain('All done');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stripActionTags
+// ---------------------------------------------------------------------------
+describe('stripActionTags', () => {
+  it('removes action tags and collapses excess newlines', () => {
+    const input = 'Hello\n<discord-action>{"type":"taskClose","taskId":"ws-001"}</discord-action>\n\n\n\nWorld';
+    const result = stripActionTags(input);
+    expect(result).not.toContain('discord-action');
+    expect(result).toContain('Hello');
+    expect(result).toContain('World');
+    // 3+ consecutive newlines collapsed to 2
+    expect(result).not.toMatch(/\n{3,}/);
+  });
+
+  it('returns text unchanged when no action tags present', () => {
+    expect(stripActionTags('Just text')).toBe('Just text');
+  });
+
+  it('removes multiple action tags', () => {
+    const input = 'A<discord-action>{"type":"a"}</discord-action>B<discord-action>{"type":"b"}</discord-action>C';
+    expect(stripActionTags(input)).toBe('ABC');
   });
 });
 
