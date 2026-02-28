@@ -1,5 +1,6 @@
 import type { ActionContext, ActionCategoryFlags, DiscordActionResult } from './actions.js';
 import { appendActionResults, discordActionsPromptSection, executeDiscordActions, parseDiscordActions } from './actions.js';
+import { DiscordTransportClient } from './transport-client.js';
 import { fmtTime, resolveChannel } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import type { CronContext } from './actions-crons.js';
@@ -249,6 +250,7 @@ export function configureDeferredScheduler(
       channelId: channel.id,
       messageId: `defer-${Date.now()}`,
       threadParentId,
+      transport: new DiscordTransportClient(guild, context.client),
       confirmation: {
         mode: 'automated',
       },

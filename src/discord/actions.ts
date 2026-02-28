@@ -1,4 +1,5 @@
 import type { Client, Guild } from 'discord.js';
+import type { TransportClient } from './transport-client.js';
 import { CHANNEL_ACTION_TYPES, executeChannelAction, channelActionsPromptSection } from './actions-channels.js';
 import type { ChannelActionRequest } from './actions-channels.js';
 import { MESSAGING_ACTION_TYPES, executeMessagingAction, messagingActionsPromptSection } from './actions-messaging.js';
@@ -53,6 +54,7 @@ export type ActionContext = {
   messageId: string;
   threadParentId?: string | null;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
+  transport?: TransportClient;
   confirmation?: {
     mode: 'interactive' | 'automated';
     sessionKey?: string;

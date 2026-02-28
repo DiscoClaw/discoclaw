@@ -230,6 +230,9 @@ Platform-agnostic message normalization layer (Phase 1 of transport portability)
 | `PlatformMessage` type (normalized chat message shape) | `src/transport/types.ts` | **done** |
 | discord.js `Message` → `PlatformMessage` mapper | `src/discord/platform-message.ts` | **done** |
 | Mapper unit tests | `src/discord/platform-message.test.ts` | **done** |
+| `TransportClient` interface (platform-agnostic guild/channel/member operations) | `src/discord/transport-client.ts` | **done** |
+| `DiscordTransportClient` (discord.js `Guild` + `Client` implementation) | `src/discord/transport-client.ts` | **done** |
+| TransportClient unit tests | `src/discord/transport-client.test.ts` | **done** |
 
 ## 18. Webhook Server
 

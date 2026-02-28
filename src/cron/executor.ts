@@ -17,6 +17,7 @@ import type { CronRunStats } from './run-stats.js';
 import type { CronRunControl } from './run-control.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
+import { DiscordTransportClient } from '../discord/transport-client.js';
 import * as discordActions from '../discord/actions.js';
 import { sendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from '../discord/output-common.js';
 import { buildPromptPreamble, loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
@@ -331,6 +332,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           channelId: targetChannel.id,
           messageId: '',
           deferScheduler: ctx.deferScheduler,
+          transport: new DiscordTransportClient(guild, ctx.client),
           confirmation: {
             mode: 'automated' as const,
           },

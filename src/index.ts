@@ -17,6 +17,7 @@ import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDisco
 import { loadWorkspacePaFiles, buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildPromptPreamble } from './discord/prompt-common.js';
 import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildAllResultLines } from './discord/actions.js';
+import { DiscordTransportClient } from './discord/transport-client.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
 import { VOICE_STYLE_INSTRUCTION } from './voice/voice-style-prompt.js';
 import { sanitizeForVoice } from './voice/voice-sanitize.js';
@@ -1362,6 +1363,7 @@ if (taskCtx) {
               client,
               channelId: resolvedVoiceChannelId,
               messageId: '', // Empty — mirrors cron executor pattern; prevents sendMessage same-channel suppression.
+              transport: new DiscordTransportClient(voiceGuild, client),
               confirmation: {
                 mode: 'automated' as const,
               },
