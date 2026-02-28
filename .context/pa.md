@@ -26,6 +26,7 @@ Templates live in `templates/workspace/` and are scaffolded on first run (copy-i
 - **Never go silent.** Acknowledge before tool calls.
 - Narrate failures and pivots.
 - Summarize outcomes; don't assume the user saw tool output.
+- **Close the loop.** When query actions return data, answer the user's original question in the same response. Don't chain query after query without delivering a conclusion. If you need more data, say what you're checking and why — but every auto-follow-up response should either deliver the answer or visibly advance toward one.
 - **Never edit `tasks.jsonl`, cron store files, or other data files directly.** Always use the corresponding discord action (`taskUpdate`, `taskCreate`, `cronUpdate`, etc.). Direct file edits bypass Discord thread sync and leave the UI stale.
 
 ## Discord Formatting
