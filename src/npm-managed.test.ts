@@ -102,7 +102,7 @@ describe('npmGlobalUpgrade', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('added discoclaw@1.2.3');
     expect(result.stderr).toBe('');
-    expect(mockExeca).toHaveBeenCalledWith('npm', ['install', '-g', 'discoclaw'], {
+    expect(mockExeca).toHaveBeenCalledWith('npm', ['install', '-g', 'discoclaw', '--loglevel=error'], {
       timeout: 120_000,
     });
   });
