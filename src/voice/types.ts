@@ -17,6 +17,7 @@ export type VoiceConfig = {
   deepgramApiKey?: string;
   deepgramSttModel?: string;
   deepgramTtsVoice?: string;
+  deepgramTtsSpeed?: number;
   cartesiaApiKey?: string;
   openaiApiKey?: string;
 };

@@ -33,6 +33,7 @@ export function createTtsProvider(config: VoiceConfig, log: LoggerLike): TtsProv
       return new DeepgramTtsProvider({
         apiKey: config.deepgramApiKey,
         model: config.deepgramTtsVoice,
+        speed: config.deepgramTtsSpeed,
         log,
       });
     }

@@ -10,6 +10,8 @@ export type DeepgramTtsOpts = {
   apiKey: string;
   model?: string;
   sampleRate?: number;
+  /** TTS playback speed in range [0.5, 1.5]. Defaults to Deepgram's default (1.0). */
+  speed?: number;
   log: LoggerLike;
   /** Override fetch for testing. */
   fetchFn?: typeof globalThis.fetch;
@@ -25,13 +27,20 @@ export class DeepgramTtsProvider implements TtsProvider {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly sampleRate: number;
+  private readonly speed: number | undefined;
   private readonly log: LoggerLike;
   private readonly fetchFn: typeof globalThis.fetch;
 
   constructor(opts: DeepgramTtsOpts) {
+    if (opts.speed !== undefined && (opts.speed < 0.5 || opts.speed > 1.5)) {
+      throw new RangeError(
+        `DeepgramTtsProvider: speed must be in range [0.5, 1.5], got ${opts.speed}`,
+      );
+    }
     this.apiKey = opts.apiKey;
     this.model = opts.model ?? DEFAULT_MODEL;
     this.sampleRate = opts.sampleRate ?? DEFAULT_SAMPLE_RATE;
+    this.speed = opts.speed;
     this.log = opts.log;
     this.fetchFn = opts.fetchFn ?? globalThis.fetch;
   }
@@ -63,6 +72,9 @@ export class DeepgramTtsProvider implements TtsProvider {
       sample_rate: String(this.sampleRate),
       container: 'none',
     });
+    if (this.speed !== undefined) {
+      params.set('speed', String(this.speed));
+    }
     const url = `${DEEPGRAM_SPEECH_URL}?${params.toString()}`;
 
     this.log.info(
