@@ -38,18 +38,18 @@ built-in tools — exposing them via a discoclaw MCP server would be redundant. 
 client that wants file/shell/web tools can use existing community MCP servers
 (`@modelcontextprotocol/server-filesystem`, etc.) directly.
 
-### 2.2 Discord Actions (~65 action types across 16 categories)
+### 2.2 Discord Actions (~84 action types across 17 categories)
 
 Structured JSON actions the AI emits in `<discord-action>` blocks, parsed and executed
 by the orchestrator against the Discord API.
 
 | Category | Action Count | Representative Types | MCP Primitive |
 |----------|-------------|----------------------|---------------|
-| Channels | 10 | `channelCreate`, `channelList`, `channelInfo` | Tool |
-| Messaging | 13 | `sendMessage`, `readMessages`, `editMessage`, `react` | Tool |
-| Guild | 2 | `roles`, `members` | Tool |
-| Moderation | 4 | `kick`, `ban`, `timeout`, `warn` | Tool |
-| Polls | 2 | `pollCreate`, `pollManage` | Tool |
+| Channels | 12 | `channelCreate`, `channelEdit`, `channelList`, `channelInfo`, `categoryCreate`, `channelMove` | Tool |
+| Messaging | 14 | `sendMessage`, `readMessages`, `editMessage`, `react`, `threadCreate`, `sendFile` | Tool |
+| Guild | 9 | `memberInfo`, `roleInfo`, `roleAdd`, `roleRemove`, `searchMessages`, `eventList`, `eventCreate` | Tool |
+| Moderation | 3 | `timeout`, `kick`, `ban` | Tool |
+| Polls | 1 | `poll` | Tool |
 | Tasks | 7 | `taskCreate`, `taskUpdate`, `taskList`, `taskSync` | Tool |
 | Crons | 10 | `cronCreate`, `cronList`, `cronTrigger`, `cronSync` | Tool |
 | Bot Profile | 3 | `botSetStatus`, `botSetActivity`, `botSetNickname` | Tool |
@@ -57,12 +57,13 @@ by the orchestrator against the Discord API.
 | Plans | 6 | `planCreate`, `planApprove`, `planRun`, `planList` | Tool |
 | Memory | 3 | `memoryRemember`, `memoryForget`, `memoryShow` | Tool |
 | Defer | 1 | `defer` | Tool |
-| Config | 2 | `modelSet`, `modelShow` | Tool |
+| Config | 3 | `modelSet`, `modelReset`, `modelShow` | Tool |
 | Imagegen | 1 | `generateImage` | Tool |
 | Voice | 5 | `voiceJoin`, `voiceLeave`, `voiceStatus` | Tool |
 | Spawn | 1 | `spawnAgent` | Tool |
+| Reaction Prompts | 1 | `reactionPrompt` | Tool |
 
-**Total:** ~65 action types that could each map to an MCP tool definition.
+**Total:** ~84 action types that could each map to an MCP tool definition.
 
 ### 2.3 Read-Only State (potential MCP Resources)
 
@@ -140,7 +141,7 @@ over MCP's request-response transport.
 
 ### 3.4 Action Category Gating
 
-Discoclaw's action surface is controlled by ~16 env-var flags (`DISCOCLAW_DISCORD_ACTIONS_*`)
+Discoclaw's action surface is controlled by 17 env-var flags (`DISCOCLAW_DISCORD_ACTIONS_*`)
 that enable/disable categories at startup. MCP's tool listing (`tools/list`) is static for
 the server lifetime — there's no standard mechanism for conditional tool availability.
 
@@ -150,12 +151,15 @@ the MCP server implementation.
 ### 3.5 Fire-and-Forget Actions
 
 Several action types are asynchronous fire-and-forget (`forgeCreate`, `forgeResume`,
-`planRun`, `spawnAgent`, `defer`). MCP tools are synchronous request-response —
-the client expects a result. Mapping async actions to MCP would require either:
+`planRun`, `defer`). MCP tools are synchronous request-response — the client expects
+a result. Mapping async actions to MCP would require either:
 
 - Blocking until completion (potentially minutes for forge runs)
 - Returning an opaque job ID and requiring a separate polling tool
 - Using MCP's experimental notification mechanism (not widely supported)
+
+Note: `spawnAgent` is **not** fire-and-forget — it streams the sub-agent invocation
+via `for await` and returns `{ ok, summary }` synchronously. It maps cleanly to MCP tools.
 
 ### 3.6 Redundancy with Existing MCP Ecosystem
 
@@ -163,6 +167,32 @@ The runtime tools (Read, Write, Edit, Glob, Grep, Bash, WebFetch) are already av
 as mature, purpose-built MCP servers in the community ecosystem. Discoclaw wrapping them
 in its own MCP server adds no value — it's a layer of indirection over tools the client
 can use directly.
+
+### 3.7 MCP Sampling Overlap
+
+MCP's `sampling` capability allows an MCP server to request that the connected client
+perform LLM inference on its behalf (the server sends a `sampling/createMessage` request
+and the client returns a model response). This inverts the usual tool-calling direction:
+the server asks the client's model to think, rather than the client calling the server's tools.
+
+Discoclaw's pipeline engine (`src/pipeline/engine.ts`) and spawn action (`actions-spawn.ts`)
+serve an analogous role — they invoke AI runtimes to generate text, then feed results back
+into subsequent steps or the originating channel. However, the overlap is structural, not
+practical:
+
+- **Pipeline steps** chain multiple runtime invocations with template interpolation between
+  them. MCP sampling provides a single request-response exchange with no chaining primitive.
+- **Spawn** invokes a sub-agent in a target channel with full action dispatch capabilities.
+  MCP sampling has no concept of channel routing or action execution on the response.
+- **Runtime selection:** Discoclaw selects runtimes per-step (model, adapter, timeout).
+  MCP sampling delegates model choice to the client, giving the server no control over
+  which model or adapter is used.
+
+If discoclaw were an MCP server, it could use sampling to delegate LLM work to the
+connected client rather than invoking its own runtimes. This would only be useful if
+the MCP client had access to models discoclaw does not — an unlikely scenario given
+discoclaw already has adapters for Claude, OpenAI, Gemini, and OpenRouter. The pipeline
+and spawn models are strictly more capable than MCP sampling for discoclaw's use cases.
 
 ## 4. What Would Be Feasible (If Pursued)
 
@@ -177,7 +207,7 @@ A minimal MCP server exposing **non-Discord, stateless** capabilities:
 | `modelShow` | High | Read model config |
 | `cronList` / `cronShow` | High | Read cron definitions |
 
-This is ~10 tools out of ~65 — a small fraction of the surface, and the most
+This is ~10 tools out of ~84 — a small fraction of the surface, and the most
 useful ones (Discord interaction, forge, plans) are excluded.
 
 ## 5. Recommendation: Defer
