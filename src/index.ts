@@ -1426,6 +1426,7 @@ if (taskCtx) {
         deepgramApiKey: cfg.deepgramApiKey,
         deepgramSttModel: cfg.deepgramSttModel,
         deepgramTtsVoice: overrides.ttsVoice ?? cfg.deepgramTtsVoice,
+        deepgramTtsSpeed: cfg.deepgramTtsSpeed,
         cartesiaApiKey: cfg.cartesiaApiKey,
         openaiApiKey: cfg.openaiApiKey,
       },
