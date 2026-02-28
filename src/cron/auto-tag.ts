@@ -81,7 +81,7 @@ export async function autoTagCron(
 // ---------------------------------------------------------------------------
 
 /**
- * Classify whether a cron job needs capable-tier or can run on fast.
+ * Classify whether a cron job needs deep/capable-tier or can run on fast.
  *
  * Two-step logic:
  * 1. Cadence default: frequent/hourly (>1x/day) → fast immediately (cost optimization).
@@ -100,10 +100,11 @@ export async function classifyCronModel(
   }
 
   const classifyPrompt =
-    `Does this scheduled task require advanced reasoning (complex analysis, ` +
-    `multi-step planning, nuanced writing) or can it be handled with basic ` +
-    `capabilities (simple lookups, templated responses, data formatting)?\n\n` +
-    `Reply with ONLY one word: "capable" or "fast"\n\n` +
+    `Does this scheduled task require heavy reasoning (complex analysis, ` +
+    `multi-step planning, deep code review), standard advanced capabilities ` +
+    `(nuanced writing, moderate analysis), or basic capabilities ` +
+    `(simple lookups, templated responses, data formatting)?\n\n` +
+    `Reply with ONLY one word: "deep", "capable", or "fast"\n\n` +
     `Job name: ${name}\n` +
     `Instruction: ${prompt.slice(0, 500)}`;
 
@@ -127,5 +128,6 @@ export async function classifyCronModel(
   }
 
   const output = (finalText || deltaText).trim().toLowerCase();
-  return output === 'capable' ? 'capable' : 'fast';
+  if (output === 'capable' || output === 'deep') return output;
+  return 'fast';
 }
