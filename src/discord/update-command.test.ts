@@ -398,6 +398,7 @@ describe('handleUpdateCommand: npm-managed mode', () => {
         cmd === 'npm' && args.includes('install') && args.includes('discoclaw@latest'),
     );
     expect(installCall).toBeDefined();
+    expect(installCall[1]).toContain('--loglevel=error');
   });
 
   it('apply reports error on install failure', async () => {

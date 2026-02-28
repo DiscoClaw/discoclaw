@@ -55,7 +55,7 @@ export async function npmGlobalUpgrade(): Promise<{
   stderr: string;
 }> {
   try {
-    const result = await execa('npm', ['install', '-g', 'discoclaw'], {
+    const result = await execa('npm', ['install', '-g', 'discoclaw', '--loglevel=error'], {
       timeout: 120_000,
     });
     return {
