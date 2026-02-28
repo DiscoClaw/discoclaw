@@ -55,7 +55,7 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed, buildCompletionNotice } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice, closeFenceIfOpen } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
@@ -93,7 +93,7 @@ import { getDefaultTimezone } from '../cron/default-timezone.js';
 import type { AttachmentLike } from './image-download.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
-export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed };
+export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed };
 
 export type BotParams = {
   token: string;
@@ -2659,6 +2659,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   guildId: msg.guildId ?? undefined,
                   channelName: channelName(msg.channel),
                 } : undefined;
+                // Pre-edit: replace the streaming preview with clean text before
+                // executing actions.  If an action (e.g. taskClose) archives the
+                // thread, the final editThenSendChunks will fail with 50083 and the
+                // streaming preview would remain visible with raw <discord-action>
+                // JSON.  This pre-edit ensures the visible state is clean regardless.
+                try {
+                  const preEditRaw = parsed.cleanText.trimEnd() || '...';
+                  const preEditText = closeFenceIfOpen(preEditRaw.slice(0, 2000));
+                  await reply.edit({ content: preEditText, allowedMentions: NO_MENTIONS });
+                } catch {
+                  // Best-effort — the reply may already be gone or the thread archived
+                  // by a prior follow-up.  The final editThenSendChunks will handle it.
+                }
                 actionResults = await executeDiscordActions(actions as Parameters<typeof executeDiscordActions>[0], actCtx, params.log, {
                   taskCtx: params.taskCtx,
                   cronCtx: params.cronCtx,

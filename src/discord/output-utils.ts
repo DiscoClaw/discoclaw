@@ -197,6 +197,17 @@ export function buildCompletionNotice(elapsedMs: number): string {
   return `Done ${formatElapsed(elapsedMs)}`;
 }
 
+/**
+ * Strip `<discord-action>...</discord-action>` blocks from text so raw JSON
+ * never leaks into streaming previews visible to users.
+ */
+export function stripActionTags(text: string): string {
+  return text
+    .replace(/<discord-action>[\s\S]*?<\/discord-action>/g, '')  // complete tags
+    .replace(/<discord-action>[\s\S]*$/g, '')                     // trailing incomplete tag (mid-stream)
+    .replace(/\n{3,}/g, '\n\n');
+}
+
 export function selectStreamingOutput(opts: {
   deltaText: string;
   activityLabel: string;
@@ -214,9 +225,9 @@ export function selectStreamingOutput(opts: {
   }
   if (opts.deltaText) {
     const label = prefix + thinkingLabel(opts.statusTick);
-    return `**${label}**\n${renderDiscordTail(opts.deltaText)}`;
+    return `**${label}**\n${renderDiscordTail(stripActionTags(opts.deltaText))}`;
   }
   if (opts.activityLabel) return renderActivityTail(prefix + opts.activityLabel);
-  if (opts.finalText) return renderDiscordTail(opts.finalText);
+  if (opts.finalText) return renderDiscordTail(stripActionTags(opts.finalText));
   return renderActivityTail(prefix + thinkingLabel(opts.statusTick));
 }
