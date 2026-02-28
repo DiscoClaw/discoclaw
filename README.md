@@ -116,6 +116,19 @@ The `!models` command lets you view and swap AI models per role at runtime — n
 
 Setting the `chat` role to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) switches the active runtime adapter for that role.
 
+## Secret Management
+
+The `!secret` command lets you manage `.env` entries from Discord without touching the file directly. It works in DMs only — values are never echoed back.
+
+| Command | Description |
+|---------|-------------|
+| `!secret set KEY=value` | Add or update a `.env` entry |
+| `!secret unset KEY` | Remove a `.env` entry |
+| `!secret list` | List key names in `.env` (values hidden) |
+| `!secret help` | Show usage |
+
+Changes take effect after a restart (`!restart`). Writes are atomic — a partial write can't corrupt your `.env`.
+
 ## Customization
 
 ### Shareable integration recipes
