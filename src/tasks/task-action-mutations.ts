@@ -170,6 +170,11 @@ export async function handleTaskClose(
     return { ok: false, error: 'taskClose requires taskId' };
   }
 
+  const existing = taskCtx.store.get(taskId);
+  if (existing && existing.status === 'closed') {
+    return { ok: true, summary: `Task ${taskId} already closed` };
+  }
+
   let needsRepairSync = false;
   const taskService = resolveTaskService(taskCtx);
   await withDirectTaskLifecycle(taskId, async () => {
