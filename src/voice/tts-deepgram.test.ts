@@ -44,6 +44,7 @@ function makeProvider(
     apiKey: string;
     model: string;
     sampleRate: number;
+    speed: number;
     log: LoggerLike;
     fetchFn: typeof globalThis.fetch;
   }> = {},
@@ -52,6 +53,7 @@ function makeProvider(
     apiKey: overrides.apiKey ?? 'test-key',
     model: overrides.model,
     sampleRate: overrides.sampleRate,
+    speed: overrides.speed,
     log: overrides.log ?? createLogger(),
     fetchFn: overrides.fetchFn ?? mockFetch(),
   });
@@ -247,6 +249,36 @@ describe('DeepgramTtsProvider', () => {
       await collectFrames(provider.synthesize('short text'));
 
       expect(log.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('speed parameter', () => {
+    it('includes speed in the URL when set', async () => {
+      const fetchFn = mockFetch([new Uint8Array([1])]);
+      const provider = makeProvider({ fetchFn, speed: 1.2 });
+
+      await collectFrames(provider.synthesize('hello'));
+
+      const [url] = vi.mocked(fetchFn).mock.calls[0]!;
+      expect(url).toContain('speed=1.2');
+    });
+
+    it('omits speed from the URL when not set', async () => {
+      const fetchFn = mockFetch([new Uint8Array([1])]);
+      const provider = makeProvider({ fetchFn });
+
+      await collectFrames(provider.synthesize('hello'));
+
+      const [url] = vi.mocked(fetchFn).mock.calls[0]!;
+      expect(url).not.toContain('speed=');
+    });
+
+    it('throws RangeError when speed is below 0.5', () => {
+      expect(() => makeProvider({ speed: 0.4 })).toThrow(RangeError);
+    });
+
+    it('throws RangeError when speed is above 1.5', () => {
+      expect(() => makeProvider({ speed: 1.6 })).toThrow(RangeError);
     });
   });
 
