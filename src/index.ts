@@ -37,6 +37,7 @@ import type { ForgeContext } from './discord/actions-forge.js';
 import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
 import type { ImagegenContext } from './discord/actions-imagegen.js';
+import type { SpawnContext } from './discord/actions-spawn.js';
 import { VoiceConnectionManager } from './voice/connection-manager.js';
 import { AudioPipelineManager } from './voice/audio-pipeline.js';
 import { VoicePresenceHandler } from './voice/presence-handler.js';
@@ -819,6 +820,7 @@ const botParams = {
   discordActionsMemory: discordActionsMemory && durableMemoryEnabled,
   discordActionsImagegen: cfg.discordActionsImagegen,
   discordActionsVoice: cfg.discordActionsVoice && cfg.voiceEnabled,
+  discordActionsSpawn: cfg.discordActionsSpawn,
   discordActionsConfig: discordActionsEnabled, // Always enabled when actions are on — model switching is a core capability.
   discordActionsDefer: cfg.discordActionsDefer,
   deferMaxDelaySeconds: cfg.deferMaxDelaySeconds,
@@ -830,6 +832,7 @@ const botParams = {
   planCtx: undefined as PlanContext | undefined,
   memoryCtx: undefined as MemoryContext | undefined,
   imagegenCtx: undefined as ImagegenContext | undefined,
+  spawnCtx: undefined as SpawnContext | undefined,
   voiceCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
   voiceStatusCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
   setTtsVoice: undefined as ((voice: string) => Promise<number>) | undefined,
@@ -1212,6 +1215,17 @@ if (taskCtx) {
     log.info('imagegen:action context initialized');
   }
 
+  if (discordActionsEnabled && cfg.discordActionsSpawn) {
+    botParams.spawnCtx = {
+      runtime: limitedRuntime,
+      model: runtimeModel,
+      cwd: workspaceCwd,
+      log,
+      maxConcurrent: cfg.spawnMaxConcurrent,
+    };
+    log.info({ maxConcurrent: cfg.spawnMaxConcurrent }, 'spawn:action context initialized');
+  }
+
   if (cfg.voiceEnabled) {
     const voiceLogChannelRef = cfg.voiceLogChannel ?? system?.voiceLogChannelId;
     const transcriptMirror = voiceLogChannelRef
@@ -1509,6 +1523,7 @@ if (cronEnabled && effectiveCronForum) {
     defer: false,
     imagegen: Boolean(botParams.imagegenCtx), // Follows env flag (DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN + API key) — cron jobs may generate images if explicitly configured.
     voice: Boolean(botParams.voiceCtx), // Follows env flag (DISCOCLAW_DISCORD_ACTIONS_VOICE + VOICE_ENABLED) — cron jobs may use voice if configured.
+    spawn: false, // Spawn is excluded from cron flows to prevent recursive agent spawning from scheduled jobs.
   };
   const cronRunControl = new CronRunControl();
 
