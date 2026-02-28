@@ -19,6 +19,12 @@ create → in_progress → done/closed
 
 Each task gets a unique ID with a configurable prefix (default `ws`, e.g., `ws-42`).
 
+## Live Task Awareness
+
+Open tasks are injected into every prompt at invocation time, sourced directly from the TaskStore. This means every new session starts with accurate task state regardless of rolling-summary freshness — the AI always knows which tasks are currently open without relying on stale summary text.
+
+The injection is always active when the TaskStore is available, with a hardcoded character budget of 600 chars.
+
 ## Bidirectional Sync
 
 The sync engine keeps the task store and Discord forum threads in sync. Changes on either side are detected and propagated:

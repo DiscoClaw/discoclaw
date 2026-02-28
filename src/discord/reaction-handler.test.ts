@@ -360,6 +360,38 @@ describe('createReactionAddHandler', () => {
     await fsP.rm(tmpDir, { recursive: true });
   });
 
+  it('prompt includes open-tasks section when taskCtx has open tasks', async () => {
+    const { TaskStore } = await import('../tasks/store.js');
+    const store = new TaskStore({ prefix: 'rx' });
+    store.create({ title: 'Fix login bug' });
+    store.create({ title: 'Add dark mode' });
+
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      taskCtx: { store } as any,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    await handler(mockReaction() as any, mockUser() as any);
+
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('Open tasks:');
+    expect(prompt).toContain('rx-001');
+    expect(prompt).toContain('Fix login bug');
+    expect(prompt).toContain('rx-002');
+    expect(prompt).toContain('Add dark mode');
+  });
+
   it('Discord actions parsed and executed from response, results appended to output', async () => {
     const runtime: RuntimeAdapter = {
       id: 'claude_code',

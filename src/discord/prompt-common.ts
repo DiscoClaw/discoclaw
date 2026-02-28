@@ -9,6 +9,7 @@ import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { TaskData } from '../tasks/types.js';
 import type { TaskContext } from '../tasks/task-context.js';
+import type { TaskStore } from '../tasks/store.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import type { RuntimeCapability } from '../runtime/types.js';
 import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';
@@ -218,6 +219,44 @@ export async function resolveEffectiveTools(opts: {
     runtimeCapabilityNote,
     toolTierNote,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Open tasks summary injection
+// ---------------------------------------------------------------------------
+
+export const OPEN_TASKS_MAX_CHARS = 600;
+
+/**
+ * Build a live "open tasks" summary block sourced directly from the TaskStore.
+ * Returns an empty string when the store is unavailable or no open tasks exist.
+ */
+export function buildOpenTasksSection(store: TaskStore | undefined): string {
+  if (!store) return '';
+  const tasks = store.list(); // excludes closed by default
+  if (tasks.length === 0) return '';
+
+  const header = 'Open tasks:\n';
+  let body = '';
+  let truncated = false;
+
+  for (const t of tasks) {
+    const safeTitle = t.title.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    const line = `${t.id}: ${t.status}, "${safeTitle}"\n`;
+    if (header.length + body.length + line.length > OPEN_TASKS_MAX_CHARS) {
+      truncated = true;
+      break;
+    }
+    body += line;
+  }
+
+  if (!body) return '';
+
+  if (truncated) {
+    body += '(truncated — more tasks exist)\n';
+  }
+
+  return header + body;
 }
 
 // ---------------------------------------------------------------------------

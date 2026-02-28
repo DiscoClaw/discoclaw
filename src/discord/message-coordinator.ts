@@ -56,7 +56,7 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice, closeFenceIfOpen } from './output-utils.js';
-import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
+import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
@@ -2241,7 +2241,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          const [durableSection, shortTermSection, taskSection, replyRef] = await Promise.all([
+          const [durableSection, shortTermSection, taskSection, replyRef, openTasksSection] = await Promise.all([
             buildDurableMemorySection({
               enabled: params.durableMemoryEnabled,
               durableDataDir: params.durableDataDir,
@@ -2266,6 +2266,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               log: params.log,
             }),
             resolveReplyReference(msg as MessageWithReference, params.botDisplayName, params.log),
+            buildOpenTasksSection(params.taskCtx?.store),
           ]);
 
           const inlinedContext = await inlineContextFiles(
@@ -2290,6 +2291,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               : '') +
             (shortTermSection
               ? `---\nRecent activity (cross-channel):\n${shortTermSection}\n\n`
+              : '') +
+            (openTasksSection
+              ? `---\n${openTasksSection}\n\n`
               : '') +
             (summarySection
               ? `---\nConversation memory:\n${summarySection}\n\n`

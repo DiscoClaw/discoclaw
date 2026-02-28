@@ -4,7 +4,8 @@ import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskData } from '../tasks/types.js';
 
-import { ROOT_POLICY, buildPromptPreamble, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, buildTaskContextSection, buildTaskThreadSection, resolveEffectiveTools, _resetToolsAuditState } from './prompt-common.js';
+import { ROOT_POLICY, buildPromptPreamble, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, buildTaskContextSection, buildTaskThreadSection, resolveEffectiveTools, _resetToolsAuditState, buildOpenTasksSection, OPEN_TASKS_MAX_CHARS } from './prompt-common.js';
+import { TaskStore } from '../tasks/store.js';
 
 // ---------------------------------------------------------------------------
 // ROOT_POLICY and buildPromptPreamble
@@ -214,6 +215,78 @@ describe('loadDailyLogFiles', () => {
 
     const result = await loadDailyLogFiles(workspace);
     expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildOpenTasksSection
+// ---------------------------------------------------------------------------
+
+describe('buildOpenTasksSection', () => {
+  it('returns empty string when store is undefined', () => {
+    expect(buildOpenTasksSection(undefined)).toBe('');
+  });
+
+  it('returns empty string when no open tasks exist', () => {
+    const store = new TaskStore();
+    expect(buildOpenTasksSection(store)).toBe('');
+  });
+
+  it('returns empty string when only closed tasks exist', () => {
+    const store = new TaskStore();
+    store.create({ title: 'Done task' });
+    store.close('t-001');
+    expect(buildOpenTasksSection(store)).toBe('');
+  });
+
+  it('formats tasks correctly as one-liners', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    store.create({ title: 'Fix auth bug' });
+    store.create({ title: 'Add logging' });
+    const result = buildOpenTasksSection(store);
+    expect(result).toContain('Open tasks:');
+    expect(result).toContain('ws-001: open, "Fix auth bug"');
+    expect(result).toContain('ws-002: open, "Add logging"');
+  });
+
+  it('includes in_progress and blocked tasks', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    store.create({ title: 'Open task' });
+    store.create({ title: 'Active task' });
+    store.update('ws-002', { status: 'in_progress' });
+    store.create({ title: 'Stuck task' });
+    store.update('ws-003', { status: 'blocked' });
+    const result = buildOpenTasksSection(store);
+    expect(result).toContain('ws-001: open, "Open task"');
+    expect(result).toContain('ws-002: in_progress, "Active task"');
+    expect(result).toContain('ws-003: blocked, "Stuck task"');
+  });
+
+  it('excludes closed tasks while including other statuses', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    store.create({ title: 'Open one' });
+    store.create({ title: 'Closed one' });
+    store.close('ws-002');
+    store.create({ title: 'Blocked one' });
+    store.update('ws-003', { status: 'blocked' });
+    const result = buildOpenTasksSection(store);
+    expect(result).toContain('ws-001: open, "Open one"');
+    expect(result).not.toContain('ws-002');
+    expect(result).not.toContain('Closed one');
+    expect(result).toContain('ws-003: blocked, "Blocked one"');
+  });
+
+  it('respects character budget truncation with trailer notice', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    // Create enough tasks to exceed the 600-char budget
+    for (let i = 0; i < 30; i++) {
+      store.create({ title: `Task with a reasonably long title number ${i + 1}` });
+    }
+    const result = buildOpenTasksSection(store);
+    expect(result.length).toBeLessThanOrEqual(OPEN_TASKS_MAX_CHARS + 50); // trailer adds some
+    expect(result).toContain('(truncated — more tasks exist)');
+    // Should not contain all 30 tasks
+    expect(result).not.toContain('ws-030');
   });
 });
 
