@@ -191,6 +191,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Plan & Forge reference | `docs/plan-and-forge.md` | **done** |
 | Webhook exposure guide | `docs/webhook-exposure.md` | **done** |
 | MCP guide (config, examples, troubleshooting) | `docs/mcp.md` | **done** |
+| MCP server feasibility audit (gap analysis, defer recommendation) | `docs/mcp-audit.md` | **done** |
 | MCP example template | `templates/mcp.json` | **done** |
 | Releasing / npm publish guide | `docs/releasing.md` | **done** |
 | Voice setup guide | `docs/voice.md` | **done** |
