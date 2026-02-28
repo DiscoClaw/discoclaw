@@ -19,6 +19,7 @@ import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildAllResultLines } from './discord/actions.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
 import { VOICE_STYLE_INSTRUCTION } from './voice/voice-style-prompt.js';
+import { sanitizeForVoice } from './voice/voice-sanitize.js';
 import type { SubsystemContexts } from './discord/actions.js';
 import { shouldTriggerFollowUp } from './discord/action-categories.js';
 import type { DeferScheduler } from './discord/defer-scheduler.js';
@@ -1391,11 +1392,12 @@ if (taskCtx) {
             // Follow-up check.
             if (followUpDepth < voiceActionFollowupDepth && shouldTriggerFollowUp(actions, actionResults)) {
               const followUpLines = buildAllResultLines(actionResults);
+              const sanitizedFollowUp = sanitizeForVoice(followUpLines.join('\n'));
               currentPrompt =
                 VOICE_STYLE_INSTRUCTION + '\n\n' +
                 `The user asked: "${text}"\n\n` +
                 `Your previous response queried Discord. Results:\n\n` +
-                followUpLines.join('\n') +
+                sanitizedFollowUp +
                 `\n\nAnswer the user's question using these results. If you need more data, emit additional query actions.`;
               continue;
             }
