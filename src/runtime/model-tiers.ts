@@ -1,9 +1,9 @@
 import type { RuntimeId } from './types.js';
 
 /** Provider-agnostic model tier. */
-export type ModelTier = 'fast' | 'capable';
+export type ModelTier = 'fast' | 'capable' | 'deep';
 
-const tiers = new Set<string>(['fast', 'capable']);
+const tiers = new Set<string>(['fast', 'capable', 'deep']);
 
 /** Type guard for ModelTier. */
 export function isModelTier(s: string): s is ModelTier {
@@ -15,10 +15,10 @@ export function isModelTier(s: string): s is ModelTier {
  * Empty string = adapter-default sentinel (adapter uses its own defaultModel).
  */
 const defaults: Record<string, Record<ModelTier, string>> = {
-  claude_code: { fast: 'haiku', capable: 'sonnet' },
-  gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro' },
-  openai: { fast: '', capable: '' },
-  codex: { fast: '', capable: '' },
+  claude_code: { fast: 'haiku', capable: 'sonnet', deep: 'claude-opus-4-6' },
+  gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro', deep: 'gemini-2.5-pro' },
+  openai: { fast: '', capable: '', deep: '' },
+  codex: { fast: '', capable: '', deep: '' },
 };
 
 function buildDefault(): Record<string, Record<ModelTier, string>> {
@@ -50,12 +50,15 @@ export function initTierOverrides(env: Record<string, string | undefined>): void
     } else if (rest.endsWith('_CAPABLE')) {
       tier = 'capable';
       runtimeUpper = rest.slice(0, -'_CAPABLE'.length);
+    } else if (rest.endsWith('_DEEP')) {
+      tier = 'deep';
+      runtimeUpper = rest.slice(0, -'_DEEP'.length);
     } else {
       continue;
     }
     const runtime = runtimeUpper.toLowerCase();
     if (!tierMap[runtime]) {
-      tierMap[runtime] = { fast: '', capable: '' };
+      tierMap[runtime] = { fast: '', capable: '', deep: '' };
     }
     tierMap[runtime][tier] = value;
   }
