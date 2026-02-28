@@ -685,7 +685,7 @@ export async function executeCronAction(
           }
           return {
             ok: true,
-            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.orphansDetected} orphans`,
+            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.promptMessagesCreated} prompt msgs, ${result.orphansDetected} orphans`,
           };
         } else {
           // Fallback (no coordinator): reload + snapshot + runCronSync + forumCountSync
@@ -709,7 +709,7 @@ export async function executeCronAction(
           cronCtx.forumCountSync?.requestUpdate();
           return {
             ok: true,
-            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.orphansDetected} orphans`,
+            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.promptMessagesCreated} prompt msgs, ${result.orphansDetected} orphans`,
           };
         }
       } catch (err) {
