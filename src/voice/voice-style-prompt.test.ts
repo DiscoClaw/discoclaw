@@ -22,4 +22,9 @@ describe('VOICE_STYLE_INSTRUCTION', () => {
   it('contains key term "no markdown"', () => {
     expect(VOICE_STYLE_INSTRUCTION.toLowerCase()).toContain('no markdown');
   });
+
+  it('contains key term "codes" or "IDs"', () => {
+    const lower = VOICE_STYLE_INSTRUCTION.toLowerCase();
+    expect(lower.includes('codes') || lower.includes('ids')).toBe(true);
+  });
 });

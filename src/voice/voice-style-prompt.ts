@@ -11,4 +11,5 @@ export const VOICE_STYLE_INSTRUCTION =
   'Telegraphic style: answer first, explain after only if needed. ' +
   'No markdown (no bullets, headers, bold, code blocks). ' +
   'No preambles ("Great question", "Sure", "Of course"). ' +
-  'No filler. Short sentences. One idea per sentence.';
+  'No filler. Short sentences. One idea per sentence. ' +
+  'Never read codes, IDs, or hashes verbatim — describe what they refer to instead.';
