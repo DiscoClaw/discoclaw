@@ -9,11 +9,14 @@ type DiscordMessage = {
   };
 };
 
+type StopReactionLike = { remove?(): Promise<unknown> } | null | undefined;
+
 type InFlightEntry = {
   reply: DiscordMessage;
   channelId: string;
   messageId: string;
   label: string;
+  stopReactionPromise?: Promise<StopReactionLike>;
 };
 
 type OrphanEntry = {
@@ -106,6 +109,21 @@ export function registerInFlightReply(
 }
 
 /**
+ * Attach the stop-reaction promise to a registered in-flight reply.
+ * The drain path uses this to remove the 🛑 directly instead of
+ * relying on reactions.resolve(), which can miss the cache.
+ */
+export function setStopReaction(
+  channelId: string,
+  messageId: string,
+  promise: Promise<StopReactionLike>,
+): void {
+  const key = `${channelId}:${messageId}`;
+  const entry = registry.get(key);
+  if (entry) entry.stopReactionPromise = promise;
+}
+
+/**
  * Number of currently tracked in-flight replies.
  */
 export function inFlightReplyCount(): number {
@@ -160,7 +178,12 @@ export async function drainInFlightReplies(opts?: {
       .edit({ content: INTERRUPTED_GRACEFUL, allowedMentions: NO_MENTIONS })
       .then(async () => {
         log?.info({ channelId: entry.channelId, messageId: entry.messageId, label: entry.label }, 'inflight:drain edited');
-        await entry.reply.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
+        // Prefer the stored MessageReaction (avoids reactions.resolve() cache miss).
+        if (entry.stopReactionPromise) {
+          try { const sr = await entry.stopReactionPromise; await sr?.remove?.(); } catch { /* best-effort */ }
+        } else {
+          await entry.reply.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
+        }
       })
       .catch((err) => {
         log?.warn({ err, channelId: entry.channelId, messageId: entry.messageId }, 'inflight:drain edit failed');
