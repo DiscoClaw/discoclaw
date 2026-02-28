@@ -759,7 +759,7 @@ export function cronActionsPromptSection(): string {
 - \`prompt\` (required): The instruction text.
 - \`timezone\` (optional, default: system timezone, or DEFAULT_TIMEZONE env if set): IANA timezone.
 - \`tags\` (optional): Comma-separated purpose tags.
-- \`model\` (optional): "fast" or "capable" (auto-classified if omitted).
+- \`model\` (optional): "fast", "capable", or "deep" (auto-classified if omitted).
 - \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode. In this mode the executor uses the JSON router to dispatch structured responses. The prompt may contain \`{{channel}}\` and \`{{channelId}}\` placeholders which are expanded to the target channel name and ID at runtime.
 - \`allowedActions\` (optional): Comma-separated list of Discord action types this job may emit (e.g., "cronList,cronShow"). Restricts the AI to only these action types during execution. Rejects unrecognized type names. Requires at least one entry if provided.
 

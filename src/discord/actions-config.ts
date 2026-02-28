@@ -369,7 +369,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
 - \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` role, swaps the active runtime adapter), or \`default\` (for cron-exec only, to revert to the env-configured default (Sonnet by default)).
+- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` role, swaps the active runtime adapter), or \`default\` (for cron-exec only, to revert to the env-configured default (Sonnet by default)).
 
 **Roles:**
 | Role | What it controls |
