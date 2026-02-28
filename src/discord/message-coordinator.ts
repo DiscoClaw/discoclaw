@@ -23,6 +23,7 @@ import type { MemoryContext } from './actions-memory.js';
 import type { ConfigContext } from './actions-config.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import type { VoiceContext } from './actions-voice.js';
+import type { SpawnContext } from './actions-spawn.js';
 import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -145,6 +146,7 @@ export type BotParams = {
   discordActionsDefer?: boolean;
   discordActionsImagegen?: boolean;
   discordActionsVoice?: boolean;
+  discordActionsSpawn?: boolean;
   deferMaxDelaySeconds?: number;
   deferMaxConcurrent?: number;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
@@ -156,6 +158,7 @@ export type BotParams = {
   configCtx?: ConfigContext;
   imagegenCtx?: ImagegenContext;
   voiceCtx?: VoiceContext;
+  spawnCtx?: SpawnContext;
   messageHistoryBudget: number;
   summaryEnabled: boolean;
   summaryModel: string;
@@ -639,6 +642,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         defer: !isDm && (params.discordActionsDefer ?? false),
         imagegen: params.discordActionsImagegen ?? false,
         voice: params.discordActionsVoice ?? false,
+        spawn: params.discordActionsSpawn ?? false,
       };
 
       if (isBotMessage) {
@@ -655,6 +659,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         actionFlags.tasks = false;
         actionFlags.imagegen = false;
         actionFlags.voice = false;
+        actionFlags.spawn = false;
         actionFlags.polls = false;
         actionFlags.messaging = true;
       }
@@ -2106,6 +2111,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               configCtx: params.configCtx,
               imagegenCtx: params.imagegenCtx,
               voiceCtx: params.voiceCtx,
+              spawnCtx: params.spawnCtx,
             });
             const displayLines = buildDisplayResultLines([confirmAction], actionResults);
             const content = displayLines.length > 0
@@ -2662,6 +2668,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   configCtx: params.configCtx,
                   imagegenCtx: params.imagegenCtx,
                   voiceCtx: params.voiceCtx,
+                  spawnCtx: params.spawnCtx,
                 });
                 for (const result of actionResults) {
                   metrics.recordActionResult(result.ok);

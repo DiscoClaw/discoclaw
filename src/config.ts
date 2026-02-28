@@ -46,8 +46,10 @@ export type DiscoclawConfig = {
   discordActionsDefer: boolean;
   discordActionsImagegen: boolean;
   discordActionsVoice: boolean;
+  discordActionsSpawn: boolean;
 
   deferMaxDelaySeconds: number;
+  spawnMaxConcurrent: number;
   deferMaxConcurrent: number;
 
   messageHistoryBudget: number;
@@ -405,6 +407,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsDefer = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER', true);
   const discordActionsImagegen = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', false);
   const discordActionsVoice = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_VOICE', false);
+  const discordActionsSpawn = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN', false);
+  const spawnMaxConcurrent = parsePositiveInt(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT', 4);
   const deferMaxDelaySeconds = parsePositiveNumber(
     env,
     'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS',
@@ -432,6 +436,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       { name: 'DISCOCLAW_DISCORD_ACTIONS_DEFER', enabled: discordActionsDefer },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', enabled: discordActionsImagegen },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_VOICE', enabled: discordActionsVoice },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_SPAWN', enabled: discordActionsSpawn },
     ]
       .filter((entry) => (env[entry.name] ?? '').trim().length > 0 && entry.enabled)
       .map((entry) => entry.name);
@@ -618,9 +623,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsDefer,
       discordActionsImagegen,
       discordActionsVoice,
+      discordActionsSpawn,
 
       deferMaxDelaySeconds,
       deferMaxConcurrent,
+      spawnMaxConcurrent,
 
       messageHistoryBudget: parseNonNegativeInt(env, 'DISCOCLAW_MESSAGE_HISTORY_BUDGET', 3000),
       summaryEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_ENABLED', true),

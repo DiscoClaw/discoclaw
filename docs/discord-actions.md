@@ -127,7 +127,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
   - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
-  - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0; requires Phase 2 config wiring — not active at runtime until wired)
+  - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 8)
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
   - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
 
@@ -418,14 +418,15 @@ Allow the model to spawn a parallel sub-agent invocation in a target channel, ex
 | `channel` | Yes | Target channel name or ID where the spawned agent posts its output |
 | `prompt` | Yes | Instruction text sent to the spawned agent as the user message |
 | `model` | No | Model override for the spawned invocation |
+| `label` | No | Short human-readable label for the agent (used in error messages and summaries) |
 
 #### Execution Flow
 
 1. The action executor receives a `spawnAgent` block from the model's response.
 2. It resolves the target channel on the current guild.
-3. It builds a prompt for the sub-agent (PA preamble + spawn context header + the user-supplied `prompt`).
-4. It fires the runtime invocation asynchronously — the caller does not await the result before continuing.
-5. The spawned agent runs independently: parses and executes its own action blocks, assembles its output, and posts it to the target channel.
+3. It invokes the runtime with the user-supplied `prompt` directly — no PA preamble or context header is prepended.
+4. It streams the runtime output, collecting text events (`text_delta` / `text_final`) and returning an error if the stream emits an `error` event.
+5. The collected output text is split and posted to the target channel via `targetChannel.send()`. Action blocks in the spawned agent's output are not parsed or executed — they are posted as literal text.
 
 Multiple `spawnAgent` actions in a single response are dispatched in parallel via `Promise.allSettled`, so all spawns start immediately and run concurrently.
 
@@ -437,8 +438,7 @@ This prevents unbounded parallel agent trees from a single top-level message.
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0).
 Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). No separate subsystem context object.
-
-> **Phase 2 required:** The env flag, `BotParams` threading, and index-level registration for `spawnAgent` are implemented in Phase 2. Until then, `actions-spawn.ts` is built and tested in isolation but no runtime code path enables it. If a model emits a `spawnAgent` block before Phase 2 is wired, the parser will silently drop it as an unrecognized type.
+Concurrency: At most `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` (default 8) spawned agents run in parallel per batch. If a response contains more than this limit, the remainder are processed in sequential batches until all are complete — none are dropped.
 
 ### Cron Flow Restrictions
 
@@ -480,7 +480,7 @@ Action flag overrides (always applied, regardless of env):
 - `memory`: `false` — deferred runs carry no user identity.
 - `defer`: `false` — prevents chaining; a deferred run cannot schedule further deferred runs.
 
-All other categories (`channels`, `messaging`, `guild`, `moderation`, `polls`, `tasks`, `crons`, `botProfile`, `forge`, `plan`, `config`) follow their env flags.
+All other categories (`channels`, `messaging`, `guild`, `moderation`, `polls`, `tasks`, `crons`, `botProfile`, `forge`, `plan`, `config`, `imagegen`, `voice`) follow their env flags.
 
 Configuration:
 - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1) — master switch for the defer action.
