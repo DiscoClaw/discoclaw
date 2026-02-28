@@ -41,6 +41,9 @@ type StartupClient = {
   channels: {
     fetch(id: string): Promise<unknown>;
   };
+  rest?: {
+    delete?(route: string): Promise<unknown>;
+  };
 };
 
 function asOrphanEntry(value: unknown): OrphanEntry | null {
@@ -240,7 +243,13 @@ export async function cleanupOrphanedReplies(opts: {
       }
       const message = await channel.messages.fetch(orphan.messageId);
       await message.edit({ content: INTERRUPTED_COLD, allowedMentions: NO_MENTIONS });
-      await message.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
+      // Remove 🛑 via REST — cold-start has no stored MessageReaction promise
+      // (different process), and reactions.resolve() depends on cache population.
+      if (client.rest?.delete) {
+        await client.rest.delete(`/channels/${orphan.channelId}/messages/${orphan.messageId}/reactions/${encodeURIComponent('🛑')}/@me`).catch(() => {});
+      } else {
+        await message.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
+      }
       log?.info({ channelId: orphan.channelId, messageId: orphan.messageId }, 'inflight:cold-start edited orphan');
     } catch (err) {
       log?.warn({ err, channelId: orphan.channelId, messageId: orphan.messageId }, 'inflight:cold-start orphan cleanup failed');

@@ -407,7 +407,38 @@ describe('cleanupOrphanedReplies', () => {
     expect(elapsed).toBeLessThan(2000);
   });
 
-  it('removes 🛑 reaction after editing orphaned message', async () => {
+  it('removes 🛑 via REST when client.rest.delete is available', async () => {
+    const filePath = path.join(tmpDir, 'inflight.json');
+    await fs.writeFile(filePath, JSON.stringify([
+      { channelId: 'ch1', messageId: 'msg1' },
+    ]));
+
+    const restDeleteSpy = vi.fn().mockResolvedValue(undefined);
+    const mockMessage = {
+      edit: vi.fn().mockResolvedValue(undefined),
+      reactions: {
+        resolve: vi.fn().mockReturnValue({ remove: vi.fn() }),
+      },
+    };
+    const mockChannel = {
+      messages: { fetch: vi.fn().mockResolvedValue(mockMessage) },
+    };
+    const client = {
+      channels: { fetch: vi.fn().mockResolvedValue(mockChannel) },
+      rest: { delete: restDeleteSpy },
+    };
+    const log = mockLog();
+
+    await cleanupOrphanedReplies({ client, dataFilePath: filePath, log });
+
+    expect(restDeleteSpy).toHaveBeenCalledOnce();
+    expect(restDeleteSpy.mock.calls[0][0]).toContain('/channels/ch1/messages/msg1/reactions/');
+    expect(restDeleteSpy.mock.calls[0][0]).toContain('/@me');
+    // reactions.resolve should NOT be called when REST is available.
+    expect(mockMessage.reactions.resolve).not.toHaveBeenCalled();
+  });
+
+  it('falls back to reactions.resolve when client.rest is unavailable', async () => {
     const filePath = path.join(tmpDir, 'inflight.json');
     await fs.writeFile(filePath, JSON.stringify([
       { channelId: 'ch1', messageId: 'msg1' },
