@@ -26,6 +26,7 @@ vi.mock('./actions.js', () => ({
   executeDiscordActions: vi.fn(async () => []),
   discordActionsPromptSection: vi.fn(() => ''),
   buildDisplayResultLines: vi.fn(() => []),
+  appendActionResults: vi.fn((body: string) => body),
 }));
 
 vi.mock('./action-utils.js', () => ({

@@ -1,5 +1,5 @@
 import type { ActionContext, ActionCategoryFlags, DiscordActionResult } from './actions.js';
-import { buildDisplayResultLines, discordActionsPromptSection, executeDiscordActions, parseDiscordActions } from './actions.js';
+import { appendActionResults, discordActionsPromptSection, executeDiscordActions, parseDiscordActions } from './actions.js';
 import { fmtTime, resolveChannel } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import type { CronContext } from './actions-crons.js';
@@ -18,7 +18,6 @@ import type { TaskContext } from '../tasks/task-context.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
-import { closeFenceIfOpen } from './output-utils.js';
 import {
   buildContextFiles,
   buildPromptPreamble,
@@ -278,11 +277,7 @@ export function configureDeferredScheduler(
       }
     }
 
-    const displayLines = buildDisplayResultLines(parsed.actions, actionResults);
-    let outgoingText = parsed.cleanText.trim();
-    if (displayLines.length > 0) {
-      outgoingText = outgoingText ? `${closeFenceIfOpen(outgoingText)}\n\n${displayLines.join('\n')}` : displayLines.join('\n');
-    }
+    let outgoingText = appendActionResults(parsed.cleanText.trim(), parsed.actions, actionResults);
     outgoingText = appendUnavailableActionTypesNotice(outgoingText, parsed.strippedUnrecognizedTypes).trim();
     outgoingText = appendParseFailureNotice(outgoingText, parsed.parseFailures).trim();
     if (!outgoingText && runtimeError) {

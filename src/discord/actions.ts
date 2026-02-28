@@ -103,6 +103,7 @@ export type DiscordActionResult =
   | { ok: true; summary: string }
   | { ok: false; error: string };
 
+import { appendOutsideFence } from './output-utils.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 
 export type SubsystemContexts = {
@@ -687,6 +688,21 @@ export function buildAllResultLines(
   return results.map((r) =>
     r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`,
   );
+}
+
+/**
+ * Append display result lines to body text, automatically closing any
+ * unclosed fenced code block so the results render outside the block.
+ * Returns body unchanged when there are no display lines.
+ */
+export function appendActionResults(
+  body: string,
+  actions: { type: string }[],
+  results: DiscordActionResult[],
+): string {
+  const displayLines = buildDisplayResultLines(actions, results);
+  if (displayLines.length === 0) return body;
+  return appendOutsideFence(body, displayLines.join('\n'));
 }
 
 // ---------------------------------------------------------------------------

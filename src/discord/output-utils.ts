@@ -32,6 +32,17 @@ export function closeFenceIfOpen(text: string): string {
   return text + '\n' + fenceChar.repeat(fenceLen);
 }
 
+/**
+ * Safely append suffix text after body, closing any unclosed fenced code
+ * block first so the suffix renders as normal markdown rather than leaking
+ * inside the code block.
+ */
+export function appendOutsideFence(body: string, suffix: string): string {
+  if (!suffix) return body;
+  if (!body) return suffix;
+  return closeFenceIfOpen(body.trimEnd()) + '\n\n' + suffix;
+}
+
 export function splitDiscord(text: string, limit = 2000): string[] {
   // Minimal fence-safe markdown chunking.
   const normalized = text.replace(/\r\n?/g, '\n');

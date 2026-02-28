@@ -9,7 +9,7 @@ import { KeyedQueue } from '../group-queue.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { discordSessionKey } from './session-key.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines, appendActionResults } from './actions.js';
 import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './actions.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
@@ -55,7 +55,7 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed, buildCompletionNotice, closeFenceIfOpen } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed, buildCompletionNotice } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
@@ -2677,11 +2677,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     'obs.action.result',
                   );
                 }
-                const displayLines = buildDisplayResultLines(actions, actionResults);
                 const anyActionSucceeded = actionResults.some((r) => r.ok);
-                processedText = displayLines.length > 0
-                  ? closeFenceIfOpen(parsed.cleanText.trimEnd()) + '\n\n' + displayLines.join('\n')
-                  : parsed.cleanText.trimEnd();
+                processedText = appendActionResults(parsed.cleanText.trimEnd(), actions, actionResults);
                 // When all display lines were suppressed (e.g. sendMessage-only) and there's
                 // no prose, delete the placeholder instead of posting "(no output)".
                 if (

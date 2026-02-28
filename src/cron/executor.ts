@@ -348,11 +348,8 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           metrics.recordActionResult(result.ok);
           ctx.log?.info({ flow: 'cron', jobId: job.id, ok: result.ok }, 'obs.action.result');
         }
-        const displayLines = discordActions.buildDisplayResultLines(actions, results);
         const anyActionSucceeded = results.some((r) => r.ok);
-        processedText = displayLines.length > 0
-          ? cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
-          : cleanText.trimEnd();
+        processedText = discordActions.appendActionResults(cleanText.trimEnd(), actions, results);
         // When all display lines were suppressed and there's no prose, skip posting.
         if (!processedText.trim() && anyActionSucceeded && strippedUnrecognizedTypes.length === 0 && parseFailuresCount === 0) {
           ctx.log?.info({ jobId: job.id }, 'cron:reply suppressed (actions-only, no display text)');
