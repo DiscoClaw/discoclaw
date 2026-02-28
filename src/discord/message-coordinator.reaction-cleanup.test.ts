@@ -84,11 +84,14 @@ function makeParams(runtime: any) {
 /** Build a reply mock and expose the stop-reaction remove spy directly. */
 function makeReplyMock(reactImpl?: () => Promise<unknown>) {
   const removeStopReaction = vi.fn(async () => undefined);
+  // react() returns a MessageReaction-like with .remove() — the production code
+  // uses this return value directly instead of going through reactions.resolve().
+  const defaultReactImpl = () => Promise.resolve({ remove: removeStopReaction });
   const reply = {
     id: 'reply-1',
     edit: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockResolvedValue(undefined),
-    react: vi.fn(reactImpl ?? (() => Promise.resolve(undefined))),
+    react: vi.fn(reactImpl ?? defaultReactImpl),
     reactions: {
       resolve: vi.fn((emoji: string) =>
         emoji === '🛑' ? { remove: removeStopReaction } : null,
@@ -174,7 +177,7 @@ describe('🛑 reaction cleanup', () => {
     expect(removeStopReaction).toHaveBeenCalledTimes(1);
   });
 
-  it('removes 🛑 even when react() itself rejects', async () => {
+  it('does not throw when react() itself rejects (no reaction to remove)', async () => {
     const { reply, removeStopReaction } = makeReplyMock(
       () => Promise.reject(new Error('rate limited')),
     );
@@ -189,21 +192,24 @@ describe('🛑 reaction cleanup', () => {
     const handler = await makeHandler(params, queue);
 
     await expect(handler(msg as any)).resolves.not.toThrow();
-    expect(removeStopReaction).toHaveBeenCalledTimes(1);
+    // react() failed so there's no MessageReaction — remove should not be called.
+    expect(removeStopReaction).not.toHaveBeenCalled();
   });
 
   it('awaits react() before calling remove — ordering guarantee for fast-fail streams', async () => {
     const order: string[] = [];
+    const removeStopReaction = vi.fn(async () => { order.push('remove'); });
 
     // Controlled react promise: doesn't resolve until we call resolveReact().
     let resolveReact!: () => void;
-    const slowReact = new Promise<void>((res) => { resolveReact = res; });
+    const slowReact = new Promise<{ remove: typeof removeStopReaction }>((res) => {
+      resolveReact = () => res({ remove: removeStopReaction });
+    });
 
     // Track order: react-resolved fires when the slow promise resolves.
     void slowReact.then(() => { order.push('react-resolved'); });
 
-    const { reply, removeStopReaction } = makeReplyMock(() => slowReact);
-    removeStopReaction.mockImplementation(async () => { order.push('remove'); });
+    const { reply } = makeReplyMock(() => slowReact);
 
     const msg = makeMessage(reply);
     const runtime = makeRuntime([

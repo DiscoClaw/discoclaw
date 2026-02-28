@@ -252,7 +252,7 @@ type ReplyTarget = {
   id: string;
   edit: (opts: { content: string; allowedMentions?: unknown; files?: unknown[] }) => Promise<unknown>;
   delete: () => Promise<unknown>;
-  react?: (emoji: string) => Promise<unknown>;
+  react?: (emoji: string) => Promise<{ remove?: () => Promise<unknown> }>;
   reactions?: {
     resolve?: (emoji: string) => { remove?: () => Promise<unknown> } | null;
   };
@@ -2155,7 +2155,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           const { signal, dispose: abortDispose } = registerAbort(reply.id);
           abortSignal = signal;
           // Best-effort: add 🛑 so the user can tap it to kill the running stream.
-          const reactPromise = reply.react?.('🛑')?.catch(() => { /* best-effort */ });
+          // Capture the MessageReaction so we can call .remove() directly in finally
+          // instead of relying on reactions.resolve() which can miss the cache.
+          const reactPromise = reply.react?.('🛑')?.catch(() => null);
           // Declared before try so they remain accessible after the finally block closes.
           let historySection = '';
           let summarySection = '';
@@ -2826,9 +2828,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
             abortDispose();
             // Best-effort: remove the 🛑 reaction added at stream start.
-            // Await the react() promise first so the reaction is in cache before removal.
-            await reactPromise?.catch(() => { /* best-effort */ });
-            try { await reply?.reactions?.resolve?.('🛑')?.remove?.(); } catch { /* best-effort */ }
+            // Use the MessageReaction directly — reactions.resolve() can miss the cache.
+            try { const sr = await reactPromise; await sr?.remove?.(); } catch { /* best-effort */ }
             dispose();
           }
 
