@@ -7,7 +7,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 // ---------------------------------------------------------------------------
 
 export type SpawnActionRequest =
-  | { type: 'spawnAgent'; prompt: string; label?: string };
+  | { type: 'spawnAgent'; channel: string; prompt: string; model?: string; label?: string };
 
 const SPAWN_TYPE_MAP: Record<SpawnActionRequest['type'], true> = {
   spawnAgent: true,
@@ -42,18 +42,23 @@ export async function executeSpawnAction(
 
   switch (action.type) {
     case 'spawnAgent': {
+      if (!action.channel?.trim()) {
+        return { ok: false, error: 'spawnAgent requires a non-empty channel' };
+      }
+
       if (!action.prompt?.trim()) {
         return { ok: false, error: 'spawnAgent requires a non-empty prompt' };
       }
 
       const label = action.label?.trim() || 'agent';
       const timeoutMs = spawnCtx.timeoutMs ?? 120_000;
+      const model = action.model ?? spawnCtx.model;
 
       try {
         let text = '';
         const stream = spawnCtx.runtime.invoke({
           prompt: action.prompt,
-          model: spawnCtx.model,
+          model,
           cwd: spawnCtx.cwd,
           timeoutMs,
         });
@@ -124,16 +129,18 @@ export async function executeSpawnActions(
 export function spawnActionsPromptSection(): string {
   return `### Spawn Agent
 
-**spawnAgent** — Spawn a sub-agent with a prompt and receive its output:
+**spawnAgent** — Spawn a parallel sub-agent in a target channel:
 \`\`\`
-<discord-action>{"type":"spawnAgent","prompt":"List all open tasks and summarize their status","label":"task-summary"}</discord-action>
+<discord-action>{"type":"spawnAgent","channel":"general","prompt":"List all open tasks and summarize their status","label":"task-summary"}</discord-action>
 \`\`\`
+- \`channel\` (required): Target channel name or ID where the spawned agent posts its output.
 - \`prompt\` (required): The instruction to send to the sub-agent.
+- \`model\` (optional): Model override for the spawned invocation.
 - \`label\` (optional): A short human-readable label for the agent (used in error messages).
 
 #### Spawn Guidelines
 - Multiple spawnAgent actions in a single response are run in parallel for efficiency.
 - Spawned agents run at recursion depth 1 and cannot themselves spawn further agents.
-- Agent output is returned to you as an action result for further analysis.
+- The spawned agent runs fire-and-forget: it posts its output directly to the target channel.
 - Keep prompts focused — each agent handles a single well-defined task.`;
 }

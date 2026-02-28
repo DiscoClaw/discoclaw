@@ -68,7 +68,7 @@ describe('executeSpawnAction', () => {
   describe('spawnAgent', () => {
     it('returns agent text output as summary', async () => {
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Say hello' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Say hello' },
         makeCtx(),
         makeSpawnCtx(),
       );
@@ -78,9 +78,29 @@ describe('executeSpawnAction', () => {
       }
     });
 
+    it('fails on empty channel', async () => {
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: '', prompt: 'Do something' },
+        makeCtx(),
+        makeSpawnCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires a non-empty channel');
+    });
+
+    it('fails on whitespace-only channel', async () => {
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: '   ', prompt: 'Do something' },
+        makeCtx(),
+        makeSpawnCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires a non-empty channel');
+    });
+
     it('fails on empty prompt', async () => {
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: '' },
+        { type: 'spawnAgent', channel: 'general', prompt: '' },
         makeCtx(),
         makeSpawnCtx(),
       );
@@ -90,7 +110,7 @@ describe('executeSpawnAction', () => {
 
     it('fails on whitespace-only prompt', async () => {
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: '   ' },
+        { type: 'spawnAgent', channel: 'general', prompt: '   ' },
         makeCtx(),
         makeSpawnCtx(),
       );
@@ -100,7 +120,7 @@ describe('executeSpawnAction', () => {
 
     it('blocks at recursion depth >= 1', async () => {
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Do something' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
         makeCtx(),
         makeSpawnCtx({ depth: 1 }),
       );
@@ -111,7 +131,7 @@ describe('executeSpawnAction', () => {
     it('uses label in error messages on runtime error event', async () => {
       const runtime = makeRuntime([{ type: 'error', message: 'Runtime error' }]);
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Do something', label: 'my-agent' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do something', label: 'my-agent' },
         makeCtx(),
         makeSpawnCtx({ runtime }),
       );
@@ -130,7 +150,7 @@ describe('executeSpawnAction', () => {
         { type: 'done' },
       ]);
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Do something' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
         makeCtx(),
         makeSpawnCtx({ runtime }),
       );
@@ -145,7 +165,7 @@ describe('executeSpawnAction', () => {
         { type: 'done' },
       ]);
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Greet' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Greet' },
         makeCtx(),
         makeSpawnCtx({ runtime }),
       );
@@ -162,7 +182,7 @@ describe('executeSpawnAction', () => {
         }),
       };
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Do something' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
         makeCtx(),
         makeSpawnCtx({ runtime }),
       );
@@ -173,7 +193,7 @@ describe('executeSpawnAction', () => {
     it('returns fallback message with label when agent outputs nothing', async () => {
       const runtime = makeRuntime([{ type: 'done' }]);
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Do something', label: 'silent-agent' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do something', label: 'silent-agent' },
         makeCtx(),
         makeSpawnCtx({ runtime }),
       );
@@ -187,7 +207,7 @@ describe('executeSpawnAction', () => {
     it('uses "agent" as default label in fallback message', async () => {
       const runtime = makeRuntime([{ type: 'done' }]);
       const result = await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Do something' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
         makeCtx(),
         makeSpawnCtx({ runtime }),
       );
@@ -200,7 +220,7 @@ describe('executeSpawnAction', () => {
       const spawnCtx = makeSpawnCtx({ runtime, model: 'claude-opus-4-6', cwd: '/my/cwd' });
 
       await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Do something specific' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do something specific' },
         makeCtx(),
         spawnCtx,
       );
@@ -214,12 +234,27 @@ describe('executeSpawnAction', () => {
       );
     });
 
+    it('action.model overrides spawnCtx.model', async () => {
+      const runtime = makeRuntime([{ type: 'done' }]);
+      const spawnCtx = makeSpawnCtx({ runtime, model: 'claude-haiku-4-5-20251001' });
+
+      await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task', model: 'claude-opus-4-6' },
+        makeCtx(),
+        spawnCtx,
+      );
+
+      expect(runtime.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'claude-opus-4-6' }),
+      );
+    });
+
     it('passes timeoutMs to runtime invocation', async () => {
       const runtime = makeRuntime([{ type: 'done' }]);
       const spawnCtx = makeSpawnCtx({ runtime, timeoutMs: 30_000 });
 
       await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Quick task' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Quick task' },
         makeCtx(),
         spawnCtx,
       );
@@ -234,7 +269,7 @@ describe('executeSpawnAction', () => {
       const spawnCtx = makeSpawnCtx({ runtime });
 
       await executeSpawnAction(
-        { type: 'spawnAgent', prompt: 'Task' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task' },
         makeCtx(),
         spawnCtx,
       );
@@ -258,7 +293,7 @@ describe('executeSpawnActions', () => {
 
   it('runs a single agent and returns its result', async () => {
     const results = await executeSpawnActions(
-      [{ type: 'spawnAgent', prompt: 'Single task' }],
+      [{ type: 'spawnAgent', channel: 'general', prompt: 'Single task' }],
       makeCtx(),
       makeSpawnCtx(),
     );
@@ -281,9 +316,9 @@ describe('executeSpawnActions', () => {
 
     const results = await executeSpawnActions(
       [
-        { type: 'spawnAgent', prompt: 'First task' },
-        { type: 'spawnAgent', prompt: 'Second task' },
-        { type: 'spawnAgent', prompt: 'Third task' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'First task' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Second task' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Third task' },
       ],
       makeCtx(),
       spawnCtx,
@@ -310,7 +345,7 @@ describe('executeSpawnActions', () => {
     };
 
     await executeSpawnActions(
-      Array.from({ length: 8 }, (_, i) => ({ type: 'spawnAgent' as const, prompt: `Task ${i}` })),
+      Array.from({ length: 8 }, (_, i) => ({ type: 'spawnAgent' as const, channel: 'general', prompt: `Task ${i}` })),
       makeCtx(),
       makeSpawnCtx({ runtime, maxConcurrent: 3 }),
     );
@@ -335,7 +370,7 @@ describe('executeSpawnActions', () => {
     };
 
     await executeSpawnActions(
-      Array.from({ length: 10 }, (_, i) => ({ type: 'spawnAgent' as const, prompt: `Task ${i}` })),
+      Array.from({ length: 10 }, (_, i) => ({ type: 'spawnAgent' as const, channel: 'general', prompt: `Task ${i}` })),
       makeCtx(),
       makeSpawnCtx({ runtime }),
     );
@@ -361,9 +396,9 @@ describe('executeSpawnActions', () => {
 
     const results = await executeSpawnActions(
       [
-        { type: 'spawnAgent', prompt: 'First' },
-        { type: 'spawnAgent', prompt: 'Second' },
-        { type: 'spawnAgent', prompt: 'Third' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'First' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Second' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Third' },
       ],
       makeCtx(),
       makeSpawnCtx({ runtime }),
@@ -379,8 +414,8 @@ describe('executeSpawnActions', () => {
   it('all results are ok: false when depth >= 1 (recursion guard)', async () => {
     const results = await executeSpawnActions(
       [
-        { type: 'spawnAgent', prompt: 'First' },
-        { type: 'spawnAgent', prompt: 'Second' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'First' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Second' },
       ],
       makeCtx(),
       makeSpawnCtx({ depth: 1 }),
@@ -400,9 +435,19 @@ describe('spawnActionsPromptSection', () => {
     expect(section).toContain('spawnAgent');
   });
 
+  it('documents the channel field', () => {
+    const section = spawnActionsPromptSection();
+    expect(section).toContain('channel');
+  });
+
   it('documents the prompt field', () => {
     const section = spawnActionsPromptSection();
     expect(section).toContain('prompt');
+  });
+
+  it('documents the model field', () => {
+    const section = spawnActionsPromptSection();
+    expect(section).toContain('model');
   });
 
   it('documents the label field', () => {
