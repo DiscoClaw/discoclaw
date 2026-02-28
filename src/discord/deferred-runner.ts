@@ -18,6 +18,7 @@ import type { TaskContext } from '../tasks/task-context.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
+import { closeFenceIfOpen } from './output-utils.js';
 import {
   buildContextFiles,
   buildPromptPreamble,
@@ -280,7 +281,7 @@ export function configureDeferredScheduler(
     const displayLines = buildDisplayResultLines(parsed.actions, actionResults);
     let outgoingText = parsed.cleanText.trim();
     if (displayLines.length > 0) {
-      outgoingText = outgoingText ? `${outgoingText}\n\n${displayLines.join('\n')}` : displayLines.join('\n');
+      outgoingText = outgoingText ? `${closeFenceIfOpen(outgoingText)}\n\n${displayLines.join('\n')}` : displayLines.join('\n');
     }
     outgoingText = appendUnavailableActionTypesNotice(outgoingText, parsed.strippedUnrecognizedTypes).trim();
     outgoingText = appendParseFailureNotice(outgoingText, parsed.parseFailures).trim();

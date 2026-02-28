@@ -14,7 +14,7 @@ import { tryAbortAll } from './abort-registry.js';
 import { getActiveOrchestrator } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
 import { editThenSendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
-import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
+import { formatBoldLabel, thinkingLabel, selectStreamingOutput, closeFenceIfOpen } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
@@ -631,7 +631,7 @@ function createReactionHandler(
               const displayLines = buildDisplayResultLines(parsed.actions, results);
               const anyActionSucceeded = results.some((r) => r.ok);
               processedText = displayLines.length > 0
-                ? parsed.cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
+                ? closeFenceIfOpen(parsed.cleanText.trimEnd()) + '\n\n' + displayLines.join('\n')
                 : parsed.cleanText.trimEnd();
               // When all display lines were suppressed (e.g. sendMessage-only) and there's
               // no prose, delete the placeholder instead of posting "(no output)".

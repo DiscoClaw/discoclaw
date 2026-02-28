@@ -55,7 +55,7 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed, buildCompletionNotice } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, formatElapsed, buildCompletionNotice, closeFenceIfOpen } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
@@ -2680,7 +2680,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const displayLines = buildDisplayResultLines(actions, actionResults);
                 const anyActionSucceeded = actionResults.some((r) => r.ok);
                 processedText = displayLines.length > 0
-                  ? parsed.cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
+                  ? closeFenceIfOpen(parsed.cleanText.trimEnd()) + '\n\n' + displayLines.join('\n')
                   : parsed.cleanText.trimEnd();
                 // When all display lines were suppressed (e.g. sendMessage-only) and there's
                 // no prose, delete the placeholder instead of posting "(no output)".

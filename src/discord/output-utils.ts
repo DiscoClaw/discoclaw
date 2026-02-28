@@ -1,3 +1,37 @@
+/**
+ * If the text ends inside an unclosed fenced code block, append the matching
+ * closing fence so that any subsequently appended text lands outside the block.
+ * Handles both backtick and tilde fences, respecting fence length.
+ */
+export function closeFenceIfOpen(text: string): string {
+  const lines = text.split('\n');
+  let inFence = false;
+  let fenceChar = '';
+  let fenceLen = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (!inFence) {
+      // Opening fence: 3+ identical chars (` or ~), optionally followed by info string
+      const match = trimmed.match(/^(`{3,}|~{3,})/);
+      if (match) {
+        inFence = true;
+        fenceChar = match[1][0];
+        fenceLen = match[1].length;
+      }
+    } else {
+      // Closing fence: same char, at least as many, nothing else on the line
+      const match = trimmed.match(/^(`{3,}|~{3,})\s*$/);
+      if (match && match[1][0] === fenceChar && match[1].length >= fenceLen) {
+        inFence = false;
+      }
+    }
+  }
+
+  if (!inFence) return text;
+  return text + '\n' + fenceChar.repeat(fenceLen);
+}
+
 export function splitDiscord(text: string, limit = 2000): string[] {
   // Minimal fence-safe markdown chunking.
   const normalized = text.replace(/\r\n?/g, '\n');
