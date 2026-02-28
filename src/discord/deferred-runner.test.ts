@@ -14,6 +14,7 @@ vi.mock('./prompt-common.js', () => ({
     runtimeCapabilityNote: null,
   })),
   buildPromptPreamble: vi.fn(() => ''),
+  buildOpenTasksSection: vi.fn(() => ''),
 }));
 
 vi.mock('./actions.js', () => ({
@@ -221,6 +222,23 @@ describe('deferred-runner observability', () => {
 
     expect(recordActionResult).toHaveBeenCalledWith(false);
     expect(status.actionFailed).toHaveBeenCalledWith('sendMessage', 'Permission denied');
+  });
+
+  it('calls buildOpenTasksSection during prompt assembly', async () => {
+    const { buildOpenTasksSection } = await import('./prompt-common.js');
+    const mockBuildOpenTasks = buildOpenTasksSection as ReturnType<typeof vi.fn>;
+    mockBuildOpenTasks.mockClear();
+
+    const taskStore = { getAll: vi.fn(() => []) };
+    const opts = makeOpts({
+      state: { ...makeState(), taskCtx: { store: taskStore } },
+    });
+
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mockBuildOpenTasks).toHaveBeenCalledWith(taskStore);
   });
 
   it('null status does not throw on runtime error', async () => {

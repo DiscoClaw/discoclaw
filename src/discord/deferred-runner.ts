@@ -21,6 +21,7 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
 import {
   buildContextFiles,
+  buildOpenTasksSection,
   buildPromptPreamble,
   inlineContextFiles,
   loadWorkspacePaFiles,
@@ -159,8 +160,12 @@ export function configureDeferredScheduler(
     }
 
     const deferredActionFlags = buildDeferredActionFlags(opts.state);
+    const openTasksSection = buildOpenTasksSection(opts.state.taskCtx?.store);
     let prompt =
       buildPromptPreamble(inlinedContext) + '\n\n' +
+      (openTasksSection
+        ? `---\n${openTasksSection}\n\n`
+        : '') +
       `---\nDeferred follow-up scheduled for <#${channel.id}> (runs at ${fmtTime(run.runsAt)}).\n---\n` +
       `User message:\n${action.prompt}`;
 
