@@ -5,6 +5,13 @@ Tasks are backed by an in-process `TaskStore` and synced to Discord forum thread
 Ground-zero post-hard-cut refactor tracker: `docs/tasks-ground-zero-post-hard-cut-plan.md`
 Ground-zero task architecture refactor status: COMPLETE (FROZEN), verified on 2026-02-21.
 
+## Prompt Injection
+
+Open task statuses are injected into prompts at invocation time, sourced directly
+from the TaskStore. This ensures every new session starts with accurate task state
+regardless of rolling summary freshness. See `.context/memory.md` for assembly order
+and token budget.
+
 ## Data Model
 
 Canonical type: `TaskData` in `src/tasks/types.ts`.

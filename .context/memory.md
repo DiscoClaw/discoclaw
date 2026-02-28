@@ -187,13 +187,14 @@ no separator). The three memory builders run in `Promise.all` so they add no lat
 | Rolling summary | 2000 chars | on | The `fast`-tier model is prompted with `"Keep the summary under {maxChars} characters"`. Replaces itself each update rather than growing. |
 | Message history | 3000 chars | on | Fetches up to 10 messages, walks backward from newest. Bot messages truncated to fit; user messages that don't fit cause a hard stop. |
 | Short-term memory | 1000 chars | **on** | Filters by max age (default 6h), sorts newest-first, accumulates lines until budget hit. |
+| Open tasks | 1000 chars | **on** | Queries TaskStore for non-closed tasks at invocation time, formats as a compact list. |
 | Auto-extraction | n/a | **off** | Write-side only — extracts facts for future prompts, adds nothing to the current turn. |
 | Workspace files | no budget | on (DMs only) | Loaded as file paths, not inlined. The runtime reads them on demand. |
 
 ### Default prompt overhead
 
-With the three enabled layers at default settings, worst-case memory overhead is
-**~7000 chars (~1750 tokens)**. With all layers enabled, ~8000 chars (~2000 tokens).
+With the four enabled layers at default settings, worst-case memory overhead is
+**~8000 chars (~2000 tokens)**. With all layers enabled, ~9000 chars (~2250 tokens).
 This is modest against typical `capable`-tier context windows.
 
 In practice most prompts use far less — a user with 5 durable items and a short summary
@@ -216,6 +217,7 @@ Memory sections are injected into every prompt in this order:
 Context files (PA + MEMORY.md + daily logs + channel context)
   → Durable memory section (up to 2000 chars)
   → Short-term memory section (up to 1000 chars)
+  → Open tasks section (up to 1000 chars)
   → Rolling summary section (up to 2000 chars)
   → Message history (up to 3000 chars)
   → Discord actions
