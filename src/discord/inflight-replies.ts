@@ -4,6 +4,9 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 
 type DiscordMessage = {
   edit(opts: { content: string; allowedMentions?: { parse: readonly never[] } }): Promise<unknown>;
+  reactions?: {
+    resolve?(emoji: string): { remove?(): Promise<unknown> } | null;
+  };
 };
 
 type InFlightEntry = {
@@ -20,6 +23,9 @@ type OrphanEntry = {
 
 type FetchableMessage = {
   edit(opts: { content: string; allowedMentions?: { parse: readonly never[] } }): Promise<unknown>;
+  reactions?: {
+    resolve?(emoji: string): { remove?(): Promise<unknown> } | null;
+  };
 };
 
 type MessageFetchableChannel = {
@@ -152,8 +158,9 @@ export async function drainInFlightReplies(opts?: {
   const editPromises = entries.map((entry) =>
     entry.reply
       .edit({ content: INTERRUPTED_GRACEFUL, allowedMentions: NO_MENTIONS })
-      .then(() => {
+      .then(async () => {
         log?.info({ channelId: entry.channelId, messageId: entry.messageId, label: entry.label }, 'inflight:drain edited');
+        await entry.reply.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
       })
       .catch((err) => {
         log?.warn({ err, channelId: entry.channelId, messageId: entry.messageId }, 'inflight:drain edit failed');
@@ -210,6 +217,7 @@ export async function cleanupOrphanedReplies(opts: {
       }
       const message = await channel.messages.fetch(orphan.messageId);
       await message.edit({ content: INTERRUPTED_COLD, allowedMentions: NO_MENTIONS });
+      await message.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
       log?.info({ channelId: orphan.channelId, messageId: orphan.messageId }, 'inflight:cold-start edited orphan');
     } catch (err) {
       log?.warn({ err, channelId: orphan.channelId, messageId: orphan.messageId }, 'inflight:cold-start orphan cleanup failed');
