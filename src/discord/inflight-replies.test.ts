@@ -193,6 +193,34 @@ describe('drainInFlightReplies', () => {
     await drainInFlightReplies();
     expect(isShuttingDown()).toBe(true);
   });
+
+  it('removes 🛑 reaction after editing', async () => {
+    const removeSpy = vi.fn().mockResolvedValue(undefined);
+    const reply = {
+      edit: vi.fn().mockResolvedValue(undefined),
+      reactions: {
+        resolve: vi.fn().mockImplementation((emoji: string) =>
+          emoji === '🛑' ? { remove: removeSpy } : null,
+        ),
+      },
+    };
+    registerInFlightReply(reply, 'ch1', 'msg1', 'test');
+
+    await drainInFlightReplies();
+
+    expect(removeSpy).toHaveBeenCalledOnce();
+    expect(reply.reactions.resolve).toHaveBeenCalledWith('🛑');
+  });
+
+  it('does not throw when reply has no reactions property', async () => {
+    const reply = mockReply(); // no reactions property
+    registerInFlightReply(reply, 'ch1', 'msg1', 'test');
+
+    // Should not throw.
+    await drainInFlightReplies();
+
+    expect(reply.edit).toHaveBeenCalledOnce();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -377,5 +405,61 @@ describe('cleanupOrphanedReplies', () => {
     const elapsed = Date.now() - start;
 
     expect(elapsed).toBeLessThan(2000);
+  });
+
+  it('removes 🛑 reaction after editing orphaned message', async () => {
+    const filePath = path.join(tmpDir, 'inflight.json');
+    await fs.writeFile(filePath, JSON.stringify([
+      { channelId: 'ch1', messageId: 'msg1' },
+    ]));
+
+    const removeSpy = vi.fn().mockResolvedValue(undefined);
+    const mockMessage = {
+      edit: vi.fn().mockResolvedValue(undefined),
+      reactions: {
+        resolve: vi.fn().mockImplementation((emoji: string) =>
+          emoji === '🛑' ? { remove: removeSpy } : null,
+        ),
+      },
+    };
+    const mockChannel = {
+      messages: { fetch: vi.fn().mockResolvedValue(mockMessage) },
+    };
+    const client = {
+      channels: { fetch: vi.fn().mockResolvedValue(mockChannel) },
+    };
+    const log = mockLog();
+
+    await cleanupOrphanedReplies({ client, dataFilePath: filePath, log });
+
+    expect(removeSpy).toHaveBeenCalledOnce();
+    expect(mockMessage.reactions.resolve).toHaveBeenCalledWith('🛑');
+  });
+
+  it('does not throw when resolve returns null (reaction already gone)', async () => {
+    const filePath = path.join(tmpDir, 'inflight.json');
+    await fs.writeFile(filePath, JSON.stringify([
+      { channelId: 'ch1', messageId: 'msg1' },
+    ]));
+
+    const mockMessage = {
+      edit: vi.fn().mockResolvedValue(undefined),
+      reactions: {
+        resolve: vi.fn().mockReturnValue(null),
+      },
+    };
+    const mockChannel = {
+      messages: { fetch: vi.fn().mockResolvedValue(mockMessage) },
+    };
+    const client = {
+      channels: { fetch: vi.fn().mockResolvedValue(mockChannel) },
+    };
+    const log = mockLog();
+
+    // Should not throw.
+    await cleanupOrphanedReplies({ client, dataFilePath: filePath, log });
+
+    expect(mockMessage.edit).toHaveBeenCalledOnce();
+    expect(mockMessage.reactions.resolve).toHaveBeenCalledWith('🛑');
   });
 });
