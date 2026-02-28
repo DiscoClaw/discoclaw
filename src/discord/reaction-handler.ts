@@ -6,7 +6,7 @@ import type { KeyedQueue } from '../group-queue.js';
 import { isAllowlisted } from './allowlist.js';
 import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildAllResultLines, appendActionResults } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
 import { shouldTriggerFollowUp } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
@@ -628,11 +628,8 @@ function createReactionHandler(
                 metrics.recordActionResult(result.ok);
                 params.log?.info({ flow: 'reaction', sessionKey, ok: result.ok }, 'obs.action.result');
               }
-              const displayLines = buildDisplayResultLines(parsed.actions, results);
               const anyActionSucceeded = results.some((r) => r.ok);
-              processedText = displayLines.length > 0
-                ? parsed.cleanText.trimEnd() + '\n\n' + displayLines.join('\n')
-                : parsed.cleanText.trimEnd();
+              processedText = appendActionResults(parsed.cleanText.trimEnd(), parsed.actions, results);
               // When all display lines were suppressed (e.g. sendMessage-only) and there's
               // no prose, delete the placeholder instead of posting "(no output)".
               if (

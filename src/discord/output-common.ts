@@ -1,5 +1,5 @@
 import { AttachmentBuilder } from 'discord.js';
-import { splitDiscord, truncateCodeBlocks } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, closeFenceIfOpen } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import type { ImageData } from '../runtime/types.js';
 import { QUERY_ACTION_TYPES } from './action-categories.js';
@@ -263,7 +263,7 @@ export function appendUnavailableActionTypesNotice(
 ): string {
   const notice = buildUnavailableActionTypesNotice(strippedTypes);
   if (!notice) return text;
-  const base = String(text ?? '').trimEnd();
+  const base = closeFenceIfOpen(String(text ?? '').trimEnd());
   return base ? `${base}\n\n${notice}` : notice;
 }
 
@@ -306,7 +306,7 @@ export function appendParseFailureNotice(
 ): string {
   const notice = buildParseFailureNotice(count);
   if (!notice) return text;
-  const base = String(text ?? '').trimEnd();
+  const base = closeFenceIfOpen(String(text ?? '').trimEnd());
   return base ? `${base}\n\n${notice}` : notice;
 }
 
