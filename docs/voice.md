@@ -309,6 +309,32 @@ xcode-select --install
 
 Then re-run `pnpm install`.
 
+#### GCC 14+ Compilation Error (Fedora 43 and other distros)
+
+On systems shipping GCC 14 or later (including Fedora 43), the build may fail with a compile-time error even when build tools are correctly installed:
+
+```
+../src/opusEncoder.cc: error: incompatible pointer types ...
+cc1plus: some warnings being treated as errors
+gyp ERR! build error
+```
+
+GCC 14 promotes `-Wincompatible-pointer-types` to a hard error by default. The upstream `@discordjs/opus` C source triggers this warning, causing the build to fail.
+
+**Workaround:** Pass the flag via `CFLAGS` to suppress the error during compilation:
+
+```bash
+CFLAGS="-Wno-error=incompatible-pointer-types" npm install -g discoclaw
+```
+
+Or, if installing from source:
+
+```bash
+CFLAGS="-Wno-error=incompatible-pointer-types" pnpm install
+```
+
+This is a compile-flag override at install time — it does not modify any source files. The flag tells GCC to treat incompatible pointer type mismatches as warnings rather than errors, which is safe for this specific native addon.
+
 ### Voice Connection DAVE Handshake Errors
 
 Discord's voice connections use the DAVE (Discord Audio/Video Encryption) protocol. If you see errors like:
