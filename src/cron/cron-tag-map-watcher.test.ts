@@ -18,7 +18,7 @@ function mockLog() {
 
 function makeCoordinator() {
   return {
-    sync: vi.fn(async () => ({ tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, orphansDetected: 0 })),
+    sync: vi.fn(async () => ({ tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, promptMessagesCreated: 0, orphansDetected: 0 })),
   } as unknown as CronSyncCoordinator;
 }
 

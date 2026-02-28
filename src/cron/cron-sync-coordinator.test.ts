@@ -13,6 +13,7 @@ vi.mock('./cron-sync.js', () => ({
     tagsApplied: 1,
     namesUpdated: 0,
     statusMessagesUpdated: 1,
+    promptMessagesCreated: 0,
     orphansDetected: 0,
   } satisfies CronSyncResult)),
 }));
@@ -49,7 +50,7 @@ describe('CronSyncCoordinator', () => {
     vi.resetAllMocks();
     mockReload.mockResolvedValue(2);
     mockRunCronSync.mockResolvedValue({
-      tagsApplied: 1, namesUpdated: 0, statusMessagesUpdated: 1, orphansDetected: 0,
+      tagsApplied: 1, namesUpdated: 0, statusMessagesUpdated: 1, promptMessagesCreated: 0, orphansDetected: 0,
     });
   });
 
@@ -82,7 +83,7 @@ describe('CronSyncCoordinator', () => {
   it('coalesced concurrent sync returns null', async () => {
     let resolveSync!: () => void;
     mockRunCronSync.mockImplementation(() => new Promise((resolve) => {
-      resolveSync = () => resolve({ tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, orphansDetected: 0 });
+      resolveSync = () => resolve({ tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, promptMessagesCreated: 0, orphansDetected: 0 });
     }));
 
     const coordinator = new CronSyncCoordinator(makeOpts());
@@ -100,9 +101,9 @@ describe('CronSyncCoordinator', () => {
     mockRunCronSync.mockImplementation(() => new Promise((resolve) => {
       callCount++;
       if (callCount === 1) {
-        resolveSync = () => resolve({ tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, orphansDetected: 0 });
+        resolveSync = () => resolve({ tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, promptMessagesCreated: 0, orphansDetected: 0 });
       } else {
-        resolve({ tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, orphansDetected: 0 });
+        resolve({ tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, promptMessagesCreated: 0, orphansDetected: 0 });
       }
     }));
 

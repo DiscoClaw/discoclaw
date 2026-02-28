@@ -643,6 +643,39 @@ describe('fetchMessage', () => {
     );
     expect(result).toEqual({ ok: false, error: 'fetchMessage requires a non-empty messageId' });
   });
+
+  it('truncates content to 500 chars by default', async () => {
+    const longContent = 'x'.repeat(600);
+    const msg = makeMockMessage('msg1', { content: longContent, author: 'alice' });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).not.toContain('x'.repeat(600));
+    expect((result as any).summary).toContain('x'.repeat(500));
+  });
+
+  it('returns full content when full flag is true', async () => {
+    const longContent = 'x'.repeat(600);
+    const msg = makeMockMessage('msg1', { content: longContent, author: 'alice' });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1', full: true },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain(longContent);
+  });
 });
 
 describe('editMessage', () => {

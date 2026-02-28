@@ -1,4 +1,5 @@
 import type { Client } from 'discord.js';
+import { EmbedBuilder } from 'discord.js';
 import { Cron } from 'croner';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -112,7 +113,10 @@ export type CronContext = {
 // ---------------------------------------------------------------------------
 
 function buildStarterContent(schedule: string, timezone: string, channel: string, prompt: string): string {
-  return `**Schedule:** \`${schedule}\` (${timezone})\n**Channel:** #${channel}\n\n${prompt}`;
+  const truncatedPrompt = prompt.length > 200
+    ? `${prompt.slice(0, 200)}… *(full prompt pinned below)*`
+    : prompt;
+  return `**Schedule:** \`${schedule}\` (${timezone})\n**Channel:** #${channel}\n\n${truncatedPrompt}`;
 }
 
 function validateCronDefinition(def: { schedule: string; timezone: string }): string | null {
@@ -290,6 +294,19 @@ export async function executeCronAction(
         await ensureStatusMessage(cronCtx.client, thread.id, cronId, record, cronCtx.statsStore, { log: cronCtx.log });
       } catch {}
 
+      // Post pinned prompt message (embed) so the full prompt is always retrievable.
+      try {
+        const embed = new EmbedBuilder()
+          .setTitle('\uD83D\uDCCB Cron Prompt')
+          .setDescription(action.prompt.slice(0, 4096))
+          .setColor(0x5865F2);
+        const promptMsg = await thread.send({ embeds: [embed], allowedMentions: { parse: [] } });
+        try { await promptMsg.pin(); } catch { /* non-fatal */ }
+        await cronCtx.statsStore.upsertRecord(cronId, thread.id, { promptMessageId: promptMsg.id });
+      } catch (err) {
+        cronCtx.log?.warn({ err, cronId }, 'cron:action:create prompt message failed');
+      }
+
       cronCtx.forumCountSync?.requestUpdate();
       return { ok: true, summary: `Cron "${action.name}" created (${cronId}), schedule: ${action.schedule}, model: ${model}${action.routingMode ? `, routing: ${action.routingMode}` : ''}` };
     }
@@ -426,6 +443,43 @@ export async function executeCronAction(
         }
       } catch {}
 
+      // Update or create the pinned prompt message when prompt changes.
+      if (action.prompt !== undefined) {
+        try {
+          const updatedRecord = cronCtx.statsStore.getRecord(action.cronId);
+          const embed = new EmbedBuilder()
+            .setTitle('\uD83D\uDCCB Cron Prompt')
+            .setDescription(newPrompt.slice(0, 4096))
+            .setColor(0x5865F2);
+
+          if (updatedRecord?.promptMessageId) {
+            // Try to edit the existing prompt message.
+            const thread = cronCtx.client.channels.cache.get(record.threadId);
+            if (thread && thread.isThread()) {
+              try {
+                const existing = await (thread as unknown as { messages: { fetch: (id: string) => Promise<{ edit: (opts: unknown) => Promise<unknown> }> } }).messages.fetch(updatedRecord.promptMessageId);
+                await existing.edit({ embeds: [embed], allowedMentions: { parse: [] } });
+              } catch {
+                // Message may have been deleted; create a new one.
+                const msg = await (thread as unknown as { send: (opts: unknown) => Promise<{ id: string; pin: () => Promise<unknown> }> }).send({ embeds: [embed], allowedMentions: { parse: [] } });
+                try { await msg.pin(); } catch { /* non-fatal */ }
+                await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { promptMessageId: msg.id });
+              }
+            }
+          } else {
+            // No existing prompt message — create one.
+            const thread = cronCtx.client.channels.cache.get(record.threadId);
+            if (thread && thread.isThread()) {
+              const msg = await (thread as unknown as { send: (opts: unknown) => Promise<{ id: string; pin: () => Promise<unknown> }> }).send({ embeds: [embed], allowedMentions: { parse: [] } });
+              try { await msg.pin(); } catch { /* non-fatal */ }
+              await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { promptMessageId: msg.id });
+            }
+          }
+        } catch (err) {
+          cronCtx.log?.warn({ err, cronId: action.cronId }, 'cron:action:update prompt message failed');
+        }
+      }
+
       // Update thread tags if needed.
       if (action.tags !== undefined || action.schedule !== undefined) {
         try {
@@ -510,10 +564,11 @@ export async function executeCronAction(
       if (record.purposeTags.length > 0) lines.push(`Tags: ${record.purposeTags.join(', ')}`);
       if (record.allowedActions && record.allowedActions.length > 0) lines.push(`Allowed actions: ${record.allowedActions.join(', ')}`);
       if (record.lastErrorMessage) lines.push(`Last error: ${record.lastErrorMessage}`);
-      if (job) {
-        const promptText = job.def.prompt;
-        const truncated = promptText.length > 500 ? `${promptText.slice(0, 500)}... (truncated)` : promptText;
-        lines.push(`Prompt: ${truncated}`);
+      // Return full prompt text — prefer the persisted record prompt (always full),
+      // falling back to the scheduler def (also full).
+      const promptText = record.prompt ?? job?.def.prompt;
+      if (promptText) {
+        lines.push(`Prompt: ${promptText}`);
       }
 
       return { ok: true, summary: lines.join('\n') };
@@ -685,7 +740,7 @@ export async function executeCronAction(
           }
           return {
             ok: true,
-            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.orphansDetected} orphans`,
+            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.promptMessagesCreated} prompt msgs, ${result.orphansDetected} orphans`,
           };
         } else {
           // Fallback (no coordinator): reload + snapshot + runCronSync + forumCountSync
@@ -709,7 +764,7 @@ export async function executeCronAction(
           cronCtx.forumCountSync?.requestUpdate();
           return {
             ok: true,
-            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.orphansDetected} orphans`,
+            summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.promptMessagesCreated} prompt msgs, ${result.orphansDetected} orphans`,
           };
         }
       } catch (err) {

@@ -13,6 +13,7 @@ export type CronRunRecord = {
   cronId: string;
   threadId: string;
   statusMessageId?: string;
+  promptMessageId?: string;
   runCount: number;
   lastRunAt: string | null;
   lastRunStatus: 'success' | 'error' | 'running' | 'interrupted' | null;
@@ -38,12 +39,12 @@ export type CronRunRecord = {
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 7 as const;
+export const CURRENT_VERSION = 8 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -371,6 +372,10 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   // Migrate v6 → v7: no-op — new fields (routingMode, allowedActions) are optional and default to absent.
   if (store.version === 6) {
     store.version = 7;
+  }
+  // Migrate v7 → v8: no-op — new field (promptMessageId) is optional and defaults to absent.
+  if (store.version === 7) {
+    store.version = 8;
   }
   return new CronRunStats(store, filePath);
 }

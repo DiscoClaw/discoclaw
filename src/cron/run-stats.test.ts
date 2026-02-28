@@ -53,7 +53,7 @@ describe('CronRunStats', () => {
   it('creates empty store on missing file', async () => {
     const stats = await loadRunStats(statsPath);
     const store = stats.getStore();
-    expect(store.version).toBe(7);
+    expect(store.version).toBe(8);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
 
@@ -301,7 +301,7 @@ describe('CronRunStats', () => {
 describe('emptyStore', () => {
   it('returns valid initial structure', () => {
     const store = emptyStore();
-    expect(store.version).toBe(7);
+    expect(store.version).toBe(8);
     expect(store.updatedAt).toBeGreaterThan(0);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
@@ -331,7 +331,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(7);
+    expect(stats.getStore().version).toBe(8);
     const rec = stats.getRecord('cron-migrated');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-migrated');
@@ -364,7 +364,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(7);
+    expect(stats.getStore().version).toBe(8);
     const rec = stats.getRecord('cron-v4');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v4');
@@ -397,7 +397,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(7);
+    expect(stats.getStore().version).toBe(8);
     const rec = stats.getRecord('cron-v5');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v5');
@@ -436,7 +436,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(7);
+    expect(stats.getStore().version).toBe(8);
     const rec = stats.getRecord('cron-v6');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v6');

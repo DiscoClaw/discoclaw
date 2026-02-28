@@ -14,7 +14,7 @@ export type MessagingActionRequest =
   | { type: 'react'; channelId: string; messageId: string; emoji: string }
   | { type: 'unreact'; channelId: string; messageId: string; emoji: string }
   | { type: 'readMessages'; channel: string; limit?: number; before?: string }
-  | { type: 'fetchMessage'; channelId: string; messageId: string }
+  | { type: 'fetchMessage'; channelId: string; messageId: string; full?: boolean }
   | { type: 'editMessage'; channelId: string; messageId: string; content: string }
   | { type: 'deleteMessage'; channelId: string; messageId: string }
   | { type: 'bulkDelete'; channelId: string; count: number }
@@ -216,7 +216,7 @@ export async function executeMessagingAction(
       const message = await messageChannel.messages.fetch(action.messageId);
       const author = message.author?.username ?? 'Unknown';
       const time = fmtTime(message.createdAt);
-      const text = (message.content || '(no text)').slice(0, 500);
+      const text = action.full ? (message.content || '(no text)') : (message.content || '(no text)').slice(0, 500);
       return { ok: true, summary: `[${author}]: ${text} (${time}, #${messageChannel.name}, id:${message.id})` };
     }
 
@@ -461,8 +461,9 @@ export function messagingActionsPromptSection(): string {
 
 **fetchMessage** — Fetch a single message by ID:
 \`\`\`
-<discord-action>{"type":"fetchMessage","channelId":"123","messageId":"456"}</discord-action>
+<discord-action>{"type":"fetchMessage","channelId":"123","messageId":"456","full":true}</discord-action>
 \`\`\`
+- \`full\` (optional): When true, returns the complete message content without truncation. Default: false (content truncated to 500 chars).
 
 **editMessage** — Edit a bot message:
 \`\`\`

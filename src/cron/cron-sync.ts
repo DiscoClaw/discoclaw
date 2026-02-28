@@ -1,4 +1,5 @@
-import type { Client } from 'discord.js';
+import { EmbedBuilder } from 'discord.js';
+import type { Client, ThreadChannel } from 'discord.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import { CADENCE_TAGS } from './run-stats.js';
@@ -31,6 +32,7 @@ export type CronSyncResult = {
   tagsApplied: number;
   namesUpdated: number;
   statusMessagesUpdated: number;
+  promptMessagesCreated: number;
   orphansDetected: number;
 };
 
@@ -60,7 +62,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
   const forum = await resolveForumChannel(client, forumId);
   if (!forum) {
     log?.warn({ forumId }, 'cron-sync: forum not found');
-    return { tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, orphansDetected: 0 };
+    return { tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, promptMessagesCreated: 0, orphansDetected: 0 };
   }
 
   const tagMap = opts.tagMap;
@@ -69,6 +71,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
   let tagsApplied = 0;
   let namesUpdated = 0;
   let statusMessagesUpdated = 0;
+  let promptMessagesCreated = 0;
   let orphansDetected = 0;
 
   type EditableCronThread = {
@@ -239,6 +242,50 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
     await sleep(throttleMs);
   }
 
+  // Phase 3.5: Prompt message backfill.
+  for (const job of jobs) {
+    const fullJob = scheduler.getJob(job.id);
+    if (!fullJob?.cronId) continue;
+
+    const record = statsStore.getRecord(fullJob.cronId);
+    if (!record?.prompt || record.promptMessageId) continue;
+
+    try {
+      let thread: ThreadChannel | null = null;
+      const cached = client.channels.cache.get(fullJob.threadId);
+      if (cached && cached.isThread()) {
+        thread = cached as ThreadChannel;
+      } else {
+        try {
+          const fetched = await client.channels.fetch(fullJob.threadId);
+          if (fetched && fetched.isThread()) thread = fetched as ThreadChannel;
+        } catch {
+          // Thread may have been deleted.
+        }
+      }
+      if (!thread) continue;
+
+      const embed = new EmbedBuilder()
+        .setTitle('\uD83D\uDCCB Cron Prompt')
+        .setDescription(record.prompt.slice(0, 4096))
+        .setColor(0x5865F2);
+
+      const msg = await thread.send({ embeds: [embed], allowedMentions: { parse: [] } });
+
+      try {
+        await msg.pin();
+      } catch {
+        // Non-fatal if pin fails.
+      }
+
+      await statsStore.upsertRecord(record.cronId, record.threadId, { promptMessageId: msg.id });
+      promptMessagesCreated++;
+    } catch (err) {
+      log?.warn({ err, cronId: fullJob.cronId }, 'cron-sync:phase3.5 prompt message failed');
+    }
+    await sleep(throttleMs);
+  }
+
   // Phase 4: Orphan detection (non-destructive, log only).
   for (const thread of threads.values()) {
     const editableThread = asEditableCronThread(thread);
@@ -250,6 +297,6 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
     }
   }
 
-  log?.info({ tagsApplied, namesUpdated, statusMessagesUpdated, orphansDetected }, 'cron-sync: complete');
-  return { tagsApplied, namesUpdated, statusMessagesUpdated, orphansDetected };
+  log?.info({ tagsApplied, namesUpdated, statusMessagesUpdated, promptMessagesCreated, orphansDetected }, 'cron-sync: complete');
+  return { tagsApplied, namesUpdated, statusMessagesUpdated, promptMessagesCreated, orphansDetected };
 }
