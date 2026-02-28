@@ -91,6 +91,7 @@ import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { getDefaultTimezone } from '../cron/default-timezone.js';
 import type { AttachmentLike } from './image-download.js';
+import { DiscordTransportClient } from './transport-client.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed };
@@ -585,6 +586,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               client: ctxRef.client,
               channelId: ctxRef.channelId,
               messageId: ctxRef.messageId,
+              transport: new DiscordTransportClient(ctxRef.guild, ctxRef.client),
             } as ActionContext,
             log: params.log,
           } : undefined;
@@ -908,6 +910,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   client: ctxRef.client,
                   channelId: ctxRef.channelId,
                   messageId: ctxRef.messageId,
+                  transport: new DiscordTransportClient(ctxRef.guild, ctxRef.client),
                 } as ActionContext,
                 log: params.log,
               } : undefined;
@@ -961,6 +964,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     client: onboardingCtxRef.client,
                     channelId: onboardingCtxRef.channelId,
                     messageId: onboardingCtxRef.messageId,
+                    transport: new DiscordTransportClient(onboardingCtxRef.guild, onboardingCtxRef.client),
                   } as ActionContext,
                   log: params.log,
                 } : undefined;
@@ -1175,6 +1179,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           messageId: msg.id,
           threadParentId,
           deferScheduler: params.deferScheduler,
+          transport: msg.guild ? new DiscordTransportClient(msg.guild, msg.client) : undefined,
         };
 
         const deps: ForgeAutoImplementDeps = {
@@ -2086,6 +2091,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               messageId: msg.id,
               threadParentId,
               deferScheduler: params.deferScheduler,
+              transport: new DiscordTransportClient(msg.guild, msg.client),
               confirmation: {
                 mode: 'interactive' as const,
                 sessionKey,
@@ -2641,6 +2647,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   messageId: msg.id,
                   threadParentId,
                   deferScheduler: params.deferScheduler,
+                  transport: new DiscordTransportClient(msg.guild, msg.client),
                   confirmation: {
                     mode: 'interactive' as const,
                     sessionKey,
