@@ -44,6 +44,7 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-config.ts`
 - `src/discord/actions-imagegen.ts`
 - `src/discord/actions-voice.ts`
+- `src/discord/actions-spawn.ts`
 - `src/discord/reaction-prompts.ts`
 
 Channel action types (in `src/discord/actions-channels.ts`):
@@ -86,6 +87,9 @@ Imagegen action types (in `src/discord/actions-imagegen.ts`):
 Voice action types (in `src/discord/actions-voice.ts`):
 - `voiceJoin`, `voiceLeave`, `voiceStatus`, `voiceMute`, `voiceDeafen`
 
+Spawn action types (in `src/discord/actions-spawn.ts`):
+- `spawnAgent`
+
 Reaction prompt types (in `src/discord/reaction-prompts.ts`):
 - `reactionPrompt` (gated under messaging flag — only available when messaging actions are enabled)
 
@@ -123,6 +127,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
   - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
+  - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0; requires Phase 2 config wiring — not active at runtime until wired)
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
   - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
 
@@ -398,6 +403,43 @@ Gated under the `messaging` flag — no separate env var.
 Prompt store lifecycle: `registerPrompt` records the pending prompt keyed by message ID; `tryResolveReactionPrompt` (called from `reaction-handler.ts`) matches incoming reactions to the stored record, returns the resolved choice, and deletes the record. Bypasses the normal reaction staleness guard since the prompt message is always fresh.
 When the user reacts, `reaction-handler.ts` detects the match and re-invokes the runtime with a system message conveying the user's choice.
 
+### Spawn Actions (`actions-spawn.ts`)
+
+Allow the model to spawn a parallel sub-agent invocation in a target channel, executing an independent AI runtime call that runs fire-and-forget alongside the current response. Each spawned agent posts its own output directly to the target channel.
+
+| Action | Description | Mutating? | Async? |
+|--------|-------------|-----------|--------|
+| `spawnAgent` | Spawn a parallel AI invocation in a named channel with a given prompt | Yes | Yes (fire-and-forget; result posted to target channel) |
+
+#### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `channel` | Yes | Target channel name or ID where the spawned agent posts its output |
+| `prompt` | Yes | Instruction text sent to the spawned agent as the user message |
+| `model` | No | Model override for the spawned invocation |
+
+#### Execution Flow
+
+1. The action executor receives a `spawnAgent` block from the model's response.
+2. It resolves the target channel on the current guild.
+3. It builds a prompt for the sub-agent (PA preamble + spawn context header + the user-supplied `prompt`).
+4. It fires the runtime invocation asynchronously — the caller does not await the result before continuing.
+5. The spawned agent runs independently: parses and executes its own action blocks, assembles its output, and posts it to the target channel.
+
+Multiple `spawnAgent` actions in a single response are dispatched in parallel via `Promise.allSettled`, so all spawns start immediately and run concurrently.
+
+#### Depth Guard
+
+`spawnAgent` is blocked when the current invocation is already at `depth >= 1`. A spawned agent runs at `depth = 1` and cannot itself emit `spawnAgent` actions — the executor returns a `{ ok: false, error: '...' }` result and the nested spawn is dropped before the runtime is called.
+
+This prevents unbounded parallel agent trees from a single top-level message.
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0).
+Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). No separate subsystem context object.
+
+> **Phase 2 required:** The env flag, `BotParams` threading, and index-level registration for `spawnAgent` are implemented in Phase 2. Until then, `actions-spawn.ts` is built and tested in isolation but no runtime code path enables it. If a model emits a `spawnAgent` block before Phase 2 is wired, the parser will silently drop it as an unrecognized type.
+
 ### Cron Flow Restrictions
 
 When actions are executed within a cron job (via `src/cron/executor.ts`), the following categories are always disabled regardless of env flags:
@@ -408,6 +450,7 @@ When actions are executed within a cron job (via `src/cron/executor.ts`), the fo
 - `config` — no relevant runtime context in cron flows
 - `defer` — deferred runs target Discord message flows, not cron flows
 - `voice` — voice actions require a live Discord guild context
+- `spawn` — spawning parallel agents from cron jobs could create unbounded agent trees
 
 The following categories are **enabled** in cron flows (gated by their respective env flags):
 
