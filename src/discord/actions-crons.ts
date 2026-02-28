@@ -113,7 +113,10 @@ export type CronContext = {
 // ---------------------------------------------------------------------------
 
 function buildStarterContent(schedule: string, timezone: string, channel: string, prompt: string): string {
-  return `**Schedule:** \`${schedule}\` (${timezone})\n**Channel:** #${channel}\n\n${prompt}`;
+  const truncatedPrompt = prompt.length > 200
+    ? `${prompt.slice(0, 200)}… *(full prompt pinned below)*`
+    : prompt;
+  return `**Schedule:** \`${schedule}\` (${timezone})\n**Channel:** #${channel}\n\n${truncatedPrompt}`;
 }
 
 function validateCronDefinition(def: { schedule: string; timezone: string }): string | null {
