@@ -87,14 +87,14 @@ Each action category has its own flag (only active when the master switch is `1`
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER` | `1` | defer |
 | `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` | `0` | generateImage |
 | `DISCOCLAW_DISCORD_ACTIONS_VOICE` | `0` | voiceStatus, voiceJoin, voiceLeave, voiceSetVoice |
-| `DISCOCLAW_DISCORD_ACTIONS_SPAWN` | `0` | spawnAgent |
+| `DISCOCLAW_DISCORD_ACTIONS_SPAWN` | `1` | spawnAgent |
 | _(config — always on)_ | — | modelSet, modelShow |
 
 Notes:
 - `reactionPrompt` is gated by the MESSAGING flag — it is registered via `REACTION_PROMPT_ACTION_TYPES` only when `flags.messaging` is true (`src/discord/actions.ts:113`).
 - Config actions (`modelSet`, `modelShow`) have no separate env flag. They are always enabled when the master switch is on, hardcoded in `src/index.ts`.
 - `generateImage` supports two providers: **OpenAI** (models: `dall-e-3`, `gpt-image-1`) and **Gemini** (models: `imagen-4.0-generate-001`, `imagen-4.0-fast-generate-001`, `imagen-4.0-ultra-generate-001`). Provider is auto-detected from the model prefix (`dall-e-*`/`gpt-image-*` → openai, `imagen-*` → gemini) or set explicitly via the `provider` field. OpenAI provider uses `OPENAI_API_KEY` (required) and optional `OPENAI_BASE_URL`. Gemini provider uses `IMAGEGEN_GEMINI_API_KEY`. At least one key must be set when `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1`. Default model is auto-detected: if only `IMAGEGEN_GEMINI_API_KEY` is set, defaults to `imagen-4.0-generate-001`; otherwise defaults to `dall-e-3`. Override with `IMAGEGEN_DEFAULT_MODEL`.
-- `spawnAgent` requires `DISCOCLAW_DISCORD_ACTIONS_SPAWN=1`. Spawned agents run fire-and-forget: each agent runs its prompt via the configured runtime and posts its output directly to the target channel. Multiple `spawnAgent` actions in a single response run in parallel (bounded by `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT`, default 8). Spawn is disabled for bot-originated messages and excluded from cron flows to prevent recursive agent chains. Spawned agents run at recursion depth 1 and cannot themselves spawn further agents.
+- `spawnAgent` is enabled by default (`DISCOCLAW_DISCORD_ACTIONS_SPAWN=1`; set to 0 to disable). Spawned agents run fire-and-forget: each agent runs its prompt via the configured runtime and posts its output directly to the target channel. Multiple `spawnAgent` actions in a single response run in parallel (bounded by `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT`, default 8). Spawn is disabled for bot-originated messages and excluded from cron flows to prevent recursive agent chains. Spawned agents run at recursion depth 1 and cannot themselves spawn further agents.
 
 Auto-follow-up: When query actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow, forgeStatus) succeed, DiscoClaw automatically re-invokes Claude with the results. This allows Claude to reason about query results without requiring the user to send a follow-up message. Controlled by `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` (default `3`, `0` disables). Mutation-only responses do not trigger follow-ups. Trivially short follow-up responses (<50 chars with no actions) are suppressed.
 
