@@ -366,6 +366,33 @@ describe('executeTaskAction', () => {
     expect((result as any).summary).toContain('Done');
   });
 
+  it('taskClose short-circuits when task is already closed', async () => {
+    const store = makeStore();
+    (store.get as any).mockImplementation((id: string) => ({
+      id,
+      title: 'Already done',
+      status: 'closed' as const,
+      priority: 2,
+      issue_type: 'task',
+      owner: '',
+      external_ref: 'discord:111222333',
+      labels: [],
+      comments: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      closed_at: '2026-01-02T00:00:00Z',
+    }));
+
+    const result = await executeTaskAction(
+      { type: 'taskClose', taskId: 'ws-001', reason: 'Done' },
+      makeCtx(),
+      makeTaskCtx({ store: store as any }),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('already closed');
+    expect(store.close).not.toHaveBeenCalled();
+  });
+
   it('taskClose calls forumCountSync.requestUpdate', async () => {
     const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
     await executeTaskAction(
