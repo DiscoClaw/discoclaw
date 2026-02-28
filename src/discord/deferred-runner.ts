@@ -14,7 +14,6 @@ import type { MemoryContext } from './actions-memory.js';
 import type { ConfigContext } from './actions-config.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import type { VoiceContext } from './actions-voice.js';
-import type { SpawnContext } from './actions-spawn.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -53,7 +52,6 @@ type DeferredRunnerState = {
   discordActionsConfig?: boolean;
   discordActionsImagegen?: boolean;
   discordActionsVoice?: boolean;
-  discordActionsSpawn?: boolean;
   taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -62,7 +60,6 @@ type DeferredRunnerState = {
   configCtx?: ConfigContext;
   imagegenCtx?: ImagegenContext;
   voiceCtx?: VoiceContext;
-  spawnCtx?: SpawnContext;
 };
 
 export type ConfigureDeferredSchedulerOpts = {
@@ -108,7 +105,6 @@ function buildDeferredActionFlags(state: DeferredRunnerState): ActionCategoryFla
     defer: false,
     imagegen: Boolean(state.discordActionsImagegen),
     voice: Boolean(state.discordActionsVoice),
-    spawn: Boolean(state.discordActionsSpawn),
   };
 }
 
@@ -269,7 +265,6 @@ export function configureDeferredScheduler(
         configCtx: opts.state.configCtx,
         imagegenCtx: opts.state.imagegenCtx,
         voiceCtx: opts.state.voiceCtx,
-        spawnCtx: opts.state.spawnCtx,
       });
       for (let i = 0; i < actionResults.length; i++) {
         const result = actionResults[i];
