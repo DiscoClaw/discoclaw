@@ -9,11 +9,14 @@ type DiscordMessage = {
   };
 };
 
+type StopReactionLike = { remove?(): Promise<unknown> } | null | undefined;
+
 type InFlightEntry = {
   reply: DiscordMessage;
   channelId: string;
   messageId: string;
   label: string;
+  stopReactionPromise?: Promise<StopReactionLike>;
 };
 
 type OrphanEntry = {
@@ -37,6 +40,9 @@ type MessageFetchableChannel = {
 type StartupClient = {
   channels: {
     fetch(id: string): Promise<unknown>;
+  };
+  rest?: {
+    delete?(route: string): Promise<unknown>;
   };
 };
 
@@ -106,6 +112,21 @@ export function registerInFlightReply(
 }
 
 /**
+ * Attach the stop-reaction promise to a registered in-flight reply.
+ * The drain path uses this to remove the 🛑 directly instead of
+ * relying on reactions.resolve(), which can miss the cache.
+ */
+export function setStopReaction(
+  channelId: string,
+  messageId: string,
+  promise: Promise<StopReactionLike>,
+): void {
+  const key = `${channelId}:${messageId}`;
+  const entry = registry.get(key);
+  if (entry) entry.stopReactionPromise = promise;
+}
+
+/**
  * Number of currently tracked in-flight replies.
  */
 export function inFlightReplyCount(): number {
@@ -160,7 +181,12 @@ export async function drainInFlightReplies(opts?: {
       .edit({ content: INTERRUPTED_GRACEFUL, allowedMentions: NO_MENTIONS })
       .then(async () => {
         log?.info({ channelId: entry.channelId, messageId: entry.messageId, label: entry.label }, 'inflight:drain edited');
-        await entry.reply.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
+        // Prefer the stored MessageReaction (avoids reactions.resolve() cache miss).
+        if (entry.stopReactionPromise) {
+          try { const sr = await entry.stopReactionPromise; await sr?.remove?.(); } catch { /* best-effort */ }
+        } else {
+          await entry.reply.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
+        }
       })
       .catch((err) => {
         log?.warn({ err, channelId: entry.channelId, messageId: entry.messageId }, 'inflight:drain edit failed');
@@ -217,7 +243,13 @@ export async function cleanupOrphanedReplies(opts: {
       }
       const message = await channel.messages.fetch(orphan.messageId);
       await message.edit({ content: INTERRUPTED_COLD, allowedMentions: NO_MENTIONS });
-      await message.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
+      // Remove 🛑 via REST — cold-start has no stored MessageReaction promise
+      // (different process), and reactions.resolve() depends on cache population.
+      if (client.rest?.delete) {
+        await client.rest.delete(`/channels/${orphan.channelId}/messages/${orphan.messageId}/reactions/${encodeURIComponent('🛑')}/@me`).catch(() => {});
+      } else {
+        await message.reactions?.resolve?.('🛑')?.remove?.().catch(() => {});
+      }
       log?.info({ channelId: orphan.channelId, messageId: orphan.messageId }, 'inflight:cold-start edited orphan');
     } catch (err) {
       log?.warn({ err, channelId: orphan.channelId, messageId: orphan.messageId }, 'inflight:cold-start orphan cleanup failed');

@@ -53,7 +53,7 @@ import { sanitizeErrorMessage, sanitizePhaseError } from './status-channel.js';
 import { ToolAwareQueue } from './tool-aware-queue.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
-import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
+import { registerInFlightReply, setStopReaction, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice, closeFenceIfOpen } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
@@ -2158,6 +2158,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           // Capture the MessageReaction so we can call .remove() directly in finally
           // instead of relying on reactions.resolve() which can miss the cache.
           const reactPromise = reply.react?.('🛑')?.catch(() => null);
+          if (reactPromise) setStopReaction(msg.channelId, reply.id, reactPromise);
+          let stopReactionRemoved = false;
           // Declared before try so they remain accessible after the finally block closes.
           let historySection = '';
           let summarySection = '';
@@ -2604,6 +2606,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               try { await streamEditQueue; } catch { /* ignore */ }
               streamEditQueue = Promise.resolve();
             }
+            // Remove 🛑 eagerly after stream completes — the user can no longer abort.
+            // Must happen before action execution: taskClose archives the thread, which
+            // would prevent reaction removal in the finally block.
+            try { const sr = await reactPromise; await sr?.remove?.(); stopReactionRemoved = true; } catch { /* best-effort */ }
             metrics.recordInvokeResult('message', Date.now() - t0, !invokeHadError, invokeErrorMessage);
             params.log?.info(
               { flow: 'message', sessionKey, followUpDepth, ms: Date.now() - t0, ok: !invokeHadError },
@@ -2832,8 +2838,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
             abortDispose();
             // Best-effort: remove the 🛑 reaction added at stream start.
-            // Use the MessageReaction directly — reactions.resolve() can miss the cache.
-            try { const sr = await reactPromise; await sr?.remove?.(); } catch { /* best-effort */ }
+            // Skipped when the eager removal (before action execution) already succeeded.
+            if (!stopReactionRemoved) {
+              try { const sr = await reactPromise; await sr?.remove?.(); } catch { /* best-effort */ }
+            }
             dispose();
           }
 
