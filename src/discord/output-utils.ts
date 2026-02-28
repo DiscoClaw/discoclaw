@@ -202,7 +202,10 @@ export function buildCompletionNotice(elapsedMs: number): string {
  * never leaks into streaming previews visible to users.
  */
 export function stripActionTags(text: string): string {
-  return text.replace(/<discord-action>[\s\S]*?<\/discord-action>/g, '').replace(/\n{3,}/g, '\n\n');
+  return text
+    .replace(/<discord-action>[\s\S]*?<\/discord-action>/g, '')  // complete tags
+    .replace(/<discord-action>[\s\S]*$/g, '')                     // trailing incomplete tag (mid-stream)
+    .replace(/\n{3,}/g, '\n\n');
 }
 
 export function selectStreamingOutput(opts: {

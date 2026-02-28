@@ -644,6 +644,14 @@ describe('stripActionTags', () => {
     const input = 'A<discord-action>{"type":"a"}</discord-action>B<discord-action>{"type":"b"}</discord-action>C';
     expect(stripActionTags(input)).toBe('ABC');
   });
+
+  it('strips trailing incomplete action tag (mid-stream)', () => {
+    const input = 'Done closing task.\n<discord-action>{"type":"taskCl';
+    const result = stripActionTags(input);
+    expect(result).not.toContain('discord-action');
+    expect(result).not.toContain('taskCl');
+    expect(result).toContain('Done closing task');
+  });
 });
 
 // ---------------------------------------------------------------------------

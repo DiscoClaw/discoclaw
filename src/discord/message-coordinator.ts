@@ -55,7 +55,7 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice, closeFenceIfOpen } from './output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
@@ -2665,8 +2665,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // streaming preview would remain visible with raw <discord-action>
                 // JSON.  This pre-edit ensures the visible state is clean regardless.
                 try {
-                  const preEditText = parsed.cleanText.trimEnd() || '...';
-                  await reply.edit({ content: preEditText.slice(0, 2000), allowedMentions: NO_MENTIONS });
+                  const preEditRaw = parsed.cleanText.trimEnd() || '...';
+                  const preEditText = closeFenceIfOpen(preEditRaw.slice(0, 2000));
+                  await reply.edit({ content: preEditText, allowedMentions: NO_MENTIONS });
                 } catch {
                   // Best-effort — the reply may already be gone or the thread archived
                   // by a prior follow-up.  The final editThenSendChunks will handle it.
