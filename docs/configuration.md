@@ -175,7 +175,7 @@ See [docs/voice.md](voice.md) for the full setup guide and provider details.
 | `DEEPGRAM_API_KEY` | — | Deepgram API key (required for Deepgram STT/TTS) |
 | `DEEPGRAM_STT_MODEL` | `nova-3-general` | Deepgram STT model |
 | `DEEPGRAM_TTS_VOICE` | `aura-2-asteria-en` | Deepgram TTS voice |
-| `DEEPGRAM_TTS_SPEED` | `1.0` | Deepgram TTS playback speed multiplier (0.5–1.5) |
+| `DEEPGRAM_TTS_SPEED` | `1.3` | Deepgram TTS playback speed multiplier (0.5–1.5) |
 | `CARTESIA_API_KEY` | — | Cartesia API key (required for Cartesia TTS) |
 
 ## Webhook
