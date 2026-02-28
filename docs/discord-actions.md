@@ -127,7 +127,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
   - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
-  - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 8)
+  - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 8)
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
   - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
 
@@ -436,7 +436,7 @@ Multiple `spawnAgent` actions in a single response are dispatched in parallel vi
 
 This prevents unbounded parallel agent trees from a single top-level message.
 
-Env: `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 0).
+Env: `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; set to 0 to disable).
 Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). No separate subsystem context object.
 Concurrency: At most `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` (default 8) spawned agents run in parallel per batch. If a response contains more than this limit, the remainder are processed in sequential batches until all are complete — none are dropped.
 
