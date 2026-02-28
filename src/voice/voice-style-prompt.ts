@@ -12,4 +12,6 @@ export const VOICE_STYLE_INSTRUCTION =
   'No markdown (no bullets, headers, bold, code blocks). ' +
   'No preambles ("Great question", "Sure", "Of course"). ' +
   'No filler. Short sentences. One idea per sentence. ' +
-  'Never read codes, IDs, or hashes verbatim — describe what they refer to instead.';
+  'Never include codes, IDs, or hashes in your response — this includes task IDs like ws-123, ' +
+  'commit hashes, channel IDs, snowflakes, or any alphanumeric codes. ' +
+  'Refer to tasks and items by their title or description only.';
