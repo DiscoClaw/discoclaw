@@ -22,6 +22,13 @@ const openrouterRuntime: RuntimeAdapter = {
   async *invoke() { /* no-op */ },
 };
 
+const geminiRuntime: RuntimeAdapter = {
+  id: 'gemini',
+  capabilities: new Set(),
+  defaultModel: 'gemini-2.5-flash',
+  async *invoke() { /* no-op */ },
+};
+
 function makeRegistry(...entries: [string, RuntimeAdapter][]): RuntimeRegistry {
   const reg = new RuntimeRegistry();
   for (const [name, adapter] of entries) {
@@ -578,6 +585,133 @@ describe('modelShow runtime line', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.summary).toContain('openrouter');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// modelSet — voice runtime swap
+// ---------------------------------------------------------------------------
+
+describe('modelSet voice runtime swap', () => {
+  it('swaps voiceModelCtx.runtime and sets adapter default model', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
+    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBe(geminiRuntime);
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('gemini');
+    expect(ctx.botParams.voiceModelCtx!.model).toBe('gemini-2.5-flash');
+    expect(ctx.voiceRuntimeName).toBe('gemini');
+    expect(result.summary).toContain('voice runtime → gemini');
+    expect(result.summary).toContain('adapter default');
+  });
+
+  it('does not swap runtime for a plain model name', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
+    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'sonnet' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBeUndefined();
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBeUndefined();
+    expect(ctx.botParams.voiceModelCtx!.model).toBe('sonnet');
+  });
+
+  it('calls persistVoiceRuntime (not persistOverride) for runtime swaps', () => {
+    let persistOverrideCalled = false;
+    let persistVoiceRuntimeName: string | undefined;
+    const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
+    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
+    ctx.persistOverride = () => { persistOverrideCalled = true; };
+    ctx.persistVoiceRuntime = (name) => { persistVoiceRuntimeName = name; };
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(persistOverrideCalled).toBe(false);
+    expect(persistVoiceRuntimeName).toBe('gemini');
+  });
+
+  it('chat runtime swap does not affect voiceModelCtx.runtime', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    ctx.botParams.planCtx = { model: 'capable', runtime: stubRuntime };
+    ctx.botParams.deferOpts = { runtime: stubRuntime };
+    executeConfigAction({ type: 'modelSet', role: 'chat', model: 'openrouter' }, ctx);
+    // Chat runtime swapped but voice stays untouched
+    expect(ctx.botParams.runtime).toBe(openrouterRuntime);
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBeUndefined();
+    expect(ctx.botParams.voiceModelCtx!.model).toBe('fast');
+  });
+
+  it('case-insensitive matching — Gemini matches gemini', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
+    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'Gemini' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBe(geminiRuntime);
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('gemini');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// modelReset — voice runtime clear
+// ---------------------------------------------------------------------------
+
+describe('modelReset voice runtime', () => {
+  it('clears voiceModelCtx.runtime and runtimeName back to undefined', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'gemini-2.5-flash', runtime: geminiRuntime, runtimeName: 'gemini' } });
+    ctx.voiceRuntimeName = 'gemini';
+    ctx.envDefaults = { voice: 'fast' };
+    let clearVoiceRuntimeCalled = false;
+    ctx.clearVoiceRuntime = () => { clearVoiceRuntimeCalled = true; };
+    const result = executeConfigAction({ type: 'modelReset', role: 'voice' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.voiceModelCtx!.model).toBe('fast');
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBeUndefined();
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBeUndefined();
+    expect(ctx.voiceRuntimeName).toBeUndefined();
+    expect(clearVoiceRuntimeCalled).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// modelShow — voice runtime display
+// ---------------------------------------------------------------------------
+
+describe('modelShow voice runtime display', () => {
+  it('displays voice runtime name when it differs from chat', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'gemini-2.5-flash', runtime: geminiRuntime, runtimeName: 'gemini' } });
+    ctx.voiceRuntimeName = 'gemini';
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const lines = result.summary.split('\n');
+    const voiceLine = lines.find(l => l.includes('**voice**'));
+    expect(voiceLine).toContain('[runtime: gemini]');
+    expect(voiceLine).toContain('gemini-2.5-flash');
+  });
+
+  it('does not annotate voice runtime when it matches chat', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'sonnet' } });
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const lines = result.summary.split('\n');
+    const voiceLine = lines.find(l => l.includes('**voice**'));
+    expect(voiceLine).toBeDefined();
+    expect(voiceLine).not.toContain('[runtime:');
+  });
+
+  it('resolves tier names against voice runtime ID, not chat runtime', () => {
+    // Voice on gemini with tier 'capable' should resolve to gemini-2.5-pro, not sonnet
+    const ctx = makeCtx({ voiceModelCtx: { model: 'capable', runtime: geminiRuntime, runtimeName: 'gemini' } });
+    ctx.voiceRuntimeName = 'gemini';
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const lines = result.summary.split('\n');
+    const voiceLine = lines.find(l => l.includes('**voice**'));
+    expect(voiceLine).toContain('gemini-2.5-pro');
+    expect(voiceLine).not.toContain('sonnet');
   });
 });
 

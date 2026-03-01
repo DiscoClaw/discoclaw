@@ -32,10 +32,16 @@ export type ConfigContext = {
   runtimeRegistry?: RuntimeRegistry;
   /** Human-readable name of the active runtime (e.g. 'claude_code', 'openrouter'). */
   runtimeName?: string;
+  /** Human-readable name of the voice runtime when it differs from chat (read-only display). */
+  voiceRuntimeName?: string;
   /** Callback to persist a model override to the overrides file. Wired in index.ts. */
   persistOverride?: (role: ModelRole, model: string) => void;
   /** Callback to clear model overrides from the overrides file. Pass undefined role to clear all. Wired in index.ts. */
   clearOverride?: (role?: ModelRole) => void;
+  /** Callback to persist the voice runtime name to overrides. */
+  persistVoiceRuntime?: (runtimeName: string) => void;
+  /** Callback to clear the voice runtime override. */
+  clearVoiceRuntime?: () => void;
   /** Env-default model string for each role, used by modelReset to revert live state. */
   envDefaults?: Partial<Record<ModelRole, string>>;
   /** Tracks which roles have active overrides (loaded from the overrides file). */
@@ -59,7 +65,7 @@ export type ConfigMutableParams = {
   planCtx?: { model?: string; runtime?: RuntimeAdapter };
   deferOpts?: { runtime: RuntimeAdapter };
   imagegenCtx?: ImagegenContext;
-  voiceModelCtx?: { model: string };
+  voiceModelCtx?: { model: string; runtime?: RuntimeAdapter; runtimeName?: string };
 };
 
 // ---------------------------------------------------------------------------
@@ -195,8 +201,23 @@ export function executeConfigAction(
           break;
         case 'voice':
           if (bp.voiceModelCtx) {
-            bp.voiceModelCtx.model = model;
-            changes.push(`voice → ${model}`);
+            // Check if the model string is actually a runtime name.
+            const voiceNormalized = model.toLowerCase();
+            const voiceNewRuntime = configCtx.runtimeRegistry?.get(voiceNormalized);
+            if (voiceNewRuntime) {
+              skipPersist = true;
+              const voiceRuntimeModel = voiceNewRuntime.defaultModel ?? '';
+              bp.voiceModelCtx.runtime = voiceNewRuntime;
+              bp.voiceModelCtx.runtimeName = voiceNormalized;
+              bp.voiceModelCtx.model = voiceRuntimeModel;
+              configCtx.voiceRuntimeName = voiceNormalized;
+              configCtx.persistVoiceRuntime?.(voiceNormalized);
+              changes.push(`voice runtime → ${voiceNormalized}`);
+              if (voiceRuntimeModel) changes.push(`voice → ${voiceRuntimeModel} (adapter default)`);
+            } else {
+              bp.voiceModelCtx.model = model;
+              changes.push(`voice → ${model}`);
+            }
           } else {
             return { ok: false, error: 'Voice subsystem not configured' };
           }
@@ -212,7 +233,10 @@ export function executeConfigAction(
         configCtx.overrideSources[action.role] = true;
       }
 
-      const resolvedDisplay = resolveModel(model, configCtx.runtime.id);
+      const resolveRid = action.role === 'voice' && bp.voiceModelCtx?.runtime
+        ? bp.voiceModelCtx.runtime.id
+        : configCtx.runtime.id;
+      const resolvedDisplay = resolveModel(model, resolveRid);
       const resolvedNote = resolvedDisplay && resolvedDisplay !== model ? ` (resolves to ${resolvedDisplay})` : '';
       return { ok: true, summary: `Model updated: ${changes.join(', ')}${resolvedNote}` };
     }
@@ -275,6 +299,10 @@ export function executeConfigAction(
             case 'voice':
               if (bp.voiceModelCtx) {
                 bp.voiceModelCtx.model = defaultModel;
+                bp.voiceModelCtx.runtime = undefined;
+                bp.voiceModelCtx.runtimeName = undefined;
+                configCtx.voiceRuntimeName = undefined;
+                configCtx.clearVoiceRuntime?.();
                 resetChanges.push(`voice → ${defaultModel}`);
               }
               break;
@@ -330,10 +358,6 @@ export function executeConfigAction(
         rows.push(['imagegen', igModel, `Image generation (${igProvider})`, '']);
       }
 
-      if (bp.voiceModelCtx) {
-        rows.push(['voice', bp.voiceModelCtx.model || `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS.voice, ovr('voice')]);
-      }
-
       const adapterDefault = configCtx.runtime.defaultModel;
       const lines = rows.map(([role, model, desc, overrideMarker]) => {
         const resolved = resolveModel(model, rid);
@@ -345,6 +369,24 @@ export function executeConfigAction(
         }
         return `**${role}**: \`${display}\`${overrideMarker} — ${desc}`;
       });
+
+      if (bp.voiceModelCtx) {
+        const voiceRid = bp.voiceModelCtx.runtime?.id ?? rid;
+        const voiceModel = bp.voiceModelCtx.model || `${bp.runtimeModel} (follows chat)`;
+        const voiceRtLabel = bp.voiceModelCtx.runtimeName && bp.voiceModelCtx.runtimeName !== (configCtx.runtimeName ?? rid)
+          ? ` [runtime: ${bp.voiceModelCtx.runtimeName}]`
+          : '';
+        // Voice row uses its own runtime ID for tier resolution.
+        const voiceResolved = resolveModel(voiceModel, voiceRid);
+        let voiceDisplay: string;
+        if (voiceModel) {
+          voiceDisplay = voiceResolved && voiceResolved !== voiceModel ? `${voiceModel} → ${voiceResolved}` : voiceModel;
+        } else {
+          const voiceAdapterDefault = bp.voiceModelCtx.runtime?.defaultModel ?? adapterDefault;
+          voiceDisplay = voiceAdapterDefault || '(adapter default)';
+        }
+        lines.push(`**voice**: \`${voiceDisplay}\`${ovr('voice')}${voiceRtLabel} — ${ROLE_DESCRIPTIONS.voice}`);
+      }
 
       return { ok: true, summary: lines.join('\n') };
     }
@@ -369,7 +411,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
 - \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` role, swaps the active runtime adapter), or \`default\` (for cron-exec only, to revert to the env-configured default (Sonnet by default)).
+- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` and \`voice\` roles, swaps the active runtime adapter independently), or \`default\` (for cron-exec only, to revert to the env-configured default (Sonnet by default)).
 
 **Roles:**
 | Role | What it controls |
