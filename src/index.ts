@@ -23,6 +23,7 @@ import { DiscordTransportClient } from './discord/transport-client.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
 import { loadVoiceIdentity, buildVoicePrompt, buildVoiceFollowUpPrompt } from './voice/voice-prompt-builder.js';
 import { sanitizeForVoice } from './voice/voice-sanitize.js';
+import type { Turn } from './voice/conversation-buffer.js';
 import type { SubsystemContexts } from './discord/actions.js';
 import { shouldTriggerFollowUp } from './discord/action-categories.js';
 import type { DeferScheduler } from './discord/defer-scheduler.js';
@@ -1324,7 +1325,7 @@ if (taskCtx) {
 
     const voiceActionFollowupDepth = 1;
 
-    const voiceInvokeAi = async (text: string, signal: AbortSignal): Promise<string> => {
+    const voiceInvokeAi = async (text: string, signal: AbortSignal, history?: string): Promise<string> => {
       // Resolve model and runtime at invoke time so tier names (fast/capable) always resolve
       // correctly even after runtime mutation via !models set voice.
       const voiceRuntime = voiceModelRef.runtime ?? limitedRuntime;
@@ -1349,12 +1350,16 @@ if (taskCtx) {
         ? discordActionsPromptSection(voiceActionFlags, botDisplayName)
         : '';
 
+      const userTextWithHistory = history
+        ? `Conversation history (recent voice exchanges):\n${history}\n\nCurrent user message:\n${text}`
+        : text;
+
       const prompt = buildVoicePrompt({
         identity,
         durableMemory: durableSection,
         voiceSystemPrompt: cfg.voiceSystemPrompt,
         actionsSection,
-        userText: text,
+        userText: userTextWithHistory,
       });
 
       let currentPrompt = prompt;
@@ -1453,6 +1458,53 @@ if (taskCtx) {
       return responseText;
     };
 
+    // Backfill callback: on voice-channel join, fetch recent voice-log messages
+    // and parse the TranscriptMirror format into user/assistant turn pairs so the
+    // ConversationBuffer starts with prior context instead of empty.
+    let backfill: (() => Promise<Turn[]>) | undefined;
+    if (voiceLogChannelRef) {
+      const logRef = voiceLogChannelRef;
+      backfill = async () => {
+        try {
+          // Resolve the voice-log channel by ID first, then by name
+          let resolved = client.channels.cache.get(logRef)
+            ?? await client.channels.fetch(logRef).catch(() => null)
+            ?? undefined;
+          if (!resolved) {
+            for (const g of client.guilds.cache.values()) {
+              const ch = g.channels.cache.find(c => c.isTextBased() && c.name === logRef);
+              if (ch) { resolved = ch; break; }
+            }
+          }
+          if (!resolved?.isTextBased() || resolved.isDMBased() || !('messages' in resolved)) return [];
+
+          const messages = await resolved.messages.fetch({ limit: 50 });
+          const chronological = [...messages.values()].reverse();
+
+          const userRe = /^\*\*(.+?)\*\* \(voice\): ([\s\S]+)/;
+          const botRe = /^\*\*(.+?)\*\* \(voice reply\): ([\s\S]+)/;
+          const turns: Turn[] = [];
+          let pendingUser: string | null = null;
+
+          for (const msg of chronological) {
+            const um = msg.content.match(userRe);
+            const bm = msg.content.match(botRe);
+            if (um) {
+              pendingUser = um[2].trim();
+            } else if (bm && pendingUser !== null) {
+              turns.push({ user: pendingUser, assistant: bm[2].trim() });
+              pendingUser = null;
+            }
+          }
+
+          return turns;
+        } catch (err) {
+          log.warn({ err }, 'voice:backfill: failed to fetch conversation history');
+          return [];
+        }
+      };
+    }
+
     audioPipeline = new AudioPipelineManager({
       log,
       voiceConfig: {
@@ -1476,6 +1528,7 @@ if (taskCtx) {
       runtimeTimeoutMs,
       transcriptMirror,
       botDisplayName,
+      backfill,
       onTranscription: (guildId, result) => {
         if (result.isFinal && result.text.trim()) {
           log.info({ guildId, text: result.text, confidence: result.confidence }, 'voice:transcription');
