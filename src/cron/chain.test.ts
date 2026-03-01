@@ -22,7 +22,7 @@ beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chain-test-'));
 });
 afterEach(async () => {
-  await fs.rm(tmpDir, { recursive: true, force: true });
+  await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 3 });
 });
 
 async function makeStatsStore(): Promise<CronRunStats> {
