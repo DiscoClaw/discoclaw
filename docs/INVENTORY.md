@@ -196,6 +196,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | MCP example template | `templates/mcp.json` | **done** |
 | Releasing / npm publish guide | `docs/releasing.md` | **done** |
 | Voice setup guide | `docs/voice.md` | **done** |
+| Cron patterns cookbook | `docs/cron-patterns.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | **done** |
 
