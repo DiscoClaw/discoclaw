@@ -230,6 +230,54 @@ describe('Gemini REST runtime adapter', () => {
     expect(runtime.defaultModel).toBe('gemini-2.5-pro');
   });
 
+  it('logs warning when response has no text parts', async () => {
+    const candidate = { content: { parts: [] }, finishReason: 'SAFETY' };
+    const sseData = `data: ${JSON.stringify({ candidates: [candidate] })}`;
+    globalThis.fetch = vi.fn().mockResolvedValue(makeSSEResponse([sseData]));
+
+    const log = { debug: vi.fn(), warn: vi.fn() };
+    const runtime = createGeminiRestRuntime({
+      apiKey: 'test-key',
+      defaultModel: 'gemini-2.5-flash',
+      log,
+    });
+
+    const events = await collectEvents(
+      runtime.invoke({ prompt: 'test', model: '', cwd: '/tmp' }),
+    );
+
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ finishReason: 'SAFETY' }),
+      'gemini-rest: empty response (no text content)',
+    );
+
+    const final = events.find((e) => e.type === 'text_final');
+    expect(final).toBeDefined();
+    expect((final as { text: string }).text).toBe('');
+  });
+
+  it('logs debug with full candidate on empty response', async () => {
+    const candidate = { content: { parts: [] }, finishReason: 'SAFETY' };
+    const sseData = `data: ${JSON.stringify({ candidates: [candidate] })}`;
+    globalThis.fetch = vi.fn().mockResolvedValue(makeSSEResponse([sseData]));
+
+    const log = { debug: vi.fn(), warn: vi.fn() };
+    const runtime = createGeminiRestRuntime({
+      apiKey: 'test-key',
+      defaultModel: 'gemini-2.5-flash',
+      log,
+    });
+
+    await collectEvents(
+      runtime.invoke({ prompt: 'test', model: '', cwd: '/tmp' }),
+    );
+
+    expect(log.debug).toHaveBeenCalledWith(
+      { candidate },
+      'gemini-rest: full candidate on empty response',
+    );
+  });
+
   it('supports custom baseUrl', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       makeSSEResponse([makeGeminiSSEData('ok')]),

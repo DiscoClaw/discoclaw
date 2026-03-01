@@ -9,7 +9,7 @@ export type GeminiRestOpts = {
   apiKey: string;
   defaultModel: string;
   baseUrl?: string;
-  log?: { debug(...args: unknown[]): void };
+  log?: { debug(...args: unknown[]): void; warn(...args: unknown[]): void };
 };
 
 /** Extract the data payload from an SSE line, or undefined if not a data line. */
@@ -63,6 +63,8 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
           }
 
           let accumulated = '';
+          let lastFinishReason: string | undefined;
+          let lastCandidate: unknown;
 
           const response = await fetch(url, {
             method: 'POST',
@@ -128,6 +130,11 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
                 }
               }
 
+              // Track last finish reason and candidate for diagnostics
+              const candidateFinish = parsed.candidates?.[0]?.finishReason;
+              if (candidateFinish) lastFinishReason = candidateFinish;
+              if (parsed.candidates?.[0]) lastCandidate = parsed.candidates[0];
+
               // Emit usage if present
               const usage = parsed.usageMetadata;
               if (usage) {
@@ -160,6 +167,14 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
           // Process any remaining buffered content
           if (buffer.trim()) {
             yield* processLine(buffer);
+          }
+
+          if (!accumulated) {
+            opts.log?.warn(
+              { finishReason: lastFinishReason ?? 'unknown', model },
+              'gemini-rest: empty response (no text content)',
+            );
+            opts.log?.debug({ candidate: lastCandidate }, 'gemini-rest: full candidate on empty response');
           }
 
           yield { type: 'text_final', text: accumulated };
