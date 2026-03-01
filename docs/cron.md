@@ -106,6 +106,77 @@ Jobs support three trigger types:
 - `webhook` — triggered by an external HTTP POST (see [docs/webhook-exposure.md](webhook-exposure.md))
 - `manual` — triggered only by explicit `cronTrigger` action
 
+## Job Chaining
+
+Jobs can declare downstream jobs that fire on successful completion, creating multi-step pipelines. A completed job's persisted state is forwarded to its downstream jobs, enabling data handoff between pipeline stages.
+
+### The `chain` Field
+
+Set the `chain` field on a job's run-stats record (via `cronCreate` or `cronUpdate`) to an array of downstream `cronId` strings:
+
+```json
+{
+  "chain": ["summarize-job", "notify-job"]
+}
+```
+
+When the upstream job completes successfully, each downstream job is triggered in order. Downstream jobs fire independently — a failure in one does not block the others.
+
+### Data Handoff via `__upstream`
+
+When a chained job fires, the upstream job's persisted state is merged into the downstream job's state under the `__upstream` key:
+
+```json
+{
+  "existingDownstreamKey": "preserved",
+  "__upstream": {
+    "fromCronId": "fetch-data-job",
+    "state": { "lastSeenTag": "v2.3.1", "items": [1, 2, 3] }
+  }
+}
+```
+
+The downstream job's `{{state}}` placeholder will include this `__upstream` object, so its prompt can reference the handoff data. The downstream job's own state keys are preserved — only `__upstream` is added or overwritten.
+
+If the upstream job has no state (or empty state), `__upstream.state` is `{}`. If state forwarding fails (e.g., disk error), the downstream job still executes — it just won't have the forwarded data.
+
+### Cycle Detection
+
+The system prevents circular chains. Before registering a chain link, `wouldCreateCycle` checks whether adding the edge would create a cycle in the chain graph. Self-loops (`A → A`) are always rejected.
+
+At startup, `detectCycles` performs a full DFS scan of the chain graph and logs any cycles found. Jobs involved in cycles have their downstream links skipped.
+
+### Depth Limits
+
+Chain execution has a hard depth limit of **10**. Each downstream trigger increments a depth counter; when a chain reaches depth 10, further downstream jobs are skipped and a warning is logged. This prevents runaway cascades from misconfigured pipelines.
+
+### Error Propagation
+
+Chaining follows a **success-only, fire-and-forget** policy:
+
+- Downstream jobs fire **only** when the upstream job records a `success` status. If the upstream job errors or is interrupted, no downstream jobs are triggered.
+- Each downstream job is triggered independently. A failure in one downstream job does not prevent the remaining downstream jobs from firing.
+- If a downstream job's record or scheduler entry is not found (e.g., the job was deleted), it is skipped with a warning.
+- Downstream execution is fire-and-forget — the upstream job does not wait for downstream jobs to complete.
+
+### Example Pipeline
+
+A three-stage pipeline: fetch data → summarize → notify.
+
+1. **fetch-data** job runs on a schedule, stores results in state.
+2. **summarize** job is chained from fetch-data. Its prompt uses `{{state}}` to read `__upstream.state` and produce a summary.
+3. **notify** job is chained from summarize. It reads the summary from `__upstream.state` and posts to a notification channel.
+
+```
+fetch-data  ──chain──▶  summarize  ──chain──▶  notify
+   (scheduled)           (triggered)            (triggered)
+```
+
+Each job's `chain` field points to the next stage:
+- `fetch-data`: `{ "chain": ["summarize"] }`
+- `summarize`: `{ "chain": ["notify"] }`
+- `notify`: no `chain` field (terminal)
+
 ## Run Stats and Cadence Tracking
 
 Each job has a persistent run-stats record tracking:
