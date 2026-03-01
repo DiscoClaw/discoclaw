@@ -30,11 +30,56 @@ The prompt is the instruction the AI follows on each execution. Write it as a di
 
 ### Placeholders
 
-Cron prompts support two placeholders:
+Cron prompts support three placeholders:
 - `{{channel}}` — expands to the target channel name
 - `{{channelId}}` — expands to the target channel snowflake ID
+- `{{state}}` — expands to the job's persisted state as JSON (see [Job State](#job-state))
 
-These are useful when the prompt needs to reference the output channel explicitly.
+These are useful when the prompt needs to reference the output channel or recall previous run context.
+
+## Job State
+
+Each cron job has a persistent key-value `state` object that survives across executions. This lets jobs remember what happened on previous runs — enabling delta tracking, deduplication, accumulation, and smarter silent-mode suppression.
+
+### `{{state}}` Placeholder
+
+Cron prompts can include a `{{state}}` placeholder, which expands to a JSON representation of the job's current state object at execution time. If the job has no state yet, it expands to `{}`.
+
+Example prompt:
+```
+Check for new GitHub releases. Previous state: {{state}}
+Only report releases newer than the "lastSeenTag" in state.
+```
+
+### Writing State Back: `<cron-state>`
+
+The AI runtime writes state back by including a `<cron-state>` block in its response. The executor parses this block, merges the JSON into the job's persisted state, and strips the block from the posted output.
+
+```text
+<cron-state>{"lastSeenTag": "v2.3.1", "lastChecked": "2026-02-28T07:00:00Z"}</cron-state>
+```
+
+The merge is shallow — top-level keys in the emitted object overwrite existing keys. To delete a key, set it to `null`.
+
+If JSON parsing fails, the state update is skipped and a warning is logged. The rest of the job output is still posted normally.
+
+### Manual State Management via `cronUpdate`
+
+State can also be set or reset manually using the `cronUpdate` action with a `state` field. This is useful for:
+- Seeding initial state before a job's first run
+- Resetting state after a schema change
+- Debugging by inspecting or overriding persisted values
+
+Setting `state` to `{}` on `cronUpdate` clears all stored state.
+
+### Use Cases
+
+| Pattern | How state helps |
+|---------|----------------|
+| **Delta tracking** | Store a cursor (timestamp, ID, tag) and only report items newer than the cursor on the next run |
+| **Deduplication** | Track seen item IDs to avoid re-posting the same alert twice |
+| **Accumulation** | Aggregate counts or summaries across runs, then emit a rollup on a cadence boundary |
+| **Silent-mode suppression** | Track consecutive no-op runs; only break silence when something genuinely changes |
 
 ## Advanced Options
 
