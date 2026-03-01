@@ -33,7 +33,10 @@ Bot:             We've been working through your Express → Fastify migration.
 
 Structured store of user facts. Each item has a kind (fact, preference, project,
 constraint, person, tool, workflow), deduplication by content hash, and a 200-item
-cap per user. Injected into every prompt.
+cap per user. Items track `hitCount` (incremented each time the item is selected
+for prompt injection) and `lastHitAt` (timestamp of most recent selection).
+Injected into every prompt using a blended score of recency and usage frequency
+rather than raw `updatedAt` alone.
 
 **What the user sees:**
 - The bot knows your preferences, projects, and key facts across all conversations.
@@ -53,7 +56,7 @@ Bot:   Given your preference for Rust in systems work, I'd lean that way —
 
 #### Consolidation
 
-When the active item count for a user crosses a threshold (`DISCOCLAW_DURABLE_CONSOLIDATION_THRESHOLD`, default `100`), consolidation can be triggered to prune and merge the list. A single `fast`-tier model call receives all active items and is asked to return a revised list — removing exact duplicates, merging near-duplicates, dropping clearly stale items, and preserving everything that is still plausibly useful. The model must not invent new facts or change the meaning of existing ones.
+When the active item count for a user crosses a threshold (`DISCOCLAW_DURABLE_CONSOLIDATION_THRESHOLD`, default `100`), consolidation can be triggered to prune and merge the list. A single `fast`-tier model call receives all active items and is asked to return a revised list — removing exact duplicates, merging near-duplicates, dropping clearly stale items, and preserving everything that is still plausibly useful. The model must not invent new facts or change the meaning of existing ones. Items with low `hitCount` and stale `lastHitAt` are natural eviction candidates — the blended score surfaces which items the AI actually uses versus those that were added once and never referenced again.
 
 The revised list is applied atomically: items absent from the model's output are deprecated via `deprecateItems()`; new or rewritten items are written via `addItem()`. Items present verbatim in the output are left untouched (no unnecessary writes).
 
@@ -183,7 +186,7 @@ no separator). The three memory builders run in `Promise.all` so they add no lat
 
 | Layer | Default budget | Default state | How it stays within budget |
 |-------|---------------|---------------|---------------------------|
-| Durable memory | 2000 chars | on | Sorts active items by recency, adds one at a time, stops when next line would exceed budget. Older facts silently excluded. |
+| Durable memory | 2000 chars | on | Ranks active items by blended score (recency + hit frequency), adds one at a time, stops when next line would exceed budget. Low-scoring items silently excluded. |
 | Rolling summary | 2000 chars | on | The `fast`-tier model is prompted with `"Keep the summary under {maxChars} characters"`. Replaces itself each update rather than growing. |
 | Message history | 3000 chars | on | Fetches up to 10 messages, walks backward from newest. Bot messages truncated to fit; user messages that don't fit cause a hard stop. |
 | Short-term memory | 1000 chars | **on** | Filters by max age (default 6h), sorts newest-first, accumulates lines until budget hit. |
@@ -202,7 +205,7 @@ might add ~500 chars total. Sections with no data produce zero overhead.
 
 ### Where the budgets are enforced
 
-- **Durable**: `selectItemsForInjection()` in `durable-memory.ts:152`
+- **Durable**: `selectItemsForInjection()` in `durable-memory.ts:152` — scores items using `hitCount`, `lastHitAt`, and `updatedAt`; increments hit counters on selected items
 - **Short-term**: `selectEntriesForInjection()` in `shortterm-memory.ts:113`
 - **Summary**: `fast`-tier prompt constraint in `summarizer.ts:63`
 - **History**: `fetchMessageHistory()` in `message-history.ts:38`
