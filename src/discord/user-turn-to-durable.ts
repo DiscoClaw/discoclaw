@@ -1,7 +1,7 @@
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { DurableItem } from './durable-memory.js';
-import { loadDurableMemory, saveDurableMemory, addItem, deprecateItems, selectItemsForInjection } from './durable-memory.js';
+import { loadDurableMemory, saveDurableMemory, addItem, deprecateItems, selectItemsForInjection, CURRENT_VERSION } from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
 import { extractFirstJsonValue } from './json-extract.js';
 
@@ -156,7 +156,7 @@ export async function applyUserTurnToDurable(opts: ApplyUserTurnToDurableOpts): 
 
   await durableWriteQueue.run(opts.userId, async () => {
     const store = (await loadDurableMemory(opts.durableDataDir, opts.userId)) ?? {
-      version: 1 as const,
+      version: CURRENT_VERSION,
       updatedAt: 0,
       items: [],
     };

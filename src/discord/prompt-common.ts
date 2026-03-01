@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildPromptPreamble as buildRootPolicyPreamble } from '../root-policy.js';
 import type { DiscordChannelContext } from './channel-context.js';
-import { formatDurableSection, loadDurableMemory, selectItemsForInjection } from './durable-memory.js';
+import { formatDurableSection, loadDurableMemory, saveDurableMemory, selectItemsForInjection, recordHits } from './durable-memory.js';
+import { durableWriteQueue } from './durable-write-queue.js';
 import { buildShortTermMemorySection } from './shortterm-memory.js';
 import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
 import { isOnboardingComplete } from '../workspace-bootstrap.js';
@@ -131,6 +132,20 @@ export async function buildDurableMemorySection(opts: {
     if (!store) return '';
     const items = selectItemsForInjection(store, opts.durableInjectMaxChars);
     if (items.length === 0) return '';
+
+    // Record hits on injected items so frequently-used items accumulate
+    // a Hebbian signal for scoring and eviction.  Fire-and-forget — the
+    // background write doesn't block prompt assembly.
+    const itemIds = items.map((it) => it.id);
+    durableWriteQueue.run(opts.userId, async () => {
+      const freshStore = await loadDurableMemory(opts.durableDataDir, opts.userId);
+      if (!freshStore) return;
+      recordHits(freshStore, itemIds);
+      await saveDurableMemory(opts.durableDataDir, opts.userId, freshStore);
+    }).catch((err) => {
+      opts.log?.warn({ err, userId: opts.userId }, 'durable memory hit recording failed');
+    });
+
     return formatDurableSection(items);
   } catch (err) {
     opts.log?.warn({ err, userId: opts.userId }, 'durable memory load failed');

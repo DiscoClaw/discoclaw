@@ -11,15 +11,17 @@ export type DurableItem = {
   source: { type: 'discord' | 'manual' | 'summary' | 'consolidation'; channelId?: string; messageId?: string; guildId?: string; channelName?: string };
   createdAt: number;
   updatedAt: number;
+  hitCount: number;
+  lastHitAt: number;
 };
 
 export type DurableMemoryStore = {
-  version: 1;
+  version: 1 | 2;
   updatedAt: number;
   items: DurableItem[];
 };
 
-export const CURRENT_VERSION = 1 as const;
+export const CURRENT_VERSION = 2 as const;
 
 export function emptyStore(): DurableMemoryStore {
   return { version: CURRENT_VERSION, updatedAt: Date.now(), items: [] };
@@ -27,8 +29,13 @@ export function emptyStore(): DurableMemoryStore {
 
 function migrateStore(store: DurableMemoryStore): DurableMemoryStore | null {
   // Migration blocks run first, then the unknown-version guard.
-  // Future migrations follow the run-stats.ts pattern:
-  //   if (store.version === 1) { /* transform fields */; store.version = 2; }
+  if (store.version === 1) {
+    for (const item of store.items) {
+      (item as DurableItem).hitCount = (item as DurableItem).hitCount ?? 0;
+      (item as DurableItem).lastHitAt = (item as DurableItem).lastHitAt ?? 0;
+    }
+    store.version = 2;
+  }
   if (store.version !== CURRENT_VERSION) {
     // Unrecognized (future) version — caller will create a fresh store.
     return null;
@@ -92,6 +99,33 @@ export function deriveItemId(kind: DurableItem['kind'], text: string): string {
   return 'durable-' + crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 8);
 }
 
+function recencyWeight(timestamp: number, now: number): number {
+  const daysSince = Math.max(0, now - timestamp) / (1000 * 60 * 60 * 24);
+  return 1 / (1 + daysSince / 30);
+}
+
+export function scoreItem(item: DurableItem, now: number): number {
+  if (item.hitCount === 0) return 0;
+  return item.hitCount * recencyWeight(item.lastHitAt, now);
+}
+
+export function blendedInjectionScore(item: DurableItem, now: number): number {
+  const hitBoost = 0.5;
+  return recencyWeight(item.updatedAt, now) + hitBoost * item.hitCount * recencyWeight(item.lastHitAt, now);
+}
+
+export function recordHits(store: DurableMemoryStore, itemIds: string[]): void {
+  const idSet = new Set(itemIds);
+  const now = Date.now();
+  for (const item of store.items) {
+    if (idSet.has(item.id)) {
+      item.hitCount += 1;
+      item.lastHitAt = now;
+    }
+  }
+  if (idSet.size > 0) store.updatedAt = now;
+}
+
 export function addItem(
   store: DurableMemoryStore,
   text: string,
@@ -121,26 +155,28 @@ export function addItem(
     source,
     createdAt: now,
     updatedAt: now,
+    hitCount: 0,
+    lastHitAt: 0,
   };
   store.items.push(item);
   store.updatedAt = now;
 
   // Enforce maxItems cap.
   while (store.items.length > maxItems) {
-    // Drop oldest deprecated first.
+    // Drop lowest-scored deprecated first.
     const deprecatedIdx = store.items
       .map((it, i) => ({ it, i }))
       .filter(({ it }) => it.status === 'deprecated')
-      .sort((a, b) => a.it.updatedAt - b.it.updatedAt)[0];
+      .sort((a, b) => scoreItem(a.it, now) - scoreItem(b.it, now))[0];
 
     if (deprecatedIdx) {
       store.items.splice(deprecatedIdx.i, 1);
     } else {
-      // Drop oldest active.
+      // Drop lowest-scored active.
       const activeIdx = store.items
         .map((it, i) => ({ it, i }))
         .filter(({ it }) => it.status === 'active')
-        .sort((a, b) => a.it.updatedAt - b.it.updatedAt)[0];
+        .sort((a, b) => scoreItem(a.it, now) - scoreItem(b.it, now))[0];
       if (activeIdx) {
         store.items.splice(activeIdx.i, 1);
       } else {
@@ -179,9 +215,10 @@ export function selectItemsForInjection(
   store: DurableMemoryStore,
   maxChars: number,
 ): DurableItem[] {
+  const now = Date.now();
   const active = store.items
     .filter((item) => item.status === 'active')
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+    .sort((a, b) => blendedInjectionScore(b, now) - blendedInjectionScore(a, now));
 
   const selected: DurableItem[] = [];
   let chars = 0;

@@ -7,6 +7,7 @@ import {
   deprecateItems,
   selectItemsForInjection,
   formatDurableSection,
+  CURRENT_VERSION,
 } from './durable-memory.js';
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
@@ -113,7 +114,7 @@ export async function executeMemoryAction(
 
 async function loadOrCreate(dir: string, userId: string): Promise<DurableMemoryStore> {
   const store = await loadDurableMemory(dir, userId);
-  return store ?? { version: 1, updatedAt: 0, items: [] };
+  return store ?? { version: CURRENT_VERSION, updatedAt: 0, items: [] };
 }
 
 // ---------------------------------------------------------------------------

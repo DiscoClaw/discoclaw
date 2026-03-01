@@ -357,7 +357,7 @@ describe('createReactionAddHandler', () => {
     expect(prompt).toContain('Durable memory');
     expect(prompt).toContain('User loves TypeScript');
 
-    await fsP.rm(tmpDir, { recursive: true });
+    await fsP.rm(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it('prompt includes open-tasks section when taskCtx has open tasks', async () => {
