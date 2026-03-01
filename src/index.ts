@@ -8,6 +8,7 @@ import fs from 'node:fs/promises';
 import { createClaudeCliRuntime } from './runtime/claude-code-cli.js';
 import { killAllSubprocesses } from './runtime/cli-adapter.js';
 import { RuntimeRegistry } from './runtime/registry.js';
+import type { RuntimeAdapter } from './runtime/types.js';
 import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
 import { createCodexCliRuntime } from './runtime/codex-cli.js';
 import { createGeminiCliRuntime } from './runtime/gemini-cli.js';
@@ -654,7 +655,7 @@ cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, runtime.id);
   tasksAutoTagModel = resolveModel(cfg.tasksAutoTagModel, runtime.id);
 const voiceModel = resolveModel(cfg.voiceModel, runtime.id);
 const cronExecModel = resolveModel(cfg.cronExecModel, runtime.id);
-const voiceModelRef = { model: voiceModel };
+const voiceModelRef: { model: string; runtime?: RuntimeAdapter; runtimeName?: string } = { model: voiceModel };
 
 // --- Load runtime-overrides.json (persistent overlay on top of .env defaults) ---
 const overrides = await loadOverrides(overridesPath, (msg, data) => log.warn(data ?? {}, msg));
@@ -687,6 +688,22 @@ if (overrideModels['summary']) {
 if (overrideModels['cron']) {
   cronAutoTagModel = overrideModels['cron'];
   log.info({ cronAutoTagModel }, 'runtime-overrides: cron model override applied');
+}
+if (overrides.voiceRuntime) {
+  const voiceRt = runtimeRegistry.get(overrides.voiceRuntime);
+  if (voiceRt) {
+    voiceModelRef.runtime = voiceRt;
+    voiceModelRef.runtimeName = overrides.voiceRuntime;
+    if (voiceRt.defaultModel && !overrideModels['voice']) {
+      voiceModelRef.model = voiceRt.defaultModel;
+    }
+    log.info({ voiceRuntime: overrides.voiceRuntime, voiceModel: voiceModelRef.model }, 'runtime-overrides: voice runtime override applied');
+  } else {
+    log.warn(
+      { voiceRuntime: overrides.voiceRuntime, availableRuntimes: runtimeRegistry.list() },
+      'runtime-overrides: voiceRuntime is not a registered runtime; ignoring',
+    );
+  }
 }
 if (overrides.ttsVoice) {
   log.info({ ttsVoice: overrides.ttsVoice }, 'runtime-overrides: ttsVoice override will be applied');
@@ -1190,6 +1207,7 @@ if (taskCtx) {
       runtime: limitedRuntime,
       runtimeRegistry,
       runtimeName: primaryRuntimeName,
+      voiceRuntimeName: voiceModelRef.runtimeName,
       // Env-default models — used by !models reset to revert live state.
       envDefaults: {
         chat: resolveModel(cfg.runtimeModel, runtime.id),
@@ -1204,6 +1222,18 @@ if (taskCtx) {
       overrideSources,
       persistOverride,
       clearOverride,
+      persistVoiceRuntime: (runtimeName: string): void => {
+        currentOverridesState.voiceRuntime = runtimeName;
+        saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+          log.warn({ err, runtimeName }, 'runtime-overrides: voice runtime save failed'),
+        );
+      },
+      clearVoiceRuntime: (): void => {
+        delete currentOverridesState.voiceRuntime;
+        saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+          log.warn({ err }, 'runtime-overrides: voice runtime clear failed'),
+        );
+      },
     };
     log.info('config:action context initialized');
   }
@@ -1282,9 +1312,10 @@ if (taskCtx) {
     const voiceActionFollowupDepth = 1;
 
     const voiceInvokeAi = async (text: string): Promise<string> => {
-      // Resolve model at invoke time so tier names (fast/capable) always resolve correctly
-      // even after runtime mutation via !models set voice.
-      const resolvedVoiceModel = resolveModel(voiceModelRef.model, limitedRuntime.id);
+      // Resolve model and runtime at invoke time so tier names (fast/capable) always resolve
+      // correctly even after runtime mutation via !models set voice.
+      const voiceRuntime = voiceModelRef.runtime ?? limitedRuntime;
+      const resolvedVoiceModel = resolveModel(voiceModelRef.model, voiceRuntime.id);
       let prompt = text;
 
       // When a voice home channel is configured, prepend full prompt context.
@@ -1332,7 +1363,7 @@ if (taskCtx) {
         let result = '';
         let invokeHadError = false;
         try {
-          for await (const evt of limitedRuntime.invoke({
+          for await (const evt of voiceRuntime.invoke({
             prompt: currentPrompt,
             model: resolvedVoiceModel,
             cwd: workspaceCwd,
