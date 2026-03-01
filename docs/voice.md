@@ -246,6 +246,22 @@ Barge-in is **STT-confirmed**: playback is only interrupted when the STT provide
 
 When a non-empty transcript arrives while `VoiceResponder` is playing, playback is stopped and the generation counter is incremented to abandon the in-flight pipeline. The transcript is then processed as a new voice turn.
 
+## Conversation History
+
+Voice invocations include a per-guild conversation ring buffer so the AI can reference prior exchanges within the same session.
+
+### Ring Buffer (In-Memory)
+
+Each guild maintains an in-memory ring buffer of the last **10 turns** (a turn is one user utterance plus the corresponding model response). New turns push onto the buffer; when the buffer is full the oldest turn is evicted. The buffer contents are formatted as `user:` / `assistant:` pairs and injected into the voice prompt ahead of the current utterance, giving the model short-term conversational context.
+
+### Voice-Log Backfill (On Join)
+
+When the bot joins a voice channel, it reads recent messages from the voice-log text channel (`DISCOCLAW_VOICE_LOG_CHANNEL` / `voice-log`) and backfills the ring buffer with up to 10 turns of prior conversation. This carries context across disconnects — if the bot drops and rejoins, it picks up where it left off instead of starting with a blank slate. Backfilled turns are marked so they are not re-posted to the transcript mirror.
+
+### Buffer Clearing (On Disconnect)
+
+When the bot leaves or is disconnected from a voice channel, the guild's ring buffer is cleared. The next connection starts fresh (with optional backfill from the voice log). This prevents stale context from leaking across unrelated sessions.
+
 ## Architecture Overview
 
 The voice system is composed of several cooperating modules:
