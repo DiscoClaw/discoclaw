@@ -70,7 +70,7 @@ async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string):
 
 const MAX_CHAIN_DEPTH = 10;
 
-async function fireChainedJobs(cronId: string, ctx: CronExecutorContext): Promise<void> {
+export async function fireChainedJobs(cronId: string, ctx: CronExecutorContext): Promise<void> {
   const chainDepth = ctx.chainDepth ?? 0;
   if (chainDepth >= MAX_CHAIN_DEPTH) {
     ctx.log?.warn({ cronId, chainDepth }, 'chain:depth limit reached, skipping downstream');

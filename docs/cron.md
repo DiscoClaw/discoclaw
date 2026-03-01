@@ -142,9 +142,7 @@ If the upstream job has no state (or empty state), `__upstream.state` is `{}`. I
 
 ### Cycle Detection
 
-The system prevents circular chains. Before registering a chain link, `wouldCreateCycle` checks whether adding the edge would create a cycle in the chain graph. Self-loops (`A → A`) are always rejected.
-
-At startup, `detectCycles` performs a full DFS scan of the chain graph and logs any cycles found. Jobs involved in cycles have their downstream links skipped.
+The system prevents circular chains at write-time. When a `cronUpdate` sets or modifies a `chain` field, `detectChainCycle` performs a BFS from each proposed downstream job to verify the upstream job is not reachable — rejecting the update if a cycle would form. Self-loops (`A → A`) are always rejected.
 
 ### Depth Limits
 

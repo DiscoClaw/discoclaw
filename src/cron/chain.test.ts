@@ -1,330 +1,295 @@
-import { describe, expect, it, vi } from 'vitest';
-import {
-  buildChainGraph,
-  detectCycles,
-  wouldCreateCycle,
-  fireDownstream,
-} from './chain.js';
-import type { ChainFireContext } from './chain.js';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { fireChainedJobs } from './executor.js';
+import type { CronExecutorContext } from './executor.js';
+import type { CronJob } from './types.js';
+import { loadRunStats } from './run-stats.js';
+import type { CronRunStats } from './run-stats.js';
 
 // ---------------------------------------------------------------------------
-// buildChainGraph
+// Helpers
 // ---------------------------------------------------------------------------
 
-describe('buildChainGraph', () => {
-  it('builds graph from records with downstream', () => {
-    const records = [
-      { cronId: 'a', downstream: ['b', 'c'] },
-      { cronId: 'b', downstream: ['d'] },
-      { cronId: 'c' },
-      { cronId: 'd' },
-    ];
-    const graph = buildChainGraph(records);
-    expect(graph.get('a')).toEqual(['b', 'c']);
-    expect(graph.get('b')).toEqual(['d']);
-    expect(graph.has('c')).toBe(false);
-    expect(graph.has('d')).toBe(false);
-  });
+function mockLog() {
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+}
 
-  it('returns empty graph for records without downstream', () => {
-    const records = [{ cronId: 'a' }, { cronId: 'b' }];
-    const graph = buildChainGraph(records);
-    expect(graph.size).toBe(0);
-  });
+let tmpDir: string;
 
-  it('skips empty downstream arrays', () => {
-    const records = [{ cronId: 'a', downstream: [] as string[] }];
-    const graph = buildChainGraph(records);
-    expect(graph.size).toBe(0);
-  });
-
-  it('copies downstream arrays (mutation-safe)', () => {
-    const downstream = ['b'];
-    const records = [{ cronId: 'a', downstream }];
-    const graph = buildChainGraph(records);
-    downstream.push('c');
-    expect(graph.get('a')).toEqual(['b']);
-  });
+beforeEach(async () => {
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chain-test-'));
+});
+afterEach(async () => {
+  await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-// ---------------------------------------------------------------------------
-// detectCycles
-// ---------------------------------------------------------------------------
+async function makeStatsStore(): Promise<CronRunStats> {
+  return loadRunStats(path.join(tmpDir, 'stats.json'));
+}
 
-describe('detectCycles', () => {
-  it('returns empty for acyclic graph', () => {
-    const graph = new Map([
-      ['a', ['b', 'c']],
-      ['b', ['d']],
-      ['c', ['d']],
-    ]);
-    expect(detectCycles(graph)).toEqual([]);
-  });
+function makeDownstreamJob(cronId: string, threadId: string): CronJob {
+  return {
+    id: threadId,
+    cronId,
+    threadId,
+    guildId: 'guild-1',
+    name: `Job ${cronId}`,
+    def: { triggerType: 'schedule', schedule: '0 0 * * *', timezone: 'UTC', channel: 'general', prompt: 'test' },
+    cron: null,
+    running: false,
+  };
+}
 
-  it('detects a simple 2-node cycle', () => {
-    const graph = new Map([
-      ['a', ['b']],
-      ['b', ['a']],
-    ]);
-    const cycles = detectCycles(graph);
-    expect(cycles.length).toBeGreaterThan(0);
-    const flat = cycles.flat();
-    expect(flat).toContain('a');
-    expect(flat).toContain('b');
-  });
-
-  it('detects a self-loop', () => {
-    const graph = new Map([['a', ['a']]]);
-    const cycles = detectCycles(graph);
-    expect(cycles.length).toBeGreaterThan(0);
-    expect(cycles[0]).toEqual(['a', 'a']);
-  });
-
-  it('detects a 3-node cycle', () => {
-    const graph = new Map([
-      ['a', ['b']],
-      ['b', ['c']],
-      ['c', ['a']],
-    ]);
-    const cycles = detectCycles(graph);
-    expect(cycles.length).toBeGreaterThan(0);
-    const cycle = cycles[0];
-    expect(cycle[0]).toBe(cycle[cycle.length - 1]); // first === last
-    expect(cycle.length).toBe(4); // a→b→c→a
-  });
-
-  it('returns empty for empty graph', () => {
-    expect(detectCycles(new Map())).toEqual([]);
-  });
-
-  it('handles disconnected components, one with cycle', () => {
-    const graph = new Map([
-      ['a', ['b']],
-      ['x', ['y']],
-      ['y', ['x']],
-    ]);
-    const cycles = detectCycles(graph);
-    expect(cycles.length).toBeGreaterThan(0);
-    const flat = cycles.flat();
-    expect(flat).toContain('x');
-    expect(flat).toContain('y');
-    // The acyclic a→b branch should not appear in any cycle.
-    const cycleNodes = new Set(cycles.flatMap((c) => c));
-    expect(cycleNodes.has('a')).toBe(false);
-  });
-
-  it('detects multiple independent cycles', () => {
-    const graph = new Map([
-      ['a', ['b']],
-      ['b', ['a']],
-      ['x', ['y']],
-      ['y', ['x']],
-    ]);
-    const cycles = detectCycles(graph);
-    expect(cycles.length).toBe(2);
-  });
-
-  it('returns cycle that starts and ends with the same node', () => {
-    const graph = new Map([
-      ['a', ['b']],
-      ['b', ['c']],
-      ['c', ['a']],
-    ]);
-    const cycles = detectCycles(graph);
-    for (const cycle of cycles) {
-      expect(cycle[0]).toBe(cycle[cycle.length - 1]);
-    }
-  });
-});
+function makeMinimalCtx(statsStore: CronRunStats, overrides?: Partial<CronExecutorContext>): CronExecutorContext {
+  return {
+    client: {} as any,
+    runtime: { id: 'claude_code', capabilities: new Set(), async *invoke() {} } as any,
+    model: 'haiku',
+    cwd: '/tmp',
+    tools: [],
+    timeoutMs: 30_000,
+    status: null,
+    log: mockLog(),
+    discordActionsEnabled: false,
+    actionFlags: {
+      channels: false, messaging: false, guild: false, moderation: false,
+      polls: false, tasks: false, crons: false, botProfile: false,
+      forge: false, plan: false, memory: false, config: false, defer: false, voice: false,
+    },
+    statsStore,
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
-// wouldCreateCycle
+// fireChainedJobs
 // ---------------------------------------------------------------------------
 
-describe('wouldCreateCycle', () => {
-  it('returns false for safe edge in acyclic graph', () => {
-    const graph = new Map([['a', ['b']]]);
-    expect(wouldCreateCycle(graph, 'b', 'c')).toBe(false);
+describe('fireChainedJobs', () => {
+  it('does nothing when getSchedulerJob is not set', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', { chain: ['downstream'] });
+    await store.upsertRecord('downstream', 'thread-down', {});
+
+    const ctx = makeMinimalCtx(store);
+    // No getSchedulerJob → early return
+    await fireChainedJobs('upstream', ctx);
+
+    const rec = store.getRecord('downstream');
+    // State should NOT have been forwarded
+    expect(rec?.state).toBeUndefined();
   });
 
-  it('returns true for self-loop', () => {
-    expect(wouldCreateCycle(new Map(), 'a', 'a')).toBe(true);
+  it('does nothing when statsStore is not set', async () => {
+    const ctx = makeMinimalCtx(undefined as any, { statsStore: undefined });
+    // Should not throw
+    await fireChainedJobs('upstream', ctx);
   });
 
-  it('returns true when edge would close a 3-node cycle', () => {
-    const graph = new Map([
-      ['a', ['b']],
-      ['b', ['c']],
-    ]);
-    // c→a would create a→b→c→a
-    expect(wouldCreateCycle(graph, 'c', 'a')).toBe(true);
+  it('does nothing when the upstream job has no chain', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', {});
+
+    const getSchedulerJob = vi.fn();
+    const ctx = makeMinimalCtx(store, { getSchedulerJob });
+    await fireChainedJobs('upstream', ctx);
+
+    expect(getSchedulerJob).not.toHaveBeenCalled();
   });
 
-  it('returns true when edge would close a 2-node cycle', () => {
-    const graph = new Map([['a', ['b']]]);
-    expect(wouldCreateCycle(graph, 'b', 'a')).toBe(true);
+  it('does nothing when chain is empty array', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', { chain: [] });
+
+    const getSchedulerJob = vi.fn();
+    const ctx = makeMinimalCtx(store, { getSchedulerJob });
+    await fireChainedJobs('upstream', ctx);
+
+    expect(getSchedulerJob).not.toHaveBeenCalled();
   });
 
-  it('returns false when edge is safe in longer chain', () => {
-    const graph = new Map([
-      ['a', ['b']],
-      ['b', ['c']],
-    ]);
-    // d→a is safe (no path from a back to d)
-    expect(wouldCreateCycle(graph, 'd', 'a')).toBe(false);
-  });
-
-  it('returns false for empty graph with distinct nodes', () => {
-    expect(wouldCreateCycle(new Map(), 'a', 'b')).toBe(false);
-  });
-
-  it('returns false for parallel edge (no cycle)', () => {
-    const graph = new Map([
-      ['a', ['b']],
-      ['a', ['c']],
-    ]);
-    // b→c is fine
-    expect(wouldCreateCycle(graph, 'b', 'c')).toBe(false);
-  });
-
-  it('detects indirect reachability through long path', () => {
-    const graph = new Map([
-      ['a', ['b']],
-      ['b', ['c']],
-      ['c', ['d']],
-      ['d', ['e']],
-    ]);
-    // e→a would create a→b→c→d→e→a
-    expect(wouldCreateCycle(graph, 'e', 'a')).toBe(true);
-    // e→c would create c→d→e→c
-    expect(wouldCreateCycle(graph, 'e', 'c')).toBe(true);
-    // e→f is safe
-    expect(wouldCreateCycle(graph, 'e', 'f')).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// fireDownstream
-// ---------------------------------------------------------------------------
-
-describe('fireDownstream', () => {
-  function makeCtx(overrides?: Partial<ChainFireContext>): ChainFireContext {
-    return {
-      getRecord: vi.fn().mockReturnValue(undefined),
-      forwardState: vi.fn().mockResolvedValue(undefined),
-      executeJob: vi.fn().mockResolvedValue(undefined),
-      ...overrides,
-    };
-  }
-
-  it('fires downstream jobs in order', async () => {
-    const executedIds: string[] = [];
-    const ctx = makeCtx({
-      getRecord: vi.fn((id: string) => ({ cronId: id, threadId: `thread-${id}` })),
-      executeJob: vi.fn(async (id: string) => { executedIds.push(id); }),
+  it('forwards __upstream state to downstream job', async () => {
+    const store = await makeStatsStore();
+    const upstreamState = { lastSeenTag: 'v2.3.1', items: [1, 2, 3] };
+    await store.upsertRecord('upstream', 'thread-up', {
+      chain: ['downstream'],
+      state: upstreamState,
+    });
+    await store.upsertRecord('downstream', 'thread-down', {
+      state: { existingKey: 'preserved' },
     });
 
-    const fired = await fireDownstream('a', ['b', 'c'], undefined, ctx);
-    expect(fired).toEqual(['b', 'c']);
-    expect(executedIds).toEqual(['b', 'c']);
+    const downstreamJob = makeDownstreamJob('downstream', 'thread-down');
+    const getSchedulerJob = vi.fn().mockReturnValue(downstreamJob);
+    const ctx = makeMinimalCtx(store, { getSchedulerJob });
+    await fireChainedJobs('upstream', ctx);
+
+    const rec = store.getRecord('downstream');
+    expect(rec?.state).toEqual({
+      existingKey: 'preserved',
+      __upstream: { fromCronId: 'upstream', state: upstreamState },
+    });
   });
 
-  it('forwards state to downstream jobs before execution', async () => {
-    const calls: string[] = [];
-    const state = { count: 42 };
-    const ctx = makeCtx({
-      getRecord: vi.fn((id: string) => ({ cronId: id, threadId: `thread-${id}` })),
-      forwardState: vi.fn(async () => { calls.push('forward'); }),
-      executeJob: vi.fn(async () => { calls.push('execute'); }),
+  it('forwards empty state as __upstream when upstream has no state', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', { chain: ['downstream'] });
+    await store.upsertRecord('downstream', 'thread-down', {});
+
+    const downstreamJob = makeDownstreamJob('downstream', 'thread-down');
+    const getSchedulerJob = vi.fn().mockReturnValue(downstreamJob);
+    const ctx = makeMinimalCtx(store, { getSchedulerJob });
+    await fireChainedJobs('upstream', ctx);
+
+    const rec = store.getRecord('downstream');
+    expect(rec?.state).toEqual({
+      __upstream: { fromCronId: 'upstream', state: {} },
+    });
+  });
+
+  it('skips downstream when record is not found', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', { chain: ['nonexistent'] });
+
+    const getSchedulerJob = vi.fn();
+    const log = mockLog();
+    const ctx = makeMinimalCtx(store, { getSchedulerJob, log });
+    await fireChainedJobs('upstream', ctx);
+
+    expect(getSchedulerJob).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ downstream: 'nonexistent' }),
+      expect.stringContaining('record not found'),
+    );
+  });
+
+  it('skips downstream when scheduler job is not found', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', { chain: ['downstream'] });
+    await store.upsertRecord('downstream', 'thread-down', {});
+
+    const getSchedulerJob = vi.fn().mockReturnValue(undefined);
+    const log = mockLog();
+    const ctx = makeMinimalCtx(store, { getSchedulerJob, log });
+    await fireChainedJobs('upstream', ctx);
+
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ downstream: 'downstream' }),
+      expect.stringContaining('scheduler job not found'),
+    );
+  });
+
+  it('fires multiple downstream jobs independently', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', {
+      chain: ['down-a', 'down-b'],
+      state: { data: 42 },
+    });
+    await store.upsertRecord('down-a', 'thread-a', {});
+    await store.upsertRecord('down-b', 'thread-b', {});
+
+    const jobA = makeDownstreamJob('down-a', 'thread-a');
+    const jobB = makeDownstreamJob('down-b', 'thread-b');
+    const getSchedulerJob = vi.fn((threadId: string) => {
+      if (threadId === 'thread-a') return jobA;
+      if (threadId === 'thread-b') return jobB;
+      return undefined;
     });
 
-    await fireDownstream('a', ['b'], state, ctx);
-    // Forward must happen before execute.
-    expect(calls).toEqual(['forward', 'execute']);
-    expect(ctx.forwardState).toHaveBeenCalledWith('b', 'thread-b', state);
+    const log = mockLog();
+    const ctx = makeMinimalCtx(store, { getSchedulerJob, log });
+    await fireChainedJobs('upstream', ctx);
+
+    // Both should have __upstream state forwarded
+    const recA = store.getRecord('down-a');
+    const recB = store.getRecord('down-b');
+    expect(recA?.state?.__upstream).toEqual({ fromCronId: 'upstream', state: { data: 42 } });
+    expect(recB?.state?.__upstream).toEqual({ fromCronId: 'upstream', state: { data: 42 } });
+
+    // Both should have been logged as fired
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ downstream: 'down-a' }),
+      expect.stringContaining('downstream fired'),
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ downstream: 'down-b' }),
+      expect.stringContaining('downstream fired'),
+    );
   });
 
-  it('skips downstream jobs whose records are not found', async () => {
-    const ctx = makeCtx({
-      getRecord: vi.fn().mockReturnValue(undefined),
+  it('logs warning and skips downstream when chain depth >= 10', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', { chain: ['downstream'] });
+    await store.upsertRecord('downstream', 'thread-down', {});
+
+    const getSchedulerJob = vi.fn();
+    const log = mockLog();
+    const ctx = makeMinimalCtx(store, { getSchedulerJob, log, chainDepth: 10 });
+    await fireChainedJobs('upstream', ctx);
+
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ cronId: 'upstream', chainDepth: 10 }),
+      expect.stringContaining('depth limit'),
+    );
+    // getSchedulerJob should never be called — we returned early
+    expect(getSchedulerJob).not.toHaveBeenCalled();
+  });
+
+  it('increments chain depth for downstream execution context', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', {
+      chain: ['downstream'],
+      state: { x: 1 },
+    });
+    await store.upsertRecord('downstream', 'thread-down', {});
+
+    const downstreamJob = makeDownstreamJob('downstream', 'thread-down');
+    const getSchedulerJob = vi.fn().mockReturnValue(downstreamJob);
+    const log = mockLog();
+    const ctx = makeMinimalCtx(store, { getSchedulerJob, log, chainDepth: 5 });
+    await fireChainedJobs('upstream', ctx);
+
+    // The function should have fired (depth 5 < 10)
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ downstream: 'downstream' }),
+      expect.stringContaining('downstream fired'),
+    );
+  });
+
+  it('handles state forward failure gracefully', async () => {
+    const store = await makeStatsStore();
+    await store.upsertRecord('upstream', 'thread-up', {
+      chain: ['downstream'],
+      state: { data: 1 },
+    });
+    await store.upsertRecord('downstream', 'thread-down', {});
+
+    // Mock upsertRecord to fail on state forwarding
+    const originalUpsert = store.upsertRecord.bind(store);
+    let callCount = 0;
+    vi.spyOn(store, 'upsertRecord').mockImplementation(async (...args) => {
+      callCount++;
+      // Fail on the state-forwarding call (the one during fireChainedJobs)
+      if (callCount > 0) throw new Error('disk full');
+      return originalUpsert(...args);
     });
 
-    const fired = await fireDownstream('a', ['missing'], undefined, ctx);
-    expect(fired).toEqual([]);
-    expect(ctx.executeJob).not.toHaveBeenCalled();
-  });
+    const downstreamJob = makeDownstreamJob('downstream', 'thread-down');
+    const getSchedulerJob = vi.fn().mockReturnValue(downstreamJob);
+    const log = mockLog();
+    const ctx = makeMinimalCtx(store, { getSchedulerJob, log });
+    await fireChainedJobs('upstream', ctx);
 
-  it('does not forward empty state', async () => {
-    const ctx = makeCtx({
-      getRecord: vi.fn((id: string) => ({ cronId: id, threadId: `thread-${id}` })),
-    });
-
-    await fireDownstream('a', ['b'], {}, ctx);
-    expect(ctx.forwardState).not.toHaveBeenCalled();
-  });
-
-  it('does not forward undefined state', async () => {
-    const ctx = makeCtx({
-      getRecord: vi.fn((id: string) => ({ cronId: id, threadId: `thread-${id}` })),
-    });
-
-    await fireDownstream('a', ['b'], undefined, ctx);
-    expect(ctx.forwardState).not.toHaveBeenCalled();
-  });
-
-  it('continues to next downstream if state forwarding fails', async () => {
-    const ctx = makeCtx({
-      getRecord: vi.fn((id: string) => ({ cronId: id, threadId: `thread-${id}` })),
-      forwardState: vi.fn().mockRejectedValue(new Error('disk full')),
-    });
-
-    const fired = await fireDownstream('a', ['b'], { x: 1 }, ctx);
-    expect(fired).toEqual(['b']);
-    expect(ctx.executeJob).toHaveBeenCalledWith('b');
-  });
-
-  it('continues to next downstream if execution fails', async () => {
-    const ctx = makeCtx({
-      getRecord: vi.fn((id: string) => ({ cronId: id, threadId: `thread-${id}` })),
-      executeJob: vi.fn()
-        .mockRejectedValueOnce(new Error('runtime crash'))
-        .mockResolvedValueOnce(undefined),
-    });
-
-    const fired = await fireDownstream('a', ['b', 'c'], undefined, ctx);
-    expect(fired).toEqual(['c']);
-  });
-
-  it('returns empty array for empty downstream list', async () => {
-    const ctx = makeCtx();
-    const fired = await fireDownstream('a', [], undefined, ctx);
-    expect(fired).toEqual([]);
-    expect(ctx.getRecord).not.toHaveBeenCalled();
-  });
-
-  it('handles mixed found and missing downstream records', async () => {
-    const ctx = makeCtx({
-      getRecord: vi.fn((id: string) => {
-        if (id === 'b') return { cronId: 'b', threadId: 'thread-b' };
-        return undefined;
-      }),
-    });
-
-    const fired = await fireDownstream('a', ['missing1', 'b', 'missing2'], undefined, ctx);
-    expect(fired).toEqual(['b']);
-    expect(ctx.executeJob).toHaveBeenCalledTimes(1);
-    expect(ctx.executeJob).toHaveBeenCalledWith('b');
-  });
-
-  it('forwards state to each downstream independently', async () => {
-    const state = { data: [1, 2, 3] };
-    const ctx = makeCtx({
-      getRecord: vi.fn((id: string) => ({ cronId: id, threadId: `thread-${id}` })),
-    });
-
-    await fireDownstream('a', ['b', 'c'], state, ctx);
-    expect(ctx.forwardState).toHaveBeenCalledTimes(2);
-    expect(ctx.forwardState).toHaveBeenCalledWith('b', 'thread-b', state);
-    expect(ctx.forwardState).toHaveBeenCalledWith('c', 'thread-c', state);
+    // Should log a warning but still fire downstream
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ downstream: 'downstream' }),
+      expect.stringContaining('state forward failed'),
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ downstream: 'downstream' }),
+      expect.stringContaining('downstream fired'),
+    );
   });
 });

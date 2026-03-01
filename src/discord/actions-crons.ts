@@ -246,8 +246,7 @@ export async function executeCronAction(
         }
         if (chainResult.ids.length > 0) {
           // No cycle detection needed on create — this job doesn't exist yet so
-          // no other job can reference it. But we still check in case the downstream
-          // jobs chain back to each other in a way that would be problematic.
+          // no other job can reference it as a downstream target.
           parsedChain = chainResult.ids;
         }
       }

@@ -251,12 +251,13 @@ Both actions share the same writeable field set (except where noted):
 | `routingMode` | No | Set to `"json"` to enable JSON routing mode (see below) |
 | `allowedActions` | No | Comma-separated action types permitted during execution (see below) |
 | `state` | No (update only) | JSON object to set as the job's persistent state (see [Job State](cron.md#job-state)) |
+| `chain` | No | Comma-separated `cronId` strings of downstream jobs to trigger on successful completion (see [Job Chaining](cron.md#job-chaining)) |
 
 `cronUpdate` additionally requires `cronId` (the cron job ID to update). Only supplied fields are changed.
 
 > **Note:** There is no `cronSetState` action. State write-back during execution uses the `<cron-state>` block convention at the executor level, not a Discord action. Use `cronUpdate` with a `state` field for manual state management.
 
-`cronShow` output includes `routingMode` and `allowedActions` when set on the job.
+`cronShow` output includes `routingMode`, `allowedActions`, and `chain` when set on the job.
 
 #### JSON Routing Mode
 
