@@ -104,6 +104,7 @@ describe('npmGlobalUpgrade', () => {
     expect(result.stderr).toBe('');
     expect(mockExeca).toHaveBeenCalledWith('npm', ['install', '-g', 'discoclaw', '--loglevel=error'], {
       timeout: 120_000,
+      env: expect.objectContaining({ CFLAGS: '-Wno-incompatible-pointer-types' }),
     });
   });
 
