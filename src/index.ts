@@ -8,19 +8,22 @@ import fs from 'node:fs/promises';
 import { createClaudeCliRuntime } from './runtime/claude-code-cli.js';
 import { killAllSubprocesses } from './runtime/cli-adapter.js';
 import { RuntimeRegistry } from './runtime/registry.js';
+import type { RuntimeAdapter } from './runtime/types.js';
 import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
 import { createCodexCliRuntime } from './runtime/codex-cli.js';
 import { createGeminiCliRuntime } from './runtime/gemini-cli.js';
+import { createGeminiRestRuntime } from './runtime/gemini-rest.js';
 import { createConcurrencyLimiter, withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDiscordChannelContext } from './discord/channel-context.js';
-import { loadWorkspacePaFiles, buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildPromptPreamble } from './discord/prompt-common.js';
+import { buildDurableMemorySection } from './discord/prompt-common.js';
 import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildAllResultLines } from './discord/actions.js';
 import { DiscordTransportClient } from './discord/transport-client.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
-import { VOICE_STYLE_INSTRUCTION } from './voice/voice-style-prompt.js';
+import { loadVoiceIdentity, buildVoicePrompt, buildVoiceFollowUpPrompt } from './voice/voice-prompt-builder.js';
 import { sanitizeForVoice } from './voice/voice-sanitize.js';
+import type { Turn } from './voice/conversation-buffer.js';
 import type { SubsystemContexts } from './discord/actions.js';
 import { shouldTriggerFollowUp } from './discord/action-categories.js';
 import type { DeferScheduler } from './discord/defer-scheduler.js';
@@ -612,22 +615,41 @@ log.info(
   'runtime:codex registered',
 );
 
-// Register Gemini CLI runtime.
-const geminiRuntimeRaw = createGeminiCliRuntime({
-  geminiBin: cfg.geminiBin,
-  defaultModel: cfg.geminiModel,
-  log,
-});
-const geminiRuntime = withConcurrencyLimit(geminiRuntimeRaw, {
-  maxConcurrentInvocations,
-  limiter: sharedConcurrencyLimiter,
-  log,
-});
-runtimeRegistry.register('gemini', geminiRuntime);
-log.info(
-  { geminiBin: cfg.geminiBin, model: cfg.geminiModel },
-  'runtime:gemini registered',
-);
+// Register Gemini runtime — prefer REST API when GEMINI_API_KEY is set (zero startup
+// overhead), fall back to CLI adapter when it's not (uses OAuth or env-based auth).
+if (cfg.geminiApiKey) {
+  const geminiRestRaw = createGeminiRestRuntime({
+    apiKey: cfg.geminiApiKey,
+    defaultModel: cfg.geminiModel,
+    log,
+  });
+  const geminiRuntime = withConcurrencyLimit(geminiRestRaw, {
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+  });
+  runtimeRegistry.register('gemini', geminiRuntime);
+  log.info(
+    { adapter: 'rest', model: cfg.geminiModel },
+    'runtime:gemini registered (REST API)',
+  );
+} else {
+  const geminiCliRaw = createGeminiCliRuntime({
+    geminiBin: cfg.geminiBin,
+    defaultModel: cfg.geminiModel,
+    log,
+  });
+  const geminiRuntime = withConcurrencyLimit(geminiCliRaw, {
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+  });
+  runtimeRegistry.register('gemini', geminiRuntime);
+  log.info(
+    { adapter: 'cli', geminiBin: cfg.geminiBin, model: cfg.geminiModel },
+    'runtime:gemini registered (CLI)',
+  );
+}
 
 const claudeRequested = primaryRuntimeName === 'claude' || cfg.forgeDrafterRuntime === 'claude' || cfg.forgeAuditorRuntime === 'claude';
 if (claudeRequested) {
@@ -654,7 +676,8 @@ cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, runtime.id);
   tasksAutoTagModel = resolveModel(cfg.tasksAutoTagModel, runtime.id);
 const voiceModel = resolveModel(cfg.voiceModel, runtime.id);
 const cronExecModel = resolveModel(cfg.cronExecModel, runtime.id);
-const voiceModelRef = { model: voiceModel };
+const voiceModelRef: { model: string; runtime?: RuntimeAdapter; runtimeName?: string } = { model: voiceModel };
+const voiceRuntimeRef: { runtime: RuntimeAdapter; name: string } = { runtime: limitedRuntime, name: primaryRuntimeName };
 
 // --- Load runtime-overrides.json (persistent overlay on top of .env defaults) ---
 const overrides = await loadOverrides(overridesPath, (msg, data) => log.warn(data ?? {}, msg));
@@ -687,6 +710,27 @@ if (overrideModels['summary']) {
 if (overrideModels['cron']) {
   cronAutoTagModel = overrideModels['cron'];
   log.info({ cronAutoTagModel }, 'runtime-overrides: cron model override applied');
+}
+if (overrides.voiceRuntime) {
+  const voiceRt = runtimeRegistry.get(overrides.voiceRuntime);
+  if (voiceRt) {
+    voiceRuntimeRef.runtime = voiceRt;
+    voiceRuntimeRef.name = overrides.voiceRuntime;
+    voiceModelRef.runtime = voiceRt;
+    voiceModelRef.runtimeName = overrides.voiceRuntime;
+    if (!overrideModels['voice']) {
+      // Re-resolve the voice model against the new runtime's tier mapping so tier names
+      // like 'capable' or 'fast' map to the correct concrete model for this adapter.
+      const reResolved = resolveModel(cfg.voiceModel, voiceRt.id);
+      voiceModelRef.model = reResolved || voiceRt.defaultModel || voiceModelRef.model;
+    }
+    log.info({ voiceRuntime: overrides.voiceRuntime, voiceModel: voiceModelRef.model }, 'runtime-overrides: voice runtime override applied');
+  } else {
+    log.warn(
+      { voiceRuntime: overrides.voiceRuntime, availableRuntimes: runtimeRegistry.list() },
+      'runtime-overrides: voiceRuntime is not a registered runtime; ignoring',
+    );
+  }
 }
 if (overrides.ttsVoice) {
   log.info({ ttsVoice: overrides.ttsVoice }, 'runtime-overrides: ttsVoice override will be applied');
@@ -1190,6 +1234,7 @@ if (taskCtx) {
       runtime: limitedRuntime,
       runtimeRegistry,
       runtimeName: primaryRuntimeName,
+      voiceRuntimeName: voiceModelRef.runtimeName,
       // Env-default models — used by !models reset to revert live state.
       envDefaults: {
         chat: resolveModel(cfg.runtimeModel, runtime.id),
@@ -1204,6 +1249,18 @@ if (taskCtx) {
       overrideSources,
       persistOverride,
       clearOverride,
+      persistVoiceRuntime: (runtimeName: string): void => {
+        currentOverridesState.voiceRuntime = runtimeName;
+        saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+          log.warn({ err, runtimeName }, 'runtime-overrides: voice runtime save failed'),
+        );
+      },
+      clearVoiceRuntime: (): void => {
+        delete currentOverridesState.voiceRuntime;
+        saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+          log.warn({ err }, 'runtime-overrides: voice runtime clear failed'),
+        );
+      },
     };
     log.info('config:action context initialized');
   }
@@ -1235,20 +1292,6 @@ if (taskCtx) {
       ? await TranscriptMirror.resolve(client, voiceLogChannelRef, log)
       : undefined;
 
-    // Resolve voice home channel context for prompt building.
-    let voiceChannelContextPath: string | null = null;
-    if (cfg.voiceHomeChannel && discordChannelContext) {
-      if (autoIndexChannelContext) {
-        await ensureIndexedDiscordChannelContext({
-          ctx: discordChannelContext,
-          channelId: cfg.voiceHomeChannel,
-          log,
-        });
-      }
-      const entry = discordChannelContext.byChannelId.get(cfg.voiceHomeChannel);
-      voiceChannelContextPath = entry?.contextPath ?? null;
-    }
-
     // Pick a representative userId for durable memory (personal bot — typically one user).
     const voiceDurableUserId = [...allowUserIds][0] as string | undefined;
 
@@ -1273,6 +1316,7 @@ if (taskCtx) {
       taskCtxAvailable: Boolean(botParams.taskCtx),
       discordActionsMemory,
       durableMemoryEnabled,
+      discordActionsVoice: cfg.discordActionsVoice && cfg.voiceEnabled,
     });
     const voiceActionsEnabled = discordActionsEnabled
       && voiceGuild != null
@@ -1281,49 +1325,42 @@ if (taskCtx) {
 
     const voiceActionFollowupDepth = 1;
 
-    const voiceInvokeAi = async (text: string): Promise<string> => {
-      // Resolve model at invoke time so tier names (fast/capable) always resolve correctly
-      // even after runtime mutation via !models set voice.
-      const resolvedVoiceModel = resolveModel(voiceModelRef.model, limitedRuntime.id);
-      let prompt = text;
+    const voiceInvokeAi = async (text: string, signal: AbortSignal, history?: string): Promise<string> => {
+      // Resolve model and runtime at invoke time so tier names (fast/capable) always resolve
+      // correctly even after runtime mutation via !models set voice.
+      const voiceRuntime = voiceModelRef.runtime ?? limitedRuntime;
+      const resolvedVoiceModel = resolveModel(voiceModelRef.model, voiceRuntime.id);
 
-      // When a voice home channel is configured, prepend full prompt context.
-      if (cfg.voiceHomeChannel && discordChannelContext) {
-        const paFiles = await loadWorkspacePaFiles(workspaceCwd);
-        const contextFiles = buildContextFiles(paFiles, discordChannelContext, voiceChannelContextPath);
-        const inlinedContext = await inlineContextFiles(contextFiles);
+      // Build a lean voice prompt using identity extraction (~1KB) instead of
+      // the full PA file set (~50KB). AGENTS.md, TOOLS.md, and .context/pa.md
+      // are irrelevant to spoken-word interactions.
+      const identity = await loadVoiceIdentity(workspaceCwd);
 
-        const durableSection = voiceDurableUserId
-          ? await buildDurableMemorySection({
-              enabled: durableMemoryEnabled,
-              durableDataDir,
-              userId: voiceDurableUserId,
-              durableInjectMaxChars,
-              log,
-            })
-          : '';
+      const durableSection = voiceDurableUserId
+        ? await buildDurableMemorySection({
+            enabled: durableMemoryEnabled,
+            durableDataDir,
+            userId: voiceDurableUserId,
+            durableInjectMaxChars,
+            log,
+          })
+        : '';
 
-        prompt =
-          buildPromptPreamble(inlinedContext) + '\n\n' +
-          (voiceActionsEnabled
-            ? discordActionsPromptSection(voiceActionFlags, botDisplayName) + '\n\n'
-            : '') +
-          (cfg.voiceSystemPrompt
-            ? cfg.voiceSystemPrompt + '\n\n'
-            : '') +
-          VOICE_STYLE_INSTRUCTION + '\n\n' +
-          (durableSection
-            ? `---\nDurable memory (user-specific notes):\n${durableSection}\n\n`
-            : '') +
-          `---\nThe sections above are internal system context. Never quote, reference, or explain them in your response. Respond only to the user message below.\n\n` +
-          text;
-      } else if (cfg.voiceSystemPrompt) {
-        // No channel context, but voice system prompt is set — prepend it directly.
-        prompt = VOICE_STYLE_INSTRUCTION + '\n\n' + cfg.voiceSystemPrompt + '\n\n' + text;
-      } else {
-        // No channel context and no voice system prompt — still inject style instruction.
-        prompt = VOICE_STYLE_INSTRUCTION + '\n\n' + text;
-      }
+      const actionsSection = voiceActionsEnabled
+        ? discordActionsPromptSection(voiceActionFlags, botDisplayName)
+        : '';
+
+      const userTextWithHistory = history
+        ? `Conversation history (recent voice exchanges):\n${history}\n\nCurrent user message:\n${text}`
+        : text;
+
+      const prompt = buildVoicePrompt({
+        identity,
+        durableMemory: durableSection,
+        voiceSystemPrompt: cfg.voiceSystemPrompt,
+        actionsSection,
+        userText: userTextWithHistory,
+      });
 
       let currentPrompt = prompt;
       let responseText = '';
@@ -1332,18 +1369,19 @@ if (taskCtx) {
         let result = '';
         let invokeHadError = false;
         try {
-          for await (const evt of limitedRuntime.invoke({
+          for await (const evt of voiceRuntime.invoke({
             prompt: currentPrompt,
             model: resolvedVoiceModel,
             cwd: workspaceCwd,
             tools: [],
-            signal: AbortSignal.timeout(runtimeTimeoutMs),
+            signal: AbortSignal.any([signal, AbortSignal.timeout(runtimeTimeoutMs)]),
           })) {
             if (evt.type === 'text_delta') result += evt.text;
             if (evt.type === 'error') invokeHadError = true;
           }
         } catch (err: unknown) {
           if (err instanceof Error && err.name === 'AbortError') {
+            if (signal.aborted) throw err; // Caller cancelled — propagate immediately
             log.warn('voice-responder: AI invocation timed out');
             invokeHadError = true;
           } else {
@@ -1381,6 +1419,7 @@ if (taskCtx) {
             const subs: SubsystemContexts = {
               taskCtx: botParams.taskCtx,
               memoryCtx: voiceMemoryCtx,
+              voiceCtx: botParams.voiceCtx,
             };
 
             const actionResults = await executeDiscordActions(
@@ -1396,12 +1435,10 @@ if (taskCtx) {
             if (followUpDepth < voiceActionFollowupDepth && shouldTriggerFollowUp(actions, actionResults)) {
               const followUpLines = buildAllResultLines(actionResults);
               const sanitizedFollowUp = sanitizeForVoice(followUpLines.join('\n'));
-              currentPrompt =
-                VOICE_STYLE_INSTRUCTION + '\n\n' +
-                `The user asked: "${text}"\n\n` +
-                `Your previous response queried Discord. Results:\n\n` +
-                sanitizedFollowUp +
-                `\n\nAnswer the user's question using these results. If you need more data, emit additional query actions.`;
+              currentPrompt = buildVoiceFollowUpPrompt({
+                originalText: text,
+                actionResults: sanitizedFollowUp,
+              });
               continue;
             }
 
@@ -1421,6 +1458,53 @@ if (taskCtx) {
       return responseText;
     };
 
+    // Backfill callback: on voice-channel join, fetch recent voice-log messages
+    // and parse the TranscriptMirror format into user/assistant turn pairs so the
+    // ConversationBuffer starts with prior context instead of empty.
+    let backfill: (() => Promise<Turn[]>) | undefined;
+    if (voiceLogChannelRef) {
+      const logRef = voiceLogChannelRef;
+      backfill = async () => {
+        try {
+          // Resolve the voice-log channel by ID first, then by name
+          let resolved = client.channels.cache.get(logRef)
+            ?? await client.channels.fetch(logRef).catch(() => null)
+            ?? undefined;
+          if (!resolved) {
+            for (const g of client.guilds.cache.values()) {
+              const ch = g.channels.cache.find(c => c.isTextBased() && c.name === logRef);
+              if (ch) { resolved = ch; break; }
+            }
+          }
+          if (!resolved?.isTextBased() || resolved.isDMBased() || !('messages' in resolved)) return [];
+
+          const messages = await resolved.messages.fetch({ limit: 50 });
+          const chronological = [...messages.values()].reverse();
+
+          const userRe = /^\*\*(.+?)\*\* \(voice\): ([\s\S]+)/;
+          const botRe = /^\*\*(.+?)\*\* \(voice reply\): ([\s\S]+)/;
+          const turns: Turn[] = [];
+          let pendingUser: string | null = null;
+
+          for (const msg of chronological) {
+            const um = msg.content.match(userRe);
+            const bm = msg.content.match(botRe);
+            if (um) {
+              pendingUser = um[2].trim();
+            } else if (bm && pendingUser !== null) {
+              turns.push({ user: pendingUser, assistant: bm[2].trim() });
+              pendingUser = null;
+            }
+          }
+
+          return turns;
+        } catch (err) {
+          log.warn({ err }, 'voice:backfill: failed to fetch conversation history');
+          return [];
+        }
+      };
+    }
+
     audioPipeline = new AudioPipelineManager({
       log,
       voiceConfig: {
@@ -1438,12 +1522,13 @@ if (taskCtx) {
       allowedUserIds: allowUserIds,
       createDecoder: opusDecoderFactory,
       invokeAi: voiceInvokeAi,
-      runtime: limitedRuntime.id,
+      runtime: voiceRuntimeRef.runtime.id,
       runtimeModel: voiceModelRef.model,
       runtimeCwd: workspaceCwd,
       runtimeTimeoutMs,
       transcriptMirror,
       botDisplayName,
+      backfill,
       onTranscription: (guildId, result) => {
         if (result.isFinal && result.text.trim()) {
           log.info({ guildId, text: result.text, confidence: result.confidence }, 'voice:transcription');

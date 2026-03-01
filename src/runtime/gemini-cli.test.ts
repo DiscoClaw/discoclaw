@@ -221,7 +221,7 @@ describe('Gemini CLI runtime adapter', () => {
     expect(callArgs[modelIdx + 1]).toBe('gemini-2.5-flash');
   });
 
-  it('inserts -- argument terminator before prompt to prevent flag parsing', async () => {
+  it('passes prompt via --prompt flag to prevent flag parsing of prompt content', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stdout: 'ok',
       exitCode: 0,
@@ -239,9 +239,9 @@ describe('Gemini CLI runtime adapter', () => {
     }));
 
     const callArgs = mockExeca.mock.calls[0][1] as string[];
-    const dashdashIdx = callArgs.indexOf('--');
-    expect(dashdashIdx).toBeGreaterThan(-1);
-    expect(callArgs[dashdashIdx + 1]).toBe('--- SOUL.md ---\ntext');
+    const promptIdx = callArgs.indexOf('--prompt');
+    expect(promptIdx).toBeGreaterThan(-1);
+    expect(callArgs[promptIdx + 1]).toBe('--- SOUL.md ---\ntext');
   });
 
   it('empty model fallback: params.model="" resolves to defaultModel', async () => {

@@ -5,6 +5,7 @@ export type RuntimeOverrides = {
   /** Model overrides keyed by ModelRole (chat, fast, forge-drafter, etc.). */
   models?: Record<string, string>;
   ttsVoice?: string;
+  voiceRuntime?: string;
 };
 
 const OVERRIDES_FILENAME = 'runtime-overrides.json';
@@ -63,6 +64,7 @@ export async function loadOverrides(
   }
 
   if (typeof obj['ttsVoice'] === 'string') overrides.ttsVoice = obj['ttsVoice'];
+  if (typeof obj['voiceRuntime'] === 'string') overrides.voiceRuntime = obj['voiceRuntime'];
   return overrides;
 }
 

@@ -28,6 +28,7 @@ Two native npm packages power the Discord voice integration:
 | `src/voice/presence-handler.ts` | Auto-join/leave on `voiceStateUpdate` (allowlisted users only) |
 | `src/voice/transcript-mirror.ts` | Posts user transcriptions and bot responses to a text channel |
 | `src/voice/voice-action-flags.ts` | Restricted action subset for voice invocations (messaging + tasks + memory only) |
+| `src/voice/conversation-buffer.ts` | Per-guild conversation ring buffer (10 turns) — stores user/model exchanges in memory; backfills from voice-log channel on join |
 | `src/discord/actions-voice.ts` | Discord action types: `voiceJoin`, `voiceLeave`, `voiceStatus`, `voiceMute`, `voiceDeafen` |
 
 ## Audio Data Flow
@@ -52,6 +53,7 @@ User speaks in Discord voice channel
 - **Dual-flag voice actions** — Voice action execution requires both `VOICE_ENABLED` and `DISCORD_ACTIONS_VOICE`. The `buildVoiceActionFlags()` function intersects a voice-specific allowlist (messaging, tasks, memory) with env config; all other action categories are hard-disabled.
 - **Generation-based cancellation** — `VoiceResponder` increments a generation counter on each new transcription. If a newer transcription arrives mid-pipeline, the older one is silently abandoned.
 - **Barge-in** — Gated on a non-empty STT transcription result, not the raw VAD `speaking.start` event. Echo from the bot's own TTS leaking through the user's mic produces empty transcriptions and is ignored. Only when `VoiceResponder.handleTranscription()` receives a non-empty transcript while the player is active does it stop playback and advance the generation counter. This eliminates false positives from echo without relying on a static grace-period timeout.
+- **Conversation ring buffer** — `ConversationBuffer` maintains a per-guild 10-turn ring buffer of user/model exchanges that gets injected into the voice prompt as formatted conversation history. Turns are appended live during a session. On voice join, the buffer backfills from recent voice-log channel messages so context carries across disconnects. The buffer is cleared when the bot leaves the voice channel.
 - **Re-entrancy guard** — `AudioPipelineManager.startPipeline` uses a `starting` set because `VoiceConnection.subscribe()` synchronously fires a Ready state change.
 - **Error containment** — `VoiceConnectionManager` catches connection errors and destroys the connection to prevent process crashes (e.g. DAVE handshake failures).
 - **Deepgram TTS 2000-char limit** — Deepgram Aura REST TTS returns HTTP 413 (silent failure) for inputs exceeding ~2000 characters. `tts-deepgram.ts` truncates the input to 2000 chars before sending to prevent silent audio dropouts. If the AI response is unexpectedly long (e.g. from a missing `VOICE_STYLE_INSTRUCTION`), the user will still hear a truncated response rather than silence.

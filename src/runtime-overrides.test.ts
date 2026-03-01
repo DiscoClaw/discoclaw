@@ -146,6 +146,24 @@ describe('loadOverrides', () => {
     expect(result).toEqual({});
   });
 
+  it('loads voiceRuntime field correctly', async () => {
+    const dir = await tmpDir();
+    dirs.push(dir);
+    const filePath = path.join(dir, 'runtime-overrides.json');
+    await fs.writeFile(filePath, JSON.stringify({ voiceRuntime: 'gemini' }), 'utf-8');
+    const result = await loadOverrides(filePath);
+    expect(result).toEqual({ voiceRuntime: 'gemini' });
+  });
+
+  it('silently drops voiceRuntime when it is not a string', async () => {
+    const dir = await tmpDir();
+    dirs.push(dir);
+    const filePath = path.join(dir, 'runtime-overrides.json');
+    await fs.writeFile(filePath, JSON.stringify({ voiceRuntime: 123 }), 'utf-8');
+    const result = await loadOverrides(filePath);
+    expect(result).toEqual({});
+  });
+
   it('loads all roles from models map', async () => {
     const dir = await tmpDir();
     dirs.push(dir);

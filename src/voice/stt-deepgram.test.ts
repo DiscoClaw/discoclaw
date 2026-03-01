@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { AudioFrame, TranscriptionResult } from './types.js';
-import { DeepgramSttProvider } from './stt-deepgram.js';
+import { DeepgramSttProvider, KEEPALIVE_INTERVAL_MS } from './stt-deepgram.js';
 
 // ---------------------------------------------------------------------------
 // Mock WebSocket (ws-library style: EventEmitter with readyState)
@@ -265,6 +265,116 @@ describe('DeepgramSttProvider', () => {
     );
     expect(exhaustedCall).toBeDefined();
 
+    vi.useRealTimers();
+  });
+
+  // -------------------------------------------------------------------------
+  // KeepAlive tests
+  // -------------------------------------------------------------------------
+
+  it('sends KeepAlive text frames on the interval after start', async () => {
+    vi.useFakeTimers();
+    const provider = makeProvider();
+    await provider.start();
+    const ws = lastCreatedWs!;
+
+    // No KeepAlive sent yet (only just connected)
+    const keepAliveBefore = ws.sent.filter(
+      (m) => typeof m === 'string' && JSON.parse(m as string).type === 'KeepAlive',
+    );
+    expect(keepAliveBefore).toHaveLength(0);
+
+    // Advance one interval — should get one KeepAlive
+    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS);
+    const keepAliveAfter1 = ws.sent.filter(
+      (m) => typeof m === 'string' && JSON.parse(m as string).type === 'KeepAlive',
+    );
+    expect(keepAliveAfter1).toHaveLength(1);
+
+    // Advance another interval — should get a second KeepAlive
+    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS);
+    const keepAliveAfter2 = ws.sent.filter(
+      (m) => typeof m === 'string' && JSON.parse(m as string).type === 'KeepAlive',
+    );
+    expect(keepAliveAfter2).toHaveLength(2);
+
+    await provider.stop();
+    vi.useRealTimers();
+  });
+
+  it('stops sending KeepAlive after stop()', async () => {
+    vi.useFakeTimers();
+    const provider = makeProvider();
+    await provider.start();
+    const ws = lastCreatedWs!;
+
+    await provider.stop();
+
+    // Advance well past the interval — no KeepAlive should appear
+    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS * 3);
+    const keepAlives = ws.sent.filter(
+      (m) => typeof m === 'string' && JSON.parse(m as string).type === 'KeepAlive',
+    );
+    expect(keepAlives).toHaveLength(0);
+
+    vi.useRealTimers();
+  });
+
+  it('clears old keepalive timer and starts new one on reconnect', async () => {
+    vi.useFakeTimers();
+    const provider = makeProvider();
+    await provider.start();
+    const ws1 = lastCreatedWs!;
+
+    // Advance to get one KeepAlive on the first connection
+    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS);
+    const ka1 = ws1.sent.filter(
+      (m) => typeof m === 'string' && JSON.parse(m as string).type === 'KeepAlive',
+    );
+    expect(ka1).toHaveLength(1);
+
+    // Trigger unexpected close → reconnect
+    ws1._triggerClose(1006);
+    await vi.advanceTimersByTimeAsync(BASE_BACKOFF_MS); // first retry backoff
+
+    const ws2 = lastCreatedWs!;
+    expect(ws2).not.toBe(ws1);
+
+    // Old timer should be cleared — no further KeepAlives on ws1
+    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS);
+    const ka1After = ws1.sent.filter(
+      (m) => typeof m === 'string' && JSON.parse(m as string).type === 'KeepAlive',
+    );
+    expect(ka1After).toHaveLength(1); // still just the original one
+
+    // New timer should fire on ws2
+    const ka2 = ws2.sent.filter(
+      (m) => typeof m === 'string' && JSON.parse(m as string).type === 'KeepAlive',
+    );
+    expect(ka2).toHaveLength(1);
+
+    await provider.stop();
+    vi.useRealTimers();
+  });
+
+  it('KeepAlive messages are JSON text strings, not Buffers', async () => {
+    vi.useFakeTimers();
+    const provider = makeProvider();
+    await provider.start();
+    const ws = lastCreatedWs!;
+
+    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS);
+
+    const keepAlives = ws.sent.filter(
+      (m) => typeof m === 'string' && JSON.parse(m as string).type === 'KeepAlive',
+    );
+    expect(keepAlives).toHaveLength(1);
+    // Must be a string (text frame), not a Buffer (binary frame)
+    expect(typeof keepAlives[0]).toBe('string');
+    expect(keepAlives[0]).not.toBeInstanceOf(Buffer);
+    expect(JSON.parse(keepAlives[0] as string)).toEqual({ type: 'KeepAlive' });
+
+    await provider.stop();
     vi.useRealTimers();
   });
 });
