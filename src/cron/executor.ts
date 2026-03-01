@@ -53,6 +53,8 @@ export type CronExecutorContext = {
   statsStore?: CronRunStats;
   lockDir?: string;
   runControl?: CronRunControl;
+  chainDepth?: number;
+  getSchedulerJob?: (threadId: string) => CronJob | undefined;
 };
 
 
@@ -63,6 +65,57 @@ async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string):
     } catch {
       // Best-effort.
     }
+  }
+}
+
+const MAX_CHAIN_DEPTH = 10;
+
+export async function fireChainedJobs(cronId: string, ctx: CronExecutorContext): Promise<void> {
+  const chainDepth = ctx.chainDepth ?? 0;
+  if (chainDepth >= MAX_CHAIN_DEPTH) {
+    ctx.log?.warn({ cronId, chainDepth }, 'chain:depth limit reached, skipping downstream');
+    return;
+  }
+
+  if (!ctx.statsStore || !ctx.getSchedulerJob) return;
+
+  const record = ctx.statsStore.getRecord(cronId);
+  if (!record?.chain || record.chain.length === 0) return;
+
+  const upstreamState = record.state;
+
+  for (const downstreamCronId of record.chain) {
+    const downstreamRecord = ctx.statsStore.getRecord(downstreamCronId);
+    if (!downstreamRecord) {
+      ctx.log?.warn({ cronId, downstream: downstreamCronId }, 'chain:downstream record not found, skipping');
+      continue;
+    }
+
+    const downstreamJob = ctx.getSchedulerJob(downstreamRecord.threadId);
+    if (!downstreamJob) {
+      ctx.log?.warn({ cronId, downstream: downstreamCronId, threadId: downstreamRecord.threadId }, 'chain:downstream scheduler job not found, skipping');
+      continue;
+    }
+
+    // Merge __upstream into downstream job's persisted state so the prompt's {{state}} includes handoff data.
+    try {
+      const forwardedState: Record<string, unknown> = {
+        ...(downstreamRecord.state ?? {}),
+        __upstream: { fromCronId: cronId, state: upstreamState ?? {} },
+      };
+      await ctx.statsStore.upsertRecord(downstreamCronId, downstreamRecord.threadId, { state: forwardedState });
+      ctx.log?.info({ cronId, downstream: downstreamCronId }, 'chain:state forwarded');
+    } catch (err) {
+      ctx.log?.warn({ err, cronId, downstream: downstreamCronId }, 'chain:state forward failed');
+    }
+
+    // Fire-and-forget with incremented chain depth.
+    const downstreamCtx: CronExecutorContext = { ...ctx, chainDepth: chainDepth + 1 };
+    void executeCronJob(downstreamJob, downstreamCtx).catch((err) => {
+      ctx.log?.warn({ err, cronId, downstream: downstreamCronId }, 'chain:downstream execution failed');
+    });
+
+    ctx.log?.info({ cronId, downstream: downstreamCronId }, 'chain:downstream fired');
   }
 }
 
@@ -320,6 +373,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         } catch {
           // Best-effort.
         }
+        void fireChainedJobs(job.cronId, ctx);
       }
       return;
     }
@@ -416,6 +470,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         } catch {
           // Best-effort.
         }
+        void fireChainedJobs(job.cronId, ctx);
       }
       metrics.increment('cron.run.success');
       return;
@@ -432,6 +487,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         } catch {
           // Best-effort.
         }
+        void fireChainedJobs(job.cronId, ctx);
       }
       metrics.increment('cron.run.success');
       return;
@@ -472,6 +528,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       } catch (statsErr) {
         ctx.log?.warn({ err: statsErr, jobId: job.id }, 'cron:exec stats record failed');
       }
+      void fireChainedJobs(job.cronId, ctx);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

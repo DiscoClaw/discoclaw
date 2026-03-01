@@ -1591,6 +1591,7 @@ if (cronEnabled && effectiveCronForum) {
     statsStore: cronStats,
     lockDir: cronLocksDir,
     runControl: cronRunControl,
+    getSchedulerJob: (threadId: string) => cronScheduler!.getJob(threadId),
   };
 
   savedCronExecCtx = cronExecCtx;
