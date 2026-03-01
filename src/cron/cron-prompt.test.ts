@@ -281,3 +281,96 @@ describe('buildCronPromptBody — placeholder expansion', () => {
     expect(body).toContain('Channel alerts with ID ch-5.');
   });
 });
+
+// ---------------------------------------------------------------------------
+// expandCronPlaceholders — {{state}} placeholder
+// ---------------------------------------------------------------------------
+
+describe('expandCronPlaceholders — {{state}} placeholder', () => {
+  it('expands {{state}} to JSON string of provided state', () => {
+    const result = expandCronPlaceholders(
+      'Current state: {{state}}',
+      'general',
+      'ch-1',
+      { counter: 3, lastSeen: '2026-02-28' },
+    );
+    expect(result).toContain('"counter":3');
+    expect(result).toContain('"lastSeen":"2026-02-28"');
+    expect(result).not.toContain('{{state}}');
+  });
+
+  it('expands {{state}} to empty object JSON when state is undefined', () => {
+    const result = expandCronPlaceholders('State: {{state}}', 'general', 'ch-1');
+    expect(result).toBe('State: {}');
+  });
+
+  it('expands {{state}} to empty object JSON when state is empty', () => {
+    const result = expandCronPlaceholders('State: {{state}}', 'general', 'ch-1', {});
+    expect(result).toBe('State: {}');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCronPromptBody — persistent state
+// ---------------------------------------------------------------------------
+
+describe('buildCronPromptBody — persistent state', () => {
+  it('includes Persistent State section when state is non-empty', () => {
+    const body = buildCronPromptBody({
+      jobName: 'Stateful Job',
+      promptTemplate: 'Check for updates.',
+      channel: 'general',
+      state: { lastCheck: '2026-02-27', items: [1, 2, 3] },
+    });
+    expect(body).toContain('## Persistent State');
+    expect(body).toContain('"lastCheck": "2026-02-27"');
+    expect(body).toContain('<cron-state>');
+  });
+
+  it('omits Persistent State section when state is undefined', () => {
+    const body = buildCronPromptBody({
+      jobName: 'Stateless Job',
+      promptTemplate: 'Say hello.',
+      channel: 'general',
+    });
+    expect(body).not.toContain('Persistent State');
+    expect(body).not.toContain('<cron-state>');
+  });
+
+  it('omits Persistent State section when state is empty object', () => {
+    const body = buildCronPromptBody({
+      jobName: 'Empty State Job',
+      promptTemplate: 'Say hello.',
+      channel: 'general',
+      state: {},
+    });
+    expect(body).not.toContain('Persistent State');
+    expect(body).not.toContain('<cron-state>');
+  });
+
+  it('truncates very large state objects', () => {
+    const largeState: Record<string, unknown> = {};
+    for (let i = 0; i < 500; i++) {
+      largeState[`key_${i}`] = 'x'.repeat(20);
+    }
+    const body = buildCronPromptBody({
+      jobName: 'Large State Job',
+      promptTemplate: 'Process data.',
+      channel: 'general',
+      state: largeState,
+    });
+    expect(body).toContain('## Persistent State');
+    expect(body).toContain('(state truncated)');
+  });
+
+  it('includes cron-state emit instruction in the state section', () => {
+    const body = buildCronPromptBody({
+      jobName: 'Job',
+      promptTemplate: 'Do stuff.',
+      channel: 'general',
+      state: { v: 1 },
+    });
+    expect(body).toContain('<cron-state>');
+    expect(body).toContain('update');
+  });
+});

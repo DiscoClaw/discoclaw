@@ -119,6 +119,44 @@ describe('CronRunStats', () => {
     expect('allowedActions' in rec).toBe(false);
   });
 
+  it('upserts with state and retrieves it', async () => {
+    const stats = await loadRunStats(statsPath);
+    const stateObj = { lastSeen: '2026-02-28', counter: 5 };
+    const rec = await stats.upsertRecord('cron-st1', 'thread-st1', { state: stateObj });
+    expect(rec.state).toEqual(stateObj);
+
+    const fetched = stats.getRecord('cron-st1');
+    expect(fetched!.state).toEqual(stateObj);
+  });
+
+  it('persists state through disk reload', async () => {
+    const stats = await loadRunStats(statsPath);
+    const stateObj = { items: ['a', 'b'], processed: true };
+    await stats.upsertRecord('cron-st2', 'thread-st2', { state: stateObj });
+
+    const stats2 = await loadRunStats(statsPath);
+    const rec = stats2.getRecord('cron-st2');
+    expect(rec).toBeDefined();
+    expect(rec!.state).toEqual(stateObj);
+  });
+
+  it('replaces state entirely on subsequent upsert', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-st3', 'thread-st3', { state: { v: 1, old: true } });
+    await stats.upsertRecord('cron-st3', 'thread-st3', { state: { v: 2, new: true } });
+
+    const rec = stats.getRecord('cron-st3')!;
+    expect(rec.state).toEqual({ v: 2, new: true });
+    expect(rec.state).not.toHaveProperty('old');
+  });
+
+  it('defaults to no state when none is provided', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-st4', 'thread-st4');
+    const rec = stats.getRecord('cron-st4')!;
+    expect(rec.state).toBeUndefined();
+  });
+
   it('retrieves records by threadId', async () => {
     const stats = await loadRunStats(statsPath);
     await stats.upsertRecord('cron-a', 'thread-100');
@@ -409,6 +447,40 @@ describe('loadRunStats version migration', () => {
     expect(rec!.channel).toBeUndefined();
     expect(rec!.prompt).toBeUndefined();
     expect(rec!.authorId).toBeUndefined();
+  });
+
+  it('migrates a v8 store to v9 with state undefined on existing records', async () => {
+    const v8Store = {
+      version: 8,
+      updatedAt: Date.now(),
+      jobs: {
+        'cron-v8': {
+          cronId: 'cron-v8',
+          threadId: 'thread-v8',
+          runCount: 4,
+          lastRunAt: '2026-02-01T00:00:00.000Z',
+          lastRunStatus: 'success',
+          cadence: 'daily',
+          purposeTags: ['delta'],
+          disabled: false,
+          model: 'sonnet',
+          triggerType: 'schedule',
+          silent: true,
+          routingMode: 'default',
+          channel: 'general',
+        },
+      },
+    };
+    await fs.writeFile(statsPath, JSON.stringify(v8Store), 'utf-8');
+
+    const stats = await loadRunStats(statsPath);
+
+    expect(stats.getStore().version).toBe(9);
+    const rec = stats.getRecord('cron-v8');
+    expect(rec).toBeDefined();
+    expect(rec!.cronId).toBe('cron-v8');
+    expect(rec!.runCount).toBe(4);
+    expect(rec!.state).toBeUndefined();
   });
 
   it('migrates a v6 store to v7 with routingMode and allowedActions undefined on existing records', async () => {
