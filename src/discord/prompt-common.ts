@@ -134,18 +134,17 @@ export async function buildDurableMemorySection(opts: {
     if (items.length === 0) return '';
 
     // Record hits on injected items so frequently-used items accumulate
-    // a Hebbian signal for scoring and eviction.
+    // a Hebbian signal for scoring and eviction.  Fire-and-forget — the
+    // background write doesn't block prompt assembly.
     const itemIds = items.map((it) => it.id);
-    try {
-      await durableWriteQueue.run(opts.userId, async () => {
-        const freshStore = await loadDurableMemory(opts.durableDataDir, opts.userId);
-        if (!freshStore) return;
-        recordHits(freshStore, itemIds);
-        await saveDurableMemory(opts.durableDataDir, opts.userId, freshStore);
-      });
-    } catch (err) {
+    durableWriteQueue.run(opts.userId, async () => {
+      const freshStore = await loadDurableMemory(opts.durableDataDir, opts.userId);
+      if (!freshStore) return;
+      recordHits(freshStore, itemIds);
+      await saveDurableMemory(opts.durableDataDir, opts.userId, freshStore);
+    }).catch((err) => {
       opts.log?.warn({ err, userId: opts.userId }, 'durable memory hit recording failed');
-    }
+    });
 
     return formatDurableSection(items);
   } catch (err) {
