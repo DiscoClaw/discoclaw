@@ -614,22 +614,41 @@ log.info(
   'runtime:codex registered',
 );
 
-// Register Gemini CLI runtime.
-const geminiRuntimeRaw = createGeminiCliRuntime({
-  geminiBin: cfg.geminiBin,
-  defaultModel: cfg.geminiModel,
-  log,
-});
-const geminiRuntime = withConcurrencyLimit(geminiRuntimeRaw, {
-  maxConcurrentInvocations,
-  limiter: sharedConcurrencyLimiter,
-  log,
-});
-runtimeRegistry.register('gemini', geminiRuntime);
-log.info(
-  { geminiBin: cfg.geminiBin, model: cfg.geminiModel },
-  'runtime:gemini registered',
-);
+// Register Gemini runtime — prefer REST API when GEMINI_API_KEY is set (zero startup
+// overhead), fall back to CLI adapter when it's not (uses OAuth or env-based auth).
+if (cfg.geminiApiKey) {
+  const geminiRestRaw = createGeminiRestRuntime({
+    apiKey: cfg.geminiApiKey,
+    defaultModel: cfg.geminiModel,
+    log,
+  });
+  const geminiRuntime = withConcurrencyLimit(geminiRestRaw, {
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+  });
+  runtimeRegistry.register('gemini', geminiRuntime);
+  log.info(
+    { adapter: 'rest', model: cfg.geminiModel },
+    'runtime:gemini registered (REST API)',
+  );
+} else {
+  const geminiCliRaw = createGeminiCliRuntime({
+    geminiBin: cfg.geminiBin,
+    defaultModel: cfg.geminiModel,
+    log,
+  });
+  const geminiRuntime = withConcurrencyLimit(geminiCliRaw, {
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+  });
+  runtimeRegistry.register('gemini', geminiRuntime);
+  log.info(
+    { adapter: 'cli', geminiBin: cfg.geminiBin, model: cfg.geminiModel },
+    'runtime:gemini registered (CLI)',
+  );
+}
 
 const claudeRequested = primaryRuntimeName === 'claude' || cfg.forgeDrafterRuntime === 'claude' || cfg.forgeAuditorRuntime === 'claude';
 if (claudeRequested) {
