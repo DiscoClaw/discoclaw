@@ -53,13 +53,13 @@ Only report releases newer than the "lastSeenTag" in state.
 
 ### Writing State Back: `<cron-state>`
 
-The AI runtime writes state back by including a `<cron-state>` block in its response. The executor parses this block, merges the JSON into the job's persisted state, and strips the block from the posted output.
+The AI runtime writes state back by including a `<cron-state>` block in its response. The executor parses this block, replaces the job's persisted state with the parsed JSON object, and strips the block from the posted output.
 
 ```text
 <cron-state>{"lastSeenTag": "v2.3.1", "lastChecked": "2026-02-28T07:00:00Z"}</cron-state>
 ```
 
-The merge is shallow — top-level keys in the emitted object overwrite existing keys. To delete a key, set it to `null`.
+The replacement is full — the emitted object becomes the new state. Keys not included in the emitted object are dropped. To preserve existing keys, include them in every `<cron-state>` emission (the `{{state}}` placeholder makes this easy).
 
 If JSON parsing fails, the state update is skipped and a warning is logged. The rest of the job output is still posted normally.
 

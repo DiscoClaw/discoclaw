@@ -238,7 +238,7 @@ Allow the model to manage scheduled tasks: create, update, pause/resume, delete,
 
 #### `cronCreate` / `cronUpdate` Fields
 
-Both actions share the same writeable field set:
+Both actions share the same writeable field set (except where noted):
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -250,9 +250,9 @@ Both actions share the same writeable field set:
 | `tags` | No | Forum thread tags to apply |
 | `routingMode` | No | Set to `"json"` to enable JSON routing mode (see below) |
 | `allowedActions` | No | Comma-separated action types permitted during execution (see below) |
-| `state` | No | JSON object to set as the job's persistent state (see [Job State](cron.md#job-state)) |
+| `state` | No (update only) | JSON object to set as the job's persistent state (see [Job State](cron.md#job-state)) |
 
-`cronUpdate` additionally requires `id` (the cron job ID to update). Only supplied fields are changed.
+`cronUpdate` additionally requires `cronId` (the cron job ID to update). Only supplied fields are changed.
 
 > **Note:** There is no `cronSetState` action. State write-back during execution uses the `<cron-state>` block convention at the executor level, not a Discord action. Use `cronUpdate` with a `state` field for manual state management.
 

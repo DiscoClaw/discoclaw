@@ -848,4 +848,80 @@ describe('executeCronAction', () => {
       expect(result.summary).not.toContain('Allowed actions:');
     }
   });
+
+  it('cronUpdate with valid state JSON persists it', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', state: '{"cursor":"abc","count":5}' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      'cron-test0001',
+      'thread-1',
+      expect.objectContaining({ state: { cursor: 'abc', count: 5 } }),
+    );
+  });
+
+  it('cronUpdate with invalid state JSON returns error', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', state: 'not-json' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('valid JSON');
+  });
+
+  it('cronUpdate with non-object state JSON returns error', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', state: '[1,2,3]' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('JSON object');
+  });
+
+  it('cronUpdate with empty object state clears state', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ state: { old: 'value' } })]),
+    });
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', state: '{}' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      'cron-test0001',
+      'thread-1',
+      expect.objectContaining({ state: {} }),
+    );
+  });
+
+  it('cronShow includes state when present', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ state: { cursor: 'xyz', count: 10 } })]),
+    });
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('State:');
+      expect(result.summary).toContain('"cursor"');
+      expect(result.summary).toContain('"xyz"');
+    }
+  });
+
+  it('cronShow omits state when empty', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).not.toContain('State:');
+    }
+  });
 });

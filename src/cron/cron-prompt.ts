@@ -119,7 +119,7 @@ export function buildCronPromptBody(input: CronPromptInput): string {
         serialized,
         '```',
         'If you need to update the persisted state for the next run, emit a `<cron-state>{...}</cron-state>` block ' +
-          'containing a JSON object with the updated state. Only emit this block if the state needs to change.',
+          'containing a JSON object with the full updated state. The emitted object fully replaces the existing state — include all keys you want to keep. Only emit this block if the state needs to change.',
       ].join('\n'),
     );
   }
