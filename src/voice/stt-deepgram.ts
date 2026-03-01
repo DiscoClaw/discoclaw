@@ -5,6 +5,7 @@ import type { AudioFrame, SttProvider, TranscriptionResult } from './types.js';
 const DEEPGRAM_STREAMING_URL = 'wss://api.deepgram.com/v1/listen';
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 500;
+export const KEEPALIVE_INTERVAL_MS = 5_000;
 
 export type DeepgramSttOpts = {
   apiKey: string;
@@ -28,6 +29,7 @@ export class DeepgramSttProvider implements SttProvider {
   private state: 'idle' | 'starting' | 'open' | 'stopped' = 'idle';
   private retryCount = 0;
   private feedCount = 0;
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: DeepgramSttOpts) {
     this.apiKey = opts.apiKey;
@@ -61,6 +63,7 @@ export class DeepgramSttProvider implements SttProvider {
   }
 
   async stop(): Promise<void> {
+    this.clearKeepAlive();
     if (this.state === 'stopped' || this.state === 'idle') return;
     this.state = 'stopped';
 
@@ -81,6 +84,7 @@ export class DeepgramSttProvider implements SttProvider {
   }
 
   private connect(): Promise<void> {
+    this.clearKeepAlive();
     return new Promise<void>((resolve, reject) => {
       const url = this.buildUrl();
       const ws = this.wsFactory(url, {
@@ -91,6 +95,11 @@ export class DeepgramSttProvider implements SttProvider {
       ws.on('open', () => {
         this.state = 'open';
         this.log.info({ url: DEEPGRAM_STREAMING_URL }, 'Deepgram STT connected');
+        this.keepAliveTimer = setInterval(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'KeepAlive' }));
+          }
+        }, KEEPALIVE_INTERVAL_MS);
         resolve();
       });
 
@@ -151,7 +160,15 @@ export class DeepgramSttProvider implements SttProvider {
     }
   }
 
+  private clearKeepAlive(): void {
+    if (this.keepAliveTimer !== null) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
+  }
+
   private handleUnexpectedClose(): void {
+    this.clearKeepAlive();
     if (this.retryCount >= MAX_RETRIES) {
       this.log.error(
         { retries: this.retryCount },
