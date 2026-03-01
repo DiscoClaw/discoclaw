@@ -20,7 +20,7 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | `DISCOCLAW_VOICE_AUTO_JOIN` | No | `0` | Auto-join voice channels when an allowlisted user enters |
 | `DISCOCLAW_STT_PROVIDER` | No | `deepgram` | Speech-to-text provider: `deepgram` or `whisper` |
 | `DISCOCLAW_TTS_PROVIDER` | No | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, `openai`, or `kokoro` |
-| `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Voice audio channel name or ID used for prompt context loading |
+| `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Voice audio channel name or ID used for action execution context and transcript mirroring |
 | `DISCOCLAW_VOICE_LOG_CHANNEL` | No | `voice-log` | Text channel name or ID where the transcript mirror posts conversation records |
 | `DISCOCLAW_VOICE_MODEL` | No | — | AI model override for voice response invocations |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations |
@@ -182,7 +182,7 @@ These are role permissions configured in Server Settings > Roles > (bot role). T
 
 ## Voice Home Channel
 
-`DISCOCLAW_VOICE_HOME_CHANNEL` identifies the voice audio channel. It is used exclusively as a **prompt context source** — PA files, per-channel context, and durable memory are loaded from this channel's context when building prompts for voice AI invocations.
+`DISCOCLAW_VOICE_HOME_CHANNEL` identifies the voice audio channel. The voice prompt builder reads workspace identity files (`SOUL.md`, `IDENTITY.md`, `USER.md`) directly, so the home channel is **not required for prompt context loading**. However, it is still used for **action execution context** (resolving guild/channel for voice actions) and as the target channel association for **transcript mirroring**.
 
 Set this to the name or ID of the voice channel (e.g. `voice`).
 
@@ -200,7 +200,7 @@ When voice is enabled, the server scaffold automatically creates two channels:
 - `voice` — the voice channel users join to speak with the bot
 - `voice-log` — a paired text channel for transcript mirroring (the default log target)
 
-`DISCOCLAW_VOICE_HOME_CHANNEL` and `DISCOCLAW_VOICE_LOG_CHANNEL` are intentionally separate: the home channel provides AI prompt context from the voice audio channel, while the log channel is where transcript text is written.
+`DISCOCLAW_VOICE_HOME_CHANNEL` and `DISCOCLAW_VOICE_LOG_CHANNEL` are intentionally separate: the home channel provides action execution context and channel association, while the log channel is where transcript text is written.
 
 ## Voice Actions
 
@@ -222,8 +222,8 @@ See `docs/discord-actions.md` for full action documentation.
 
 During voice invocations, only a restricted subset of Discord actions are available:
 
-- **Allowed:** messaging, tasks, memory
-- **Disabled:** channels, guild, moderation, polls, crons, bot profile, forge, plan, config, defer, imagegen, voice
+- **Allowed:** messaging, tasks, memory, voice
+- **Disabled:** channels, guild, moderation, polls, crons, bot profile, forge, plan, config, defer, imagegen
 
 Each allowed category is AND-ed with its env config flag — if `DISCOCLAW_DISCORD_ACTIONS_MESSAGING=0`, messaging actions are unavailable even in voice. See `src/voice/voice-action-flags.ts`.
 
