@@ -54,6 +54,7 @@ export type ActionContext = {
   messageId: string;
   threadParentId?: string | null;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
+  deferDepth?: number;
   transport?: TransportClient;
   confirmation?: {
     mode: 'interactive' | 'automated';

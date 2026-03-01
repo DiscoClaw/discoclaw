@@ -88,6 +88,7 @@ function makeOpts(overrides: Record<string, unknown> = {}) {
   return {
     maxDelaySeconds: 3600,
     maxConcurrent: 5,
+    deferMaxDepth: 4,
     state: makeState(),
     runtime: makeRuntime([{ type: 'text_final', text: 'Hello' } as EngineEvent, { type: 'done' } as EngineEvent]),
     runtimeTools: [],
@@ -266,5 +267,96 @@ describe('deferred-runner observability', () => {
     scheduler.schedule({ action: makeAction(), context: makeContext() as any });
 
     await expect(vi.advanceTimersByTimeAsync(2000)).resolves.not.toThrow();
+  });
+
+  it('flags have defer: true when depth is below maxDepth', async () => {
+    const { parseDiscordActions } = await import('./actions.js');
+    const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
+    mockParse.mockClear();
+    mockParse.mockReturnValue({
+      actions: [],
+      cleanText: 'ok',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+
+    const opts = makeOpts({ deferMaxDepth: 4 });
+    const scheduler = configureDeferredScheduler(opts);
+    // context with no deferDepth (defaults to 0) → depth becomes 1, which is < 4
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const flags = mockParse.mock.calls[0][1];
+    expect(flags.defer).toBe(true);
+  });
+
+  it('flags have defer: false when depth equals maxDepth', async () => {
+    const { parseDiscordActions } = await import('./actions.js');
+    const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
+    mockParse.mockClear();
+    mockParse.mockReturnValue({
+      actions: [],
+      cleanText: 'ok',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+
+    const opts = makeOpts({ deferMaxDepth: 4 });
+    const scheduler = configureDeferredScheduler(opts);
+    // context with deferDepth 3 → depth becomes 4, which equals maxDepth
+    const ctx = { ...makeContext(), deferDepth: 3 };
+    scheduler.schedule({ action: makeAction(), context: ctx as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const flags = mockParse.mock.calls[0][1];
+    expect(flags.defer).toBe(false);
+  });
+
+  it('actCtx carries deferDepth incremented by 1 from incoming context', async () => {
+    const { parseDiscordActions, executeDiscordActions } = await import('./actions.js');
+    const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
+    const mockExecute = executeDiscordActions as ReturnType<typeof vi.fn>;
+    mockParse.mockClear();
+    mockExecute.mockClear();
+
+    mockParse.mockReturnValue({
+      actions: [{ type: 'sendMessage', content: 'hi' }],
+      cleanText: '',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecute.mockResolvedValue([{ ok: true, summary: 'sent' }]);
+
+    const opts = makeOpts({ deferMaxDepth: 4 });
+    const scheduler = configureDeferredScheduler(opts);
+    const ctx = { ...makeContext(), deferDepth: 2 };
+    scheduler.schedule({ action: makeAction(), context: ctx as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const actCtx = mockExecute.mock.calls[0][1];
+    expect(actCtx.deferDepth).toBe(3);
+  });
+
+  it('deferMaxDepth 1 allows first level but blocks second', async () => {
+    const { parseDiscordActions } = await import('./actions.js');
+    const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
+
+    // First level: deferDepth undefined → depth = 1, maxDepth = 1 → defer: false
+    mockParse.mockClear();
+    mockParse.mockReturnValue({
+      actions: [],
+      cleanText: 'ok',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+
+    const opts = makeOpts({ deferMaxDepth: 1 });
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // depth = 0 + 1 = 1, maxDepth = 1 → 1 < 1 is false → defer: false
+    const flags = mockParse.mock.calls[0][1];
+    expect(flags.defer).toBe(false);
   });
 });
