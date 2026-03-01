@@ -11,6 +11,9 @@ import {
   deprecateItems,
   selectItemsForInjection,
   formatDurableSection,
+  scoreItem,
+  blendedInjectionScore,
+  recordHits,
   CURRENT_VERSION,
 } from './durable-memory.js';
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
@@ -20,7 +23,7 @@ async function makeTmpDir(): Promise<string> {
 }
 
 function emptyStore(): DurableMemoryStore {
-  return { version: 1, updatedAt: 0, items: [] };
+  return { version: 2, updatedAt: 0, items: [] };
 }
 
 function makeItem(overrides: Partial<DurableItem> = {}): DurableItem {
@@ -33,6 +36,8 @@ function makeItem(overrides: Partial<DurableItem> = {}): DurableItem {
     source: { type: 'manual' },
     createdAt: 1000,
     updatedAt: 1000,
+    hitCount: 0,
+    lastHitAt: 0,
     ...overrides,
   };
 }
@@ -46,7 +51,7 @@ describe('loadDurableMemory', () => {
 
   it('parses valid store', async () => {
     const dir = await makeTmpDir();
-    const store: DurableMemoryStore = { version: 1, updatedAt: 1000, items: [] };
+    const store: DurableMemoryStore = { version: 2, updatedAt: 1000, items: [] };
     await fs.writeFile(path.join(dir, '12345.json'), JSON.stringify(store), 'utf8');
     const result = await loadDurableMemory(dir, '12345');
     expect(result).toEqual(store);
@@ -64,12 +69,31 @@ describe('loadDurableMemory', () => {
     await expect(loadDurableMemory(dir, '../evil')).rejects.toThrow(/Invalid userId/);
   });
 
-  it('returns store unchanged for version-1 store (migration no-op)', async () => {
+  it('migrates v1 store to v2 with hitCount and lastHitAt backfilled', async () => {
     const dir = await makeTmpDir();
-    const store: DurableMemoryStore = { version: 1, updatedAt: 1000, items: [] };
-    await fs.writeFile(path.join(dir, 'user1.json'), JSON.stringify(store), 'utf8');
+    const v1Store = {
+      version: 1,
+      updatedAt: 1000,
+      items: [
+        {
+          id: 'durable-abc12345',
+          kind: 'fact',
+          text: 'test item',
+          tags: [],
+          status: 'active',
+          source: { type: 'manual' },
+          createdAt: 500,
+          updatedAt: 1000,
+        },
+      ],
+    };
+    await fs.writeFile(path.join(dir, 'user1.json'), JSON.stringify(v1Store), 'utf8');
     const result = await loadDurableMemory(dir, 'user1');
-    expect(result).toEqual(store);
+    expect(result).not.toBeNull();
+    expect(result!.version).toBe(2);
+    expect(result!.items).toHaveLength(1);
+    expect(result!.items[0].hitCount).toBe(0);
+    expect(result!.items[0].lastHitAt).toBe(0);
   });
 
   it('returns empty store for unsupported version', async () => {
@@ -343,5 +367,107 @@ describe('formatDurableSection', () => {
     const result = formatDurableSection(items);
     expect(result).not.toContain('#');
     expect(result).toMatch(/src: manual, updated/);
+  });
+});
+
+describe('scoreItem', () => {
+  it('returns 0 when hitCount is 0', () => {
+    const item = makeItem({ hitCount: 0, lastHitAt: 1000 });
+    expect(scoreItem(item, Date.now())).toBe(0);
+  });
+
+  it('scores higher with recent lastHitAt than distant lastHitAt', () => {
+    const now = Date.now();
+    const recent = makeItem({ hitCount: 5, lastHitAt: now - 1000 });
+    const distant = makeItem({ hitCount: 5, lastHitAt: now - 90 * 24 * 60 * 60 * 1000 });
+    expect(scoreItem(recent, now)).toBeGreaterThan(scoreItem(distant, now));
+  });
+
+  it('scores higher with more hits', () => {
+    const now = Date.now();
+    const manyHits = makeItem({ hitCount: 10, lastHitAt: now - 1000 });
+    const fewHits = makeItem({ hitCount: 2, lastHitAt: now - 1000 });
+    expect(scoreItem(manyHits, now)).toBeGreaterThan(scoreItem(fewHits, now));
+  });
+});
+
+describe('blendedInjectionScore', () => {
+  it('recently-updated + frequently-hit item scores above old + never-hit item', () => {
+    const now = Date.now();
+    const hotItem = makeItem({
+      updatedAt: now - 1000,
+      hitCount: 10,
+      lastHitAt: now - 1000,
+    });
+    const coldItem = makeItem({
+      updatedAt: now - 60 * 24 * 60 * 60 * 1000,
+      hitCount: 0,
+      lastHitAt: 0,
+    });
+    expect(blendedInjectionScore(hotItem, now)).toBeGreaterThan(
+      blendedInjectionScore(coldItem, now),
+    );
+  });
+});
+
+describe('addItem — eviction with hit tracking', () => {
+  it('evicts never-hit item before frequently-hit item of same age', () => {
+    const store = emptyStore();
+    const now = Date.now();
+    store.items.push(
+      makeItem({ id: 'never-hit', status: 'active', text: 'never hit', updatedAt: now - 1000, hitCount: 0, lastHitAt: 0 }),
+      makeItem({ id: 'freq-hit', status: 'active', text: 'frequently hit', updatedAt: now - 1000, hitCount: 10, lastHitAt: now - 500 }),
+    );
+    addItem(store, 'new item', { type: 'manual' }, 2);
+    expect(store.items).toHaveLength(2);
+    expect(store.items.find((it) => it.id === 'never-hit')).toBeUndefined();
+    expect(store.items.find((it) => it.id === 'freq-hit')).toBeDefined();
+  });
+
+  it('evicts deprecated never-hit item before active never-hit item', () => {
+    const store = emptyStore();
+    const now = Date.now();
+    store.items.push(
+      makeItem({ id: 'dep-no-hit', status: 'deprecated', text: 'deprecated no hit', updatedAt: now - 1000, hitCount: 0, lastHitAt: 0 }),
+      makeItem({ id: 'active-no-hit', status: 'active', text: 'active no hit', updatedAt: now - 1000, hitCount: 0, lastHitAt: 0 }),
+    );
+    addItem(store, 'new item', { type: 'manual' }, 2);
+    expect(store.items).toHaveLength(2);
+    expect(store.items.find((it) => it.id === 'dep-no-hit')).toBeUndefined();
+    expect(store.items.find((it) => it.id === 'active-no-hit')).toBeDefined();
+  });
+});
+
+describe('selectItemsForInjection — blended scoring', () => {
+  it('orders by blended score, not just updatedAt', () => {
+    const now = Date.now();
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'old-hot', text: 'old but popular', status: 'active', updatedAt: now - 30 * 24 * 60 * 60 * 1000, hitCount: 20, lastHitAt: now - 1000 }),
+      makeItem({ id: 'new-cold', text: 'new but ignored', status: 'active', updatedAt: now - 1000, hitCount: 0, lastHitAt: 0 }),
+    );
+    const items = selectItemsForInjection(store, 10000);
+    expect(items).toHaveLength(2);
+    expect(items[0].id).toBe('old-hot');
+    expect(items[1].id).toBe('new-cold');
+  });
+});
+
+describe('recordHits', () => {
+  it('bumps hitCount and lastHitAt on matching IDs, leaves others untouched', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'hit-me', hitCount: 3, lastHitAt: 500 }),
+      makeItem({ id: 'leave-me', hitCount: 1, lastHitAt: 400 }),
+    );
+    const before = store.items[1].hitCount;
+    const beforeLastHit = store.items[1].lastHitAt;
+
+    recordHits(store, ['hit-me']);
+
+    expect(store.items[0].hitCount).toBe(4);
+    expect(store.items[0].lastHitAt).toBeGreaterThan(500);
+    expect(store.items[1].hitCount).toBe(before);
+    expect(store.items[1].lastHitAt).toBe(beforeLastHit);
   });
 });
