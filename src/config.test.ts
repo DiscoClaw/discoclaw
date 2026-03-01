@@ -3,6 +3,7 @@ import {
   parseConfig,
   DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT,
   DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS,
+  DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DEPTH,
 } from './config.js';
 
 function env(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
@@ -134,6 +135,8 @@ describe('parseConfig', () => {
     expect(config.discordActionsDefer).toBe(true);
     expect(config.deferMaxDelaySeconds).toBe(DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS);
     expect(config.deferMaxConcurrent).toBe(DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT);
+    expect(config.deferMaxDepth).toBe(DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DEPTH);
+    expect(config.deferMaxDepth).toBe(4);
   });
 
   it('parses defer config overrides', () => {
@@ -141,10 +144,21 @@ describe('parseConfig', () => {
       DISCOCLAW_DISCORD_ACTIONS_DEFER: '1',
       DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS: '900',
       DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT: '2',
+      DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH: '8',
     }));
     expect(config.discordActionsDefer).toBe(true);
     expect(config.deferMaxDelaySeconds).toBe(900);
     expect(config.deferMaxConcurrent).toBe(2);
+    expect(config.deferMaxDepth).toBe(8);
+  });
+
+  it('throws on non-positive or non-integer deferMaxDepth', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH: '0' })))
+      .toThrow(/DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH must be a positive number/);
+    expect(() => parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH: '-1' })))
+      .toThrow(/DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH must be a positive number/);
+    expect(() => parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH: '2.5' })))
+      .toThrow(/DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH must be an integer/);
   });
 
   it('reports ignored action category flags as info-level advisories', () => {
