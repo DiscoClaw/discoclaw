@@ -179,5 +179,7 @@ export function reactionPromptSection(): string {
 
 The action returns immediately with a confirmation that the prompt was sent. When the user reacts with a valid choice, a follow-up invocation is triggered automatically so you can act on the decision.
 
+**Context warning:** The follow-up AI invocation receives *only* the \`question\` text and the chosen emoji — no conversation history or prior context is included. Write questions that are specific and self-contained so the follow-up AI knows exactly what action to take for each choice. For example, use "Deploy commit abc123 to staging?" instead of "Should I proceed?" — the follow-up invocation won't know what "proceed" refers to.
+
 Use this for binary confirmations (✅/❌) or short option lists — not for open-ended text input.`;
 }

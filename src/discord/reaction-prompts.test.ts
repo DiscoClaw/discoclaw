@@ -306,6 +306,12 @@ describe('reactionPromptSection', () => {
   it('mentions choice count limits', () => {
     expect(reactionPromptSection()).toContain('2–9');
   });
+
+  it('warns about no conversation history in follow-up invocation', () => {
+    const section = reactionPromptSection();
+    expect(section).toContain('no conversation history');
+    expect(section).toContain('self-contained');
+  });
 });
 
 // ---------------------------------------------------------------------------
