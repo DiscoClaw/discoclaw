@@ -39,9 +39,7 @@ export function createGeminiStrategy(defaultModel: string): CliAdapterStrategy {
       const args: string[] = ['--model', params.model];
 
       if (!useStdin) {
-        // `--` terminates option parsing so prompts like "--- SOUL.md ---" are
-        // always treated as positional input rather than CLI flags.
-        args.push('--', params.prompt);
+        args.push('--prompt', params.prompt);
       }
       // When useStdin is true, no positional arg is added — the binary reads from stdin.
 
