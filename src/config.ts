@@ -117,7 +117,8 @@ export type DiscoclawConfig = {
   openrouterBaseUrl?: string;
   openrouterModel: string;
 
-  // Gemini CLI adapter config
+  // Gemini adapter config
+  geminiApiKey?: string;
   geminiBin: string;
   geminiModel: string;
 
@@ -705,6 +706,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openrouterBaseUrl,
       openrouterModel,
 
+      geminiApiKey: parseTrimmedString(env, 'GEMINI_API_KEY'),
       geminiBin: parseTrimmedString(env, 'GEMINI_BIN') ?? 'gemini',
       geminiModel: parseTrimmedString(env, 'GEMINI_MODEL') ?? 'gemini-2.5-pro',
 
