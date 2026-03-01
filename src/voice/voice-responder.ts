@@ -21,7 +21,7 @@ const DISCORD_RATE = 48_000;
 const DISCORD_CHANNELS = 2;
 
 /** Callback to invoke the AI runtime and return a text response. */
-export type InvokeAiFn = (text: string) => Promise<string>;
+export type InvokeAiFn = (text: string, signal: AbortSignal) => Promise<string>;
 
 export type VoiceResponderOpts = {
   log: LoggerLike;
@@ -43,6 +43,7 @@ export class VoiceResponder {
   private readonly player: AudioPlayer;
   private generation = 0;
   private _processing = false;
+  private activeAbort: AbortController | null = null;
 
   constructor(opts: VoiceResponderOpts) {
     this.log = opts.log;
@@ -77,14 +78,19 @@ export class VoiceResponder {
   async handleTranscription(text: string): Promise<void> {
     if (!text.trim()) return;
 
+    // Abort any in-flight AI subprocess before bumping the generation counter
+    this.activeAbort?.abort();
+
     const gen = ++this.generation;
+    const ac = new AbortController();
+    this.activeAbort = ac;
     this.player.stop(); // interrupt any current playback
     this._processing = true;
 
     try {
       // Step 1: Invoke AI runtime
       this.log.info({ text: text.slice(0, 100) }, 'voice-responder: invoking AI');
-      const response = await this.invokeAi(text);
+      const response = await this.invokeAi(text, ac.signal);
       if (gen !== this.generation) return;
 
       if (!response.trim()) {
@@ -176,6 +182,8 @@ export class VoiceResponder {
 
   /** Interrupt any in-flight pipeline and stop playback. */
   stop(): void {
+    this.activeAbort?.abort();
+    this.activeAbort = null;
     this.generation++;
     this.player.stop();
     this._processing = false;

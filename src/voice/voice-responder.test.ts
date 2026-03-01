@@ -97,7 +97,7 @@ type ResponderKit = {
   log: LoggerLike;
   tts: TtsProvider;
   connection: import('@discordjs/voice').VoiceConnection;
-  invokeAi: ReturnType<typeof vi.fn<(text: string) => Promise<string>>>;
+  invokeAi: ReturnType<typeof vi.fn<(text: string, signal: AbortSignal) => Promise<string>>>;
 };
 
 function createResponder(overrides: Partial<VoiceResponderOpts> = {}): ResponderKit {
@@ -105,7 +105,7 @@ function createResponder(overrides: Partial<VoiceResponderOpts> = {}): Responder
   const log = createLogger();
   const tts = createMockTts();
   const connection = createMockConnection();
-  const invokeAi = vi.fn(async () => 'AI says hello');
+  const invokeAi = vi.fn(async (_text: string, _signal?: AbortSignal) => 'AI says hello');
 
   const responder = new VoiceResponder({
     log,
@@ -156,7 +156,7 @@ describe('VoiceResponder', () => {
 
       await responder.handleTranscription('hello bot');
 
-      expect(invokeAi).toHaveBeenCalledWith('hello bot');
+      expect(invokeAi).toHaveBeenCalledWith('hello bot', expect.any(AbortSignal));
       expect(tts.synthesize).toHaveBeenCalledWith('AI says hello');
       expect(player.play).toHaveBeenCalled();
       expect(log.info).toHaveBeenCalledWith(
@@ -284,6 +284,65 @@ describe('VoiceResponder', () => {
       // Only the second transcription should have triggered TTS
       expect(tts.synthesize).toHaveBeenCalledTimes(1);
       expect(tts.synthesize).toHaveBeenCalledWith('second response');
+    });
+
+    it('passes an AbortSignal to invokeAi', async () => {
+      const { responder, invokeAi } = createResponder();
+
+      await responder.handleTranscription('hello');
+
+      expect(invokeAi).toHaveBeenCalledTimes(1);
+      const signal = invokeAi.mock.calls[0][1];
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal.aborted).toBe(false);
+    });
+
+    it('aborts previous AI signal when new transcription arrives', async () => {
+      let resolveFirst!: (value: string) => void;
+      let firstSignal!: AbortSignal;
+      let callCount = 0;
+      const invokeAi = vi.fn((_text: string, signal: AbortSignal) => {
+        callCount++;
+        if (callCount === 1) {
+          firstSignal = signal;
+          return new Promise<string>((r) => { resolveFirst = r; });
+        }
+        return Promise.resolve('second response');
+      });
+      const { responder } = createResponder({ invokeAi });
+
+      const first = responder.handleTranscription('first');
+      expect(firstSignal.aborted).toBe(false);
+
+      // Second transcription should abort the first signal
+      const second = responder.handleTranscription('second');
+      expect(firstSignal.aborted).toBe(true);
+
+      resolveFirst('first response');
+      await Promise.all([first, second]);
+
+      // Second call gets its own non-aborted signal
+      const secondSignal = invokeAi.mock.calls[1][1];
+      expect(secondSignal.aborted).toBe(false);
+    });
+
+    it('aborts AI signal when stop() is called', async () => {
+      let resolveAi!: (value: string) => void;
+      let capturedSignal!: AbortSignal;
+      const invokeAi = vi.fn((_text: string, signal: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise<string>((r) => { resolveAi = r; });
+      });
+      const { responder } = createResponder({ invokeAi });
+
+      const promise = responder.handleTranscription('hello');
+      expect(capturedSignal.aborted).toBe(false);
+
+      responder.stop();
+      expect(capturedSignal.aborted).toBe(true);
+
+      resolveAi('response');
+      await promise;
     });
 
     it('handles multiple TTS frames', async () => {

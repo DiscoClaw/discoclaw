@@ -1317,7 +1317,7 @@ if (taskCtx) {
 
     const voiceActionFollowupDepth = 1;
 
-    const voiceInvokeAi = async (text: string): Promise<string> => {
+    const voiceInvokeAi = async (text: string, signal: AbortSignal): Promise<string> => {
       // Resolve model and runtime at invoke time so tier names (fast/capable) always resolve
       // correctly even after runtime mutation via !models set voice.
       const voiceRuntime = voiceModelRef.runtime ?? limitedRuntime;
@@ -1374,7 +1374,7 @@ if (taskCtx) {
             model: resolvedVoiceModel,
             cwd: workspaceCwd,
             tools: [],
-            signal: AbortSignal.timeout(runtimeTimeoutMs),
+            signal: AbortSignal.any([signal, AbortSignal.timeout(runtimeTimeoutMs)]),
           })) {
             if (evt.type === 'text_delta') result += evt.text;
             if (evt.type === 'error') invokeHadError = true;
