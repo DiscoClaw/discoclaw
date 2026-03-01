@@ -1381,6 +1381,7 @@ if (taskCtx) {
           }
         } catch (err: unknown) {
           if (err instanceof Error && err.name === 'AbortError') {
+            if (signal.aborted) throw err; // Caller cancelled — propagate immediately
             log.warn('voice-responder: AI invocation timed out');
             invokeHadError = true;
           } else {
