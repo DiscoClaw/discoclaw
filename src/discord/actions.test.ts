@@ -763,6 +763,7 @@ describe('discordActionsPromptSection', () => {
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS');
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT');
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH');
+    expect(prompt).toContain('no conversation history');
   });
 });
 
