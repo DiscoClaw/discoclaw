@@ -15,6 +15,7 @@ import { createSttProvider } from './stt-factory.js';
 import { createTtsProvider } from './tts-factory.js';
 import { VoiceResponder, type InvokeAiFn } from './voice-responder.js';
 import type { TranscriptMirrorLike } from './transcript-mirror.js';
+import { ConversationBuffer, type Turn } from './conversation-buffer.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +46,8 @@ export type AudioPipelineOpts = {
   transcriptMirror?: TranscriptMirrorLike;
   /** Bot display name for transcript mirror messages. */
   botDisplayName?: string;
+  /** Optional async callback that returns initial turn pairs for conversation history backfill on join. */
+  backfill?: () => Promise<Turn[]>;
 };
 
 type GuildPipeline = {
@@ -52,6 +55,7 @@ type GuildPipeline = {
   sttProvider: SttProvider;
   receiver: AudioReceiver;
   responder?: VoiceResponder;
+  buffer?: ConversationBuffer;
 };
 
 // ---------------------------------------------------------------------------
@@ -73,6 +77,7 @@ export class AudioPipelineManager {
   private readonly createTts: (config: VoiceConfig, log: LoggerLike) => TtsProvider;
   private readonly transcriptMirror?: TranscriptMirrorLike;
   private readonly botDisplayName: string;
+  private readonly backfill?: () => Promise<Turn[]>;
   private readonly pipelines = new Map<string, GuildPipeline>();
   /** Re-entrancy guard: VoiceConnection.subscribe() can synchronously fire stateChange→Ready. */
   private readonly starting = new Set<string>();
@@ -92,6 +97,7 @@ export class AudioPipelineManager {
     this.createTts = opts.createTts ?? createTtsProvider;
     this.transcriptMirror = opts.transcriptMirror;
     this.botDisplayName = opts.botDisplayName ?? 'Bot';
+    this.backfill = opts.backfill;
   }
 
   /**
@@ -132,6 +138,21 @@ export class AudioPipelineManager {
       const sttProvider = this.createStt(this.voiceConfig, this.log);
       const mirror = this.transcriptMirror;
 
+      // Create conversation buffer and backfill history if available
+      let buffer: ConversationBuffer | undefined;
+      if (this.invokeAi) {
+        buffer = new ConversationBuffer();
+        if (this.backfill) {
+          try {
+            const turns = await this.backfill();
+            buffer.backfill(turns);
+            this.log.info({ guildId, turns: turns.length }, 'conversation buffer backfilled');
+          } catch (err) {
+            this.log.warn({ guildId, err }, 'conversation backfill failed — proceeding with empty buffer');
+          }
+        }
+      }
+
       // Create VoiceResponder for the full conversation loop if invokeAi is configured
       let responder: VoiceResponder | undefined;
       if (this.invokeAi) {
@@ -150,6 +171,7 @@ export class AudioPipelineManager {
                   });
                 }
               : undefined,
+            buffer,
           });
           this.log.info({ guildId }, 'voice responder created');
         } catch (err) {
@@ -203,7 +225,7 @@ export class AudioPipelineManager {
 
       receiver.start();
 
-      this.pipelines.set(guildId, { connection, sttProvider, receiver, responder });
+      this.pipelines.set(guildId, { connection, sttProvider, receiver, responder, buffer });
       this.log.info({ guildId }, 'audio pipeline started');
     } catch (err) {
       this.log.error({ guildId, err }, 'failed to start audio pipeline');

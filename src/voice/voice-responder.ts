@@ -15,13 +15,14 @@ import {
 } from '@discordjs/voice';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { TtsProvider } from './types.js';
+import type { ConversationBuffer } from './conversation-buffer.js';
 
 /** Discord voice transport format. */
 const DISCORD_RATE = 48_000;
 const DISCORD_CHANNELS = 2;
 
 /** Callback to invoke the AI runtime and return a text response. */
-export type InvokeAiFn = (text: string, signal: AbortSignal) => Promise<string>;
+export type InvokeAiFn = (text: string, signal: AbortSignal, history?: string) => Promise<string>;
 
 export type VoiceResponderOpts = {
   log: LoggerLike;
@@ -32,6 +33,8 @@ export type VoiceResponderOpts = {
   onBotResponse?: (text: string) => void;
   /** Override for testing — supply a custom AudioPlayer factory. */
   createPlayer?: () => AudioPlayer;
+  /** Per-guild conversation ring buffer for injecting history into prompts. */
+  buffer?: ConversationBuffer;
 };
 
 export class VoiceResponder {
@@ -40,6 +43,7 @@ export class VoiceResponder {
   private readonly connection: VoiceConnection;
   private readonly invokeAi: InvokeAiFn;
   private readonly onBotResponse?: (text: string) => void;
+  private readonly buffer?: ConversationBuffer;
   private readonly player: AudioPlayer;
   private generation = 0;
   private _processing = false;
@@ -51,6 +55,7 @@ export class VoiceResponder {
     this.connection = opts.connection;
     this.invokeAi = opts.invokeAi;
     this.onBotResponse = opts.onBotResponse;
+    this.buffer = opts.buffer;
     this.player = opts.createPlayer ? opts.createPlayer() : createAudioPlayer();
     const subscription = this.connection.subscribe(this.player);
     this.log.info(
@@ -89,8 +94,9 @@ export class VoiceResponder {
 
     try {
       // Step 1: Invoke AI runtime
+      const history = this.buffer?.getHistory();
       this.log.info({ text: text.slice(0, 100) }, 'voice-responder: invoking AI');
-      const response = await this.invokeAi(text, ac.signal);
+      const response = await this.invokeAi(text, ac.signal, history || undefined);
       if (gen !== this.generation) return;
 
       if (!response.trim()) {
@@ -104,6 +110,9 @@ export class VoiceResponder {
       } catch (err) {
         this.log.warn({ err }, 'voice-responder: onBotResponse callback error');
       }
+
+      // Record the turn in the conversation buffer
+      this.buffer?.push(text, response);
 
       // Step 2 & 3: Stream TTS -> upsample -> play incrementally
       this.log.info({ responseLength: response.length }, 'voice-responder: starting TTS');

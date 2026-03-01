@@ -156,7 +156,7 @@ describe('VoiceResponder', () => {
 
       await responder.handleTranscription('hello bot');
 
-      expect(invokeAi).toHaveBeenCalledWith('hello bot', expect.any(AbortSignal));
+      expect(invokeAi).toHaveBeenCalledWith('hello bot', expect.any(AbortSignal), undefined);
       expect(tts.synthesize).toHaveBeenCalledWith('AI says hello');
       expect(player.play).toHaveBeenCalled();
       expect(log.info).toHaveBeenCalledWith(
