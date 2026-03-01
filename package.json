@@ -51,7 +51,7 @@
     "review:full-audit": "pnpm review:sections --with-gates && pnpm review:long-chunks && pnpm review:chunk-risks && pnpm review:chunk-audit && pnpm review:finalize"
   },
   "dependencies": {
-    "@discordjs/opus": "^0.9.0",
+    "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.19.0",
     "@snazzah/davey": "^0.1.9",
     "croner": "^10.0.1",
@@ -76,7 +76,10 @@
       "@discordjs/opus",
       "simple-git-hooks",
       "sodium-native"
-    ]
+    ],
+    "overrides": {
+      "tar": ">=6.2.2"
+    }
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",
