@@ -27,12 +27,14 @@ export function buildVoiceActionFlags(opts: {
   taskCtxAvailable: boolean;
   discordActionsMemory: boolean;
   durableMemoryEnabled: boolean;
+  discordActionsVoice?: boolean;
 }): ActionCategoryFlags {
   return {
     // Voice-allowed categories — AND with env config.
     messaging: opts.discordActionsMessaging,
     tasks: opts.discordActionsTasks && opts.tasksEnabled && opts.taskCtxAvailable,
     memory: opts.discordActionsMemory && opts.durableMemoryEnabled,
+    voice: opts.discordActionsVoice ?? false,
 
     // Categories not in the voice allowlist — always disabled.
     channels: false,
@@ -46,6 +48,5 @@ export function buildVoiceActionFlags(opts: {
     config: false,
     defer: false,
     imagegen: false,
-    voice: false,
   };
 }

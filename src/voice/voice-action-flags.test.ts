@@ -31,6 +31,17 @@ describe('buildVoiceActionFlags', () => {
     expect(flags.config).toBe(false);
     expect(flags.defer).toBe(false);
     expect(flags.imagegen).toBe(false);
+    // voice defaults to false when discordActionsVoice is not passed
+    expect(flags.voice).toBe(false);
+  });
+
+  it('enables voice when discordActionsVoice is true', () => {
+    const flags = buildVoiceActionFlags({ ...allEnabled, discordActionsVoice: true });
+    expect(flags.voice).toBe(true);
+  });
+
+  it('disables voice when discordActionsVoice is false', () => {
+    const flags = buildVoiceActionFlags({ ...allEnabled, discordActionsVoice: false });
     expect(flags.voice).toBe(false);
   });
 
@@ -79,10 +90,10 @@ describe('buildVoiceActionFlags', () => {
   });
 
   it('non-allowlisted categories remain false even when all env flags are true', () => {
-    const flags = buildVoiceActionFlags(allEnabled);
+    const flags = buildVoiceActionFlags({ ...allEnabled, discordActionsVoice: true });
     const nonAllowlisted = [
       'channels', 'guild', 'moderation', 'polls', 'crons',
-      'botProfile', 'forge', 'plan', 'config', 'defer', 'imagegen', 'voice',
+      'botProfile', 'forge', 'plan', 'config', 'defer', 'imagegen',
     ] as const;
     for (const key of nonAllowlisted) {
       expect(flags[key]).toBe(false);
