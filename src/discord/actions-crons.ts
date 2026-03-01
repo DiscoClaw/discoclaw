@@ -39,8 +39,8 @@ import { VOICE_ACTION_TYPES } from './actions-voice.js';
 // ---------------------------------------------------------------------------
 
 export type CronActionRequest =
-  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string; routingMode?: 'json'; allowedActions?: string }
-  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean; routingMode?: 'json'; allowedActions?: string; state?: string }
+  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string; routingMode?: 'json'; allowedActions?: string; chain?: string }
+  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean; routingMode?: 'json'; allowedActions?: string; state?: string; chain?: string }
   | { type: 'cronList'; status?: string }
   | { type: 'cronShow'; cronId: string }
   | { type: 'cronPause'; cronId: string }
@@ -147,6 +147,52 @@ function requestRunningJobCancel(cronCtx: CronContext, threadId: string, cronId:
   return canceled;
 }
 
+/**
+ * Parse and validate a comma-separated chain string. Returns parsed cronIds or an error message.
+ */
+function parseAndValidateChain(chainStr: string, statsStore: CronRunStats, selfCronId?: string): { ids: string[] } | { error: string } {
+  if (chainStr === '') {
+    return { ids: [] };
+  }
+  const ids = chainStr.split(',').map((s) => s.trim()).filter(Boolean);
+  if (ids.length === 0) {
+    return { error: 'chain requires at least one cronId if provided' };
+  }
+  // Validate each cronId exists.
+  const missing = ids.filter((id) => !statsStore.getRecord(id));
+  if (missing.length > 0) {
+    return { error: `chain contains unknown cronIds: ${missing.join(', ')}` };
+  }
+  // No self-referencing.
+  if (selfCronId && ids.includes(selfCronId)) {
+    return { error: 'chain cannot reference itself' };
+  }
+  return { ids };
+}
+
+/**
+ * Detect cycles in the chain graph. Returns true if adding the proposed chain
+ * to `cronId` would create a cycle.
+ */
+function detectChainCycle(cronId: string, proposedChain: string[], statsStore: CronRunStats): boolean {
+  // BFS from each downstream job, checking if we can reach cronId.
+  const visited = new Set<string>();
+  const queue = [...proposedChain];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current === cronId) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    const rec = statsStore.getRecord(current);
+    if (rec?.chain) {
+      for (const next of rec.chain) {
+        if (!visited.has(next)) queue.push(next);
+      }
+    }
+  }
+  return false;
+}
+
 type CronThreadOps = {
   edit?: (opts: { appliedTags: string[] }) => Promise<unknown>;
   send?: (opts: { content: string; allowedMentions: { parse: string[] } }) => Promise<unknown>;
@@ -189,6 +235,21 @@ export async function executeCronAction(
           return { ok: false, error: `allowedActions contains unrecognized action types: ${unknown.join(', ')}` };
         }
         parsedAllowedActions = parts;
+      }
+
+      // Validate chain if provided.
+      let parsedChain: string[] | undefined;
+      if (action.chain !== undefined) {
+        const chainResult = parseAndValidateChain(action.chain, cronCtx.statsStore);
+        if ('error' in chainResult) {
+          return { ok: false, error: chainResult.error };
+        }
+        if (chainResult.ids.length > 0) {
+          // No cycle detection needed on create — this job doesn't exist yet so
+          // no other job can reference it. But we still check in case the downstream
+          // jobs chain back to each other in a way that would be problematic.
+          parsedChain = chainResult.ids;
+        }
       }
 
       // Create forum thread.
@@ -287,6 +348,7 @@ export async function executeCronAction(
         authorId: cronCtx.client.user?.id,
         ...(action.routingMode ? { routingMode: action.routingMode } : {}),
         ...(parsedAllowedActions !== undefined && { allowedActions: parsedAllowedActions }),
+        ...(parsedChain !== undefined && { chain: parsedChain }),
       });
 
       // Create status message.
@@ -308,7 +370,7 @@ export async function executeCronAction(
       }
 
       cronCtx.forumCountSync?.requestUpdate();
-      return { ok: true, summary: `Cron "${action.name}" created (${cronId}), schedule: ${action.schedule}, model: ${model}${action.routingMode ? `, routing: ${action.routingMode}` : ''}` };
+      return { ok: true, summary: `Cron "${action.name}" created (${cronId}), schedule: ${action.schedule}, model: ${model}${action.routingMode ? `, routing: ${action.routingMode}` : ''}${parsedChain ? `, chain: ${parsedChain.join(', ')}` : ''}` };
     }
 
     case 'cronUpdate': {
@@ -372,6 +434,24 @@ export async function executeCronAction(
           }
           updates.allowedActions = parts;
           changes.push(`allowedActions → ${parts.join(', ')}`);
+        }
+      }
+
+      // Chain override.
+      if (action.chain !== undefined) {
+        if (action.chain === '') {
+          updates.chain = undefined;
+          changes.push('chain cleared');
+        } else {
+          const chainResult = parseAndValidateChain(action.chain, cronCtx.statsStore, action.cronId);
+          if ('error' in chainResult) {
+            return { ok: false, error: chainResult.error };
+          }
+          if (detectChainCycle(action.cronId, chainResult.ids, cronCtx.statsStore)) {
+            return { ok: false, error: 'chain would create a cycle' };
+          }
+          updates.chain = chainResult.ids;
+          changes.push(`chain → ${chainResult.ids.join(', ')}`);
         }
       }
 
@@ -542,7 +622,8 @@ export async function executeCronAction(
         const tags = record?.purposeTags?.join(', ') || '';
         const nextRun = j.nextRun ? `<t:${Math.floor(j.nextRun.getTime() / 1000)}:R>` : 'N/A';
         const cronId = fullJob?.cronId ?? '?';
-        return `\`${cronId}\` **${j.name}** | \`${j.schedule}\` | ${displayStatus} | ${model} | ${runs} runs | next: ${nextRun}${tags ? ` | ${tags}` : ''}`;
+        const chained = record?.chain && record.chain.length > 0 ? ' | chained' : '';
+        return `\`${cronId}\` **${j.name}** | \`${j.schedule}\` | ${displayStatus} | ${model} | ${runs} runs | next: ${nextRun}${tags ? ` | ${tags}` : ''}${chained}`;
       });
       return { ok: true, summary: lines.join('\n') };
     }
@@ -578,6 +659,14 @@ export async function executeCronAction(
       if (record.lastRunAt) lines.push(`Last run: <t:${Math.floor(new Date(record.lastRunAt).getTime() / 1000)}:R>`);
       if (record.purposeTags.length > 0) lines.push(`Tags: ${record.purposeTags.join(', ')}`);
       if (record.allowedActions && record.allowedActions.length > 0) lines.push(`Allowed actions: ${record.allowedActions.join(', ')}`);
+      if (record.chain && record.chain.length > 0) {
+        const chainEntries = record.chain.map((id) => {
+          const downstream = cronCtx.statsStore.getRecord(id);
+          const downstreamJob = downstream ? cronCtx.scheduler.getJob(downstream.threadId) : undefined;
+          return `\`${id}\`${downstreamJob ? ` (${downstreamJob.name})` : ''}`;
+        });
+        lines.push(`Chain: ${chainEntries.join(', ')}`);
+      }
       if (record.lastErrorMessage) lines.push(`Last error: ${record.lastErrorMessage}`);
       if (record.state && Object.keys(record.state).length > 0) {
         const stateJson = JSON.stringify(record.state);
@@ -836,6 +925,7 @@ export function cronActionsPromptSection(): string {
 - \`model\` (optional): "fast", "capable", or "deep" (auto-classified if omitted).
 - \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode. In this mode the executor uses the JSON router to dispatch structured responses. The prompt may contain \`{{channel}}\` and \`{{channelId}}\` placeholders which are expanded to the target channel name and ID at runtime.
 - \`allowedActions\` (optional): Comma-separated list of Discord action types this job may emit (e.g., "cronList,cronShow"). Restricts the AI to only these action types during execution. Rejects unrecognized type names. Requires at least one entry if provided.
+- \`chain\` (optional): Comma-separated cronIds of downstream jobs to trigger on successful completion (e.g., "cron-a1b2c3d4,cron-e5f6g7h8"). Creates a multi-step pipeline — the completed job's persisted state is forwarded to downstream jobs. Referenced cronIds must exist. Cycles are rejected.
 
 **cronUpdate** — Update a cron's settings:
 \`\`\`
@@ -846,6 +936,7 @@ export function cronActionsPromptSection(): string {
 - \`silent\` (optional): Boolean. When true, suppresses short "nothing to report" responses.
 - \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode, or omit/pass empty string to clear.
 - \`allowedActions\` (optional): Update the allowed action types list. Empty string clears the restriction.
+- \`chain\` (optional): Update downstream pipeline jobs (comma-separated cronIds). Empty string clears the chain. Cycles are detected and rejected.
 - \`state\` (optional): JSON string to replace the job's persistent state object (e.g., \`"{\\"cursor\\":\\"abc\\"}"\`). Must be a JSON object. Used for manual state manipulation; normally state is managed by the job itself.
 
 **cronList** — List all cron jobs:

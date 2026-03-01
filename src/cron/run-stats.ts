@@ -199,6 +199,9 @@ export class CronRunStats {
           if ('allowedActions' in updates && updates.allowedActions === undefined) {
             delete existing.allowedActions;
           }
+          if ('chain' in updates && updates.chain === undefined) {
+            delete existing.chain;
+          }
         }
         existing.threadId = threadId;
         if (prevStatusMessageId && prevStatusMessageId !== existing.statusMessageId) {
