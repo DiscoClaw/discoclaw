@@ -4,6 +4,7 @@ import { parseAllowBotIds, parseAllowChannelIds, parseAllowUserIds } from './dis
 export const KNOWN_TOOLS = new Set(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch']);
 export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS = 1800;
 export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT = 5;
+export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DEPTH = 4;
 
 type ParseResult = {
   config: DiscoclawConfig;
@@ -49,6 +50,7 @@ export type DiscoclawConfig = {
   discordActionsSpawn: boolean;
 
   deferMaxDelaySeconds: number;
+  deferMaxDepth: number;
   spawnMaxConcurrent: number;
   deferMaxConcurrent: number;
 
@@ -420,6 +422,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT',
     DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT,
   );
+  const deferMaxDepth = parsePositiveInt(
+    env,
+    'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH',
+    DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DEPTH,
+  );
 
   if (!discordActionsEnabled) {
     const enabledCategories = [
@@ -636,6 +643,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsSpawn,
 
       deferMaxDelaySeconds,
+      deferMaxDepth,
       deferMaxConcurrent,
       spawnMaxConcurrent,
 

@@ -482,7 +482,7 @@ Execution flow (runs when a deferred timer fires):
 
 Action flag overrides (always applied, regardless of env):
 - `memory`: `false` — deferred runs carry no user identity.
-- `defer`: `false` — prevents chaining; a deferred run cannot schedule further deferred runs.
+- `defer`: depth-gated — a deferred run can schedule further deferred runs up to `deferMaxDepth` (default 4). Each nested run increments `ActionContext.deferDepth`; when the depth limit is reached, the `defer` flag is set to `false` and further nesting is blocked.
 
 All other categories (`channels`, `messaging`, `guild`, `moderation`, `polls`, `tasks`, `crons`, `botProfile`, `forge`, `plan`, `config`, `imagegen`, `voice`) follow their env flags.
 
@@ -490,6 +490,7 @@ Configuration:
 - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1) — master switch for the defer action.
 - `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` (default 1800) — maximum allowed delay in seconds; enforced by `DeferScheduler`.
 - `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` (default 5) — maximum number of pending timers.
+- `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH` (default 4) — maximum nesting depth for deferred runs. A top-level defer starts at depth 0; each nested deferred run increments the counter. When `deferDepth >= deferMaxDepth`, the `defer` flag is forced to `false` and the run cannot schedule further defers.
 
 Timers are in-process only and do not survive a bot restart.
 

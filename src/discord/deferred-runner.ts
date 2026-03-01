@@ -67,6 +67,7 @@ type DeferredRunnerState = {
 export type ConfigureDeferredSchedulerOpts = {
   maxDelaySeconds: number;
   maxConcurrent: number;
+  deferMaxDepth: number;
   state: DeferredRunnerState;
   runtime: RuntimeAdapter;
   runtimeTools: string[];
@@ -89,7 +90,7 @@ function getThreadParentId(candidate: unknown): string | null {
   return String(channel.parentId);
 }
 
-function buildDeferredActionFlags(state: DeferredRunnerState): ActionCategoryFlags {
+function buildDeferredActionFlags(state: DeferredRunnerState, depth: number, maxDepth: number): ActionCategoryFlags {
   return {
     channels: state.discordActionsChannels,
     messaging: state.discordActionsMessaging,
@@ -104,7 +105,7 @@ function buildDeferredActionFlags(state: DeferredRunnerState): ActionCategoryFla
     // Deferred runs do not carry a user identity, so memory actions stay disabled.
     memory: false,
     config: Boolean(state.discordActionsConfig),
-    defer: false,
+    defer: depth < maxDepth,
     imagegen: Boolean(state.discordActionsImagegen),
     voice: Boolean(state.discordActionsVoice),
   };
@@ -159,7 +160,8 @@ export function configureDeferredScheduler(
       }
     }
 
-    const deferredActionFlags = buildDeferredActionFlags(opts.state);
+    const deferDepth = (context.deferDepth ?? 0) + 1;
+    const deferredActionFlags = buildDeferredActionFlags(opts.state, deferDepth, opts.deferMaxDepth);
     const openTasksSection = buildOpenTasksSection(opts.state.taskCtx?.store);
     let prompt =
       buildPromptPreamble(inlinedContext) + '\n\n' +
@@ -255,6 +257,8 @@ export function configureDeferredScheduler(
       channelId: channel.id,
       messageId: `defer-${Date.now()}`,
       threadParentId,
+      deferScheduler: context.deferScheduler,
+      deferDepth,
       transport: new DiscordTransportClient(guild, context.client),
       confirmation: {
         mode: 'automated',

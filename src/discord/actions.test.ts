@@ -762,7 +762,7 @@ describe('discordActionsPromptSection', () => {
     expect(prompt).toContain('without another user prompt');
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS');
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT');
-    expect(prompt).toContain('forces `defer` off');
+    expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH');
   });
 });
 

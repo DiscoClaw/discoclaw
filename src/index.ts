@@ -964,6 +964,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
   deferOpts = {
     maxDelaySeconds: cfg.deferMaxDelaySeconds,
     maxConcurrent: cfg.deferMaxConcurrent,
+    deferMaxDepth: cfg.deferMaxDepth,
     state: botParams,
     runtime,
     runtimeTools,
