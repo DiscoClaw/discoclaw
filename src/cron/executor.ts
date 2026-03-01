@@ -182,6 +182,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         channelId: channelForSend.id,
         silent: preRunRecord?.silent,
         routingMode: preRunRecord?.routingMode === 'json' ? 'json' : undefined,
+        state: preRunRecord?.state,
       });
 
     const tools = await resolveEffectiveTools({
@@ -285,7 +286,31 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     metrics.recordInvokeResult('cron', Date.now() - t0, true);
     ctx.log?.info({ flow: 'cron', jobId: job.id, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');
 
-    const output = finalText || deltaText;
+    let output = finalText || deltaText;
+
+    // Extract <cron-state> blocks from the output — last one wins.
+    const cronStateRegex = /<cron-state>([\s\S]*?)<\/cron-state>/g;
+    let cronStateMatch: RegExpExecArray | null;
+    let lastCronStateJson: string | undefined;
+    while ((cronStateMatch = cronStateRegex.exec(output)) !== null) {
+      lastCronStateJson = cronStateMatch[1];
+    }
+    if (lastCronStateJson !== undefined && ctx.statsStore && job.cronId) {
+      try {
+        const parsedState = JSON.parse(lastCronStateJson.trim()) as Record<string, unknown>;
+        if (parsedState && typeof parsedState === 'object' && !Array.isArray(parsedState)) {
+          await ctx.statsStore.upsertRecord(job.cronId, job.threadId, { state: parsedState });
+          ctx.log?.info({ jobId: job.id, cronId: job.cronId }, 'cron:exec persisted updated state');
+        } else {
+          ctx.log?.warn({ jobId: job.id, cronId: job.cronId }, 'cron:exec <cron-state> was not a JSON object, ignoring');
+        }
+      } catch (stateErr) {
+        ctx.log?.warn({ err: stateErr, jobId: job.id, cronId: job.cronId }, 'cron:exec <cron-state> parse failed, ignoring');
+      }
+      // Strip all <cron-state> blocks from the output text.
+      output = output.replace(/<cron-state>[\s\S]*?<\/cron-state>/g, '').trim();
+    }
+
     if (!output.trim() && collectedImages.length === 0) {
       metrics.increment('cron.run.skipped');
       ctx.log?.warn({ jobId: job.id }, 'cron:exec empty output');
