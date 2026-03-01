@@ -30,6 +30,7 @@ export type CronRunRecord = {
   silent?: boolean;           // suppress output when AI has nothing actionable to report
   routingMode?: 'default' | 'json';  // how AI output is routed to Discord channels
   allowedActions?: string[];  // restrict which Discord action types the AI may emit during this job
+  state?: Record<string, unknown>;  // persistent key-value state that survives across executions
   // Persisted cron definition fields — stored on parse so boots can skip AI re-parsing.
   schedule?: string;
   timezone?: string;
@@ -39,12 +40,12 @@ export type CronRunRecord = {
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 8 as const;
+export const CURRENT_VERSION = 9 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -376,6 +377,10 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   // Migrate v7 → v8: no-op — new field (promptMessageId) is optional and defaults to absent.
   if (store.version === 7) {
     store.version = 8;
+  }
+  // Migrate v8 → v9: no-op — new field (state) is optional and defaults to absent.
+  if (store.version === 8) {
+    store.version = 9;
   }
   return new CronRunStats(store, filePath);
 }

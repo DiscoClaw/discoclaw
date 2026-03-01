@@ -1229,3 +1229,140 @@ describe('executeCronJob allowedActions filtering', () => {
     executeDiscordActionsSpy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// <cron-state> extraction and persistence
+// ---------------------------------------------------------------------------
+
+describe('executeCronJob cron-state extraction', () => {
+  let statsDir: string;
+
+  beforeEach(async () => {
+    statsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-cron-state-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(statsDir, { recursive: true, force: true });
+  });
+
+  it('extracts <cron-state> block and persists state via upsertRecord', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    const response = 'Here is the report.\n<cron-state>{"lastSeen":"2026-02-28","count":5}</cron-state>';
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime(response) });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const rec = statsStore.getRecord('cron-test0001')!;
+    expect(rec.state).toEqual({ lastSeen: '2026-02-28', count: 5 });
+  });
+
+  it('strips <cron-state> blocks from the output sent to Discord', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    const response = 'Report content here.\n<cron-state>{"v":1}</cron-state>';
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime(response) });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalled();
+    const sentContent = channel.send.mock.calls[0][0].content;
+    expect(sentContent).not.toContain('<cron-state>');
+    expect(sentContent).toContain('Report content here.');
+  });
+
+  it('uses the last <cron-state> block when multiple are present', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    const response = [
+      'Part 1.',
+      '<cron-state>{"v":1}</cron-state>',
+      'Part 2.',
+      '<cron-state>{"v":2,"final":true}</cron-state>',
+    ].join('\n');
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime(response) });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const rec = statsStore.getRecord('cron-test0001')!;
+    expect(rec.state).toEqual({ v: 2, final: true });
+  });
+
+  it('ignores invalid JSON in <cron-state> block gracefully', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', { state: { old: true } });
+
+    const response = 'Output here.\n<cron-state>not valid json</cron-state>';
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime(response) });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    // State should remain unchanged after invalid parse.
+    const rec = statsStore.getRecord('cron-test0001')!;
+    expect(rec.state).toEqual({ old: true });
+    expect(ctx.log?.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 'thread-1' }),
+      'cron:exec <cron-state> parse failed, ignoring',
+    );
+  });
+
+  it('ignores non-object JSON in <cron-state> block (e.g. array)', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+
+    const response = 'Output here.\n<cron-state>[1,2,3]</cron-state>';
+    const ctx = makeCtx({ statsStore, runtime: makeMockRuntime(response) });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    const rec = statsStore.getRecord('cron-test0001')!;
+    expect(rec.state).toBeUndefined();
+    expect(ctx.log?.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 'thread-1' }),
+      'cron:exec <cron-state> was not a JSON object, ignoring',
+    );
+  });
+
+  it('passes existing state to the prompt via preRunRecord', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      state: { counter: 42, lastItem: 'xyz' },
+    });
+
+    let capturedPrompt = '';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(opts: any): AsyncIterable<EngineEvent> {
+        capturedPrompt = opts.prompt;
+        yield { type: 'text_final', text: 'Done.' };
+        yield { type: 'done' };
+      },
+    };
+
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(capturedPrompt).toContain('Persistent State');
+    expect(capturedPrompt).toContain('"counter": 42');
+    expect(capturedPrompt).toContain('"lastItem": "xyz"');
+  });
+});

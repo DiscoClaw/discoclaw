@@ -40,7 +40,7 @@ import { VOICE_ACTION_TYPES } from './actions-voice.js';
 
 export type CronActionRequest =
   | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string; routingMode?: 'json'; allowedActions?: string }
-  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean; routingMode?: 'json'; allowedActions?: string }
+  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean; routingMode?: 'json'; allowedActions?: string; state?: string }
   | { type: 'cronList'; status?: string }
   | { type: 'cronShow'; cronId: string }
   | { type: 'cronPause'; cronId: string }
@@ -375,6 +375,21 @@ export async function executeCronAction(
         }
       }
 
+      // State override (manual JSON manipulation).
+      if (action.state !== undefined) {
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(action.state) as Record<string, unknown>;
+        } catch {
+          return { ok: false, error: 'state must be valid JSON' };
+        }
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          return { ok: false, error: 'state must be a JSON object' };
+        }
+        updates.state = parsed;
+        changes.push('state updated');
+      }
+
       // Definition changes (schedule, timezone, channel, prompt).
       const newSchedule = action.schedule ?? job.def.schedule ?? '';
       const newTimezone = action.timezone ?? job.def.timezone;
@@ -564,6 +579,10 @@ export async function executeCronAction(
       if (record.purposeTags.length > 0) lines.push(`Tags: ${record.purposeTags.join(', ')}`);
       if (record.allowedActions && record.allowedActions.length > 0) lines.push(`Allowed actions: ${record.allowedActions.join(', ')}`);
       if (record.lastErrorMessage) lines.push(`Last error: ${record.lastErrorMessage}`);
+      if (record.state && Object.keys(record.state).length > 0) {
+        const stateJson = JSON.stringify(record.state);
+        lines.push(`State: ${stateJson.length > 500 ? stateJson.slice(0, 500) + '... (truncated)' : stateJson}`);
+      }
       // Return full prompt text — prefer the persisted record prompt (always full),
       // falling back to the scheduler def (also full).
       const promptText = record.prompt ?? job?.def.prompt;
@@ -827,6 +846,7 @@ export function cronActionsPromptSection(): string {
 - \`silent\` (optional): Boolean. When true, suppresses short "nothing to report" responses.
 - \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode, or omit/pass empty string to clear.
 - \`allowedActions\` (optional): Update the allowed action types list. Empty string clears the restriction.
+- \`state\` (optional): JSON string to replace the job's persistent state object (e.g., \`"{\\"cursor\\":\\"abc\\"}"\`). Must be a JSON object. Used for manual state manipulation; normally state is managed by the job itself.
 
 **cronList** — List all cron jobs:
 \`\`\`

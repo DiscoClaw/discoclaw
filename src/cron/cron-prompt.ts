@@ -25,6 +25,8 @@ export type CronPromptInput = {
   routingMode?: CronRoutingMode;
   /** Additional channels the AI may route to in json routing mode. */
   availableChannels?: Array<{ name: string; id: string }>;
+  /** Persistent key-value state from the previous run. */
+  state?: Record<string, unknown>;
 };
 
 // ---------------------------------------------------------------------------
@@ -35,8 +37,17 @@ export type CronPromptInput = {
  * Expand {{channel}} and {{channelId}} placeholders in a cron prompt template.
  * All occurrences are replaced; unrecognized placeholders are left intact.
  */
-export function expandCronPlaceholders(text: string, channel: string, channelId: string): string {
-  return text.replaceAll('{{channel}}', channel).replaceAll('{{channelId}}', channelId);
+export function expandCronPlaceholders(
+  text: string,
+  channel: string,
+  channelId: string,
+  state?: Record<string, unknown>,
+): string {
+  const stateJson = JSON.stringify(state ?? {});
+  return text
+    .replaceAll('{{channel}}', channel)
+    .replaceAll('{{channelId}}', channelId)
+    .replaceAll('{{state}}', stateJson);
 }
 
 // ---------------------------------------------------------------------------
@@ -62,9 +73,10 @@ export function buildCronPromptBody(input: CronPromptInput): string {
     silent,
     routingMode,
     availableChannels,
+    state,
   } = input;
 
-  const expandedPrompt = expandCronPlaceholders(promptTemplate, channel, channelId);
+  const expandedPrompt = expandCronPlaceholders(promptTemplate, channel, channelId, state);
 
   const segments: string[] = [
     `You are executing a scheduled cron job named "${jobName}".`,
@@ -89,6 +101,27 @@ export function buildCronPromptBody(input: CronPromptInput): string {
         'IMPORTANT: If there is nothing actionable to report, respond with exactly `HEARTBEAT_OK` and nothing else.',
       );
     }
+  }
+
+  // Inject persistent state section when state is present and non-empty.
+  if (state && Object.keys(state).length > 0) {
+    const STATE_CHAR_LIMIT = 4000;
+    let serialized = JSON.stringify(state, null, 2);
+    if (serialized.length > STATE_CHAR_LIMIT) {
+      serialized = serialized.slice(0, STATE_CHAR_LIMIT) + '\n... (state truncated)';
+    }
+    segments.push(
+      [
+        '## Persistent State',
+        '',
+        'The following state was persisted from your previous run:',
+        '```json',
+        serialized,
+        '```',
+        'If you need to update the persisted state for the next run, emit a `<cron-state>{...}</cron-state>` block ' +
+          'containing a JSON object with the full updated state. The emitted object fully replaces the existing state — include all keys you want to keep. Only emit this block if the state needs to change.',
+      ].join('\n'),
+    );
   }
 
   return segments.join('\n\n');
