@@ -9,6 +9,7 @@ describe('buildVoiceActionFlags', () => {
     taskCtxAvailable: true,
     discordActionsMemory: true,
     durableMemoryEnabled: true,
+    discordActionsVoice: false,
   };
 
   it('enables messaging, tasks, memory when all env flags are true', () => {
@@ -83,6 +84,7 @@ describe('buildVoiceActionFlags', () => {
       taskCtxAvailable: false,
       discordActionsMemory: false,
       durableMemoryEnabled: false,
+      discordActionsVoice: false,
     });
     expect(flags.messaging).toBe(false);
     expect(flags.tasks).toBe(false);

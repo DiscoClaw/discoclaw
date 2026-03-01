@@ -555,7 +555,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('DISCOCLAW_VOICE_ENABLED=1 with TTS provider "openai" but OPENAI_API_KEY is not set; voice TTS will fail at runtime.');
   }
   if (voiceEnabled && !voiceHomeChannel) {
-    warnings.push('DISCOCLAW_VOICE_ENABLED=1 but DISCOCLAW_VOICE_HOME_CHANNEL is not set; voice will run without channel context, durable memory, and actions.');
+    warnings.push('DISCOCLAW_VOICE_ENABLED=1 but DISCOCLAW_VOICE_HOME_CHANNEL is not set; voice actions will be disabled (no target channel for action execution).');
   }
 
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
