@@ -1,7 +1,7 @@
 import type { DiscordActionResult } from './actions.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { RuntimeRegistry } from '../runtime/registry.js';
-import { resolveModel } from '../runtime/model-tiers.js';
+import { resolveModel, findRuntimeForModel } from '../runtime/model-tiers.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import { resolveDefaultModel, resolveProvider } from './actions-imagegen.js';
 
@@ -217,6 +217,35 @@ export function executeConfigAction(
             } else {
               bp.voiceModelCtx.model = model;
               changes.push(`voice → ${model}`);
+
+              // Auto-switch voice runtime if the model belongs to a different provider.
+              if (configCtx.runtimeRegistry) {
+                const owningRuntimeId = findRuntimeForModel(model);
+                const currentVoiceRuntimeId = bp.voiceModelCtx.runtime?.id ?? configCtx.runtime.id;
+                if (owningRuntimeId && owningRuntimeId !== currentVoiceRuntimeId) {
+                  // Tier-map keys (e.g. 'claude_code') may differ from registry keys (e.g. 'claude').
+                  // Scan registry entries by adapter.id to find the matching key.
+                  let matchedKey: string | undefined;
+                  let matchedAdapter: RuntimeAdapter | undefined;
+                  for (const registryKey of configCtx.runtimeRegistry.list()) {
+                    const adapter = configCtx.runtimeRegistry.get(registryKey);
+                    if (adapter && adapter.id === owningRuntimeId) {
+                      matchedKey = registryKey;
+                      matchedAdapter = adapter;
+                      break;
+                    }
+                  }
+                  if (matchedAdapter && matchedKey) {
+                    bp.voiceModelCtx.runtime = matchedAdapter;
+                    bp.voiceModelCtx.runtimeName = matchedKey;
+                    configCtx.voiceRuntimeName = matchedKey;
+                    configCtx.persistVoiceRuntime?.(matchedKey);
+                    changes.push(`voice runtime → ${matchedKey} (auto-switched)`);
+                  } else {
+                    return { ok: false, error: `Model "${model}" belongs to runtime "${owningRuntimeId}" which is not configured in the registry` };
+                  }
+                }
+              }
             }
           } else {
             return { ok: false, error: 'Voice subsystem not configured' };
@@ -411,7 +440,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
 - \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` and \`voice\` roles, swaps the active runtime adapter independently), or \`default\` (for cron-exec only, to revert to the env-configured default (Sonnet by default)).
+- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` and \`voice\` roles, swaps the active runtime adapter independently), or \`default\` (for cron-exec only, to revert to the env-configured default (Sonnet by default)). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
 
 **Roles:**
 | Role | What it controls |
