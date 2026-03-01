@@ -57,6 +57,7 @@ export async function npmGlobalUpgrade(): Promise<{
   try {
     const result = await execa('npm', ['install', '-g', 'discoclaw', '--loglevel=error'], {
       timeout: 120_000,
+      env: { ...process.env, CFLAGS: '-Wno-incompatible-pointer-types' },
     });
     return {
       exitCode: result.exitCode ?? 0,

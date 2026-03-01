@@ -141,7 +141,8 @@ export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts =
 
   if (npmMode) {
     progress('Installing latest version from npm...');
-    const install = await run('npm', ['install', '-g', 'discoclaw@latest', '--loglevel=error'], { timeout: 120_000 });
+    const npmEnv = { ...process.env, CFLAGS: '-Wno-incompatible-pointer-types' };
+    const install = await run('npm', ['install', '-g', 'discoclaw@latest', '--loglevel=error'], { timeout: 120_000, env: npmEnv });
     if (install.exitCode !== 0) {
       const detail = (install.stderr || install.stdout).trim().slice(0, 500);
       return { reply: `\`npm install -g discoclaw@latest\` failed:\n\`\`\`\n${detail}\n\`\`\`` };
