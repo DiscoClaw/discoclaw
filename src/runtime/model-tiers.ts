@@ -80,3 +80,20 @@ export function resolveModel(tierOrModel: string, runtimeId: RuntimeId): string 
   if (!runtimeTiers) return '';
   return runtimeTiers[tierOrModel];
 }
+
+/**
+ * Reverse-lookup: find which runtime owns a concrete model string.
+ *
+ * Iterates the live tier map and returns the first runtime ID whose tier
+ * values include `model`. Skips empty-string sentinel values so that
+ * adapter-default entries never match. Returns `undefined` when no runtime
+ * claims the model.
+ */
+export function findRuntimeForModel(model: string): string | undefined {
+  for (const [runtimeId, tiers] of Object.entries(tierMap)) {
+    for (const value of Object.values(tiers)) {
+      if (value !== '' && value === model) return runtimeId;
+    }
+  }
+  return undefined;
+}
