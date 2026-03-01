@@ -656,6 +656,7 @@ cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, runtime.id);
 const voiceModel = resolveModel(cfg.voiceModel, runtime.id);
 const cronExecModel = resolveModel(cfg.cronExecModel, runtime.id);
 const voiceModelRef: { model: string; runtime?: RuntimeAdapter; runtimeName?: string } = { model: voiceModel };
+const voiceRuntimeRef: { runtime: RuntimeAdapter; name: string } = { runtime: limitedRuntime, name: primaryRuntimeName };
 
 // --- Load runtime-overrides.json (persistent overlay on top of .env defaults) ---
 const overrides = await loadOverrides(overridesPath, (msg, data) => log.warn(data ?? {}, msg));
@@ -692,10 +693,15 @@ if (overrideModels['cron']) {
 if (overrides.voiceRuntime) {
   const voiceRt = runtimeRegistry.get(overrides.voiceRuntime);
   if (voiceRt) {
+    voiceRuntimeRef.runtime = voiceRt;
+    voiceRuntimeRef.name = overrides.voiceRuntime;
     voiceModelRef.runtime = voiceRt;
     voiceModelRef.runtimeName = overrides.voiceRuntime;
-    if (voiceRt.defaultModel && !overrideModels['voice']) {
-      voiceModelRef.model = voiceRt.defaultModel;
+    if (!overrideModels['voice']) {
+      // Re-resolve the voice model against the new runtime's tier mapping so tier names
+      // like 'capable' or 'fast' map to the correct concrete model for this adapter.
+      const reResolved = resolveModel(cfg.voiceModel, voiceRt.id);
+      voiceModelRef.model = reResolved || voiceRt.defaultModel || voiceModelRef.model;
     }
     log.info({ voiceRuntime: overrides.voiceRuntime, voiceModel: voiceModelRef.model }, 'runtime-overrides: voice runtime override applied');
   } else {
@@ -1469,7 +1475,7 @@ if (taskCtx) {
       allowedUserIds: allowUserIds,
       createDecoder: opusDecoderFactory,
       invokeAi: voiceInvokeAi,
-      runtime: limitedRuntime.id,
+      runtime: voiceRuntimeRef.runtime.id,
       runtimeModel: voiceModelRef.model,
       runtimeCwd: workspaceCwd,
       runtimeTimeoutMs,
