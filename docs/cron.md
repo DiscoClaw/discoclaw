@@ -21,6 +21,10 @@ The cron system lets you define recurring tasks as forum threads in plain langua
 
 Manually creating a forum thread in the cron channel is rejected — the bot posts a notice and archives it. Cron jobs must be created through the bot.
 
+## Patterns & Recipes
+
+For composition patterns, worked examples, and copy-pasteable action blocks — including stateful polling, silent monitoring, multi-channel routing, chained pipelines, and more — see [docs/cron-patterns.md](cron-patterns.md).
+
 ## Writing Effective Cron Prompts
 
 The prompt is the instruction the AI follows on each execution. Write it as a direct instruction:
