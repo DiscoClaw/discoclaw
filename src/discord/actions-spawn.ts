@@ -161,5 +161,6 @@ export function spawnActionsPromptSection(): string {
 - Multiple spawnAgent actions in a single response are run in parallel for efficiency.
 - Spawned agents run at recursion depth 1 and cannot themselves spawn further agents.
 - The spawned agent runs fire-and-forget: it posts its output directly to the target channel.
-- Keep prompts focused — each agent handles a single well-defined task.`;
+- Keep prompts focused — each agent handles a single well-defined task.
+- **Context isolation:** The spawned agent has **no conversation history** — it receives only the \`prompt\` string. The prompt must be fully self-contained: include all entity IDs, channel names, file paths, and relevant state. Do not reference "the above," "this task," or anything from the current conversation — the spawned agent cannot see it.`;
 }

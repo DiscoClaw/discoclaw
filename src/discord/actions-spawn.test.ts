@@ -569,6 +569,11 @@ describe('spawnActionsPromptSection', () => {
     expect(section).toContain('recursion');
   });
 
+  it('warns about no conversation history (context isolation)', () => {
+    const section = spawnActionsPromptSection();
+    expect(section).toContain('no conversation history');
+  });
+
   it('includes a usage example block', () => {
     const section = spawnActionsPromptSection();
     expect(section).toContain('<discord-action>');
