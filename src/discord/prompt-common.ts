@@ -124,13 +124,14 @@ export async function buildDurableMemorySection(opts: {
   durableDataDir: string;
   userId: string;
   durableInjectMaxChars: number;
+  query?: string;
   log?: LoggerLike;
 }): Promise<string> {
   if (!opts.enabled) return '';
   try {
     const store = await loadDurableMemory(opts.durableDataDir, opts.userId);
     if (!store) return '';
-    const items = selectItemsForInjection(store, opts.durableInjectMaxChars);
+    const items = selectItemsForInjection(store, opts.durableInjectMaxChars, opts.query);
     if (items.length === 0) return '';
 
     // Record hits on injected items so frequently-used items accumulate

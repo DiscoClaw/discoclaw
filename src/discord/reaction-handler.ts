@@ -260,6 +260,7 @@ function createReactionHandler(
               durableDataDir: params.durableDataDir,
               userId: user.id,
               durableInjectMaxChars: params.durableInjectMaxChars,
+              query: String(msg.content ?? ''),
               log: params.log,
             }),
             buildTaskThreadSection({
