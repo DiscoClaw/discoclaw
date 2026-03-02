@@ -75,7 +75,7 @@ import {
   drainInFlightReplies,
   hasInFlightForChannel,
 } from './discord/inflight-replies.js';
-import { writeShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
+import { writeShutdownContext, patchShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 import { getGitHash } from './version.js';
 import { healCorruptedJsonStores, healStaleCronRecords, healInterruptedCronRuns } from './health/startup-healing.js';
 import { validateDiscordToken } from './validate.js';
@@ -213,7 +213,14 @@ const shutdown = async () => {
   // new in-flight replies during the drain window.
   if (deferSchedulerRef) {
     const cancelled = deferSchedulerRef.cancelAll();
-    if (cancelled > 0) log.info({ cancelled }, 'shutdown:deferred timers cancelled');
+    if (cancelled > 0) {
+      log.info({ cancelled }, 'shutdown:deferred timers cancelled');
+      try {
+        await patchShutdownContext(pidLockDir, { cancelledDefers: cancelled });
+      } catch (err) {
+        log.warn({ err }, 'shutdown:failed to patch cancelledDefers');
+      }
+    }
   }
   // Edit all in-progress Discord replies before killing subprocesses.
   await drainInFlightReplies({ timeoutMs: 3000, log });
