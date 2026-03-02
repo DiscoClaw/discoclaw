@@ -446,7 +446,7 @@ describe('isRetryableError', () => {
   });
 
   it('matches drafter echoed the template', () => {
-    expect(isRetryableError('Draft failed: drafter echoed the template instead of producing a real plan')).toBe(true);
+    expect(isRetryableError('drafter echoed the template')).toBe(true);
   });
 
   it('is case-insensitive', () => {
@@ -1666,7 +1666,7 @@ describe('ForgeOrchestrator', () => {
 
     expect(result.error).toBeUndefined();
     expect(result.rounds).toBe(1);
-    expect(progress.some((p) => p.includes('echoed template') && p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('stalled') && p.includes('retrying'))).toBe(true);
     expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
     // Verify structured warning log was emitted
     const warnCalls = mockLog.warn.mock.calls.filter(
@@ -1691,7 +1691,7 @@ describe('ForgeOrchestrator', () => {
 
     expect(result.error).toBeDefined();
     expect(result.error).toContain('echoed the template');
-    expect(progress.some((p) => p.includes('echoed template') && p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('stalled') && p.includes('retrying'))).toBe(true);
     expect(progress.some((p) => p.includes('Forge failed'))).toBe(true);
   });
 
@@ -1710,7 +1710,7 @@ describe('ForgeOrchestrator', () => {
       calls.push({ msg, force: optsArg?.force });
     });
 
-    const retryCall = calls.find((c) => c.msg.includes('echoed template'));
+    const retryCall = calls.find((c) => c.msg.includes('stalled') && c.msg.includes('retrying'));
     expect(retryCall).toBeDefined();
     expect(retryCall!.force).toBe(true);
   });

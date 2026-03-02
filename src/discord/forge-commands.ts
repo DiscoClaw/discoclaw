@@ -828,7 +828,13 @@ export class ForgeOrchestrator {
           cwd: this.opts.cwd,
           model: this.opts.model,
           signal: this.abortController.signal,
-        }, 'Draft', onProgress);
+        }, 'Draft', onProgress, (result) => {
+          const output = result.outputs[0] ?? '';
+          if (isTemplateEchoed(output)) {
+            this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
+            throw new Error('drafter echoed the template');
+          }
+        });
         if (!draftPipelineResult) {
           this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
@@ -841,50 +847,7 @@ export class ForgeOrchestrator {
             reachedMaxRounds: false,
           };
         }
-        let draftOutput = draftPipelineResult.outputs[0] ?? '';
-
-        // Validate that the drafter produced a real plan, not an echoed template.
-        // Template echo is a transient model failure — retry once before giving up.
-        if (isTemplateEchoed(draftOutput)) {
-          this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
-          await onProgress('Draft echoed template — retrying...', { force: true });
-
-          const retryDef = {
-            steps: [{
-              kind: 'prompt' as const,
-              prompt: drafterPrompt,
-              runtime: effectiveDrafterRt,
-              model: drafterModel,
-              tools: readOnlyTools,
-              addDirs,
-              timeoutMs: this.opts.timeoutMs,
-              sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-            }],
-            runtime: this.opts.runtime,
-            cwd: this.opts.cwd,
-            model: this.opts.model,
-            signal: this.abortController.signal,
-          };
-
-          const retryResult = await this.runCancellable(retryDef);
-          if (!retryResult) {
-            this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
-            await this.updatePlanStatus(filePath, 'CANCELLED');
-            await onProgress(`Forge ${planId} cancelled.`, { force: true });
-            return {
-              planId,
-              filePath,
-              finalVerdict: 'CANCELLED',
-              rounds: round - startRound + 1,
-              reachedMaxRounds: false,
-            };
-          }
-
-          draftOutput = retryResult.outputs[0] ?? '';
-          if (isTemplateEchoed(draftOutput)) {
-            throw new Error('Draft failed: drafter echoed the template instead of producing a real plan');
-          }
-        }
+        const draftOutput = draftPipelineResult.outputs[0] ?? '';
 
         // Write the draft — preserve the header (planId, taskId) from the created file.
         planContent = this.mergeDraftWithHeader(planContent, draftOutput);
@@ -1180,14 +1143,21 @@ export class ForgeOrchestrator {
    * Posts a phase-specific stall notice to Discord via onProgress before retrying.
    * Returns null if the run was cancelled; throws with a phase-specific message
    * if the error is non-retryable or both attempts fail.
+   *
+   * An optional `validate` callback runs after each successful pipeline result.
+   * If it throws a retryable error, the pipeline is retried like any other
+   * transient failure.
    */
   private async runWithRetry(
     def: Parameters<typeof runPipeline>[0],
     phase: string,
     onProgress: ProgressFn,
+    validate?: (result: { outputs: string[] }) => void,
   ): Promise<{ outputs: string[] } | null> {
     try {
-      return await this.runCancellable(def);
+      const result = await this.runCancellable(def);
+      if (result && validate) validate(result);
+      return result;
     } catch (firstErr) {
       if (this.cancelRequested) return null;
       const firstMsg = String(firstErr instanceof Error ? firstErr.message : firstErr);
@@ -1197,7 +1167,9 @@ export class ForgeOrchestrator {
       this.opts.log?.warn({ err: firstErr, phase }, 'forge:retry');
       await onProgress(`Forge ${phase} stalled — retrying...`, { force: true });
       try {
-        return await this.runCancellable(def);
+        const result = await this.runCancellable(def);
+        if (result && validate) validate(result);
+        return result;
       } catch (secondErr) {
         if (this.cancelRequested) return null;
         const secondMsg = String(secondErr instanceof Error ? secondErr.message : secondErr);
