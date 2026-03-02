@@ -95,6 +95,9 @@ export type DiscoclawConfig = {
   imagegenGeminiApiKey?: string;
   imagegenDefaultModel?: string;
 
+  // Anthropic Messages API (direct HTTP — used for voice to avoid CLI cold-start)
+  anthropicApiKey?: string;
+
   // Voice config
   voiceEnabled: boolean;
   voiceAutoJoin: boolean;
@@ -502,6 +505,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     }
   }
 
+  const anthropicApiKey = parseTrimmedString(env, 'ANTHROPIC_API_KEY');
+
   const voiceEnabled = parseBoolean(env, 'DISCOCLAW_VOICE_ENABLED', false);
   const voiceAutoJoin = parseBoolean(env, 'DISCOCLAW_VOICE_AUTO_JOIN', false);
   const voiceSttProvider = parseEnum(env, 'DISCOCLAW_STT_PROVIDER', ['deepgram', 'whisper', 'openai'] as const, 'deepgram')!;
@@ -686,6 +691,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiCompatToolsEnabled,
       imagegenGeminiApiKey,
       imagegenDefaultModel,
+
+      anthropicApiKey,
 
       voiceEnabled,
       voiceAutoJoin,

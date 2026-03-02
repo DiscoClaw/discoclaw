@@ -13,6 +13,7 @@ import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
 import { createCodexCliRuntime } from './runtime/codex-cli.js';
 import { createGeminiCliRuntime } from './runtime/gemini-cli.js';
 import { createGeminiRestRuntime } from './runtime/gemini-rest.js';
+import { createAnthropicRestRuntime } from './runtime/anthropic-rest.js';
 import { createConcurrencyLimiter, withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDiscordChannelContext } from './discord/channel-context.js';
@@ -695,6 +696,55 @@ const cronExecModel = resolveModel(cfg.cronExecModel, runtime.id);
 const voiceModelRef: { model: string; runtime?: RuntimeAdapter; runtimeName?: string } = { model: voiceModel };
 const voiceRuntimeRef: { runtime: RuntimeAdapter; name: string } = { runtime: limitedRuntime, name: primaryRuntimeName };
 
+/**
+ * Resolve the voice runtime at invocation time.
+ *
+ * Priority:
+ *  1. Explicit override on voiceModelRef (set by auto-wiring or runtime-overrides.json)
+ *  2. The 'anthropic' adapter from the registry (zero cold-start, ideal for voice)
+ *  3. The primary limited runtime (fallback)
+ */
+export function resolveVoiceRuntime(
+  voiceRef: { runtime?: RuntimeAdapter },
+  registry: RuntimeRegistry,
+  fallback: RuntimeAdapter,
+): RuntimeAdapter {
+  if (voiceRef.runtime) return voiceRef.runtime;
+  return registry.get('anthropic') ?? fallback;
+}
+
+// Register Anthropic REST adapter when ANTHROPIC_API_KEY is set (direct HTTP, zero cold-start).
+// Used as the default voice runtime to eliminate CLI subprocess overhead.
+if (cfg.anthropicApiKey) {
+  const anthropicRestRaw = createAnthropicRestRuntime({
+    apiKey: cfg.anthropicApiKey,
+    defaultModel: 'claude-sonnet-4-6',
+    log,
+  });
+  const anthropicRuntime = withConcurrencyLimit(anthropicRestRaw, {
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+  });
+  runtimeRegistry.register('anthropic', anthropicRuntime);
+  log.info({ adapter: 'rest', model: 'claude-sonnet-4-6' }, 'runtime:anthropic registered (Messages API)');
+
+  // Auto-wire as voice runtime to eliminate CLI cold-start latency
+  if (cfg.voiceEnabled) {
+    voiceModelRef.runtime = anthropicRuntime;
+    voiceModelRef.runtimeName = 'anthropic';
+    // Re-resolve the voice model against the Anthropic adapter's tier mapping
+    const reResolved = resolveModel(cfg.voiceModel, anthropicRuntime.id);
+    voiceModelRef.model = reResolved || anthropicRuntime.defaultModel || voiceModelRef.model;
+    voiceRuntimeRef.runtime = anthropicRuntime;
+    voiceRuntimeRef.name = 'anthropic';
+    log.info(
+      { voiceRuntime: 'anthropic', voiceModel: voiceModelRef.model },
+      'voice: auto-wired to Anthropic REST adapter (zero cold-start)',
+    );
+  }
+}
+
 // --- Load runtime-overrides.json (persistent overlay on top of .env defaults) ---
 const overrides = await loadOverrides(overridesPath, (msg, data) => log.warn(data ?? {}, msg));
 let currentOverridesState: RuntimeOverrides = {
@@ -1356,7 +1406,7 @@ if (taskCtx) {
     const voiceInvokeAi = async (text: string, signal: AbortSignal, history?: string): Promise<string> => {
       // Resolve model and runtime at invoke time so tier names (fast/capable) always resolve
       // correctly even after runtime mutation via !models set voice.
-      const voiceRuntime = voiceModelRef.runtime ?? limitedRuntime;
+      const voiceRuntime = resolveVoiceRuntime(voiceModelRef, runtimeRegistry, limitedRuntime);
       const resolvedVoiceModel = resolveModel(voiceModelRef.model, voiceRuntime.id);
 
       // Build a lean voice prompt using identity extraction (~1KB) instead of

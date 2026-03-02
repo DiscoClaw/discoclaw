@@ -102,6 +102,39 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
   - No tool execution, no fs tools
   - No image input/output support
 
+## Anthropic REST Runtime
+
+Direct HTTP adapter for the Anthropic Messages API — no CLI subprocess, no cold-start. Designed for latency-sensitive paths like voice where the ~2-4 s CLI bootstrap is unacceptable.
+
+- Adapter: `src/runtime/anthropic-rest.ts`
+- Factory: `createAnthropicRestRuntime(opts)`
+- Auth: `x-api-key` header (from `ANTHROPIC_API_KEY` env var)
+- Streaming: SSE (`stream: true`) — emits `text_delta`, `usage`, `text_final`, `done` engine events
+- Runtime ID: `claude_code` (same as CLI adapter so model tier resolution is compatible)
+- Default model: `claude-sonnet-4-6` (set at registration time in `src/index.ts`)
+- Capabilities: `streaming_text` only (no tools, no sessions)
+- Conditional registration: only registered as `'anthropic'` in the runtime registry when `ANTHROPIC_API_KEY` is set
+
+Env vars:
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `ANTHROPIC_API_KEY` | *(required)* | API key; also gates adapter registration |
+
+Configurable via `AnthropicRestOpts`: `baseUrl` (default `https://api.anthropic.com`), `apiVersion` (default `2023-06-01`), `defaultMaxTokens` (default `1024`).
+
+### Voice auto-wiring
+
+When both `ANTHROPIC_API_KEY` and `DISCOCLAW_VOICE_ENABLED=1` are set, the startup path in `src/index.ts` auto-wires the Anthropic REST adapter as the voice runtime. `resolveVoiceRuntime()` checks `voiceModelRef.runtime` first, then falls back to the `'anthropic'` registry entry, then the primary CLI runtime. This can be overridden at runtime via `runtime-overrides.json` (`voiceRuntime` key) or the `!models` command.
+
+### Key files
+
+| File | Role |
+|------|------|
+| `src/runtime/anthropic-rest.ts` | Adapter: SSE streaming, abort/timeout, system prompt extraction |
+| `src/runtime/anthropic-rest.test.ts` | Unit tests (mocked fetch, SSE parsing, error handling, abort) |
+| `src/runtime/openai-compat.ts` | Provides `splitSystemPrompt()` used by the adapter |
+
 ## OpenRouter Adapter
 
 - Implementation: reuses `src/runtime/openai-compat.ts` with `id: 'openrouter'` — no separate adapter file needed.

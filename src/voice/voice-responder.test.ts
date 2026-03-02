@@ -297,7 +297,7 @@ describe('VoiceResponder', () => {
       expect(signal.aborted).toBe(false);
     });
 
-    it('aborts previous AI signal when new transcription arrives', async () => {
+    it('queues new transcription instead of aborting in-flight AI call', async () => {
       let resolveFirst!: (value: string) => void;
       let firstSignal!: AbortSignal;
       let callCount = 0;
@@ -314,16 +314,18 @@ describe('VoiceResponder', () => {
       const first = responder.handleTranscription('first');
       expect(firstSignal.aborted).toBe(false);
 
-      // Second transcription should abort the first signal
-      const second = responder.handleTranscription('second');
-      expect(firstSignal.aborted).toBe(true);
+      // Second transcription queues instead of aborting the first AI call
+      responder.handleTranscription('second');
+      expect(firstSignal.aborted).toBe(false);
 
+      // First AI call finishes; generation mismatch skips TTS, then
+      // pending text is drained via processPipeline
       resolveFirst('first response');
-      await Promise.all([first, second]);
+      await first;
 
-      // Second call gets its own non-aborted signal
-      const secondSignal = invokeAi.mock.calls[1][1];
-      expect(secondSignal.aborted).toBe(false);
+      // The queued text triggers a second AI call
+      expect(invokeAi).toHaveBeenCalledTimes(2);
+      expect(invokeAi.mock.calls[1][0]).toBe('second');
     });
 
     it('aborts AI signal when stop() is called', async () => {
