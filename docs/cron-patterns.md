@@ -132,6 +132,58 @@ The router sends each entry to its target channel.
 
 ---
 
+## Pattern: Stateful JSON Router
+
+**Use case:** Poll an external source, deduplicate against previously seen items, and route each item to a different channel based on its content. Combines stateful polling with JSON routing.
+
+### Example: Inbox Triage
+
+A cron that checks for new messages (email, RSS, alerts — anything with unique IDs), skips ones it's already seen, classifies each new item, and routes it to the right channel.
+
+Create the job:
+
+```json
+{
+  "action": "cronCreate",
+  "name": "inbox-triage",
+  "schedule": "*/15 * * * *",
+  "timezone": "America/New_York",
+  "channel": "general",
+  "routingMode": "json",
+  "prompt": "Run ~/scripts/check-inbox.sh to get recent items as JSON.\n\nCheck the Persistent State section for `seen_ids`. Filter out any items whose `id` is already in that list. Only process new items.\n\nFor each new item, write a brief summary and route it to the appropriate channel:\n- Finance, billing, invoices → #finance\n- Infrastructure, ops, alerts → #ops\n- Project updates, PRs, CI → #dev\n- Everything else → #general\n\nReturn a JSON array: [{\"channel\": \"#finance\", \"content\": \"summary here\"}, ...]\n\nAfter routing, emit a <cron-state> block with the updated seen_ids (all existing IDs plus newly processed ones, capped at 200 most recent):\n<cron-state>{\"seen_ids\": [\"id1\", \"id2\", ...]}</cron-state>\n\nIf there are no new items, return [] and do not update state."
+}
+```
+
+Enable silent mode so empty runs don't post:
+
+```json
+{
+  "action": "cronUpdate",
+  "cronId": "inbox-triage",
+  "silent": true
+}
+```
+
+On each run the AI:
+
+1. Executes the script and gets raw items
+2. Reads `{{state}}` to find previously seen IDs
+3. Filters to only new items
+4. Returns a JSON array with per-channel routing
+5. Emits `<cron-state>` with updated `seen_ids`
+
+When there's nothing new, the AI returns `[]` — the JSON router's empty-array sentinel — and silent mode suppresses the post.
+
+### Gotchas
+
+- **State and JSON routing work together.** The `<cron-state>` block is stripped before the JSON router parses the array. The AI can emit both in the same response.
+- **Cap your ID list.** Without a cap, `seen_ids` grows unbounded. Instruct the AI to keep only the N most recent IDs (200 is a reasonable default).
+- **`[]` is the silent sentinel for JSON mode.** In default (non-JSON) mode, the sentinel is `HEARTBEAT_OK`. Your prompt must use the correct one for the routing mode.
+- **Routing rules in the prompt are suggestions, not enforcement.** The AI decides which channel each item goes to based on your instructions. Be specific about classification criteria to get consistent routing.
+- **The script must be executable and return valid JSON.** If the script fails or returns garbage, the AI will likely produce an error message that falls back to the default channel.
+
+---
+
 ## Pattern: Chained Pipelines
 
 **Use case:** Multi-step workflows where one job's output feeds the next.

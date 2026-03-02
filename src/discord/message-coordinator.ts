@@ -2985,8 +2985,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           // Archive the outgoing summary before it gets overwritten.
           if (params.summaryArchiveDir && work.existingSummary) {
-            const ch = asThreadChannel(msg.channel);
-            const channelName = String(ch?.name ?? ch?.parent?.name ?? msg.channelId);
+            const channelName = channelNameOrParent(msg.channel, String(msg.channelId));
             await archiveSummary(params.summaryArchiveDir, sessionKey, channelName, work.existingSummary);
           }
 
