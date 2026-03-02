@@ -32,6 +32,8 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'forgeStatus',
   // Voice
   'voiceStatus',
+  // Defer
+  'deferList',
   // Spawn
   'spawnAgent',
 ]);
