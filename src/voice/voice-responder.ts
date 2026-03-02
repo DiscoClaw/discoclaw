@@ -48,6 +48,7 @@ export class VoiceResponder {
   private generation = 0;
   private _processing = false;
   private activeAbort: AbortController | null = null;
+  private pending: string | null = null;
 
   constructor(opts: VoiceResponderOpts) {
     this.log = opts.log;
@@ -77,20 +78,36 @@ export class VoiceResponder {
 
   /**
    * Process a transcription: invoke AI -> synthesize TTS -> play audio.
-   * If called while already processing, the earlier pipeline is abandoned
-   * via a generation counter (newer invocation wins).
+   * If called while already processing, the new text is queued (coalesced)
+   * and processed after the current pipeline completes. Only the most
+   * recent pending text is kept. Barge-in still stops playback but the
+   * queue protects the in-flight AI call from cancellation.
    */
   async handleTranscription(text: string): Promise<void> {
     if (!text.trim()) return;
 
-    // Abort any in-flight AI subprocess before bumping the generation counter
-    this.activeAbort?.abort();
+    if (this._processing) {
+      // Queue the latest transcription instead of aborting the in-flight AI call
+      this.pending = text;
+      // Barge-in: stop current playback but let the AI call finish
+      this.generation++;
+      this.player.stop();
+      return;
+    }
 
+    this._processing = true;
+    await this.processPipeline(text);
+  }
+
+  /**
+   * Run one AI -> TTS -> playback pipeline. On completion, checks for
+   * pending text and self-invokes to drain the queue.
+   */
+  private async processPipeline(text: string): Promise<void> {
     const gen = ++this.generation;
     const ac = new AbortController();
     this.activeAbort = ac;
     this.player.stop(); // interrupt any current playback
-    this._processing = true;
 
     try {
       // Step 1: Invoke AI runtime
@@ -172,7 +189,13 @@ export class VoiceResponder {
       if (gen !== this.generation) return;
       this.log.error({ err }, 'voice-responder: error in response pipeline');
     } finally {
-      if (gen === this.generation) {
+      const next = this.pending;
+      this.pending = null;
+      if (next) {
+        // Drain the queue: process the most recent pending transcription
+        await this.processPipeline(next);
+      } else if (gen === this.generation) {
+        this.activeAbort = null;
         this._processing = false;
       }
     }
@@ -189,8 +212,9 @@ export class VoiceResponder {
     return status === AudioPlayerStatus.Playing || status === AudioPlayerStatus.Buffering;
   }
 
-  /** Interrupt any in-flight pipeline and stop playback. */
+  /** Interrupt any in-flight pipeline, clear the queue, and stop playback. */
   stop(): void {
+    this.pending = null;
     this.activeAbort?.abort();
     this.activeAbort = null;
     this.generation++;
