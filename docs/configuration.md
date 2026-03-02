@@ -166,6 +166,7 @@ See [docs/voice.md](voice.md) for the full setup guide and provider details.
 |----------|---------|-------------|
 | `DISCOCLAW_VOICE_ENABLED` | `false` | Master switch for voice subsystem |
 | `DISCOCLAW_VOICE_AUTO_JOIN` | `false` | Auto-join voice channels when users enter |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key (required for direct Messages API voice responses) |
 | `DISCOCLAW_VOICE_MODEL` | — | Model override for voice responses |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | — | System prompt override for voice (max 4000 chars) |
 | `DISCOCLAW_STT_PROVIDER` | `deepgram` | Speech-to-text provider: `deepgram`, `whisper`, `openai` |
