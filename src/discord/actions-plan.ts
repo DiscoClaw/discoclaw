@@ -70,6 +70,8 @@ export type PlanContext = {
   skipCompletionNotify?: boolean;
   /** Called with the final completion content after the run finishes. Allows callers (e.g. forge auto-implement) to consume the outcome without a race against Discord status messages. */
   onRunComplete?: (content: string) => Promise<void>;
+  /** Called after a backing task is closed, so callers can sync Discord thread tags. */
+  onTaskClosed?: (taskId: string) => void;
 };
 
 type MessageEditTarget = {
@@ -216,6 +218,11 @@ export async function executePlanAction(
       if (taskId) {
         try {
           planCtx.taskStore.close(taskId, 'Plan closed');
+        } catch {
+          // best-effort
+        }
+        try {
+          planCtx.onTaskClosed?.(taskId);
         } catch {
           // best-effort
         }
@@ -432,6 +439,7 @@ export async function executePlanAction(
             planCtx.taskStore,
             acquireWriterLock,
             planCtx.log,
+            planCtx.onTaskClosed,
           );
           autoClosed = closeResult.closed;
         } catch (err) {

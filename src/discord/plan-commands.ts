@@ -269,6 +269,8 @@ export type HandlePlanCommandOpts = {
   taskStore: TaskStore;
   plansDir?: string;
   maxContextFiles?: number;
+  /** Called after a backing task is closed, so callers can sync Discord thread tags. */
+  onTaskClosed?: (taskId: string) => void;
 };
 
 export type CreatePlanOpts = {
@@ -523,6 +525,11 @@ export async function handlePlanCommand(
         } catch {
           // best-effort
         }
+        try {
+          opts.onTaskClosed?.(taskId);
+        } catch {
+          // best-effort
+        }
       }
 
       return `Plan **${found.header.planId}** closed.`;
@@ -704,6 +711,7 @@ export async function closePlanIfComplete(
   taskStore: TaskStore,
   acquireLock: () => Promise<() => void>,
   log?: LoggerLike,
+  onTaskClosed?: (taskId: string) => void,
 ): Promise<{ closed: boolean; reason: string }> {
   let taskId: string | undefined;
   const releaseLock = await acquireLock();
@@ -756,6 +764,11 @@ export async function closePlanIfComplete(
       taskStore.close(taskId, 'All phases complete');
     } catch (err) {
       log?.warn({ err, taskId }, 'closePlanIfComplete: failed to close task (best-effort)');
+    }
+    try {
+      onTaskClosed?.(taskId);
+    } catch {
+      // best-effort
     }
   }
 
