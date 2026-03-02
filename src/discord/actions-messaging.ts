@@ -62,6 +62,19 @@ const SENDFILE_ALLOWED_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf',
 ]);
 
+/** Parse a comma-separated list of allowed directories for sendFile. */
+export function parseSendFileAllowedDirs(raw?: string): string[] {
+  if (!raw || !raw.trim()) return ['/tmp'];
+  return raw.split(',').map(d => d.trim()).filter(Boolean).map(d => path.resolve(d));
+}
+
+let sendFileAllowedDirs = parseSendFileAllowedDirs(process.env.DISCOCLAW_SENDFILE_ALLOWED_DIRS);
+
+/** @internal Override the sendFile directory allowlist (test-only). */
+export function _setSendFileAllowedDirs(dirs: string[]): void {
+  sendFileAllowedDirs = dirs;
+}
+
 type MessageRecord = {
   id: string;
   author?: { username?: string };
@@ -408,13 +421,29 @@ export async function executeMessagingAction(
       if (action.content && action.content.length > DISCORD_MAX_CONTENT) {
         return { ok: false, error: `Content exceeds Discord's ${DISCORD_MAX_CONTENT} character limit (got ${action.content.length})` };
       }
+      // Resolve symlinks and validate the file is under an allowed directory.
+      let realPath: string;
+      try {
+        realPath = await fs.realpath(trimmedPath);
+      } catch (err) {
+        if (errorCode(err) === 'ENOENT') {
+          return { ok: false, error: `File not found: ${trimmedPath}` };
+        }
+        throw err;
+      }
+      const pathAllowed = sendFileAllowedDirs.some(
+        dir => realPath === dir || realPath.startsWith(dir + path.sep),
+      );
+      if (!pathAllowed) {
+        return { ok: false, error: 'sendFile path is outside allowed directories' };
+      }
       let fileBuffer: Buffer;
       try {
-        const stat = await fs.stat(trimmedPath);
+        const stat = await fs.stat(realPath);
         if (stat.size > SENDFILE_MAX_BYTES) {
           return { ok: false, error: `File exceeds the ${SENDFILE_MAX_BYTES / (1024 * 1024)} MB size limit (${stat.size} bytes)` };
         }
-        fileBuffer = await fs.readFile(trimmedPath) as Buffer;
+        fileBuffer = await fs.readFile(realPath) as Buffer;
       } catch (err) {
         if (errorCode(err) === 'ENOENT') {
           return { ok: false, error: `File not found: ${trimmedPath}` };
