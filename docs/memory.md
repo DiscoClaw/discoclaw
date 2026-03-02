@@ -117,6 +117,18 @@ Bot:   Sure — is this related to the auth middleware test you were debugging
 
 Curated long-term notes (`workspace/MEMORY.md`) and daily scratch logs (`workspace/memory/YYYY-MM-DD.md`). Loaded in DMs only. These hold things too nuanced for structured durable items — decisions, lessons, project context.
 
+## Summary Archive
+
+Each time a rolling summary is refreshed, the outgoing summary (the one being replaced) is appended to a date-partitioned JSONL file:
+
+```
+memory/summary-archive/YYYY-MM-DD.jsonl
+```
+
+Each line is a JSON object containing the session key, channel ID, timestamp, and the full summary text that was overwritten. The archive is append-only — entries are never modified or deleted by the summarizer.
+
+This provides an episodic history of past summaries that can be searched offline (e.g., grep by date, channel, or keyword). **No retrieval pipeline reads the archive at runtime yet** — it exists purely as a historical record for future use.
+
 ## Token Budget & Overhead
 
 Each layer has its own character budget. Empty layers are omitted entirely (no header, no separator). The three memory builders run in parallel so they add no latency.

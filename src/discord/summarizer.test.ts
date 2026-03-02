@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadSummary, saveSummary, generateSummary } from './summarizer.js';
+import { loadSummary, saveSummary, generateSummary, archiveSummary } from './summarizer.js';
 import type { ConversationSummary } from './summarizer.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 
@@ -312,6 +312,69 @@ describe('summary truncation', () => {
     const maxChars = 100;
     const short = 'hello world';
     expect(short.slice(0, maxChars)).toBe(short);
+  });
+});
+
+describe('archiveSummary', () => {
+  it('writes valid JSONL with correct fields', async () => {
+    const dir = await makeTmpDir();
+    const archiveDir = path.join(dir, 'archive');
+    await archiveSummary(archiveDir, 'sess-1', '#general', 'User discussed deployment.');
+
+    const files = await fs.readdir(archiveDir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/^\d{4}-\d{2}-\d{2}\.jsonl$/);
+
+    const raw = await fs.readFile(path.join(archiveDir, files[0]), 'utf8');
+    const lines = raw.trimEnd().split('\n');
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry).toHaveProperty('timestamp');
+    expect(entry.sessionKey).toBe('sess-1');
+    expect(entry.channelName).toBe('#general');
+    expect(entry.summary).toBe('User discussed deployment.');
+  });
+
+  it('appends multiple entries to the same day file', async () => {
+    const dir = await makeTmpDir();
+    const archiveDir = path.join(dir, 'archive');
+    await archiveSummary(archiveDir, 'sess-1', '#general', 'First summary.');
+    await archiveSummary(archiveDir, 'sess-2', '#random', 'Second summary.');
+
+    const files = await fs.readdir(archiveDir);
+    expect(files).toHaveLength(1);
+
+    const raw = await fs.readFile(path.join(archiveDir, files[0]), 'utf8');
+    const lines = raw.trimEnd().split('\n');
+    expect(lines).toHaveLength(2);
+
+    const first = JSON.parse(lines[0]);
+    const second = JSON.parse(lines[1]);
+    expect(first.sessionKey).toBe('sess-1');
+    expect(second.sessionKey).toBe('sess-2');
+  });
+
+  it('creates the archive directory if missing', async () => {
+    const dir = await makeTmpDir();
+    const archiveDir = path.join(dir, 'nested', 'deep', 'archive');
+    await archiveSummary(archiveDir, 'sess-1', '#dev', 'Summary.');
+
+    const files = await fs.readdir(archiveDir);
+    expect(files).toHaveLength(1);
+  });
+
+  it('does not throw when appendFile fails', async () => {
+    // Use a path where the parent is a file, not a directory, so mkdir fails
+    const dir = await makeTmpDir();
+    const blockingFile = path.join(dir, 'blocker');
+    await fs.writeFile(blockingFile, 'not a dir', 'utf8');
+    const badArchiveDir = path.join(blockingFile, 'sub');
+
+    // Should not throw — errors are swallowed
+    await expect(
+      archiveSummary(badArchiveDir, 'sess-1', '#general', 'Should not throw.'),
+    ).resolves.toBeUndefined();
   });
 });
 

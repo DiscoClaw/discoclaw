@@ -52,6 +52,29 @@ export async function saveSummary(
   await fs.rename(tmp, filePath);
 }
 
+export async function archiveSummary(
+  archiveDir: string,
+  sessionKey: string,
+  channelName: string,
+  summary: string,
+): Promise<void> {
+  try {
+    await fs.mkdir(archiveDir, { recursive: true });
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const filePath = path.join(archiveDir, `${date}.jsonl`);
+    const entry = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      sessionKey,
+      channelName,
+      summary,
+    });
+    await fs.appendFile(filePath, entry + '\n', 'utf8');
+  } catch (err) {
+    // Archive failures must never block summary saves — log and swallow.
+    console.error('[archiveSummary] failed:', err);
+  }
+}
+
 export type GenerateSummaryOpts = {
   previousSummary: string | null;
   recentExchange: string;

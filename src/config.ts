@@ -60,6 +60,7 @@ export type DiscoclawConfig = {
   summaryMaxChars: number;
   summaryEveryNTurns: number;
   summaryDataDirOverride?: string;
+  summaryArchiveDirOverride?: string;
   durableMemoryEnabled: boolean;
   durableDataDirOverride?: string;
   durableInjectMaxChars: number;
@@ -654,6 +655,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       summaryMaxChars: parseNonNegativeInt(env, 'DISCOCLAW_SUMMARY_MAX_CHARS', 2000),
       summaryEveryNTurns: parsePositiveInt(env, 'DISCOCLAW_SUMMARY_EVERY_N_TURNS', 5),
       summaryDataDirOverride: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_DATA_DIR'),
+      summaryArchiveDirOverride: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_ARCHIVE_DIR'),
       durableMemoryEnabled: parseBoolean(env, 'DISCOCLAW_DURABLE_MEMORY_ENABLED', true),
       durableDataDirOverride: parseTrimmedString(env, 'DISCOCLAW_DURABLE_DATA_DIR'),
       durableInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_DURABLE_INJECT_MAX_CHARS', 2000),

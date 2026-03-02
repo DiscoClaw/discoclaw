@@ -28,7 +28,7 @@ import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { fetchMessageHistory } from './message-history.js';
-import { loadSummary, saveSummary, generateSummary } from './summarizer.js';
+import { loadSummary, saveSummary, generateSummary, archiveSummary } from './summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
 import { parseSecretCommand, handleSecretCommand } from './secret-commands.js';
 import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './plan-commands.js';
@@ -166,6 +166,7 @@ export type BotParams = {
   summaryMaxChars: number;
   summaryEveryNTurns: number;
   summaryDataDir: string;
+  summaryArchiveDir?: string;
   durableMemoryEnabled: boolean;
   durableDataDir: string;
   durableInjectMaxChars: number;
@@ -2981,6 +2982,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           });
 
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
+
+          // Archive the outgoing summary before it gets overwritten.
+          if (params.summaryArchiveDir && work.existingSummary) {
+            const channelName = channelNameOrParent(msg.channel, String(msg.channelId));
+            await archiveSummary(params.summaryArchiveDir, sessionKey, channelName, work.existingSummary);
+          }
 
           await saveSummary(params.summaryDataDir, sessionKey, {
             summary: newSummary.slice(0, params.summaryMaxChars),
