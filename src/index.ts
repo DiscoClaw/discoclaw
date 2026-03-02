@@ -1346,6 +1346,7 @@ if (taskCtx) {
             durableDataDir,
             userId: voiceDurableUserId,
             durableInjectMaxChars,
+            query: text,
             log,
           })
         : '';
