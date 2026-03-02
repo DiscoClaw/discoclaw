@@ -14,6 +14,8 @@ import {
   scoreItem,
   blendedInjectionScore,
   recordHits,
+  tokenize,
+  keywordRelevance,
   CURRENT_VERSION,
 } from './durable-memory.js';
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
@@ -469,5 +471,172 @@ describe('recordHits', () => {
     expect(store.items[0].lastHitAt).toBeGreaterThan(500);
     expect(store.items[1].hitCount).toBe(before);
     expect(store.items[1].lastHitAt).toBe(beforeLastHit);
+  });
+});
+
+describe('tokenize', () => {
+  it('lowercases and splits on non-alphanumeric boundaries', () => {
+    const tokens = tokenize('Hello World! TypeScript is great.');
+    expect(tokens.has('hello')).toBe(true);
+    expect(tokens.has('world')).toBe(true);
+    expect(tokens.has('typescript')).toBe(true);
+    expect(tokens.has('great')).toBe(true);
+  });
+
+  it('filters out stop words', () => {
+    const tokens = tokenize('the quick brown fox is not a dog');
+    expect(tokens.has('the')).toBe(false);
+    expect(tokens.has('not')).toBe(false);
+    expect(tokens.has('quick')).toBe(true);
+    expect(tokens.has('brown')).toBe(true);
+    expect(tokens.has('fox')).toBe(true);
+    expect(tokens.has('dog')).toBe(true);
+  });
+
+  it('filters out tokens shorter than 3 characters', () => {
+    const tokens = tokenize('I am ok go run typescript');
+    expect(tokens.has('ok')).toBe(false);
+    expect(tokens.has('go')).toBe(false);
+    expect(tokens.has('am')).toBe(false);
+    expect(tokens.has('run')).toBe(true);
+    expect(tokens.has('typescript')).toBe(true);
+  });
+
+  it('returns empty set for empty input', () => {
+    expect(tokenize('').size).toBe(0);
+  });
+
+  it('deduplicates tokens', () => {
+    const tokens = tokenize('rust rust rust');
+    expect(tokens.size).toBe(1);
+    expect(tokens.has('rust')).toBe(true);
+  });
+});
+
+describe('keywordRelevance', () => {
+  it('returns 1.0 for perfect overlap', () => {
+    const queryTokens = tokenize('typescript projects');
+    const score = keywordRelevance(queryTokens, 'User loves TypeScript projects', []);
+    expect(score).toBe(1.0);
+  });
+
+  it('returns 0 for no overlap', () => {
+    const queryTokens = tokenize('python machine learning');
+    const score = keywordRelevance(queryTokens, 'User prefers Rust for systems', []);
+    expect(score).toBe(0);
+  });
+
+  it('returns partial score for partial overlap', () => {
+    const queryTokens = tokenize('typescript react projects');
+    const score = keywordRelevance(queryTokens, 'User likes TypeScript and Vue', []);
+    expect(score).toBeGreaterThan(0);
+    expect(score).toBeLessThan(1);
+    // 1 out of 3 non-stop tokens match: typescript
+    expect(score).toBeCloseTo(1 / 3);
+  });
+
+  it('returns 0 when query has no meaningful tokens', () => {
+    const queryTokens = tokenize('is a the');
+    const score = keywordRelevance(queryTokens, 'some text here', []);
+    expect(score).toBe(0);
+  });
+
+  it('includes tags in matching', () => {
+    const queryTokens = tokenize('kubernetes deployment');
+    const score = keywordRelevance(queryTokens, 'Uses containers for services', ['kubernetes', 'deployment']);
+    expect(score).toBe(1.0);
+  });
+});
+
+describe('selectItemsForInjection — query-aware boosting', () => {
+  it('boosts items with keyword overlap above non-matching items', () => {
+    const now = Date.now();
+    const store = emptyStore();
+    store.items.push(
+      makeItem({
+        id: 'irrelevant',
+        text: 'User prefers dark mode in all editors',
+        status: 'active',
+        updatedAt: now - 1000,
+        hitCount: 10,
+        lastHitAt: now - 1000,
+      }),
+      makeItem({
+        id: 'relevant',
+        text: 'User uses TypeScript for all projects',
+        status: 'active',
+        updatedAt: now - 30 * 24 * 60 * 60 * 1000,
+        hitCount: 1,
+        lastHitAt: now - 30 * 24 * 60 * 60 * 1000,
+      }),
+    );
+    // Without query, 'irrelevant' (higher blended score) would rank first
+    const withoutQuery = selectItemsForInjection(store, 10000);
+    expect(withoutQuery[0].id).toBe('irrelevant');
+
+    // With query about TypeScript, 'relevant' should be boosted above 'irrelevant'
+    const withQuery = selectItemsForInjection(store, 10000, 'Tell me about TypeScript');
+    expect(withQuery[0].id).toBe('relevant');
+    expect(withQuery[1].id).toBe('irrelevant');
+  });
+
+  it('falls back to blended score when query has no meaningful tokens', () => {
+    const now = Date.now();
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'first item', status: 'active', updatedAt: now - 1000, hitCount: 5, lastHitAt: now - 500 }),
+      makeItem({ id: 'b', text: 'second item', status: 'active', updatedAt: now - 60 * 24 * 60 * 60 * 1000, hitCount: 0, lastHitAt: 0 }),
+    );
+    const items = selectItemsForInjection(store, 10000, 'is the a');
+    expect(items[0].id).toBe('a');
+  });
+
+  it('preserves existing behavior when query is undefined', () => {
+    const now = Date.now();
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'old-hot', text: 'old but popular', status: 'active', updatedAt: now - 30 * 24 * 60 * 60 * 1000, hitCount: 20, lastHitAt: now - 1000 }),
+      makeItem({ id: 'new-cold', text: 'new but ignored', status: 'active', updatedAt: now - 1000, hitCount: 0, lastHitAt: 0 }),
+    );
+    const items = selectItemsForInjection(store, 10000);
+    expect(items[0].id).toBe('old-hot');
+  });
+
+  it('boosts items matching via tags', () => {
+    const now = Date.now();
+    const store = emptyStore();
+    store.items.push(
+      makeItem({
+        id: 'no-tag-match',
+        text: 'User enjoys hiking on weekends',
+        status: 'active',
+        updatedAt: now - 1000,
+        hitCount: 5,
+        lastHitAt: now - 1000,
+      }),
+      makeItem({
+        id: 'tag-match',
+        text: 'Deploys services regularly',
+        tags: ['kubernetes', 'docker'],
+        status: 'active',
+        updatedAt: now - 60 * 24 * 60 * 60 * 1000,
+        hitCount: 0,
+        lastHitAt: 0,
+      }),
+    );
+    // Query has 2 tokens matching tags (kubernetes, docker) out of 3 total
+    const items = selectItemsForInjection(store, 10000, 'kubernetes docker containers');
+    expect(items[0].id).toBe('tag-match');
+  });
+
+  it('still respects char budget with query', () => {
+    const store = emptyStore();
+    const now = Date.now();
+    store.items.push(
+      makeItem({ id: 'a', text: 'TypeScript project config', status: 'active', updatedAt: now - 1000 }),
+      makeItem({ id: 'b', text: 'TypeScript compiler options reference', status: 'active', updatedAt: now - 2000 }),
+    );
+    const items = selectItemsForInjection(store, 80, 'TypeScript');
+    expect(items).toHaveLength(1);
   });
 });
