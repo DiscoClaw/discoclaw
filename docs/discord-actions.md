@@ -322,8 +322,13 @@ Allow the model to schedule a deferred follow-up invocation in a target channel 
 Fields (`defer`): `channel` (channel name or ID), `prompt` (text sent as the user message when the timer fires), `delaySeconds` (positive number).
 Fields (`deferList`): none — returns a snapshot of all active deferred jobs.
 
+Job IDs: Each scheduled defer is assigned a stable numeric `id` by the `DeferScheduler`. The `defer` action includes the `id` in its success summary (e.g. `id=3`), and `deferList` output prefixes each entry with its `id`. These IDs are the stable identifiers for addressing specific pending jobs — they are the prerequisite for a future `deferCancel` action.
+
 Env: `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1).
 `DeferScheduler` constraints: delays are capped at `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` (default 1800 s); at most `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` (default 5) timers may be pending simultaneously. Timers are in-process only — they do not survive a restart.
+`DeferScheduler` lifecycle methods: the scheduler stores `setTimeout` timer refs alongside job metadata, enabling individual and bulk cancellation.
+- `cancel(id)` — cancel a single pending job by its numeric ID. Clears the timer and removes the job from the active set. Returns `true` if the job existed and was cancelled, `false` otherwise.
+- `cancelAll()` — cancel all pending jobs and clear their timers. Returns the count of jobs cancelled. This is the clean-shutdown primitive — callers can drain all pending timers before the process exits.
 Execution flow: when the timer fires, `deferred-runner.ts` resolves the channel, builds a prompt (PA preamble + deferred header + user prompt text), invokes the runtime directly, then parses any action blocks from the response and posts the result to the target channel. This is a direct runtime invocation, not a replay through the Discord message handler.
 
 ### Config Actions (`actions-config.ts`)

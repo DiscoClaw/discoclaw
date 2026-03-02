@@ -60,7 +60,7 @@ export async function executeDeferAction(
   const when = fmtTime(result.runsAt);
   return {
     ok: true,
-    summary: `Deferred follow-up scheduled for ${channel} in ${delayLabel} (runs at ${when})`,
+    summary: `Deferred follow-up scheduled for ${channel} in ${delayLabel} (id=${result.id}, runs at ${when})`,
   };
 }
 
@@ -82,7 +82,7 @@ export function executeDeferListAction(
     const action = job.action as DeferActionRequest;
     const channel = action.channel ?? 'unknown';
     const prompt = action.prompt ?? '';
-    return `${i + 1}. channel=${channel} | remaining=${formatDuration(remainingSec)} | runsAt=${fmtTime(job.runsAt)} | prompt="${prompt}"`;
+    return `${i + 1}. id=${job.id} | channel=${channel} | remaining=${formatDuration(remainingSec)} | runsAt=${fmtTime(job.runsAt)} | prompt="${prompt}"`;
   });
 
   return { ok: true, summary: `Pending deferred actions (${active.length}):\n${lines.join('\n')}` };
