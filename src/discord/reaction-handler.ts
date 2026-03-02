@@ -10,7 +10,7 @@ import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
 import { shouldTriggerFollowUp } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
-import { tryAbortAll } from './abort-registry.js';
+import { tryAbort, isActivelyStreaming } from './abort-registry.js';
 import { getActiveOrchestrator } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection } from './prompt-common.js';
 import { editThenSendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
@@ -138,21 +138,22 @@ function createReactionHandler(
         }
       }
 
-      // 4a. Abort intercept — 🛑 on a bot reply kills all active streams and any running forge.
+      // 4a. Abort intercept — 🛑 on a bot reply aborts the stream for that specific message.
       // Placed after reaction prompt resolution (step 5) so pending prompts using 🛑 as a
       // choice are resolved normally before this check. When resolvedPrompt is non-null, the
       // entire block is skipped so the resolved choice flows through to AI invocation.
       // On remove mode it silently consumes the event; on add mode with no resolved prompt
-      // it fires forge-aware cancellation and always consumes the event.
+      // it fires per-message abort + forge-aware cancellation and always consumes the event.
       if (
         reaction.emoji.name === '🛑' &&
         reaction.message.author?.id === reaction.message.client.user?.id &&
         !resolvedPrompt
       ) {
         if (mode === 'remove') return;
-        // add mode: abort all active streams and cancel any running forge.
-        const abortedCount = tryAbortAll();
-        if (abortedCount > 0) metrics.increment('discord.reaction.abort');
+        // add mode: abort the stream for this specific message and cancel any running forge.
+        const wasActive = isActivelyStreaming(reaction.message.id);
+        tryAbort(reaction.message.id);
+        if (wasActive) metrics.increment('discord.reaction.abort');
         const orch = getActiveOrchestrator();
         if (orch?.isRunning) orch.requestCancel('stop reaction');
         return;
