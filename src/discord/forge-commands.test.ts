@@ -14,6 +14,7 @@ import {
   appendAuditRound,
   stripTemplateHeader,
   isTemplateEchoed,
+  resolveForgeDescription,
   ForgeOrchestrator,
 } from './forge-commands.js';
 import type { ForgeOrchestratorOpts } from './forge-commands.js';
@@ -541,6 +542,54 @@ describe('isTemplateEchoed', () => {
       '```',
     ].join('\n');
     expect(isTemplateEchoed(output)).toBe(false);
+  });
+});
+
+describe('resolveForgeDescription', () => {
+  it('returns original description when not degenerate', () => {
+    expect(resolveForgeDescription('Add rate limiting', undefined, undefined)).toBe('Add rate limiting');
+  });
+
+  it('substitutes task title for "this"', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    store.create({ title: 'Sanitize webhook body', priority: 1 });
+    const task = store.list()[0]!;
+    expect(resolveForgeDescription('this', store, task.id)).toBe('Sanitize webhook body');
+  });
+
+  it('substitutes task title for "that" (case-insensitive)', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    store.create({ title: 'Fix the bug', priority: 2 });
+    const task = store.list()[0]!;
+    expect(resolveForgeDescription('That', store, task.id)).toBe('Fix the bug');
+  });
+
+  it('substitutes task title for "it"', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    store.create({ title: 'Implement feature', priority: 2 });
+    const task = store.list()[0]!;
+    expect(resolveForgeDescription('it', store, task.id)).toBe('Implement feature');
+  });
+
+  it('returns original if no task store', () => {
+    expect(resolveForgeDescription('this', undefined, 'ws-001')).toBe('this');
+  });
+
+  it('returns original if no existing task ID', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    expect(resolveForgeDescription('this', store, undefined)).toBe('this');
+  });
+
+  it('returns original if task not found in store', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    expect(resolveForgeDescription('this', store, 'ws-999')).toBe('this');
+  });
+
+  it('does not substitute for normal descriptions', () => {
+    const store = new TaskStore({ prefix: 'ws' });
+    store.create({ title: 'Some task', priority: 2 });
+    const task = store.list()[0]!;
+    expect(resolveForgeDescription('Add retry logic', store, task.id)).toBe('Add retry logic');
   });
 });
 
@@ -1715,6 +1764,38 @@ describe('ForgeOrchestrator', () => {
     expect(retryCall!.force).toBe(true);
   });
 
+  it('template-echo retry augments prompt with anti-echo warning', async () => {
+    const tmpDir = await makeTmpDir();
+    const echoedTemplate = `# Plan: {{TITLE}}\n\n## Objective\n\n_Describe the objective here._\n`;
+    const realDraft = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild it.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const prompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        prompts.push(params.prompt);
+        const responses = [echoedTemplate, realDraft, auditClean];
+        const text = responses[prompts.length - 1] ?? '(no response)';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    // First draft prompt should NOT have the retry prefix
+    expect(prompts[0]).not.toContain('previous attempt returned the template verbatim');
+    // Retry draft prompt SHOULD have the prefix
+    expect(prompts[1]).toContain('previous attempt returned the template verbatim');
+    expect(prompts[1]).toContain('MUST read the codebase');
+  });
+
   it('retries revision phase on failure and completes if retry succeeds', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
@@ -1736,6 +1817,39 @@ describe('ForgeOrchestrator', () => {
     expect(result.rounds).toBe(2);
     expect(progress.some((p) => p.includes('Revision') && p.includes('stalled'))).toBe(true);
     expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+  });
+
+  it('resolves degenerate description "this" to task title in drafter prompt', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Sanitize webhook body\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nSanitize webhook.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const prompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        prompts.push(params.prompt);
+        const responses = [draftPlan, auditClean];
+        const text = responses[prompts.length - 1] ?? '(no response)';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+        })();
+      },
+    };
+
+    const taskStore = new TaskStore({ prefix: 'ws' });
+    taskStore.create({ title: 'Sanitize webhook body before prompt interpolation', priority: 1 });
+    const task = taskStore.list()[0]!;
+
+    const opts = await baseOpts(tmpDir, runtime, { taskStore, existingTaskId: task.id });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('this', async () => {});
+
+    // Drafter prompt should contain the resolved task title, not "this"
+    expect(prompts[0]).toContain('Sanitize webhook body before prompt interpolation');
+    expect(prompts[0]).not.toMatch(/## Task\s+\nthis\n/);
   });
 });
 

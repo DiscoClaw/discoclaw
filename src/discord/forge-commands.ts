@@ -131,6 +131,42 @@ export function isTemplateEchoed(output: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Template-echo retry prefix
+// ---------------------------------------------------------------------------
+
+const TEMPLATE_ECHO_RETRY_PREFIX = [
+  'IMPORTANT: Your previous attempt returned the template verbatim instead of a real plan.',
+  'You MUST read the codebase using your tools (Read, Glob, Grep) and produce substantive',
+  'analysis based on the actual code. Do NOT echo the template structure with placeholder text.',
+  '',
+  '',
+].join('\n');
+
+// ---------------------------------------------------------------------------
+// Degenerate description resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Detects degenerate descriptions (pronouns/deictics like "this", "that", "it")
+ * and substitutes the task title when available.  This prevents the drafter from
+ * receiving `## Task\n\nthis` as its primary instruction.
+ */
+const DEICTIC_RE = /^(this|that|it|the task|the issue|above|same)$/i;
+
+export function resolveForgeDescription(
+  description: string,
+  taskStore?: TaskStore,
+  existingTaskId?: string,
+): string {
+  const trimmed = description.trim();
+  if (!DEICTIC_RE.test(trimmed)) return description;
+  if (!taskStore || !existingTaskId) return description;
+  const task = taskStore.get(existingTaskId);
+  if (!task?.title) return description;
+  return task.title;
+}
+
+// ---------------------------------------------------------------------------
 // Prompt builders
 // ---------------------------------------------------------------------------
 
@@ -551,6 +587,13 @@ export class ForgeOrchestrator {
     this.currentPlanId = undefined;
     const t0 = Date.now();
 
+    // Resolve degenerate descriptions ("this", "it", etc.) to the task title
+    description = resolveForgeDescription(
+      description,
+      this.opts.taskStore,
+      this.opts.existingTaskId,
+    );
+
     let planId = '';
     let filePath = '';
 
@@ -834,7 +877,17 @@ export class ForgeOrchestrator {
             this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
             throw new Error('drafter echoed the template');
           }
-        });
+        }, (retryDef) => ({
+          ...retryDef,
+          steps: retryDef.steps.map((step) =>
+            step.kind === 'prompt'
+              ? {
+                ...step,
+                prompt: TEMPLATE_ECHO_RETRY_PREFIX + step.prompt,
+              }
+              : step,
+          ),
+        }));
         if (!draftPipelineResult) {
           this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
@@ -1147,12 +1200,16 @@ export class ForgeOrchestrator {
    * An optional `validate` callback runs after each successful pipeline result.
    * If it throws a retryable error, the pipeline is retried like any other
    * transient failure.
+   *
+   * An optional `retryTransform` callback modifies the pipeline definition
+   * before the retry attempt (e.g. augmenting the prompt with error context).
    */
   private async runWithRetry(
     def: Parameters<typeof runPipeline>[0],
     phase: string,
     onProgress: ProgressFn,
     validate?: (result: { outputs: string[] }) => void,
+    retryTransform?: (def: Parameters<typeof runPipeline>[0]) => Parameters<typeof runPipeline>[0],
   ): Promise<{ outputs: string[] } | null> {
     try {
       const result = await this.runCancellable(def);
@@ -1166,8 +1223,9 @@ export class ForgeOrchestrator {
       }
       this.opts.log?.warn({ err: firstErr, phase }, 'forge:retry');
       await onProgress(`Forge ${phase} stalled — retrying...`, { force: true });
+      const retryDef = retryTransform ? retryTransform(def) : def;
       try {
-        const result = await this.runCancellable(def);
+        const result = await this.runCancellable(retryDef);
         if (result && validate) validate(result);
         return result;
       } catch (secondErr) {
