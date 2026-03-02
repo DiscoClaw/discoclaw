@@ -1229,6 +1229,15 @@ if (taskCtx) {
       onProgress: async (msg) => {
         log.info({ msg }, 'plan:action:progress');
       },
+      onTaskClosed: (taskId: string) => {
+        try {
+          botParams.taskCtx?.syncCoordinator?.sync()?.catch((err: unknown) => {
+            log.warn({ err, taskId }, 'plan:onTaskClosed sync failed');
+          });
+        } catch (err) {
+          log.warn({ err, taskId }, 'plan:onTaskClosed sync error');
+        }
+      },
     };
     log.info('plan:action context initialized');
   }

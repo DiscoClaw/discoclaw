@@ -481,6 +481,7 @@ describe('executePlanAction', () => {
         expect.any(TaskStore),
         expect.any(Function),
         expect.anything(),
+        undefined,
       );
     });
 

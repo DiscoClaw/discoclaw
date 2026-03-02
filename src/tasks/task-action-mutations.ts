@@ -171,14 +171,15 @@ export async function handleTaskClose(
   }
 
   const existing = taskCtx.store.get(taskId);
-  if (existing && existing.status === 'closed') {
-    return { ok: true, summary: `Task ${taskId} already closed` };
-  }
+  const alreadyClosed = existing?.status === 'closed';
 
   let needsRepairSync = false;
+  let threadRepaired = false;
   const taskService = resolveTaskService(taskCtx);
   await withDirectTaskLifecycle(taskId, async () => {
-    const closedTask = taskService.close(taskId, action.reason);
+    const closedTask = alreadyClosed
+      ? existing
+      : taskService.close(taskId, action.reason);
     const threadRepair = await syncClosedTaskThread({
       actionType: action.type,
       taskCtx,
@@ -186,7 +187,10 @@ export async function handleTaskClose(
       taskId,
       closedTask,
     });
-    if (threadRepair) needsRepairSync = true;
+    if (threadRepair) {
+      needsRepairSync = true;
+      threadRepaired = true;
+    }
   });
 
   if (needsRepairSync) {
@@ -195,5 +199,9 @@ export async function handleTaskClose(
 
   taskThreadCache.invalidate();
   taskCtx.forumCountSync?.requestUpdate();
+  if (alreadyClosed) {
+    const repairNote = threadRepaired ? ' (thread repaired)' : '';
+    return { ok: true, summary: `Task ${taskId} already closed${repairNote}` };
+  }
   return { ok: true, summary: `Task ${taskId} closed${action.reason ? `: ${action.reason}` : ''}` };
 }

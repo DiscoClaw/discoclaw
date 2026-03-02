@@ -1150,6 +1150,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
           maxPlanRunPhases: MAX_PLAN_RUN_PHASES,
           skipCompletionNotify: true,
+          onTaskClosed: params.planCtx?.onTaskClosed,
           onProgress: async (progressMsg: string) => {
             params.log?.info(
               { planId: result.planId, progress: progressMsg },
@@ -1344,6 +1345,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 workspaceCwd: params.workspaceCwd,
                 taskStore: params.planCtx?.taskStore ?? (params.taskCtx)?.store ?? new TaskStore(),
                 maxContextFiles: params.planPhaseMaxContextFiles,
+                onTaskClosed: params.planCtx?.onTaskClosed,
               };
 
               // Phase-related commands require PLAN_PHASES_ENABLED
@@ -1637,6 +1639,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       planOpts.taskStore,
                       acquireWriterLock,
                       params.log,
+                      planOpts.onTaskClosed,
                     );
                     if (closeResult.closed) {
                       await editSummary(summaryMsg + '\n\nPlan and backing task auto-closed.');
