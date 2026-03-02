@@ -211,14 +211,62 @@ export function deprecateItems(
   return { store, deprecatedCount };
 }
 
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+  'should', 'may', 'might', 'can', 'shall', 'to', 'of', 'in', 'for',
+  'on', 'with', 'at', 'by', 'from', 'as', 'into', 'about', 'but',
+  'not', 'or', 'and', 'if', 'then', 'so', 'that', 'this', 'it',
+  'its', 'my', 'your', 'our', 'their', 'his', 'her', 'what', 'which',
+  'who', 'how', 'when', 'where', 'why',
+]);
+
+export function tokenize(text: string): Set<string> {
+  const tokens = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t));
+  return new Set(tokens);
+}
+
+export function keywordRelevance(queryTokens: Set<string>, itemText: string, itemTags: string[]): number {
+  if (queryTokens.size === 0) return 0;
+  const itemTokens = tokenize(itemText + ' ' + itemTags.join(' '));
+  let matches = 0;
+  for (const token of queryTokens) {
+    if (itemTokens.has(token)) matches++;
+  }
+  return matches / queryTokens.size;
+}
+
+const QUERY_BOOST_WEIGHT = 2.0;
+
 export function selectItemsForInjection(
   store: DurableMemoryStore,
   maxChars: number,
+  query?: string,
 ): DurableItem[] {
   const now = Date.now();
-  const active = store.items
-    .filter((item) => item.status === 'active')
-    .sort((a, b) => blendedInjectionScore(b, now) - blendedInjectionScore(a, now));
+  const queryTokens = query ? tokenize(query) : new Set<string>();
+
+  const activeItems = store.items.filter((item) => item.status === 'active');
+
+  // Pre-compute blended scores and find max for normalization.
+  const blendedScores = new Map<string, number>();
+  let maxBlended = 0;
+  for (const item of activeItems) {
+    const score = blendedInjectionScore(item, now);
+    blendedScores.set(item.id, score);
+    if (score > maxBlended) maxBlended = score;
+  }
+
+  const active = activeItems.sort((a, b) => {
+    const normA = maxBlended > 0 ? (blendedScores.get(a.id) ?? 0) / maxBlended : 0;
+    const normB = maxBlended > 0 ? (blendedScores.get(b.id) ?? 0) / maxBlended : 0;
+    const scoreA = normA + QUERY_BOOST_WEIGHT * keywordRelevance(queryTokens, a.text, a.tags);
+    const scoreB = normB + QUERY_BOOST_WEIGHT * keywordRelevance(queryTokens, b.text, b.tags);
+    return scoreB - scoreA;
+  });
 
   const selected: DurableItem[] = [];
   let chars = 0;

@@ -2250,6 +2250,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               durableDataDir: params.durableDataDir,
               userId: msg.author.id,
               durableInjectMaxChars: params.durableInjectMaxChars,
+              query: String(msg.content ?? ''),
               log: params.log,
             }),
             buildShortTermMemorySection({
