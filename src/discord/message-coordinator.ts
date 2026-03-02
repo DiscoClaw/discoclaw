@@ -439,11 +439,18 @@ async function resolvePinnedMessagesSummary(
   log?: LoggerLike,
   maxChars = 600,
 ): Promise<string | undefined> {
-  const fetchPinned = channel?.messages?.fetchPinned;
-  if (typeof fetchPinned !== 'function') return undefined;
+  const mgr = channel?.messages as Record<string, unknown> | undefined;
+  // Use fetchPins (non-deprecated) if available, fall back to fetchPinned.
+  // Bind to the manager so `this.client` resolves correctly inside discord.js.
+  const fetchFn = typeof mgr?.fetchPins === 'function'
+    ? (mgr.fetchPins as () => Promise<{ size: number; values(): Iterable<PinnedMessageLike> }>).bind(mgr)
+    : typeof mgr?.fetchPinned === 'function'
+      ? (mgr.fetchPinned as () => Promise<{ size: number; values(): Iterable<PinnedMessageLike> }>).bind(mgr)
+      : undefined;
+  if (!fetchFn) return undefined;
 
   try {
-    const pinned = await fetchPinned();
+    const pinned = await fetchFn();
     if (!pinned || pinned.size === 0) return undefined;
 
     const lines: string[] = [];
