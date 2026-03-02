@@ -17,10 +17,11 @@ export type DeferSchedulerOptions<Act extends DeferSchedulerAction = DeferSchedu
 };
 
 type ScheduleResult =
-  | { ok: true; runsAt: Date; delaySeconds: number }
+  | { ok: true; id: number; runsAt: Date; delaySeconds: number }
   | { ok: false; error: string };
 
 export type DeferJobInfo<Act extends DeferSchedulerAction = DeferSchedulerAction> = {
+  id: number;
   action: Act;
   runsAt: Date;
 };
@@ -28,6 +29,7 @@ export type DeferJobInfo<Act extends DeferSchedulerAction = DeferSchedulerAction
 export class DeferScheduler<Act extends DeferSchedulerAction = DeferSchedulerAction, Ctx = unknown> {
   private nextId = 1;
   private readonly activeJobs = new Map<number, DeferJobInfo<Act>>();
+  private readonly timers = new Map<number, ReturnType<typeof setTimeout>>();
   private readonly maxDelaySeconds: number;
   private readonly maxConcurrent: number;
   private readonly jobHandler: DeferSchedulerOptions<Act, Ctx>['jobHandler'];
@@ -68,9 +70,10 @@ export class DeferScheduler<Act extends DeferSchedulerAction = DeferSchedulerAct
     const runsAt = new Date(Date.now() + delaySeconds * 1000);
     const delayMs = delaySeconds * 1000;
 
-    this.activeJobs.set(id, { action: job.action, runsAt });
+    this.activeJobs.set(id, { id, action: job.action, runsAt });
 
     const invokeHandler = async () => {
+      this.timers.delete(id);
       try {
         await Promise.resolve(this.jobHandler({ action: job.action, context: job.context, runsAt }));
       } finally {
@@ -78,8 +81,30 @@ export class DeferScheduler<Act extends DeferSchedulerAction = DeferSchedulerAct
       }
     };
 
-    setTimeout(invokeHandler, delayMs);
+    const timer = setTimeout(invokeHandler, delayMs);
+    this.timers.set(id, timer);
 
-    return { ok: true, runsAt, delaySeconds };
+    return { ok: true, id, runsAt, delaySeconds };
+  }
+
+  /** Cancel a single pending job by ID. Returns true if the job existed and was cancelled. */
+  cancel(id: number): boolean {
+    const timer = this.timers.get(id);
+    if (!timer) return false;
+    clearTimeout(timer);
+    this.timers.delete(id);
+    this.activeJobs.delete(id);
+    return true;
+  }
+
+  /** Cancel all pending jobs and clear their timers. Returns the number of jobs cancelled. */
+  cancelAll(): number {
+    const count = this.timers.size;
+    for (const timer of this.timers.values()) {
+      clearTimeout(timer);
+    }
+    this.timers.clear();
+    this.activeJobs.clear();
+    return count;
   }
 }
