@@ -217,6 +217,10 @@ const shutdown = async () => {
   cronForumCountSync?.stop();
   cronTagMapWatcher?.stop();
   cronScheduler?.stopAll();
+  if (botParams.deferScheduler) {
+    const cancelled = botParams.deferScheduler.cancelAll();
+    if (cancelled > 0) log.info({ cancelled }, 'shutdown:deferred timers cancelled');
+  }
   voicePresenceHandler?.destroy();
   await audioPipeline?.stopAll();
   voiceManager?.leaveAll();
