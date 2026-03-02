@@ -40,11 +40,22 @@ function makeMockChannel(overrides: Partial<any> = {}) {
   };
 }
 
+function makeEmbed(overrides: Partial<any> = {}) {
+  return {
+    title: overrides.title ?? null,
+    description: overrides.description ?? null,
+    url: overrides.url ?? null,
+    fields: overrides.fields ?? [],
+    footer: overrides.footer ?? null,
+  };
+}
+
 function makeMockMessage(id: string, overrides: Partial<any> = {}) {
   const { author: authorName, ...rest } = overrides;
   return {
     id,
     content: rest.content ?? 'Hello',
+    embeds: rest.embeds ?? [],
     author: { username: authorName ?? 'testuser' },
     createdAt: new Date('2025-01-15T12:00:00Z'),
     createdTimestamp: new Date('2025-01-15T12:00:00Z').getTime(),
@@ -596,6 +607,49 @@ describe('readMessages', () => {
     expect((result as any).error).not.toContain('not found');
   });
 
+  it('shows embed text instead of "(no text)" for embed-only messages', async () => {
+    const msg = makeMockMessage('m1', {
+      content: '',
+      author: 'alice',
+      embeds: [makeEmbed({ title: 'Cron Prompt', description: 'Check the weather' })],
+    });
+    const fetchedMessages = new Map([['m1', msg]]);
+    const ch = makeMockChannel({ name: 'general', fetchedMessages });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: '#general', limit: 5 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Title: Cron Prompt');
+    expect(summary).toContain('Description: Check the weather');
+    expect(summary).not.toContain('(no text)');
+  });
+
+  it('shows content with [Embed: ...] when both content and embeds present', async () => {
+    const msg = makeMockMessage('m1', {
+      content: 'Hello world',
+      author: 'alice',
+      embeds: [makeEmbed({ title: 'Link Preview', description: 'A website' })],
+    });
+    const fetchedMessages = new Map([['m1', msg]]);
+    const ch = makeMockChannel({ name: 'general', fetchedMessages });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: '#general', limit: 5 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Hello world [Embed:');
+    expect(summary).toContain('Title: Link Preview');
+  });
+
   it('clamps limit to 20', async () => {
     const ch = makeMockChannel({ name: 'general', fetchedMessages: new Map() });
     const ctx = makeCtx([ch]);
@@ -644,8 +698,8 @@ describe('fetchMessage', () => {
     expect(result).toEqual({ ok: false, error: 'fetchMessage requires a non-empty messageId' });
   });
 
-  it('truncates content to 500 chars by default', async () => {
-    const longContent = 'x'.repeat(600);
+  it('truncates content to 2000 chars by default', async () => {
+    const longContent = 'x'.repeat(2500);
     const msg = makeMockMessage('msg1', { content: longContent, author: 'alice' });
     const ch = makeMockChannel({ id: 'ch1', name: 'general' });
     ch.messages.fetch = vi.fn(async () => msg);
@@ -657,8 +711,8 @@ describe('fetchMessage', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect((result as any).summary).not.toContain('x'.repeat(600));
-    expect((result as any).summary).toContain('x'.repeat(500));
+    expect((result as any).summary).not.toContain('x'.repeat(2500));
+    expect((result as any).summary).toContain('x'.repeat(2000));
   });
 
   it('returns full content when full flag is true', async () => {
@@ -675,6 +729,202 @@ describe('fetchMessage', () => {
 
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain(longContent);
+  });
+
+  it('surfaces embed text for embed-only message', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      embeds: [makeEmbed({ title: 'Cron Prompt', description: 'Check the weather' })],
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Title: Cron Prompt');
+    expect(summary).toContain('Description: Check the weather');
+    expect(summary).not.toContain('(no text)');
+  });
+
+  it('shows content with [Embeds] section when both content and embeds present', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: 'Hello world',
+      author: 'alice',
+      embeds: [makeEmbed({ title: 'Link Preview' })],
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Hello world');
+    expect(summary).toContain('[Embeds]');
+    expect(summary).toContain('Title: Link Preview');
+  });
+
+  it('returns untruncated embed text when full is true', async () => {
+    const longDesc = 'x'.repeat(3000);
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      embeds: [makeEmbed({ title: 'Big Embed', description: longDesc })],
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1', full: true },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain(longDesc);
+  });
+
+  it('formats embed with title and description', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      embeds: [makeEmbed({ title: 'My Title', description: 'My Description' })],
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1', full: true },
+      ctx,
+    );
+
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Title: My Title');
+    expect(summary).toContain('Description: My Description');
+  });
+
+  it('formats embed fields', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      embeds: [makeEmbed({
+        fields: [
+          { name: 'Status', value: 'Active' },
+          { name: 'Priority', value: 'High' },
+        ],
+      })],
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1', full: true },
+      ctx,
+    );
+
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Status: Active');
+    expect(summary).toContain('Priority: High');
+  });
+
+  it('formats embed footer and URL', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      embeds: [makeEmbed({
+        url: 'https://example.com',
+        footer: { text: 'Footer text' },
+      })],
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1', full: true },
+      ctx,
+    );
+
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('URL: https://example.com');
+    expect(summary).toContain('Footer: Footer text');
+  });
+
+  it('separates multiple embeds with ---', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      embeds: [
+        makeEmbed({ title: 'First' }),
+        makeEmbed({ title: 'Second' }),
+      ],
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1', full: true },
+      ctx,
+    );
+
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Title: First');
+    expect(summary).toContain('---');
+    expect(summary).toContain('Title: Second');
+  });
+
+  it('shows "(no text)" for message with no content and no embeds', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      embeds: [],
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('(no text)');
+  });
+
+  it('truncates embed text when full is false', async () => {
+    const longDesc = 'x'.repeat(3000);
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      embeds: [makeEmbed({ description: longDesc })],
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    const summary = (result as any).summary as string;
+    expect(summary).not.toContain('x'.repeat(3000));
   });
 });
 
@@ -1050,6 +1300,50 @@ describe('listPins', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('forum channel');
     expect((result as any).error).not.toContain('not found');
+  });
+
+  it('surfaces embed text for pinned embed-only message', async () => {
+    const pinned = new Map([
+      ['p1', makeMockMessage('p1', {
+        content: '',
+        author: 'alice',
+        embeds: [makeEmbed({ title: 'Pinned Embed', description: 'Important info' })],
+      })],
+    ]);
+    const ch = makeMockChannel({ name: 'general', pinnedMessages: pinned });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'listPins', channel: '#general' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Title: Pinned Embed');
+    expect(summary).not.toContain('(no text)');
+  });
+
+  it('shows combined content and embed for pinned message with both', async () => {
+    const pinned = new Map([
+      ['p1', makeMockMessage('p1', {
+        content: 'Check this out',
+        author: 'alice',
+        embeds: [makeEmbed({ title: 'Link Preview' })],
+      })],
+    ]);
+    const ch = makeMockChannel({ name: 'general', pinnedMessages: pinned });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'listPins', channel: '#general' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Check this out [Embed:');
+    expect(summary).toContain('Title: Link Preview');
   });
 
   it('returns empty message when no pins', async () => {
