@@ -26,6 +26,7 @@ import fs from 'node:fs/promises';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { CronJob } from '../cron/types.js';
 import { executeCronJob, type CronExecutorContext } from '../cron/executor.js';
+import { sanitizeExternalContent } from '../sanitize-external.js';
 
 // ---------------------------------------------------------------------------
 // Config types
@@ -104,9 +105,10 @@ let webhookJobCounter = 0;
 function buildWebhookJob(source: string, src: WebhookSourceConfig, bodyText: string, guildId: string): CronJob {
   webhookJobCounter += 1;
   const id = `webhook-${source}-${webhookJobCounter}`;
+  const sanitizedBody = sanitizeExternalContent(bodyText, `webhook:${source}`);
   const prompt = src.prompt !== undefined
-    ? src.prompt.replaceAll('{{body}}', bodyText).replaceAll('{{source}}', source)
-    : `A webhook event was received from source "${source}".\n\nPayload:\n${bodyText}`;
+    ? src.prompt.replaceAll('{{body}}', sanitizedBody).replaceAll('{{source}}', source)
+    : `A webhook event was received from source "${source}".\n\nPayload:\n${sanitizedBody}`;
   return {
     id,
     cronId: '',
