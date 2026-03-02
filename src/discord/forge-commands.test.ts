@@ -445,6 +445,10 @@ describe('isRetryableError', () => {
     expect(isRetryableError('stdin write failed: broken pipe')).toBe(true);
   });
 
+  it('matches drafter echoed the template', () => {
+    expect(isRetryableError('Draft failed: drafter echoed the template instead of producing a real plan')).toBe(true);
+  });
+
   it('is case-insensitive', () => {
     expect(isRetryableError('HANG DETECTED')).toBe(true);
     expect(isRetryableError('Process Exited Unexpectedly')).toBe(true);
@@ -1637,6 +1641,78 @@ describe('ForgeOrchestrator', () => {
     expect(result.finalVerdict).toBe('CANCELLED');
     expect(callCount).toBe(1); // retry was not attempted
     expect(progress[progress.length - 1]).toMatch(/cancelled/i);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Template-echo retry behavior
+  // ---------------------------------------------------------------------------
+
+  it('retries draft when first attempt echoes the template, and succeeds on second attempt', async () => {
+    const tmpDir = await makeTmpDir();
+    const echoedTemplate = `# Plan: {{TITLE}}\n\n**ID:** {{PLAN_ID}}\n**Task:** {{TASK_ID}}\n**Created:** {{DATE}}\n**Status:** DRAFT\n**Project:** {{PROJECT}}\n\n---\n\n## Objective\n\n_Describe the objective here._\n\n## Changes\n\n_List file-by-file changes._\n`;
+    const realDraft = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    // Call 0: draft → echoed template, Call 1: retry draft → real plan, Call 2: audit → clean
+    const runtime = makeMockRuntime([echoedTemplate, realDraft, auditClean]);
+    const mockLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const opts = await baseOpts(tmpDir, runtime, { log: mockLog });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.rounds).toBe(1);
+    expect(progress.some((p) => p.includes('echoed template') && p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+    // Verify structured warning log was emitted
+    const warnCalls = mockLog.warn.mock.calls.filter(
+      (c: unknown[]) => c[1] === 'forge:template-echo',
+    );
+    expect(warnCalls.length).toBe(1);
+  });
+
+  it('reports error when both draft attempts echo the template', async () => {
+    const tmpDir = await makeTmpDir();
+    const echoedTemplate = `# Plan: {{TITLE}}\n\n**ID:** {{PLAN_ID}}\n**Task:** {{TASK_ID}}\n**Created:** {{DATE}}\n**Status:** DRAFT\n**Project:** {{PROJECT}}\n\n---\n\n## Objective\n\n_Describe the objective here._\n\n## Changes\n\n_List file-by-file changes._\n`;
+
+    // Both draft attempts echo the template
+    const runtime = makeMockRuntime([echoedTemplate, echoedTemplate]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('echoed the template');
+    expect(progress.some((p) => p.includes('echoed template') && p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge failed'))).toBe(true);
+  });
+
+  it('template-echo retry progress message includes force: true', async () => {
+    const tmpDir = await makeTmpDir();
+    const echoedTemplate = `# Plan: {{TITLE}}\n\n## Objective\n\n_Describe the objective here._\n`;
+    const realDraft = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild it.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([echoedTemplate, realDraft, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const calls: Array<{ msg: string; force?: boolean }> = [];
+    await orchestrator.run('Test feature', async (msg, optsArg) => {
+      calls.push({ msg, force: optsArg?.force });
+    });
+
+    const retryCall = calls.find((c) => c.msg.includes('echoed template'));
+    expect(retryCall).toBeDefined();
+    expect(retryCall!.force).toBe(true);
   });
 
   it('retries revision phase on failure and completes if retry succeeds', async () => {

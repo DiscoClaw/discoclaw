@@ -502,7 +502,8 @@ export function isRetryableError(msg: string): boolean {
     lower.includes('progress stall') ||
     lower.includes('timed out') ||
     lower.includes('process exited unexpectedly') ||
-    lower.includes('stdin write failed')
+    lower.includes('stdin write failed') ||
+    lower.includes('drafter echoed the template')
   );
 }
 
@@ -840,11 +841,49 @@ export class ForgeOrchestrator {
             reachedMaxRounds: false,
           };
         }
-        const draftOutput = draftPipelineResult.outputs[0] ?? '';
+        let draftOutput = draftPipelineResult.outputs[0] ?? '';
 
-        // Validate that the drafter produced a real plan, not an echoed template
+        // Validate that the drafter produced a real plan, not an echoed template.
+        // Template echo is a transient model failure — retry once before giving up.
         if (isTemplateEchoed(draftOutput)) {
-          throw new Error('Draft failed: drafter echoed the template instead of producing a real plan');
+          this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
+          await onProgress('Draft echoed template — retrying...', { force: true });
+
+          const retryDef = {
+            steps: [{
+              kind: 'prompt' as const,
+              prompt: drafterPrompt,
+              runtime: effectiveDrafterRt,
+              model: drafterModel,
+              tools: readOnlyTools,
+              addDirs,
+              timeoutMs: this.opts.timeoutMs,
+              sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+            }],
+            runtime: this.opts.runtime,
+            cwd: this.opts.cwd,
+            model: this.opts.model,
+            signal: this.abortController.signal,
+          };
+
+          const retryResult = await this.runCancellable(retryDef);
+          if (!retryResult) {
+            this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
+            await this.updatePlanStatus(filePath, 'CANCELLED');
+            await onProgress(`Forge ${planId} cancelled.`, { force: true });
+            return {
+              planId,
+              filePath,
+              finalVerdict: 'CANCELLED',
+              rounds: round - startRound + 1,
+              reachedMaxRounds: false,
+            };
+          }
+
+          draftOutput = retryResult.outputs[0] ?? '';
+          if (isTemplateEchoed(draftOutput)) {
+            throw new Error('Draft failed: drafter echoed the template instead of producing a real plan');
+          }
         }
 
         // Write the draft — preserve the header (planId, taskId) from the created file.
