@@ -944,6 +944,7 @@ describe('ForgeOrchestrator', () => {
 
     expect(result.finalVerdict).toBe('CANCELLED');
     expect(result.rounds).toBeLessThanOrEqual(2);
+    expect(progress[progress.length - 1]).toMatch(/cancelled/i);
   });
 
   it('concurrent forge throws error', async () => {
@@ -1240,10 +1241,12 @@ describe('ForgeOrchestrator', () => {
     const opts = await baseOpts(tmpDir, runtime);
     orchestrator = new ForgeOrchestrator(opts);
 
-    const result = await orchestrator.run('Test', async () => {});
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test', async (msg) => { progress.push(msg); });
 
     expect(result.finalVerdict).toBe('CANCELLED');
     expect(result.error).toBeUndefined();
+    expect(progress[progress.length - 1]).toMatch(/cancelled/i);
   });
 
   it('cancel mid-phase (cancel-aware catch): pipeline throws while cancel is set', async () => {
@@ -1266,10 +1269,12 @@ describe('ForgeOrchestrator', () => {
     const opts = await baseOpts(tmpDir, runtime);
     orchestrator = new ForgeOrchestrator(opts);
 
-    const result = await orchestrator.run('Test', async () => {});
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test', async (msg) => { progress.push(msg); });
 
     expect(result.finalVerdict).toBe('CANCELLED');
     expect(result.error).toBeUndefined();
+    expect(progress[progress.length - 1]).toMatch(/cancelled/i);
   });
 
   // ---------------------------------------------------------------------------
@@ -1459,10 +1464,12 @@ describe('ForgeOrchestrator', () => {
     const opts = await baseOpts(tmpDir, runtime);
     orchestrator = new ForgeOrchestrator(opts);
 
-    const result = await orchestrator.run('Test', async () => {});
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test', async (msg) => { progress.push(msg); });
 
     expect(result.finalVerdict).toBe('CANCELLED');
     expect(callCount).toBe(1); // retry was not attempted
+    expect(progress[progress.length - 1]).toMatch(/cancelled/i);
   });
 
   it('retries revision phase on failure and completes if retry succeeds', async () => {
@@ -1615,13 +1622,16 @@ describe('ForgeOrchestrator.resume()', () => {
     await fs.writeFile(filePath, planContent, 'utf-8');
 
     const orchestrator = new ForgeOrchestrator(opts);
+    const progress: string[] = [];
     const result = await orchestrator.resume('plan-001', filePath, 'Test Plan', async (msg) => {
+      progress.push(msg);
       if (msg.includes('blocking concerns')) {
         orchestrator.requestCancel();
       }
     });
 
     expect(result.finalVerdict).toBe('CANCELLED');
+    expect(progress[progress.length - 1]).toMatch(/cancelled/i);
   });
 
   it('rejects IMPLEMENTING plans', async () => {

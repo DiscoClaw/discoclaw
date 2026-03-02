@@ -741,6 +741,7 @@ export class ForgeOrchestrator {
     while (round < maxRound) {
       if (this.cancelRequested) {
         await this.updatePlanStatus(filePath, 'CANCELLED');
+        await onProgress(`Forge ${planId} cancelled.`, { force: true });
         return {
           planId,
           filePath,
@@ -780,6 +781,7 @@ export class ForgeOrchestrator {
         }, 'Draft', onProgress);
         if (!draftPipelineResult) {
           await this.updatePlanStatus(filePath, 'CANCELLED');
+          await onProgress(`Forge ${planId} cancelled.`, { force: true });
           return {
             planId,
             filePath,
@@ -852,6 +854,7 @@ export class ForgeOrchestrator {
       }, `Audit round ${round}`, onProgress);
       if (!auditPipelineResult) {
         await this.updatePlanStatus(filePath, 'CANCELLED');
+        await onProgress(`Forge ${planId} cancelled.`, { force: true });
         return {
           planId,
           filePath,
@@ -925,6 +928,7 @@ export class ForgeOrchestrator {
       }, `Revision after round ${round}`, onProgress);
       if (!revisionPipelineResult) {
         await this.updatePlanStatus(filePath, 'CANCELLED');
+        await onProgress(`Forge ${planId} cancelled.`, { force: true });
         return {
           planId,
           filePath,
