@@ -73,6 +73,19 @@ export async function assertPathAllowed(
 }
 
 /**
+ * Pure (no I/O) check: does `canonicalPath` fall under at least one root?
+ * Both the path and roots should already be resolved (e.g. via fs.realpath).
+ */
+export function isPathUnderRoots(
+  canonicalPath: string,
+  roots: string[],
+): boolean {
+  return roots.some(
+    (root) => canonicalPath === root || canonicalPath.startsWith(root + path.sep),
+  );
+}
+
+/**
  * Resolve a file_path argument against the first allowed root,
  * then validate it falls within allowed roots.
  */

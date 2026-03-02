@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
 import * as fsMod from 'node:fs/promises';
-import { executeMessagingAction } from './actions-messaging.js';
+import { executeMessagingAction, _setSendFileAllowedDirs } from './actions-messaging.js';
 import type { MessagingActionRequest } from './actions-messaging.js';
 import type { ActionContext } from './actions.js';
 
 vi.mock('node:fs/promises', () => ({
   stat: vi.fn(),
   readFile: vi.fn(),
+  realpath: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -1363,6 +1364,8 @@ describe('sendFile', () => {
   beforeEach(() => {
     vi.mocked(fsMod.stat).mockResolvedValue({ size: 1000 } as any);
     vi.mocked(fsMod.readFile).mockResolvedValue(Buffer.from('fake image data') as any);
+    vi.mocked(fsMod.realpath).mockImplementation(async (p: any) => String(p));
+    _setSendFileAllowedDirs(['/tmp']);
   });
 
   it('sends a file to a channel', async () => {
@@ -1416,7 +1419,7 @@ describe('sendFile', () => {
   });
 
   it('returns error when file not found on disk', async () => {
-    vi.mocked(fsMod.stat).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    vi.mocked(fsMod.realpath).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     const ch = makeMockChannel({ id: 'ch1', name: 'general' });
     const ctx = makeCtx([ch]);
 
@@ -1566,5 +1569,97 @@ describe('sendFile', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('forum channel');
     expect((result as any).error).not.toContain('not found');
+  });
+
+  it('rejects path traversal via .. that escapes allowed directory', async () => {
+    // realpath resolves /tmp/../etc/passwd → /etc/passwd
+    vi.mocked(fsMod.realpath).mockResolvedValue('/etc/passwd');
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/../etc/passwd.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('outside allowed directories');
+    expect(fsMod.stat).not.toHaveBeenCalled();
+  });
+
+  it('rejects symlink that resolves outside allowed directory', async () => {
+    // Symlink at /tmp/evil.png → /home/user/secrets/data.png
+    vi.mocked(fsMod.realpath).mockResolvedValue('/home/user/secrets/data.png');
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/evil.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('outside allowed directories');
+    expect(fsMod.stat).not.toHaveBeenCalled();
+  });
+
+  it('allows file under a custom allowed directory', async () => {
+    _setSendFileAllowedDirs(['/home/user/uploads']);
+    vi.mocked(fsMod.realpath).mockResolvedValue('/home/user/uploads/photo.jpg');
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/home/user/uploads/photo.jpg' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('photo.jpg');
+  });
+
+  it('rejects file outside custom allowed directories', async () => {
+    _setSendFileAllowedDirs(['/home/user/uploads']);
+    vi.mocked(fsMod.realpath).mockResolvedValue('/tmp/screenshot.png');
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/screenshot.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('outside allowed directories');
+  });
+
+  it('allows file when realpath matches an allowed dir exactly', async () => {
+    _setSendFileAllowedDirs(['/tmp/exact-file.png']);
+    vi.mocked(fsMod.realpath).mockResolvedValue('/tmp/exact-file.png');
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/exact-file.png' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('uses realpath-resolved path for file I/O', async () => {
+    // Symlink at /tmp/link.png → /tmp/real/photo.png (still under /tmp)
+    vi.mocked(fsMod.realpath).mockResolvedValue('/tmp/real/photo.png');
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/link.png' },
+      ctx,
+    );
+
+    // stat and readFile should be called with the resolved real path
+    expect(fsMod.stat).toHaveBeenCalledWith('/tmp/real/photo.png');
+    expect(fsMod.readFile).toHaveBeenCalledWith('/tmp/real/photo.png');
   });
 });

@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, fmtTime, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { isPathUnderRoots } from '../runtime/tools/path-security.js';
 
 /** Serialize Discord embeds into a compact text representation. */
 function formatEmbeds(embeds: Embed[] | undefined, truncate?: number): string {
@@ -61,6 +62,32 @@ const THREAD_AUTO_ARCHIVE_MINUTES = new Set([60, 1440, 4320, 10080]);
 const SENDFILE_ALLOWED_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf',
 ]);
+
+/** Parse a comma-separated list of allowed directories for sendFile.
+ *  Auto-includes DISCOCLAW_DATA_DIR and WORKSPACE_CWD when set. */
+export function parseSendFileAllowedDirs(
+  raw?: string,
+  dataDir?: string,
+  workspaceCwd?: string,
+): string[] {
+  const dirs: string[] = raw?.trim()
+    ? raw.split(',').map(d => d.trim()).filter(Boolean).map(d => path.resolve(d))
+    : ['/tmp'];
+  if (dataDir?.trim()) dirs.push(path.resolve(dataDir.trim()));
+  if (workspaceCwd?.trim()) dirs.push(path.resolve(workspaceCwd.trim()));
+  return dirs;
+}
+
+let sendFileAllowedDirs = parseSendFileAllowedDirs(
+  process.env.DISCOCLAW_SENDFILE_ALLOWED_DIRS,
+  process.env.DISCOCLAW_DATA_DIR,
+  process.env.WORKSPACE_CWD,
+);
+
+/** @internal Override the sendFile directory allowlist (test-only). */
+export function _setSendFileAllowedDirs(dirs: string[]): void {
+  sendFileAllowedDirs = dirs;
+}
 
 type MessageRecord = {
   id: string;
@@ -408,13 +435,26 @@ export async function executeMessagingAction(
       if (action.content && action.content.length > DISCORD_MAX_CONTENT) {
         return { ok: false, error: `Content exceeds Discord's ${DISCORD_MAX_CONTENT} character limit (got ${action.content.length})` };
       }
+      // Resolve symlinks and validate the file is under an allowed directory.
+      let realPath: string;
+      try {
+        realPath = await fs.realpath(trimmedPath);
+      } catch (err) {
+        if (errorCode(err) === 'ENOENT') {
+          return { ok: false, error: `File not found: ${trimmedPath}` };
+        }
+        throw err;
+      }
+      if (!isPathUnderRoots(realPath, sendFileAllowedDirs)) {
+        return { ok: false, error: 'sendFile path is outside allowed directories' };
+      }
       let fileBuffer: Buffer;
       try {
-        const stat = await fs.stat(trimmedPath);
+        const stat = await fs.stat(realPath);
         if (stat.size > SENDFILE_MAX_BYTES) {
           return { ok: false, error: `File exceeds the ${SENDFILE_MAX_BYTES / (1024 * 1024)} MB size limit (${stat.size} bytes)` };
         }
-        fileBuffer = await fs.readFile(trimmedPath) as Buffer;
+        fileBuffer = await fs.readFile(realPath) as Buffer;
       } catch (err) {
         if (errorCode(err) === 'ENOENT') {
           return { ok: false, error: `File not found: ${trimmedPath}` };
