@@ -117,15 +117,31 @@ export function isTemplateEchoed(output: string): boolean {
   // Check for (system) as a metadata value (e.g. **ID:** (system))
   if (/\(system\)/i.test(bodyText)) return true;
 
-  // Check for known FALLBACK_TEMPLATE placeholder phrases
-  const placeholderPhrases = [
+  // Check for FALLBACK_TEMPLATE placeholder phrases (single hit sufficient —
+  // these italic markdown phrases are distinctive enough to be conclusive).
+  const fallbackPhrases = [
     '_Describe the objective here._',
     '_Define what\'s in and out of scope._',
     '_List file-by-file changes._',
   ];
-  for (const phrase of placeholderPhrases) {
+  for (const phrase of fallbackPhrases) {
     if (bodyText.includes(phrase)) return true;
   }
+
+  // Check for .plan-template.md placeholder phrases.  Require 2+ hits
+  // because a single `path/to/file.ts` could appear in a genuine plan
+  // that references the template pattern.
+  const templatePhrases = [
+    '`path/to/file.ts` — what changes and why',
+    '`path/to/other.ts` — what changes and why',
+    '`path/to/new.ts` — purpose',
+    '`path/to/old.ts` — why it\'s safe to remove',
+  ];
+  let templateHits = 0;
+  for (const phrase of templatePhrases) {
+    if (bodyText.includes(phrase)) templateHits++;
+  }
+  if (templateHits >= 2) return true;
 
   return false;
 }
@@ -175,7 +191,11 @@ export function buildDrafterPrompt(
   templateContent: string,
   contextSummary: string,
 ): string {
-  const templateBody = stripTemplateHeader(templateContent);
+  const rawBody = stripTemplateHeader(templateContent);
+  // Replace remaining mustache tokens with concrete values so the drafter
+  // doesn't echo them verbatim (e.g. {{DATE}} in the Audit Log section).
+  const today = new Date().toISOString().split('T')[0]!;
+  const templateBody = rawBody.replace(/\{\{[A-Z_]+\}\}/g, today);
 
   return [
     PHASE_SAFETY_REMINDER,

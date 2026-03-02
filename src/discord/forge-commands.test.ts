@@ -531,6 +531,32 @@ describe('isTemplateEchoed', () => {
     expect(isTemplateEchoed(realDraft)).toBe(false);
   });
 
+  it('returns true for output echoing real .plan-template.md phrases (2+ hits)', () => {
+    const echoedTemplate = [
+      '## Objective',
+      '',
+      'What we\'re doing and why.',
+      '',
+      '## Changes',
+      '',
+      '### File-by-file breakdown',
+      '',
+      '- `path/to/file.ts` — what changes and why',
+      '- `path/to/other.ts` — what changes and why',
+    ].join('\n');
+    expect(isTemplateEchoed(echoedTemplate)).toBe(true);
+  });
+
+  it('returns false for a single real template phrase (not enough signal)', () => {
+    const singlePhrase = [
+      '## Changes',
+      '',
+      '- `path/to/file.ts` — what changes and why',
+      '- `src/discord/actions.ts` — add new action handler',
+    ].join('\n');
+    expect(isTemplateEchoed(singlePhrase)).toBe(false);
+  });
+
   it('ignores mustache tokens inside fenced code blocks', () => {
     const output = [
       '## Objective',
@@ -619,6 +645,32 @@ describe('buildDrafterPrompt', () => {
     expect(prompt.indexOf('## Instructions')).toBeLessThan(prompt.indexOf('## Expected Output Structure'));
     // Anti-echo instruction
     expect(prompt).toContain('DO NOT echo the template verbatim');
+  });
+
+  it('strips mustache tokens from the template body (e.g. {{DATE}} in Audit Log)', () => {
+    const template = [
+      '# Plan: {{TITLE}}',
+      '',
+      '**ID:** {{PLAN_ID}}',
+      '**Created:** {{DATE}}',
+      '',
+      '---',
+      '',
+      '## Objective',
+      '',
+      'What we\'re doing and why.',
+      '',
+      '### Review 1 — {{DATE}}',
+      '**Status:** PENDING',
+    ].join('\n');
+    const prompt = buildDrafterPrompt('Fix the bug', template, 'ctx');
+    // Header tokens are stripped by stripTemplateHeader
+    expect(prompt).not.toContain('{{PLAN_ID}}');
+    // Body tokens like {{DATE}} in the Audit Log section should be replaced
+    expect(prompt).not.toContain('{{DATE}}');
+    // The replacement should be today's date
+    const today = new Date().toISOString().split('T')[0]!;
+    expect(prompt).toContain(`### Review 1 — ${today}`);
   });
 });
 
