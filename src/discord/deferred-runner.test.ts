@@ -337,6 +337,80 @@ describe('deferred-runner observability', () => {
     expect(actCtx.deferDepth).toBe(3);
   });
 
+  it('missing guild posts status notice via handlerError', async () => {
+    const status = makeStatusPoster();
+    const opts = makeOpts({ status });
+
+    const scheduler = configureDeferredScheduler(opts);
+    const ctx = { ...makeContext(), guild: null };
+    scheduler.schedule({ action: makeAction(), context: ctx as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(status.handlerError).toHaveBeenCalledWith(
+      { sessionKey: 'defer' },
+      'deferred run skipped: no guild context',
+    );
+  });
+
+  it('unresolvable channel posts status notice via handlerError', async () => {
+    const { resolveChannel } = await import('./action-utils.js');
+    (resolveChannel as ReturnType<typeof vi.fn>).mockReturnValueOnce(null);
+
+    const status = makeStatusPoster();
+    const opts = makeOpts({ status });
+
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(status.handlerError).toHaveBeenCalledWith(
+      { sessionKey: 'defer:ch-1' },
+      'deferred run skipped: channel "ch-1" not found',
+    );
+  });
+
+  it('channel not in allowlist posts status notice via handlerError', async () => {
+    const status = makeStatusPoster();
+    const opts = makeOpts({
+      status,
+      state: { ...makeState(), allowChannelIds: new Set(['other-channel']) },
+    });
+
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(status.handlerError).toHaveBeenCalledWith(
+      { sessionKey: 'defer:ch-1' },
+      'deferred run skipped: channel ch-1 not in allowlist',
+    );
+  });
+
+  it('empty output logs a warning', async () => {
+    const { parseDiscordActions } = await import('./actions.js');
+    (parseDiscordActions as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      actions: [],
+      cleanText: '',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const opts = makeOpts({
+      runtime: makeRuntime([{ type: 'text_final', text: '' } as EngineEvent, { type: 'done' } as EngineEvent]),
+      log,
+    });
+
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(log.warn).toHaveBeenCalledWith(
+      { flow: 'defer', channelId: 'ch-1' },
+      'defer:empty output, nothing to send',
+    );
+  });
+
   it('deferMaxDepth 1 allows first level but blocks second', async () => {
     const { parseDiscordActions } = await import('./actions.js');
     const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;

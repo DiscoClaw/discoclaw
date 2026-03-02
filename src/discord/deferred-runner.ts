@@ -119,12 +119,16 @@ export function configureDeferredScheduler(
     const guild = context.guild;
     if (!guild) {
       opts.log?.warn({ flow: 'defer', run, action }, 'defer:missing-guild');
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      opts.status?.handlerError({ sessionKey: 'defer' }, 'deferred run skipped: no guild context');
       return;
     }
 
     const channel = resolveChannel(guild, action.channel);
     if (!channel) {
       opts.log?.warn({ flow: 'defer', run, channel: action.channel }, 'defer:target channel not found');
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      opts.status?.handlerError({ sessionKey: `defer:${action.channel}` }, `deferred run skipped: channel "${action.channel}" not found`);
       return;
     }
 
@@ -135,6 +139,8 @@ export function configureDeferredScheduler(
         (parentId && opts.state.allowChannelIds.has(parentId));
       if (!allowed) {
         opts.log?.warn({ flow: 'defer', channelId: channel.id }, 'defer:target channel not allowlisted');
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        opts.status?.handlerError({ sessionKey: `defer:${channel.id}` }, `deferred run skipped: channel ${channel.id} not in allowlist`);
         return;
       }
     }
@@ -295,7 +301,10 @@ export function configureDeferredScheduler(
       outgoingText = runtimeError;
     }
 
-    if (!outgoingText) return;
+    if (!outgoingText) {
+      opts.log?.warn({ flow: 'defer', channelId: channel.id }, 'defer:empty output, nothing to send');
+      return;
+    }
     try {
       await channel.send({ content: outgoingText, allowedMentions: NO_MENTIONS });
     } catch (err) {
