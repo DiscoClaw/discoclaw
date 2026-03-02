@@ -1,9 +1,28 @@
-import { ChannelType, AttachmentBuilder } from 'discord.js';
+import { ChannelType, AttachmentBuilder, type Embed } from 'discord.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, fmtTime, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
+
+/** Serialize Discord embeds into a compact text representation. */
+function formatEmbeds(embeds: Embed[] | undefined, truncate?: number): string {
+  if (!embeds?.length) return '';
+  const parts: string[] = [];
+  for (const e of embeds) {
+    const lines: string[] = [];
+    if (e.title) lines.push(`Title: ${e.title}`);
+    if (e.description) lines.push(`Description: ${e.description}`);
+    if (e.url) lines.push(`URL: ${e.url}`);
+    for (const f of e.fields) {
+      lines.push(`${f.name}: ${f.value}`);
+    }
+    if (e.footer?.text) lines.push(`Footer: ${e.footer.text}`);
+    parts.push(lines.join('\n'));
+  }
+  const full = parts.join('\n---\n');
+  return truncate ? full.slice(0, truncate) : full;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,6 +66,7 @@ type MessageRecord = {
   id: string;
   author?: { username?: string };
   content?: string;
+  embeds: Embed[];
   createdAt: Date;
   createdTimestamp: number;
   reactions: {
@@ -201,7 +221,10 @@ export async function executeMessagingAction(
       const lines = sorted.map((m) => {
         const author = m.author?.username ?? 'Unknown';
         const time = fmtTime(m.createdAt);
-        const text = (m.content || '(no text)').slice(0, 200);
+        const content = m.content || '';
+        const embed = formatEmbeds(m.embeds, 200);
+        const combined = content || embed || '(no text)';
+        const text = (content && embed ? `${content} [Embed: ${embed}]` : combined).slice(0, 300);
         return `[${author}] ${text} (${time}, id:${m.id})`;
       });
       return { ok: true, summary: `Messages in #${channel.name}:\n${lines.join('\n')}` };
@@ -216,7 +239,11 @@ export async function executeMessagingAction(
       const message = await messageChannel.messages.fetch(action.messageId);
       const author = message.author?.username ?? 'Unknown';
       const time = fmtTime(message.createdAt);
-      const text = action.full ? (message.content || '(no text)') : (message.content || '(no text)').slice(0, 500);
+      const contentText = message.content || '';
+      const embedText = formatEmbeds(message.embeds, action.full ? undefined : 2000);
+      const body = contentText || embedText || '(no text)';
+      const combined = contentText && embedText ? `${contentText}\n[Embeds]\n${embedText}` : body;
+      const text = action.full ? combined : combined.slice(0, 2000);
       return { ok: true, summary: `[${author}]: ${text} (${time}, #${messageChannel.name}, id:${message.id})` };
     }
 
@@ -354,7 +381,10 @@ export async function executeMessagingAction(
 
       const lines = [...pinned.values()].map((m) => {
         const author = m.author?.username ?? 'Unknown';
-        const text = (m.content || '(no text)').slice(0, 200);
+        const content = m.content || '';
+        const embed = formatEmbeds(m.embeds, 200);
+        const combined = content || embed || '(no text)';
+        const text = (content && embed ? `${content} [Embed: ${embed}]` : combined).slice(0, 300);
         return `[${author}] ${text} (id:${m.id})`;
       });
       return { ok: true, summary: `Pinned messages in #${channel.name}:\n${lines.join('\n')}` };
@@ -463,7 +493,7 @@ export function messagingActionsPromptSection(): string {
 \`\`\`
 <discord-action>{"type":"fetchMessage","channelId":"123","messageId":"456","full":true}</discord-action>
 \`\`\`
-- \`full\` (optional): When true, returns the complete message content without truncation. Default: false (content truncated to 500 chars).
+- \`full\` (optional): When true, returns the complete message content without truncation. Default: false (content truncated to 2000 chars).
 
 **editMessage** — Edit a bot message:
 \`\`\`
