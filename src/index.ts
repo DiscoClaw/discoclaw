@@ -273,7 +273,7 @@ const summaryEveryNTurns = cfg.summaryEveryNTurns;
 const summaryDataDir = cfg.summaryDataDirOverride
   || (dataDir ? path.join(dataDir, 'memory', 'rolling') : path.join(__dirname, '..', 'data', 'memory', 'rolling'));
 const summaryArchiveDir = cfg.summaryArchiveDirOverride
-  || (dataDir ? path.join(dataDir, 'memory', 'rolling-archive') : path.join(__dirname, '..', 'data', 'memory', 'rolling-archive'));
+  || (dataDir ? path.join(dataDir, 'memory', 'summary-archive') : path.join(__dirname, '..', 'data', 'memory', 'summary-archive'));
 const durableMemoryEnabled = cfg.durableMemoryEnabled;
 const durableDataDir = cfg.durableDataDirOverride
   || (dataDir ? path.join(dataDir, 'memory', 'durable') : path.join(__dirname, '..', 'data', 'memory', 'durable'));
@@ -988,6 +988,7 @@ const botParams = {
     apiCheckTimeoutMs: 5000,
     workspaceCwd,
     summaryDataDir,
+    summaryArchiveDir,
     durableDataDir,
     durableMemoryEnabled,
     cronScheduler: null as CronScheduler | null,
