@@ -272,6 +272,8 @@ const summaryMaxChars = cfg.summaryMaxChars;
 const summaryEveryNTurns = cfg.summaryEveryNTurns;
 const summaryDataDir = cfg.summaryDataDirOverride
   || (dataDir ? path.join(dataDir, 'memory', 'rolling') : path.join(__dirname, '..', 'data', 'memory', 'rolling'));
+const summaryArchiveDir = cfg.summaryArchiveDirOverride
+  || (dataDir ? path.join(dataDir, 'memory', 'rolling-archive') : path.join(__dirname, '..', 'data', 'memory', 'rolling-archive'));
 const durableMemoryEnabled = cfg.durableMemoryEnabled;
 const durableDataDir = cfg.durableDataDirOverride
   || (dataDir ? path.join(dataDir, 'memory', 'durable') : path.join(__dirname, '..', 'data', 'memory', 'durable'));
@@ -891,6 +893,7 @@ const botParams = {
   summaryMaxChars,
   summaryEveryNTurns,
   summaryDataDir,
+  summaryArchiveDir,
   durableMemoryEnabled,
   durableDataDir,
   durableInjectMaxChars,
