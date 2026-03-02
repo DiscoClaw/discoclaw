@@ -87,6 +87,50 @@ export function parseForgeCommand(content: string): ForgeCommand | null {
 }
 
 // ---------------------------------------------------------------------------
+// Template helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Strips the header (everything up to and including the first `---` separator)
+ * from a plan template, returning only the body sections (## Objective, ## Scope, etc.).
+ * If no `---` separator is found, returns the full content unchanged.
+ */
+export function stripTemplateHeader(template: string): string {
+  const separatorIdx = template.indexOf('\n---\n');
+  if (separatorIdx === -1) return template;
+  return template.slice(separatorIdx + '\n---\n'.length).trimStart();
+}
+
+/**
+ * Detects when drafter output looks like an unfilled template rather than a
+ * genuine draft. Returns true if the output contains mustache tokens (`{{...}}`),
+ * `(system)` as a metadata value, or known FALLBACK_TEMPLATE placeholder phrases.
+ * Checks against body text only, ignoring fenced code blocks.
+ */
+export function isTemplateEchoed(output: string): boolean {
+  // Strip fenced code blocks so we only inspect prose/body text
+  const bodyText = output.replace(/```[\s\S]*?```/g, '');
+
+  // Check for mustache tokens
+  if (/\{\{[A-Z_]+\}\}/.test(bodyText)) return true;
+
+  // Check for (system) as a metadata value (e.g. **ID:** (system))
+  if (/\(system\)/i.test(bodyText)) return true;
+
+  // Check for known FALLBACK_TEMPLATE placeholder phrases
+  const placeholderPhrases = [
+    '_Describe the objective here._',
+    '_Define what\'s in and out of scope._',
+    '_List file-by-file changes._',
+  ];
+  for (const phrase of placeholderPhrases) {
+    if (bodyText.includes(phrase)) return true;
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Prompt builders
 // ---------------------------------------------------------------------------
 
@@ -95,6 +139,8 @@ export function buildDrafterPrompt(
   templateContent: string,
   contextSummary: string,
 ): string {
+  const templateBody = stripTemplateHeader(templateContent);
+
   return [
     PHASE_SAFETY_REMINDER,
     '',
@@ -104,29 +150,30 @@ export function buildDrafterPrompt(
     '',
     description,
     '',
-    '## Plan Template',
-    '',
-    'Fill in this template completely. Output the complete plan file content starting with `# Plan:` and ending with the Audit Log section. Output ONLY the plan markdown — no preamble, no explanation, no commentary.',
-    '',
-    '```',
-    templateContent,
-    '```',
-    '',
-    '## Project Context',
-    '',
-    contextSummary,
-    '',
     '## Instructions',
     '',
-    '- Read the codebase using your tools (Read, Glob, Grep) to understand the existing code before writing the plan.',
+    '- **Read the codebase using your tools (Read, Glob, Grep) first**, then write the plan. Do not guess — base every section on what you find in the actual code.',
     '- **`## Changes` is a required top-level section.** List every file that will be created, modified, or deleted with concrete file paths. Do not place file change information inside a `## Phases` section or any other section — changes belong exclusively in `## Changes`. If you need to describe implementation sequencing, use a separate `## Phases` section.',
     '- Be specific in the `## Changes` section — include actual file paths, function names, and type signatures.',
     '- Identify real risks and dependencies based on the actual codebase.',
     '- Write concrete, verifiable test cases.',
     '- Include documentation updates in the Changes section when adding new features, config options, or public APIs. Consider: docs/*.md, .env.example files, README.md, INVENTORY.md, and inline code comments.',
     '- Set the status to DRAFT.',
-    '- Replace all {{PLACEHOLDER}} tokens with actual values. The plan ID and task ID will be filled in by the system — use `(system)` as placeholders for those.',
+    '- DO NOT echo the template verbatim — every section must contain substantive analysis of the actual codebase.',
+    '- The plan header (ID, Task, Created, Status, Project) is managed by the system — do not include it. Start your output with `# Plan:` followed by the plan title.',
     '- Output the complete plan markdown and nothing else.',
+    '',
+    '## Expected Output Structure',
+    '',
+    'Follow this structure for the plan body:',
+    '',
+    '````markdown',
+    templateBody,
+    '````',
+    '',
+    '## Project Context',
+    '',
+    contextSummary,
   ].join('\n');
 }
 
@@ -794,6 +841,11 @@ export class ForgeOrchestrator {
           };
         }
         const draftOutput = draftPipelineResult.outputs[0] ?? '';
+
+        // Validate that the drafter produced a real plan, not an echoed template
+        if (isTemplateEchoed(draftOutput)) {
+          throw new Error('Draft failed: drafter echoed the template instead of producing a real plan');
+        }
 
         // Write the draft — preserve the header (planId, taskId) from the created file.
         planContent = this.mergeDraftWithHeader(planContent, draftOutput);
