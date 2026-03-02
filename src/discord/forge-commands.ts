@@ -482,7 +482,8 @@ export class ForgeOrchestrator {
     return this.running ? this.currentPlanId : undefined;
   }
 
-  requestCancel(): void {
+  requestCancel(reason?: string): void {
+    this.opts.log?.info({ planId: this.currentPlanId, reason: reason ?? 'unknown' }, 'forge:cancel-requested');
     this.cancelRequested = true;
     this.abortController.abort();
   }
@@ -740,6 +741,7 @@ export class ForgeOrchestrator {
 
     while (round < maxRound) {
       if (this.cancelRequested) {
+        this.opts.log?.info({ planId, round, phase: 'loop-entry' }, 'forge:cancelled');
         await this.updatePlanStatus(filePath, 'CANCELLED');
         await onProgress(`Forge ${planId} cancelled.`, { force: true });
         return {
@@ -780,6 +782,7 @@ export class ForgeOrchestrator {
           signal: this.abortController.signal,
         }, 'Draft', onProgress);
         if (!draftPipelineResult) {
+          this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
           await onProgress(`Forge ${planId} cancelled.`, { force: true });
           return {
@@ -853,6 +856,7 @@ export class ForgeOrchestrator {
         signal: this.abortController.signal,
       }, `Audit round ${round}`, onProgress);
       if (!auditPipelineResult) {
+        this.opts.log?.info({ planId, round, phase: 'audit' }, 'forge:cancelled');
         await this.updatePlanStatus(filePath, 'CANCELLED');
         await onProgress(`Forge ${planId} cancelled.`, { force: true });
         return {
@@ -927,6 +931,7 @@ export class ForgeOrchestrator {
         signal: this.abortController.signal,
       }, `Revision after round ${round}`, onProgress);
       if (!revisionPipelineResult) {
+        this.opts.log?.info({ planId, round, phase: 'revision' }, 'forge:cancelled');
         await this.updatePlanStatus(filePath, 'CANCELLED');
         await onProgress(`Forge ${planId} cancelled.`, { force: true });
         return {

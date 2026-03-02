@@ -930,7 +930,8 @@ describe('ForgeOrchestrator', () => {
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntime([draftPlan, auditBlocking, revisedPlan, auditClean]);
-    const opts = await baseOpts(tmpDir, runtime);
+    const mockLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const opts = await baseOpts(tmpDir, runtime, { log: mockLog });
     const orchestrator = new ForgeOrchestrator(opts);
 
     const progress: string[] = [];
@@ -945,6 +946,74 @@ describe('ForgeOrchestrator', () => {
     expect(result.finalVerdict).toBe('CANCELLED');
     expect(result.rounds).toBeLessThanOrEqual(2);
     expect(progress[progress.length - 1]).toMatch(/cancelled/i);
+
+    // Verify structured cancellation log was emitted with correct phase
+    const cancelledCalls = mockLog.info.mock.calls.filter(
+      (c: unknown[]) => c[1] === 'forge:cancelled',
+    );
+    expect(cancelledCalls.length).toBeGreaterThanOrEqual(1);
+    const lastCancelled = cancelledCalls[cancelledCalls.length - 1]!;
+    expect(lastCancelled[0]).toHaveProperty('phase');
+    expect(['loop-entry', 'draft', 'audit', 'revision']).toContain(lastCancelled[0].phase);
+  });
+
+  it('requestCancel(reason) logs the reason', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Task:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const mockLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const opts = await baseOpts(tmpDir, runtime, { log: mockLog });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    // Start the forge so currentPlanId is set, then cancel with a reason
+    const result = await orchestrator.run('Test', async (msg) => {
+      if (msg.includes('Drafting')) {
+        orchestrator.requestCancel('user-initiated');
+      }
+    });
+
+    expect(result.finalVerdict).toBe('CANCELLED');
+
+    // Verify requestCancel logged the reason
+    const cancelRequestedCalls = mockLog.info.mock.calls.filter(
+      (c: unknown[]) => c[1] === 'forge:cancel-requested',
+    );
+    expect(cancelRequestedCalls.length).toBe(1);
+    expect(cancelRequestedCalls[0]![0]).toMatchObject({ reason: 'user-initiated' });
+  });
+
+  it('cancel during draft phase logs phase:draft', async () => {
+    const tmpDir = await makeTmpDir();
+
+    let orchestrator!: ForgeOrchestrator;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(_params) {
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          // Cancel mid-draft, then yield — post-return guard returns null
+          orchestrator.requestCancel();
+          yield { type: 'text_final', text: '# Plan: Test\n' };
+        })();
+      },
+    };
+
+    const mockLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const opts = await baseOpts(tmpDir, runtime, { log: mockLog });
+    orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test', async () => {});
+
+    expect(result.finalVerdict).toBe('CANCELLED');
+
+    // Verify draft-phase cancellation log
+    const cancelledCalls = mockLog.info.mock.calls.filter(
+      (c: unknown[]) => c[1] === 'forge:cancelled',
+    );
+    expect(cancelledCalls.length).toBeGreaterThanOrEqual(1);
+    expect(cancelledCalls[0]![0]).toMatchObject({ phase: 'draft' });
   });
 
   it('concurrent forge throws error', async () => {
