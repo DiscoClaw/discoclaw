@@ -195,6 +195,96 @@ describe('renderHealthReport', () => {
     expect(verbose).toContain('- tasks.sync.follow_up.error_class.other=1');
   });
 
+  it('shows defer metrics counters in basic report', () => {
+    const metrics = new MetricsRegistry();
+    metrics.recordInvokeStart('defer');
+    metrics.recordInvokeStart('defer');
+    metrics.recordInvokeStart('defer');
+    metrics.recordInvokeResult('defer', 200, true);
+    metrics.recordInvokeResult('defer', 300, true);
+    metrics.recordInvokeResult('defer', 100, false, 'timed out');
+
+    const basic = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+      },
+      mode: 'basic',
+    });
+    expect(basic).toContain('Defer: started=3 ok=2 failed=1');
+  });
+
+  it('shows pending count from deferScheduler', () => {
+    const metrics = new MetricsRegistry();
+    const mockScheduler = { listActive: () => [{}, {}, {}] };
+
+    const basic = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+      },
+      mode: 'basic',
+      deferScheduler: mockScheduler,
+    });
+    expect(basic).toContain('pending=3');
+  });
+
+  it('shows defer latency in the latency line', () => {
+    const metrics = new MetricsRegistry();
+    metrics.recordInvokeResult('defer', 150, true);
+    metrics.recordInvokeResult('defer', 350, true);
+
+    const basic = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+      },
+      mode: 'basic',
+    });
+    expect(basic).toMatch(/Latency\(ms\):.*defer p50=\d+ p95=\d+/);
+  });
+
+  it('shows pending=0 when no deferScheduler is provided', () => {
+    const metrics = new MetricsRegistry();
+
+    const basic = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+      },
+      mode: 'basic',
+    });
+    expect(basic).toContain('pending=0');
+  });
+
   it('renders tools report', () => {
     const out = renderHealthToolsReport({
       permissionTier: 'standard',

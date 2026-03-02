@@ -830,6 +830,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           config: healthConfig,
           mode,
           botDisplayName: params.botDisplayName,
+          deferScheduler: params.deferScheduler,
         });
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
         return;
