@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, fmtTime, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { isPathUnderRoots } from '../runtime/tools/path-security.js';
 
 /** Serialize Discord embeds into a compact text representation. */
 function formatEmbeds(embeds: Embed[] | undefined, truncate?: number): string {
@@ -62,13 +63,26 @@ const SENDFILE_ALLOWED_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf',
 ]);
 
-/** Parse a comma-separated list of allowed directories for sendFile. */
-export function parseSendFileAllowedDirs(raw?: string): string[] {
-  if (!raw || !raw.trim()) return ['/tmp'];
-  return raw.split(',').map(d => d.trim()).filter(Boolean).map(d => path.resolve(d));
+/** Parse a comma-separated list of allowed directories for sendFile.
+ *  Auto-includes DISCOCLAW_DATA_DIR and WORKSPACE_CWD when set. */
+export function parseSendFileAllowedDirs(
+  raw?: string,
+  dataDir?: string,
+  workspaceCwd?: string,
+): string[] {
+  const dirs: string[] = raw?.trim()
+    ? raw.split(',').map(d => d.trim()).filter(Boolean).map(d => path.resolve(d))
+    : ['/tmp'];
+  if (dataDir?.trim()) dirs.push(path.resolve(dataDir.trim()));
+  if (workspaceCwd?.trim()) dirs.push(path.resolve(workspaceCwd.trim()));
+  return dirs;
 }
 
-let sendFileAllowedDirs = parseSendFileAllowedDirs(process.env.DISCOCLAW_SENDFILE_ALLOWED_DIRS);
+let sendFileAllowedDirs = parseSendFileAllowedDirs(
+  process.env.DISCOCLAW_SENDFILE_ALLOWED_DIRS,
+  process.env.DISCOCLAW_DATA_DIR,
+  process.env.WORKSPACE_CWD,
+);
 
 /** @internal Override the sendFile directory allowlist (test-only). */
 export function _setSendFileAllowedDirs(dirs: string[]): void {
@@ -431,10 +445,7 @@ export async function executeMessagingAction(
         }
         throw err;
       }
-      const pathAllowed = sendFileAllowedDirs.some(
-        dir => realPath === dir || realPath.startsWith(dir + path.sep),
-      );
-      if (!pathAllowed) {
+      if (!isPathUnderRoots(realPath, sendFileAllowedDirs)) {
         return { ok: false, error: 'sendFile path is outside allowed directories' };
       }
       let fileBuffer: Buffer;
