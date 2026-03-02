@@ -13,6 +13,7 @@ export type ShutdownContext = {
   timestamp: string;
   activeForge?: string;
   requestedBy?: string;
+  cancelledDefers?: number;
 };
 
 export type StartupContext = {
@@ -56,6 +57,44 @@ export async function writeShutdownContext(
 
   const tmpPath = `${filePath}.tmp.${process.pid}`;
   await fs.writeFile(tmpPath, JSON.stringify(ctx) + '\n', 'utf-8');
+  await fs.rename(tmpPath, filePath);
+}
+
+// ---------------------------------------------------------------------------
+// Patch (shutdown side — merge fields into existing context)
+// ---------------------------------------------------------------------------
+
+/**
+ * Merge additional fields into an existing shutdown context file.
+ * If the file doesn't exist or can't be parsed, this is a no-op — the caller
+ * should have already written the base context via `writeShutdownContext`.
+ */
+export async function patchShutdownContext(
+  dataDir: string,
+  patch: Partial<ShutdownContext>,
+): Promise<void> {
+  const filePath = path.join(dataDir, FILENAME);
+
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, 'utf-8');
+  } catch {
+    return; // No file to patch.
+  }
+
+  let existing: unknown;
+  try {
+    existing = JSON.parse(raw);
+  } catch {
+    return; // Corrupted — leave it alone.
+  }
+
+  const obj = asObjectRecord(existing);
+  if (!obj) return;
+
+  const merged = { ...obj, ...patch };
+  const tmpPath = `${filePath}.tmp.${process.pid}`;
+  await fs.writeFile(tmpPath, JSON.stringify(merged) + '\n', 'utf-8');
   await fs.rename(tmpPath, filePath);
 }
 
@@ -108,12 +147,17 @@ export async function readAndClearShutdownContext(
   const reason: ShutdownReason = typeof reasonValue === 'string' && VALID_REASONS.has(reasonValue as ShutdownReason)
     ? (reasonValue as ShutdownReason)
     : 'unknown';
+  const cancelledDefers = typeof parsedObj.cancelledDefers === 'number' && Number.isFinite(parsedObj.cancelledDefers) && parsedObj.cancelledDefers > 0
+    ? Math.floor(parsedObj.cancelledDefers)
+    : undefined;
+
   const ctx: ShutdownContext = {
     reason,
     timestamp: typeof parsedObj.timestamp === 'string' ? parsedObj.timestamp : new Date().toISOString(),
     message: typeof parsedObj.message === 'string' ? parsedObj.message.slice(0, MAX_FIELD_LENGTH) : undefined,
     activeForge: typeof parsedObj.activeForge === 'string' ? parsedObj.activeForge.slice(0, MAX_FIELD_LENGTH) : undefined,
     requestedBy: typeof parsedObj.requestedBy === 'string' ? parsedObj.requestedBy : undefined,
+    cancelledDefers,
   };
 
   if (ctx.reason === 'unknown') {
@@ -165,6 +209,11 @@ export function formatStartupInjection(ctx: StartupContext): string | null {
 
   if (ctx.shutdown?.activeForge) {
     line += ` A forge run was in progress: ${ctx.shutdown.activeForge}.`;
+  }
+
+  if (ctx.shutdown?.cancelledDefers) {
+    const n = ctx.shutdown.cancelledDefers;
+    line += ` ${n} deferred action${n === 1 ? ' was' : 's were'} cancelled and did not run.`;
   }
 
   line += ' If the current thread\'s task is already resolved, don\'t announce it — just respond to the user.';

@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   writeShutdownContext,
+  patchShutdownContext,
   readAndClearShutdownContext,
   formatStartupInjection,
 } from './shutdown-context.js';
@@ -86,6 +87,64 @@ describe('writeShutdownContext', () => {
 
     const raw = await fs.readFile(path.join(tmpDir, 'shutdown-context.json'), 'utf-8');
     expect(JSON.parse(raw).reason).toBe('unknown');
+  });
+});
+
+describe('patchShutdownContext', () => {
+  it('merges cancelledDefers into existing context', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'restart-command',
+      message: 'User requested via !restart',
+      timestamp: '2026-02-13T00:00:00.000Z',
+      requestedBy: '12345',
+    });
+    await patchShutdownContext(tmpDir, { cancelledDefers: 3 });
+
+    const raw = await fs.readFile(path.join(tmpDir, 'shutdown-context.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.reason).toBe('restart-command');
+    expect(parsed.requestedBy).toBe('12345');
+    expect(parsed.cancelledDefers).toBe(3);
+  });
+
+  it('is a no-op when no file exists', async () => {
+    await patchShutdownContext(tmpDir, { cancelledDefers: 5 });
+
+    const files = await fs.readdir(tmpDir);
+    expect(files).toEqual([]);
+  });
+
+  it('is a no-op when file contains corrupted JSON', async () => {
+    await fs.writeFile(path.join(tmpDir, 'shutdown-context.json'), 'not json!!!', 'utf-8');
+    await patchShutdownContext(tmpDir, { cancelledDefers: 2 });
+
+    const raw = await fs.readFile(path.join(tmpDir, 'shutdown-context.json'), 'utf-8');
+    expect(raw).toBe('not json!!!');
+  });
+
+  it('is a no-op when file contains non-object JSON', async () => {
+    await fs.writeFile(path.join(tmpDir, 'shutdown-context.json'), '"hello"', 'utf-8');
+    await patchShutdownContext(tmpDir, { cancelledDefers: 2 });
+
+    const raw = await fs.readFile(path.join(tmpDir, 'shutdown-context.json'), 'utf-8');
+    expect(raw).toBe('"hello"');
+  });
+
+  it('preserves all existing fields when patching', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'deploy',
+      message: 'rolling update',
+      timestamp: '2026-02-13T00:00:00.000Z',
+      activeForge: 'plan-037',
+    });
+    await patchShutdownContext(tmpDir, { cancelledDefers: 1 });
+
+    const raw = await fs.readFile(path.join(tmpDir, 'shutdown-context.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.reason).toBe('deploy');
+    expect(parsed.message).toBe('rolling update');
+    expect(parsed.activeForge).toBe('plan-037');
+    expect(parsed.cancelledDefers).toBe(1);
   });
 });
 
@@ -203,6 +262,67 @@ describe('readAndClearShutdownContext', () => {
     );
     const result = await readAndClearShutdownContext(tmpDir);
     expect(result.type).toBe('graceful-unknown');
+  });
+
+  it('preserves cancelledDefers in shutdown context', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'restart-command',
+      timestamp: '2026-02-13T00:00:00.000Z',
+      cancelledDefers: 3,
+    });
+
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledDefers).toBe(3);
+  });
+
+  it('reads cancelledDefers patched into existing context', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'restart-command',
+      message: 'User requested via !restart',
+      timestamp: '2026-02-13T00:00:00.000Z',
+    });
+    await patchShutdownContext(tmpDir, { cancelledDefers: 5 });
+
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.type).toBe('intentional');
+    expect(result.shutdown?.cancelledDefers).toBe(5);
+    expect(result.shutdown?.message).toBe('User requested via !restart');
+  });
+
+  it('ignores cancelledDefers when zero', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledDefers: 0 }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledDefers).toBeUndefined();
+  });
+
+  it('ignores cancelledDefers when negative', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledDefers: -1 }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledDefers).toBeUndefined();
+  });
+
+  it('ignores cancelledDefers when not a number', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledDefers: 'three' }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledDefers).toBeUndefined();
+  });
+
+  it('floors fractional cancelledDefers', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledDefers: 2.7 }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledDefers).toBe(2);
   });
 
   it('truncates oversized message and activeForge fields', async () => {
@@ -327,6 +447,72 @@ describe('formatStartupInjection', () => {
     };
     const result = formatStartupInjection(ctx);
     expect(result).toContain('plan-042');
+  });
+
+  it('appends cancelled defers info (singular) when cancelledDefers is 1', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledDefers: 1,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('1 deferred action was cancelled and did not run.');
+  });
+
+  it('appends cancelled defers info (plural) when cancelledDefers > 1', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledDefers: 3,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('3 deferred actions were cancelled and did not run.');
+  });
+
+  it('does not mention cancelled defers when count is 0 or absent', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).not.toContain('deferred action');
+  });
+
+  it('includes both forge and cancelled defers when both present', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        activeForge: 'plan-037',
+        cancelledDefers: 2,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('plan-037');
+    expect(result).toContain('2 deferred actions were cancelled');
+  });
+
+  it('includes cancelled defers for graceful-unknown type', () => {
+    const ctx: StartupContext = {
+      type: 'graceful-unknown',
+      shutdown: {
+        reason: 'unknown',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledDefers: 4,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('4 deferred actions were cancelled');
   });
 
   it('includes resolved-task guard for all non-null results', () => {
