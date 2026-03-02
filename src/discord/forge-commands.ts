@@ -502,7 +502,8 @@ export function isRetryableError(msg: string): boolean {
     lower.includes('progress stall') ||
     lower.includes('timed out') ||
     lower.includes('process exited unexpectedly') ||
-    lower.includes('stdin write failed')
+    lower.includes('stdin write failed') ||
+    lower.includes('drafter echoed the template')
   );
 }
 
@@ -827,7 +828,13 @@ export class ForgeOrchestrator {
           cwd: this.opts.cwd,
           model: this.opts.model,
           signal: this.abortController.signal,
-        }, 'Draft', onProgress);
+        }, 'Draft', onProgress, (result) => {
+          const output = result.outputs[0] ?? '';
+          if (isTemplateEchoed(output)) {
+            this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
+            throw new Error('drafter echoed the template');
+          }
+        });
         if (!draftPipelineResult) {
           this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
@@ -841,11 +848,6 @@ export class ForgeOrchestrator {
           };
         }
         const draftOutput = draftPipelineResult.outputs[0] ?? '';
-
-        // Validate that the drafter produced a real plan, not an echoed template
-        if (isTemplateEchoed(draftOutput)) {
-          throw new Error('Draft failed: drafter echoed the template instead of producing a real plan');
-        }
 
         // Write the draft — preserve the header (planId, taskId) from the created file.
         planContent = this.mergeDraftWithHeader(planContent, draftOutput);
@@ -1141,14 +1143,21 @@ export class ForgeOrchestrator {
    * Posts a phase-specific stall notice to Discord via onProgress before retrying.
    * Returns null if the run was cancelled; throws with a phase-specific message
    * if the error is non-retryable or both attempts fail.
+   *
+   * An optional `validate` callback runs after each successful pipeline result.
+   * If it throws a retryable error, the pipeline is retried like any other
+   * transient failure.
    */
   private async runWithRetry(
     def: Parameters<typeof runPipeline>[0],
     phase: string,
     onProgress: ProgressFn,
+    validate?: (result: { outputs: string[] }) => void,
   ): Promise<{ outputs: string[] } | null> {
     try {
-      return await this.runCancellable(def);
+      const result = await this.runCancellable(def);
+      if (result && validate) validate(result);
+      return result;
     } catch (firstErr) {
       if (this.cancelRequested) return null;
       const firstMsg = String(firstErr instanceof Error ? firstErr.message : firstErr);
@@ -1158,7 +1167,9 @@ export class ForgeOrchestrator {
       this.opts.log?.warn({ err: firstErr, phase }, 'forge:retry');
       await onProgress(`Forge ${phase} stalled — retrying...`, { force: true });
       try {
-        return await this.runCancellable(def);
+        const result = await this.runCancellable(def);
+        if (result && validate) validate(result);
+        return result;
       } catch (secondErr) {
         if (this.cancelRequested) return null;
         const secondMsg = String(secondErr instanceof Error ? secondErr.message : secondErr);

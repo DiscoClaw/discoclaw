@@ -76,7 +76,7 @@ Task action types (in `src/tasks/task-action-contract.ts`):
 - `taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`, `tagMapReload`
 
 Defer action types (in `src/discord/actions-defer.ts`):
-- `defer`
+- `defer`, `deferList`
 
 Config action types (in `src/discord/actions-config.ts`):
 - `modelSet`, `modelShow`
@@ -317,8 +317,10 @@ Allow the model to schedule a deferred follow-up invocation in a target channel 
 | Action | Description | Mutating? | Async? |
 |--------|-------------|-----------|--------|
 | `defer` | Schedule a delayed re-invocation of the runtime in a named channel | Yes | Yes (in-process timer; fires after `delaySeconds`) |
+| `deferList` | Query all pending deferred actions (channel, prompt, time remaining) | No (query) | No |
 
-Fields: `channel` (channel name or ID), `prompt` (text sent as the user message when the timer fires), `delaySeconds` (positive number).
+Fields (`defer`): `channel` (channel name or ID), `prompt` (text sent as the user message when the timer fires), `delaySeconds` (positive number).
+Fields (`deferList`): none — returns a snapshot of all active deferred jobs.
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1).
 `DeferScheduler` constraints: delays are capped at `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` (default 1800 s); at most `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` (default 5) timers may be pending simultaneously. Timers are in-process only — they do not survive a restart.

@@ -28,8 +28,8 @@ import { PLAN_ACTION_TYPES, executePlanAction, planActionsPromptSection } from '
 import type { PlanActionRequest, PlanContext } from './actions-plan.js';
 import { MEMORY_ACTION_TYPES, executeMemoryAction, memoryActionsPromptSection } from './actions-memory.js';
 import type { MemoryActionRequest, MemoryContext } from './actions-memory.js';
-import { DEFER_ACTION_TYPES, executeDeferAction } from './actions-defer.js';
-import type { DeferActionRequest } from './actions-defer.js';
+import { DEFER_ACTION_TYPES, executeDeferAction, executeDeferListAction } from './actions-defer.js';
+import type { DeferActionRequest, DeferListActionRequest, DeferActionRequestUnion } from './actions-defer.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } from './actions-config.js';
 import type { ConfigActionRequest, ConfigContext } from './actions-config.js';
@@ -96,6 +96,7 @@ export type DiscordActionRequest =
   | PlanActionRequest
   | MemoryActionRequest
   | DeferActionRequest
+  | DeferListActionRequest
   | ConfigActionRequest
   | ReactionPromptRequest
   | ImagegenActionRequest
@@ -621,7 +622,11 @@ export async function executeDiscordActions(
           result = await executeMemoryAction(action as MemoryActionRequest, ctx, effectiveSubs.memoryCtx);
         }
       } else if (DEFER_ACTION_TYPES.has(action.type)) {
-        result = await executeDeferAction(action as DeferActionRequest, ctx);
+        if (action.type === 'deferList') {
+          result = executeDeferListAction(ctx);
+        } else {
+          result = await executeDeferAction(action as DeferActionRequest, ctx);
+        }
       } else if (CONFIG_ACTION_TYPES.has(action.type)) {
         if (!effectiveSubs.configCtx) {
           result = { ok: false, error: 'Config subsystem not configured' };
@@ -786,7 +791,7 @@ Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if on
 - Never emit an action with empty, placeholder, or missing values for required parameters. If you don't have the value (e.g., no messageId for react), skip the action entirely.
 - Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
 - Action blocks are removed from the displayed message; results are appended automatically.
-- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow, voiceStatus) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
+- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow, voiceStatus, deferList) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
 - Include all needed actions in a single response when possible (e.g., a channelList and multiple channelDelete blocks together).
 - Multiple actions of the same type are fully supported — all will be executed sequentially. Include as many same-type actions as needed.
 
@@ -803,7 +808,9 @@ If an action fails with a "Missing Permissions" or "Missing Access" error, tell 
     sections.push(`### Deferred self-invocation
 Use a <discord-action>{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}</discord-action> block to schedule a follow-up run inside the requested channel without another user prompt. You must specify the channel by name or ID; delaySeconds is how long to wait (capped by DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS) and prompt becomes the user message when the deferred invocation runs. The scheduler enforces DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT pending jobs, respects the same channel permissions as this response, automatically posts the follow-up output, and allows nested defers up to the configured depth limit (DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH, default 4); once the limit is reached, \`defer\` is disabled for that run. If a guard rail rejects the request (too long, too many active defers, missing permissions, or the channel becomes invalid) the action fails with an explanatory message.
 
-**Context isolation warning:** The deferred invocation runs with no conversation history — the \`prompt\` string is the **only** context the AI receives. It must include all relevant IDs, file paths, channel references, and state needed to act. Vague prompts like "check on that" will fail because the AI has no memory of what "that" refers to. Write every deferred prompt as a fully self-contained instruction.`);
+**Context isolation warning:** The deferred invocation runs with no conversation history — the \`prompt\` string is the **only** context the AI receives. It must include all relevant IDs, file paths, channel references, and state needed to act. Vague prompts like "check on that" will fail because the AI has no memory of what "that" refers to. Write every deferred prompt as a fully self-contained instruction.
+
+Use <discord-action>{"type":"deferList"}</discord-action> to query all pending deferred actions. Returns channel, prompt, and time remaining for each. This is a read-only query action — results are automatically sent back for further analysis.`);
 
   }
 

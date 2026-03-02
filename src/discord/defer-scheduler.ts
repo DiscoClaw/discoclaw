@@ -20,8 +20,14 @@ type ScheduleResult =
   | { ok: true; runsAt: Date; delaySeconds: number }
   | { ok: false; error: string };
 
+export type DeferJobInfo<Act extends DeferSchedulerAction = DeferSchedulerAction> = {
+  action: Act;
+  runsAt: Date;
+};
+
 export class DeferScheduler<Act extends DeferSchedulerAction = DeferSchedulerAction, Ctx = unknown> {
-  private activeCount = 0;
+  private nextId = 1;
+  private readonly activeJobs = new Map<number, DeferJobInfo<Act>>();
   private readonly maxDelaySeconds: number;
   private readonly maxConcurrent: number;
   private readonly jobHandler: DeferSchedulerOptions<Act, Ctx>['jobHandler'];
@@ -30,6 +36,11 @@ export class DeferScheduler<Act extends DeferSchedulerAction = DeferSchedulerAct
     this.maxDelaySeconds = opts.maxDelaySeconds;
     this.maxConcurrent = opts.maxConcurrent;
     this.jobHandler = opts.jobHandler;
+  }
+
+  /** Returns a snapshot of all currently pending jobs. */
+  listActive(): DeferJobInfo<Act>[] {
+    return [...this.activeJobs.values()];
   }
 
   schedule(job: DeferSchedulerJob<Act, Ctx>): ScheduleResult {
@@ -46,22 +57,24 @@ export class DeferScheduler<Act extends DeferSchedulerAction = DeferSchedulerAct
         error: `delaySeconds cannot exceed ${this.maxDelaySeconds} seconds`,
       };
     }
-    if (this.activeCount >= this.maxConcurrent) {
+    if (this.activeJobs.size >= this.maxConcurrent) {
       return {
         ok: false,
         error: `Maximum of ${this.maxConcurrent} deferred actions are already scheduled`,
       };
     }
 
-    this.activeCount++;
+    const id = this.nextId++;
     const runsAt = new Date(Date.now() + delaySeconds * 1000);
     const delayMs = delaySeconds * 1000;
+
+    this.activeJobs.set(id, { action: job.action, runsAt });
 
     const invokeHandler = async () => {
       try {
         await Promise.resolve(this.jobHandler({ action: job.action, context: job.context, runsAt }));
       } finally {
-        this.activeCount = Math.max(0, this.activeCount - 1);
+        this.activeJobs.delete(id);
       }
     };
 

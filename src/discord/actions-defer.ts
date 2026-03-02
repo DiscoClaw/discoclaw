@@ -10,7 +10,13 @@ export type DeferActionRequest = {
   delaySeconds: number;
 };
 
-const DEFER_TYPES: ReadonlyArray<DeferActionRequest['type']> = ['defer'];
+export type DeferListActionRequest = {
+  type: 'deferList';
+};
+
+export type DeferActionRequestUnion = DeferActionRequest | DeferListActionRequest;
+
+const DEFER_TYPES: ReadonlyArray<DeferActionRequestUnion['type']> = ['defer', 'deferList'];
 export const DEFER_ACTION_TYPES = new Set<string>(DEFER_TYPES);
 
 export type DeferredRun = DeferSchedulerRun<DeferActionRequest, ActionContext>;
@@ -56,6 +62,30 @@ export async function executeDeferAction(
     ok: true,
     summary: `Deferred follow-up scheduled for ${channel} in ${delayLabel} (runs at ${when})`,
   };
+}
+
+export function executeDeferListAction(
+  ctx: ActionContext,
+): DiscordActionResult {
+  const scheduler = ctx.deferScheduler;
+  if (!scheduler) {
+    return { ok: false, error: 'Deferred actions are not configured for this bot' };
+  }
+
+  const active = scheduler.listActive();
+  if (active.length === 0) {
+    return { ok: true, summary: 'No pending deferred actions.' };
+  }
+
+  const lines = active.map((job, i) => {
+    const remainingSec = Math.max(0, Math.floor((job.runsAt.getTime() - Date.now()) / 1000));
+    const action = job.action as DeferActionRequest;
+    const channel = action.channel ?? 'unknown';
+    const prompt = action.prompt ?? '';
+    return `${i + 1}. channel=${channel} | remaining=${formatDuration(remainingSec)} | runsAt=${fmtTime(job.runsAt)} | prompt="${prompt}"`;
+  });
+
+  return { ok: true, summary: `Pending deferred actions (${active.length}):\n${lines.join('\n')}` };
 }
 
 function formatDuration(seconds: number): string {

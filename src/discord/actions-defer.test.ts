@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionContext } from './actions.js';
 import { DeferScheduler, type DeferSchedulerOptions } from './defer-scheduler.js';
-import { executeDeferAction, type DeferActionRequest, type DeferredRun } from './actions-defer.js';
+import { executeDeferAction, executeDeferListAction, type DeferActionRequest, type DeferredRun } from './actions-defer.js';
 import type { Client, Guild } from 'discord.js';
 
 const baseContext: ActionContext = {
@@ -106,6 +106,109 @@ describe('executeDeferAction', () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('defer action unexpectedly succeeded despite exceeding max delay');
     expect(result.error).toBe('Deferred follow-up for general rejected: delaySeconds cannot exceed 5 seconds');
+  });
+});
+
+describe('executeDeferListAction', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));
+  });
+
+  it('requires scheduler configuration', () => {
+    const result = executeDeferListAction(baseContext);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('deferList unexpectedly succeeded without a scheduler');
+    expect(result.error).toContain('not configured');
+  });
+
+  it('returns empty message when no jobs are pending', () => {
+    const { scheduler } = makeScheduler();
+    const ctx: ActionContext = {
+      ...createContext(),
+      deferScheduler: scheduler,
+    };
+
+    const result = executeDeferListAction(ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('deferList failed unexpectedly');
+    expect(result.summary).toBe('No pending deferred actions.');
+  });
+
+  it('lists pending jobs with channel, prompt, and time remaining', () => {
+    const { scheduler } = makeScheduler();
+    const ctx: ActionContext = {
+      ...createContext(),
+      deferScheduler: scheduler,
+    };
+
+    scheduler.schedule({
+      action: { type: 'defer', channel: 'general', prompt: 'check status', delaySeconds: 30 },
+      context: ctx,
+    });
+    scheduler.schedule({
+      action: { type: 'defer', channel: 'alerts', prompt: 'send report', delaySeconds: 60 },
+      context: ctx,
+    });
+
+    const result = executeDeferListAction(ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('deferList failed unexpectedly');
+    expect(result.summary).toContain('Pending deferred actions (2)');
+    expect(result.summary).toContain('channel=general');
+    expect(result.summary).toContain('prompt="check status"');
+    expect(result.summary).toContain('remaining=30s');
+    expect(result.summary).toContain('channel=alerts');
+    expect(result.summary).toContain('prompt="send report"');
+    expect(result.summary).toContain('remaining=1m');
+  });
+
+  it('shows decreasing time remaining as time passes', () => {
+    const { scheduler } = makeScheduler();
+    const ctx: ActionContext = {
+      ...createContext(),
+      deferScheduler: scheduler,
+    };
+
+    scheduler.schedule({
+      action: { type: 'defer', channel: 'general', prompt: 'ping', delaySeconds: 60 },
+      context: ctx,
+    });
+
+    vi.advanceTimersByTime(45_000);
+
+    const result = executeDeferListAction(ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('deferList failed unexpectedly');
+    expect(result.summary).toContain('remaining=15s');
+  });
+
+  it('excludes completed jobs from the listing', async () => {
+    const { scheduler } = makeScheduler({ maxConcurrent: 2 });
+    const ctx: ActionContext = {
+      ...createContext(),
+      deferScheduler: scheduler,
+    };
+
+    scheduler.schedule({
+      action: { type: 'defer', channel: 'general', prompt: 'first', delaySeconds: 5 },
+      context: ctx,
+    });
+    scheduler.schedule({
+      action: { type: 'defer', channel: 'alerts', prompt: 'second', delaySeconds: 30 },
+      context: ctx,
+    });
+
+    // Advance past the first job's delay
+    vi.advanceTimersByTime(5000);
+    await Promise.resolve();
+
+    const result = executeDeferListAction(ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('deferList failed unexpectedly');
+    expect(result.summary).toContain('Pending deferred actions (1)');
+    expect(result.summary).toContain('channel=alerts');
+    expect(result.summary).not.toContain('channel=general');
   });
 });
 
