@@ -154,7 +154,7 @@ function createReactionHandler(
         const abortedCount = tryAbortAll();
         if (abortedCount > 0) metrics.increment('discord.reaction.abort');
         const orch = getActiveOrchestrator();
-        if (orch?.isRunning) orch.requestCancel();
+        if (orch?.isRunning) orch.requestCancel('stop reaction');
         return;
       }
 
