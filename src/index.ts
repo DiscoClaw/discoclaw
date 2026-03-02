@@ -51,8 +51,7 @@ import { TranscriptMirror } from './voice/transcript-mirror.js';
 import { ForgeOrchestrator } from './discord/forge-commands.js';
 import { initializeTasksContext, wireTaskSync } from './tasks/initialize.js';
 import { ForumCountSync } from './discord/forum-count-sync.js';
-import { resolveTasksForum, closeTaskThread } from './tasks/thread-ops.js';
-import { getThreadIdFromTask } from './tasks/thread-helpers.js';
+import { resolveTasksForum } from './tasks/thread-ops.js';
 import { initTasksForumGuard } from './tasks/forum-guard.js';
 import { reloadTagMapInPlace } from './tasks/tag-map.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
@@ -1231,13 +1230,13 @@ if (taskCtx) {
         log.info({ msg }, 'plan:action:progress');
       },
       onTaskClosed: (taskId: string) => {
-        const task = effectiveTaskStore.get(taskId);
-        if (!task) return;
-        const threadId = getThreadIdFromTask(task);
-        if (!threadId) return;
-        closeTaskThread(client, threadId, task, taskCtx?.tagMap, log).catch((err) => {
-          log.warn({ err, taskId, threadId }, 'plan:onTaskClosed thread sync failed');
-        });
+        try {
+          botParams.taskCtx?.syncCoordinator?.sync()?.catch((err: unknown) => {
+            log.warn({ err, taskId }, 'plan:onTaskClosed sync failed');
+          });
+        } catch (err) {
+          log.warn({ err, taskId }, 'plan:onTaskClosed sync error');
+        }
       },
     };
     log.info('plan:action context initialized');
