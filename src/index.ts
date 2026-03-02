@@ -696,6 +696,23 @@ const cronExecModel = resolveModel(cfg.cronExecModel, runtime.id);
 const voiceModelRef: { model: string; runtime?: RuntimeAdapter; runtimeName?: string } = { model: voiceModel };
 const voiceRuntimeRef: { runtime: RuntimeAdapter; name: string } = { runtime: limitedRuntime, name: primaryRuntimeName };
 
+/**
+ * Resolve the voice runtime at invocation time.
+ *
+ * Priority:
+ *  1. Explicit override on voiceModelRef (set by auto-wiring or runtime-overrides.json)
+ *  2. The 'anthropic' adapter from the registry (zero cold-start, ideal for voice)
+ *  3. The primary limited runtime (fallback)
+ */
+export function resolveVoiceRuntime(
+  voiceRef: { runtime?: RuntimeAdapter },
+  registry: RuntimeRegistry,
+  fallback: RuntimeAdapter,
+): RuntimeAdapter {
+  if (voiceRef.runtime) return voiceRef.runtime;
+  return registry.get('anthropic') ?? fallback;
+}
+
 // Register Anthropic REST adapter when ANTHROPIC_API_KEY is set (direct HTTP, zero cold-start).
 // Used as the default voice runtime to eliminate CLI subprocess overhead.
 if (cfg.anthropicApiKey) {
@@ -1389,7 +1406,7 @@ if (taskCtx) {
     const voiceInvokeAi = async (text: string, signal: AbortSignal, history?: string): Promise<string> => {
       // Resolve model and runtime at invoke time so tier names (fast/capable) always resolve
       // correctly even after runtime mutation via !models set voice.
-      const voiceRuntime = voiceModelRef.runtime ?? limitedRuntime;
+      const voiceRuntime = resolveVoiceRuntime(voiceModelRef, runtimeRegistry, limitedRuntime);
       const resolvedVoiceModel = resolveModel(voiceModelRef.model, voiceRuntime.id);
 
       // Build a lean voice prompt using identity extraction (~1KB) instead of
