@@ -88,6 +88,7 @@ export function renderHealthReport(opts: {
   config: HealthConfigSnapshot;
   mode: HealthCommandMode;
   botDisplayName?: string;
+  deferScheduler?: { listActive(): unknown[] };
 }): string {
   const snap = opts.metrics.snapshot();
   const counters = snap.counters;
@@ -103,10 +104,17 @@ export function renderHealthReport(opts: {
   lines.push(`Actions: ok=${counters['actions.succeeded'] ?? 0} failed=${counters['actions.failed'] ?? 0}`);
   lines.push(`Cron runs: ok=${counters['cron.run.success'] ?? 0} error=${counters['cron.run.error'] ?? 0} skipped=${counters['cron.run.skipped'] ?? 0}`);
 
+  const deferStarted = asCount(counters, 'invoke.defer.started');
+  const deferOk = asCount(counters, 'invoke.defer.succeeded');
+  const deferFailed = asCount(counters, 'invoke.defer.failed');
+  const deferPending = opts.deferScheduler ? opts.deferScheduler.listActive().length : 0;
+  lines.push(`Defer: started=${deferStarted} ok=${deferOk} failed=${deferFailed} pending=${deferPending}`);
+
   lines.push(
     `Latency(ms): msg p50=${snap.latencies.message.p50Ms} p95=${snap.latencies.message.p95Ms}; ` +
     `reaction p50=${snap.latencies.reaction.p50Ms} p95=${snap.latencies.reaction.p95Ms}; ` +
-    `cron p50=${snap.latencies.cron.p50Ms} p95=${snap.latencies.cron.p95Ms}`,
+    `cron p50=${snap.latencies.cron.p50Ms} p95=${snap.latencies.cron.p95Ms}; ` +
+    `defer p50=${snap.latencies.defer.p50Ms} p95=${snap.latencies.defer.p95Ms}`,
   );
 
   if (opts.mode === 'verbose') {
