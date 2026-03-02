@@ -705,7 +705,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const aborted = tryAbortAll();
         const orch = getActiveOrchestrator();
         const forgeRunning = Boolean(orch?.isRunning);
-        if (forgeRunning && orch) orch.requestCancel();
+        if (forgeRunning && orch) orch.requestCancel('!stop');
         const parts: string[] = [];
         if (aborted > 0) parts.push(`Aborted ${aborted} active stream${aborted === 1 ? '' : 's'}.`);
         if (forgeRunning) parts.push('Forge cancel requested.');
@@ -1844,7 +1844,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (forgeCmd.action === 'cancel') {
                 const orch = getActiveOrchestrator();
                 if (orch?.isRunning) {
-                  orch.requestCancel();
+                  orch.requestCancel('!forge cancel');
                   await msg.reply({ content: 'Forge cancel requested.', allowedMentions: NO_MENTIONS });
                 } else {
                   await msg.reply({ content: 'No forge running to cancel.', allowedMentions: NO_MENTIONS });

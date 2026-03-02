@@ -151,7 +151,7 @@ export async function executeForgeAction(
       if (!orch?.isRunning) {
         return { ok: false, error: 'No forge is currently running.' };
       }
-      orch.requestCancel();
+      orch.requestCancel('forgeCancel action');
       const activeId = getActiveForgeId();
       return { ok: true, summary: `Cancel requested${activeId ? ` for ${activeId}` : ''}` };
     }
