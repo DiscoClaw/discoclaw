@@ -185,6 +185,7 @@ let savedCronExecCtx: import('./cron/executor.js').CronExecutorContext | null = 
 let voiceManager: VoiceConnectionManager | null = null;
 let audioPipeline: AudioPipelineManager | null = null;
 let voicePresenceHandler: VoicePresenceHandler | null = null;
+let deferSchedulerRef: DeferScheduler<DeferActionRequest, ActionContext> | null = null;
 const memorySampler = new MemorySampler();
 globalMetrics.setMemorySampler(memorySampler);
 memorySampler.sample();
@@ -208,6 +209,12 @@ const shutdown = async () => {
     log.warn({ err }, 'shutdown:failed to write shutdown context');
   }
 
+  // Cancel deferred timers first — before drain — so they cannot fire and produce
+  // new in-flight replies during the drain window.
+  if (deferSchedulerRef) {
+    const cancelled = deferSchedulerRef.cancelAll();
+    if (cancelled > 0) log.info({ cancelled }, 'shutdown:deferred timers cancelled');
+  }
   // Edit all in-progress Discord replies before killing subprocesses.
   await drainInFlightReplies({ timeoutMs: 3000, log });
   // Kill all CLI subprocesses so they release session locks before the new instance starts.
@@ -217,10 +224,6 @@ const shutdown = async () => {
   cronForumCountSync?.stop();
   cronTagMapWatcher?.stop();
   cronScheduler?.stopAll();
-  if (botParams.deferScheduler) {
-    const cancelled = botParams.deferScheduler.cancelAll();
-    if (cancelled > 0) log.info({ cancelled }, 'shutdown:deferred timers cancelled');
-  }
   voicePresenceHandler?.destroy();
   await audioPipeline?.stopAll();
   voiceManager?.leaveAll();
@@ -1030,6 +1033,7 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
   };
   const deferScheduler = configureDeferredScheduler(deferOpts);
   botParams.deferScheduler = deferScheduler;
+  deferSchedulerRef = deferScheduler;
   botParams.deferOpts = deferOpts;
 }
 

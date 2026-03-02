@@ -810,7 +810,7 @@ Use a <discord-action>{"type":"defer","channel":"general","delaySeconds":600,"pr
 
 **Context isolation warning:** The deferred invocation runs with no conversation history — the \`prompt\` string is the **only** context the AI receives. It must include all relevant IDs, file paths, channel references, and state needed to act. Vague prompts like "check on that" will fail because the AI has no memory of what "that" refers to. Write every deferred prompt as a fully self-contained instruction.
 
-Use <discord-action>{"type":"deferList"}</discord-action> to query all pending deferred actions. Returns channel, prompt, and time remaining for each. This is a read-only query action — results are automatically sent back for further analysis.`);
+Use <discord-action>{"type":"deferList"}</discord-action> to query all pending deferred actions. Returns a job \`id\`, channel, prompt, and time remaining for each entry. This is a read-only query action — results are automatically sent back for further analysis.`);
 
   }
 

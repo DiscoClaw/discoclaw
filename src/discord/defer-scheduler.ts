@@ -97,14 +97,15 @@ export class DeferScheduler<Act extends DeferSchedulerAction = DeferSchedulerAct
     return true;
   }
 
-  /** Cancel all pending jobs and clear their timers. Returns the number of jobs cancelled. */
+  /** Cancel all pending jobs and clear their timers. Returns the number of jobs cancelled.
+   *  Already-running jobs (timer fired, handler still executing) are left alone. */
   cancelAll(): number {
     const count = this.timers.size;
-    for (const timer of this.timers.values()) {
+    for (const [id, timer] of this.timers.entries()) {
       clearTimeout(timer);
+      this.activeJobs.delete(id);
     }
     this.timers.clear();
-    this.activeJobs.clear();
     return count;
   }
 }
