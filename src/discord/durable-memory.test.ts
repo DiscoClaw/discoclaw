@@ -8,6 +8,7 @@ import {
   saveDurableMemory,
   deriveItemId,
   addItem,
+  compactActiveItems,
   deprecateItems,
   selectItemsForInjection,
   formatDurableSection,
@@ -230,6 +231,149 @@ describe('addItem', () => {
     addItem(store, 'third item', { type: 'manual' }, 2);
     expect(store.items).toHaveLength(2);
     expect(store.items.find((it) => it.id === 'active1')).toBeUndefined();
+  });
+});
+
+describe('compactActiveItems', () => {
+  it('demotes overflow active items when item threshold is exceeded', () => {
+    const store = emptyStore();
+    const now = Date.now();
+    for (let i = 0; i < 26; i++) {
+      store.items.push(
+        makeItem({
+          id: `item-${String(i).padStart(2, '0')}`,
+          text: `active item ${i}`,
+          status: 'active',
+          createdAt: now - i * 1000,
+          updatedAt: now - i * 1000,
+          hitCount: 0,
+          lastHitAt: 0,
+        }),
+      );
+    }
+
+    const summary = compactActiveItems(store, { maxActiveItems: 25, maxActiveChars: 100_000 });
+
+    expect(summary.demotedCount).toBe(1);
+    expect(summary.demotedByItemLimit).toBe(1);
+    expect(summary.demotedByCharLimit).toBe(0);
+    expect(summary.activeCount).toBe(25);
+    expect(store.items.filter((it) => it.status === 'active')).toHaveLength(25);
+    expect(store.items.filter((it) => it.status === 'deprecated')).toHaveLength(1);
+  });
+
+  it('demotes overflow active items when char threshold is exceeded', () => {
+    const now = Date.now();
+    const keep = makeItem({
+      id: 'keep',
+      text: 'Keep this concise durable memory item',
+      status: 'active',
+      createdAt: now - 1_000,
+      updatedAt: now - 1_000,
+      hitCount: 5,
+      lastHitAt: now - 500,
+    });
+    const demote = makeItem({
+      id: 'demote',
+      text: 'Demote this never-hit durable memory item because the char budget is too tight',
+      status: 'active',
+      createdAt: now - 2_000,
+      updatedAt: now - 2_000,
+      hitCount: 0,
+      lastHitAt: 0,
+    });
+
+    const store = emptyStore();
+    store.items.push(keep, demote);
+    const keepChars = formatDurableSection([keep]).length;
+
+    const summary = compactActiveItems(store, {
+      maxActiveItems: 10,
+      maxActiveChars: keepChars,
+    });
+
+    expect(summary.demotedCount).toBe(1);
+    expect(summary.demotedByItemLimit).toBe(0);
+    expect(summary.demotedByCharLimit).toBe(1);
+    expect(summary.activeChars).toBeLessThanOrEqual(keepChars);
+    expect(store.items.find((it) => it.id === 'keep')?.status).toBe('active');
+    expect(store.items.find((it) => it.id === 'demote')?.status).toBe('deprecated');
+  });
+
+  it('deterministically demotes never-hit items first', () => {
+    const now = Date.now();
+    function buildCandidates(): { neverA: DurableItem; neverB: DurableItem; hit: DurableItem } {
+      return {
+        neverA: makeItem({
+          id: 'never-a',
+          text: 'never a',
+          status: 'active',
+          createdAt: now - 1_000,
+          updatedAt: now - 1_000,
+          hitCount: 0,
+          lastHitAt: 0,
+        }),
+        neverB: makeItem({
+          id: 'never-b',
+          text: 'never b',
+          status: 'active',
+          createdAt: now - 1_000,
+          updatedAt: now - 1_000,
+          hitCount: 0,
+          lastHitAt: 0,
+        }),
+        hit: makeItem({
+          id: 'hit',
+          text: 'high value',
+          status: 'active',
+          createdAt: now - 1_000,
+          updatedAt: now - 1_000,
+          hitCount: 8,
+          lastHitAt: now - 500,
+        }),
+      };
+    }
+
+    const first = buildCandidates();
+    const storeA = emptyStore();
+    storeA.items.push(first.neverB, first.neverA, first.hit);
+    compactActiveItems(storeA, { maxActiveItems: 2, maxActiveChars: 10_000 });
+    const demotedA = storeA.items.filter((it) => it.status === 'deprecated').map((it) => it.id);
+
+    const second = buildCandidates();
+    const storeB = emptyStore();
+    storeB.items.push(second.neverA, second.neverB, second.hit);
+    compactActiveItems(storeB, { maxActiveItems: 2, maxActiveChars: 10_000 });
+    const demotedB = storeB.items.filter((it) => it.status === 'deprecated').map((it) => it.id);
+
+    expect(demotedA).toEqual(['never-a']);
+    expect(demotedB).toEqual(['never-a']);
+    expect(storeA.items.find((it) => it.id === 'hit')?.status).toBe('active');
+    expect(storeB.items.find((it) => it.id === 'hit')?.status).toBe('active');
+  });
+
+  it('does nothing when active set is exactly at item and char thresholds', () => {
+    const first = makeItem({ id: 'a', text: 'alpha item', status: 'active', updatedAt: 1000 });
+    const second = makeItem({ id: 'b', text: 'beta item', status: 'active', updatedAt: 2000 });
+    const store = emptyStore();
+    store.updatedAt = 777;
+    store.items.push(first, second);
+    const exactChars = formatDurableSection([first, second]).length;
+    const beforeUpdatedAts = store.items.map((it) => it.updatedAt);
+
+    const summary = compactActiveItems(store, {
+      maxActiveItems: 2,
+      maxActiveChars: exactChars,
+    });
+
+    expect(summary.demotedCount).toBe(0);
+    expect(summary.demotedByItemLimit).toBe(0);
+    expect(summary.demotedByCharLimit).toBe(0);
+    expect(summary.activeCount).toBe(2);
+    expect(summary.activeChars).toBe(exactChars);
+    expect(store.updatedAt).toBe(777);
+    expect(store.items.map((it) => it.status)).toEqual(['active', 'active']);
+    expect(store.items.map((it) => it.updatedAt)).toEqual(beforeUpdatedAts);
   });
 });
 
