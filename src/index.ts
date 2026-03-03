@@ -530,6 +530,15 @@ const streamStallTimeoutMs = cfg.streamStallTimeoutMs;
 const progressStallTimeoutMs = cfg.progressStallTimeoutMs;
 const streamStallWarningMs = cfg.streamStallWarningMs;
 const maxConcurrentInvocations = cfg.maxConcurrentInvocations;
+const globalSupervisorEnabled = cfg.globalSupervisorEnabled;
+const globalSupervisorAuditStream = cfg.globalSupervisorAuditStream;
+const globalSupervisorLimits = {
+  maxCycles: cfg.globalSupervisorMaxCycles,
+  maxRetries: cfg.globalSupervisorMaxRetries,
+  maxEscalationLevel: cfg.globalSupervisorMaxEscalationLevel,
+  maxTotalEvents: cfg.globalSupervisorMaxTotalEvents,
+  maxWallTimeMs: cfg.globalSupervisorMaxWallTimeMs,
+};
 const sharedConcurrencyLimiter = createConcurrencyLimiter(maxConcurrentInvocations);
 
 function isGlobalSupervisorAuditPayload(value: unknown): value is GlobalSupervisorAuditPayload {
@@ -580,6 +589,9 @@ const registerRuntime = (name: string, runtime: RuntimeAdapter): RuntimeAdapter 
     limiter: sharedConcurrencyLimiter,
     log,
     env: process.env,
+    globalSupervisorEnabled,
+    globalSupervisorAuditStream,
+    globalSupervisorLimits,
   });
   const observed = withSupervisorAuditLogs(name, wrapped);
   runtimeRegistry.register(name, observed);
