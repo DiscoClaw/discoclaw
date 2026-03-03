@@ -1,0 +1,25 @@
+event: obs.supervisor.cycle
+level: info
+gated_by: DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED=1
+source: src/index.ts (withSupervisorAuditLogs)
+emitted_when: a runtime log_line parses as GlobalSupervisorAuditPayload
+
+description:
+- Cycle audit event from the global runtime supervisor loop.
+- Phases are emitted in order: plan -> execute -> evaluate -> decide.
+
+fields:
+- runtimeName: string
+- source: "global_supervisor"
+- phase: "plan" | "execute" | "evaluate" | "decide"
+- cycle: number
+- retriesUsed: number
+- escalationLevel: number
+- decision?: "complete" | "retry" | "bail"
+- reason?: string
+- failureKind?: "transient_error" | "hard_error" | "runtime_error" | "aborted" | "missing_done" | "exception" | "event_limit"
+- retryable?: boolean
+- signature?: string
+
+example:
+{"runtimeName":"claude","source":"global_supervisor","phase":"decide","cycle":2,"retriesUsed":1,"escalationLevel":1,"decision":"retry","failureKind":"transient_error","retryable":true,"signature":"transient_error:timeout"}

@@ -52,6 +52,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Template strategy (documents how to add a new CLI runtime) | `src/runtime/strategies/template-strategy.ts` | **done** |
 | OpenRouter runtime (OpenAI-compat adapter at `openrouter.ai/api/v1`, `id: 'openrouter'`) | `src/runtime/openai-compat.ts`, `src/health/credential-check.ts` | **done** |
 | Loop detector (detects runaway tool-calling patterns and aborts degenerate runs) | `src/runtime/loop-detector.ts`, `src/runtime/loop-detector.test.ts` | **done** |
+| Global supervisor wrapper (runtime-wide `plan -> execute -> evaluate -> decide` loop with retries/escalation, deterministic retry blocking, structured bail handoff, and cycle audit events) | `src/runtime/global-supervisor.ts`, `src/index.runtime.ts`, `src/index.ts` | **done** |
 
 ## 4. Memory Systems
 
@@ -177,6 +178,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Core (pidlock, bootstrap, permissions) | 3 tests | **done** |
 | Discord subsystem | 14 tests | **done** |
 | Runtime adapters (Claude CLI + OpenAI-compat + Codex CLI + registry + tool schemas + tool exec) | 6 tests | **done** |
+| Global supervisor wrapper coverage (loop/bail semantics + runtime wiring) | `src/runtime/global-supervisor.test.ts`, `src/index.runtime.test.ts` | **done** |
 | Beads subsystem | 3 test files | **done** |
 | Tasks subsystem (`TaskStore`, migration) | 2 test files | **done** |
 | Cron subsystem | 3 tests | **done** |

@@ -42,6 +42,7 @@
     "doctor:online": "tsx scripts/doctor.ts --check-connection",
     "setup": "tsx scripts/setup.ts",
     "test": "vitest run --passWithNoTests",
+    "supervisor:measure": "vitest run src/runtime/global-supervisor.test.ts src/index.runtime.test.ts",
     "prepublishOnly": "pnpm build && pnpm test",
     "review:sections": "tsx scripts/review-sections.ts",
     "review:long-chunks": "tsx scripts/review-long-file-chunks.ts",
