@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineEvent } from './types.js';
 
@@ -118,8 +119,26 @@ function createMockSubprocess(opts: {
 }
 
 describe('Codex CLI runtime adapter', () => {
+  const originalHardening = process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
+  const originalStableHome = process.env.DISCOCLAW_CODEX_STABLE_HOME;
+
   beforeEach(() => {
     mockExeca.mockReset();
+    delete process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
+    delete process.env.DISCOCLAW_CODEX_STABLE_HOME;
+  });
+
+  afterEach(() => {
+    if (originalHardening === undefined) {
+      delete process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
+    } else {
+      process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING = originalHardening;
+    }
+    if (originalStableHome === undefined) {
+      delete process.env.DISCOCLAW_CODEX_STABLE_HOME;
+    } else {
+      process.env.DISCOCLAW_CODEX_STABLE_HOME = originalStableHome;
+    }
   });
 
   it('happy path: stdout text emits text_delta + text_final + done', async () => {
@@ -459,6 +478,7 @@ describe('Codex CLI runtime adapter', () => {
   });
 
   it('error sanitization maps rollout path corruption to a clear remediation message', async () => {
+    process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING = '0';
     mockExeca.mockReturnValue(createMockSubprocess({
       stdout: '',
       stderr: '2026-02-16T23:36:26.244364Z ERROR codex_core::rollout::list: state db missing rollout path for thread 019c5957-beea-7e92-aca4-42b5c15af63d',
@@ -481,6 +501,91 @@ describe('Codex CLI runtime adapter', () => {
     const msg = (errorEvt as { message: string }).message;
     expect(msg).toContain('codex session state appears corrupted');
     expect(msg).toContain('CODEX_HOME');
+  });
+
+  it('launcher state hardening retries once with stable CODEX_HOME on rollout-path errors', async () => {
+    process.env.DISCOCLAW_CODEX_STABLE_HOME = '/tmp/discoclaw-codex-stable-home-test';
+
+    mockExeca
+      .mockImplementationOnce(() => createMockSubprocess({
+        stdout: '',
+        stderr: 'ERROR codex_core::rollout::list: state db missing rollout path for thread abc',
+        exitCode: 1,
+      }))
+      .mockImplementationOnce(() => createMockSubprocess({
+        stdout: 'Recovered answer',
+        exitCode: 0,
+      }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Say hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+    const retryEnv = mockExeca.mock.calls[1][2] as { env?: Record<string, string | undefined> };
+    expect(retryEnv.env?.CODEX_HOME).toBe('/tmp/discoclaw-codex-stable-home-test');
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    expect(events.find((e) => e.type === 'text_final')).toEqual({ type: 'text_final', text: 'Recovered answer' });
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
+  it('launcher state hardening uses repo-stable default home when DISCOCLAW_CODEX_STABLE_HOME is unset', async () => {
+    mockExeca
+      .mockImplementationOnce(() => createMockSubprocess({
+        stdout: '',
+        stderr: 'ERROR codex_core::rollout::list: state db missing rollout path for thread abc',
+        exitCode: 1,
+      }))
+      .mockImplementationOnce(() => createMockSubprocess({
+        stdout: 'Recovered answer',
+        exitCode: 0,
+      }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Say hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+    const retryEnv = mockExeca.mock.calls[1][2] as { env?: Record<string, string | undefined> };
+    expect(retryEnv.env?.CODEX_HOME).toBe(path.resolve(process.cwd(), '.codex-home-discoclaw'));
+  });
+
+  it('launcher state hardening can be disabled explicitly', async () => {
+    process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING = '0';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: '',
+      stderr: 'ERROR codex_core::rollout::list: state db missing rollout path for thread abc',
+      exitCode: 1,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Say hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(events.find((e) => e.type === 'error')).toBeDefined();
   });
 
   it('ENOENT via tryFinalize: uses fixed message, never leaks prompt', async () => {

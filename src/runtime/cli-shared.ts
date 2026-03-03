@@ -89,12 +89,13 @@ export class SubprocessTracker {
 // cliExecaEnv — standard env overrides for CLI subprocesses
 // ---------------------------------------------------------------------------
 /** Build the environment for a CLI subprocess (NO_COLOR, FORCE_COLOR, TERM). */
-export function cliExecaEnv(): Record<string, string | undefined> {
+export function cliExecaEnv(overrides?: Record<string, string | undefined>): Record<string, string | undefined> {
   return {
     ...process.env,
     NO_COLOR: process.env.NO_COLOR ?? '1',
     FORCE_COLOR: process.env.FORCE_COLOR ?? '0',
     TERM: process.env.TERM ?? 'dumb',
+    ...(overrides ?? {}),
   };
 }
 
