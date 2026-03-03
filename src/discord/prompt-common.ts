@@ -32,6 +32,78 @@ export function buildPromptPreamble(inlinedContext: string): string {
   return inlinedContext ? ROOT_POLICY + '\n\n' + inlinedContext : ROOT_POLICY;
 }
 
+export function estimateTokensFromChars(chars: number): number {
+  if (!Number.isFinite(chars) || chars <= 0) return 0;
+  return Math.ceil(chars / 4);
+}
+
+export type PromptSectionKey =
+  | 'soul'
+  | 'identity'
+  | 'user'
+  | 'agents'
+  | 'tools'
+  | 'pa'
+  | 'durableMemory'
+  | 'rollingSummary'
+  | 'channelContext'
+  | 'tasks'
+  | 'actionsReference';
+
+export type PromptSectionEstimate = {
+  chars: number;
+  estTokens: number;
+  included: boolean;
+};
+
+export type PromptSectionEstimateMap = Record<PromptSectionKey, PromptSectionEstimate>;
+
+export type InlinedContextSection = {
+  filePath: string;
+  fileName: string;
+  rendered: string;
+  chars: number;
+};
+
+const PROMPT_SECTION_KEYS: PromptSectionKey[] = [
+  'soul',
+  'identity',
+  'user',
+  'agents',
+  'tools',
+  'pa',
+  'durableMemory',
+  'rollingSummary',
+  'channelContext',
+  'tasks',
+  'actionsReference',
+];
+
+function estimateForChars(chars: number): PromptSectionEstimate {
+  const safeChars = Number.isFinite(chars) && chars > 0 ? Math.floor(chars) : 0;
+  return {
+    chars: safeChars,
+    estTokens: estimateTokensFromChars(safeChars),
+    included: safeChars > 0,
+  };
+}
+
+function classifyContextSection(
+  section: InlinedContextSection,
+  normalizedChannelContextPath?: string,
+): PromptSectionKey {
+  if (normalizedChannelContextPath && path.resolve(section.filePath) === normalizedChannelContextPath) {
+    return 'channelContext';
+  }
+  const name = section.fileName.toLowerCase();
+  if (name === 'soul.md') return 'soul';
+  if (name === 'identity.md') return 'identity';
+  if (name === 'user.md') return 'user';
+  if (name === 'agents.md') return 'agents';
+  if (name === 'tools.md') return 'tools';
+  return 'pa';
+}
+
 export async function loadWorkspacePaFiles(
   workspaceCwd: string,
   opts?: { skip?: boolean },
@@ -98,17 +170,24 @@ export function buildContextFiles(
  * Falls back gracefully if any file can't be read, unless the file is in the
  * `required` set — required files throw on read failure.
  */
-export async function inlineContextFiles(
+export async function inlineContextFilesWithMeta(
   filePaths: string[],
   opts?: { required?: Set<string> },
-): Promise<string> {
-  if (filePaths.length === 0) return '';
-  const sections: string[] = [];
+): Promise<{ text: string; sections: InlinedContextSection[] }> {
+  if (filePaths.length === 0) return { text: '', sections: [] };
+
+  const sections: InlinedContextSection[] = [];
   for (const filePath of filePaths) {
     try {
       const content = await fs.readFile(filePath, 'utf-8');
-      const name = path.basename(filePath);
-      sections.push(`--- ${name} ---\n${content.trimEnd()}`);
+      const fileName = path.basename(filePath);
+      const rendered = `--- ${fileName} ---\n${content.trimEnd()}`;
+      sections.push({
+        filePath,
+        fileName,
+        rendered,
+        chars: rendered.length,
+      });
     } catch (err) {
       if (opts?.required?.has(filePath)) {
         throw new Error(`Required context file unreadable: ${filePath}`);
@@ -116,7 +195,74 @@ export async function inlineContextFiles(
       // Non-required files (channel context, memory) still skip gracefully.
     }
   }
-  return sections.join('\n\n');
+
+  return {
+    text: sections.map((section) => section.rendered).join('\n\n'),
+    sections,
+  };
+}
+
+export async function inlineContextFiles(
+  filePaths: string[],
+  opts?: { required?: Set<string> },
+): Promise<string> {
+  const result = await inlineContextFilesWithMeta(filePaths, opts);
+  return result.text;
+}
+
+export function buildPromptSectionEstimates(input: {
+  contextSections: InlinedContextSection[];
+  channelContextPath?: string | null;
+  durableSection?: string;
+  summarySection?: string;
+  taskSection?: string;
+  openTasksSection?: string;
+  actionsReferenceSection?: string;
+}): { sections: PromptSectionEstimateMap; totalChars: number; totalEstTokens: number } {
+  const charsBySection: Record<PromptSectionKey, number> = {
+    soul: 0,
+    identity: 0,
+    user: 0,
+    agents: 0,
+    tools: 0,
+    pa: 0,
+    durableMemory: 0,
+    rollingSummary: 0,
+    channelContext: 0,
+    tasks: 0,
+    actionsReference: 0,
+  };
+
+  const normalizedChannelContextPath = input.channelContextPath
+    ? path.resolve(input.channelContextPath)
+    : undefined;
+
+  for (const section of input.contextSections) {
+    const key = classifyContextSection(section, normalizedChannelContextPath);
+    const sectionChars = Number.isFinite(section.chars) && section.chars >= 0
+      ? Math.floor(section.chars)
+      : section.rendered.length;
+    charsBySection[key] += sectionChars;
+  }
+
+  charsBySection.durableMemory = input.durableSection?.length ?? 0;
+  charsBySection.rollingSummary = input.summarySection?.length ?? 0;
+  charsBySection.tasks = (input.taskSection?.length ?? 0) + (input.openTasksSection?.length ?? 0);
+  charsBySection.actionsReference = input.actionsReferenceSection?.length ?? 0;
+
+  const sections = {} as PromptSectionEstimateMap;
+  let totalChars = 0;
+
+  for (const key of PROMPT_SECTION_KEYS) {
+    sections[key] = estimateForChars(charsBySection[key]);
+    totalChars += sections[key].chars;
+  }
+
+  return {
+    sections,
+    totalChars,
+    totalEstTokens: estimateTokensFromChars(totalChars),
+  };
 }
 
 export async function buildDurableMemorySection(opts: {
