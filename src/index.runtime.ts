@@ -1,7 +1,10 @@
 import type { RuntimeRegistry } from './runtime/registry.js';
+import { withConcurrencyLimit, type ConcurrencyLimiter } from './runtime/concurrency-limit.js';
+import { withGlobalSupervisor, type GlobalSupervisorLimits } from './runtime/global-supervisor.js';
 import type { RuntimeAdapter } from './runtime/types.js';
 
 type RuntimeLog = {
+  debug?(payload: unknown, msg?: string): void;
   info(payload: unknown, msg?: string): void;
   warn(payload: unknown, msg?: string): void;
 };
@@ -103,4 +106,45 @@ export function collectActiveProviders(opts: {
   if (opts.drafterRuntime?.id) activeProviders.add(opts.drafterRuntime.id);
   if (opts.auditorRuntime?.id) activeProviders.add(opts.auditorRuntime.id);
   return activeProviders;
+}
+
+export type WrapRuntimeWithGlobalPoliciesOptions = {
+  runtime: RuntimeAdapter;
+  maxConcurrentInvocations: number;
+  limiter?: ConcurrencyLimiter | null;
+  log?: RuntimeLog;
+  env?: NodeJS.ProcessEnv;
+  globalSupervisorEnabled?: boolean;
+  globalSupervisorAuditStream?: 'stdout' | 'stderr';
+  globalSupervisorLimits?: Partial<GlobalSupervisorLimits>;
+};
+
+/**
+ * Apply runtime wrappers in a fixed order:
+ * 1) Global supervisor loop (plan -> execute -> evaluate -> decide)
+ * 2) Shared concurrency limiter
+ */
+export function wrapRuntimeWithGlobalPolicies(opts: WrapRuntimeWithGlobalPoliciesOptions): RuntimeAdapter {
+  const supervised = withGlobalSupervisor(opts.runtime, {
+    enabled: opts.globalSupervisorEnabled,
+    env: opts.env,
+    auditStream: opts.globalSupervisorAuditStream,
+    limits: opts.globalSupervisorLimits,
+  });
+  return withConcurrencyLimit(supervised, {
+    maxConcurrentInvocations: opts.maxConcurrentInvocations,
+    limiter: opts.limiter,
+    log: opts.log,
+  });
+}
+
+export type RegisterRuntimeWithGlobalPoliciesOptions = WrapRuntimeWithGlobalPoliciesOptions & {
+  name: string;
+  runtimeRegistry: RuntimeRegistry;
+};
+
+export function registerRuntimeWithGlobalPolicies(opts: RegisterRuntimeWithGlobalPoliciesOptions): RuntimeAdapter {
+  const wrapped = wrapRuntimeWithGlobalPolicies(opts);
+  opts.runtimeRegistry.register(opts.name, wrapped);
+  return wrapped;
 }
