@@ -3,7 +3,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadSummary, saveSummary, generateSummary, archiveSummary } from './summarizer.js';
+import {
+  loadSummary,
+  saveSummary,
+  generateSummary,
+  archiveSummary,
+  estimateSummaryTokens,
+  recompressSummary,
+} from './summarizer.js';
 import type { ConversationSummary } from './summarizer.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 
@@ -268,6 +275,76 @@ describe('generateSummary', () => {
     await generateSummary(runtime, baseOpts);
     expect(seenPrompt).not.toContain('Current task statuses:');
     expect(seenPrompt).not.toContain('Recently closed');
+  });
+});
+
+describe('estimateSummaryTokens', () => {
+  it('rounds with Math.ceil(chars / 4)', () => {
+    expect(estimateSummaryTokens('')).toBe(0);
+    expect(estimateSummaryTokens('abc')).toBe(1);
+    expect(estimateSummaryTokens('abcd')).toBe(1);
+    expect(estimateSummaryTokens('abcde')).toBe(2);
+    expect(estimateSummaryTokens('a'.repeat(10))).toBe(3);
+  });
+});
+
+describe('recompressSummary', () => {
+  const baseOpts = {
+    summary: 'X'.repeat(500),
+    model: 'haiku',
+    cwd: '/tmp',
+    thresholdTokens: 100,
+    targetTokens: 65,
+    timeoutMs: 30_000,
+  };
+
+  it('wires recompression prompt with limits, safety rules, and task status context', async () => {
+    let seenPrompt = '';
+    let seenTools: string[] | undefined;
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        seenPrompt = p.prompt;
+        seenTools = p.tools;
+        yield { type: 'text_final' as const, text: 'Compressed summary' };
+      }),
+    } as unknown as RuntimeAdapter;
+
+    const result = await recompressSummary(runtime, {
+      ...baseOpts,
+      taskStatusContext: 't-001: in_progress, "Ship summary recompression"',
+    });
+
+    expect(result).toBe('Compressed summary');
+    expect(seenTools).toEqual([]);
+    expect(seenPrompt).toContain('at most 65 tokens');
+    expect(seenPrompt).toContain('Recompress threshold: 100');
+    expect(seenPrompt).toContain('Drop stale details');
+    expect(seenPrompt).toContain('Collapse repeated references');
+    expect(seenPrompt).toContain('Preserve active project state and unresolved threads');
+    expect(seenPrompt).toContain('Current task statuses:');
+    expect(seenPrompt).toContain('t-001: in_progress, "Ship summary recompression"');
+  });
+
+  it('returns original summary when runtime emits an error event', async () => {
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'error' as const, message: 'timeout' };
+      }),
+    } as unknown as RuntimeAdapter;
+
+    const result = await recompressSummary(runtime, baseOpts);
+    expect(result).toBe(baseOpts.summary);
+  });
+
+  it('returns original summary when recompression result is empty', async () => {
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final' as const, text: '   ' };
+      }),
+    } as unknown as RuntimeAdapter;
+
+    const result = await recompressSummary(runtime, baseOpts);
+    expect(result).toBe(baseOpts.summary);
   });
 });
 
