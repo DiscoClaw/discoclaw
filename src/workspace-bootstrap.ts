@@ -23,8 +23,55 @@ const TEMPLATE_FILES = [
  */
 const SYSTEM_OWNED_FILES = new Set(['DISCOCLAW.md']);
 
+/**
+ * Marker strings from the legacy AGENTS.md template where system-owned
+ * instructions lived before DISCOCLAW.md was introduced.
+ */
+const LEGACY_AGENTS_MARKERS = [
+  '## Rebuild & Restart Workflow',
+  '## Releasing to npm',
+  '## Discord Action Batching',
+  '## Forge, Plan & Memory Action Types',
+  '## Bead Creation',
+  '## YouTube Links',
+  '## Codex working directory',
+];
+const LEGACY_AGENTS_MIN_MARKER_HITS = 2;
+
 /** Marker text present in the template IDENTITY.md but removed during onboarding. */
 const IDENTITY_TEMPLATE_MARKER = '*(pick something you like)*';
+
+type BootstrapLog = {
+  info: (obj: Record<string, unknown>, msg: string) => void;
+  warn: (obj: Record<string, unknown>, msg: string) => void;
+};
+
+function findLegacyAgentsMarkers(content: string): string[] {
+  return LEGACY_AGENTS_MARKERS.filter((marker) => content.includes(marker));
+}
+
+async function warnIfLegacyAgentsContainsSystemInstructions(
+  workspaceCwd: string,
+  log?: BootstrapLog,
+): Promise<void> {
+  const agentsPath = path.join(workspaceCwd, 'AGENTS.md');
+  let content = '';
+  try {
+    content = await fs.readFile(agentsPath, 'utf-8');
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+
+  const matchedMarkers = findLegacyAgentsMarkers(content);
+  if (matchedMarkers.length < LEGACY_AGENTS_MIN_MARKER_HITS) return;
+
+  log?.warn(
+    { workspaceCwd, matchedMarkers },
+    'workspace:bootstrap legacy AGENTS.md system sections detected — this can conflict with managed DISCOCLAW.md instructions. ' +
+      'Keep personal rules in AGENTS.md and remove migrated system sections.',
+  );
+}
 
 /**
  * Onboarding is considered complete when IDENTITY.md exists and no longer
@@ -61,10 +108,7 @@ export async function isOnboardingComplete(workspaceCwd: string): Promise<boolea
  */
 export async function ensureWorkspaceBootstrapFiles(
   workspaceCwd: string,
-  log?: {
-    info: (obj: Record<string, unknown>, msg: string) => void;
-    warn: (obj: Record<string, unknown>, msg: string) => void;
-  },
+  log?: BootstrapLog,
 ): Promise<string[]> {
   const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
   await fs.mkdir(workspaceCwd, { recursive: true });
@@ -168,6 +212,8 @@ export async function ensureWorkspaceBootstrapFiles(
 
   // Ensure the daily log directory exists for file-based memory.
   await fs.mkdir(path.join(workspaceCwd, 'memory'), { recursive: true });
+
+  await warnIfLegacyAgentsContainsSystemInstructions(workspaceCwd, log);
 
   if (created.length > 0) {
     log?.info({ created, workspaceCwd }, 'workspace:bootstrap scaffolded PA files');

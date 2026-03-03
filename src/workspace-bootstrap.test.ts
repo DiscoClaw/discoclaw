@@ -304,6 +304,46 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     expect(discoContent).toBe(templateContent);
   });
 
+  it('warns when AGENTS.md still contains legacy system sections', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
+    dirs.push(workspace);
+
+    const legacyAgents = [
+      '# AGENTS.md - Legacy',
+      '## Releasing to npm',
+      '## Rebuild & Restart Workflow',
+      '## Discord Action Batching',
+    ].join('\n');
+    await fs.writeFile(path.join(workspace, 'AGENTS.md'), legacyAgents, 'utf-8');
+
+    const log = mockLog();
+    await ensureWorkspaceBootstrapFiles(workspace, log as any);
+
+    expect(
+      log.warn.mock.calls.some(([, msg]) => String(msg).includes('legacy AGENTS.md system sections detected')),
+    ).toBe(true);
+  });
+
+  it('does not warn when AGENTS.md has fewer than two legacy markers', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
+    dirs.push(workspace);
+
+    const customAgents = [
+      '# AGENTS.md',
+      '## My Rules',
+      '- Keep answers short',
+      '## Discord Action Batching',
+    ].join('\n');
+    await fs.writeFile(path.join(workspace, 'AGENTS.md'), customAgents, 'utf-8');
+
+    const log = mockLog();
+    await ensureWorkspaceBootstrapFiles(workspace, log as any);
+
+    expect(
+      log.warn.mock.calls.some(([, msg]) => String(msg).includes('legacy AGENTS.md system sections detected')),
+    ).toBe(false);
+  });
+
   // --- Plan-027 tests: force bootstrap env var ---
 
   it('DISCOCLAW_FORCE_BOOTSTRAP=1 creates BOOTSTRAP.md in onboarded workspace', async () => {
