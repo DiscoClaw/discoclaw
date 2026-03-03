@@ -1875,6 +1875,39 @@ if (cronEnabled && effectiveCronForum) {
   log.warn('DISCOCLAW_CRON_ENABLED=1 but no automations forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_CRON_FORUM); cron subsystem disabled');
 }
 
+// --- Wire spawn action flags + subsystems (late-bind after all contexts are initialized) ---
+if (botParams.spawnCtx) {
+  botParams.spawnCtx.actionFlags = {
+    channels: discordActionsChannels,
+    messaging: discordActionsMessaging,
+    guild: discordActionsGuild,
+    moderation: discordActionsModeration,
+    polls: discordActionsPolls,
+    tasks: Boolean(botParams.discordActionsTasks),
+    crons: Boolean(botParams.discordActionsCrons),
+    botProfile: Boolean(discordActionsBotProfile),
+    forge: Boolean(botParams.discordActionsForge),
+    plan: Boolean(botParams.discordActionsPlan),
+    memory: false, // No user identity in spawn context.
+    config: false, // Spawned agents should not change bot configuration.
+    defer: Boolean(botParams.discordActionsDefer),
+    imagegen: Boolean(botParams.discordActionsImagegen),
+    voice: Boolean(botParams.discordActionsVoice),
+    spawn: false, // Prevent recursive spawn (also enforced by depth check).
+  };
+  botParams.spawnCtx.deferScheduler = botParams.deferScheduler;
+  botParams.spawnCtx.subsystems = {
+    taskCtx: botParams.taskCtx,
+    cronCtx: botParams.cronCtx,
+    forgeCtx: botParams.forgeCtx,
+    planCtx: botParams.planCtx,
+    configCtx: botParams.configCtx,
+    imagegenCtx: botParams.imagegenCtx,
+    voiceCtx: botParams.voiceCtx,
+  };
+  log.info('spawn:action flags and subsystems wired');
+}
+
 // --- Webhook subsystem ---
 if (cfg.webhookEnabled && savedCronExecCtx) {
   if (!cfg.webhookConfigPath) {
