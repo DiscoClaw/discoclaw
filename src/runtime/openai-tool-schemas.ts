@@ -17,6 +17,7 @@ const DISCO_TO_OPENAI_NAMES: Readonly<Record<string, string[]>> = {
   WebFetch: ['web_fetch'],
   // Hybrid pipeline runtime lifecycle wiring.
   Pipeline: ['pipeline.start', 'pipeline.status', 'pipeline.resume', 'pipeline.cancel'],
+  Step: ['step.run', 'step.assert', 'step.retry', 'step.wait'],
 };
 
 /** OpenAI function name → discoclaw tool name (for dispatching tool results) */
@@ -267,6 +268,94 @@ const TOOL_DEFS: Record<string, OpenAIFunctionTool> = {
       },
     },
   },
+
+  'step.run': {
+    type: 'function',
+    function: {
+      name: 'step.run',
+      description: 'Execute the current step for an active pipeline run.',
+      parameters: {
+        type: 'object',
+        properties: {
+          run_id: { type: 'string', description: 'Run identifier returned by pipeline.start.' },
+          expected_current_step: {
+            type: 'number',
+            description: 'Expected current step index for optimistic concurrency checks.',
+          },
+        },
+        required: ['run_id', 'expected_current_step'],
+        additionalProperties: false,
+      },
+    },
+  },
+
+  'step.assert': {
+    type: 'function',
+    function: {
+      name: 'step.assert',
+      description: 'Assert that a run is still on the expected active step.',
+      parameters: {
+        type: 'object',
+        properties: {
+          run_id: { type: 'string', description: 'Run identifier returned by pipeline.start.' },
+          expected_current_step: {
+            type: 'number',
+            description: 'Expected current step index for optimistic concurrency checks.',
+          },
+          expected_step_status: {
+            type: 'string',
+            description: 'Optional expected status for the current step (e.g. "pending", "failed").',
+          },
+        },
+        required: ['run_id', 'expected_current_step'],
+        additionalProperties: false,
+      },
+    },
+  },
+
+  'step.retry': {
+    type: 'function',
+    function: {
+      name: 'step.retry',
+      description: 'Schedule a deterministic retry for the current failed step.',
+      parameters: {
+        type: 'object',
+        properties: {
+          run_id: { type: 'string', description: 'Run identifier returned by pipeline.start.' },
+          expected_current_step: {
+            type: 'number',
+            description: 'Expected current step index for optimistic concurrency checks.',
+          },
+          max_attempts: {
+            type: 'number',
+            description: 'Optional step-level max attempts (1-3). Values above 3 are clamped to 3.',
+          },
+        },
+        required: ['run_id', 'expected_current_step'],
+        additionalProperties: false,
+      },
+    },
+  },
+
+  'step.wait': {
+    type: 'function',
+    function: {
+      name: 'step.wait',
+      description: 'Report whether the current step retry window is ready to run.',
+      parameters: {
+        type: 'object',
+        properties: {
+          run_id: { type: 'string', description: 'Run identifier returned by pipeline.start.' },
+          expected_current_step: {
+            type: 'number',
+            description: 'Expected current step index for optimistic concurrency checks.',
+          },
+        },
+        required: ['run_id', 'expected_current_step'],
+        additionalProperties: false,
+      },
+    },
+  },
 };
 
 // ── Public API ────────────────────────────────────────────────────────
@@ -285,6 +374,13 @@ export function buildToolSchemas(enabledTools: string[]): OpenAIFunctionTool[] {
       expanded.add('pipeline.status');
       expanded.add('pipeline.resume');
       expanded.add('pipeline.cancel');
+      continue;
+    }
+    if (tool === 'Step') {
+      expanded.add('step.run');
+      expanded.add('step.assert');
+      expanded.add('step.retry');
+      expanded.add('step.wait');
       continue;
     }
     expanded.add(tool);

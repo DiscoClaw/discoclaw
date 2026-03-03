@@ -580,7 +580,28 @@ function handleWebSearch(): ToolResult {
 // ── Hybrid pipeline lifecycle handlers ──────────────────────────────
 
 type PipelineStepStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
-type PipelineRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+type PipelineRunStatus = 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled';
+
+const FAILURE_CODE_VERSION = 'v1' as const;
+type FailureCode =
+  | 'E_TOOL_UNAVAILABLE'
+  | 'E_POLICY_BLOCKED'
+  | 'E_RETRY_EXHAUSTED'
+  | 'E_IDEMPOTENCY_CONFLICT'
+  | 'E_RUN_NOT_FOUND';
+
+type StepToolName = 'step.run' | 'step.assert' | 'step.retry' | 'step.wait';
+
+const STEP_TOOL_NAMES: ReadonlySet<StepToolName> = new Set([
+  'step.run',
+  'step.assert',
+  'step.retry',
+  'step.wait',
+]);
+
+const ACTIVE_STEP_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set(['running', 'waiting']);
+const STEP_MAX_ATTEMPTS_TOTAL = 3;
+const STEP_RETRY_DELAYS_MS = [1_000, 2_000] as const;
 
 type PipelineStep = {
   tool: string;
@@ -601,6 +622,11 @@ type PipelineRun = {
   lastError?: string;
   completedAt?: string;
   cancelledAt?: string;
+  attemptsByStep: Record<string, number>;
+  lastAttemptAtByStep: Record<string, string | null>;
+  nextRetryDueAtByStep: Record<string, string | null>;
+  cancelRequested: boolean;
+  failureCode?: FailureCode;
 };
 
 type PipelineStore = {
@@ -613,6 +639,10 @@ const PIPELINE_MAX_RUNS = 200;
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function stepKey(index: number): string {
+  return String(index);
 }
 
 function emptyPipelineStore(): PipelineStore {
@@ -650,6 +680,100 @@ async function loadPipelineStore(storePath: string): Promise<{ store: PipelineSt
   }
 }
 
+function normalizeRunStatus(status: unknown): PipelineRunStatus {
+  if (status === 'pending') return 'running';
+  if (status === 'running' || status === 'waiting' || status === 'completed' || status === 'failed' || status === 'cancelled') {
+    return status;
+  }
+  return 'running';
+}
+
+function normalizeStepStatus(status: unknown): PipelineStepStatus {
+  if (status === 'pending' || status === 'running' || status === 'done' || status === 'failed' || status === 'cancelled') {
+    return status;
+  }
+  return 'pending';
+}
+
+function normalizePipelineRun(run: PipelineRun): void {
+  run.status = normalizeRunStatus(run.status);
+  run.cancelRequested = run.cancelRequested === true || run.status === 'cancelled';
+
+  if (!Number.isInteger(run.currentStep) || run.currentStep < 0) {
+    run.currentStep = 0;
+  }
+  if (run.currentStep > run.steps.length) {
+    run.currentStep = run.steps.length;
+  }
+
+  for (const step of run.steps) {
+    step.status = normalizeStepStatus(step.status);
+    if (typeof step.updatedAt !== 'string' || step.updatedAt.trim() === '') {
+      step.updatedAt = run.updatedAt;
+    }
+  }
+
+  const attemptsRaw = run.attemptsByStep as unknown;
+  const lastAttemptRaw = run.lastAttemptAtByStep as unknown;
+  const nextRetryRaw = run.nextRetryDueAtByStep as unknown;
+
+  const attempts: Record<string, number> = {};
+  const lastAttempt: Record<string, string | null> = {};
+  const nextRetry: Record<string, string | null> = {};
+
+  const attemptsObj =
+    attemptsRaw && typeof attemptsRaw === 'object' && !Array.isArray(attemptsRaw)
+      ? attemptsRaw as Record<string, unknown>
+      : {};
+  const lastAttemptObj =
+    lastAttemptRaw && typeof lastAttemptRaw === 'object' && !Array.isArray(lastAttemptRaw)
+      ? lastAttemptRaw as Record<string, unknown>
+      : {};
+  const nextRetryObj =
+    nextRetryRaw && typeof nextRetryRaw === 'object' && !Array.isArray(nextRetryRaw)
+      ? nextRetryRaw as Record<string, unknown>
+      : {};
+
+  for (let i = 0; i < run.steps.length; i++) {
+    const key = stepKey(i);
+    const attemptsVal = attemptsObj[key];
+    attempts[key] = typeof attemptsVal === 'number' && Number.isFinite(attemptsVal) && attemptsVal >= 0
+      ? Math.floor(attemptsVal)
+      : 0;
+
+    const lastAttemptVal = lastAttemptObj[key];
+    lastAttempt[key] = typeof lastAttemptVal === 'string' && lastAttemptVal.trim() !== ''
+      ? lastAttemptVal
+      : null;
+
+    const nextRetryVal = nextRetryObj[key];
+    nextRetry[key] = typeof nextRetryVal === 'string' && nextRetryVal.trim() !== ''
+      ? nextRetryVal
+      : null;
+  }
+
+  run.attemptsByStep = attempts;
+  run.lastAttemptAtByStep = lastAttempt;
+  run.nextRetryDueAtByStep = nextRetry;
+
+  if (
+    run.failureCode !== undefined
+    && run.failureCode !== 'E_TOOL_UNAVAILABLE'
+    && run.failureCode !== 'E_POLICY_BLOCKED'
+    && run.failureCode !== 'E_RETRY_EXHAUSTED'
+    && run.failureCode !== 'E_IDEMPOTENCY_CONFLICT'
+    && run.failureCode !== 'E_RUN_NOT_FOUND'
+  ) {
+    run.failureCode = undefined;
+  }
+}
+
+function normalizePipelineStore(store: PipelineStore): void {
+  for (const run of Object.values(store.runs)) {
+    normalizePipelineRun(run);
+  }
+}
+
 function prunePipelineRuns(store: PipelineStore): void {
   const entries = Object.entries(store.runs);
   if (entries.length <= PIPELINE_MAX_RUNS) return;
@@ -670,6 +794,20 @@ async function savePipelineStore(storePath: string, store: PipelineStore): Promi
 function parseRunId(args: Record<string, unknown>): string | undefined {
   const candidate = args.run_id ?? args.runId ?? args.id;
   return typeof candidate === 'string' && candidate.trim() !== '' ? candidate.trim() : undefined;
+}
+
+function parseExpectedCurrentStep(args: Record<string, unknown>): number | undefined {
+  const candidate = args.expected_current_step ?? args.expectedCurrentStep;
+  if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0) return candidate;
+  if (typeof candidate === 'string' && /^\d+$/.test(candidate.trim())) return Number(candidate.trim());
+  return undefined;
+}
+
+function parseMaxAttempts(args: Record<string, unknown>): number | undefined {
+  const candidate = args.max_attempts ?? args.maxAttempts;
+  if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate > 0) return candidate;
+  if (typeof candidate === 'string' && /^\d+$/.test(candidate.trim())) return Number(candidate.trim());
+  return undefined;
 }
 
 function parseAutoRun(args: Record<string, unknown>): boolean {
@@ -728,6 +866,12 @@ function summarizePipelineRun(run: PipelineRun): Record<string, unknown> {
     updated_at: run.updatedAt,
     completed_at: run.completedAt ?? null,
     cancelled_at: run.cancelledAt ?? null,
+    cancel_requested: run.cancelRequested,
+    failure_code_version: FAILURE_CODE_VERSION,
+    failure_code: run.failureCode ?? null,
+    attempts_by_step: run.attemptsByStep,
+    last_attempt_at_by_step: run.lastAttemptAtByStep,
+    next_retry_due_at_by_step: run.nextRetryDueAtByStep,
     steps: run.steps.map((step, idx) => ({
       index: idx,
       tool: step.tool,
@@ -753,6 +897,7 @@ async function executePipelineRun(
 
   while (run.currentStep < run.steps.length) {
     const step = run.steps[run.currentStep]!;
+    const key = stepKey(run.currentStep);
     if (step.status === 'done') {
       run.currentStep++;
       run.updatedAt = nowIso();
@@ -762,6 +907,10 @@ async function executePipelineRun(
 
     step.status = 'running';
     step.updatedAt = nowIso();
+    run.attemptsByStep[key] = (run.attemptsByStep[key] ?? 0) + 1;
+    run.lastAttemptAtByStep[key] = step.updatedAt;
+    run.nextRetryDueAtByStep[key] = null;
+    run.failureCode = undefined;
     run.updatedAt = step.updatedAt;
     await savePipelineStore(storePath, store);
 
@@ -781,6 +930,7 @@ async function executePipelineRun(
     if (!result.ok) {
       step.status = 'failed';
       run.status = 'failed';
+      run.failureCode = classifyFailureCode(result.result);
       run.lastError = `step ${run.currentStep + 1} (${step.tool}) failed: ${result.result}`;
       await savePipelineStore(storePath, store);
       return;
@@ -792,9 +942,328 @@ async function executePipelineRun(
   }
 
   run.status = 'completed';
+  run.failureCode = undefined;
   run.completedAt = nowIso();
   run.updatedAt = run.completedAt;
   await savePipelineStore(storePath, store);
+}
+
+function stepFailure(
+  operation: StepToolName,
+  code: FailureCode,
+  message: string,
+  extra?: Record<string, unknown>,
+): ToolResult {
+  return {
+    ok: false,
+    result: JSON.stringify({
+      ok: false,
+      operation,
+      failure_code_version: FAILURE_CODE_VERSION,
+      failure_code: code,
+      message,
+      ...(extra ?? {}),
+    }),
+  };
+}
+
+function stepSuccess(
+  operation: StepToolName,
+  extra?: Record<string, unknown>,
+): ToolResult {
+  return {
+    ok: true,
+    result: JSON.stringify({
+      ok: true,
+      operation,
+      ...(extra ?? {}),
+    }),
+  };
+}
+
+function classifyFailureCode(message: string): FailureCode {
+  if (/tool not allowlisted/i.test(message) || /nested pipeline/i.test(message) || /nested step/i.test(message)) {
+    return 'E_POLICY_BLOCKED';
+  }
+  if (/run not found/i.test(message) || /run_id is required/i.test(message)) {
+    return 'E_RUN_NOT_FOUND';
+  }
+  if (/retry exhausted/i.test(message)) {
+    return 'E_RETRY_EXHAUSTED';
+  }
+  if (/unknown tool/i.test(message)) {
+    return 'E_TOOL_UNAVAILABLE';
+  }
+  return 'E_TOOL_UNAVAILABLE';
+}
+
+type StepToolContext = {
+  storePath: string;
+  store: PipelineStore;
+  run: PipelineRun;
+  step: PipelineStep;
+  stepIndex: number;
+  stepStateKey: string;
+};
+
+async function loadStepToolContext(
+  operation: StepToolName,
+  args: Record<string, unknown>,
+  allowedRoots: string[],
+  opts: ExecuteToolCallOpts | undefined,
+): Promise<{ ctx?: StepToolContext; failure?: ToolResult }> {
+  const storePath = resolvePipelineStorePath(allowedRoots, opts);
+  const loaded = await loadPipelineStore(storePath);
+  if (loaded.error) {
+    return { failure: stepFailure(operation, 'E_TOOL_UNAVAILABLE', loaded.error) };
+  }
+
+  const store = loaded.store;
+  normalizePipelineStore(store);
+
+  const runId = parseRunId(args);
+  if (!runId) {
+    return { failure: stepFailure(operation, 'E_RUN_NOT_FOUND', 'run_id is required') };
+  }
+
+  const run = store.runs[runId];
+  if (!run) {
+    return { failure: stepFailure(operation, 'E_RUN_NOT_FOUND', `pipeline run not found: ${runId}`) };
+  }
+
+  const expectedCurrentStep = parseExpectedCurrentStep(args);
+  if (expectedCurrentStep === undefined) {
+    return { failure: stepFailure(operation, 'E_POLICY_BLOCKED', 'expected_current_step is required') };
+  }
+  if (expectedCurrentStep !== run.currentStep) {
+    return {
+      failure: stepFailure(
+        operation,
+        'E_POLICY_BLOCKED',
+        `expected_current_step mismatch (expected ${expectedCurrentStep}, actual ${run.currentStep})`,
+      ),
+    };
+  }
+
+  if (run.cancelRequested) {
+    return { failure: stepFailure(operation, 'E_POLICY_BLOCKED', 'run cancel has been requested') };
+  }
+  if (!ACTIVE_STEP_RUN_STATUSES.has(run.status)) {
+    return { failure: stepFailure(operation, 'E_POLICY_BLOCKED', `run status is not active: ${run.status}`) };
+  }
+  if (run.currentStep < 0 || run.currentStep >= run.steps.length) {
+    return { failure: stepFailure(operation, 'E_POLICY_BLOCKED', 'run has no active current step') };
+  }
+
+  const step = run.steps[run.currentStep]!;
+  return {
+    ctx: {
+      storePath,
+      store,
+      run,
+      step,
+      stepIndex: run.currentStep,
+      stepStateKey: stepKey(run.currentStep),
+    },
+  };
+}
+
+async function handleStepTool(
+  name: string,
+  args: Record<string, unknown>,
+  allowedRoots: string[],
+  log: LogFn | undefined,
+  opts: ExecuteToolCallOpts | undefined,
+): Promise<ToolResult> {
+  if (!STEP_TOOL_NAMES.has(name as StepToolName)) {
+    return { result: `Unknown tool: ${name}`, ok: false };
+  }
+
+  const operation = name as StepToolName;
+  const { ctx, failure } = await loadStepToolContext(operation, args, allowedRoots, opts);
+  if (failure || !ctx) return failure!;
+
+  if (operation === 'step.assert') {
+    const expectedStepStatus = args.expected_step_status ?? args.expectedStepStatus;
+    if (typeof expectedStepStatus === 'string' && expectedStepStatus.trim() !== '' && ctx.step.status !== expectedStepStatus) {
+      return stepFailure(
+        operation,
+        'E_POLICY_BLOCKED',
+        `expected step status "${expectedStepStatus}" did not match current status "${ctx.step.status}"`,
+        { run: summarizePipelineRun(ctx.run) },
+      );
+    }
+    return stepSuccess(operation, {
+      run: summarizePipelineRun(ctx.run),
+      step_index: ctx.stepIndex,
+      step_status: ctx.step.status,
+    });
+  }
+
+  if (operation === 'step.wait') {
+    const nowMs = Date.now();
+    const dueAt = ctx.run.nextRetryDueAtByStep[ctx.stepStateKey];
+    if (!dueAt) {
+      if (ctx.run.status !== 'running') {
+        ctx.run.status = 'running';
+        ctx.run.updatedAt = nowIso();
+        await savePipelineStore(ctx.storePath, ctx.store);
+      }
+      return stepSuccess(operation, {
+        ready: true,
+        wait_ms: 0,
+        next_retry_due_at: null,
+        run: summarizePipelineRun(ctx.run),
+      });
+    }
+
+    const dueMs = Date.parse(dueAt);
+    if (!Number.isFinite(dueMs) || dueMs <= nowMs) {
+      ctx.run.nextRetryDueAtByStep[ctx.stepStateKey] = null;
+      ctx.run.status = 'running';
+      ctx.run.updatedAt = nowIso();
+      await savePipelineStore(ctx.storePath, ctx.store);
+      return stepSuccess(operation, {
+        ready: true,
+        wait_ms: 0,
+        next_retry_due_at: dueAt,
+        run: summarizePipelineRun(ctx.run),
+      });
+    }
+
+    const waitMs = dueMs - nowMs;
+    if (ctx.run.status !== 'waiting') {
+      ctx.run.status = 'waiting';
+      ctx.run.updatedAt = nowIso();
+      await savePipelineStore(ctx.storePath, ctx.store);
+    }
+    return stepSuccess(operation, {
+      ready: false,
+      wait_ms: waitMs,
+      next_retry_due_at: dueAt,
+      run: summarizePipelineRun(ctx.run),
+    });
+  }
+
+  if (operation === 'step.retry') {
+    if (ctx.step.status !== 'failed') {
+      return stepFailure(
+        operation,
+        'E_POLICY_BLOCKED',
+        `current step is not failed (status=${ctx.step.status})`,
+        { run: summarizePipelineRun(ctx.run) },
+      );
+    }
+
+    const configuredMaxAttempts = parseMaxAttempts(args);
+    const maxAttempts = Math.min(STEP_MAX_ATTEMPTS_TOTAL, Math.max(1, configuredMaxAttempts ?? STEP_MAX_ATTEMPTS_TOTAL));
+    const attempts = ctx.run.attemptsByStep[ctx.stepStateKey] ?? 0;
+    if (attempts >= maxAttempts) {
+      ctx.run.status = 'failed';
+      ctx.run.failureCode = 'E_RETRY_EXHAUSTED';
+      ctx.run.updatedAt = nowIso();
+      await savePipelineStore(ctx.storePath, ctx.store);
+      return stepFailure(
+        operation,
+        'E_RETRY_EXHAUSTED',
+        `retry exhausted for step ${ctx.stepIndex} (${attempts}/${maxAttempts} attempts used)`,
+        { run: summarizePipelineRun(ctx.run) },
+      );
+    }
+
+    const retryOrdinal = Math.max(1, attempts);
+    const delayMs = STEP_RETRY_DELAYS_MS[Math.min(retryOrdinal - 1, STEP_RETRY_DELAYS_MS.length - 1)];
+    const dueAt = new Date(Date.now() + delayMs).toISOString();
+    const updatedAt = nowIso();
+
+    ctx.run.nextRetryDueAtByStep[ctx.stepStateKey] = dueAt;
+    ctx.run.status = 'waiting';
+    ctx.run.failureCode = undefined;
+    ctx.run.lastError = undefined;
+    ctx.run.updatedAt = updatedAt;
+    ctx.step.status = 'pending';
+    ctx.step.ok = undefined;
+    ctx.step.result = undefined;
+    ctx.step.updatedAt = updatedAt;
+    await savePipelineStore(ctx.storePath, ctx.store);
+
+    return stepSuccess(operation, {
+      retry_due_at: dueAt,
+      max_attempts: maxAttempts,
+      attempts_used: attempts,
+      run: summarizePipelineRun(ctx.run),
+    });
+  }
+
+  const dueAt = ctx.run.nextRetryDueAtByStep[ctx.stepStateKey];
+  if (dueAt) {
+    const dueMs = Date.parse(dueAt);
+    if (Number.isFinite(dueMs) && dueMs > Date.now()) {
+      return stepFailure(
+        operation,
+        'E_POLICY_BLOCKED',
+        `retry not due yet for step ${ctx.stepIndex}; wait until ${dueAt}`,
+        { run: summarizePipelineRun(ctx.run) },
+      );
+    }
+  }
+
+  const updatedAt = nowIso();
+  ctx.run.status = 'running';
+  ctx.run.failureCode = undefined;
+  ctx.run.nextRetryDueAtByStep[ctx.stepStateKey] = null;
+  ctx.run.updatedAt = updatedAt;
+  ctx.step.status = 'running';
+  ctx.step.updatedAt = updatedAt;
+  ctx.run.attemptsByStep[ctx.stepStateKey] = (ctx.run.attemptsByStep[ctx.stepStateKey] ?? 0) + 1;
+  ctx.run.lastAttemptAtByStep[ctx.stepStateKey] = updatedAt;
+  await savePipelineStore(ctx.storePath, ctx.store);
+
+  const result = await executeToolCall(
+    ctx.step.tool,
+    ctx.step.arguments,
+    allowedRoots,
+    log,
+    { ...opts, pipelineStepMode: true },
+  );
+
+  const completedAt = nowIso();
+  ctx.step.ok = result.ok;
+  ctx.step.result = result.result;
+  ctx.step.updatedAt = completedAt;
+  ctx.run.updatedAt = completedAt;
+
+  if (!result.ok) {
+    const failureCode = classifyFailureCode(result.result);
+    ctx.step.status = 'failed';
+    ctx.run.status = 'waiting';
+    ctx.run.failureCode = failureCode;
+    ctx.run.lastError = `step ${ctx.stepIndex + 1} (${ctx.step.tool}) failed: ${result.result}`;
+    await savePipelineStore(ctx.storePath, ctx.store);
+    return stepFailure(
+      operation,
+      failureCode,
+      ctx.run.lastError,
+      { run: summarizePipelineRun(ctx.run) },
+    );
+  }
+
+  ctx.step.status = 'done';
+  ctx.run.currentStep++;
+  ctx.run.failureCode = undefined;
+  ctx.run.lastError = undefined;
+  if (ctx.run.currentStep >= ctx.run.steps.length) {
+    ctx.run.status = 'completed';
+    ctx.run.completedAt = completedAt;
+  } else {
+    ctx.run.status = 'running';
+  }
+  await savePipelineStore(ctx.storePath, ctx.store);
+
+  return stepSuccess(operation, {
+    step_result: result.result,
+    run: summarizePipelineRun(ctx.run),
+  });
 }
 
 async function handlePipelineTool(
@@ -814,6 +1283,7 @@ async function handlePipelineTool(
     return { result: loaded.error, ok: false };
   }
   const store = loaded.store;
+  normalizePipelineStore(store);
 
   if (name === 'pipeline.start') {
     const parsedSteps = parsePipelineSteps(args);
@@ -827,13 +1297,26 @@ async function handlePipelineTool(
     }
 
     const createdAt = nowIso();
+    const attemptsByStep: Record<string, number> = {};
+    const lastAttemptAtByStep: Record<string, string | null> = {};
+    const nextRetryDueAtByStep: Record<string, string | null> = {};
+    for (let i = 0; i < parsedSteps.steps.length; i++) {
+      const key = stepKey(i);
+      attemptsByStep[key] = 0;
+      lastAttemptAtByStep[key] = null;
+      nextRetryDueAtByStep[key] = null;
+    }
     const run: PipelineRun = {
       runId,
-      status: 'pending',
+      status: 'running',
       currentStep: 0,
       steps: parsedSteps.steps,
       createdAt,
       updatedAt: createdAt,
+      attemptsByStep,
+      lastAttemptAtByStep,
+      nextRetryDueAtByStep,
+      cancelRequested: false,
     };
     store.runs[runId] = run;
     prunePipelineRuns(store);
@@ -870,7 +1353,10 @@ async function handlePipelineTool(
       return { result: `pipeline run is cancelled: ${runId}`, ok: false };
     }
     if (run.status === 'running') {
-      return { result: `pipeline run is already running: ${runId}`, ok: false };
+      const currentStep = run.currentStep < run.steps.length ? run.steps[run.currentStep] : undefined;
+      if (currentStep?.status === 'running') {
+        return { result: `pipeline run is already running: ${runId}`, ok: false };
+      }
     }
 
     if (run.status === 'failed' && run.currentStep < run.steps.length) {
@@ -882,7 +1368,8 @@ async function handlePipelineTool(
         step.updatedAt = nowIso();
       }
       run.lastError = undefined;
-      run.status = 'pending';
+      run.failureCode = undefined;
+      run.status = 'running';
       run.updatedAt = nowIso();
       await savePipelineStore(storePath, store);
     }
@@ -902,6 +1389,7 @@ async function handlePipelineTool(
       return { result: `pipeline run already failed: ${runId}`, ok: false };
     }
     if (run.status !== 'cancelled') {
+      run.cancelRequested = true;
       run.status = 'cancelled';
       run.cancelledAt = nowIso();
       run.updatedAt = run.cancelledAt;
@@ -955,10 +1443,17 @@ export async function executeToolCall(
     return { result: 'No allowed roots configured', ok: false };
   }
 
-  if (opts?.pipelineStepMode && name.startsWith('pipeline.')) {
-    return { result: 'Nested pipeline.* calls are not allowed inside pipeline steps', ok: false };
+  if (opts?.pipelineStepMode && (name.startsWith('pipeline.') || name.startsWith('step.'))) {
+    return { result: 'Nested pipeline.* and step.* calls are not allowed inside pipeline steps', ok: false };
   }
   if (opts?.allowedToolNames && !opts.allowedToolNames.has(name)) {
+    if (STEP_TOOL_NAMES.has(name as StepToolName)) {
+      return stepFailure(
+        name as StepToolName,
+        'E_POLICY_BLOCKED',
+        `Tool not allowlisted for this invocation: ${name}`,
+      );
+    }
     return { result: `Tool not allowlisted for this invocation: ${name}`, ok: false };
   }
 
@@ -972,6 +1467,19 @@ export async function executeToolCall(
       const message = err instanceof Error ? err.message : String(err);
       log?.(`tool:${name} error: ${message}`);
       return { result: message, ok: false };
+    }
+  }
+
+  if (name.startsWith('step.')) {
+    try {
+      log?.(`tool:${name} start`);
+      const result = await handleStepTool(name, args, allowedRoots, log, opts);
+      log?.(`tool:${name} done ok=${result.ok}`);
+      return result;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log?.(`tool:${name} error: ${message}`);
+      return stepFailure(name as StepToolName, 'E_TOOL_UNAVAILABLE', message);
     }
   }
 

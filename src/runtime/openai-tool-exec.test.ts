@@ -593,6 +593,226 @@ describe('pipeline.start/status/resume/cancel', () => {
   });
 });
 
+// ── step primitives ──────────────────────────────────────────────────
+
+describe('step.run/assert/retry/wait', () => {
+  it('step.run executes current step and advances the run', async () => {
+    const started = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'step-run.txt', content: 'ok' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(started.ok).toBe(true);
+    const runId = parseJsonResult(started.result)['run_id'] as string;
+
+    const ran = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'write_file']) },
+    );
+    expect(ran.ok).toBe(true);
+
+    const payload = parseJsonResult(ran.result);
+    expect(payload['operation']).toBe('step.run');
+    const run = payload['run'] as Record<string, unknown>;
+    expect(run['status']).toBe('completed');
+    expect(run['current_step']).toBe(1);
+    await expect(fs.readFile(path.join(tmpDir, 'step-run.txt'), 'utf-8')).resolves.toBe('ok');
+  });
+
+  it('step.assert validates active run state', async () => {
+    const started = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'assert.txt', content: 'ok' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    const runId = parseJsonResult(started.result)['run_id'] as string;
+
+    const asserted = await executeToolCall(
+      'step.assert',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.assert']) },
+    );
+    expect(asserted.ok).toBe(true);
+    const payload = parseJsonResult(asserted.result);
+    expect(payload['operation']).toBe('step.assert');
+    expect(payload['step_status']).toBe('pending');
+  });
+
+  it('step.run returns E_POLICY_BLOCKED on expected_current_step mismatch', async () => {
+    const started = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'mismatch.txt', content: 'x' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    const runId = parseJsonResult(started.result)['run_id'] as string;
+
+    const ran = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 1 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'write_file']) },
+    );
+    expect(ran.ok).toBe(false);
+    const payload = parseJsonResult(ran.result);
+    expect(payload['failure_code_version']).toBe('v1');
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+  });
+
+  it('step.run returns E_RUN_NOT_FOUND for missing run', async () => {
+    const ran = await executeToolCall(
+      'step.run',
+      { run_id: 'missing-run', expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run']) },
+    );
+    expect(ran.ok).toBe(false);
+    const payload = parseJsonResult(ran.result);
+    expect(payload['failure_code']).toBe('E_RUN_NOT_FOUND');
+  });
+
+  it('step.run returns E_POLICY_BLOCKED when the underlying step tool is not allowlisted', async () => {
+    const started = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'blocked-step.txt', content: 'x' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    const runId = parseJsonResult(started.result)['run_id'] as string;
+
+    const ran = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run']) },
+    );
+    expect(ran.ok).toBe(false);
+    const payload = parseJsonResult(ran.result);
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+  });
+
+  it('step.retry schedules retries and enforces deterministic retry exhaustion', async () => {
+    const started = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'not_a_real_tool', arguments: {} }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    const runId = parseJsonResult(started.result)['run_id'] as string;
+
+    const run1 = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'not_a_real_tool']) },
+    );
+    expect(run1.ok).toBe(false);
+    expect(parseJsonResult(run1.result)['failure_code']).toBe('E_TOOL_UNAVAILABLE');
+
+    const retry1 = await executeToolCall(
+      'step.retry',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.retry']) },
+    );
+    expect(retry1.ok).toBe(true);
+
+    const wait1 = await executeToolCall(
+      'step.wait',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.wait']) },
+    );
+    const wait1Payload = parseJsonResult(wait1.result);
+    if (wait1Payload['ready'] === false) {
+      await new Promise((resolve) => setTimeout(resolve, Number(wait1Payload['wait_ms']) + 20));
+    }
+
+    const run2 = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'not_a_real_tool']) },
+    );
+    expect(run2.ok).toBe(false);
+
+    const retry2 = await executeToolCall(
+      'step.retry',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.retry']) },
+    );
+    expect(retry2.ok).toBe(true);
+
+    const wait2 = await executeToolCall(
+      'step.wait',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.wait']) },
+    );
+    const wait2Payload = parseJsonResult(wait2.result);
+    if (wait2Payload['ready'] === false) {
+      await new Promise((resolve) => setTimeout(resolve, Number(wait2Payload['wait_ms']) + 20));
+    }
+
+    const run3 = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'not_a_real_tool']) },
+    );
+    expect(run3.ok).toBe(false);
+
+    const retry3 = await executeToolCall(
+      'step.retry',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.retry']) },
+    );
+    expect(retry3.ok).toBe(false);
+    const payload = parseJsonResult(retry3.result);
+    expect(payload['failure_code']).toBe('E_RETRY_EXHAUSTED');
+  });
+});
+
 // ── Security: path traversal ─────────────────────────────────────────
 
 describe('path security', () => {
