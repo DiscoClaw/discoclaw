@@ -94,6 +94,8 @@ Current durable-memory behavior is size-triggered hot-tier compaction: active it
 | `DISCOCLAW_SUMMARY_MODEL` | `fast` | Model tier for summary generation |
 | `DISCOCLAW_SUMMARY_MAX_CHARS` | `2000` | Max chars for rolling summary |
 | `DISCOCLAW_SUMMARY_EVERY_N_TURNS` | `5` | Turns between summary refreshes |
+| `DISCOCLAW_SUMMARY_MAX_TOKENS` | `1500` | Estimated-token threshold for rolling summary recompression (roughly `ceil(chars / 4)`) |
+| `DISCOCLAW_SUMMARY_TARGET_RATIO` | `0.65` | Recompression target ratio; target tokens are `floor(DISCOCLAW_SUMMARY_MAX_TOKENS * ratio)` |
 | `DISCOCLAW_SUMMARY_DATA_DIR` | — | Override summary storage directory |
 | `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED` | `true` | Enable auto-extraction (user turn → durable memory) |
 | `DISCOCLAW_MESSAGE_HISTORY_BUDGET` | `3000` | Character budget for message history |

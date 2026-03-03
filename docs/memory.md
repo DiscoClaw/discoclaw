@@ -21,6 +21,22 @@ Bot:             We've been working through your Express → Fastify migration.
                  request validation layer.
 ```
 
+#### Rolling Summary Token Recompression
+
+After each summary refresh, DiscoClaw estimates summary size as `ceil(chars / 4)` tokens.
+
+- If the estimate exceeds `DISCOCLAW_SUMMARY_MAX_TOKENS` (default `1500`), DiscoClaw runs one extra recompression pass before saving.
+- The recompression target is `floor(DISCOCLAW_SUMMARY_MAX_TOKENS * DISCOCLAW_SUMMARY_TARGET_RATIO)` (default ratio `0.65`).
+- Recompression is one-pass only (no retry loop). If the result still exceeds threshold, DiscoClaw logs a warning and continues.
+
+Logging visibility:
+- Recompression logs include before/after estimated tokens, threshold, and target.
+- A warning is emitted when the one-pass recompressed summary remains above threshold.
+
+Summary safety behavior is unchanged:
+- If recompression fails or returns empty content, DiscoClaw keeps the pre-recompression summary.
+- The saved summary is still capped by `DISCOCLAW_SUMMARY_MAX_CHARS`.
+
 ### 2. Durable Memory — long-term user facts
 
 A structured store of user facts that persists across all conversations and restarts. Each item has a kind (fact, preference, project, constraint, person, tool, workflow), deduplication by content hash, and a 200-item cap per user. Injection is hot-tier bounded to keep prompts lean: active durable memory is auto-compacted to about 25 items or ~2000 chars.
@@ -153,6 +169,10 @@ With all layers at default settings, worst-case memory overhead is ~8600 chars (
 - `DISCOCLAW_MESSAGE_HISTORY_BUDGET` — more message history
 - `DISCOCLAW_SHORTTERM_INJECT_MAX_CHARS` — more cross-channel context
 
+**Tune rolling-summary token recompression:**
+- `DISCOCLAW_SUMMARY_MAX_TOKENS` — estimated-token threshold that triggers one-pass recompression
+- `DISCOCLAW_SUMMARY_TARGET_RATIO` — recompression target ratio relative to that threshold
+
 **Want less memory overhead?** Disable layers you don't need:
 - `DISCOCLAW_DURABLE_MEMORY_ENABLED=false` — no long-term facts
 - `DISCOCLAW_SUMMARY_ENABLED=false` — no rolling summaries
@@ -177,6 +197,8 @@ With all layers at default settings, worst-case memory overhead is ~8600 chars (
 | `DISCOCLAW_SUMMARY_MODEL` | `fast` | Model tier for summary generation |
 | `DISCOCLAW_SUMMARY_MAX_CHARS` | `2000` | Max chars for rolling summary |
 | `DISCOCLAW_SUMMARY_EVERY_N_TURNS` | `5` | Turns between summary updates |
+| `DISCOCLAW_SUMMARY_MAX_TOKENS` | `1500` | Estimated-token threshold that triggers one-pass rolling-summary recompression |
+| `DISCOCLAW_SUMMARY_TARGET_RATIO` | `0.65` | Recompression target ratio; target tokens are `floor(maxTokens * ratio)` |
 | `DISCOCLAW_DURABLE_MEMORY_ENABLED` | `true` | Enable durable memory |
 | `DISCOCLAW_DURABLE_INJECT_MAX_CHARS` | `2000` | Max chars injected per prompt |
 | `DISCOCLAW_DURABLE_MAX_ITEMS` | `200` | Max items per user |
