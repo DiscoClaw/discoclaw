@@ -696,6 +696,52 @@ describe('OpenAI-compat tool loop', () => {
     expect(body2.messages[2].content).toBe('hello world');
   });
 
+  it('expands Step category to step primitives in tool-loop mode', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(makeToolCallResponse([
+        { id: 'call_step', name: 'step.assert', arguments: JSON.stringify({ run_id: 'r1', expected_current_step: 0 }) },
+      ]))
+      .mockResolvedValueOnce(makeTextResponse('step asserted'));
+    globalThis.fetch = fetchMock;
+
+    vi.mocked(executeToolCall).mockResolvedValue({
+      result: JSON.stringify({ ok: true, operation: 'step.assert' }),
+      ok: true,
+    });
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+      enableTools: true,
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'assert current step',
+      model: '',
+      cwd: '/tmp',
+      tools: ['Step'],
+    }));
+
+    expect(events.find((e) => e.type === 'tool_start')).toMatchObject({
+      type: 'tool_start',
+      name: 'Step',
+    });
+    expect(events.find((e) => e.type === 'tool_end')).toMatchObject({
+      type: 'tool_end',
+      name: 'Step',
+      ok: true,
+    });
+
+    expect(executeToolCall).toHaveBeenCalledWith(
+      'step.assert',
+      { run_id: 'r1', expected_current_step: 0 },
+      ['/tmp'],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'step.assert', 'step.retry', 'step.wait']) },
+    );
+  });
+
   it('multiple tool calls in one response', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(makeToolCallResponse([
