@@ -31,6 +31,7 @@ export type ForgeResult = {
   reachedMaxRounds: boolean;
   error?: string;
   planSummary?: string;
+  structuralWarning?: string;
 };
 
 export type ForgeOrchestratorOpts = {
@@ -1005,13 +1006,39 @@ export class ForgeOrchestrator {
 
       // Check if we should loop
       if (!lastVerdict.shouldLoop) {
+        // Post-loop structural check: verify a revision hasn't stripped required sections.
+        // Truncate to content before ## Audit Log so audit notes don't confuse parsePlan.
+        let structuralWarning: string | undefined;
+        const auditLogIdx = planContent.indexOf('\n## Audit Log');
+        const bodyForCheck = auditLogIdx !== -1 ? planContent.slice(0, auditLogIdx) : planContent;
+        const postConcerns = auditPlanStructure(bodyForCheck);
+        const postVerdict = deriveVerdict(postConcerns);
+        if (postVerdict.shouldLoop) {
+          const missing = postConcerns
+            .filter((c) => c.severity === 'high' || c.severity === 'medium')
+            .map((c) => c.title)
+            .join(', ');
+          structuralWarning = missing;
+          planContent = appendAuditRound(
+            planContent,
+            round + 1,
+            `**Structural warning (automated):** ${missing}`,
+            { maxSeverity: 'medium', shouldLoop: false },
+          );
+          await this.atomicWrite(filePath, planContent);
+        }
+
         await this.updatePlanStatus(filePath, 'REVIEW');
         // Re-read to get updated status in the summary
         planContent = await fs.readFile(filePath, 'utf-8');
         const summary = buildPlanSummary(planContent);
         const elapsed = Math.round((Date.now() - t0) / 1000);
+        const roundLabel = `${round - startRound + 1} round${round - startRound + 1 > 1 ? 's' : ''}`;
+        const warningSuffix = structuralWarning
+          ? ` ⚠️ Structural warning: ${structuralWarning}`
+          : '';
         await onProgress(
-          `Forge complete. Plan ${planId} ready for review (${round - startRound + 1} round${round - startRound + 1 > 1 ? 's' : ''}, ${elapsed}s)`,
+          `Forge complete. Plan ${planId} ready for review (${roundLabel}, ${elapsed}s)${warningSuffix}`,
           { force: true },
         );
         return {
@@ -1021,6 +1048,7 @@ export class ForgeOrchestrator {
           rounds: round - startRound + 1,
           reachedMaxRounds: false,
           planSummary: summary,
+          structuralWarning,
         };
       }
 
