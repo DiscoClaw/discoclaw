@@ -1372,6 +1372,7 @@ if (taskCtx) {
   }
 
   if (discordActionsEnabled && cfg.discordActionsSpawn) {
+    const spawnLimiter = createConcurrencyLimiter(cfg.spawnMaxConcurrent);
     botParams.spawnCtx = {
       runtime: limitedRuntime,
       model: runtimeModel,
@@ -1382,6 +1383,7 @@ if (taskCtx) {
       appendSystemPrompt,
       log,
       maxConcurrent: cfg.spawnMaxConcurrent,
+      limiter: spawnLimiter ?? undefined,
     };
     log.info({ maxConcurrent: cfg.spawnMaxConcurrent }, 'spawn:action context initialized');
   }
