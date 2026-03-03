@@ -28,7 +28,7 @@ import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { fetchMessageHistory } from './message-history.js';
-import { loadSummary, saveSummary, generateSummary, archiveSummary } from './summarizer.js';
+import { loadSummary, saveSummary, generateSummary, archiveSummary, recompressSummary, estimateSummaryTokens } from './summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
 import { parseSecretCommand, handleSecretCommand } from './secret-commands.js';
 import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './plan-commands.js';
@@ -165,6 +165,8 @@ export type BotParams = {
   summaryModel: string;
   summaryMaxChars: number;
   summaryEveryNTurns: number;
+  summaryMaxTokens?: number;
+  summaryTargetRatio?: number;
   summaryDataDir: string;
   summaryArchiveDir?: string;
   durableMemoryEnabled: boolean;
@@ -3031,7 +3033,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         summaryWorkQueue.run(sessionKey, async () => {
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
 
-          const newSummary = await generateSummary(params.runtime, {
+          let newSummary = await generateSummary(params.runtime, {
             previousSummary: work.existingSummary,
             recentExchange: work.exchange,
             model: resolveModel(params.summaryModel, params.runtime.id),
@@ -3042,6 +3044,32 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           });
 
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
+
+          // Preserve failure fallback behavior: only recompress when a fresh summary
+          // was actually produced and it exceeds the configured token threshold.
+          if (newSummary !== work.existingSummary) {
+            const thresholdTokens = params.summaryMaxTokens ?? 1500;
+            const targetRatio = params.summaryTargetRatio ?? 0.65;
+            const beforeTokens = estimateSummaryTokens(newSummary);
+            if (beforeTokens > thresholdTokens) {
+              const targetTokens = Math.max(1, Math.floor(thresholdTokens * targetRatio));
+              const recompressed = await recompressSummary(params.runtime, {
+                summary: newSummary,
+                model: resolveModel(params.summaryModel, params.runtime.id),
+                cwd: params.workspaceCwd,
+                thresholdTokens,
+                targetTokens,
+                timeoutMs: 30_000,
+                ...(work.taskStatusContext !== undefined ? { taskStatusContext: work.taskStatusContext } : {}),
+              });
+              const afterTokens = estimateSummaryTokens(recompressed);
+              params.log?.info(
+                { sessionKey, beforeTokens, afterTokens, thresholdTokens, targetTokens },
+                'discord:summary recompression',
+              );
+              newSummary = recompressed;
+            }
+          }
 
           // Archive the outgoing summary before it gets overwritten.
           if (params.summaryArchiveDir && work.existingSummary) {

@@ -1,0 +1,9 @@
+# Summary Recompression Default (0.65)
+
+This workspace now supports automatic one-pass rolling-summary recompression.
+
+- Trigger threshold: `DISCOCLAW_SUMMARY_MAX_TOKENS` (default `1500`).
+- Target ratio: `DISCOCLAW_SUMMARY_TARGET_RATIO` (default `0.65`).
+- Effective recompression target: `floor(max_tokens * target_ratio)`.
+
+When a freshly generated rolling summary exceeds the threshold, it is recompressed once and token estimates are logged before/after recompression.

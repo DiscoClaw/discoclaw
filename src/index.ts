@@ -303,6 +303,8 @@ const summaryEnabled = cfg.summaryEnabled;
 let summaryModel = cfg.summaryModel;
 const summaryMaxChars = cfg.summaryMaxChars;
 const summaryEveryNTurns = cfg.summaryEveryNTurns;
+const summaryMaxTokens = cfg.summaryMaxTokens;
+const summaryTargetRatio = cfg.summaryTargetRatio;
 const summaryDataDir = cfg.summaryDataDirOverride
   || (dataDir ? path.join(dataDir, 'memory', 'rolling') : path.join(__dirname, '..', 'data', 'memory', 'rolling'));
 const summaryArchiveDir = cfg.summaryArchiveDirOverride
@@ -974,6 +976,8 @@ const botParams = {
   summaryModel,
   summaryMaxChars,
   summaryEveryNTurns,
+  summaryMaxTokens,
+  summaryTargetRatio,
   summaryDataDir,
   summaryArchiveDir,
   durableMemoryEnabled,

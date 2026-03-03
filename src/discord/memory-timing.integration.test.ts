@@ -174,4 +174,59 @@ describe('memory timing integration', () => {
     const summaryFile = path.join(summaryDir, 'discord:channel:chan.json');
     await expect(fs.access(summaryFile)).rejects.toThrow();
   });
+
+  it('runs one-pass summary recompression when generated summary exceeds token threshold', async () => {
+    let recompressCalls = 0;
+    const runtime = {
+      id: 'test-runtime',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (p: any) {
+        const prompt = String(p.prompt ?? '');
+        if (prompt.includes('Updated summary:')) {
+          // 200 chars ~= 50 estimated tokens.
+          yield { type: 'text_final', text: 'A'.repeat(200) } as any;
+          return;
+        }
+        if (prompt.includes('Recompressed summary:')) {
+          recompressCalls += 1;
+          yield { type: 'text_final', text: 'compressed' } as any;
+          return;
+        }
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+    const log = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-recompress-'));
+    const handler = createMessageCreateHandler(
+      makeParams(runtime, summaryDir, {
+        summaryEveryNTurns: 1,
+        summaryMaxTokens: 20,
+        summaryTargetRatio: 0.5,
+        log,
+      }),
+      makeQueue(),
+    );
+
+    await handler(makeMsg('trigger summary', 'r1'));
+
+    const summaryFile = path.join(summaryDir, 'discord:channel:chan.json');
+    await waitForFileSummary(summaryFile, 'compressed');
+
+    expect(recompressCalls).toBe(1);
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: 'discord:channel:chan',
+        beforeTokens: 50,
+        afterTokens: 3,
+        thresholdTokens: 20,
+        targetTokens: 10,
+      }),
+      'discord:summary recompression',
+    );
+  });
 });
