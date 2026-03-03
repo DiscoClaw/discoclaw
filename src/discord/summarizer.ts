@@ -86,7 +86,8 @@ export type GenerateSummaryOpts = {
 };
 
 export function estimateSummaryTokens(summary: string): number {
-  return Math.ceil(summary.length / 4);
+  const chars = summary.length;
+  return Math.ceil(chars / 4);
 }
 
 export type RecompressSummaryOpts = {
