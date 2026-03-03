@@ -58,6 +58,10 @@ export async function autoImplementForgePlan(
     return manualOutcome(planId, 'Review the flagged concerns before implementing.', normalizedVerdict);
   }
 
+  if (result.structuralWarning) {
+    return manualOutcome(planId, 'Structural issues detected in the plan — manual review required before implementation.');
+  }
+
   if (isPlanRunning(planId)) {
     return manualOutcome(planId, 'A plan run is already in progress for this plan.');
   }

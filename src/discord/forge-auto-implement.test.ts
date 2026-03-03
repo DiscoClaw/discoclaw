@@ -127,6 +127,20 @@ describe('autoImplementForgePlan', () => {
     expect(deps.log?.error).toHaveBeenCalled();
   });
 
+  it('returns manual outcome when structuralWarning is set', async () => {
+    const result = buildResult({ structuralWarning: 'Missing required section: Risks' });
+    const deps = createDeps();
+
+    const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
+
+    expect(outcome.status).toBe('manual');
+    if (outcome.status !== 'manual') throw new Error('expected manual');
+    expect(outcome.message).toContain('Structural issues detected');
+    expect(outcome.message).toContain('manual review required');
+    expect(deps.planApprove).not.toHaveBeenCalled();
+    expect(deps.planRun).not.toHaveBeenCalled();
+  });
+
   it('includes blocking severity labels in the fallback message', async () => {
     const result = buildResult({ finalVerdict: 'blocking' });
     const deps = createDeps();
