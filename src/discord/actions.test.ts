@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines } from './actions.js';
+import {
+  parseDiscordActions,
+  executeDiscordActions,
+  discordActionsPromptSection,
+  buildTieredDiscordActionsPromptSection,
+  buildDisplayResultLines,
+  buildAllResultLines,
+} from './actions.js';
 import type { ActionCategoryFlags, DiscordActionResult } from './actions.js';
 import { TaskStore } from '../tasks/store.js';
 import { _resetDestructiveConfirmationForTest } from './destructive-confirmation.js';
@@ -764,6 +771,101 @@ describe('discordActionsPromptSection', () => {
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT');
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH');
     expect(prompt).toContain('no conversation history');
+  });
+});
+
+describe('buildTieredDiscordActionsPromptSection', () => {
+  const TIER_FLAGS: ActionCategoryFlags = {
+    channels: true,
+    messaging: true,
+    guild: true,
+    moderation: true,
+    polls: true,
+    tasks: true,
+    crons: true,
+    botProfile: true,
+    forge: true,
+    plan: true,
+    memory: true,
+    config: true,
+    defer: true,
+    imagegen: true,
+    voice: true,
+    spawn: true,
+  };
+
+  it('includes only core categories for a plain turn', () => {
+    const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+      channelName: 'general',
+      channelContextPath: null,
+      isThread: false,
+      userText: 'hello',
+    });
+
+    expect(selection.includedCategories).toEqual(['messaging', 'channels']);
+    expect(selection.tierBuckets.core).toEqual(['messaging', 'channels']);
+    expect(selection.tierBuckets.channelContextual).toEqual([]);
+    expect(selection.tierBuckets.keywordTriggered).toEqual([]);
+    expect(selection.prompt).toContain('### Messaging');
+    expect(selection.prompt).toContain('### Channel Management');
+    expect(selection.prompt).not.toContain('### Task Tracking');
+    expect(selection.prompt).not.toContain('### Memory (Durable User Memory)');
+  });
+
+  it('adds task schemas for task-thread contextual turns without unrelated categories', () => {
+    const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+      channelName: 'task-ws-204',
+      channelContextPath: '/tmp/context/tasks/task-ws-204.md',
+      isThread: true,
+      userText: 'status update',
+    });
+
+    expect(selection.includedCategories).toEqual(['messaging', 'channels', 'tasks']);
+    expect(selection.tierBuckets.channelContextual).toEqual(['tasks']);
+    expect(selection.prompt).toContain('### Task Tracking');
+    expect(selection.prompt).not.toContain('### Cron Scheduled Tasks');
+    expect(selection.prompt).not.toContain('### Memory (Durable User Memory)');
+    expect(selection.prompt).not.toContain('### Plan Management');
+  });
+
+  it('adds keyword-triggered schemas and deduplicates overlap', () => {
+    const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+      channelName: 'general',
+      channelContextPath: null,
+      isThread: false,
+      userText: 'Remember this, draft a plan with forge, and schedule a cron reminder. Also make a task.',
+    });
+
+    expect(selection.keywordHits).toEqual(['memory', 'task', 'plan', 'forge', 'cron']);
+    expect(selection.tierBuckets.keywordTriggered).toEqual(['memory', 'tasks', 'plan', 'forge', 'crons', 'defer']);
+    expect(new Set(selection.tierBuckets.keywordTriggered).size).toBe(selection.tierBuckets.keywordTriggered.length);
+    expect(selection.prompt).toContain('### Memory (Durable User Memory)');
+    expect(selection.prompt).toContain('### Task Tracking');
+    expect(selection.prompt).toContain('### Plan Management');
+    expect(selection.prompt).toContain('### Forge (Plan Drafting + Audit)');
+    expect(selection.prompt).toContain('### Cron Scheduled Tasks');
+    expect(selection.prompt).toContain('### Deferred self-invocation');
+  });
+
+  it('hard-blocks disabled categories even when keywords/context hit', () => {
+    const selection = buildTieredDiscordActionsPromptSection(
+      { ...TIER_FLAGS, memory: false, plan: false, forge: false, crons: false, defer: false },
+      'ClawBot',
+      {
+        channelName: 'cron-and-planning',
+        channelContextPath: '/tmp/context/tasks/thread.md',
+        isThread: true,
+        userText: 'remember this and make a plan in forge with cron reminder',
+      },
+    );
+
+    expect(selection.keywordHits).toEqual(['memory', 'plan', 'forge', 'cron']);
+    expect(selection.includedCategories).toEqual(['messaging', 'channels', 'tasks']);
+    expect(selection.prompt).not.toContain('### Memory (Durable User Memory)');
+    expect(selection.prompt).not.toContain('### Plan Management');
+    expect(selection.prompt).not.toContain('### Forge (Plan Drafting + Audit)');
+    expect(selection.prompt).not.toContain('### Cron Scheduled Tasks');
+    expect(selection.prompt).not.toContain('### Deferred self-invocation');
   });
 });
 
