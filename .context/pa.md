@@ -9,17 +9,19 @@ For architecture details, see `.context/architecture.md`.
 
 ## Workspace Files
 
-| File | Purpose | Loaded |
-|------|---------|--------|
-| `SOUL.md` | Core personality and values | Every prompt |
-| `IDENTITY.md` | Name and vibe | Every prompt |
-| `USER.md` | Who you're helping | Every prompt |
-| `AGENTS.md` | Your personal rules and conventions | Every prompt |
-| `TOOLS.md` | Available tools and integrations | Every prompt |
-| `MEMORY.md` | Curated long-term memory | DM prompts |
-| `BOOTSTRAP.md` | First-run onboarding (deleted after) | Once |
+| File | Purpose | Owner | Loaded |
+|------|---------|-------|--------|
+| `SOUL.md` | Core personality and values | User | Every prompt |
+| `IDENTITY.md` | Name and vibe | User | Every prompt |
+| `USER.md` | Who you're helping | User | Every prompt |
+| `DISCOCLAW.md` | System instructions | Discoclaw (overwritten on boot) | Every prompt |
+| `AGENTS.md` | Personal rules and preferences | User (never overwritten) | Every prompt |
+| `TOOLS.md` | Available tools and integrations | Discoclaw | Every prompt |
+| `MEMORY.md` | Curated long-term memory | User | DM prompts |
+| `BOOTSTRAP.md` | First-run onboarding (deleted after) | User | Once |
 
 Templates live in `templates/workspace/` and are scaffolded on first run (copy-if-missing).
+`DISCOCLAW.md` is overwritten from its template on every boot — do not edit it directly.
 
 ## Operational Essentials
 
@@ -115,5 +117,7 @@ See `.context/memory.md` for full architecture, examples, and config reference.
 
 ## Customization
 
-These rules are generic defaults. Override or extend them in `workspace/AGENTS.md`,
-which is your personal space — not tracked by git, not overwritten on updates.
+System instructions live in `workspace/DISCOCLAW.md` (auto-managed, overwritten on every boot).
+Personal rules, preferences, and overrides go in `workspace/AGENTS.md` — your file, never overwritten.
+
+To customize behavior, edit `AGENTS.md`. Don't edit `DISCOCLAW.md` — your changes will be lost on next boot.
