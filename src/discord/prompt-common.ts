@@ -2,7 +2,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildPromptPreamble as buildRootPolicyPreamble } from '../root-policy.js';
 import type { DiscordChannelContext } from './channel-context.js';
-import { formatDurableSection, loadDurableMemory, saveDurableMemory, selectItemsForInjection, recordHits } from './durable-memory.js';
+import {
+  compactActiveItems,
+  formatDurableSection,
+  loadDurableMemory,
+  saveDurableMemory,
+  selectItemsForInjection,
+  recordHits,
+} from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
 import { buildShortTermMemorySection } from './shortterm-memory.js';
 import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
@@ -277,22 +284,32 @@ export async function buildDurableMemorySection(opts: {
   try {
     const store = await loadDurableMemory(opts.durableDataDir, opts.userId);
     if (!store) return '';
+
+    // Keep the hot tier bounded before selecting what gets injected.
+    const compaction = compactActiveItems(store);
     const items = selectItemsForInjection(store, opts.durableInjectMaxChars, opts.query);
-    if (items.length === 0) return '';
-
-    // Record hits on injected items so frequently-used items accumulate
-    // a Hebbian signal for scoring and eviction.  Fire-and-forget — the
-    // background write doesn't block prompt assembly.
     const itemIds = items.map((it) => it.id);
-    durableWriteQueue.run(opts.userId, async () => {
-      const freshStore = await loadDurableMemory(opts.durableDataDir, opts.userId);
-      if (!freshStore) return;
-      recordHits(freshStore, itemIds);
-      await saveDurableMemory(opts.durableDataDir, opts.userId, freshStore);
-    }).catch((err) => {
-      opts.log?.warn({ err, userId: opts.userId }, 'durable memory hit recording failed');
-    });
 
+    // Persist compaction and hit updates via the shared durable write queue.
+    if (compaction.demotedCount > 0 || itemIds.length > 0) {
+      durableWriteQueue.run(opts.userId, async () => {
+        const freshStore = await loadDurableMemory(opts.durableDataDir, opts.userId);
+        if (!freshStore) return;
+        const freshCompaction = compactActiveItems(freshStore);
+        if (itemIds.length > 0) {
+          // Record hits on injected items so frequently-used items accumulate
+          // a Hebbian signal for scoring and eviction.
+          recordHits(freshStore, itemIds);
+        }
+        if (freshCompaction.demotedCount > 0 || itemIds.length > 0) {
+          await saveDurableMemory(opts.durableDataDir, opts.userId, freshStore);
+        }
+      }).catch((err) => {
+        opts.log?.warn({ err, userId: opts.userId }, 'durable memory compaction/hit recording failed');
+      });
+    }
+
+    if (items.length === 0) return '';
     return formatDurableSection(items);
   } catch (err) {
     opts.log?.warn({ err, userId: opts.userId }, 'durable memory load failed');
