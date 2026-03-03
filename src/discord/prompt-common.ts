@@ -37,7 +37,7 @@ export async function loadWorkspacePaFiles(
   opts?: { skip?: boolean },
 ): Promise<string[]> {
   if (opts?.skip) return [];
-  const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'AGENTS.md', 'TOOLS.md'];
+  const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'DISCOCLAW.md', 'AGENTS.md', 'TOOLS.md'];
   const paFiles: string[] = [];
 
   // Only include BOOTSTRAP.md when onboarding is still in progress.
