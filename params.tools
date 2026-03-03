@@ -34,12 +34,73 @@ Hybrid pipeline tooling contract for OpenAI-compatible runtimes.
   - `OPENAI_COMPAT_HYBRID_PIPELINE_ENABLED=1`.
   - `params.tools` includes the required category (`Pipeline` and/or `Step`).
 - Non-OpenAI runtimes must not receive OpenAI-only hybrid tool labels from `params.tools`.
+- Step primitive constraints (`step.run`, `step.assert`, `step.retry`, `step.wait`):
+  - Every step call must include `run_id` and `expected_current_step`.
+  - Runtime must resolve `run_id` from persisted state and reject missing runs.
+  - Runtime must verify `expected_current_step` equals persisted `current_step` before executing any step primitive.
+  - Step primitives must execute only when persisted run status is active (`running|waiting`) and `cancel_requested=false`.
+
+## Persisted run state requirements
+
+- Hybrid pipeline run state must be durably persisted before acknowledging `pipeline.start` success.
+- Durable state must survive process restart and host restart; in-memory-only state is non-compliant.
+- Persisted minimum fields for each run:
+  - `run_id` (stable unique identifier).
+  - `runtime` and `adapter` (routing context).
+  - `pipeline_name` and `pipeline_input_hash` (request identity).
+  - `idempotency_key` (nullable only when caller omitted it).
+  - `status` (`queued|running|waiting|failed|succeeded|cancelled`).
+  - `current_step` (step identifier or null).
+  - `attempts_by_step` (integer attempts per step).
+  - `last_attempt_at_by_step` (UTC timestamp per step, nullable before first attempt).
+  - `next_retry_due_at_by_step` (UTC timestamp per step, nullable when no retry is scheduled).
+  - `failure_code` (nullable, canonical value when failed).
+  - `created_at` and `updated_at` (UTC timestamps).
+  - `cancel_requested` (boolean).
+- Restart recovery behavior:
+  - `pipeline.status`, `pipeline.resume`, and `pipeline.cancel` must resolve against persisted state after restart.
+  - Runs persisted as `queued|running|waiting` at restart must be recoverable via `pipeline.resume`; they must not be treated as `run-not-found`.
+  - Retry scheduling after restart must use persisted `next_retry_due_at_by_step` and `last_attempt_at_by_step`; recomputing retry timing from process-start time is non-compliant.
 
 ## Deterministic failure requirements
 
 - Tool-unavailable, policy-blocked, retry-exhausted, idempotency-conflict, and run-not-found outcomes must return stable machine-readable failure codes.
+- Failure code set is versioned as `failure_code_version=v1` and values are canonical:
+  - `E_TOOL_UNAVAILABLE`
+  - `E_POLICY_BLOCKED`
+  - `E_RETRY_EXHAUSTED`
+  - `E_IDEMPOTENCY_CONFLICT`
+  - `E_RUN_NOT_FOUND`
+- Operation mappings (must not vary by adapter):
+  - `pipeline.start`: may return `E_TOOL_UNAVAILABLE`, `E_POLICY_BLOCKED`, `E_IDEMPOTENCY_CONFLICT`.
+  - `pipeline.status`: may return `E_TOOL_UNAVAILABLE`, `E_POLICY_BLOCKED`, `E_RUN_NOT_FOUND`.
+  - `pipeline.resume`: may return `E_TOOL_UNAVAILABLE`, `E_POLICY_BLOCKED`, `E_RUN_NOT_FOUND`, `E_RETRY_EXHAUSTED`.
+  - `pipeline.cancel`: may return `E_TOOL_UNAVAILABLE`, `E_POLICY_BLOCKED`, `E_RUN_NOT_FOUND`.
+  - `step.run`: may return `E_TOOL_UNAVAILABLE`, `E_POLICY_BLOCKED`, `E_RUN_NOT_FOUND`.
+  - `step.assert`: may return `E_TOOL_UNAVAILABLE`, `E_POLICY_BLOCKED`, `E_RUN_NOT_FOUND`.
+  - `step.retry`: may return `E_TOOL_UNAVAILABLE`, `E_POLICY_BLOCKED`, `E_RUN_NOT_FOUND`, `E_RETRY_EXHAUSTED`.
+  - `step.wait`: may return `E_TOOL_UNAVAILABLE`, `E_POLICY_BLOCKED`, `E_RUN_NOT_FOUND`.
 - Retry behavior must be bounded and deterministic.
 - Resume/cancel/status must be safe for repeated calls (idempotent where applicable).
+
+## Retry bounds
+
+- Retry bounds apply per step, not per run.
+- Default maximum attempts per step is `3` total attempts (`1` initial + `2` retries).
+- A step-level explicit override may lower the cap, but must not increase above `3`.
+- Once the cap is reached, additional retry attempts must fail with `E_RETRY_EXHAUSTED`.
+- Backoff strategy is fixed deterministic linear backoff: `1s, 2s` for retries 1..N.
+- Retry due time must be persisted at scheduling time and reused across restart/resume.
+
+## Idempotency requirements
+
+- `pipeline.start` idempotency key source:
+  - Caller-provided `idempotency_key` when present.
+  - Otherwise derived key: `sha256(runtime + adapter + pipeline_name + canonical_json(input))`.
+- Dedupe window is `24h` from first accepted `pipeline.start` for a key.
+- Repeated `pipeline.start` with same key and equivalent payload during the dedupe window must return the original `run_id` and current run status without creating a new run.
+- Repeated `pipeline.start` with same key but non-equivalent payload must fail with `E_IDEMPOTENCY_CONFLICT`.
+- `pipeline.status`, `pipeline.resume`, and `pipeline.cancel` must be idempotent for repeated identical calls on the same `run_id`.
 
 ## Observability requirements
 
