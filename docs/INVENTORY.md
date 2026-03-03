@@ -58,7 +58,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | Message history (budget-based) | `src/discord/message-history.ts` | **done** |
-| Rolling summaries (AI-generated, per-session) | `src/discord/summarizer.ts` | **done** |
+| Rolling summaries (AI-generated, per-session, with one-pass token-cap recompression when threshold is exceeded) | `src/discord/summarizer.ts`, `src/discord/message-coordinator.ts` | **done** |
 | Durable memory (facts/preferences/constraints) | `src/discord/durable-memory.ts` | **done** |
 | Memory commands (`!memory show/remember/forget/reset`) | `src/discord/memory-commands.ts` | **done** |
 | Short-term memory (cross-channel recent excerpts, time-based expiry, character-budget injection) | `src/discord/shortterm-memory.ts`, `src/discord/shortterm-memory.test.ts` | **done** |

@@ -85,6 +85,21 @@ export type GenerateSummaryOpts = {
   taskStatusContext?: string;
 };
 
+export function estimateSummaryTokens(summary: string): number {
+  const chars = summary.length;
+  return Math.ceil(chars / 4);
+}
+
+export type RecompressSummaryOpts = {
+  summary: string;
+  model: string;
+  cwd: string;
+  thresholdTokens: number;
+  targetTokens: number;
+  timeoutMs: number;
+  taskStatusContext?: string;
+};
+
 const SUMMARIZE_PROMPT_TEMPLATE = `You are a conversation summarizer. Update the running summary below with the new exchange.
 
 Rules:
@@ -99,6 +114,38 @@ Rules:
 
 Updated summary:`;
 
+const RECOMPRESS_PROMPT_TEMPLATE = `You are compressing a rolling conversation summary that exceeded its token budget.
+
+Rules:
+- Reduce the summary to at most {targetTokens} tokens (rough estimate: 1 token ~= 4 chars).
+- Drop stale details that are no longer relevant.
+- Collapse repeated references into a single concise mention.
+- Preserve active project state and unresolved threads.
+- Keep important decisions, preferences, and current focus.
+- Write in third person, present tense.
+- Output ONLY the recompressed summary text, nothing else.
+{taskStatusRule}
+Token context:
+- Current estimated tokens: {beforeTokens}
+- Recompress threshold: {thresholdTokens}
+
+Current summary:
+{summary}
+
+{taskStatusSection}Recompressed summary:`;
+
+function taskStatusPromptParts(taskStatusContext?: string): { taskStatusRule: string; taskStatusSection: string } {
+  if (taskStatusContext === undefined) {
+    return { taskStatusRule: '', taskStatusSection: '' };
+  }
+
+  return {
+    taskStatusRule:
+      '- A task status snapshot is provided below. Update the summary to reflect the current status of any referenced tasks. Tasks listed under "Recently closed" are now done — correct any stale open references to them. Tasks not present as active and not listed as recently closed are likely closed — remove or correct stale open-task references. If the snapshot notes it is truncated, only reconcile tasks explicitly listed.',
+    taskStatusSection: `Current task statuses:\n${taskStatusContext}\n\n`,
+  };
+}
+
 export async function generateSummary(
   runtime: RuntimeAdapter,
   opts: GenerateSummaryOpts,
@@ -108,13 +155,7 @@ export async function generateSummary(
       ? `Current summary:\n${opts.previousSummary}\n`
       : 'Current summary:\n(none)\n';
 
-    const taskStatusRule = opts.taskStatusContext !== undefined
-      ? '- A task status snapshot is provided below. Update the summary to reflect the current status of any referenced tasks. Tasks listed under "Recently closed" are now done — correct any stale open references to them. Tasks not present as active and not listed as recently closed are likely closed — remove or correct stale open-task references. If the snapshot notes it is truncated, only reconcile tasks explicitly listed.'
-      : '';
-
-    const taskStatusSection = opts.taskStatusContext !== undefined
-      ? `Current task statuses:\n${opts.taskStatusContext}\n\n`
-      : '';
+    const { taskStatusRule, taskStatusSection } = taskStatusPromptParts(opts.taskStatusContext);
 
     const prompt = SUMMARIZE_PROMPT_TEMPLATE
       .replace('{maxChars}', String(opts.maxChars))
@@ -146,5 +187,54 @@ export async function generateSummary(
     return result || (opts.previousSummary ?? '');
   } catch {
     return opts.previousSummary ?? '';
+  }
+}
+
+export async function recompressSummary(
+  runtime: RuntimeAdapter,
+  opts: RecompressSummaryOpts,
+): Promise<string> {
+  const beforeTokens = estimateSummaryTokens(opts.summary);
+  if (beforeTokens <= opts.thresholdTokens) return opts.summary;
+
+  try {
+    const { taskStatusRule, taskStatusSection } = taskStatusPromptParts(opts.taskStatusContext);
+    const prompt = RECOMPRESS_PROMPT_TEMPLATE
+      .replace('{targetTokens}', String(opts.targetTokens))
+      .replace('{beforeTokens}', String(beforeTokens))
+      .replace('{thresholdTokens}', String(opts.thresholdTokens))
+      .replace('{summary}', opts.summary)
+      .replace('{taskStatusRule}', taskStatusRule)
+      .replace('{taskStatusSection}', taskStatusSection);
+
+    let finalText = '';
+    let deltaText = '';
+
+    for await (const evt of runtime.invoke({
+      prompt,
+      model: opts.model,
+      cwd: opts.cwd,
+      tools: [],
+      timeoutMs: opts.timeoutMs,
+    })) {
+      if (evt.type === 'text_final') {
+        finalText = evt.text;
+      } else if (evt.type === 'text_delta') {
+        deltaText += evt.text;
+      } else if (evt.type === 'error') {
+        return opts.summary;
+      }
+    }
+
+    const result = (finalText || deltaText).trim();
+    if (!result) return opts.summary;
+
+    const afterTokens = estimateSummaryTokens(result);
+    console.info(
+      `[recompressSummary] token estimate before=${beforeTokens} after=${afterTokens} threshold=${opts.thresholdTokens} target=${opts.targetTokens}`,
+    );
+    return result;
+  } catch {
+    return opts.summary;
   }
 }
