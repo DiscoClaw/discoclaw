@@ -437,7 +437,8 @@ Allow the model to spawn a parallel sub-agent invocation in a target channel, ex
 2. It resolves the target channel on the current guild.
 3. It builds a prompt preamble (root policy + inlined workspace PA context files) and prepends it to the user-supplied `prompt`.
 4. It streams the runtime output, collecting text events (`text_delta` / `text_final`) and returning an error if the stream emits an `error` event.
-5. The collected output text is split and posted to the target channel via `targetChannel.send()`. Action blocks in the spawned agent's output are not parsed or executed — they are posted as literal text.
+5. The collected output text is passed through `parseDiscordActions()` to extract any `<discord-action>` blocks, and the remaining (cleaned) text is split and posted to the target channel via `targetChannel.send()`.
+6. Extracted action blocks are executed via `executeDiscordActions()` using the same subsystem contexts as the parent invocation, so spawned agents can perform Discord actions (send messages, manage tasks, etc.) just like deferred or chat-originated invocations.
 
 Multiple `spawnAgent` actions in a single response are dispatched in parallel via `Promise.allSettled`, so all spawns start immediately and run concurrently.
 
@@ -448,7 +449,7 @@ Multiple `spawnAgent` actions in a single response are dispatched in parallel vi
 This prevents unbounded parallel agent trees from a single top-level message.
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; set to 0 to disable).
-Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). No separate subsystem context object.
+Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). Receives subsystem contexts (message, guild, subsystems) for action parsing and execution.
 Concurrency: At most `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` (default 8) spawned agents run in parallel per batch. If a response contains more than this limit, the remainder are processed in sequential batches until all are complete — none are dropped.
 
 ### Cron Flow Restrictions
