@@ -14,7 +14,7 @@ import { createCodexCliRuntime } from './runtime/codex-cli.js';
 import { createGeminiCliRuntime } from './runtime/gemini-cli.js';
 import { createGeminiRestRuntime } from './runtime/gemini-rest.js';
 import { createAnthropicRestRuntime } from './runtime/anthropic-rest.js';
-import { createConcurrencyLimiter, withConcurrencyLimit } from './runtime/concurrency-limit.js';
+import { createConcurrencyLimiter } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { buildDurableMemorySection } from './discord/prompt-common.js';
@@ -85,10 +85,16 @@ import { validateDiscordToken } from './validate.js';
 import { TaskStore } from './tasks/store.js';
 import { migrateLegacyTaskDataFile, resolveTaskDataPath } from './tasks/path-defaults.js';
 import { resolveCronTagBootstrapForumId, resolveSessionStorePath } from './index.paths.js';
-import { collectActiveProviders, logRuntimeDebugConfig, resolveForgeRuntimes } from './index.runtime.js';
+import {
+  collectActiveProviders,
+  logRuntimeDebugConfig,
+  registerRuntimeWithGlobalPolicies,
+  resolveForgeRuntimes,
+} from './index.runtime.js';
 import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupChecks } from './index.post-connect.js';
 import { loadOverrides, saveOverrides, clearOverrides, resolveOverridesPath, type RuntimeOverrides } from './runtime-overrides.js';
 import type { ModelRole } from './discord/actions-config.js';
+import { parseGlobalSupervisorBail, type GlobalSupervisorAuditPayload } from './runtime/global-supervisor.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -526,6 +532,60 @@ const streamStallWarningMs = cfg.streamStallWarningMs;
 const maxConcurrentInvocations = cfg.maxConcurrentInvocations;
 const sharedConcurrencyLimiter = createConcurrencyLimiter(maxConcurrentInvocations);
 
+function isGlobalSupervisorAuditPayload(value: unknown): value is GlobalSupervisorAuditPayload {
+  if (!value || typeof value !== 'object') return false;
+  const payload = value as Record<string, unknown>;
+  return payload.source === 'global_supervisor'
+    && (payload.phase === 'plan' || payload.phase === 'execute' || payload.phase === 'evaluate' || payload.phase === 'decide');
+}
+
+function parseGlobalSupervisorAuditLine(line: string): GlobalSupervisorAuditPayload | null {
+  try {
+    const parsed = JSON.parse(line);
+    return isGlobalSupervisorAuditPayload(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function withSupervisorAuditLogs(runtimeName: string, runtime: RuntimeAdapter): RuntimeAdapter {
+  return {
+    ...runtime,
+    async *invoke(params) {
+      for await (const evt of runtime.invoke(params)) {
+        if (evt.type === 'log_line') {
+          const audit = parseGlobalSupervisorAuditLine(evt.line);
+          if (audit) {
+            log.info({ runtimeName, ...audit }, 'obs.supervisor.cycle');
+            continue;
+          }
+        } else if (evt.type === 'error') {
+          const bail = parseGlobalSupervisorBail(evt.message);
+          if (bail) {
+            log.warn({ runtimeName, ...bail }, 'obs.supervisor.bail');
+          }
+        }
+        yield evt;
+      }
+    },
+  };
+}
+
+const registerRuntime = (name: string, runtime: RuntimeAdapter): RuntimeAdapter => {
+  const wrapped = registerRuntimeWithGlobalPolicies({
+    name,
+    runtimeRegistry,
+    runtime,
+    maxConcurrentInvocations,
+    limiter: sharedConcurrencyLimiter,
+    log,
+    env: process.env,
+  });
+  const observed = withSupervisorAuditLogs(name, wrapped);
+  runtimeRegistry.register(name, observed);
+  return observed;
+};
+
 // Build runtime registry
 const runtimeRegistry = new RuntimeRegistry();
 
@@ -581,13 +641,7 @@ const registerClaudeRuntime = () => {
     streamStallTimeoutMs,
     progressStallTimeoutMs,
   });
-  const limitedClaudeRuntime = withConcurrencyLimit(claudeRuntime, {
-    maxConcurrentInvocations,
-    limiter: sharedConcurrencyLimiter,
-    log,
-  });
-  runtimeRegistry.register('claude', limitedClaudeRuntime);
-  return limitedClaudeRuntime;
+  return registerRuntime('claude', claudeRuntime);
 };
 
 if (cfg.openaiApiKey) {
@@ -599,12 +653,7 @@ if (cfg.openaiApiKey) {
     enableTools: cfg.openaiCompatToolsEnabled,
     log,
   });
-  const openaiRuntime = withConcurrencyLimit(openaiRuntimeRaw, {
-    maxConcurrentInvocations,
-    limiter: sharedConcurrencyLimiter,
-    log,
-  });
-  runtimeRegistry.register('openai', openaiRuntime);
+  registerRuntime('openai', openaiRuntimeRaw);
 }
 
 if (cfg.openrouterApiKey) {
@@ -616,12 +665,7 @@ if (cfg.openrouterApiKey) {
     enableTools: cfg.openaiCompatToolsEnabled,
     log,
   });
-  const openrouterRuntime = withConcurrencyLimit(openrouterRuntimeRaw, {
-    maxConcurrentInvocations,
-    limiter: sharedConcurrencyLimiter,
-    log,
-  });
-  runtimeRegistry.register('openrouter', openrouterRuntime);
+  registerRuntime('openrouter', openrouterRuntimeRaw);
   log.info(
     { baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1', model: cfg.openrouterModel },
     'runtime:openrouter registered',
@@ -636,12 +680,7 @@ const codexRuntimeRaw = createCodexCliRuntime({
   disableSessions: cfg.codexDisableSessions,
   log,
 });
-const codexRuntime = withConcurrencyLimit(codexRuntimeRaw, {
-  maxConcurrentInvocations,
-  limiter: sharedConcurrencyLimiter,
-  log,
-});
-runtimeRegistry.register('codex', codexRuntime);
+registerRuntime('codex', codexRuntimeRaw);
 log.info(
   {
     codexBin: cfg.codexBin,
@@ -660,12 +699,7 @@ if (cfg.geminiApiKey) {
     defaultModel: cfg.geminiModel,
     log,
   });
-  const geminiRuntime = withConcurrencyLimit(geminiRestRaw, {
-    maxConcurrentInvocations,
-    limiter: sharedConcurrencyLimiter,
-    log,
-  });
-  runtimeRegistry.register('gemini', geminiRuntime);
+  registerRuntime('gemini', geminiRestRaw);
   log.info(
     { adapter: 'rest', model: cfg.geminiModel },
     'runtime:gemini registered (REST API)',
@@ -676,12 +710,7 @@ if (cfg.geminiApiKey) {
     defaultModel: cfg.geminiModel,
     log,
   });
-  const geminiRuntime = withConcurrencyLimit(geminiCliRaw, {
-    maxConcurrentInvocations,
-    limiter: sharedConcurrencyLimiter,
-    log,
-  });
-  runtimeRegistry.register('gemini', geminiRuntime);
+  registerRuntime('gemini', geminiCliRaw);
   log.info(
     { adapter: 'cli', geminiBin: cfg.geminiBin, model: cfg.geminiModel },
     'runtime:gemini registered (CLI)',
@@ -741,12 +770,7 @@ if (cfg.anthropicApiKey) {
     defaultModel: 'claude-sonnet-4-6',
     log,
   });
-  const anthropicRuntime = withConcurrencyLimit(anthropicRestRaw, {
-    maxConcurrentInvocations,
-    limiter: sharedConcurrencyLimiter,
-    log,
-  });
-  runtimeRegistry.register('anthropic', anthropicRuntime);
+  const anthropicRuntime = registerRuntime('anthropic', anthropicRestRaw);
   log.info({ adapter: 'rest', model: 'claude-sonnet-4-6' }, 'runtime:anthropic registered (Messages API)');
 
   // Auto-wire as voice runtime to eliminate CLI cold-start latency
