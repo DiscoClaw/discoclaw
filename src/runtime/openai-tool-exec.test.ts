@@ -8,6 +8,10 @@ import { executeToolCall } from './openai-tool-exec.js';
 
 let tmpDir: string;
 
+function parseJsonResult(result: string): Record<string, unknown> {
+  return JSON.parse(result) as Record<string, unknown>;
+}
+
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-tool-exec-'));
 });
@@ -424,6 +428,168 @@ describe('web_search', () => {
     const r = await executeToolCall('web_search', { query: 'test' }, [tmpDir]);
     expect(r.ok).toBe(false);
     expect(r.result).toContain('web_search not available');
+  });
+});
+
+// ── pipeline lifecycle ───────────────────────────────────────────────
+
+describe('pipeline.start/status/resume/cancel', () => {
+  it('pipeline.start auto-runs steps and persists terminal state', async () => {
+    const start = await executeToolCall(
+      'pipeline.start',
+      {
+        steps: [
+          { tool: 'write_file', arguments: { file_path: 'a.txt', content: 'hello' } },
+          { tool: 'read_file', arguments: { file_path: 'a.txt' } },
+        ],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start', 'pipeline.status', 'write_file', 'read_file']) },
+    );
+
+    expect(start.ok).toBe(true);
+    const started = parseJsonResult(start.result);
+    expect(started['status']).toBe('completed');
+    expect(started['total_steps']).toBe(2);
+
+    const runId = started['run_id'] as string;
+    const status = await executeToolCall(
+      'pipeline.status',
+      { run_id: runId },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.status']) },
+    );
+    expect(status.ok).toBe(true);
+    const statusJson = parseJsonResult(status.result);
+    expect(statusJson['status']).toBe('completed');
+  });
+
+  it('pipeline.start with auto_run=false can be resumed', async () => {
+    const start = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [
+          { tool: 'write_file', arguments: { file_path: 'b.txt', content: 'world' } },
+          { tool: 'read_file', arguments: { file_path: 'b.txt' } },
+        ],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start', 'pipeline.resume', 'write_file', 'read_file']) },
+    );
+    expect(start.ok).toBe(true);
+
+    const runId = (parseJsonResult(start.result)['run_id'] as string);
+    const resumed = await executeToolCall(
+      'pipeline.resume',
+      { run_id: runId },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.resume', 'write_file', 'read_file']) },
+    );
+    expect(resumed.ok).toBe(true);
+    expect(parseJsonResult(resumed.result)['status']).toBe('completed');
+  });
+
+  it('pipeline.step execution fails deterministically when a step tool is not allowlisted', async () => {
+    const start = await executeToolCall(
+      'pipeline.start',
+      {
+        steps: [
+          { tool: 'write_file', arguments: { file_path: 'blocked.txt', content: 'x' } },
+        ],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(start.ok).toBe(false);
+    const payload = parseJsonResult(start.result);
+    expect(payload['status']).toBe('failed');
+    expect(payload['last_error']).toMatch(/not allowlisted/i);
+  });
+
+  it('pipeline.resume retries failed current step after allowlist change', async () => {
+    const start = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'retry.txt', content: 'ok' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(start.ok).toBe(true);
+    const runId = (parseJsonResult(start.result)['run_id'] as string);
+
+    const firstResume = await executeToolCall(
+      'pipeline.resume',
+      { run_id: runId },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.resume']) },
+    );
+    expect(firstResume.ok).toBe(false);
+    expect(parseJsonResult(firstResume.result)['status']).toBe('failed');
+
+    const secondResume = await executeToolCall(
+      'pipeline.resume',
+      { run_id: runId },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.resume', 'write_file']) },
+    );
+    expect(secondResume.ok).toBe(true);
+    expect(parseJsonResult(secondResume.result)['status']).toBe('completed');
+  });
+
+  it('pipeline.cancel marks pending steps cancelled', async () => {
+    const start = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [
+          { tool: 'write_file', arguments: { file_path: 'c.txt', content: 'cancel me' } },
+          { tool: 'read_file', arguments: { file_path: 'c.txt' } },
+        ],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start', 'pipeline.cancel']) },
+    );
+    expect(start.ok).toBe(true);
+    const runId = (parseJsonResult(start.result)['run_id'] as string);
+
+    const cancelled = await executeToolCall(
+      'pipeline.cancel',
+      { run_id: runId },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.cancel']) },
+    );
+    expect(cancelled.ok).toBe(true);
+    const payload = parseJsonResult(cancelled.result);
+    expect(payload['status']).toBe('cancelled');
+  });
+
+  it('rejects nested pipeline calls when executing a pipeline step', async () => {
+    const start = await executeToolCall(
+      'pipeline.start',
+      {
+        steps: [{ tool: 'pipeline.status', arguments: { run_id: 'any' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start', 'pipeline.status']) },
+    );
+    expect(start.ok).toBe(false);
+    const payload = parseJsonResult(start.result);
+    expect(payload['status']).toBe('failed');
+    expect(payload['last_error']).toMatch(/nested pipeline/i);
   });
 });
 

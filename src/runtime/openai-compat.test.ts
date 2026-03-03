@@ -680,6 +680,8 @@ describe('OpenAI-compat tool loop', () => {
       'read_file',
       { file_path: '/tmp/test.txt' },
       ['/tmp'],
+      undefined,
+      { allowedToolNames: new Set(['read_file']) },
     );
 
     // First request has tools and stream:false
@@ -846,7 +848,49 @@ describe('OpenAI-compat tool loop', () => {
       'read_file',
       { file_path: '/home/test.txt' },
       ['/home', '/extra'],
+      undefined,
+      { allowedToolNames: new Set(['read_file']) },
     );
+  });
+
+  it('rejects a non-allowlisted tool call deterministically in tool-loop mode', async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeToolCallResponse([
+        { id: 'call_1', name: 'write_file', arguments: JSON.stringify({ file_path: '/tmp/x', content: 'x' }) },
+      ]))
+      .mockResolvedValueOnce(makeTextResponse('Recovered after tool rejection.'));
+
+    vi.mocked(executeToolCall).mockImplementation(async (name, _args, _roots, _log, opts) => {
+      if (!opts?.allowedToolNames?.has(name)) {
+        return { result: `Tool not allowlisted for this invocation: ${name}`, ok: false };
+      }
+      return { result: 'ok', ok: true };
+    });
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+      enableTools: true,
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Try to write',
+      model: '',
+      cwd: '/tmp',
+      tools: ['Read'],
+    }));
+
+    const toolEnd = events.find((e) => e.type === 'tool_end');
+    expect(toolEnd).toMatchObject({
+      type: 'tool_end',
+      name: 'Write',
+      ok: false,
+    });
+    expect((toolEnd as { output?: string }).output).toContain('not allowlisted');
+
+    const final = events.find((e) => e.type === 'text_final');
+    expect(final).toMatchObject({ type: 'text_final', text: 'Recovered after tool rejection.' });
   });
 
   it('enableTools true but empty params.tools uses streaming path', async () => {

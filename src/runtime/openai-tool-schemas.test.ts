@@ -54,6 +54,27 @@ describe('buildToolSchemas', () => {
     expect(schemas).toHaveLength(2);
     expect(schemas.map((s) => s.function.name)).toEqual(['read_file', 'bash']);
   });
+
+  it('expands Pipeline into lifecycle function tools', () => {
+    const schemas = buildToolSchemas(['Read', 'Pipeline']);
+    expect(schemas.map((s) => s.function.name)).toEqual([
+      'read_file',
+      'pipeline.start',
+      'pipeline.status',
+      'pipeline.resume',
+      'pipeline.cancel',
+    ]);
+  });
+
+  it('deduplicates lifecycle functions when Pipeline and explicit names overlap', () => {
+    const schemas = buildToolSchemas(['Pipeline', 'pipeline.status']);
+    expect(schemas.map((s) => s.function.name)).toEqual([
+      'pipeline.start',
+      'pipeline.status',
+      'pipeline.resume',
+      'pipeline.cancel',
+    ]);
+  });
 });
 
 describe('OPENAI_TO_DISCO_NAME', () => {
@@ -66,6 +87,10 @@ describe('OPENAI_TO_DISCO_NAME', () => {
     expect(OPENAI_TO_DISCO_NAME['bash']).toBe('Bash');
     expect(OPENAI_TO_DISCO_NAME['web_search']).toBe('WebSearch');
     expect(OPENAI_TO_DISCO_NAME['web_fetch']).toBe('WebFetch');
+    expect(OPENAI_TO_DISCO_NAME['pipeline.start']).toBe('Pipeline');
+    expect(OPENAI_TO_DISCO_NAME['pipeline.status']).toBe('Pipeline');
+    expect(OPENAI_TO_DISCO_NAME['pipeline.resume']).toBe('Pipeline');
+    expect(OPENAI_TO_DISCO_NAME['pipeline.cancel']).toBe('Pipeline');
   });
 
   it('is consistent with schemas — every schema name has a reverse mapping', () => {
@@ -78,7 +103,7 @@ describe('OPENAI_TO_DISCO_NAME', () => {
     }
   });
 
-  it('has exactly 8 entries', () => {
-    expect(Object.keys(OPENAI_TO_DISCO_NAME)).toHaveLength(8);
+  it('has exactly 12 entries', () => {
+    expect(Object.keys(OPENAI_TO_DISCO_NAME)).toHaveLength(12);
   });
 });

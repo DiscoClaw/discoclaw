@@ -133,6 +133,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
         // Determine whether to enter the tool loop
         const toolsRequested = opts.enableTools && params.tools && params.tools.length > 0;
         const toolSchemas = toolsRequested ? buildToolSchemas(params.tools!) : [];
+        const allowedToolNames = new Set(toolSchemas.map((schema) => schema.function.name));
         const useTools = toolSchemas.length > 0;
 
         const controller = new AbortController();
@@ -229,7 +230,9 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
 
                 yield { type: 'tool_start', name: discoName, input: args };
 
-                const result = await executeToolCall(fnName, args, allowedRoots);
+                const result = await executeToolCall(fnName, args, allowedRoots, undefined, {
+                  allowedToolNames,
+                });
                 yield { type: 'tool_end', name: discoName, output: result.result, ok: result.ok };
 
                 messages.push({

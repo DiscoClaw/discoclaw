@@ -6,6 +6,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -42,6 +43,24 @@ const LOCALHOST_HOSTNAMES = new Set(['localhost', '[::1]']);
 export type ToolResult = { result: string; ok: boolean };
 
 type LogFn = (msg: string) => void;
+
+export type ExecuteToolCallOpts = {
+  /**
+   * Optional strict allowlist of OpenAI function names enabled for the current
+   * invocation. When provided, non-allowlisted tool names fail closed.
+   */
+  allowedToolNames?: ReadonlySet<string>;
+  /**
+   * Optional override for pipeline durable state storage path.
+   * Defaults to `<allowedRoots[0]>/.discoclaw/openai-pipeline-runs.json`.
+   */
+  pipelineStorePath?: string;
+  /**
+   * Internal recursion guard used when executing a pipeline step.
+   * Nested `pipeline.*` calls are rejected deterministically.
+   */
+  pipelineStepMode?: boolean;
+};
 
 // ── Path security ────────────────────────────────────────────────────
 
@@ -558,6 +577,349 @@ function handleWebSearch(): ToolResult {
   };
 }
 
+// ── Hybrid pipeline lifecycle handlers ──────────────────────────────
+
+type PipelineStepStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+type PipelineRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+type PipelineStep = {
+  tool: string;
+  arguments: Record<string, unknown>;
+  status: PipelineStepStatus;
+  ok?: boolean;
+  result?: string;
+  updatedAt: string;
+};
+
+type PipelineRun = {
+  runId: string;
+  status: PipelineRunStatus;
+  currentStep: number;
+  steps: PipelineStep[];
+  createdAt: string;
+  updatedAt: string;
+  lastError?: string;
+  completedAt?: string;
+  cancelledAt?: string;
+};
+
+type PipelineStore = {
+  version: 1;
+  runs: Record<string, PipelineRun>;
+};
+
+const PIPELINE_STORE_VERSION = 1 as const;
+const PIPELINE_MAX_RUNS = 200;
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function emptyPipelineStore(): PipelineStore {
+  return { version: PIPELINE_STORE_VERSION, runs: {} };
+}
+
+function resolvePipelineStorePath(allowedRoots: string[], opts?: ExecuteToolCallOpts): string {
+  if (opts?.pipelineStorePath && opts.pipelineStorePath.trim() !== '') {
+    return path.resolve(opts.pipelineStorePath);
+  }
+  return path.join(allowedRoots[0], '.discoclaw', 'openai-pipeline-runs.json');
+}
+
+async function loadPipelineStore(storePath: string): Promise<{ store: PipelineStore; error?: string }> {
+  try {
+    const raw = await fs.readFile(storePath, 'utf-8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { store: emptyPipelineStore(), error: 'pipeline store is malformed (expected object root)' };
+    }
+    const obj = parsed as Record<string, unknown>;
+    if (obj.version !== PIPELINE_STORE_VERSION) {
+      return { store: emptyPipelineStore(), error: 'pipeline store has unsupported version' };
+    }
+    const runsRaw = obj.runs;
+    if (!runsRaw || typeof runsRaw !== 'object' || Array.isArray(runsRaw)) {
+      return { store: emptyPipelineStore(), error: 'pipeline store is malformed (runs must be an object)' };
+    }
+    return { store: obj as PipelineStore };
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { store: emptyPipelineStore() };
+    }
+    return { store: emptyPipelineStore(), error: 'failed to read pipeline store' };
+  }
+}
+
+function prunePipelineRuns(store: PipelineStore): void {
+  const entries = Object.entries(store.runs);
+  if (entries.length <= PIPELINE_MAX_RUNS) return;
+  entries.sort((a, b) => Date.parse(b[1].updatedAt) - Date.parse(a[1].updatedAt));
+  const keep = new Set(entries.slice(0, PIPELINE_MAX_RUNS).map(([runId]) => runId));
+  for (const runId of Object.keys(store.runs)) {
+    if (!keep.has(runId)) delete store.runs[runId];
+  }
+}
+
+async function savePipelineStore(storePath: string, store: PipelineStore): Promise<void> {
+  await fs.mkdir(path.dirname(storePath), { recursive: true });
+  const tmpPath = `${storePath}.tmp.${process.pid}`;
+  await fs.writeFile(tmpPath, JSON.stringify(store, null, 2) + '\n', 'utf-8');
+  await fs.rename(tmpPath, storePath);
+}
+
+function parseRunId(args: Record<string, unknown>): string | undefined {
+  const candidate = args.run_id ?? args.runId ?? args.id;
+  return typeof candidate === 'string' && candidate.trim() !== '' ? candidate.trim() : undefined;
+}
+
+function parseAutoRun(args: Record<string, unknown>): boolean {
+  const candidate = args.auto_run ?? args.autoRun;
+  if (typeof candidate === 'boolean') return candidate;
+  return true;
+}
+
+function parsePipelineSteps(args: Record<string, unknown>): { steps?: PipelineStep[]; error?: string } {
+  const rawSteps = args.steps;
+  if (!Array.isArray(rawSteps)) {
+    return { error: 'steps must be an array' };
+  }
+  if (rawSteps.length === 0) {
+    return { error: 'steps must not be empty' };
+  }
+
+  const steps: PipelineStep[] = [];
+  for (let i = 0; i < rawSteps.length; i++) {
+    const raw = rawSteps[i];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return { error: `steps[${i}] must be an object` };
+    }
+    const obj = raw as Record<string, unknown>;
+    const toolCandidate = obj.tool ?? obj.name ?? obj.function ?? obj.tool_name;
+    if (typeof toolCandidate !== 'string' || toolCandidate.trim() === '') {
+      return { error: `steps[${i}].tool is required` };
+    }
+    const rawArgs = obj.arguments ?? obj.args ?? obj.input;
+    let normalizedArgs: Record<string, unknown> = {};
+    if (rawArgs !== undefined) {
+      if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
+        return { error: `steps[${i}] arguments must be an object when provided` };
+      }
+      normalizedArgs = rawArgs as Record<string, unknown>;
+    }
+    steps.push({
+      tool: toolCandidate.trim(),
+      arguments: normalizedArgs,
+      status: 'pending',
+      updatedAt: nowIso(),
+    });
+  }
+
+  return { steps };
+}
+
+function summarizePipelineRun(run: PipelineRun): Record<string, unknown> {
+  return {
+    run_id: run.runId,
+    status: run.status,
+    current_step: run.currentStep,
+    total_steps: run.steps.length,
+    last_error: run.lastError ?? null,
+    created_at: run.createdAt,
+    updated_at: run.updatedAt,
+    completed_at: run.completedAt ?? null,
+    cancelled_at: run.cancelledAt ?? null,
+    steps: run.steps.map((step, idx) => ({
+      index: idx,
+      tool: step.tool,
+      status: step.status,
+      ok: step.ok ?? null,
+      result: step.result ?? null,
+      updated_at: step.updatedAt,
+    })),
+  };
+}
+
+async function executePipelineRun(
+  run: PipelineRun,
+  storePath: string,
+  store: PipelineStore,
+  allowedRoots: string[],
+  log: LogFn | undefined,
+  opts: ExecuteToolCallOpts | undefined,
+): Promise<void> {
+  run.status = 'running';
+  run.updatedAt = nowIso();
+  await savePipelineStore(storePath, store);
+
+  while (run.currentStep < run.steps.length) {
+    const step = run.steps[run.currentStep]!;
+    if (step.status === 'done') {
+      run.currentStep++;
+      run.updatedAt = nowIso();
+      await savePipelineStore(storePath, store);
+      continue;
+    }
+
+    step.status = 'running';
+    step.updatedAt = nowIso();
+    run.updatedAt = step.updatedAt;
+    await savePipelineStore(storePath, store);
+
+    const result = await executeToolCall(
+      step.tool,
+      step.arguments,
+      allowedRoots,
+      log,
+      { ...opts, pipelineStepMode: true },
+    );
+
+    step.ok = result.ok;
+    step.result = result.result;
+    step.updatedAt = nowIso();
+    run.updatedAt = step.updatedAt;
+
+    if (!result.ok) {
+      step.status = 'failed';
+      run.status = 'failed';
+      run.lastError = `step ${run.currentStep + 1} (${step.tool}) failed: ${result.result}`;
+      await savePipelineStore(storePath, store);
+      return;
+    }
+
+    step.status = 'done';
+    run.currentStep++;
+    await savePipelineStore(storePath, store);
+  }
+
+  run.status = 'completed';
+  run.completedAt = nowIso();
+  run.updatedAt = run.completedAt;
+  await savePipelineStore(storePath, store);
+}
+
+async function handlePipelineTool(
+  name: string,
+  args: Record<string, unknown>,
+  allowedRoots: string[],
+  log: LogFn | undefined,
+  opts: ExecuteToolCallOpts | undefined,
+): Promise<ToolResult> {
+  if (!['pipeline.start', 'pipeline.status', 'pipeline.resume', 'pipeline.cancel'].includes(name)) {
+    return { result: `Unknown tool: ${name}`, ok: false };
+  }
+
+  const storePath = resolvePipelineStorePath(allowedRoots, opts);
+  const loaded = await loadPipelineStore(storePath);
+  if (loaded.error) {
+    return { result: loaded.error, ok: false };
+  }
+  const store = loaded.store;
+
+  if (name === 'pipeline.start') {
+    const parsedSteps = parsePipelineSteps(args);
+    if (parsedSteps.error || !parsedSteps.steps) {
+      return { result: parsedSteps.error ?? 'invalid steps', ok: false };
+    }
+
+    const runId = parseRunId(args) ?? `plr_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
+    if (store.runs[runId]) {
+      return { result: `pipeline run already exists: ${runId}`, ok: false };
+    }
+
+    const createdAt = nowIso();
+    const run: PipelineRun = {
+      runId,
+      status: 'pending',
+      currentStep: 0,
+      steps: parsedSteps.steps,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    store.runs[runId] = run;
+    prunePipelineRuns(store);
+    await savePipelineStore(storePath, store);
+
+    if (parseAutoRun(args)) {
+      await executePipelineRun(run, storePath, store, allowedRoots, log, opts);
+    }
+
+    return {
+      ok: run.status !== 'failed',
+      result: JSON.stringify(summarizePipelineRun(run)),
+    };
+  }
+
+  const runId = parseRunId(args);
+  if (!runId) {
+    return { result: 'run_id is required', ok: false };
+  }
+  const run = store.runs[runId];
+  if (!run) {
+    return { result: `pipeline run not found: ${runId}`, ok: false };
+  }
+
+  if (name === 'pipeline.status') {
+    return { ok: true, result: JSON.stringify(summarizePipelineRun(run)) };
+  }
+
+  if (name === 'pipeline.resume') {
+    if (run.status === 'completed') {
+      return { result: `pipeline run already completed: ${runId}`, ok: false };
+    }
+    if (run.status === 'cancelled') {
+      return { result: `pipeline run is cancelled: ${runId}`, ok: false };
+    }
+    if (run.status === 'running') {
+      return { result: `pipeline run is already running: ${runId}`, ok: false };
+    }
+
+    if (run.status === 'failed' && run.currentStep < run.steps.length) {
+      const step = run.steps[run.currentStep]!;
+      if (step.status === 'failed') {
+        step.status = 'pending';
+        step.ok = undefined;
+        step.result = undefined;
+        step.updatedAt = nowIso();
+      }
+      run.lastError = undefined;
+      run.status = 'pending';
+      run.updatedAt = nowIso();
+      await savePipelineStore(storePath, store);
+    }
+
+    await executePipelineRun(run, storePath, store, allowedRoots, log, opts);
+    return {
+      ok: run.status !== 'failed',
+      result: JSON.stringify(summarizePipelineRun(run)),
+    };
+  }
+
+  if (name === 'pipeline.cancel') {
+    if (run.status === 'completed') {
+      return { result: `pipeline run already completed: ${runId}`, ok: false };
+    }
+    if (run.status === 'failed') {
+      return { result: `pipeline run already failed: ${runId}`, ok: false };
+    }
+    if (run.status !== 'cancelled') {
+      run.status = 'cancelled';
+      run.cancelledAt = nowIso();
+      run.updatedAt = run.cancelledAt;
+      for (let i = run.currentStep; i < run.steps.length; i++) {
+        const step = run.steps[i]!;
+        if (step.status === 'pending' || step.status === 'running') {
+          step.status = 'cancelled';
+          step.updatedAt = run.updatedAt;
+        }
+      }
+      await savePipelineStore(storePath, store);
+    }
+    return { ok: true, result: JSON.stringify(summarizePipelineRun(run)) };
+  }
+
+  return { result: `Unknown tool: ${name}`, ok: false };
+}
+
 // ── Dispatcher ───────────────────────────────────────────────────────
 
 const HANDLERS: Record<
@@ -587,9 +949,30 @@ export async function executeToolCall(
   args: Record<string, unknown>,
   allowedRoots: string[],
   log?: LogFn,
+  opts?: ExecuteToolCallOpts,
 ): Promise<ToolResult> {
   if (allowedRoots.length === 0) {
     return { result: 'No allowed roots configured', ok: false };
+  }
+
+  if (opts?.pipelineStepMode && name.startsWith('pipeline.')) {
+    return { result: 'Nested pipeline.* calls are not allowed inside pipeline steps', ok: false };
+  }
+  if (opts?.allowedToolNames && !opts.allowedToolNames.has(name)) {
+    return { result: `Tool not allowlisted for this invocation: ${name}`, ok: false };
+  }
+
+  if (name.startsWith('pipeline.')) {
+    try {
+      log?.(`tool:${name} start`);
+      const result = await handlePipelineTool(name, args, allowedRoots, log, opts);
+      log?.(`tool:${name} done ok=${result.ok}`);
+      return result;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log?.(`tool:${name} error: ${message}`);
+      return { result: message, ok: false };
+    }
   }
 
   const handler = HANDLERS[name];

@@ -5,21 +5,25 @@
  * (read_file, write_file, …) and provides JSON Schema parameter definitions.
  */
 
-/** Discoclaw tool name → OpenAI function name */
-const DISCO_TO_OPENAI_NAME: Record<string, string> = {
-  Read: 'read_file',
-  Write: 'write_file',
-  Edit: 'edit_file',
-  Glob: 'list_files',
-  Grep: 'search_content',
-  Bash: 'bash',
-  WebSearch: 'web_search',
-  WebFetch: 'web_fetch',
+/** Discoclaw tool name → OpenAI function names */
+const DISCO_TO_OPENAI_NAMES: Readonly<Record<string, string[]>> = {
+  Read: ['read_file'],
+  Write: ['write_file'],
+  Edit: ['edit_file'],
+  Glob: ['list_files'],
+  Grep: ['search_content'],
+  Bash: ['bash'],
+  WebSearch: ['web_search'],
+  WebFetch: ['web_fetch'],
+  // Hybrid pipeline runtime lifecycle wiring.
+  Pipeline: ['pipeline.start', 'pipeline.status', 'pipeline.resume', 'pipeline.cancel'],
 };
 
 /** OpenAI function name → discoclaw tool name (for dispatching tool results) */
 export const OPENAI_TO_DISCO_NAME: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(DISCO_TO_OPENAI_NAME).map(([disco, openai]) => [openai, disco]),
+  Object.entries(DISCO_TO_OPENAI_NAMES).flatMap(([disco, openaiNames]) =>
+    openaiNames.map((openai) => [openai, disco]),
+  ),
 );
 
 // ── Individual tool schemas ──────────────────────────────────────────
@@ -182,6 +186,87 @@ const TOOL_DEFS: Record<string, OpenAIFunctionTool> = {
       },
     },
   },
+
+  'pipeline.start': {
+    type: 'function',
+    function: {
+      name: 'pipeline.start',
+      description: 'Create a durable pipeline run and optionally execute it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          run_id: { type: 'string', description: 'Optional caller-specified run identifier.' },
+          auto_run: {
+            type: 'boolean',
+            description: 'When true (default), execute from the first step immediately.',
+          },
+          steps: {
+            type: 'array',
+            description: 'Ordered pipeline steps to execute. Each step must include a tool name.',
+            items: {
+              type: 'object',
+              properties: {
+                tool: { type: 'string', description: 'Tool function name to execute for this step.' },
+                arguments: { type: 'object', description: 'Arguments object passed to the tool.' },
+              },
+              required: ['tool'],
+              additionalProperties: true,
+            },
+          },
+        },
+        required: ['steps'],
+        additionalProperties: false,
+      },
+    },
+  },
+
+  'pipeline.status': {
+    type: 'function',
+    function: {
+      name: 'pipeline.status',
+      description: 'Get status for an existing pipeline run.',
+      parameters: {
+        type: 'object',
+        properties: {
+          run_id: { type: 'string', description: 'Run identifier returned by pipeline.start.' },
+        },
+        required: ['run_id'],
+        additionalProperties: false,
+      },
+    },
+  },
+
+  'pipeline.resume': {
+    type: 'function',
+    function: {
+      name: 'pipeline.resume',
+      description: 'Resume a pending or failed pipeline run from its current step.',
+      parameters: {
+        type: 'object',
+        properties: {
+          run_id: { type: 'string', description: 'Run identifier returned by pipeline.start.' },
+        },
+        required: ['run_id'],
+        additionalProperties: false,
+      },
+    },
+  },
+
+  'pipeline.cancel': {
+    type: 'function',
+    function: {
+      name: 'pipeline.cancel',
+      description: 'Cancel an existing pipeline run.',
+      parameters: {
+        type: 'object',
+        properties: {
+          run_id: { type: 'string', description: 'Run identifier returned by pipeline.start.' },
+        },
+        required: ['run_id'],
+        additionalProperties: false,
+      },
+    },
+  },
 };
 
 // ── Public API ────────────────────────────────────────────────────────
@@ -193,10 +278,26 @@ const TOOL_DEFS: Record<string, OpenAIFunctionTool> = {
  * skipped so callers don't need to pre-filter.
  */
 export function buildToolSchemas(enabledTools: string[]): OpenAIFunctionTool[] {
-  const schemas: OpenAIFunctionTool[] = [];
+  const expanded = new Set<string>();
   for (const tool of enabledTools) {
+    if (tool === 'Pipeline') {
+      expanded.add('pipeline.start');
+      expanded.add('pipeline.status');
+      expanded.add('pipeline.resume');
+      expanded.add('pipeline.cancel');
+      continue;
+    }
+    expanded.add(tool);
+  }
+
+  const schemas: OpenAIFunctionTool[] = [];
+  const seenNames = new Set<string>();
+  for (const tool of expanded) {
     const def = TOOL_DEFS[tool];
-    if (def) schemas.push(def);
+    if (def && !seenNames.has(def.function.name)) {
+      seenNames.add(def.function.name);
+      schemas.push(def);
+    }
   }
   return schemas;
 }
