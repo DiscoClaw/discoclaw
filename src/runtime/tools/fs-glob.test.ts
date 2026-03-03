@@ -77,6 +77,18 @@ describe('fs-glob execute', () => {
     expect(r.result).toContain('Invalid glob pattern');
   });
 
+  it('rejects traversal hidden in character classes', async () => {
+    const r = await execute({ pattern: '[.][.]/etc/*', path: tmpDir }, [tmpDir]);
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('rejects traversal hidden via brace concatenation', async () => {
+    const r = await execute({ pattern: '{.,.}{.,.}/etc/*', path: tmpDir }, [tmpDir]);
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
   it('rejects absolute branch hidden in brace expansion', async () => {
     const r = await execute({ pattern: '{**/*.ts,/etc/*}', path: tmpDir }, [tmpDir]);
     expect(r.ok).toBe(false);

@@ -132,6 +132,21 @@ function validateListFilesPattern(pattern: string): string | null {
     return 'pattern cannot contain parent directory traversal';
   }
 
+  // Reject segments that can evaluate to ".." via glob syntax
+  // (e.g. "[.][.]", "{.,.}{.,.}", "@(..|foo)").
+  if (typeof path.matchesGlob === 'function') {
+    for (const segment of normalized.split('/')) {
+      if (!segment || segment === '.') continue;
+      try {
+        if (path.matchesGlob('..', segment)) {
+          return 'pattern cannot contain parent directory traversal';
+        }
+      } catch {
+        return 'pattern contains malformed glob syntax';
+      }
+    }
+  }
+
   return null;
 }
 
