@@ -78,6 +78,7 @@ Boolean values accept `0`/`1` or `true`/`false`.
 ## Memory
 
 See [docs/memory.md](memory.md) for detailed descriptions of each layer.
+Current durable-memory behavior is size-triggered hot-tier compaction: active items are kept near 25 items or ~2000 chars, and low-value items are demoted using `hitCount` + `lastHitAt` signals.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -86,8 +87,8 @@ See [docs/memory.md](memory.md) for detailed descriptions of each layer.
 | `DISCOCLAW_DURABLE_MAX_ITEMS` | `200` | Max durable items per user |
 | `DISCOCLAW_DURABLE_DATA_DIR` | — | Override durable memory storage directory |
 | `DISCOCLAW_DURABLE_SUPERSESSION_SHADOW` | `false` | Shadow mode: log supersession without acting |
-| `DISCOCLAW_MEMORY_CONSOLIDATION_THRESHOLD` | `50` | Item count before consolidation triggers |
-| `DISCOCLAW_MEMORY_CONSOLIDATION_MODEL` | `fast` | Model tier for consolidation |
+| `DISCOCLAW_MEMORY_CONSOLIDATION_THRESHOLD` | `50` | Legacy consolidation threshold knob (parsed for compatibility; not wired to active hot-tier compaction) |
+| `DISCOCLAW_MEMORY_CONSOLIDATION_MODEL` | `fast` | Legacy consolidation model knob (parsed for compatibility; no runtime effect in current hot-tier path) |
 | `DISCOCLAW_MEMORY_COMMANDS_ENABLED` | `true` | Enable `!memory` bang commands |
 | `DISCOCLAW_SUMMARY_ENABLED` | `true` | Enable rolling summaries |
 | `DISCOCLAW_SUMMARY_MODEL` | `fast` | Model tier for summary generation |

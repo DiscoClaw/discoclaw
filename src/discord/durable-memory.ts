@@ -22,6 +22,16 @@ export type DurableMemoryStore = {
 };
 
 export const CURRENT_VERSION = 2 as const;
+export const HOT_ACTIVE_ITEM_TARGET = 25;
+export const HOT_ACTIVE_CHAR_TARGET = 2000;
+
+export type ActiveCompactionSummary = {
+  demotedCount: number;
+  demotedByItemLimit: number;
+  demotedByCharLimit: number;
+  activeCount: number;
+  activeChars: number;
+};
 
 export function emptyStore(): DurableMemoryStore {
   return { version: CURRENT_VERSION, updatedAt: Date.now(), items: [] };
@@ -126,6 +136,80 @@ export function recordHits(store: DurableMemoryStore, itemIds: string[]): void {
   if (idSet.size > 0) store.updatedAt = now;
 }
 
+function compareLowValueItems(a: DurableItem, b: DurableItem, now: number): number {
+  const aNeverHit = a.hitCount === 0 ? 0 : 1;
+  const bNeverHit = b.hitCount === 0 ? 0 : 1;
+  if (aNeverHit !== bNeverHit) return aNeverHit - bNeverHit;
+
+  const scoreDelta = scoreItem(a, now) - scoreItem(b, now);
+  if (scoreDelta !== 0) return scoreDelta;
+
+  if (a.hitCount !== b.hitCount) return a.hitCount - b.hitCount;
+  if (a.lastHitAt !== b.lastHitAt) return a.lastHitAt - b.lastHitAt;
+  if (a.updatedAt !== b.updatedAt) return a.updatedAt - b.updatedAt;
+  if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+  return a.id.localeCompare(b.id);
+}
+
+function countInjectionChars(items: DurableItem[]): number {
+  let chars = 0;
+  for (const item of items) {
+    const sep = chars > 0 ? 1 : 0;
+    chars += sep + formatItemLine(item).length;
+  }
+  return chars;
+}
+
+export function compactActiveItems(
+  store: DurableMemoryStore,
+  opts?: {
+    maxActiveItems?: number;
+    maxActiveChars?: number;
+  },
+): ActiveCompactionSummary {
+  const maxActiveItems = opts?.maxActiveItems ?? HOT_ACTIVE_ITEM_TARGET;
+  const maxActiveChars = opts?.maxActiveChars ?? HOT_ACTIVE_CHAR_TARGET;
+  const now = Date.now();
+
+  let demotedCount = 0;
+  let demotedByItemLimit = 0;
+  let demotedByCharLimit = 0;
+
+  let activeItems = store.items.filter((item) => item.status === 'active');
+  let activeChars = countInjectionChars(activeItems);
+
+  while (activeItems.length > maxActiveItems || activeChars > maxActiveChars) {
+    const overItemLimit = activeItems.length > maxActiveItems;
+    const demoteTarget = activeItems
+      .slice()
+      .sort((a, b) => compareLowValueItems(a, b, now))[0];
+
+    if (!demoteTarget) break;
+
+    demoteTarget.status = 'deprecated';
+    demoteTarget.updatedAt = now;
+    demotedCount++;
+    if (overItemLimit) {
+      demotedByItemLimit++;
+    } else {
+      demotedByCharLimit++;
+    }
+
+    activeItems = store.items.filter((item) => item.status === 'active');
+    activeChars = countInjectionChars(activeItems);
+  }
+
+  if (demotedCount > 0) store.updatedAt = now;
+
+  return {
+    demotedCount,
+    demotedByItemLimit,
+    demotedByCharLimit,
+    activeCount: activeItems.length,
+    activeChars,
+  };
+}
+
 export function addItem(
   store: DurableMemoryStore,
   text: string,
@@ -143,6 +227,7 @@ export function addItem(
     existing.source = source;
     existing.updatedAt = now;
     store.updatedAt = now;
+    compactActiveItems(store);
     return store;
   }
 
@@ -160,6 +245,7 @@ export function addItem(
   };
   store.items.push(item);
   store.updatedAt = now;
+  compactActiveItems(store);
 
   // Enforce maxItems cap.
   while (store.items.length > maxItems) {
@@ -167,7 +253,7 @@ export function addItem(
     const deprecatedIdx = store.items
       .map((it, i) => ({ it, i }))
       .filter(({ it }) => it.status === 'deprecated')
-      .sort((a, b) => scoreItem(a.it, now) - scoreItem(b.it, now))[0];
+      .sort((a, b) => compareLowValueItems(a.it, b.it, now))[0];
 
     if (deprecatedIdx) {
       store.items.splice(deprecatedIdx.i, 1);
@@ -176,7 +262,7 @@ export function addItem(
       const activeIdx = store.items
         .map((it, i) => ({ it, i }))
         .filter(({ it }) => it.status === 'active')
-        .sort((a, b) => scoreItem(a.it, now) - scoreItem(b.it, now))[0];
+        .sort((a, b) => compareLowValueItems(a.it, b.it, now))[0];
       if (activeIdx) {
         store.items.splice(activeIdx.i, 1);
       } else {

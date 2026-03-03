@@ -8,6 +8,7 @@ import {
   ROOT_POLICY,
   OPEN_TASKS_MAX_CHARS,
   _resetToolsAuditState,
+  buildDurableMemorySection,
   buildOpenTasksSection,
   buildPromptPreamble,
   buildPromptSectionEstimates,
@@ -22,6 +23,8 @@ import {
   resolveEffectiveTools,
 } from './prompt-common.js';
 import { TaskStore } from '../tasks/store.js';
+import { loadDurableMemory, saveDurableMemory } from './durable-memory.js';
+import { durableWriteQueue } from './durable-write-queue.js';
 
 // ---------------------------------------------------------------------------
 // ROOT_POLICY and buildPromptPreamble
@@ -194,6 +197,103 @@ describe('buildPromptSectionEstimates', () => {
       estTokens: 2,
       included: true,
     });
+  });
+});
+
+describe('buildDurableMemorySection', () => {
+  const dirs: string[] = [];
+
+  async function waitForDurableQueueIdle(timeoutMs = 2000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (durableWriteQueue.size() > 0) {
+      if (Date.now() > deadline) {
+        throw new Error('timed out waiting for durable write queue');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  afterEach(async () => {
+    await waitForDurableQueueIdle();
+    for (const d of dirs) await fs.rm(d, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  it('compacts hot-tier memory and still records hits using the existing call shape', async () => {
+    const durableDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pc-durable-'));
+    dirs.push(durableDir);
+    const userId = 'test-user';
+    const now = Date.now();
+
+    const staleLowValue = {
+      id: 'stale-low',
+      kind: 'fact' as const,
+      text: 'stale no-hit fact',
+      tags: [],
+      status: 'active' as const,
+      source: { type: 'manual' as const },
+      createdAt: now - 20 * 24 * 60 * 60 * 1000,
+      updatedAt: now - 10 * 24 * 60 * 60 * 1000,
+      hitCount: 0,
+      lastHitAt: 0,
+    };
+
+    const fillerItems = Array.from({ length: 24 }, (_unused, i) => ({
+      id: `active-${String(i).padStart(2, '0')}`,
+      kind: 'fact' as const,
+      text: `active filler item ${i}`,
+      tags: [],
+      status: 'active' as const,
+      source: { type: 'manual' as const },
+      createdAt: now - 5_000 + i,
+      updatedAt: now - 5_000 + i,
+      hitCount: 0,
+      lastHitAt: 0,
+    }));
+
+    const importantItem = {
+      id: 'important-hot',
+      kind: 'preference' as const,
+      text: 'important preference',
+      tags: ['important'],
+      status: 'active' as const,
+      source: { type: 'manual' as const },
+      createdAt: now - 1_000,
+      updatedAt: now - 1_000,
+      hitCount: 3,
+      lastHitAt: now - 500,
+    };
+
+    await saveDurableMemory(durableDir, userId, {
+      version: 2,
+      updatedAt: now,
+      items: [staleLowValue, ...fillerItems, importantItem],
+    });
+
+    const section = await buildDurableMemorySection({
+      enabled: true,
+      durableDataDir: durableDir,
+      userId,
+      durableInjectMaxChars: 10_000,
+    });
+
+    expect(section).toContain('important preference');
+    expect(section).not.toContain('stale no-hit fact');
+
+    await waitForDurableQueueIdle();
+
+    const persisted = await loadDurableMemory(durableDir, userId);
+    expect(persisted).not.toBeNull();
+
+    const activeItems = persisted!.items.filter((item) => item.status === 'active');
+    expect(activeItems).toHaveLength(25);
+
+    const stalePersisted = persisted!.items.find((item) => item.id === 'stale-low');
+    expect(stalePersisted?.status).toBe('deprecated');
+
+    const importantPersisted = persisted!.items.find((item) => item.id === 'important-hot');
+    expect(importantPersisted?.hitCount).toBe(4);
+    expect(importantPersisted?.lastHitAt).toBeGreaterThan(importantItem.lastHitAt);
   });
 });
 
