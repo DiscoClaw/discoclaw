@@ -3045,37 +3045,50 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
 
-          // Preserve failure fallback behavior: only recompress when a fresh summary
-          // was actually produced and it exceeds the configured token threshold.
-          if (newSummary !== work.existingSummary) {
-            const thresholdTokens = params.summaryMaxTokens ?? 1500;
-            const targetRatio = params.summaryTargetRatio ?? 0.65;
-            const beforeTokens = estimateSummaryTokens(newSummary);
-            if (beforeTokens > thresholdTokens) {
-              const targetTokens = Math.max(1, Math.floor(thresholdTokens * targetRatio));
-              const recompressed = await recompressSummary(params.runtime, {
-                summary: newSummary,
-                model: resolveModel(params.summaryModel, params.runtime.id),
-                cwd: params.workspaceCwd,
-                thresholdTokens,
-                targetTokens,
-                timeoutMs: 30_000,
-                ...(work.taskStatusContext !== undefined ? { taskStatusContext: work.taskStatusContext } : {}),
-              });
-              const afterTokens = estimateSummaryTokens(recompressed);
-              params.log?.info(
+          const thresholdTokens = params.summaryMaxTokens ?? 1500;
+          const targetRatio = params.summaryTargetRatio ?? 0.65;
+          const beforeTokens = estimateSummaryTokens(newSummary);
+          if (newSummary !== work.existingSummary && beforeTokens > thresholdTokens) {
+            if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
+
+            const targetTokens = Math.max(1, Math.floor(thresholdTokens * targetRatio));
+            const summaryBeforeRecompress = newSummary;
+            const recompressed = await recompressSummary(params.runtime, {
+              summary: summaryBeforeRecompress,
+              model: resolveModel(params.summaryModel, params.runtime.id),
+              cwd: params.workspaceCwd,
+              thresholdTokens,
+              targetTokens,
+              timeoutMs: 30_000,
+              ...(work.taskStatusContext !== undefined ? { taskStatusContext: work.taskStatusContext } : {}),
+            });
+
+            if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
+
+            newSummary = recompressed.trim().length > 0 ? recompressed : summaryBeforeRecompress;
+            const afterTokens = estimateSummaryTokens(newSummary);
+            params.log?.info(
+              { sessionKey, beforeTokens, afterTokens, thresholdTokens, targetTokens },
+              'discord:summary recompression',
+            );
+
+            if (afterTokens > thresholdTokens) {
+              params.log?.warn(
                 { sessionKey, beforeTokens, afterTokens, thresholdTokens, targetTokens },
-                'discord:summary recompression',
+                'discord:summary recompression still above threshold',
               );
-              newSummary = recompressed;
             }
           }
+
+          if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
 
           // Archive the outgoing summary before it gets overwritten.
           if (params.summaryArchiveDir && work.existingSummary) {
             const channelName = channelNameOrParent(msg.channel, String(msg.channelId));
             await archiveSummary(params.summaryArchiveDir, sessionKey, channelName, work.existingSummary);
           }
+
+          if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
 
           await saveSummary(params.summaryDataDir, sessionKey, {
             summary: newSummary.slice(0, params.summaryMaxChars),
