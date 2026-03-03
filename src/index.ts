@@ -44,6 +44,7 @@ import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
 import type { ImagegenContext } from './discord/actions-imagegen.js';
 import type { SpawnContext } from './discord/actions-spawn.js';
+import { cancelAll as cancelAllSpawns } from './discord/spawn-registry.js';
 import { VoiceConnectionManager } from './voice/connection-manager.js';
 import { AudioPipelineManager } from './voice/audio-pipeline.js';
 import { VoicePresenceHandler } from './voice/presence-handler.js';
@@ -225,6 +226,18 @@ const shutdown = async () => {
         await patchShutdownContext(pidLockDir, { cancelledDefers: cancelled });
       } catch (err) {
         log.warn({ err }, 'shutdown:failed to patch cancelledDefers');
+      }
+    }
+  }
+  // Clear the spawn registry so we can report how many agents were in flight.
+  {
+    const cancelled = cancelAllSpawns();
+    if (cancelled > 0) {
+      log.info({ cancelled }, 'shutdown:spawned agents cancelled');
+      try {
+        await patchShutdownContext(pidLockDir, { cancelledSpawns: cancelled });
+      } catch (err) {
+        log.warn({ err }, 'shutdown:failed to patch cancelledSpawns');
       }
     }
   }
