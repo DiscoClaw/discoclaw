@@ -14,6 +14,7 @@ export type ShutdownContext = {
   activeForge?: string;
   requestedBy?: string;
   cancelledDefers?: number;
+  cancelledSpawns?: number;
 };
 
 export type StartupContext = {
@@ -150,6 +151,9 @@ export async function readAndClearShutdownContext(
   const cancelledDefers = typeof parsedObj.cancelledDefers === 'number' && Number.isFinite(parsedObj.cancelledDefers) && parsedObj.cancelledDefers > 0
     ? Math.floor(parsedObj.cancelledDefers)
     : undefined;
+  const cancelledSpawns = typeof parsedObj.cancelledSpawns === 'number' && Number.isFinite(parsedObj.cancelledSpawns) && parsedObj.cancelledSpawns > 0
+    ? Math.floor(parsedObj.cancelledSpawns)
+    : undefined;
 
   const ctx: ShutdownContext = {
     reason,
@@ -158,6 +162,7 @@ export async function readAndClearShutdownContext(
     activeForge: typeof parsedObj.activeForge === 'string' ? parsedObj.activeForge.slice(0, MAX_FIELD_LENGTH) : undefined,
     requestedBy: typeof parsedObj.requestedBy === 'string' ? parsedObj.requestedBy : undefined,
     cancelledDefers,
+    cancelledSpawns,
   };
 
   if (ctx.reason === 'unknown') {
@@ -214,6 +219,11 @@ export function formatStartupInjection(ctx: StartupContext): string | null {
   if (ctx.shutdown?.cancelledDefers) {
     const n = ctx.shutdown.cancelledDefers;
     line += ` ${n} deferred action${n === 1 ? ' was' : 's were'} cancelled and did not run.`;
+  }
+
+  if (ctx.shutdown?.cancelledSpawns) {
+    const n = ctx.shutdown.cancelledSpawns;
+    line += ` ${n} spawned agent${n === 1 ? ' was' : 's were'} cancelled and did not complete.`;
   }
 
   line += ' If the current thread\'s task is already resolved, don\'t announce it — just respond to the user.';
