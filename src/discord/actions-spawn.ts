@@ -81,7 +81,7 @@ export async function executeSpawnAction(
       const model = action.model ?? spawnCtx.model;
 
       // --- Resolve effective tools ---
-      let effectiveTools: string[] = [];
+      let effectiveTools: string[] = spawnCtx.runtimeTools;
       try {
         const toolsInfo = await resolveEffectiveTools({
           workspaceCwd: spawnCtx.workspaceCwd,

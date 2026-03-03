@@ -435,7 +435,7 @@ Allow the model to spawn a parallel sub-agent invocation in a target channel, ex
 
 1. The action executor receives a `spawnAgent` block from the model's response.
 2. It resolves the target channel on the current guild.
-3. It invokes the runtime with the user-supplied `prompt` directly — no PA preamble or context header is prepended.
+3. It builds a prompt preamble (root policy + inlined workspace PA context files) and prepends it to the user-supplied `prompt`.
 4. It streams the runtime output, collecting text events (`text_delta` / `text_final`) and returning an error if the stream emits an `error` event.
 5. The collected output text is split and posted to the target channel via `targetChannel.send()`. Action blocks in the spawned agent's output are not parsed or executed — they are posted as literal text.
 

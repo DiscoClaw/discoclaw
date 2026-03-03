@@ -455,7 +455,7 @@ describe('executeSpawnAction', () => {
       expect(invokeCall.prompt).toContain('Test task');
     });
 
-    it('falls back to empty tools when resolveEffectiveTools throws', async () => {
+    it('falls back to base runtimeTools when resolveEffectiveTools throws', async () => {
       mockResolveEffectiveTools.mockRejectedValueOnce(new Error('permission error'));
       const runtime = makeRuntime([{ type: 'done' }]);
       const spawnCtx = makeSpawnCtx({ runtime });
@@ -468,7 +468,7 @@ describe('executeSpawnAction', () => {
 
       expect(result.ok).toBe(true);
       expect(runtime.invoke).toHaveBeenCalledWith(
-        expect.objectContaining({ tools: [] }),
+        expect.objectContaining({ tools: ['Bash', 'Read', 'Write'] }),
       );
     });
 
