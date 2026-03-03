@@ -411,6 +411,77 @@ describe('deferred-runner observability', () => {
     );
   });
 
+  it('spawn flag is included in deferred action flags when discordActionsSpawn is set', async () => {
+    const { parseDiscordActions } = await import('./actions.js');
+    const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
+    mockParse.mockClear();
+    mockParse.mockReturnValue({
+      actions: [],
+      cleanText: 'ok',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+
+    const opts = makeOpts({
+      state: { ...makeState(), discordActionsSpawn: true },
+    });
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const flags = mockParse.mock.calls[0][1];
+    expect(flags.spawn).toBe(true);
+  });
+
+  it('spawn flag defaults to false when discordActionsSpawn is not set', async () => {
+    const { parseDiscordActions } = await import('./actions.js');
+    const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
+    mockParse.mockClear();
+    mockParse.mockReturnValue({
+      actions: [],
+      cleanText: 'ok',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+
+    const opts = makeOpts(); // no discordActionsSpawn in state
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const flags = mockParse.mock.calls[0][1];
+    expect(flags.spawn).toBe(false);
+  });
+
+  it('spawnCtx is forwarded to executeDiscordActions subsystems', async () => {
+    const { parseDiscordActions, executeDiscordActions } = await import('./actions.js');
+    const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
+    const mockExecute = executeDiscordActions as ReturnType<typeof vi.fn>;
+    mockParse.mockClear();
+    mockExecute.mockClear();
+
+    mockParse.mockReturnValue({
+      actions: [{ type: 'spawnAgent', channel: 'general', prompt: 'do it' }],
+      cleanText: '',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecute.mockResolvedValue([{ ok: true, summary: 'spawned' }]);
+
+    const fakeSpawnCtx = { runtime: {}, model: 'fast' };
+    const opts = makeOpts({
+      state: { ...makeState(), discordActionsSpawn: true, spawnCtx: fakeSpawnCtx },
+    });
+
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // Fourth argument to executeDiscordActions is the subsystem contexts
+    const subs = mockExecute.mock.calls[0][3];
+    expect(subs.spawnCtx).toBe(fakeSpawnCtx);
+  });
+
   it('deferMaxDepth 1 allows first level but blocks second', async () => {
     const { parseDiscordActions } = await import('./actions.js');
     const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
