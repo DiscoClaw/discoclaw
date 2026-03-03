@@ -21,6 +21,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Message batching (combine queued messages into single prompt during active invocation) | `src/discord/message-batching.ts` | **done** |
 | Startup self-healing (missing workspace files, stale cron/task thread refs, corrupted JSON stores) | `src/health/startup-healing.ts`, `src/workspace-bootstrap.ts` | **done** |
 | YouTube transcript fetching (auto-fetch transcripts from YouTube URLs in messages, inject into prompt) | `src/discord/youtube-transcript.ts` | **done** |
+| Prompt section token-estimate logging (per-section `chars` + `Math.ceil(chars / 4)` estimates at prompt assembly time across message/reaction/defer/voice flows) | `src/discord/prompt-common.ts`, `src/discord/message-coordinator.ts`, `src/discord/reaction-handler.ts`, `src/discord/deferred-runner.ts`, `src/voice/voice-prompt-builder.ts`, `src/index.ts` | **done** |
 
 ## 2. Security
 
@@ -83,6 +84,7 @@ All actions are gated by category env flags (off by default except channels).
 | Category | Action types | File | Status |
 |----------|-------------|------|--------|
 | Core dispatcher + parser | — | `actions.ts` | **done** |
+| Tiered action schema injection (core/always + channel-contextual + keyword-triggered prompt subsets) | — | `actions.ts`, `message-coordinator.ts`, `reaction-handler.ts`, `deferred-runner.ts`, `index.ts` | **done** |
 | Channel management | create, edit, delete, list, info, categoryCreate, threadEdit, forumTagCreate, forumTagDelete, forumTagList | `actions-channels.ts` | **done** |
 | Messaging | send, edit, delete, react, pin, fetch, sendFile | `actions-messaging.ts` | **done** |
 | Guild/server | roles, members | `actions-guild.ts` | **done** |

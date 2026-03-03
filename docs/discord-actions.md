@@ -137,10 +137,30 @@ Important behavioral notes:
 - Even if a category is implemented, it is not usable unless its flag is enabled.
 - Actions are not advertised to the model in DMs: `src/discord.ts` only appends the actions prompt section for non-DM messages, and execution requires `msg.guild`.
 
+## Tiered Schema Injection (Prompt Guidance)
+
+Prompt-time action schema guidance is assembled by `buildTieredDiscordActionsPromptSection(...)` in `src/discord/actions.ts`.
+
+- When called without selection inputs (`discordActionsPromptSection(...)` wrapper), it includes every enabled category (legacy full reference behavior).
+- When called with selection inputs (current message/reaction/defer/voice invocation flows), it injects a reduced subset across three tiers:
+  - `core` (always): `messaging`, `channels`
+  - `channelContextual`: inferred from `channelName`, `channelContextPath`, and `isThread` (currently adds task/cron categories when context indicates they are relevant)
+  - `keywordTriggered`: inferred from `userText` keyword matches (memory/task/plan/forge/cron/config/imagegen/voice/moderation/poll/guild/botProfile/spawn keywords)
+- Selection inputs are: `channelName`, `channelContextPath`, `isThread`, and `userText`.
+- Included categories are deduplicated and rendered in deterministic category order.
+- Optional schema estimate logging can be enabled with `DISCOCLAW_LOG_ACTION_SCHEMA_ESTIMATES=1`, which logs per-section `chars` and `estTokens` using `Math.ceil(chars / 4)`.
+
+Capability/gating note (important):
+- Prompt injection selection only changes what schema text is shown to the model.
+- `parseDiscordActions(...)` still hard-gates by `ActionCategoryFlags` and strips disabled action types.
+- `executeDiscordActions(...)` still enforces runtime/subsystem availability for each category.
+- So even when a schema section is not injected, parser/executor capability remains env/context-gated; prompt selection does not grant capability.
+
 ## Action Lifecycle (End To End)
 
 1. Prompt injection:
-  - The model is taught the available actions via `discordActionsPromptSection(...)` in `src/discord/actions.ts`.
+  - The model is taught the available actions via `buildTieredDiscordActionsPromptSection(...)` (with flow-specific selection inputs) in `src/discord/actions.ts`.
+  - `discordActionsPromptSection(...)` remains as the full-reference wrapper used when no selection inputs are provided.
   - Each category contributes examples via its `*ActionsPromptSection()` function.
 
 2. Model emits action blocks:
@@ -494,7 +514,7 @@ Execution flow (runs when a deferred timer fires):
 2. **Channel allowlist** — if `DISCORD_CHANNEL_IDS` is configured, the target channel (or its thread parent) must be present; otherwise the run is dropped with a warning.
 3. **Channel context** — resolves the per-channel `DiscordChannelContext` for prompt building (used for context path and content directory).
 4. **Context inlining** — loads workspace PA files and inlines any matching context files for the target channel.
-5. **Prompt construction** — builds: PA preamble + `---\nDeferred follow-up scheduled for <#channel> (runs at HH:MM).\n---\nUser message:\n{prompt}`. If `discordActionsEnabled`, appends the full actions prompt section.
+5. **Prompt construction** — builds: PA preamble + `---\nDeferred follow-up scheduled for <#channel> (runs at HH:MM).\n---\nUser message:\n{prompt}`. If `discordActionsEnabled`, appends the tier-selected actions prompt section (core/contextual/keyword for the deferred prompt text + channel context).
 6. **Tool resolution** — applies workspace permissions and runtime capabilities to produce the effective tool list.
 7. **Runtime invocation** — invokes the runtime directly. This is not replayed through the normal Discord message handler.
 8. **Action parsing and execution** — parses action blocks (`parseDiscordActions`) and executes them (`executeDiscordActions`) with a synthetic action context (`messageId: "defer-<timestamp>"`).
@@ -538,7 +558,7 @@ Inside the queue callback (AI invocation flow):
 - Optionally joins the thread if `autoJoinThreads` is enabled and the bot has not yet joined.
 - Posts a `**Thinking...**` placeholder reply.
 - Loads workspace PA files, context files, durable memory section, and task thread section.
-- Builds the prompt: PA preamble + task section + durable memory + reaction event line (or resolved-prompt line when `resolvedPrompt` is set) + original message content + attachment text + embeds + guidance line + actions prompt section.
+- Builds the prompt: PA preamble + task section + durable memory + reaction event line (or resolved-prompt line when `resolvedPrompt` is set) + original message content + attachment text + embeds + guidance line + tier-selected actions prompt section.
 - Downloads image attachments and non-image text attachments from the reacted-to message.
 - Streams the runtime response with keepalive ticks (every 5 s) and stall warnings.
 - Parses and executes action blocks. A per-event `memoryCtx` is constructed with the reacting user's ID so memory actions target the correct user.
