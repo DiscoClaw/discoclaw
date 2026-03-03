@@ -268,6 +268,125 @@ describe('createReactionAddHandler', () => {
     expect(boundaryIdx).toBeLessThan(reactionIdx);
   });
 
+  it('injects tiered Discord action schema using reaction content and channel metadata', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+      discordActionsChannels: true,
+      discordActionsTasks: true,
+      discordActionsMemory: true,
+      discordActionsGuild: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({
+        content: 'Please remember this note.',
+        channel: {
+          id: 'ch-1',
+          name: 'task-board',
+          isThread: () => false,
+          send: vi.fn().mockResolvedValue(undefined),
+        },
+      }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('### Messaging');
+    expect(prompt).toContain('### Channel Management');
+    expect(prompt).toContain('### Task Tracking');
+    expect(prompt).toContain('### Memory (Durable User Memory)');
+    expect(prompt).not.toContain('### Guild Info & Management');
+  });
+
+  it('logs prompt section estimate payload with reaction flow label', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+      discordActionsChannels: true,
+      discordActionsTasks: true,
+      discordActionsMemory: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({
+        content: 'Please remember this note.',
+        channel: {
+          id: 'ch-1',
+          name: 'task-board',
+          isThread: () => false,
+          send: vi.fn().mockResolvedValue(undefined),
+        },
+      }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    const infoCalls = (params.log?.info as ReturnType<typeof vi.fn>).mock.calls;
+    const estimateCall = infoCalls.find((call: any[]) => call[1] === 'reaction:prompt:section-estimates');
+    expect(estimateCall).toBeTruthy();
+
+    const payload = estimateCall![0];
+    expect(payload.flow).toBe('reaction');
+    expect(payload.totalChars).toEqual(expect.any(Number));
+    expect(payload.totalEstTokens).toEqual(expect.any(Number));
+    expect(payload.actionSchemaSelection).toEqual(expect.objectContaining({
+      includedCategories: expect.arrayContaining(['messaging', 'channels']),
+      tierBuckets: expect.objectContaining({
+        core: expect.arrayContaining(['messaging', 'channels']),
+        channelContextual: expect.any(Array),
+        keywordTriggered: expect.any(Array),
+      }),
+      keywordHits: expect.any(Array),
+    }));
+
+    const sectionKeys = [
+      'soul',
+      'identity',
+      'user',
+      'agents',
+      'tools',
+      'pa',
+      'durableMemory',
+      'rollingSummary',
+      'channelContext',
+      'tasks',
+      'actionsReference',
+    ] as const;
+    for (const key of sectionKeys) {
+      expect(payload.sections[key]).toEqual(expect.objectContaining({
+        chars: expect.any(Number),
+        estTokens: expect.any(Number),
+        included: expect.any(Boolean),
+      }));
+    }
+    expect(payload.sections.actionsReference.included).toBe(true);
+  });
+
   it('image attachments are downloaded and passed to runtime.invoke', async () => {
     const invokeSpy = vi.fn();
     const runtime: RuntimeAdapter = {
@@ -1325,6 +1444,24 @@ describe('createReactionRemoveHandler', () => {
     const replyObj = reaction.message._replyObj;
     const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
     expect(lastEditCall[0].content).toContain('Runtime error: timeout reached');
+  });
+
+  it('logs prompt section estimate payload with reaction-remove flow label', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    const infoCalls = (params.log?.info as ReturnType<typeof vi.fn>).mock.calls;
+    const estimateCall = infoCalls.find((call: any[]) => call[1] === 'reaction-remove:prompt:section-estimates');
+    expect(estimateCall).toBeTruthy();
+    expect(estimateCall![0]).toEqual(expect.objectContaining({
+      flow: 'reaction-remove',
+      sections: expect.any(Object),
+      totalChars: expect.any(Number),
+      totalEstTokens: expect.any(Number),
+    }));
   });
 });
 

@@ -311,7 +311,7 @@ describe('prompt inlines context file contents', () => {
 });
 
 describe('discord action flags are not frozen at handler creation', () => {
-  it('tasks prompt section appears after toggling discordActionsTasks on the same params object', async () => {
+  it('injects only selected action schema sections for representative turns', async () => {
     const queue = makeQueue();
     const prompts: string[] = [];
     const runtime = {
@@ -339,12 +339,17 @@ describe('discord action flags are not frozen at handler creation', () => {
       autoJoinThreads: false,
       useRuntimeSessions: true,
       discordActionsEnabled: true,
-      discordActionsChannels: false,
-      discordActionsMessaging: false,
+      discordActionsChannels: true,
+      discordActionsMessaging: true,
       discordActionsGuild: false,
       discordActionsModeration: false,
       discordActionsPolls: false,
-      discordActionsTasks: false,
+      discordActionsTasks: true,
+      discordActionsCrons: true,
+      discordActionsForge: true,
+      discordActionsPlan: true,
+      discordActionsMemory: true,
+      discordActionsDefer: true,
       discordActionsBotProfile: false,
       messageHistoryBudget: 0,
       summaryEnabled: false,
@@ -375,12 +380,176 @@ describe('discord action flags are not frozen at handler creation', () => {
 
     await handler(makeMsg({ channelId: 'chan', content: 'first' }));
     expect(prompts[0]).toContain('## Discord Actions');
-    expect(prompts[0]).not.toContain('taskCreate');
+    expect(prompts[0]).toContain('### Messaging');
+    expect(prompts[0]).toContain('### Channel Management');
+    expect(prompts[0]).not.toContain('### Task Tracking');
+    expect(prompts[0]).not.toContain('### Memory (Durable User Memory)');
+    expect(prompts[0]).not.toContain('### Plan Management');
+    expect(prompts[0]).not.toContain('### Forge (Plan Drafting + Audit)');
+    expect(prompts[0]).not.toContain('### Cron Scheduled Tasks');
 
-    params.discordActionsTasks = true;
-    await handler(makeMsg({ channelId: 'chan', content: 'second' }));
+    await handler(makeMsg({
+      channelId: 'thread-1',
+      content: 'second',
+      channel: {
+        send: vi.fn(async () => {}),
+        isThread: () => true,
+        parentId: 'parent-1',
+        name: 'thread-name',
+        id: 'thread-1',
+      },
+    }));
     expect(prompts[1]).toContain('## Discord Actions');
-    expect(prompts[1]).toContain('taskCreate');
+    expect(prompts[1]).toContain('### Messaging');
+    expect(prompts[1]).toContain('### Channel Management');
+    expect(prompts[1]).toContain('### Task Tracking');
+    expect(prompts[1]).not.toContain('### Memory (Durable User Memory)');
+    expect(prompts[1]).not.toContain('### Plan Management');
+    expect(prompts[1]).not.toContain('### Forge (Plan Drafting + Audit)');
+    expect(prompts[1]).not.toContain('### Cron Scheduled Tasks');
+
+    await handler(makeMsg({
+      channelId: 'chan',
+      content: 'Remember this, draft a plan with forge, and schedule a cron reminder. Also make a task.',
+    }));
+    expect(prompts[2]).toContain('## Discord Actions');
+    expect(prompts[2]).toContain('### Messaging');
+    expect(prompts[2]).toContain('### Channel Management');
+    expect(prompts[2]).toContain('### Task Tracking');
+    expect(prompts[2]).toContain('### Memory (Durable User Memory)');
+    expect(prompts[2]).toContain('### Plan Management');
+    expect(prompts[2]).toContain('### Forge (Plan Drafting + Audit)');
+    expect(prompts[2]).toContain('### Cron Scheduled Tasks');
+    expect(prompts[2]).toContain('### Deferred self-invocation');
+  });
+
+  it('logs prompt section estimates with required context keys for message flow', async () => {
+    const queue = makeQueue();
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+    const log = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'prompt-estimates-workspace-'));
+    await fs.writeFile(path.join(workspace, 'SOUL.md'), '# Soul', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'IDENTITY.md'), '# Identity', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'USER.md'), '# User', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'AGENTS.md'), '# Agents', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'TOOLS.md'), '# Tools', 'utf-8');
+
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'prompt-estimates-summary-'));
+    await saveSummary(summaryDir, 'discord:channel:chan-est', {
+      summary: 'Rolling summary entry',
+      updatedAt: Date.now(),
+    });
+
+    const durableDir = await fs.mkdtemp(path.join(os.tmpdir(), 'prompt-estimates-durable-'));
+    const store: DurableMemoryStore = { version: 1, updatedAt: 0, items: [] };
+    addItem(store, 'Durable preference', { type: 'manual' }, 200);
+    await saveDurableMemory(durableDir, '123', store);
+
+    const taskStore = new TaskStore({ prefix: 'ws' });
+    taskStore.create({ title: 'Open task for prompt estimate assertions', labels: ['plan'] });
+
+    const { ctx, channelsDir } = await buildMockChannelContext({
+      channelFiles: [{ name: 'general.md', content: '# General channel context' }],
+    });
+    ctx.byChannelId = new Map([[
+      'chan-est',
+      {
+        channelId: 'chan-est',
+        channelName: 'general',
+        contextPath: path.join(channelsDir, 'general.md'),
+      },
+    ]]);
+
+    const handler = createMessageCreateHandler({
+      allowUserIds: new Set(['123']),
+      allowBotIds: new Set<string>(),
+      botMessageMemoryWriteEnabled: false,
+      runtime,
+      sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
+      workspaceCwd: workspace,
+      projectCwd: '/tmp',
+      groupsDir: '/tmp',
+      useGroupDirCwd: false,
+      runtimeModel: 'opus',
+      runtimeTools: [],
+      runtimeTimeoutMs: 1000,
+      requireChannelContext: false,
+      autoIndexChannelContext: false,
+      autoJoinThreads: false,
+      useRuntimeSessions: true,
+      discordChannelContext: ctx as any,
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+      discordActionsMessaging: true,
+      discordActionsGuild: false,
+      discordActionsModeration: false,
+      discordActionsPolls: false,
+      discordActionsTasks: true,
+      discordActionsBotProfile: false,
+      messageHistoryBudget: 0,
+      summaryEnabled: true,
+      summaryModel: 'haiku',
+      summaryMaxChars: 2000,
+      summaryEveryNTurns: 5,
+      summaryDataDir: summaryDir,
+      summaryToDurableEnabled: false,
+      shortTermMemoryEnabled: false,
+      shortTermDataDir: '/tmp/shortterm',
+      shortTermMaxEntries: 20,
+      shortTermMaxAgeMs: 21600000,
+      shortTermInjectMaxChars: 1000,
+      durableMemoryEnabled: true,
+      durableDataDir: durableDir,
+      durableInjectMaxChars: 2000,
+      durableMaxItems: 200,
+      memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
+      reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
+      reactionMaxAgeMs: 86400000,
+      streamStallWarningMs: 0,
+      botDisplayName: 'TestBot',
+      taskCtx: { store: taskStore } as any,
+      log: log as any,
+    }, queue);
+
+    await handler(makeMsg({ channelId: 'chan-est', content: 'hello there' }));
+
+    const infoCalls = log.info.mock.calls;
+    const estimateCall = infoCalls.find((call: any[]) => call[1] === 'message:prompt:section-estimates');
+    expect(estimateCall).toBeTruthy();
+
+    const payload = estimateCall![0];
+    const sectionKeys = [
+      'soul',
+      'identity',
+      'user',
+      'agents',
+      'tools',
+      'pa',
+      'durableMemory',
+      'rollingSummary',
+      'channelContext',
+      'tasks',
+      'actionsReference',
+    ] as const;
+    for (const key of sectionKeys) {
+      expect(payload.sections[key]).toEqual(expect.objectContaining({
+        chars: expect.any(Number),
+        estTokens: expect.any(Number),
+        included: expect.any(Boolean),
+      }));
+      expect(payload.sections[key].included).toBe(true);
+    }
   });
 });
 

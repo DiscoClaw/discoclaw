@@ -6,13 +6,13 @@ import type { KeyedQueue } from '../group-queue.js';
 import { isAllowlisted } from './allowlist.js';
 import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildAllResultLines, appendActionResults } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines, appendActionResults } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
 import { shouldTriggerFollowUp } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { tryAbort, isActivelyStreaming } from './abort-registry.js';
 import { getActiveOrchestrator, getActiveForgeChannelId } from './forge-plan-registry.js';
-import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection } from './prompt-common.js';
+import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection, buildPromptSectionEstimates } from './prompt-common.js';
 import { editThenSendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
@@ -292,7 +292,7 @@ function createReactionHandler(
             channelLabel = `#${channelCtx.channelName ?? 'unknown'}`;
           }
 
-          const inlinedContext = await inlineContextFiles(
+          const inlinedContext = await inlineContextFilesWithMeta(
             contextFiles,
             { required: new Set(params.discordChannelContext?.paContextFiles ?? []) },
           );
@@ -305,9 +305,17 @@ function createReactionHandler(
             : promptText.guidanceLine;
 
           const openTasksSection = buildOpenTasksSection(params.taskCtx?.store);
+          let actionsReferenceSection = '';
+          let actionSchemaSelection:
+            | {
+              includedCategories: string[];
+              tierBuckets: { core: string[]; channelContextual: string[]; keywordTriggered: string[] };
+              keywordHits: string[];
+            }
+            | null = null;
 
           let prompt =
-            buildPromptPreamble(inlinedContext) + '\n\n' +
+            buildPromptPreamble(inlinedContext.text) + '\n\n' +
             (taskSection
               ? `---\n${taskSection}\n\n`
               : '') +
@@ -395,8 +403,43 @@ function createReactionHandler(
           };
 
           if (params.discordActionsEnabled && !isDm) {
-            prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags, params.botDisplayName);
+            const actionSelection = buildTieredDiscordActionsPromptSection(
+              actionFlags,
+              params.botDisplayName,
+              {
+                channelName: channelCtx.channelName ?? channelNameFrom(msg.channel),
+                channelContextPath: channelCtx.contextPath,
+                isThread,
+                userText: String(msg.content ?? ''),
+              },
+            );
+            actionsReferenceSection = actionSelection.prompt;
+            actionSchemaSelection = {
+              includedCategories: actionSelection.includedCategories,
+              tierBuckets: actionSelection.tierBuckets,
+              keywordHits: actionSelection.keywordHits,
+            };
+            prompt += '\n\n---\n' + actionsReferenceSection;
           }
+
+          const promptSectionEstimates = buildPromptSectionEstimates({
+            contextSections: inlinedContext.sections,
+            channelContextPath: channelCtx.contextPath,
+            durableSection,
+            taskSection,
+            openTasksSection,
+            actionsReferenceSection,
+          });
+          params.log?.info(
+            {
+              flow: logPrefix,
+              sections: promptSectionEstimates.sections,
+              totalChars: promptSectionEstimates.totalChars,
+              totalEstTokens: promptSectionEstimates.totalEstTokens,
+              actionSchemaSelection,
+            },
+            `${logPrefix}:prompt:section-estimates`,
+          );
 
           const addDirs: string[] = [];
           if (params.useGroupDirCwd) addDirs.push(params.workspaceCwd);

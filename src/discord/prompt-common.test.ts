@@ -4,7 +4,23 @@ import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskData } from '../tasks/types.js';
 
-import { ROOT_POLICY, buildPromptPreamble, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, buildTaskContextSection, buildTaskThreadSection, resolveEffectiveTools, _resetToolsAuditState, buildOpenTasksSection, OPEN_TASKS_MAX_CHARS } from './prompt-common.js';
+import {
+  ROOT_POLICY,
+  OPEN_TASKS_MAX_CHARS,
+  _resetToolsAuditState,
+  buildOpenTasksSection,
+  buildPromptPreamble,
+  buildPromptSectionEstimates,
+  buildTaskContextSection,
+  buildTaskThreadSection,
+  estimateTokensFromChars,
+  inlineContextFiles,
+  inlineContextFilesWithMeta,
+  loadDailyLogFiles,
+  loadWorkspaceMemoryFile,
+  loadWorkspacePaFiles,
+  resolveEffectiveTools,
+} from './prompt-common.js';
 import { TaskStore } from '../tasks/store.js';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +67,133 @@ describe('buildPromptPreamble', () => {
     const ctx = '--- SOUL.md ---\nYou are a helpful assistant.';
     const result = buildPromptPreamble(ctx);
     expect(result).toContain(ctx);
+  });
+});
+
+describe('estimateTokensFromChars', () => {
+  it('uses Math.ceil(chars / 4) rounding behavior', () => {
+    expect(estimateTokensFromChars(0)).toBe(0);
+    expect(estimateTokensFromChars(1)).toBe(1);
+    expect(estimateTokensFromChars(4)).toBe(1);
+    expect(estimateTokensFromChars(5)).toBe(2);
+    expect(estimateTokensFromChars(9)).toBe(3);
+  });
+});
+
+describe('inlineContextFilesWithMeta', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    for (const d of dirs) await fs.rm(d, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  it('returns rendered text and per-file metadata with char counts', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pc-meta-'));
+    dirs.push(dir);
+    const filePath = path.join(dir, 'SOUL.md');
+    await fs.writeFile(filePath, 'soul text\n', 'utf-8');
+
+    const result = await inlineContextFilesWithMeta([filePath]);
+    expect(result.text).toBe('--- SOUL.md ---\nsoul text');
+    expect(result.sections).toEqual([
+      {
+        filePath,
+        fileName: 'SOUL.md',
+        rendered: '--- SOUL.md ---\nsoul text',
+        chars: '--- SOUL.md ---\nsoul text'.length,
+      },
+    ]);
+  });
+
+  it('keeps inlineContextFiles behavior via compatibility wrapper', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pc-meta-'));
+    dirs.push(dir);
+    const filePath = path.join(dir, 'USER.md');
+    await fs.writeFile(filePath, 'hello', 'utf-8');
+
+    const withMeta = await inlineContextFilesWithMeta([filePath]);
+    const wrapped = await inlineContextFiles([filePath]);
+    expect(wrapped).toBe(withMeta.text);
+  });
+});
+
+describe('buildPromptSectionEstimates', () => {
+  const allKeys = [
+    'soul',
+    'identity',
+    'user',
+    'agents',
+    'tools',
+    'pa',
+    'durableMemory',
+    'rollingSummary',
+    'channelContext',
+    'tasks',
+    'actionsReference',
+  ] as const;
+
+  it('includes all section keys with zeroed estimates when content is absent', () => {
+    const result = buildPromptSectionEstimates({ contextSections: [] });
+
+    for (const key of allKeys) {
+      expect(result.sections[key]).toEqual({
+        chars: 0,
+        estTokens: 0,
+        included: false,
+      });
+    }
+    expect(result.totalChars).toBe(0);
+    expect(result.totalEstTokens).toBe(0);
+  });
+
+  it('classifies context sections, derives channelContext from path metadata, and totals estimates', () => {
+    const channelPath = '/tmp/workspace/channel-context.md';
+    const result = buildPromptSectionEstimates({
+      contextSections: [
+        { filePath: '/tmp/workspace/SOUL.md', fileName: 'SOUL.md', rendered: 'xxxx', chars: 4 },
+        { filePath: '/tmp/workspace/IDENTITY.md', fileName: 'IDENTITY.md', rendered: 'xxxxx', chars: 5 },
+        { filePath: '/tmp/workspace/USER.md', fileName: 'USER.md', rendered: 'xxxxxx', chars: 6 },
+        { filePath: '/tmp/workspace/AGENTS.md', fileName: 'AGENTS.md', rendered: 'xxxxxxx', chars: 7 },
+        { filePath: '/tmp/workspace/TOOLS.md', fileName: 'TOOLS.md', rendered: 'xxxxxxxx', chars: 8 },
+        { filePath: '/tmp/workspace/pa.md', fileName: 'pa.md', rendered: 'xxxxxxxxx', chars: 9 },
+        { filePath: '/tmp/workspace/./channel-context.md', fileName: 'channel-context.md', rendered: 'xxxxxxxxxxx', chars: 11 },
+      ],
+      channelContextPath: channelPath,
+      durableSection: 'ddd',
+      summarySection: 'ssss',
+      taskSection: 'tt',
+      openTasksSection: 'ooo',
+      actionsReferenceSection: 'aaaaaa',
+    });
+
+    expect(result.sections.soul.chars).toBe(4);
+    expect(result.sections.identity.chars).toBe(5);
+    expect(result.sections.user.chars).toBe(6);
+    expect(result.sections.agents.chars).toBe(7);
+    expect(result.sections.tools.chars).toBe(8);
+    expect(result.sections.pa.chars).toBe(9);
+    expect(result.sections.channelContext.chars).toBe(11);
+    expect(result.sections.durableMemory.chars).toBe(3);
+    expect(result.sections.rollingSummary.chars).toBe(4);
+    expect(result.sections.tasks.chars).toBe(5); // taskSection + openTasksSection
+    expect(result.sections.actionsReference.chars).toBe(6);
+    expect(result.totalChars).toBe(68);
+    expect(result.totalEstTokens).toBe(17);
+  });
+
+  it('combines task thread and open tasks text into the tasks section', () => {
+    const result = buildPromptSectionEstimates({
+      contextSections: [],
+      taskSection: 'task',
+      openTasksSection: 'open',
+    });
+
+    expect(result.sections.tasks).toEqual({
+      chars: 8,
+      estTokens: 2,
+      included: true,
+    });
   });
 });
 

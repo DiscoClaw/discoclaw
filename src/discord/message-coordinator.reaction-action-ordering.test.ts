@@ -24,15 +24,22 @@ vi.mock('../workspace-bootstrap.js', () => ({
 const executeDiscordActionsMock = vi.fn(async () => [
   { ok: true, summary: 'Task closed' },
 ]);
+const parseDiscordActionsMock = vi.fn((_text: string) => ({
+  actions: [{ type: 'taskClose', taskId: 'ws-001', reason: 'Done' }],
+  cleanText: 'Closing the task.',
+  strippedUnrecognizedTypes: [],
+  parseFailures: 0,
+}));
 
 vi.mock('./actions.js', () => ({
-  parseDiscordActions: vi.fn((_text: string) => ({
-    actions: [{ type: 'taskClose', taskId: 'ws-001', reason: 'Done' }],
-    cleanText: 'Closing the task.',
-    strippedUnrecognizedTypes: [],
-    parseFailures: 0,
-  })),
+  parseDiscordActions: parseDiscordActionsMock,
   executeDiscordActions: executeDiscordActionsMock,
+  buildTieredDiscordActionsPromptSection: vi.fn(() => ({
+    prompt: '',
+    includedCategories: [],
+    tierBuckets: { core: [], channelContextual: [], keywordTriggered: [] },
+    keywordHits: [],
+  })),
   discordActionsPromptSection: vi.fn(() => ''),
   buildDisplayResultLines: vi.fn(() => ['Task closed']),
   buildAllResultLines: vi.fn(() => ['Task closed']),
@@ -82,6 +89,7 @@ function makeParams(runtime: any) {
     discordActionsGuild: false,
     discordActionsModeration: false,
     discordActionsPolls: false,
+    discordActionsTasks: true,
     messageHistoryBudget: 0,
     summaryEnabled: false,
     summaryModel: 'fast',
@@ -200,6 +208,7 @@ describe('🛑 removal happens before action execution (taskClose regression)', 
 
     // Core invariant: stop reaction removed before actions execute.
     expect(removeStopReaction).toHaveBeenCalledTimes(1);
+    expect(parseDiscordActionsMock).toHaveBeenCalledTimes(1);
     expect(executeDiscordActionsMock).toHaveBeenCalledTimes(1);
 
     const removeIdx = order.indexOf('stop-reaction-removed');

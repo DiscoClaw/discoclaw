@@ -29,12 +29,13 @@ vi.mock('./forge-commands.js', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeCtx(): ActionContext {
+function makeCtx(overrides?: Partial<ActionContext>): ActionContext {
   return {
     guild: {} as any,
     client: {} as any,
     channelId: 'test-channel',
     messageId: 'test-message',
+    ...overrides,
   };
 }
 
@@ -79,6 +80,7 @@ function makeForgeCtx(overrides?: Partial<ForgeContext>): ForgeContext {
 
 beforeEach(() => {
   _resetForTest();
+  vi.clearAllMocks();
 });
 
 describe('FORGE_ACTION_TYPES', () => {
@@ -110,6 +112,72 @@ describe('executeForgeAction', () => {
         expect(result.summary).toContain('Add retry logic');
       }
       expect(forgeCtx.orchestratorFactory).toHaveBeenCalled();
+    });
+
+    it('reuses linked task when invoked from a task thread', async () => {
+      const taskStore = new TaskStore();
+      const task = taskStore.create({
+        title: 'Token budget awareness',
+        description: 'Instrument per-section token counts',
+      });
+      taskStore.update(task.id, { externalRef: 'discord:thread-1122' });
+
+      const forgeCtx = makeForgeCtx({ taskStore });
+      const result = await executeForgeAction(
+        { type: 'forgeCreate', description: 'this' },
+        {
+          ...makeCtx(),
+          channelId: 'thread-1122',
+          threadParentId: 'forum-1',
+        },
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(forgeCtx.orchestratorFactory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          existingTaskId: task.id,
+          taskDescription: task.description,
+        }),
+      );
+    });
+
+    it('does not forward runtime events when toolAwareStreaming is disabled', async () => {
+      const edit = vi.fn(async () => ({}));
+      const send = vi.fn(async () => ({ edit }));
+      const fetch = vi.fn(async () => ({ send }));
+
+      const forgeCtx = makeForgeCtx({ toolAwareStreaming: false });
+      const result = await executeForgeAction(
+        { type: 'forgeCreate', description: 'Add retry logic' },
+        makeCtx({ client: { channels: { fetch } } as any }),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      const orch = (forgeCtx.orchestratorFactory as any).mock.results[0]?.value;
+      const runCall = orch?.run?.mock.calls[0];
+      expect(typeof runCall?.[1]).toBe('function');
+      expect(runCall?.[3]).toBeUndefined();
+    });
+
+    it('forwards runtime events when toolAwareStreaming is enabled', async () => {
+      const edit = vi.fn(async () => ({}));
+      const send = vi.fn(async () => ({ edit }));
+      const fetch = vi.fn(async () => ({ send }));
+
+      const forgeCtx = makeForgeCtx({ toolAwareStreaming: true });
+      const result = await executeForgeAction(
+        { type: 'forgeCreate', description: 'Add retry logic' },
+        makeCtx({ client: { channels: { fetch } } as any }),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      const orch = (forgeCtx.orchestratorFactory as any).mock.results[0]?.value;
+      const runCall = orch?.run?.mock.calls[0];
+      expect(typeof runCall?.[1]).toBe('function');
+      expect(typeof runCall?.[3]).toBe('function');
     });
 
     it('fails without description', async () => {

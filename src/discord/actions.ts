@@ -717,76 +717,154 @@ export function appendActionResults(
 // Prompt section
 // ---------------------------------------------------------------------------
 
-export function discordActionsPromptSection(flags: ActionCategoryFlags, botDisplayName?: string): string {
-  const displayName = botDisplayName ?? 'Discoclaw';
-  const sections: string[] = [];
+export type ActionSchemaTier = 'core' | 'channelContextual' | 'keywordTriggered';
 
-  sections.push(`## Discord Actions
+export type ActionSchemaSelection = {
+  prompt: string;
+  includedCategories: string[];
+  tierBuckets: Record<ActionSchemaTier, string[]>;
+  keywordHits: string[];
+};
 
-Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if only a subset of sub-categories are available). You can perform Discord server actions by including structured action blocks in your response.`);
+type ActionSchemaCategory =
+  | 'channels'
+  | 'messaging'
+  | 'guild'
+  | 'moderation'
+  | 'polls'
+  | 'tasks'
+  | 'crons'
+  | 'botProfile'
+  | 'forge'
+  | 'plan'
+  | 'memory'
+  | 'defer'
+  | 'config'
+  | 'imagegen'
+  | 'voice'
+  | 'spawn';
 
-  if (flags.messaging) {
-    sections.push(messagingActionsPromptSection());
-    sections.push(reactionPromptSection());
+const ACTION_SCHEMA_CATEGORY_ORDER: ActionSchemaCategory[] = [
+  'messaging',
+  'channels',
+  'guild',
+  'moderation',
+  'polls',
+  'tasks',
+  'crons',
+  'botProfile',
+  'forge',
+  'plan',
+  'memory',
+  'config',
+  'imagegen',
+  'voice',
+  'spawn',
+  'defer',
+];
+
+const ACTION_SCHEMA_CORE_CATEGORIES: ActionSchemaCategory[] = ['messaging', 'channels'];
+
+const ACTION_SCHEMA_TASK_CONTEXT_RE = /\b(task|tasks|todo|ticket|issue|backlog|sprint)\b/i;
+const ACTION_SCHEMA_CRON_CONTEXT_RE = /\b(cron|schedule|scheduled|reminder|remind|timer)\b/i;
+
+type ActionSchemaKeywordRule = {
+  hit: string;
+  pattern: RegExp;
+  categories: ActionSchemaCategory[];
+};
+
+const ACTION_SCHEMA_KEYWORD_RULES: ActionSchemaKeywordRule[] = [
+  { hit: 'memory', pattern: /\b(memory|remember|forget|recall|preference)\b/i, categories: ['memory'] },
+  { hit: 'task', pattern: /\b(task|todo|ticket|issue|backlog)\b/i, categories: ['tasks'] },
+  { hit: 'plan', pattern: /\b(plan|roadmap|milestone|phase)\b/i, categories: ['plan', 'forge'] },
+  { hit: 'forge', pattern: /\bforge\b/i, categories: ['forge', 'plan'] },
+  { hit: 'cron', pattern: /\b(cron|schedule|scheduled|reminder|remind|later)\b/i, categories: ['crons', 'defer'] },
+  { hit: 'config', pattern: /\b(model|config|configure|setting)\b/i, categories: ['config'] },
+  { hit: 'imagegen', pattern: /\b(image|generate image|draw|illustration|photo)\b/i, categories: ['imagegen'] },
+  { hit: 'voice', pattern: /\b(voice|speak|mute|unmute)\b/i, categories: ['voice'] },
+  { hit: 'moderation', pattern: /\b(moderat|ban|kick|timeout)\b/i, categories: ['moderation'] },
+  { hit: 'poll', pattern: /\b(poll|vote)\b/i, categories: ['polls'] },
+  { hit: 'guild', pattern: /\b(guild|server|member|role|event)\b/i, categories: ['guild'] },
+  { hit: 'botProfile', pattern: /\b(bot profile|bot name|persona)\b/i, categories: ['botProfile'] },
+  { hit: 'spawn', pattern: /\b(spawn|agent)\b/i, categories: ['spawn'] },
+];
+
+function estimateTokensFromChars(chars: number): number {
+  if (!Number.isFinite(chars) || chars <= 0) return 0;
+  return Math.ceil(chars / 4);
+}
+
+function pushUnique<T extends string>(items: T[], value: T): void {
+  if (!items.includes(value)) items.push(value);
+}
+
+function isActionSchemaCategoryEnabled(flags: ActionCategoryFlags, category: ActionSchemaCategory): boolean {
+  switch (category) {
+    case 'channels': return flags.channels;
+    case 'messaging': return flags.messaging;
+    case 'guild': return flags.guild;
+    case 'moderation': return flags.moderation;
+    case 'polls': return flags.polls;
+    case 'tasks': return flags.tasks;
+    case 'crons': return flags.crons;
+    case 'botProfile': return flags.botProfile;
+    case 'forge': return flags.forge;
+    case 'plan': return flags.plan;
+    case 'memory': return flags.memory;
+    case 'defer': return flags.defer;
+    case 'config': return flags.config;
+    case 'imagegen': return Boolean(flags.imagegen);
+    case 'voice': return Boolean(flags.voice);
+    case 'spawn': return Boolean(flags.spawn);
   }
+}
 
-  if (flags.channels) {
-    sections.push(channelActionsPromptSection());
+function renderActionSchemaCategorySection(category: ActionSchemaCategory): string {
+  switch (category) {
+    case 'messaging':
+      return `${messagingActionsPromptSection()}\n\n${reactionPromptSection()}`;
+    case 'channels':
+      return channelActionsPromptSection();
+    case 'guild':
+      return guildActionsPromptSection();
+    case 'moderation':
+      return moderationActionsPromptSection();
+    case 'polls':
+      return pollActionsPromptSection();
+    case 'tasks':
+      return taskActionsPromptSection();
+    case 'crons':
+      return cronActionsPromptSection();
+    case 'botProfile':
+      return botProfileActionsPromptSection();
+    case 'forge':
+      return forgeActionsPromptSection();
+    case 'plan':
+      return planActionsPromptSection();
+    case 'memory':
+      return memoryActionsPromptSection();
+    case 'config':
+      return configActionsPromptSection();
+    case 'imagegen':
+      return imagegenActionsPromptSection();
+    case 'voice':
+      return voiceActionsPromptSection();
+    case 'spawn':
+      return spawnActionsPromptSection();
+    case 'defer':
+      return '';
   }
+}
 
-  if (flags.guild) {
-    sections.push(guildActionsPromptSection());
-  }
+function discordActionsIntroSection(): string {
+  return `## Discord Actions
 
-  if (flags.moderation) {
-    sections.push(moderationActionsPromptSection());
-  }
+Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if only a subset of sub-categories are available). You can perform Discord server actions by including structured action blocks in your response.`;
+}
 
-  if (flags.polls) {
-    sections.push(pollActionsPromptSection());
-  }
-
-  if (flags.tasks) {
-    sections.push(taskActionsPromptSection());
-  }
-
-  if (flags.crons) {
-    sections.push(cronActionsPromptSection());
-  }
-
-  if (flags.botProfile) {
-    sections.push(botProfileActionsPromptSection());
-  }
-
-  if (flags.forge) {
-    sections.push(forgeActionsPromptSection());
-  }
-
-  if (flags.plan) {
-    sections.push(planActionsPromptSection());
-  }
-
-  if (flags.memory) {
-    sections.push(memoryActionsPromptSection());
-  }
-
-  if (flags.config) {
-    sections.push(configActionsPromptSection());
-  }
-
-  if (flags.imagegen) {
-    sections.push(imagegenActionsPromptSection());
-  }
-
-  if (flags.voice) {
-    sections.push(voiceActionsPromptSection());
-  }
-
-  if (flags.spawn) {
-    sections.push(spawnActionsPromptSection());
-  }
-
-  sections.push(`### Rules
+function discordActionsRulesSection(displayName: string): string {
+  return `### Rules
 - Only the action types listed above are supported.
 - Never emit an action with empty, placeholder, or missing values for required parameters. If you don't have the value (e.g., no messageId for react), skip the action entirely.
 - Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
@@ -802,17 +880,173 @@ If an action fails with a "Missing Permissions" or "Missing Access" error, tell 
 1. Open **Server Settings → Roles**.
 2. Find the ${displayName} bot's role (usually named after the bot).
 3. Enable the required permission under the role's permissions.
-4. The bot may need to be re-invited with the "moderator" permission profile if the role wasn't granted at invite time.`);
+4. The bot may need to be re-invited with the "moderator" permission profile if the role wasn't granted at invite time.`;
+}
 
-  if (flags.defer) {
-    sections.push(`### Deferred self-invocation
+function deferredSelfInvocationSection(): string {
+  return `### Deferred self-invocation
 Use a <discord-action>{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}</discord-action> block to schedule a follow-up run inside the requested channel without another user prompt. You must specify the channel by name or ID; delaySeconds is how long to wait (capped by DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS) and prompt becomes the user message when the deferred invocation runs. The scheduler enforces DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT pending jobs, respects the same channel permissions as this response, automatically posts the follow-up output, and allows nested defers up to the configured depth limit (DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH, default 4); once the limit is reached, \`defer\` is disabled for that run. If a guard rail rejects the request (too long, too many active defers, missing permissions, or the channel becomes invalid) the action fails with an explanatory message.
 
 **Context isolation warning:** The deferred invocation runs with no conversation history — the \`prompt\` string is the **only** context the AI receives. It must include all relevant IDs, file paths, channel references, and state needed to act. Vague prompts like "check on that" will fail because the AI has no memory of what "that" refers to. Write every deferred prompt as a fully self-contained instruction.
 
-Use <discord-action>{"type":"deferList"}</discord-action> to query all pending deferred actions. Returns a job \`id\`, channel, prompt, and time remaining for each entry. This is a read-only query action — results are automatically sent back for further analysis.`);
+Use <discord-action>{"type":"deferList"}</discord-action> to query all pending deferred actions. Returns a job \`id\`, channel, prompt, and time remaining for each entry. This is a read-only query action — results are automatically sent back for further analysis.`;
+}
 
+function deriveContextualCategories(opts: {
+  channelName?: string;
+  channelContextPath?: string | null;
+  isThread?: boolean;
+}): ActionSchemaCategory[] {
+  const categories: ActionSchemaCategory[] = [];
+  const contextText = `${opts.channelName ?? ''} ${opts.channelContextPath ?? ''}`.trim();
+  if (opts.isThread || ACTION_SCHEMA_TASK_CONTEXT_RE.test(contextText)) {
+    categories.push('tasks');
+  }
+  if (ACTION_SCHEMA_CRON_CONTEXT_RE.test(contextText)) {
+    categories.push('crons');
+  }
+  return categories;
+}
+
+function deriveKeywordCategories(userText?: string): {
+  categories: ActionSchemaCategory[];
+  keywordHits: string[];
+} {
+  const categories: ActionSchemaCategory[] = [];
+  const keywordHits: string[] = [];
+  if (!userText?.trim()) return { categories, keywordHits };
+
+  for (const rule of ACTION_SCHEMA_KEYWORD_RULES) {
+    if (!rule.pattern.test(userText)) continue;
+    pushUnique(keywordHits, rule.hit);
+    for (const category of rule.categories) {
+      pushUnique(categories, category);
+    }
+  }
+  return { categories, keywordHits };
+}
+
+function maybeLogActionSchemaTokenEstimates(input: {
+  selection: Omit<ActionSchemaSelection, 'prompt'>;
+  sections: Array<{ section: string; content: string }>;
+}): void {
+  if (process.env.DISCOCLAW_LOG_ACTION_SCHEMA_ESTIMATES !== '1') return;
+  const estimates = input.sections.map((section) => {
+    const chars = section.content.length;
+    return {
+      section: section.section,
+      chars,
+      estTokens: estimateTokensFromChars(chars),
+    };
+  });
+  const totalChars = estimates.reduce((sum, current) => sum + current.chars, 0);
+  console.info(
+    '[discord:actions:schema-estimates]',
+    JSON.stringify({
+      ...input.selection,
+      sections: estimates,
+      totalChars,
+      totalEstTokens: estimateTokensFromChars(totalChars),
+    }),
+  );
+}
+
+export function buildTieredDiscordActionsPromptSection(
+  flags: ActionCategoryFlags,
+  botDisplayName?: string,
+  opts?: {
+    channelName?: string;
+    channelContextPath?: string | null;
+    isThread?: boolean;
+    userText?: string;
+  },
+): ActionSchemaSelection {
+  const displayName = botDisplayName ?? 'Discoclaw';
+  const tierBuckets: Record<ActionSchemaTier, ActionSchemaCategory[]> = {
+    core: [],
+    channelContextual: [],
+    keywordTriggered: [],
+  };
+  const included = new Set<ActionSchemaCategory>();
+  const keywordHits: string[] = [];
+
+  const addCategory = (tier: ActionSchemaTier, category: ActionSchemaCategory): void => {
+    if (!isActionSchemaCategoryEnabled(flags, category)) return;
+    if (included.has(category)) return;
+    included.add(category);
+    tierBuckets[tier].push(category);
+  };
+
+  if (!opts) {
+    for (const category of ACTION_SCHEMA_CATEGORY_ORDER) {
+      addCategory('core', category);
+    }
+  } else {
+    for (const category of ACTION_SCHEMA_CORE_CATEGORIES) {
+      addCategory('core', category);
+    }
+
+    for (const category of deriveContextualCategories(opts)) {
+      addCategory('channelContextual', category);
+    }
+
+    const keywordSelection = deriveKeywordCategories(opts.userText);
+    for (const hit of keywordSelection.keywordHits) {
+      pushUnique(keywordHits, hit);
+    }
+    for (const category of keywordSelection.categories) {
+      addCategory('keywordTriggered', category);
+    }
   }
 
-  return sections.join('\n\n');
+  const includedCategories = ACTION_SCHEMA_CATEGORY_ORDER.filter((category) => included.has(category));
+  const sections: string[] = [];
+  const sectionLogs: Array<{ section: string; content: string }> = [];
+  const intro = discordActionsIntroSection();
+  sections.push(intro);
+  sectionLogs.push({ section: 'intro', content: intro });
+
+  for (const category of includedCategories) {
+    if (category === 'defer') continue;
+    const section = renderActionSchemaCategorySection(category);
+    if (!section) continue;
+    sections.push(section);
+    sectionLogs.push({ section: category, content: section });
+  }
+
+  const rules = discordActionsRulesSection(displayName);
+  sections.push(rules);
+  sectionLogs.push({ section: 'rules', content: rules });
+
+  if (included.has('defer')) {
+    const deferSection = deferredSelfInvocationSection();
+    sections.push(deferSection);
+    sectionLogs.push({ section: 'defer', content: deferSection });
+  }
+
+  const selection: ActionSchemaSelection = {
+    prompt: sections.join('\n\n'),
+    includedCategories,
+    tierBuckets: {
+      core: [...tierBuckets.core],
+      channelContextual: [...tierBuckets.channelContextual],
+      keywordTriggered: [...tierBuckets.keywordTriggered],
+    },
+    keywordHits,
+  };
+
+  maybeLogActionSchemaTokenEstimates({
+    selection: {
+      includedCategories: selection.includedCategories,
+      tierBuckets: selection.tierBuckets,
+      keywordHits: selection.keywordHits,
+    },
+    sections: sectionLogs,
+  });
+
+  return selection;
+}
+
+export function discordActionsPromptSection(flags: ActionCategoryFlags, botDisplayName?: string): string {
+  return buildTieredDiscordActionsPromptSection(flags, botDisplayName).prompt;
 }
