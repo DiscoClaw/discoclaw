@@ -11,7 +11,7 @@ import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } f
 import { shouldTriggerFollowUp } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { tryAbort, isActivelyStreaming } from './abort-registry.js';
-import { getActiveOrchestrator } from './forge-plan-registry.js';
+import { getActiveOrchestrator, getActiveForgeChannelId } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection } from './prompt-common.js';
 import { editThenSendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
@@ -155,7 +155,9 @@ function createReactionHandler(
         tryAbort(reaction.message.id);
         if (wasActive) metrics.increment('discord.reaction.abort');
         const orch = getActiveOrchestrator();
-        if (orch?.isRunning) orch.requestCancel('stop reaction');
+        if (orch?.isRunning && getActiveForgeChannelId() === reaction.message.channelId) {
+          orch.requestCancel('stop reaction');
+        }
         return;
       }
 

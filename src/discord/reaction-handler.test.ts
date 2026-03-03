@@ -1728,12 +1728,14 @@ describe('🛑 per-message abort intercept', () => {
     }
   });
 
-  it('calls requestCancel on a running forge orchestrator', async () => {
+  it('calls requestCancel on a running forge orchestrator in the same channel', async () => {
     const requestCancelFn = vi.fn();
     const mockOrch = { isRunning: true, requestCancel: requestCancelFn };
     const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(false);
     const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(false);
     const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(mockOrch as any);
+    // Forge is running in the same channel as the reaction message ('ch-1').
+    const getChannelSpy = vi.spyOn(forgePlanRegistry, 'getActiveForgeChannelId').mockReturnValue('ch-1');
     try {
       const params = makeParams();
       const queue = mockQueue();
@@ -1746,6 +1748,32 @@ describe('🛑 per-message abort intercept', () => {
       tryAbortSpy.mockRestore();
       isActiveSpy.mockRestore();
       getOrchestratorSpy.mockRestore();
+      getChannelSpy.mockRestore();
+    }
+  });
+
+  it('does not call requestCancel when forge is running in a different channel', async () => {
+    const requestCancelFn = vi.fn();
+    const mockOrch = { isRunning: true, requestCancel: requestCancelFn };
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(false);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(false);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(mockOrch as any);
+    // Forge is running in a different channel than the reaction message ('ch-1').
+    const getChannelSpy = vi.spyOn(forgePlanRegistry, 'getActiveForgeChannelId').mockReturnValue('other-channel');
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      expect(requestCancelFn).not.toHaveBeenCalled();
+      // tryAbort for per-message streaming is still called regardless.
+      expect(tryAbortSpy).toHaveBeenCalledOnce();
+    } finally {
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+      getChannelSpy.mockRestore();
     }
   });
 
@@ -1755,6 +1783,7 @@ describe('🛑 per-message abort intercept', () => {
     const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(false);
     const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(false);
     const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(mockOrch as any);
+    const getChannelSpy = vi.spyOn(forgePlanRegistry, 'getActiveForgeChannelId').mockReturnValue('ch-1');
     try {
       const params = makeParams();
       const queue = mockQueue();
@@ -1766,6 +1795,7 @@ describe('🛑 per-message abort intercept', () => {
       tryAbortSpy.mockRestore();
       isActiveSpy.mockRestore();
       getOrchestratorSpy.mockRestore();
+      getChannelSpy.mockRestore();
     }
   });
 

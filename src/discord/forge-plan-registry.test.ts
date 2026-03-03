@@ -4,6 +4,8 @@ import {
   setActiveOrchestrator,
   getActiveOrchestrator,
   getActiveForgeId,
+  getActiveForgeChannelId,
+  isForgeInChannel,
   addRunningPlan,
   removeRunningPlan,
   isPlanRunning,
@@ -96,6 +98,59 @@ describe('active orchestrator', () => {
     const fake = { activePlanId: undefined } as any;
     setActiveOrchestrator(fake);
     expect(getActiveForgeId()).toBeUndefined();
+  });
+
+  it('stores channelId when provided', () => {
+    const fake = { activePlanId: 'plan-001', isRunning: true } as any;
+    setActiveOrchestrator(fake, 'channel-123');
+    expect(getActiveForgeChannelId()).toBe('channel-123');
+  });
+
+  it('clears channelId when orchestrator is set to null', () => {
+    const fake = { activePlanId: 'plan-001', isRunning: true } as any;
+    setActiveOrchestrator(fake, 'channel-123');
+    setActiveOrchestrator(null);
+    expect(getActiveForgeChannelId()).toBeUndefined();
+  });
+
+  it('returns undefined channelId when no channelId was provided', () => {
+    const fake = { activePlanId: 'plan-001', isRunning: true } as any;
+    setActiveOrchestrator(fake);
+    expect(getActiveForgeChannelId()).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isForgeInChannel
+// ---------------------------------------------------------------------------
+
+describe('isForgeInChannel', () => {
+  it('returns false when no orchestrator is set', () => {
+    expect(isForgeInChannel('channel-123')).toBe(false);
+  });
+
+  it('returns true when forge is running in the same channel', () => {
+    const fake = { isRunning: true, activePlanId: 'plan-001' } as any;
+    setActiveOrchestrator(fake, 'channel-123');
+    expect(isForgeInChannel('channel-123')).toBe(true);
+  });
+
+  it('returns false when forge is running in a different channel', () => {
+    const fake = { isRunning: true, activePlanId: 'plan-001' } as any;
+    setActiveOrchestrator(fake, 'channel-123');
+    expect(isForgeInChannel('channel-456')).toBe(false);
+  });
+
+  it('returns false when forge is not running', () => {
+    const fake = { isRunning: false, activePlanId: undefined } as any;
+    setActiveOrchestrator(fake, 'channel-123');
+    expect(isForgeInChannel('channel-123')).toBe(false);
+  });
+
+  it('returns false when forge has no channel info', () => {
+    const fake = { isRunning: true, activePlanId: 'plan-001' } as any;
+    setActiveOrchestrator(fake);
+    expect(isForgeInChannel('channel-123')).toBe(false);
   });
 });
 
@@ -195,7 +250,7 @@ describe('getForgeStatusSummary', () => {
 
 describe('_resetForTest', () => {
   it('clears all state', async () => {
-    setActiveOrchestrator({ activePlanId: 'plan-001' } as any);
+    setActiveOrchestrator({ activePlanId: 'plan-001', isRunning: true } as any, 'channel-789');
     addRunningPlan('plan-002');
 
     // Acquire a lock and don't release — reset should clear the chain
@@ -204,6 +259,7 @@ describe('_resetForTest', () => {
     _resetForTest();
 
     expect(getActiveOrchestrator()).toBeNull();
+    expect(getActiveForgeChannelId()).toBeUndefined();
     expect(isPlanRunning('plan-002')).toBe(false);
 
     // Lock should be acquirable after reset (not stuck behind unreleased previous lock)
