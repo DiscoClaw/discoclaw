@@ -7,6 +7,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
+import type { ConcurrencyLimiter } from '../runtime/concurrency-limit.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { splitDiscord } from './output-utils.js';
@@ -59,6 +60,8 @@ export type SpawnContext = {
   subsystems?: SubsystemContexts;
   /** Defer scheduler forwarded to the action context. */
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
+  /** Global concurrency limiter — when set, each spawn acquires a permit before invoking the runtime. */
+  limiter?: ConcurrencyLimiter;
 };
 
 // ---------------------------------------------------------------------------
@@ -143,7 +146,15 @@ export async function executeSpawnAction(
       const abortKey = `spawn-${++spawnCounter}-${label}`;
       const { signal, dispose: abortDispose } = registerAbort(abortKey);
       const { dispose: spawnDispose } = registerSpawn(abortKey, label);
+      let releaseLimiter: (() => void) | undefined;
       try {
+        if (spawnCtx.limiter) {
+          releaseLimiter = await spawnCtx.limiter.acquire();
+        }
+        // If the signal was aborted while waiting for the limiter, skip the runtime call.
+        if (signal.aborted) {
+          return { ok: true, summary: `Agent (${label}) aborted` };
+        }
         let text = '';
         const stream = spawnCtx.runtime.invoke({
           prompt: fullPrompt,
@@ -217,6 +228,7 @@ export async function executeSpawnAction(
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, error: `spawnAgent (${label}) failed: ${msg}` };
       } finally {
+        releaseLimiter?.();
         spawnDispose();
         abortDispose();
       }
@@ -229,7 +241,9 @@ export async function executeSpawnAction(
 // ---------------------------------------------------------------------------
 
 /**
- * Execute multiple spawnAgent actions in parallel, bounded by maxConcurrent.
+ * Execute multiple spawnAgent actions in parallel.
+ * When a limiter is set on spawnCtx, it enforces the concurrency cap globally
+ * (across all callers). Without a limiter, all actions fire concurrently.
  * Results are returned in the same order as the input actions.
  */
 export async function executeSpawnActions(
@@ -239,36 +253,17 @@ export async function executeSpawnActions(
 ): Promise<DiscordActionResult[]> {
   if (actions.length === 0) return [];
 
-  const maxConcurrent = spawnCtx.maxConcurrent ?? 4;
-  const results: DiscordActionResult[] = new Array(actions.length);
+  const settled = await Promise.allSettled(
+    actions.map((action) => executeSpawnAction(action, ctx, spawnCtx)),
+  );
 
-  let i = 0;
-  while (i < actions.length) {
-    const batch = actions.slice(i, i + maxConcurrent);
-    const settled = await Promise.allSettled(
-      batch.map((action) => executeSpawnAction(action, ctx, spawnCtx)),
-    );
-    for (let j = 0; j < settled.length; j++) {
-      const item = settled[j]!;
-      results[i + j] = item.status === 'fulfilled'
-        ? item.value
-        : { ok: false, error: item.reason instanceof Error ? item.reason.message : String(item.reason) };
-    }
-    // If any spawn in this batch was aborted, stop scheduling further batches.
-    const batchAborted = settled.some(
-      (item) => item.status === 'fulfilled' && item.value.ok && item.value.summary.endsWith('aborted'),
-    );
-    i += maxConcurrent;
-    if (batchAborted) {
-      for (let k = i; k < actions.length; k++) {
-        const lbl = actions[k]!.label?.trim() || 'agent';
-        results[k] = { ok: true, summary: `Agent (${lbl}) aborted` };
-      }
-      break;
-    }
-  }
-
-  return results;
+  return settled.map((item, i) => {
+    if (item.status === 'fulfilled') return item.value;
+    return {
+      ok: false as const,
+      error: item.reason instanceof Error ? item.reason.message : String(item.reason),
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

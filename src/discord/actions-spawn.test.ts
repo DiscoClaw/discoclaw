@@ -617,7 +617,7 @@ describe('executeSpawnActions', () => {
     expect(results.every((r) => r.ok)).toBe(true);
   });
 
-  it('respects maxConcurrent limit per batch', async () => {
+  it('respects limiter concurrency cap', async () => {
     let concurrentCount = 0;
     let maxSeen = 0;
 
@@ -633,16 +633,19 @@ describe('executeSpawnActions', () => {
       }),
     };
 
+    const { createConcurrencyLimiter } = await import('../runtime/concurrency-limit.js');
+    const limiter = createConcurrencyLimiter(3)!;
+
     await executeSpawnActions(
       Array.from({ length: 8 }, (_, i) => ({ type: 'spawnAgent' as const, channel: 'general', prompt: `Task ${i}` })),
       makeCtx(),
-      makeSpawnCtx({ runtime, maxConcurrent: 3 }),
+      makeSpawnCtx({ runtime, limiter }),
     );
 
     expect(maxSeen).toBeLessThanOrEqual(3);
   });
 
-  it('uses default maxConcurrent of 4', async () => {
+  it('fires all concurrently when no limiter is set', async () => {
     let concurrentCount = 0;
     let maxSeen = 0;
 
@@ -659,12 +662,13 @@ describe('executeSpawnActions', () => {
     };
 
     await executeSpawnActions(
-      Array.from({ length: 10 }, (_, i) => ({ type: 'spawnAgent' as const, channel: 'general', prompt: `Task ${i}` })),
+      Array.from({ length: 5 }, (_, i) => ({ type: 'spawnAgent' as const, channel: 'general', prompt: `Task ${i}` })),
       makeCtx(),
       makeSpawnCtx({ runtime }),
     );
 
-    expect(maxSeen).toBeLessThanOrEqual(4);
+    // Without a limiter, all 5 should run concurrently
+    expect(maxSeen).toBe(5);
   });
 
   it('collects errors without aborting other agents', async () => {
@@ -1188,10 +1192,13 @@ describe('abort propagation — tryAbortAll kills spawned agents', () => {
     }
   });
 
-  it('stops scheduling new batches after abort in current batch', async () => {
+  it('skips runtime invocation for spawns that acquire limiter permit after abort', async () => {
+    const { createConcurrencyLimiter } = await import('../runtime/concurrency-limit.js');
+    const limiter = createConcurrencyLimiter(2)!;
+
     let runtimesStarted = 0;
-    let batchStarted!: () => void;
-    const batchStartedPromise = new Promise<void>(r => { batchStarted = r; });
+    let bothStarted!: () => void;
+    const bothStartedPromise = new Promise<void>(r => { bothStarted = r; });
 
     const runtime: RuntimeAdapter = {
       id: 'other',
@@ -1199,7 +1206,7 @@ describe('abort propagation — tryAbortAll kills spawned agents', () => {
       invoke: vi.fn(async function* (_params: any) {
         yield { type: 'text_delta' as const, text: 'partial' };
         runtimesStarted++;
-        if (runtimesStarted === 2) batchStarted();
+        if (runtimesStarted === 2) bothStarted();
         await new Promise<void>((_resolve, reject) => {
           const sig = _params.signal as AbortSignal | undefined;
           if (sig?.aborted) {
@@ -1221,10 +1228,11 @@ describe('abort propagation — tryAbortAll kills spawned agents', () => {
         { type: 'spawnAgent', channel: 'general', prompt: 'Task 4', label: 'four' },
       ],
       makeCtx(),
-      makeSpawnCtx({ runtime, maxConcurrent: 2 }),
+      makeSpawnCtx({ runtime, limiter }),
     );
 
-    await batchStartedPromise;
+    // Wait for the first 2 to start (they hold the limiter permits).
+    await bothStartedPromise;
     mockTryAbortAll();
 
     const results = await resultsPromise;
@@ -1234,7 +1242,156 @@ describe('abort propagation — tryAbortAll kills spawned agents', () => {
       expect(r.ok).toBe(true);
       if (r.ok) expect(r.summary).toContain('aborted');
     }
-    // Runtime should only have been invoked for the first batch (2 agents, not 4)
+    // Tasks 3 & 4 should skip runtime.invoke because signal was aborted before acquire returned.
     expect(runtime.invoke).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Global limiter — cross-caller concurrency
+// ---------------------------------------------------------------------------
+
+function makeDeferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe('global limiter — cross-caller concurrency', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAbortMap.clear();
+    mockRegisterAbort.mockImplementation((key: string) => {
+      const controller = new AbortController();
+      mockAbortMap.set(key, controller);
+      return { signal: controller.signal, dispose: vi.fn(() => mockAbortMap.delete(key)) };
+    });
+  });
+
+  it('two concurrent executeSpawnActions calls share the same limiter and never exceed maxConcurrent', async () => {
+    const { createConcurrencyLimiter } = await import('../runtime/concurrency-limit.js');
+    const limiter = createConcurrencyLimiter(2)!;
+
+    let concurrentCount = 0;
+    let maxSeen = 0;
+    const gates: Array<{ resolve: () => void }> = [];
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* () {
+        concurrentCount++;
+        maxSeen = Math.max(maxSeen, concurrentCount);
+        const gate = makeDeferred<void>();
+        gates.push(gate);
+        await gate.promise;
+        yield { type: 'text_delta' as const, text: 'ok' };
+        yield { type: 'done' as const };
+        concurrentCount--;
+      }),
+    };
+
+    const ctx = makeCtx();
+    const spawnCtx = makeSpawnCtx({ runtime, limiter });
+
+    // Launch two separate executeSpawnActions calls concurrently,
+    // each with 2 actions → 4 spawns total, all sharing the same limiter(2).
+    const p1 = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'A1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'A2' },
+      ],
+      ctx,
+      spawnCtx,
+    );
+    const p2 = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'B1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'B2' },
+      ],
+      ctx,
+      spawnCtx,
+    );
+
+    // Wait for the first 2 to start (they hold the 2 permits).
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(2);
+    });
+
+    // At this point, exactly 2 are running — the other 2 are waiting for permits.
+    expect(concurrentCount).toBe(2);
+    expect(maxSeen).toBe(2);
+
+    // Release one slot → a waiting spawn should start.
+    gates[0]!.resolve();
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(3);
+    });
+    expect(maxSeen).toBe(2); // still never exceeded 2
+
+    // Release the rest.
+    gates[1]!.resolve();
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(4);
+    });
+    gates[2]!.resolve();
+    gates[3]!.resolve();
+
+    const [results1, results2] = await Promise.all([p1, p2]);
+    expect(results1).toHaveLength(2);
+    expect(results2).toHaveLength(2);
+    expect([...results1, ...results2].every((r) => r.ok)).toBe(true);
+    expect(maxSeen).toBe(2);
+  });
+
+  it('all spawns fire concurrently when no limiter is set (backward compat)', async () => {
+    let concurrentCount = 0;
+    let maxSeen = 0;
+    const gates: Array<{ resolve: () => void }> = [];
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* () {
+        concurrentCount++;
+        maxSeen = Math.max(maxSeen, concurrentCount);
+        const gate = makeDeferred<void>();
+        gates.push(gate);
+        await gate.promise;
+        yield { type: 'text_delta' as const, text: 'ok' };
+        yield { type: 'done' as const };
+        concurrentCount--;
+      }),
+    };
+
+    const ctx = makeCtx();
+    const spawnCtx = makeSpawnCtx({ runtime }); // no limiter
+
+    const p = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'T1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'T2' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'T3' },
+      ],
+      ctx,
+      spawnCtx,
+    );
+
+    // All 3 should start immediately with no gating.
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(3);
+    });
+    expect(concurrentCount).toBe(3);
+    expect(maxSeen).toBe(3);
+
+    // Release all.
+    for (const g of gates) g.resolve();
+    const results = await p;
+    expect(results).toHaveLength(3);
+    expect(results.every((r) => r.ok)).toBe(true);
   });
 });
