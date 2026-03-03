@@ -11,6 +11,26 @@ import type { ActionContext } from './actions.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 
 // ---------------------------------------------------------------------------
+// Mock prompt-common utilities
+// ---------------------------------------------------------------------------
+
+vi.mock('./prompt-common.js', () => ({
+  resolveEffectiveTools: vi.fn(async () => ({
+    effectiveTools: ['Bash', 'Read'],
+    permissionTier: 'env',
+    permissionNote: undefined,
+    runtimeCapabilityNote: undefined,
+  })),
+  loadWorkspacePaFiles: vi.fn(async () => []),
+  buildContextFiles: vi.fn(() => []),
+  inlineContextFiles: vi.fn(async () => ''),
+  buildPromptPreamble: vi.fn((_ctx: string) => '[ROOT_POLICY]'),
+}));
+
+import { resolveEffectiveTools as _resolveEffectiveTools } from './prompt-common.js';
+const mockResolveEffectiveTools = vi.mocked(_resolveEffectiveTools);
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -56,7 +76,9 @@ function makeSpawnCtx(overrides?: Partial<SpawnContext>): SpawnContext {
   return {
     runtime: makeRuntime([{ type: 'text_delta', text: 'Agent output' }, { type: 'done' }]),
     model: 'claude-opus-4',
-    cwd: '/tmp/workspace',
+    runtimeTools: ['Bash', 'Read', 'Write'],
+    workspaceCwd: '/tmp/workspace',
+    useGroupDirCwd: false,
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     ...overrides,
   };
@@ -297,7 +319,7 @@ describe('executeSpawnAction', () => {
 
     it('invokes runtime with correct model, cwd, and prompt', async () => {
       const runtime = makeRuntime([{ type: 'done' }]);
-      const spawnCtx = makeSpawnCtx({ runtime, model: 'claude-opus-4-6', cwd: '/my/cwd' });
+      const spawnCtx = makeSpawnCtx({ runtime, model: 'claude-opus-4-6', workspaceCwd: '/my/cwd' });
 
       await executeSpawnAction(
         { type: 'spawnAgent', channel: 'general', prompt: 'Do something specific' },
@@ -309,7 +331,7 @@ describe('executeSpawnAction', () => {
         expect.objectContaining({
           model: 'claude-opus-4-6',
           cwd: '/my/cwd',
-          prompt: 'Do something specific',
+          prompt: expect.stringContaining('Do something specific'),
         }),
       );
     });
@@ -381,6 +403,91 @@ describe('executeSpawnAction', () => {
       );
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain('Missing Access');
+    });
+
+    it('passes tools and addDirs to runtime.invoke when context is configured', async () => {
+      mockResolveEffectiveTools.mockResolvedValueOnce({
+        effectiveTools: ['Bash', 'Read'],
+        permissionTier: 'env',
+        permissionNote: undefined,
+        runtimeCapabilityNote: undefined,
+      });
+      const runtime = makeRuntime([{ type: 'done' }]);
+      const spawnCtx = makeSpawnCtx({
+        runtime,
+        useGroupDirCwd: true,
+        discordChannelContext: {
+          contentDir: '/tmp/content',
+          indexPath: '/tmp/content/discord/DISCORD.md',
+          paContextFiles: [],
+          channelsDir: '/tmp/content/discord/channels',
+          byChannelId: new Map(),
+          dmContextPath: '/tmp/content/discord/channels/dm.md',
+        },
+      });
+
+      await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+        makeCtx(),
+        spawnCtx,
+      );
+
+      expect(runtime.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: ['Bash', 'Read'],
+          addDirs: ['/tmp/workspace', '/tmp/content'],
+        }),
+      );
+    });
+
+    it('includes root policy preamble in the prompt passed to runtime.invoke', async () => {
+      const runtime = makeRuntime([{ type: 'done' }]);
+      const spawnCtx = makeSpawnCtx({ runtime });
+
+      await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Test task' },
+        makeCtx(),
+        spawnCtx,
+      );
+
+      const invokeCall = (runtime.invoke as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(invokeCall.prompt).toContain('[ROOT_POLICY]');
+      expect(invokeCall.prompt).toContain('Test task');
+    });
+
+    it('falls back to empty tools when resolveEffectiveTools throws', async () => {
+      mockResolveEffectiveTools.mockRejectedValueOnce(new Error('permission error'));
+      const runtime = makeRuntime([{ type: 'done' }]);
+      const spawnCtx = makeSpawnCtx({ runtime });
+
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+        makeCtx(),
+        spawnCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(runtime.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({ tools: [] }),
+      );
+    });
+
+    it('omits addDirs when useGroupDirCwd is false and no discordChannelContext', async () => {
+      const runtime = makeRuntime([{ type: 'done' }]);
+      const spawnCtx = makeSpawnCtx({
+        runtime,
+        useGroupDirCwd: false,
+        discordChannelContext: undefined,
+      });
+
+      await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+        makeCtx(),
+        spawnCtx,
+      );
+
+      const invokeCall = (runtime.invoke as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(invokeCall.addDirs).toBeUndefined();
     });
   });
 });

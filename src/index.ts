@@ -1362,7 +1362,11 @@ if (taskCtx) {
     botParams.spawnCtx = {
       runtime: limitedRuntime,
       model: runtimeModel,
-      cwd: workspaceCwd,
+      runtimeTools,
+      workspaceCwd,
+      discordChannelContext,
+      useGroupDirCwd,
+      appendSystemPrompt,
       log,
       maxConcurrent: cfg.spawnMaxConcurrent,
     };

@@ -1,9 +1,17 @@
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import type { DiscordChannelContext } from './channel-context.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { splitDiscord } from './output-utils.js';
+import {
+  buildContextFiles,
+  buildPromptPreamble,
+  inlineContextFiles,
+  loadWorkspacePaFiles,
+  resolveEffectiveTools,
+} from './prompt-common.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,7 +28,11 @@ export const SPAWN_ACTION_TYPES = new Set<string>(Object.keys(SPAWN_TYPE_MAP));
 export type SpawnContext = {
   runtime: RuntimeAdapter;
   model: string;
-  cwd: string;
+  runtimeTools: string[];
+  workspaceCwd: string;
+  discordChannelContext?: DiscordChannelContext;
+  useGroupDirCwd: boolean;
+  appendSystemPrompt?: string;
   log?: LoggerLike;
   /** Recursion depth — 0 for user/cron origins, 1+ for action-triggered sub-invocations. */
   depth?: number;
@@ -68,12 +80,54 @@ export async function executeSpawnAction(
       const timeoutMs = spawnCtx.timeoutMs ?? 120_000;
       const model = action.model ?? spawnCtx.model;
 
+      // --- Resolve effective tools ---
+      let effectiveTools: string[] = [];
+      try {
+        const toolsInfo = await resolveEffectiveTools({
+          workspaceCwd: spawnCtx.workspaceCwd,
+          runtimeTools: spawnCtx.runtimeTools,
+          runtimeCapabilities: spawnCtx.runtime.capabilities,
+          runtimeId: spawnCtx.runtime.id,
+          log: spawnCtx.log,
+        });
+        effectiveTools = toolsInfo.effectiveTools;
+      } catch (err) {
+        spawnCtx.log?.warn({ flow: 'spawn', label, err }, 'spawn:resolve effective tools failed');
+      }
+
+      // --- Build addDirs ---
+      const addDirs: string[] = [];
+      if (spawnCtx.useGroupDirCwd) addDirs.push(spawnCtx.workspaceCwd);
+      if (spawnCtx.discordChannelContext) addDirs.push(spawnCtx.discordChannelContext.contentDir);
+      const uniqueAddDirs = addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined;
+
+      // --- Build prompt preamble with inlined PA context ---
+      let preamble = '';
+      try {
+        const paFiles = await loadWorkspacePaFiles(spawnCtx.workspaceCwd, { skip: !!spawnCtx.appendSystemPrompt });
+        const contextFiles = buildContextFiles(paFiles, spawnCtx.discordChannelContext, undefined);
+        let inlinedContext = '';
+        if (contextFiles.length > 0) {
+          inlinedContext = await inlineContextFiles(contextFiles, {
+            required: new Set(spawnCtx.discordChannelContext?.paContextFiles ?? []),
+          });
+        }
+        preamble = buildPromptPreamble(inlinedContext);
+      } catch (err) {
+        spawnCtx.log?.warn({ flow: 'spawn', label, err }, 'spawn:preamble construction failed');
+        preamble = buildPromptPreamble('');
+      }
+
+      const fullPrompt = preamble + '\n\n' + action.prompt;
+
       try {
         let text = '';
         const stream = spawnCtx.runtime.invoke({
-          prompt: action.prompt,
+          prompt: fullPrompt,
           model,
-          cwd: spawnCtx.cwd,
+          cwd: spawnCtx.workspaceCwd,
+          tools: effectiveTools,
+          addDirs: uniqueAddDirs,
           timeoutMs,
         });
 
