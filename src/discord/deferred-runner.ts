@@ -1,5 +1,5 @@
 import type { ActionContext, ActionCategoryFlags, DiscordActionResult } from './actions.js';
-import { appendActionResults, discordActionsPromptSection, executeDiscordActions, parseDiscordActions } from './actions.js';
+import { appendActionResults, buildTieredDiscordActionsPromptSection, executeDiscordActions, parseDiscordActions } from './actions.js';
 import { DiscordTransportClient } from './transport-client.js';
 import { fmtTime, resolveChannel } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
@@ -21,13 +21,15 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
 import {
+  buildPromptSectionEstimates,
   buildContextFiles,
   buildOpenTasksSection,
   buildPromptPreamble,
-  inlineContextFiles,
+  inlineContextFilesWithMeta,
   loadWorkspacePaFiles,
   resolveEffectiveTools,
 } from './prompt-common.js';
+import type { InlinedContextSection } from './prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { globalMetrics } from '../observability/metrics.js';
@@ -159,10 +161,13 @@ export function configureDeferredScheduler(
 
     const paFiles = await loadWorkspacePaFiles(opts.workspaceCwd, { skip: !!opts.appendSystemPrompt });
     const contextFiles = buildContextFiles(paFiles, opts.discordChannelContext, channelCtx.contextPath);
-    let inlinedContext = '';
+    let inlinedContext: { text: string; sections: InlinedContextSection[] } = {
+      text: '',
+      sections: [],
+    };
     if (contextFiles.length > 0) {
       try {
-        inlinedContext = await inlineContextFiles(contextFiles, {
+        inlinedContext = await inlineContextFilesWithMeta(contextFiles, {
           required: new Set(opts.discordChannelContext?.paContextFiles ?? []),
         });
       } catch (err) {
@@ -173,8 +178,16 @@ export function configureDeferredScheduler(
     const deferDepth = (context.deferDepth ?? 0) + 1;
     const deferredActionFlags = buildDeferredActionFlags(opts.state, deferDepth, opts.deferMaxDepth);
     const openTasksSection = buildOpenTasksSection(opts.state.taskCtx?.store);
+    let actionsReferenceSection = '';
+    let actionSchemaSelection:
+      | {
+        includedCategories: string[];
+        tierBuckets: { core: string[]; channelContextual: string[]; keywordTriggered: string[] };
+        keywordHits: string[];
+      }
+      | null = null;
     let prompt =
-      buildPromptPreamble(inlinedContext) + '\n\n' +
+      buildPromptPreamble(inlinedContext.text) + '\n\n' +
       (openTasksSection
         ? `---\n${openTasksSection}\n\n`
         : '') +
@@ -182,8 +195,42 @@ export function configureDeferredScheduler(
       `User message:\n${action.prompt}`;
 
     if (opts.state.discordActionsEnabled) {
-      prompt += '\n\n---\n' + discordActionsPromptSection(deferredActionFlags, opts.botDisplayName);
+      const actionSelection = buildTieredDiscordActionsPromptSection(
+        deferredActionFlags,
+        opts.botDisplayName,
+        {
+          channelName: channelCtx.channelName,
+          channelContextPath: channelCtx.contextPath,
+          isThread: threadParentId !== null,
+          userText: action.prompt,
+        },
+      );
+      actionsReferenceSection = actionSelection.prompt;
+      actionSchemaSelection = {
+        includedCategories: actionSelection.includedCategories,
+        tierBuckets: actionSelection.tierBuckets,
+        keywordHits: actionSelection.keywordHits,
+      };
+      prompt += '\n\n---\n' + actionsReferenceSection;
     }
+
+    const promptSectionEstimates = buildPromptSectionEstimates({
+      contextSections: inlinedContext.sections,
+      channelContextPath: channelCtx.contextPath,
+      openTasksSection,
+      actionsReferenceSection,
+    });
+    opts.log?.info(
+      {
+        flow: 'defer',
+        channelId: channel.id,
+        sections: promptSectionEstimates.sections,
+        totalChars: promptSectionEstimates.totalChars,
+        totalEstTokens: promptSectionEstimates.totalEstTokens,
+        actionSchemaSelection,
+      },
+      'defer:prompt:section-estimates',
+    );
 
     const noteLines: string[] = [];
     let effectiveTools = opts.runtimeTools;

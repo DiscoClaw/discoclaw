@@ -7,7 +7,7 @@ import type { StatusPoster } from './status-channel.js';
 vi.mock('./prompt-common.js', () => ({
   loadWorkspacePaFiles: vi.fn(async () => []),
   buildContextFiles: vi.fn(() => []),
-  inlineContextFiles: vi.fn(async () => ''),
+  inlineContextFilesWithMeta: vi.fn(async () => ({ text: '', sections: [] })),
   resolveEffectiveTools: vi.fn(async () => ({
     effectiveTools: [],
     permissionNote: null,
@@ -15,6 +15,11 @@ vi.mock('./prompt-common.js', () => ({
   })),
   buildPromptPreamble: vi.fn(() => ''),
   buildOpenTasksSection: vi.fn(() => ''),
+  buildPromptSectionEstimates: vi.fn(() => ({
+    sections: {},
+    totalChars: 0,
+    totalEstTokens: 0,
+  })),
 }));
 
 vi.mock('./actions.js', () => ({
@@ -25,7 +30,12 @@ vi.mock('./actions.js', () => ({
     parseFailures: 0,
   })),
   executeDiscordActions: vi.fn(async () => []),
-  discordActionsPromptSection: vi.fn(() => ''),
+  buildTieredDiscordActionsPromptSection: vi.fn(() => ({
+    prompt: '',
+    includedCategories: [],
+    tierBuckets: { core: [], channelContextual: [], keywordTriggered: [] },
+    keywordHits: [],
+  })),
   buildDisplayResultLines: vi.fn(() => []),
   appendActionResults: vi.fn((body: string) => body),
 }));
@@ -255,6 +265,143 @@ describe('deferred-runner observability', () => {
     const prompt: string = invokeSpy.mock.calls[0][0].prompt;
     expect(prompt).toContain('Open tasks:');
     expect(prompt).toContain('ws-001: open, "Test task"');
+  });
+
+  it('uses tiered action schema prompt selection with deferred channel context', async () => {
+    const { buildTieredDiscordActionsPromptSection } = await import('./actions.js');
+    const mockBuildTiered = buildTieredDiscordActionsPromptSection as ReturnType<typeof vi.fn>;
+    mockBuildTiered.mockClear();
+    mockBuildTiered.mockReturnValue({
+      prompt: '### Messaging',
+      includedCategories: ['messaging'],
+      tierBuckets: { core: ['messaging'], channelContextual: [], keywordTriggered: [] },
+      keywordHits: ['send'],
+    });
+
+    const { resolveDiscordChannelContext } = await import('./channel-context.js');
+    (resolveDiscordChannelContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      contextPath: '/tmp/channel-context.md',
+      channelName: 'ops',
+    });
+
+    const invokeSpy = vi.fn();
+    const runtime = {
+      id: 'test',
+      capabilities: new Set() as ReadonlySet<never>,
+      async *invoke(p: unknown): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' } as EngineEvent;
+        yield { type: 'done' } as EngineEvent;
+      },
+    };
+
+    const opts = makeOpts({
+      runtime,
+      state: {
+        ...makeState(),
+        discordActionsEnabled: true,
+        discordActionsMessaging: true,
+        discordActionsChannels: true,
+      },
+    });
+
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mockBuildTiered).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messaging: true,
+        channels: true,
+      }),
+      'Discoclaw',
+      expect.objectContaining({
+        channelName: 'ops',
+        channelContextPath: '/tmp/channel-context.md',
+        isThread: false,
+        userText: 'do the thing',
+      }),
+    );
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('### Messaging');
+  });
+
+  it('logs deferred prompt section estimate payload with action schema selection', async () => {
+    const { inlineContextFilesWithMeta, buildPromptSectionEstimates } = await import('./prompt-common.js');
+    const mockInlineContext = inlineContextFilesWithMeta as ReturnType<typeof vi.fn>;
+    const mockBuildEstimates = buildPromptSectionEstimates as ReturnType<typeof vi.fn>;
+    mockInlineContext.mockClear();
+    mockBuildEstimates.mockClear();
+
+    mockInlineContext.mockResolvedValueOnce({
+      text: '--- AGENTS.md ---\nContext',
+      sections: [{
+        filePath: '/tmp/AGENTS.md',
+        fileName: 'AGENTS.md',
+        rendered: '--- AGENTS.md ---\nContext',
+        chars: 24,
+      }],
+    });
+    const estimatePayload = {
+      sections: { pa: { chars: 24, estTokens: 6, included: true } },
+      totalChars: 50,
+      totalEstTokens: 13,
+    };
+    mockBuildEstimates.mockReturnValueOnce(estimatePayload);
+
+    const { buildTieredDiscordActionsPromptSection } = await import('./actions.js');
+    const mockBuildTiered = buildTieredDiscordActionsPromptSection as ReturnType<typeof vi.fn>;
+    mockBuildTiered.mockClear();
+    mockBuildTiered.mockReturnValue({
+      prompt: '### Messaging',
+      includedCategories: ['messaging', 'channels'],
+      tierBuckets: {
+        core: ['messaging', 'channels'],
+        channelContextual: ['tasks'],
+        keywordTriggered: ['memory'],
+      },
+      keywordHits: ['remember'],
+    });
+
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const opts = makeOpts({
+      log,
+      state: {
+        ...makeState(),
+        discordActionsEnabled: true,
+        discordActionsMessaging: true,
+        discordActionsChannels: true,
+      },
+    });
+
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mockBuildEstimates).toHaveBeenCalledWith(expect.objectContaining({
+      contextSections: expect.any(Array),
+      actionsReferenceSection: '### Messaging',
+    }));
+
+    const infoCalls = log.info.mock.calls;
+    const estimateCall = infoCalls.find((call: any[]) => call[1] === 'defer:prompt:section-estimates');
+    expect(estimateCall).toBeTruthy();
+    expect(estimateCall![0]).toEqual(expect.objectContaining({
+      flow: 'defer',
+      channelId: 'ch-1',
+      sections: estimatePayload.sections,
+      totalChars: estimatePayload.totalChars,
+      totalEstTokens: estimatePayload.totalEstTokens,
+      actionSchemaSelection: expect.objectContaining({
+        includedCategories: expect.arrayContaining(['messaging', 'channels']),
+        tierBuckets: expect.objectContaining({
+          core: expect.arrayContaining(['messaging', 'channels']),
+          channelContextual: expect.any(Array),
+          keywordTriggered: expect.any(Array),
+        }),
+        keywordHits: expect.arrayContaining(['remember']),
+      }),
+    }));
   });
 
   it('null status does not throw on runtime error', async () => {
