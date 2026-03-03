@@ -99,7 +99,11 @@ const TOOL_DEFS: Record<string, OpenAIFunctionTool> = {
       parameters: {
         type: 'object',
         properties: {
-          pattern: { type: 'string', description: 'Glob pattern to match (e.g. "**/*.ts").' },
+          pattern: {
+            type: 'string',
+            description:
+              'Glob pattern to match, relative to allowed workspace roots; must not be absolute or contain ".." path traversal segments (e.g. "**/*.ts").',
+          },
           path: { type: 'string', description: 'Directory to search in.' },
         },
         required: ['pattern'],

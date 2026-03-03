@@ -160,7 +160,7 @@ describe('edit_file', () => {
 // ── list_files ───────────────────────────────────────────────────────
 
 describe('list_files', () => {
-  it('finds files matching a glob pattern', async () => {
+  it('keeps valid in-root patterns working', async () => {
     await fs.writeFile(path.join(tmpDir, 'a.ts'), '');
     await fs.writeFile(path.join(tmpDir, 'b.ts'), '');
     await fs.writeFile(path.join(tmpDir, 'c.js'), '');
@@ -174,6 +174,100 @@ describe('list_files', () => {
     expect(r.result).toContain('a.ts');
     expect(r.result).toContain('b.ts');
     expect(r.result).not.toContain('c.js');
+  });
+
+  it('rejects absolute pattern /etc/*', async () => {
+    const r = await executeToolCall(
+      'list_files',
+      { pattern: '/etc/*', path: tmpDir },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('rejects traversal pattern ../../etc/*', async () => {
+    const r = await executeToolCall(
+      'list_files',
+      { pattern: '../../etc/*', path: tmpDir },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('rejects traversal hidden in character classes', async () => {
+    const r = await executeToolCall(
+      'list_files',
+      { pattern: '[.][.]/etc/*', path: tmpDir },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('rejects traversal hidden via brace concatenation', async () => {
+    const r = await executeToolCall(
+      'list_files',
+      { pattern: '{.,.}{.,.}/etc/*', path: tmpDir },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('rejects absolute branch hidden in brace expansion', async () => {
+    const r = await executeToolCall(
+      'list_files',
+      { pattern: '{**/*.ts,/etc/*}', path: tmpDir },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('rejects drive-prefixed absolute branch hidden in brace expansion', async () => {
+    const r = await executeToolCall(
+      'list_files',
+      { pattern: '{**/*.ts,C:\\Windows\\*}', path: tmpDir },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('rejects drive-prefixed absolute branch hidden in extglob alternatives', async () => {
+    const r = await executeToolCall(
+      'list_files',
+      { pattern: '@(C:\\Windows\\*|**/*.ts)', path: tmpDir },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('fails closed if glob yields an out-of-root entry', async () => {
+    const fsWithGlob = fs as unknown as {
+      glob?: (pattern: string, options: { cwd: string }) => AsyncIterable<string>;
+    };
+    const originalGlob = fsWithGlob.glob;
+
+    fsWithGlob.glob = async function* fakeGlob() {
+      yield 'safe.ts';
+      yield '../../etc/passwd';
+    };
+
+    try {
+      const r = await executeToolCall(
+        'list_files',
+        { pattern: '**/*', path: tmpDir },
+        [tmpDir],
+      );
+      expect(r.ok).toBe(false);
+      expect(r.result).toContain('Unsafe glob match rejected');
+    } finally {
+      fsWithGlob.glob = originalGlob;
+    }
   });
 
   it('returns message when no files match', async () => {
