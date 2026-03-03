@@ -20,6 +20,12 @@ import {
 } from './prompt-common.js';
 
 // ---------------------------------------------------------------------------
+// Module-level counter for unique abort keys (avoids Date.now() collisions in parallel batches)
+// ---------------------------------------------------------------------------
+
+let spawnCounter = 0;
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -133,7 +139,7 @@ export async function executeSpawnAction(
       const fullPrompt = preamble + '\n\n' + action.prompt;
 
       // Register in the abort registry so tryAbortAll() (via !stop) can kill this agent.
-      const abortKey = `spawn-${Date.now()}-${label}`;
+      const abortKey = `spawn-${++spawnCounter}-${label}`;
       const { signal, dispose: abortDispose } = registerAbort(abortKey);
       try {
         let text = '';
@@ -203,6 +209,9 @@ export async function executeSpawnAction(
           summary: `Agent (${label}) posted to #${targetChannel.name}`,
         };
       } catch (err) {
+        if (signal.aborted) {
+          return { ok: true, summary: `Agent (${label}) aborted` };
+        }
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, error: `spawnAgent (${label}) failed: ${msg}` };
       } finally {
@@ -242,7 +251,18 @@ export async function executeSpawnActions(
         ? item.value
         : { ok: false, error: item.reason instanceof Error ? item.reason.message : String(item.reason) };
     }
+    // If any spawn in this batch was aborted, stop scheduling further batches.
+    const batchAborted = settled.some(
+      (item) => item.status === 'fulfilled' && item.value.ok && item.value.summary.endsWith('aborted'),
+    );
     i += maxConcurrent;
+    if (batchAborted) {
+      for (let k = i; k < actions.length; k++) {
+        const lbl = actions[k]!.label?.trim() || 'agent';
+        results[k] = { ok: true, summary: `Agent (${lbl}) aborted` };
+      }
+      break;
+    }
   }
 
   return results;

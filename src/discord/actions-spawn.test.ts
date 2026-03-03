@@ -11,18 +11,33 @@ import type { ActionContext, ActionCategoryFlags } from './actions.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 
 // ---------------------------------------------------------------------------
-// Mock abort-registry
+// Mock abort-registry (shared controller map so tryAbortAll propagates signals)
 // ---------------------------------------------------------------------------
 
-vi.mock('./abort-registry.js', () => ({
-  registerAbort: vi.fn(() => {
-    const controller = new AbortController();
-    return { signal: controller.signal, dispose: vi.fn() };
-  }),
+const { mockAbortMap } = vi.hoisted(() => ({
+  mockAbortMap: new Map<string, AbortController>(),
 }));
 
-import { registerAbort } from './abort-registry.js';
+vi.mock('./abort-registry.js', () => ({
+  registerAbort: vi.fn((key: string) => {
+    const controller = new AbortController();
+    mockAbortMap.set(key, controller);
+    return { signal: controller.signal, dispose: vi.fn(() => mockAbortMap.delete(key)) };
+  }),
+  tryAbortAll: vi.fn(() => {
+    let count = 0;
+    for (const c of mockAbortMap.values()) {
+      c.abort();
+      count++;
+    }
+    return count;
+  }),
+  _resetForTest: vi.fn(() => mockAbortMap.clear()),
+}));
+
+import { registerAbort, tryAbortAll } from './abort-registry.js';
 const mockRegisterAbort = vi.mocked(registerAbort);
+const mockTryAbortAll = vi.mocked(tryAbortAll);
 
 // ---------------------------------------------------------------------------
 // Mock prompt-common utilities
@@ -1062,5 +1077,164 @@ describe('executeSpawnAction — abort registry', () => {
     for (const d of disposes) {
       expect(d).toHaveBeenCalledOnce();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Abort propagation (tryAbortAll → signal → runtime)
+// ---------------------------------------------------------------------------
+
+/**
+ * Helper: creates a runtime that yields one event then blocks until aborted.
+ * Calls `onStarted` after yielding the first event so the test can coordinate.
+ */
+function makeBlockingRuntime(onStarted: () => void): RuntimeAdapter {
+  return {
+    id: 'other',
+    capabilities: new Set(),
+    invoke: vi.fn(async function* (_params: any) {
+      yield { type: 'text_delta' as const, text: 'partial' };
+      onStarted();
+      await new Promise<void>((_resolve, reject) => {
+        const sig = _params.signal as AbortSignal | undefined;
+        if (sig?.aborted) {
+          reject(new DOMException('The operation was aborted', 'AbortError'));
+          return;
+        }
+        sig?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted', 'AbortError'));
+        }, { once: true });
+      });
+    }),
+  };
+}
+
+describe('abort propagation — tryAbortAll kills spawned agents', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAbortMap.clear();
+    // Restore the factory implementation (may have been overridden by a previous test).
+    mockRegisterAbort.mockImplementation((key: string) => {
+      const controller = new AbortController();
+      mockAbortMap.set(key, controller);
+      return { signal: controller.signal, dispose: vi.fn(() => mockAbortMap.delete(key)) };
+    });
+  });
+
+  it('tryAbortAll kills in-flight spawned agent and returns abort-aware result', async () => {
+    let runtimeStarted!: () => void;
+    const started = new Promise<void>(r => { runtimeStarted = r; });
+    const runtime = makeBlockingRuntime(() => runtimeStarted());
+
+    const resultPromise = executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Slow task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    await started;
+    // Abort all active streams (simulates !stop)
+    mockTryAbortAll();
+
+    const result = await resultPromise;
+    // Should be abort-aware, not a generic error
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.summary).toContain('aborted');
+  });
+
+  it('tryAbortAll aborts all in-flight spawns in a parallel batch', async () => {
+    let runtimesStarted = 0;
+    let allStarted!: () => void;
+    const allStartedPromise = new Promise<void>(r => { allStarted = r; });
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (_params: any) {
+        yield { type: 'text_delta' as const, text: 'partial' };
+        runtimesStarted++;
+        if (runtimesStarted === 3) allStarted();
+        await new Promise<void>((_resolve, reject) => {
+          const sig = _params.signal as AbortSignal | undefined;
+          if (sig?.aborted) {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+            return;
+          }
+          sig?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+          }, { once: true });
+        });
+      }),
+    };
+
+    const resultsPromise = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 2' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 3' },
+      ],
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    await allStartedPromise;
+    mockTryAbortAll();
+
+    const results = await resultsPromise;
+    expect(results).toHaveLength(3);
+    for (const r of results) {
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.summary).toContain('aborted');
+    }
+  });
+
+  it('stops scheduling new batches after abort in current batch', async () => {
+    let runtimesStarted = 0;
+    let batchStarted!: () => void;
+    const batchStartedPromise = new Promise<void>(r => { batchStarted = r; });
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (_params: any) {
+        yield { type: 'text_delta' as const, text: 'partial' };
+        runtimesStarted++;
+        if (runtimesStarted === 2) batchStarted();
+        await new Promise<void>((_resolve, reject) => {
+          const sig = _params.signal as AbortSignal | undefined;
+          if (sig?.aborted) {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+            return;
+          }
+          sig?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+          }, { once: true });
+        });
+      }),
+    };
+
+    const resultsPromise = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 2' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 3', label: 'three' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 4', label: 'four' },
+      ],
+      makeCtx(),
+      makeSpawnCtx({ runtime, maxConcurrent: 2 }),
+    );
+
+    await batchStartedPromise;
+    mockTryAbortAll();
+
+    const results = await resultsPromise;
+    expect(results).toHaveLength(4);
+    // All results should indicate abort
+    for (const r of results) {
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.summary).toContain('aborted');
+    }
+    // Runtime should only have been invoked for the first batch (2 agents, not 4)
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
   });
 });
