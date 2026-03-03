@@ -1,0 +1,48 @@
+# params.tools
+
+Hybrid pipeline tooling contract for OpenAI-compatible runtimes.
+
+## Goals
+
+- Preserve current runtime behavior when hybrid mode is disabled.
+- Constrain hybrid execution to explicit allowlists.
+- Keep tool routing deterministic across runtimes.
+
+## Default behavior (compatibility)
+
+- If `OPENAI_COMPAT_HYBRID_PIPELINE_ENABLED` is not `1`, hybrid tools are unavailable.
+- Existing OpenAI-compatible tool behavior remains unchanged when hybrid mode is disabled.
+- `params.tools` remains an allowlist, not an entitlement: unknown or unsupported tools are ignored by non-matching runtimes.
+
+## Hybrid tool categories
+
+- `Pipeline` category enables:
+  - `pipeline.start`
+  - `pipeline.status`
+  - `pipeline.resume`
+  - `pipeline.cancel`
+- `Step` category enables:
+  - `step.run`
+  - `step.assert`
+  - `step.retry`
+  - `step.wait`
+
+## Runtime gating
+
+- Hybrid categories are active only when all checks pass:
+  - Runtime is OpenAI-compatible (`openai` or `openrouter` shared adapter path).
+  - `OPENAI_COMPAT_HYBRID_PIPELINE_ENABLED=1`.
+  - `params.tools` includes the required category (`Pipeline` and/or `Step`).
+- Non-OpenAI runtimes must not receive OpenAI-only hybrid tool labels from `params.tools`.
+
+## Deterministic failure requirements
+
+- Tool-unavailable, policy-blocked, retry-exhausted, idempotency-conflict, and run-not-found outcomes must return stable machine-readable failure codes.
+- Retry behavior must be bounded and deterministic.
+- Resume/cancel/status must be safe for repeated calls (idempotent where applicable).
+
+## Observability requirements
+
+- Record success/failure/cancel counters for pipeline runs.
+- Record retry counters.
+- Record overhead metrics (`ms`, `tokens_est`) for hybrid execution paths.
