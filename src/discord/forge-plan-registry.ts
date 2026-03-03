@@ -33,10 +33,12 @@ export function acquireWriterLock(): Promise<() => void> {
 // ---------------------------------------------------------------------------
 
 let _activeOrchestrator: ForgeOrchestrator | null = null;
+let _activeForgeChannelId: string | undefined;
 
 /** Set the active forge orchestrator (or null to clear). */
-export function setActiveOrchestrator(orch: ForgeOrchestrator | null): void {
+export function setActiveOrchestrator(orch: ForgeOrchestrator | null, channelId?: string): void {
   _activeOrchestrator = orch;
+  _activeForgeChannelId = orch ? channelId : undefined;
 }
 
 /** Get the active forge orchestrator, if any. */
@@ -47,6 +49,20 @@ export function getActiveOrchestrator(): ForgeOrchestrator | null {
 /** Returns the active forge plan ID if a forge is running, undefined otherwise. */
 export function getActiveForgeId(): string | undefined {
   return _activeOrchestrator?.activePlanId;
+}
+
+/** Returns the channel ID where the active forge is running, if known. */
+export function getActiveForgeChannelId(): string | undefined {
+  return _activeOrchestrator ? _activeForgeChannelId : undefined;
+}
+
+/**
+ * Check whether the active forge is running in the given channel.
+ * Returns true when a forge is running AND its channel matches.
+ * Returns false when no forge is running, the forge has no channel info, or the channel doesn't match.
+ */
+export function isForgeInChannel(channelId: string): boolean {
+  return _activeOrchestrator?.isRunning === true && _activeForgeChannelId === channelId;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,5 +120,6 @@ export function getForgeStatusSummary(): string {
 export function _resetForTest(): void {
   writerLockChain = Promise.resolve();
   _activeOrchestrator = null;
+  _activeForgeChannelId = undefined;
   _runningPlanIds.clear();
 }
