@@ -1890,7 +1890,7 @@ if (botParams.spawnCtx) {
     plan: Boolean(botParams.discordActionsPlan),
     memory: false, // No user identity in spawn context.
     config: false, // Spawned agents should not change bot configuration.
-    defer: Boolean(botParams.discordActionsDefer),
+    defer: false, // Spawned agents are fire-and-forget — no deferred scheduling.
     imagegen: Boolean(botParams.discordActionsImagegen),
     voice: Boolean(botParams.discordActionsVoice),
     spawn: false, // Prevent recursive spawn (also enforced by depth check).
