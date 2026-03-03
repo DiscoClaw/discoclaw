@@ -59,6 +59,8 @@ export type DiscoclawConfig = {
   summaryModel: string;
   summaryMaxChars: number;
   summaryEveryNTurns: number;
+  summaryMaxTokens: number;
+  summaryTargetRatio: number;
   summaryDataDirOverride?: string;
   summaryArchiveDirOverride?: string;
   durableMemoryEnabled: boolean;
@@ -275,6 +277,20 @@ function parsePositiveInt(
   const n = parsePositiveNumber(env, name, defaultValue);
   if (!Number.isInteger(n)) {
     throw new Error(`${name} must be an integer, got "${n}"`);
+  }
+  return n;
+}
+
+function parseZeroToOneExclusive(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  defaultValue: number,
+): number {
+  const raw = env[name];
+  if (raw == null || raw.trim() === '') return defaultValue;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || n >= 1) {
+    throw new Error(`${name} must be a number between 0 and 1 (exclusive), got "${raw}"`);
   }
   return n;
 }
@@ -659,6 +675,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       summaryModel: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_MODEL') ?? fastModel,
       summaryMaxChars: parseNonNegativeInt(env, 'DISCOCLAW_SUMMARY_MAX_CHARS', 2000),
       summaryEveryNTurns: parsePositiveInt(env, 'DISCOCLAW_SUMMARY_EVERY_N_TURNS', 5),
+      summaryMaxTokens: parsePositiveInt(env, 'DISCOCLAW_SUMMARY_MAX_TOKENS', 1500),
+      summaryTargetRatio: parseZeroToOneExclusive(env, 'DISCOCLAW_SUMMARY_TARGET_RATIO', 0.65),
       summaryDataDirOverride: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_DATA_DIR'),
       summaryArchiveDirOverride: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_ARCHIVE_DIR'),
       durableMemoryEnabled: parseBoolean(env, 'DISCOCLAW_DURABLE_MEMORY_ENABLED', true),

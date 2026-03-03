@@ -27,6 +27,8 @@ describe('parseConfig', () => {
     expect(config.primaryRuntime).toBe('claude');
     expect(config.runtimeModel).toBe('capable');
     expect(config.summaryModel).toBe('fast');
+    expect(config.summaryMaxTokens).toBe(1500);
+    expect(config.summaryTargetRatio).toBe(0.65);
     expect(config.cronModel).toBe('fast');
     expect(config.cronAutoTagModel).toBe('fast');
     expect(config.cronExecModel).toBe('capable');
@@ -466,6 +468,30 @@ describe('parseConfig', () => {
   it('parses FORGE_AUTO_IMPLEMENT=true as true', () => {
     const { config } = parseConfig(env({ FORGE_AUTO_IMPLEMENT: 'true' }));
     expect(config.forgeAutoImplement).toBe(true);
+  });
+
+  // --- Summary recompression controls ---
+  it('parses summary recompression control overrides', () => {
+    const { config } = parseConfig(env({
+      DISCOCLAW_SUMMARY_MAX_TOKENS: '900',
+      DISCOCLAW_SUMMARY_TARGET_RATIO: '0.4',
+    }));
+    expect(config.summaryMaxTokens).toBe(900);
+    expect(config.summaryTargetRatio).toBe(0.4);
+  });
+
+  it('throws on invalid summary max tokens', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_SUMMARY_MAX_TOKENS: '0' })))
+      .toThrow(/DISCOCLAW_SUMMARY_MAX_TOKENS must be a positive number/);
+    expect(() => parseConfig(env({ DISCOCLAW_SUMMARY_MAX_TOKENS: '2.5' })))
+      .toThrow(/DISCOCLAW_SUMMARY_MAX_TOKENS must be an integer/);
+  });
+
+  it('throws on invalid summary target ratio', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_SUMMARY_TARGET_RATIO: '0' })))
+      .toThrow(/DISCOCLAW_SUMMARY_TARGET_RATIO must be a number between 0 and 1 \(exclusive\)/);
+    expect(() => parseConfig(env({ DISCOCLAW_SUMMARY_TARGET_RATIO: '1' })))
+      .toThrow(/DISCOCLAW_SUMMARY_TARGET_RATIO must be a number between 0 and 1 \(exclusive\)/);
   });
 
   // --- Summary-to-durable ---
