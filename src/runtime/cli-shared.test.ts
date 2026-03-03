@@ -96,6 +96,12 @@ describe('cliExecaEnv', () => {
     expect(env.FORCE_COLOR).toBeDefined();
     expect(env.TERM).toBeDefined();
   });
+
+  it('applies explicit overrides after process defaults', () => {
+    const env = cliExecaEnv({ CODEX_HOME: '/tmp/codex-home-test', NO_COLOR: '0' });
+    expect(env.CODEX_HOME).toBe('/tmp/codex-home-test');
+    expect(env.NO_COLOR).toBe('0');
+  });
 });
 
 describe('LineBuffer', () => {

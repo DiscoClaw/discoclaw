@@ -174,6 +174,29 @@ describe('Gemini CLI runtime adapter', () => {
     expect(events[events.length - 1]!.type).toBe('done');
   });
 
+  it('does not retry launcher state hardening patterns for stateless provider', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: '',
+      stderr: 'state db missing rollout path for thread abc',
+      exitCode: 1,
+    }));
+
+    const rt = createGeminiCliRuntime({
+      geminiBin: 'gemini',
+      defaultModel: 'gemini-2.5-pro',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Say hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(events.find((e) => e.type === 'error')).toBeDefined();
+    expect(events[events.length - 1]!.type).toBe('done');
+  });
+
   it('timeout path: timedOut flag emits timeout error + done', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       timedOut: true,
