@@ -71,6 +71,18 @@ describe('fs-glob execute', () => {
     expect(r.result).toContain('Invalid glob pattern');
   });
 
+  it('rejects traversal hidden in brace expansion', async () => {
+    const r = await execute({ pattern: '{**/*.ts,../secret/*}', path: tmpDir }, [tmpDir]);
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('rejects drive-prefixed absolute patterns', async () => {
+    const r = await execute({ pattern: 'C:\\Windows\\*', path: tmpDir }, [tmpDir]);
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
   it('fails closed if glob yields an out-of-root entry', async () => {
     const fsWithGlob = fs as unknown as {
       glob?: (pattern: string, options: { cwd: string }) => AsyncIterable<string>;
@@ -88,6 +100,21 @@ describe('fs-glob execute', () => {
       expect(r.result).toContain('Unsafe glob match rejected');
     } finally {
       fsWithGlob.glob = originalGlob;
+    }
+  });
+
+  it('fails closed if a matched symlink resolves outside allowed roots', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-outside-'));
+    const outsideFile = path.join(outsideDir, 'secret.txt');
+    await fs.writeFile(outsideFile, 'secret');
+    await fs.symlink(outsideFile, path.join(tmpDir, 'escape-link.txt'));
+
+    try {
+      const r = await execute({ pattern: '**/*', path: tmpDir }, [tmpDir]);
+      expect(r.ok).toBe(false);
+      expect(r.result).toContain('Unsafe glob match rejected');
+    } finally {
+      await fs.rm(outsideDir, { recursive: true, force: true });
     }
   });
 
