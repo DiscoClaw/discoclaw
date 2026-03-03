@@ -462,7 +462,7 @@ Each spawned agent registers independently in the abort registry (`src/discord/a
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; set to 0 to disable).
 Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). Receives subsystem contexts (message, guild, subsystems) for action parsing and execution.
-Concurrency: At most `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` (default 8) spawned agents run in parallel per batch. If a response contains more than this limit, the remainder are processed in sequential batches until all are complete — none are dropped.
+Concurrency: At most `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` (default 8) spawned agents run in parallel globally across all responses. If more spawns are requested than the limit allows, they queue behind the global semaphore until a slot opens — none are dropped.
 
 ### Cron Flow Restrictions
 
