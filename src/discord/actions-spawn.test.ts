@@ -7,7 +7,7 @@ import {
   spawnActionsPromptSection,
 } from './actions-spawn.js';
 import type { SpawnContext } from './actions-spawn.js';
-import type { ActionContext } from './actions.js';
+import type { ActionContext, ActionCategoryFlags } from './actions.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,55 @@ vi.mock('./prompt-common.js', () => ({
 
 import { resolveEffectiveTools as _resolveEffectiveTools } from './prompt-common.js';
 const mockResolveEffectiveTools = vi.mocked(_resolveEffectiveTools);
+
+// ---------------------------------------------------------------------------
+// Mock actions module (parseDiscordActions, executeDiscordActions, appendActionResults)
+// ---------------------------------------------------------------------------
+
+vi.mock('./actions.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./actions.js')>();
+  return {
+    ...actual,
+    parseDiscordActions: vi.fn((_text: string, _flags: ActionCategoryFlags) => ({
+      cleanText: _text,
+      actions: [],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    })),
+    executeDiscordActions: vi.fn(async () => []),
+    appendActionResults: vi.fn((body: string) => body),
+  };
+});
+
+import { parseDiscordActions, executeDiscordActions, appendActionResults } from './actions.js';
+const mockParseDiscordActions = vi.mocked(parseDiscordActions);
+const mockExecuteDiscordActions = vi.mocked(executeDiscordActions);
+const mockAppendActionResults = vi.mocked(appendActionResults);
+
+// ---------------------------------------------------------------------------
+// Mock output-common
+// ---------------------------------------------------------------------------
+
+vi.mock('./output-common.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./output-common.js')>();
+  return {
+    ...actual,
+    appendUnavailableActionTypesNotice: vi.fn((text: string) => text),
+    appendParseFailureNotice: vi.fn((text: string) => text),
+  };
+});
+
+import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
+const mockAppendUnavailableNotice = vi.mocked(appendUnavailableActionTypesNotice);
+const mockAppendParseFailureNotice = vi.mocked(appendParseFailureNotice);
+
+// ---------------------------------------------------------------------------
+// Mock transport-client
+// ---------------------------------------------------------------------------
+
+vi.mock('./transport-client.js', () => ({
+  DiscordTransportClient: vi.fn(() => ({})),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -685,5 +734,190 @@ describe('spawnActionsPromptSection', () => {
     const section = spawnActionsPromptSection();
     expect(section).toContain('<discord-action>');
     expect(section).toContain('spawnAgent');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Action parsing on spawn output
+// ---------------------------------------------------------------------------
+
+function makeActionFlags(): ActionCategoryFlags {
+  return {
+    channels: false,
+    messaging: true,
+    guild: false,
+    moderation: false,
+    polls: false,
+    tasks: true,
+    crons: false,
+    botProfile: false,
+    forge: false,
+    plan: false,
+    memory: false,
+    defer: false,
+    config: false,
+  };
+}
+
+describe('executeSpawnAction — action parsing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Restore default mock implementations
+    mockParseDiscordActions.mockImplementation((_text, _flags) => ({
+      cleanText: _text,
+      actions: [],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    }));
+    mockExecuteDiscordActions.mockResolvedValue([]);
+    mockAppendActionResults.mockImplementation((body) => body);
+    mockAppendUnavailableNotice.mockImplementation((text) => text);
+    mockAppendParseFailureNotice.mockImplementation((text) => text);
+  });
+
+  it('parses action blocks and strips them from posted text', async () => {
+    const rawOutput = 'Here is some text\n<discord-action>{"type":"taskCreate","title":"test"}</discord-action>\nMore text';
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: rawOutput },
+      { type: 'done' },
+    ]);
+
+    mockParseDiscordActions.mockReturnValueOnce({
+      cleanText: 'Here is some text\n\nMore text',
+      actions: [{ type: 'taskCreate', title: 'test' } as any],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecuteDiscordActions.mockResolvedValueOnce([{ ok: true, summary: 'Task created' }]);
+    mockAppendActionResults.mockReturnValueOnce('Here is some text\n\nMore text\nDone: Task created');
+
+    const channel = makeMockChannel();
+    const result = await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Create a task' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime, actionFlags: makeActionFlags() }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockParseDiscordActions).toHaveBeenCalledWith(rawOutput, expect.objectContaining({ messaging: true }));
+    expect(mockExecuteDiscordActions).toHaveBeenCalledTimes(1);
+    // The posted text should be the cleaned text with results appended
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Here is some text') }),
+    );
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.not.stringContaining('<discord-action>') }),
+    );
+  });
+
+  it('appends action results to posted output', async () => {
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: 'Some output' },
+      { type: 'done' },
+    ]);
+
+    mockParseDiscordActions.mockReturnValueOnce({
+      cleanText: 'Some output',
+      actions: [{ type: 'taskCreate', title: 'test' } as any],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecuteDiscordActions.mockResolvedValueOnce([{ ok: true, summary: 'Task created: test' }]);
+    mockAppendActionResults.mockReturnValueOnce('Some output\nDone: Task created: test');
+
+    const channel = makeMockChannel();
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime, actionFlags: makeActionFlags() }),
+    );
+
+    expect(mockAppendActionResults).toHaveBeenCalledWith(
+      'Some output',
+      expect.arrayContaining([expect.objectContaining({ type: 'taskCreate' })]),
+      expect.arrayContaining([expect.objectContaining({ ok: true })]),
+    );
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Done: Task created: test') }),
+    );
+  });
+
+  it('posts raw text unchanged when actionFlags is not provided (backward compat)', async () => {
+    const rawOutput = 'Raw text with <discord-action>{"type":"taskCreate"}</discord-action>';
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: rawOutput },
+      { type: 'done' },
+    ]);
+
+    const channel = makeMockChannel();
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime }), // no actionFlags
+    );
+
+    // parseDiscordActions should NOT be called
+    expect(mockParseDiscordActions).not.toHaveBeenCalled();
+    // The raw text (including action blocks) should be posted as-is
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: rawOutput }),
+    );
+  });
+
+  it('posts cleaned text with error appended when action execution fails', async () => {
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: 'Agent text' },
+      { type: 'done' },
+    ]);
+
+    mockParseDiscordActions.mockReturnValueOnce({
+      cleanText: 'Agent text',
+      actions: [{ type: 'taskCreate', title: 'test' } as any],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecuteDiscordActions.mockResolvedValueOnce([{ ok: false, error: 'Missing permissions' }]);
+    mockAppendActionResults.mockReturnValueOnce('Agent text\nFailed: Missing permissions');
+
+    const channel = makeMockChannel();
+    const result = await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Create task' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime, actionFlags: makeActionFlags() }),
+    );
+
+    expect(result.ok).toBe(true); // The spawn itself succeeded
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Failed: Missing permissions') }),
+    );
+  });
+
+  it('does not parse action blocks inside code fences', async () => {
+    const rawOutput = '```\n<discord-action>{"type":"taskCreate"}</discord-action>\n```';
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: rawOutput },
+      { type: 'done' },
+    ]);
+
+    // parseDiscordActions should return no actions (block is inside code fence)
+    mockParseDiscordActions.mockReturnValueOnce({
+      cleanText: rawOutput,
+      actions: [],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+
+    const channel = makeMockChannel();
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Show example' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime, actionFlags: makeActionFlags() }),
+    );
+
+    expect(mockExecuteDiscordActions).not.toHaveBeenCalled();
+    // Text should be posted as-is (code fence preserved)
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: rawOutput }),
+    );
   });
 });

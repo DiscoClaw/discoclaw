@@ -1,7 +1,12 @@
-import type { DiscordActionResult, ActionContext } from './actions.js';
+import type { DiscordActionResult, ActionContext, ActionCategoryFlags, SubsystemContexts } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, appendActionResults } from './actions.js';
+import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
+import { DiscordTransportClient } from './transport-client.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { DiscordChannelContext } from './channel-context.js';
+import type { DeferScheduler } from './defer-scheduler.js';
+import type { DeferActionRequest } from './actions-defer.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { splitDiscord } from './output-utils.js';
@@ -40,6 +45,12 @@ export type SpawnContext = {
   maxConcurrent?: number;
   /** Timeout per agent invocation in ms (default: 120_000). */
   timeoutMs?: number;
+  /** When set, parse and execute discord actions from the spawned agent's output. */
+  actionFlags?: ActionCategoryFlags;
+  /** Subsystem contexts forwarded to executeDiscordActions. */
+  subsystems?: SubsystemContexts;
+  /** Defer scheduler forwarded to the action context. */
+  deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
 };
 
 // ---------------------------------------------------------------------------
@@ -141,6 +152,41 @@ export async function executeSpawnAction(
           }
         }
 
+        // --- Action parsing (when actionFlags provided) ---
+        if (spawnCtx.actionFlags) {
+          const parsed = parseDiscordActions(text, spawnCtx.actionFlags);
+          const actCtx: ActionContext = {
+            guild: ctx.guild,
+            client: ctx.client,
+            channelId: targetChannel.id,
+            messageId: `spawn-${Date.now()}`,
+            deferScheduler: spawnCtx.deferScheduler,
+            transport: new DiscordTransportClient(ctx.guild, ctx.client),
+            confirmation: { mode: 'automated' },
+          };
+
+          let actionResults: DiscordActionResult[] = [];
+          if (parsed.actions.length > 0) {
+            actionResults = await executeDiscordActions(parsed.actions, actCtx, spawnCtx.log, spawnCtx.subsystems);
+          }
+
+          let outgoingText = appendActionResults(parsed.cleanText.trim(), parsed.actions, actionResults);
+          outgoingText = appendUnavailableActionTypesNotice(outgoingText, parsed.strippedUnrecognizedTypes).trim();
+          outgoingText = appendParseFailureNotice(outgoingText, parsed.parseFailures).trim();
+          const finalOutput = outgoingText || `Agent (${label}) completed with no output.`;
+
+          const chunks = splitDiscord(finalOutput);
+          for (const chunk of chunks) {
+            await targetChannel.send({ content: chunk, allowedMentions: NO_MENTIONS });
+          }
+
+          return {
+            ok: true,
+            summary: `Agent (${label}) posted to #${targetChannel.name}`,
+          };
+        }
+
+        // --- No action flags: raw text post (backward compatible) ---
         const outputText = text.trim() || `Agent (${label}) completed with no output.`;
         const chunks = splitDiscord(outputText);
         for (const chunk of chunks) {
