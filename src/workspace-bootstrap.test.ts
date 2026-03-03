@@ -21,6 +21,7 @@ const ALL_TEMPLATE_FILES = [
   'AGENTS.md',
   'TOOLS.md',
   'MEMORY.md',
+  'DISCOCLAW.md',
 ];
 
 /** Real IDENTITY.md content that passes onboarding check (no template marker). */
@@ -123,7 +124,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     }
   });
 
-  it('does not overwrite existing files', async () => {
+  it('does not overwrite existing user-owned files', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
@@ -165,13 +166,13 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     expect(stat.isDirectory()).toBe(true);
   });
 
-  it('returns empty array when all files already exist', async () => {
+  it('returns empty array when all files already exist (except system-owned)', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
 
     // First run — scaffolds everything.
     await ensureWorkspaceBootstrapFiles(workspace);
-    // Second run — nothing to do.
+    // Second run — nothing newly created (DISCOCLAW.md is overwritten but not "created").
     const created = await ensureWorkspaceBootstrapFiles(workspace);
 
     expect(created).toEqual([]);
@@ -215,6 +216,94 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     );
   });
 
+  // --- DISCOCLAW.md system-owned overwrite tests ---
+
+  it('DISCOCLAW.md is overwritten on every boot', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
+    dirs.push(workspace);
+
+    // First run — scaffolds everything.
+    await ensureWorkspaceBootstrapFiles(workspace);
+
+    // User modifies DISCOCLAW.md (should be overwritten).
+    const customContent = '# User-modified DISCOCLAW content';
+    await fs.writeFile(path.join(workspace, 'DISCOCLAW.md'), customContent, 'utf-8');
+
+    // Second run — DISCOCLAW.md should be overwritten with template.
+    const log = mockLog();
+    await ensureWorkspaceBootstrapFiles(workspace, log as any);
+
+    const content = await fs.readFile(path.join(workspace, 'DISCOCLAW.md'), 'utf-8');
+    expect(content).not.toBe(customContent);
+    // Read the actual template to verify it matches.
+    const templateContent = await fs.readFile(
+      path.join(__dirname, '..', 'templates', 'workspace', 'DISCOCLAW.md'),
+      'utf-8',
+    );
+    expect(content).toBe(templateContent);
+  });
+
+  it('DISCOCLAW.md overwrite does not appear in created list', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
+    dirs.push(workspace);
+
+    // First run — scaffolds everything (DISCOCLAW.md IS in created).
+    const firstCreated = await ensureWorkspaceBootstrapFiles(workspace);
+    expect(firstCreated).toContain('DISCOCLAW.md');
+
+    // Second run — DISCOCLAW.md is overwritten but NOT in created.
+    const secondCreated = await ensureWorkspaceBootstrapFiles(workspace);
+    expect(secondCreated).not.toContain('DISCOCLAW.md');
+  });
+
+  it('DISCOCLAW.md overwrite logs "updated system-owned file"', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
+    dirs.push(workspace);
+
+    // First run — scaffolds everything.
+    await ensureWorkspaceBootstrapFiles(workspace);
+
+    // Second run — should log overwrite.
+    const log = mockLog();
+    await ensureWorkspaceBootstrapFiles(workspace, log as any);
+
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ file: 'DISCOCLAW.md', workspaceCwd: workspace }),
+      expect.stringContaining('updated system-owned file'),
+    );
+  });
+
+  it('DISCOCLAW.md is overwritten even when user-owned files are preserved', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
+    dirs.push(workspace);
+
+    // First run — scaffolds everything.
+    await ensureWorkspaceBootstrapFiles(workspace);
+
+    // User customizes AGENTS.md (user-owned, should NOT be overwritten).
+    const customAgents = '# My custom agents rules';
+    await fs.writeFile(path.join(workspace, 'AGENTS.md'), customAgents, 'utf-8');
+
+    // User modifies DISCOCLAW.md (system-owned, SHOULD be overwritten).
+    await fs.writeFile(path.join(workspace, 'DISCOCLAW.md'), '# modified', 'utf-8');
+
+    // Second run.
+    await ensureWorkspaceBootstrapFiles(workspace);
+
+    // AGENTS.md should be preserved.
+    const agentsContent = await fs.readFile(path.join(workspace, 'AGENTS.md'), 'utf-8');
+    expect(agentsContent).toBe(customAgents);
+
+    // DISCOCLAW.md should be overwritten with template.
+    const discoContent = await fs.readFile(path.join(workspace, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoContent).not.toBe('# modified');
+    const templateContent = await fs.readFile(
+      path.join(__dirname, '..', 'templates', 'workspace', 'DISCOCLAW.md'),
+      'utf-8',
+    );
+    expect(discoContent).toBe(templateContent);
+  });
+
   // --- Plan-027 tests: force bootstrap env var ---
 
   it('DISCOCLAW_FORCE_BOOTSTRAP=1 creates BOOTSTRAP.md in onboarded workspace', async () => {
@@ -254,7 +343,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     expect(content).toBe(templateContent);
   });
 
-  it('DISCOCLAW_FORCE_BOOTSTRAP=1 does NOT overwrite other template files', async () => {
+  it('DISCOCLAW_FORCE_BOOTSTRAP=1 does NOT overwrite other user-owned template files', async () => {
     vi.stubEnv('DISCOCLAW_FORCE_BOOTSTRAP', '1');
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-bootstrap-'));
     dirs.push(workspace);
@@ -274,13 +363,15 @@ describe('ensureWorkspaceBootstrapFiles', () => {
 
     await ensureWorkspaceBootstrapFiles(workspace);
 
-    // All custom files should retain their content byte-for-byte.
+    // All custom user-owned files should retain their content byte-for-byte.
     for (const [file, expected] of Object.entries(customFiles)) {
       const actual = await fs.readFile(path.join(workspace, file), 'utf-8');
       expect(actual).toBe(expected);
     }
     // BOOTSTRAP.md should be created from template.
     await expect(fs.access(path.join(workspace, 'BOOTSTRAP.md'))).resolves.toBeUndefined();
+    // DISCOCLAW.md should be created from template (system-owned, always overwritten).
+    await expect(fs.access(path.join(workspace, 'DISCOCLAW.md'))).resolves.toBeUndefined();
   });
 
   it('DISCOCLAW_FORCE_BOOTSTRAP=true does NOT trigger force mode (strict equality)', async () => {
@@ -450,73 +541,118 @@ describe('ensureWorkspaceBootstrapFiles — unlink error handling', () => {
 // Ensures templates contain critical operational knowledge so a fresh install
 // produces a fully operational bot without manual additions.
 
+describe('template content — DISCOCLAW.md', () => {
+  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  let discoclaw: string;
+
+  it('template file exists and is non-empty', async () => {
+    discoclaw = await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw.length).toBeGreaterThan(0);
+  });
+
+  it('contains auto-managed warning', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('Auto-managed by Discoclaw');
+    expect(discoclaw).toContain('overwritten on every boot');
+  });
+
+  it('contains Discord action batching rules', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('Discord Action Batching');
+    expect(discoclaw).toContain('Multiple actions of the same type in a single response are fully supported');
+  });
+
+  it('contains response economy guidance', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('Response Economy');
+  });
+
+  it('contains knowledge cutoff awareness section', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('Knowledge Cutoff Awareness');
+    expect(discoclaw).toContain('use the web to verify');
+  });
+
+  it('contains session completion workflow', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('Landing the Plane');
+    expect(discoclaw).toContain('git push');
+  });
+
+  it('contains plan-audit-implement workflow', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('Plan-Audit-Implement Workflow');
+    expect(discoclaw).toContain('DRAFT');
+    expect(discoclaw).toContain('APPROVED');
+  });
+
+  it('references TOOLS.md for forge/plan/memory action types', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('See TOOLS.md');
+    expect(discoclaw).toContain('discord-action');
+  });
+
+  it('contains Discord formatting rules', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('Discord Formatting');
+    expect(discoclaw).toContain('No markdown tables in Discord');
+  });
+
+  it('contains task creation guidance', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('Task Management');
+  });
+
+  it('contains git commit hash guidance', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('Git Commits');
+    expect(discoclaw).toContain('short commit hash');
+  });
+
+  it('uses correct !memory remember syntax (not !memory add)', async () => {
+    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
+    expect(discoclaw).toContain('!memory remember');
+    expect(discoclaw).not.toContain('!memory add');
+  });
+});
+
 describe('template content — AGENTS.md', () => {
   const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
   let agents: string;
 
-  // Read template once for all content checks.
   it('template file exists and is non-empty', async () => {
     agents = await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
     expect(agents.length).toBeGreaterThan(0);
   });
 
-  it('contains Discord action batching rules', async () => {
+  it('declares itself as user-owned (never overwritten)', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Discord Action Batching');
-    expect(agents).toContain('Multiple actions of the same type in a single response are fully supported');
+    expect(agents).toContain('never overwrite');
   });
 
-  it('contains response economy guidance', async () => {
+  it('references DISCOCLAW.md for system instructions', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Response Economy');
+    expect(agents).toContain('DISCOCLAW.md');
   });
 
-  it('contains knowledge cutoff awareness section', async () => {
+  it('contains memory vs instructions guidance', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Knowledge Cutoff Awareness');
-    expect(agents).toContain('use the web to verify');
+    expect(agents).toContain('Memory vs Instructions');
   });
 
-  it('contains session completion workflow', async () => {
+  it('contains make-it-yours section', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Landing the Plane');
-    expect(agents).toContain('git push');
+    expect(agents).toContain('Make It Yours');
   });
 
-  it('contains plan-audit-implement workflow', async () => {
+  it('does not contain system instructions (those are in DISCOCLAW.md now)', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Plan-Audit-Implement Workflow');
-    expect(agents).toContain('DRAFT');
-    expect(agents).toContain('APPROVED');
-  });
-
-  it('references TOOLS.md for forge/plan/memory action types', async () => {
-    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('See TOOLS.md');
-    expect(agents).toContain('discord-action');
-  });
-
-  it('contains Discord formatting rules', async () => {
-    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Discord Formatting');
-    expect(agents).toContain('No markdown tables in Discord');
-  });
-
-  it('contains task creation guidance', async () => {
-    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Task Management');
-  });
-
-  it('contains git commit hash guidance', async () => {
-    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('Git Commits');
-    expect(agents).toContain('short commit hash');
-  });
-
-  it('uses correct !memory remember syntax (not !memory add)', async () => {
-    agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('!memory remember');
-    expect(agents).not.toContain('!memory add');
+    // These sections have moved to DISCOCLAW.md.
+    expect(agents).not.toContain('Discord Action Batching');
+    expect(agents).not.toContain('Response Economy');
+    expect(agents).not.toContain('Knowledge Cutoff Awareness');
+    expect(agents).not.toContain('Landing the Plane');
+    expect(agents).not.toContain('Plan-Audit-Implement Workflow');
   });
 });
 
@@ -606,7 +742,7 @@ describe('template content — no personalization leak', () => {
   const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
   const FORBIDDEN_TOKENS = ['David', 'Escondido', 'Chelsea', 'marshmonkey'];
 
-  for (const file of ['AGENTS.md', 'TOOLS.md']) {
+  for (const file of ['AGENTS.md', 'TOOLS.md', 'DISCOCLAW.md']) {
     it(`${file} does not contain user-specific tokens`, async () => {
       const content = await fs.readFile(path.join(templatesDir, file), 'utf-8');
       for (const token of FORBIDDEN_TOKENS) {
@@ -623,13 +759,13 @@ describe('scaffolded workspace contains operational content', () => {
     dirs.length = 0;
   });
 
-  it('fresh scaffold produces AGENTS.md with all critical sections', async () => {
+  it('fresh scaffold produces DISCOCLAW.md with all critical sections', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
     dirs.push(workspace);
 
     await ensureWorkspaceBootstrapFiles(workspace);
 
-    const agents = await fs.readFile(path.join(workspace, 'AGENTS.md'), 'utf-8');
+    const discoclaw = await fs.readFile(path.join(workspace, 'DISCOCLAW.md'), 'utf-8');
     const requiredSections = [
       'Discord Action Batching',
       'Response Economy',
@@ -640,7 +776,7 @@ describe('scaffolded workspace contains operational content', () => {
       'Task Management',
     ];
     for (const section of requiredSections) {
-      expect(agents).toContain(section);
+      expect(discoclaw).toContain(section);
     }
   });
 

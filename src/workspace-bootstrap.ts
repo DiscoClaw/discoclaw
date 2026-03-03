@@ -14,7 +14,14 @@ const TEMPLATE_FILES = [
   'AGENTS.md',
   'TOOLS.md',
   'MEMORY.md',
+  'DISCOCLAW.md',
 ];
+
+/**
+ * System-owned files that are overwritten from the template on every boot.
+ * These contain discoclaw's operational instructions — not user content.
+ */
+const SYSTEM_OWNED_FILES = new Set(['DISCOCLAW.md']);
 
 /** Marker text present in the template IDENTITY.md but removed during onboarding. */
 const IDENTITY_TEMPLATE_MARKER = '*(pick something you like)*';
@@ -42,7 +49,9 @@ export async function isOnboardingComplete(workspaceCwd: string): Promise<boolea
 
 /**
  * Ensure workspace PA template files exist. Copies any missing files from
- * `templates/workspace/` to the workspace directory. Never overwrites existing files.
+ * `templates/workspace/` to the workspace directory. Never overwrites existing
+ * user-owned files. System-owned files (DISCOCLAW.md) are overwritten on every
+ * boot to ensure users receive the latest operational instructions.
  *
  * When onboarding is complete (IDENTITY.md has real content), BOOTSTRAP.md is
  * excluded from scaffolding and any existing copy is auto-deleted to prevent
@@ -78,20 +87,35 @@ export async function ensureWorkspaceBootstrapFiles(
     if (file === 'BOOTSTRAP.md' && onboarded) continue;
 
     const dest = path.join(workspaceCwd, file);
+    const isSystemOwned = SYSTEM_OWNED_FILES.has(file);
+
+    let fileExists = false;
     try {
       await fs.access(dest);
-      // File already exists — don't overwrite.
+      fileExists = true;
     } catch {
-      const src = path.join(templatesDir, file);
-      await fs.copyFile(src, dest);
-      // Inject the system timezone into USER.md for new workspaces.
-      if (file === 'USER.md') {
-        const content = await fs.readFile(dest, 'utf-8');
-        const systemTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        await fs.writeFile(dest, content.replace('- **Timezone:**', `- **Timezone:** ${systemTz}`), 'utf-8');
-      }
+      // File doesn't exist — will be created below.
+    }
+
+    // Skip existing user-owned files (never overwrite user content).
+    if (fileExists && !isSystemOwned) continue;
+
+    const src = path.join(templatesDir, file);
+    await fs.copyFile(src, dest);
+
+    // Inject the system timezone into USER.md for new workspaces.
+    if (file === 'USER.md') {
+      const content = await fs.readFile(dest, 'utf-8');
+      const systemTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      await fs.writeFile(dest, content.replace('- **Timezone:**', `- **Timezone:** ${systemTz}`), 'utf-8');
+    }
+
+    if (!fileExists) {
       created.push(file);
       log?.info({ file, workspaceCwd }, 'workspace:bootstrap recreated missing file');
+    } else {
+      // System-owned file was overwritten with latest template.
+      log?.info({ file, workspaceCwd }, 'workspace:bootstrap updated system-owned file');
     }
   }
 
