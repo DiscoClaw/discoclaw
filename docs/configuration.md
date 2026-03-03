@@ -30,6 +30,26 @@ Boolean values accept `0`/`1` or `true`/`false`.
 | `CLAUDE_APPEND_SYSTEM_PROMPT` | — | Additional system prompt appended to all invocations (max 4000 chars) |
 | `DISCOCLAW_RUNTIME_SESSIONS` | `true` | Enable multi-turn session persistence |
 
+### Global Runtime Supervisor
+
+Runtime-wide wrapper for every invocation (`plan -> execute -> evaluate -> decide`). Disabled by default to preserve legacy behavior.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED` | `false` | Enable the runtime-wide supervisor wrapper. When `false`, invocations run through the legacy direct path. |
+| `DISCOCLAW_GLOBAL_SUPERVISOR_AUDIT_STREAM` | `stderr` | Stream for per-cycle JSON audit events (`stdout` or `stderr`). |
+| `DISCOCLAW_GLOBAL_SUPERVISOR_MAX_CYCLES` | `3` | Max supervisor cycles before bail. Must be `>= 1`. |
+| `DISCOCLAW_GLOBAL_SUPERVISOR_MAX_RETRIES` | `2` | Max retries across cycles. Must be `>= 0`. Effective retries are capped by `maxCycles - 1`. |
+| `DISCOCLAW_GLOBAL_SUPERVISOR_MAX_ESCALATION_LEVEL` | `2` | Max escalation level appended to the system prompt after retries. Must be `>= 0`. |
+| `DISCOCLAW_GLOBAL_SUPERVISOR_MAX_TOTAL_EVENTS` | `5000` | Max total streamed runtime events across all cycles before bail. Must be `>= 1`. |
+| `DISCOCLAW_GLOBAL_SUPERVISOR_MAX_WALL_TIME_MS` | `0` | Wall-time cap for the full supervisor loop. `0` disables the cap. Must be `>= 0`. |
+
+If the supervisor bails, it emits a structured error handoff:
+
+- Error prefix: `GLOBAL_SUPERVISOR_BAIL `
+- Payload: JSON with `source: "global_supervisor"` plus `reason`, `cycle`, `retriesUsed`, `escalationLevel`, `failureKind`, `retryable`, `signature`, `lastError`, and `limits`.
+- Bail reasons: `non_retryable_failure`, `deterministic_retry_blocked`, `max_cycles_exceeded`, `max_retries_exceeded`, `max_wall_time_exceeded`, `max_events_exceeded`.
+
 ### Claude CLI
 
 | Variable | Default | Description |
