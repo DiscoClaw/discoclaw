@@ -23,7 +23,7 @@ Bot:             We've been working through your Express → Fastify migration.
 
 ### 2. Durable Memory — long-term user facts
 
-A structured store of user facts that persists across all conversations and restarts. Each item has a kind (fact, preference, project, constraint, person, tool, workflow), deduplication by content hash, and a 200-item cap per user. Injected into every prompt.
+A structured store of user facts that persists across all conversations and restarts. Each item has a kind (fact, preference, project, constraint, person, tool, workflow), deduplication by content hash, and a 200-item cap per user. Injection is hot-tier bounded to keep prompts lean: active durable memory is auto-compacted to about 25 items or ~2000 chars.
 
 **What you see:**
 - The bot knows your preferences, projects, and key facts across all channels.
@@ -40,13 +40,13 @@ Bot:   Given your preference for Rust in systems work, I'd lean that way —
        especially since this is a low-level networking tool.
 ```
 
-#### Consolidation
+#### Hot-Tier Compaction
 
-When the active item count crosses a threshold (default 50), consolidation prunes and merges the list. A fast-tier model receives all active items and returns a revised list — removing duplicates, merging near-duplicates, and dropping stale items. The model cannot invent new facts.
+Durable memory compacts itself automatically when the active set grows beyond the thread target (25 items or ~2000 chars). Compaction demotes the lowest-value active items first.
 
-Safety guards:
-- The revised list must contain at least 50% of the original count, or consolidation is aborted.
-- Runs at most once per session per user.
+Demotion signal:
+- `hitCount` and `lastHitAt` are the decay signal. Items with no hits are demoted first, then lower/older hit patterns are demoted before frequently/recently-hit items.
+- Demoted items stay in durable storage as `deprecated` (history is preserved), but only active items are injected.
 
 ### 3. Memory Commands — user-facing control
 
@@ -164,9 +164,9 @@ With all layers at default settings, worst-case memory overhead is ~8600 chars (
 - `DISCOCLAW_DURABLE_MAX_ITEMS` — cap per user (default 200)
 - `DISCOCLAW_DURABLE_SUPERSESSION_SHADOW=true` — observe supersession without acting (shadow mode)
 
-**Control consolidation:**
-- `DISCOCLAW_MEMORY_CONSOLIDATION_THRESHOLD` — item count before consolidation triggers (default 50)
-- `DISCOCLAW_MEMORY_CONSOLIDATION_MODEL` — model tier for consolidation (default fast)
+**Hot-tier compaction behavior:**
+- Active durable memory compacts automatically at 25 items or ~2000 chars.
+- Demotion priority is driven by `hitCount` + `lastHitAt` (with recency decay).
 
 ## Configuration Reference
 
@@ -183,8 +183,8 @@ With all layers at default settings, worst-case memory overhead is ~8600 chars (
 | `DISCOCLAW_MEMORY_COMMANDS_ENABLED` | `true` | Enable `!memory` commands |
 | `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED` | `true` | Enable auto-extraction |
 | `DISCOCLAW_DURABLE_SUPERSESSION_SHADOW` | `false` | Shadow mode for supersession |
-| `DISCOCLAW_MEMORY_CONSOLIDATION_THRESHOLD` | `50` | Items before consolidation triggers |
-| `DISCOCLAW_MEMORY_CONSOLIDATION_MODEL` | `fast` | Model tier for consolidation |
+| `DISCOCLAW_MEMORY_CONSOLIDATION_THRESHOLD` | `50` | Legacy consolidation knob (currently not wired to runtime compaction path) |
+| `DISCOCLAW_MEMORY_CONSOLIDATION_MODEL` | `fast` | Legacy consolidation knob (currently not wired to runtime compaction path) |
 | `DISCOCLAW_SHORTTERM_MEMORY_ENABLED` | `true` | Enable short-term cross-channel memory |
 | `DISCOCLAW_SHORTTERM_MAX_ENTRIES` | `20` | Max short-term entries |
 | `DISCOCLAW_SHORTTERM_MAX_AGE_HOURS` | `6` | Expiry for short-term entries |
@@ -199,7 +199,7 @@ With all layers at default settings, worst-case memory overhead is ~8600 chars (
 **Too many durable items / memory feels noisy:**
 - Lower `DISCOCLAW_DURABLE_MAX_ITEMS` to cap total items.
 - Use `!memory forget <substring>` to prune specific items.
-- Consolidation auto-prunes when the threshold is crossed.
+- Hot-tier compaction auto-demotes low-value active items once the active set exceeds 25 items or ~2000 chars.
 
 **Auto-extraction picking up irrelevant facts:**
 - Disable with `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED=false`.

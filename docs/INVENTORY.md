@@ -63,7 +63,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Memory commands (`!memory show/remember/forget/reset`) | `src/discord/memory-commands.ts` | **done** |
 | Short-term memory (cross-channel recent excerpts, time-based expiry, character-budget injection) | `src/discord/shortterm-memory.ts`, `src/discord/shortterm-memory.test.ts` | **done** |
 | Auto-extraction / user-turn-to-durable (AI fact extraction → durable memory, dedup, async write queue) | `src/discord/user-turn-to-durable.ts`, `src/discord/user-turn-to-durable.test.ts`, `src/discord/durable-write-queue.ts` | **done** |
-| Durable memory consolidation (sends all active items to a fast-tier model, applies revised list via `deprecateItems()` / `addItem()`) | `src/discord/durable-consolidation.ts` | **done** |
+| Durable memory hot-tier compaction (auto-demotes low-value active items when active set exceeds 25 items or ~2000 chars; uses `hitCount`/`lastHitAt` access signals) | `src/discord/durable-memory.ts`, `src/discord/prompt-common.ts` | **done** |
 | Summary archive (append-only JSONL log of replaced rolling summaries, `memory/summary-archive/YYYY-MM-DD.jsonl`) | `src/discord/summarizer.ts` | **done** |
 | Open-tasks prompt injection (live open-task summary from TaskStore injected into every prompt at invocation time) | `src/discord/prompt-common.ts` | **done** |
 
