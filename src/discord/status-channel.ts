@@ -91,6 +91,9 @@ export type BootReportData = {
   runtimeModel?: string;
   bootDurationMs?: number;
   buildVersion?: string;
+  // npm version check (informational)
+  npmVersion?: string;
+  npmLatestVersion?: string | null;
 };
 
 export type StatusPoster = {
@@ -107,6 +110,36 @@ export type StatusPosterOpts = {
   botDisplayName?: string;
   log?: LoggerLike;
 };
+
+/**
+ * Format the version segment of the boot report Version line.
+ * Examples:
+ *   v0.5.8 (latest) · abc1234
+ *   v0.5.8 → v0.5.9 available · abc1234
+ *   v0.5.8 · abc1234              (registry unreachable)
+ *   abc1234                        (no npm version)
+ */
+export function formatVersionLine(data: Pick<BootReportData, 'npmVersion' | 'npmLatestVersion' | 'buildVersion'>): string {
+  const parts: string[] = [];
+
+  if (data.npmVersion) {
+    let versionPart = `v${data.npmVersion}`;
+    if (data.npmLatestVersion) {
+      if (data.npmLatestVersion === data.npmVersion) {
+        versionPart += ' (latest)';
+      } else {
+        versionPart += ` → v${data.npmLatestVersion} available`;
+      }
+    }
+    parts.push(versionPart);
+  }
+
+  if (data.buildVersion) {
+    parts.push(data.buildVersion);
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : '(unknown)';
+}
 
 export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): StatusPoster {
   const name = opts?.botDisplayName ?? 'Discoclaw';
@@ -216,7 +249,7 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       lines.push(`Memory · ${memoryParts.length > 0 ? memoryParts.join(', ') : 'off'}`);
 
       lines.push(`Actions · ${data.actionCategoriesEnabled.length > 0 ? data.actionCategoriesEnabled.join(', ') : '(none)'}`);
-      lines.push(`Version · DiscoClaw ${data.buildVersion ?? '(unknown)'}`);
+      lines.push(`Version · DiscoClaw ${formatVersionLine(data)}`);
 
       if (data.configWarnings && data.configWarnings > 0) {
         lines.push(`Config Warnings · ${data.configWarnings}`);
