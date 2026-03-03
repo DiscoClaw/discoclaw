@@ -43,6 +43,11 @@ On session start, read your workspace identity files if they exist:
 These are personal, gitignored, and may not exist yet. If `workspace/BOOTSTRAP.md`
 exists, that's your first run — read it, follow it, then delete it.
 
+### Workspace file ownership
+
+- **`workspace/DISCOCLAW.md`** — system instructions, auto-managed by discoclaw. Overwritten from `templates/workspace/DISCOCLAW.md` on every boot. Do not edit.
+- **`workspace/AGENTS.md`** — user rules and preferences. Never overwritten by discoclaw. Users customize this file freely.
+
 ## Working Rules
 
 - Prefer small, auditable changes (nanoclaw-style).

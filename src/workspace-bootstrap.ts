@@ -14,10 +14,64 @@ const TEMPLATE_FILES = [
   'AGENTS.md',
   'TOOLS.md',
   'MEMORY.md',
+  'DISCOCLAW.md',
 ];
+
+/**
+ * System-owned files that are overwritten from the template on every boot.
+ * These contain discoclaw's operational instructions — not user content.
+ */
+const SYSTEM_OWNED_FILES = new Set(['DISCOCLAW.md']);
+
+/**
+ * Marker strings from the legacy AGENTS.md template where system-owned
+ * instructions lived before DISCOCLAW.md was introduced.
+ */
+const LEGACY_AGENTS_MARKERS = [
+  '## Rebuild & Restart Workflow',
+  '## Releasing to npm',
+  '## Discord Action Batching',
+  '## Forge, Plan & Memory Action Types',
+  '## Bead Creation',
+  '## YouTube Links',
+  '## Codex working directory',
+];
+const LEGACY_AGENTS_MIN_MARKER_HITS = 2;
 
 /** Marker text present in the template IDENTITY.md but removed during onboarding. */
 const IDENTITY_TEMPLATE_MARKER = '*(pick something you like)*';
+
+type BootstrapLog = {
+  info: (obj: Record<string, unknown>, msg: string) => void;
+  warn: (obj: Record<string, unknown>, msg: string) => void;
+};
+
+function findLegacyAgentsMarkers(content: string): string[] {
+  return LEGACY_AGENTS_MARKERS.filter((marker) => content.includes(marker));
+}
+
+async function warnIfLegacyAgentsContainsSystemInstructions(
+  workspaceCwd: string,
+  log?: BootstrapLog,
+): Promise<void> {
+  const agentsPath = path.join(workspaceCwd, 'AGENTS.md');
+  let content = '';
+  try {
+    content = await fs.readFile(agentsPath, 'utf-8');
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+
+  const matchedMarkers = findLegacyAgentsMarkers(content);
+  if (matchedMarkers.length < LEGACY_AGENTS_MIN_MARKER_HITS) return;
+
+  log?.warn(
+    { workspaceCwd, matchedMarkers },
+    'workspace:bootstrap legacy AGENTS.md system sections detected — this can conflict with managed DISCOCLAW.md instructions. ' +
+      'Keep personal rules in AGENTS.md and remove migrated system sections.',
+  );
+}
 
 /**
  * Onboarding is considered complete when IDENTITY.md exists and no longer
@@ -42,7 +96,9 @@ export async function isOnboardingComplete(workspaceCwd: string): Promise<boolea
 
 /**
  * Ensure workspace PA template files exist. Copies any missing files from
- * `templates/workspace/` to the workspace directory. Never overwrites existing files.
+ * `templates/workspace/` to the workspace directory. Never overwrites existing
+ * user-owned files. System-owned files (DISCOCLAW.md) are overwritten on every
+ * boot to ensure users receive the latest operational instructions.
  *
  * When onboarding is complete (IDENTITY.md has real content), BOOTSTRAP.md is
  * excluded from scaffolding and any existing copy is auto-deleted to prevent
@@ -52,10 +108,7 @@ export async function isOnboardingComplete(workspaceCwd: string): Promise<boolea
  */
 export async function ensureWorkspaceBootstrapFiles(
   workspaceCwd: string,
-  log?: {
-    info: (obj: Record<string, unknown>, msg: string) => void;
-    warn: (obj: Record<string, unknown>, msg: string) => void;
-  },
+  log?: BootstrapLog,
 ): Promise<string[]> {
   const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
   await fs.mkdir(workspaceCwd, { recursive: true });
@@ -78,20 +131,35 @@ export async function ensureWorkspaceBootstrapFiles(
     if (file === 'BOOTSTRAP.md' && onboarded) continue;
 
     const dest = path.join(workspaceCwd, file);
+    const isSystemOwned = SYSTEM_OWNED_FILES.has(file);
+
+    let fileExists = false;
     try {
       await fs.access(dest);
-      // File already exists — don't overwrite.
+      fileExists = true;
     } catch {
-      const src = path.join(templatesDir, file);
-      await fs.copyFile(src, dest);
-      // Inject the system timezone into USER.md for new workspaces.
-      if (file === 'USER.md') {
-        const content = await fs.readFile(dest, 'utf-8');
-        const systemTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        await fs.writeFile(dest, content.replace('- **Timezone:**', `- **Timezone:** ${systemTz}`), 'utf-8');
-      }
+      // File doesn't exist — will be created below.
+    }
+
+    // Skip existing user-owned files (never overwrite user content).
+    if (fileExists && !isSystemOwned) continue;
+
+    const src = path.join(templatesDir, file);
+    await fs.copyFile(src, dest);
+
+    // Inject the system timezone into USER.md for new workspaces.
+    if (file === 'USER.md') {
+      const content = await fs.readFile(dest, 'utf-8');
+      const systemTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      await fs.writeFile(dest, content.replace('- **Timezone:**', `- **Timezone:** ${systemTz}`), 'utf-8');
+    }
+
+    if (!fileExists) {
       created.push(file);
       log?.info({ file, workspaceCwd }, 'workspace:bootstrap recreated missing file');
+    } else {
+      // System-owned file was overwritten with latest template.
+      log?.info({ file, workspaceCwd }, 'workspace:bootstrap updated system-owned file');
     }
   }
 
@@ -144,6 +212,8 @@ export async function ensureWorkspaceBootstrapFiles(
 
   // Ensure the daily log directory exists for file-based memory.
   await fs.mkdir(path.join(workspaceCwd, 'memory'), { recursive: true });
+
+  await warnIfLegacyAgentsContainsSystemInstructions(workspaceCwd, log);
 
   if (created.length > 0) {
     log?.info({ created, workspaceCwd }, 'workspace:bootstrap scaffolded PA files');

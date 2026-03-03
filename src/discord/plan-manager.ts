@@ -117,7 +117,7 @@ const PHASES_STATE_VERSION = 1;
 
 /** Known workspace filenames that should be normalized to workspace/ prefix. */
 const KNOWN_WORKSPACE_FILES = new Set([
-  'TOOLS.md', 'AGENTS.md', 'MEMORY.md', 'SOUL.md', 'IDENTITY.md', 'USER.md',
+  'TOOLS.md', 'DISCOCLAW.md', 'AGENTS.md', 'MEMORY.md', 'SOUL.md', 'IDENTITY.md', 'USER.md',
 ]);
 
 /** Hardcoded project directory map. */
