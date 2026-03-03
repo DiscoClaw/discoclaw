@@ -78,6 +78,7 @@ import {
 } from './discord/inflight-replies.js';
 import { writeShutdownContext, patchShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 import { getGitHash } from './version.js';
+import { getLocalVersion, getLatestNpmVersion } from './npm-managed.js';
 import { healCorruptedJsonStores, healStaleCronRecords, healInterruptedCronRuns } from './health/startup-healing.js';
 import { validateDiscordToken } from './validate.js';
 import { TaskStore } from './tasks/store.js';
@@ -158,6 +159,10 @@ const gitHash = await getGitHash();
 if (gitHash) {
   log.info({ gitHash }, 'startup:build hash resolved');
 }
+
+// --- Resolve npm version info (fire early, await later before boot report) ---
+const npmVersion = getLocalVersion();
+const npmLatestVersionPromise = getLatestNpmVersion();
 
 // --- Read shutdown context from previous run (before bot connects to avoid race) ---
 let startupInjection: string | null = null;
@@ -1935,6 +1940,7 @@ const actionCategoriesEnabled = buildActionCategoriesEnabled({
   discordActionsVoice: cfg.discordActionsVoice,
   voiceEnabled: cfg.voiceEnabled,
 });
+const npmLatestVersion = await npmLatestVersionPromise;
 publishBootReport({
   botStatus,
   startupCtx,
@@ -1953,6 +1959,8 @@ publishBootReport({
   runtimeModel,
   bootDurationMs: Date.now() - bootStartMs,
   buildVersion: gitHash ?? undefined,
+  npmVersion,
+  npmLatestVersion,
   log,
 });
 

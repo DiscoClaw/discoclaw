@@ -144,6 +144,8 @@ export function publishBootReport(opts: {
   runtimeModel: string;
   bootDurationMs: number;
   buildVersion?: string;
+  npmVersion?: string;
+  npmLatestVersion?: string | null;
   log: LoggerLike;
 }): void {
   if (!opts.botStatus?.bootReport) return;
@@ -174,5 +176,7 @@ export function publishBootReport(opts: {
     runtimeModel: opts.runtimeModel,
     bootDurationMs: opts.bootDurationMs,
     buildVersion: opts.buildVersion,
+    npmVersion: opts.npmVersion,
+    npmLatestVersion: opts.npmLatestVersion,
   }).catch((err) => opts.log.warn({ err }, 'status-channel: boot report failed'));
 }
