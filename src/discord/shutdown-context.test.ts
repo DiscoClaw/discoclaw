@@ -130,6 +130,22 @@ describe('patchShutdownContext', () => {
     expect(raw).toBe('"hello"');
   });
 
+  it('merges cancelledSpawns into existing context', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'restart-command',
+      message: 'User requested via !restart',
+      timestamp: '2026-02-13T00:00:00.000Z',
+      requestedBy: '12345',
+    });
+    await patchShutdownContext(tmpDir, { cancelledSpawns: 2 });
+
+    const raw = await fs.readFile(path.join(tmpDir, 'shutdown-context.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.reason).toBe('restart-command');
+    expect(parsed.requestedBy).toBe('12345');
+    expect(parsed.cancelledSpawns).toBe(2);
+  });
+
   it('preserves all existing fields when patching', async () => {
     await writeShutdownContext(tmpDir, {
       reason: 'deploy',
@@ -325,6 +341,67 @@ describe('readAndClearShutdownContext', () => {
     expect(result.shutdown?.cancelledDefers).toBe(2);
   });
 
+  it('preserves cancelledSpawns in shutdown context', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'restart-command',
+      timestamp: '2026-02-13T00:00:00.000Z',
+      cancelledSpawns: 4,
+    });
+
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledSpawns).toBe(4);
+  });
+
+  it('reads cancelledSpawns patched into existing context', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'restart-command',
+      message: 'User requested via !restart',
+      timestamp: '2026-02-13T00:00:00.000Z',
+    });
+    await patchShutdownContext(tmpDir, { cancelledSpawns: 3 });
+
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.type).toBe('intentional');
+    expect(result.shutdown?.cancelledSpawns).toBe(3);
+    expect(result.shutdown?.message).toBe('User requested via !restart');
+  });
+
+  it('ignores cancelledSpawns when zero', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledSpawns: 0 }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledSpawns).toBeUndefined();
+  });
+
+  it('ignores cancelledSpawns when negative', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledSpawns: -2 }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledSpawns).toBeUndefined();
+  });
+
+  it('ignores cancelledSpawns when not a number', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledSpawns: 'five' }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledSpawns).toBeUndefined();
+  });
+
+  it('floors fractional cancelledSpawns', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledSpawns: 3.9 }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledSpawns).toBe(3);
+  });
+
   it('truncates oversized message and activeForge fields', async () => {
     const long = 'x'.repeat(1000);
     await fs.writeFile(
@@ -500,6 +577,89 @@ describe('formatStartupInjection', () => {
     const result = formatStartupInjection(ctx);
     expect(result).toContain('plan-037');
     expect(result).toContain('2 deferred actions were cancelled');
+  });
+
+  it('appends cancelled spawns info (singular) when cancelledSpawns is 1', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledSpawns: 1,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('1 spawned agent was cancelled and did not complete.');
+  });
+
+  it('appends cancelled spawns info (plural) when cancelledSpawns > 1', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledSpawns: 5,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('5 spawned agents were cancelled and did not complete.');
+  });
+
+  it('does not mention cancelled spawns when count is 0 or absent', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).not.toContain('spawned agent');
+  });
+
+  it('includes both cancelledDefers and cancelledSpawns when both present', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledDefers: 2,
+        cancelledSpawns: 3,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('2 deferred actions were cancelled');
+    expect(result).toContain('3 spawned agents were cancelled');
+  });
+
+  it('includes forge, cancelledDefers, and cancelledSpawns when all present', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        activeForge: 'plan-099',
+        cancelledDefers: 1,
+        cancelledSpawns: 2,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('plan-099');
+    expect(result).toContain('1 deferred action was cancelled');
+    expect(result).toContain('2 spawned agents were cancelled');
+  });
+
+  it('includes cancelled spawns for graceful-unknown type', () => {
+    const ctx: StartupContext = {
+      type: 'graceful-unknown',
+      shutdown: {
+        reason: 'unknown',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledSpawns: 2,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('2 spawned agents were cancelled');
   });
 
   it('includes cancelled defers for graceful-unknown type', () => {

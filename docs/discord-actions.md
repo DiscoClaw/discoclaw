@@ -435,9 +435,12 @@ Allow the model to spawn a parallel sub-agent invocation in a target channel, ex
 
 1. The action executor receives a `spawnAgent` block from the model's response.
 2. It resolves the target channel on the current guild.
-3. It invokes the runtime with the user-supplied `prompt` directly — no PA preamble or context header is prepended.
-4. It streams the runtime output, collecting text events (`text_delta` / `text_final`) and returning an error if the stream emits an `error` event.
-5. The collected output text is split and posted to the target channel via `targetChannel.send()`. Action blocks in the spawned agent's output are not parsed or executed — they are posted as literal text.
+3. It builds a prompt preamble (root policy + inlined workspace PA context files) and prepends it to the user-supplied `prompt`.
+4. It registers the spawned agent in the **abort registry** (key: `spawn-<counter>-<label>`, using a module-level incrementing counter to avoid collisions in parallel batches) and passes the resulting `AbortSignal` to `runtime.invoke()`. This makes the agent visible to `tryAbortAll()`, so `!stop` can kill running spawned agents alongside the main stream.
+5. It streams the runtime output, collecting text events (`text_delta` / `text_final`) and returning an error if the stream emits an `error` event.
+6. The collected output text is passed through `parseDiscordActions()` to extract any `<discord-action>` blocks, and the remaining (cleaned) text is split and posted to the target channel via `targetChannel.send()`.
+7. Extracted action blocks are executed via `executeDiscordActions()` using the same subsystem contexts as the parent invocation, so spawned agents can perform Discord actions (send messages, manage tasks, etc.) just like deferred or chat-originated invocations.
+8. In the `finally` block, the abort registry entry is disposed (moved into a 15 s cooldown window, same as the main stream).
 
 Multiple `spawnAgent` actions in a single response are dispatched in parallel via `Promise.allSettled`, so all spawns start immediately and run concurrently.
 
@@ -447,9 +450,19 @@ Multiple `spawnAgent` actions in a single response are dispatched in parallel vi
 
 This prevents unbounded parallel agent trees from a single top-level message.
 
+#### Abort Integration
+
+Each spawned agent registers independently in the abort registry (`src/discord/abort-registry.ts`) before its runtime invocation starts. This means:
+
+- **`!stop`** calls `tryAbortAll()`, which aborts all active streams — including any in-flight spawned agents.
+- **🛑 on the parent reply** aborts the parent stream before action execution, preventing spawns from launching at all. It does not abort already-running spawned agents.
+- **Per-batch isolation:** When multiple `spawnAgent` actions run in parallel, each gets its own abort key (`spawn-<counter>-<label>`) and `AbortSignal`. Aborting one does not affect the others (though `tryAbortAll()` aborts them all).
+- **Lifecycle:** The abort entry is disposed in the `finally` block after the stream completes (success, error, or abort), moving it into the standard 15 s cooldown window.
+- **Validation short-circuit:** Abort registration is skipped for early failures (recursion guard, missing channel, empty prompt) since no runtime invocation occurs.
+
 Env: `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; set to 0 to disable).
-Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). No separate subsystem context object.
-Concurrency: At most `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` (default 8) spawned agents run in parallel per batch. If a response contains more than this limit, the remainder are processed in sequential batches until all are complete — none are dropped.
+Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). Receives subsystem contexts (message, guild, subsystems) for action parsing and execution.
+Concurrency: At most `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` (default 8) spawned agents run in parallel globally across all responses. If more spawns are requested than the limit allows, they queue behind the global semaphore until a slot opens — none are dropped.
 
 ### Cron Flow Restrictions
 

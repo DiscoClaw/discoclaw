@@ -13,6 +13,70 @@ function makeDeferred<T>() {
   return { promise, resolve, reject };
 }
 
+describe('createConcurrencyLimiter', () => {
+  it('returns a limiter with the specified max', () => {
+    const limiter = createConcurrencyLimiter(3);
+    expect(limiter).not.toBeNull();
+    expect(limiter!.max).toBe(3);
+  });
+
+  it('returns null for max=0', () => {
+    expect(createConcurrencyLimiter(0)).toBeNull();
+  });
+
+  it('returns null for negative values', () => {
+    expect(createConcurrencyLimiter(-1)).toBeNull();
+    expect(createConcurrencyLimiter(-100)).toBeNull();
+  });
+
+  it('returns null for NaN', () => {
+    expect(createConcurrencyLimiter(NaN)).toBeNull();
+  });
+
+  it('returns null for Infinity', () => {
+    expect(createConcurrencyLimiter(Infinity)).toBeNull();
+  });
+
+  it('floors fractional values', () => {
+    const limiter = createConcurrencyLimiter(2.9);
+    expect(limiter).not.toBeNull();
+    expect(limiter!.max).toBe(2);
+  });
+
+  it('returns null when floored value is 0', () => {
+    expect(createConcurrencyLimiter(0.5)).toBeNull();
+  });
+
+  it('limits concurrency to max permits', async () => {
+    const limiter = createConcurrencyLimiter(2)!;
+    let active = 0;
+    let maxSeen = 0;
+
+    const task = async () => {
+      const release = await limiter.acquire();
+      active++;
+      maxSeen = Math.max(maxSeen, active);
+      await new Promise((r) => setTimeout(r, 20));
+      active--;
+      release();
+    };
+
+    await Promise.all([task(), task(), task(), task()]);
+    expect(maxSeen).toBe(2);
+  });
+
+  it('double-release is a no-op', async () => {
+    const limiter = createConcurrencyLimiter(1)!;
+    const release = await limiter.acquire();
+    release();
+    release(); // should not throw or double-release
+
+    // Should still be able to acquire again normally
+    const release2 = await limiter.acquire();
+    release2();
+  });
+});
+
 describe('withConcurrencyLimit', () => {
   it('serializes invocations when maxConcurrentInvocations=1', async () => {
     const started: string[] = [];

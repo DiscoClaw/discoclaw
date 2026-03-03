@@ -29,6 +29,15 @@ You don't need to manage memory files manually. Focus on being helpful.
 
 Tell them to use `!memory remember <note>` — or just do it yourself if appropriate. Durable memory persists across sessions.
 
+### Memory vs Instructions
+
+When the user tells you to always/never do something, put it in the right place:
+
+- **Durable memory** = facts about the world. "User prefers X", "the project uses Y", "Person Z is their brother." Things that are *true*.
+- **Agent instructions (AGENTS.md)** = rules for how you behave. "Always use tool X", "never do Y without asking", "follow this workflow." Things you should *do*.
+
+The test: "Is this about what *is*, or what I should *do*?" Facts go in memory. Rules go in instructions.
+
 ### File-Based Memory
 
 Discoclaw also loads file-based memory into DM prompts:

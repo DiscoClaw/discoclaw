@@ -44,6 +44,7 @@ import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
 import type { ImagegenContext } from './discord/actions-imagegen.js';
 import type { SpawnContext } from './discord/actions-spawn.js';
+import { cancelAll as cancelAllSpawns } from './discord/spawn-registry.js';
 import { VoiceConnectionManager } from './voice/connection-manager.js';
 import { AudioPipelineManager } from './voice/audio-pipeline.js';
 import { VoicePresenceHandler } from './voice/presence-handler.js';
@@ -225,6 +226,18 @@ const shutdown = async () => {
         await patchShutdownContext(pidLockDir, { cancelledDefers: cancelled });
       } catch (err) {
         log.warn({ err }, 'shutdown:failed to patch cancelledDefers');
+      }
+    }
+  }
+  // Clear the spawn registry so we can report how many agents were in flight.
+  {
+    const cancelled = cancelAllSpawns();
+    if (cancelled > 0) {
+      log.info({ cancelled }, 'shutdown:spawned agents cancelled');
+      try {
+        await patchShutdownContext(pidLockDir, { cancelledSpawns: cancelled });
+      } catch (err) {
+        log.warn({ err }, 'shutdown:failed to patch cancelledSpawns');
       }
     }
   }
@@ -1359,12 +1372,18 @@ if (taskCtx) {
   }
 
   if (discordActionsEnabled && cfg.discordActionsSpawn) {
+    const spawnLimiter = createConcurrencyLimiter(cfg.spawnMaxConcurrent);
     botParams.spawnCtx = {
       runtime: limitedRuntime,
       model: runtimeModel,
-      cwd: workspaceCwd,
+      runtimeTools,
+      workspaceCwd,
+      discordChannelContext,
+      useGroupDirCwd,
+      appendSystemPrompt,
       log,
       maxConcurrent: cfg.spawnMaxConcurrent,
+      limiter: spawnLimiter ?? undefined,
     };
     log.info({ maxConcurrent: cfg.spawnMaxConcurrent }, 'spawn:action context initialized');
   }
@@ -1869,6 +1888,39 @@ if (cronEnabled && effectiveCronForum) {
   );
 } else if (cronEnabled && !effectiveCronForum) {
   log.warn('DISCOCLAW_CRON_ENABLED=1 but no automations forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_CRON_FORUM); cron subsystem disabled');
+}
+
+// --- Wire spawn action flags + subsystems (late-bind after all contexts are initialized) ---
+if (botParams.spawnCtx) {
+  botParams.spawnCtx.actionFlags = {
+    channels: discordActionsChannels,
+    messaging: discordActionsMessaging,
+    guild: discordActionsGuild,
+    moderation: discordActionsModeration,
+    polls: discordActionsPolls,
+    tasks: Boolean(botParams.discordActionsTasks),
+    crons: Boolean(botParams.discordActionsCrons),
+    botProfile: Boolean(discordActionsBotProfile),
+    forge: Boolean(botParams.discordActionsForge),
+    plan: Boolean(botParams.discordActionsPlan),
+    memory: false, // No user identity in spawn context.
+    config: false, // Spawned agents should not change bot configuration.
+    defer: false, // Spawned agents are fire-and-forget — no deferred scheduling.
+    imagegen: Boolean(botParams.discordActionsImagegen),
+    voice: Boolean(botParams.discordActionsVoice),
+    spawn: false, // Prevent recursive spawn (also enforced by depth check).
+  };
+  botParams.spawnCtx.deferScheduler = botParams.deferScheduler;
+  botParams.spawnCtx.subsystems = {
+    taskCtx: botParams.taskCtx,
+    cronCtx: botParams.cronCtx,
+    forgeCtx: botParams.forgeCtx,
+    planCtx: botParams.planCtx,
+    configCtx: botParams.configCtx,
+    imagegenCtx: botParams.imagegenCtx,
+    voiceCtx: botParams.voiceCtx,
+  };
+  log.info('spawn:action flags and subsystems wired');
 }
 
 // --- Webhook subsystem ---

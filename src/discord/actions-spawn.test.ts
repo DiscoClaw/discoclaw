@@ -7,8 +7,106 @@ import {
   spawnActionsPromptSection,
 } from './actions-spawn.js';
 import type { SpawnContext } from './actions-spawn.js';
-import type { ActionContext } from './actions.js';
+import type { ActionContext, ActionCategoryFlags } from './actions.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
+
+// ---------------------------------------------------------------------------
+// Mock abort-registry (shared controller map so tryAbortAll propagates signals)
+// ---------------------------------------------------------------------------
+
+const { mockAbortMap } = vi.hoisted(() => ({
+  mockAbortMap: new Map<string, AbortController>(),
+}));
+
+vi.mock('./abort-registry.js', () => ({
+  registerAbort: vi.fn((key: string) => {
+    const controller = new AbortController();
+    mockAbortMap.set(key, controller);
+    return { signal: controller.signal, dispose: vi.fn(() => mockAbortMap.delete(key)) };
+  }),
+  tryAbortAll: vi.fn(() => {
+    let count = 0;
+    for (const c of mockAbortMap.values()) {
+      c.abort();
+      count++;
+    }
+    return count;
+  }),
+  _resetForTest: vi.fn(() => mockAbortMap.clear()),
+}));
+
+import { registerAbort, tryAbortAll } from './abort-registry.js';
+const mockRegisterAbort = vi.mocked(registerAbort);
+const mockTryAbortAll = vi.mocked(tryAbortAll);
+
+// ---------------------------------------------------------------------------
+// Mock prompt-common utilities
+// ---------------------------------------------------------------------------
+
+vi.mock('./prompt-common.js', () => ({
+  resolveEffectiveTools: vi.fn(async () => ({
+    effectiveTools: ['Bash', 'Read'],
+    permissionTier: 'env',
+    permissionNote: undefined,
+    runtimeCapabilityNote: undefined,
+  })),
+  loadWorkspacePaFiles: vi.fn(async () => []),
+  buildContextFiles: vi.fn(() => []),
+  inlineContextFiles: vi.fn(async () => ''),
+  buildPromptPreamble: vi.fn((_ctx: string) => '[ROOT_POLICY]'),
+}));
+
+import { resolveEffectiveTools as _resolveEffectiveTools } from './prompt-common.js';
+const mockResolveEffectiveTools = vi.mocked(_resolveEffectiveTools);
+
+// ---------------------------------------------------------------------------
+// Mock actions module (parseDiscordActions, executeDiscordActions, appendActionResults)
+// ---------------------------------------------------------------------------
+
+vi.mock('./actions.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./actions.js')>();
+  return {
+    ...actual,
+    parseDiscordActions: vi.fn((_text: string, _flags: ActionCategoryFlags) => ({
+      cleanText: _text,
+      actions: [],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    })),
+    executeDiscordActions: vi.fn(async () => []),
+    appendActionResults: vi.fn((body: string) => body),
+  };
+});
+
+import { parseDiscordActions, executeDiscordActions, appendActionResults } from './actions.js';
+const mockParseDiscordActions = vi.mocked(parseDiscordActions);
+const mockExecuteDiscordActions = vi.mocked(executeDiscordActions);
+const mockAppendActionResults = vi.mocked(appendActionResults);
+
+// ---------------------------------------------------------------------------
+// Mock output-common
+// ---------------------------------------------------------------------------
+
+vi.mock('./output-common.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./output-common.js')>();
+  return {
+    ...actual,
+    appendUnavailableActionTypesNotice: vi.fn((text: string) => text),
+    appendParseFailureNotice: vi.fn((text: string) => text),
+  };
+});
+
+import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
+const mockAppendUnavailableNotice = vi.mocked(appendUnavailableActionTypesNotice);
+const mockAppendParseFailureNotice = vi.mocked(appendParseFailureNotice);
+
+// ---------------------------------------------------------------------------
+// Mock transport-client
+// ---------------------------------------------------------------------------
+
+vi.mock('./transport-client.js', () => ({
+  DiscordTransportClient: vi.fn(() => ({})),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,7 +154,9 @@ function makeSpawnCtx(overrides?: Partial<SpawnContext>): SpawnContext {
   return {
     runtime: makeRuntime([{ type: 'text_delta', text: 'Agent output' }, { type: 'done' }]),
     model: 'claude-opus-4',
-    cwd: '/tmp/workspace',
+    runtimeTools: ['Bash', 'Read', 'Write'],
+    workspaceCwd: '/tmp/workspace',
+    useGroupDirCwd: false,
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     ...overrides,
   };
@@ -297,7 +397,7 @@ describe('executeSpawnAction', () => {
 
     it('invokes runtime with correct model, cwd, and prompt', async () => {
       const runtime = makeRuntime([{ type: 'done' }]);
-      const spawnCtx = makeSpawnCtx({ runtime, model: 'claude-opus-4-6', cwd: '/my/cwd' });
+      const spawnCtx = makeSpawnCtx({ runtime, model: 'claude-opus-4-6', workspaceCwd: '/my/cwd' });
 
       await executeSpawnAction(
         { type: 'spawnAgent', channel: 'general', prompt: 'Do something specific' },
@@ -309,7 +409,7 @@ describe('executeSpawnAction', () => {
         expect.objectContaining({
           model: 'claude-opus-4-6',
           cwd: '/my/cwd',
-          prompt: 'Do something specific',
+          prompt: expect.stringContaining('Do something specific'),
         }),
       );
     });
@@ -382,6 +482,91 @@ describe('executeSpawnAction', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain('Missing Access');
     });
+
+    it('passes tools and addDirs to runtime.invoke when context is configured', async () => {
+      mockResolveEffectiveTools.mockResolvedValueOnce({
+        effectiveTools: ['Bash', 'Read'],
+        permissionTier: 'env',
+        permissionNote: undefined,
+        runtimeCapabilityNote: undefined,
+      });
+      const runtime = makeRuntime([{ type: 'done' }]);
+      const spawnCtx = makeSpawnCtx({
+        runtime,
+        useGroupDirCwd: true,
+        discordChannelContext: {
+          contentDir: '/tmp/content',
+          indexPath: '/tmp/content/discord/DISCORD.md',
+          paContextFiles: [],
+          channelsDir: '/tmp/content/discord/channels',
+          byChannelId: new Map(),
+          dmContextPath: '/tmp/content/discord/channels/dm.md',
+        },
+      });
+
+      await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+        makeCtx(),
+        spawnCtx,
+      );
+
+      expect(runtime.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: ['Bash', 'Read'],
+          addDirs: ['/tmp/workspace', '/tmp/content'],
+        }),
+      );
+    });
+
+    it('includes root policy preamble in the prompt passed to runtime.invoke', async () => {
+      const runtime = makeRuntime([{ type: 'done' }]);
+      const spawnCtx = makeSpawnCtx({ runtime });
+
+      await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Test task' },
+        makeCtx(),
+        spawnCtx,
+      );
+
+      const invokeCall = (runtime.invoke as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(invokeCall.prompt).toContain('[ROOT_POLICY]');
+      expect(invokeCall.prompt).toContain('Test task');
+    });
+
+    it('falls back to base runtimeTools when resolveEffectiveTools throws', async () => {
+      mockResolveEffectiveTools.mockRejectedValueOnce(new Error('permission error'));
+      const runtime = makeRuntime([{ type: 'done' }]);
+      const spawnCtx = makeSpawnCtx({ runtime });
+
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+        makeCtx(),
+        spawnCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(runtime.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({ tools: ['Bash', 'Read', 'Write'] }),
+      );
+    });
+
+    it('omits addDirs when useGroupDirCwd is false and no discordChannelContext', async () => {
+      const runtime = makeRuntime([{ type: 'done' }]);
+      const spawnCtx = makeSpawnCtx({
+        runtime,
+        useGroupDirCwd: false,
+        discordChannelContext: undefined,
+      });
+
+      await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+        makeCtx(),
+        spawnCtx,
+      );
+
+      const invokeCall = (runtime.invoke as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(invokeCall.addDirs).toBeUndefined();
+    });
   });
 });
 
@@ -432,7 +617,7 @@ describe('executeSpawnActions', () => {
     expect(results.every((r) => r.ok)).toBe(true);
   });
 
-  it('respects maxConcurrent limit per batch', async () => {
+  it('respects limiter concurrency cap', async () => {
     let concurrentCount = 0;
     let maxSeen = 0;
 
@@ -448,16 +633,19 @@ describe('executeSpawnActions', () => {
       }),
     };
 
+    const { createConcurrencyLimiter } = await import('../runtime/concurrency-limit.js');
+    const limiter = createConcurrencyLimiter(3)!;
+
     await executeSpawnActions(
       Array.from({ length: 8 }, (_, i) => ({ type: 'spawnAgent' as const, channel: 'general', prompt: `Task ${i}` })),
       makeCtx(),
-      makeSpawnCtx({ runtime, maxConcurrent: 3 }),
+      makeSpawnCtx({ runtime, limiter }),
     );
 
     expect(maxSeen).toBeLessThanOrEqual(3);
   });
 
-  it('uses default maxConcurrent of 4', async () => {
+  it('fires all concurrently when no limiter is set', async () => {
     let concurrentCount = 0;
     let maxSeen = 0;
 
@@ -474,12 +662,13 @@ describe('executeSpawnActions', () => {
     };
 
     await executeSpawnActions(
-      Array.from({ length: 10 }, (_, i) => ({ type: 'spawnAgent' as const, channel: 'general', prompt: `Task ${i}` })),
+      Array.from({ length: 5 }, (_, i) => ({ type: 'spawnAgent' as const, channel: 'general', prompt: `Task ${i}` })),
       makeCtx(),
       makeSpawnCtx({ runtime }),
     );
 
-    expect(maxSeen).toBeLessThanOrEqual(4);
+    // Without a limiter, all 5 should run concurrently
+    expect(maxSeen).toBe(5);
   });
 
   it('collects errors without aborting other agents', async () => {
@@ -578,5 +767,631 @@ describe('spawnActionsPromptSection', () => {
     const section = spawnActionsPromptSection();
     expect(section).toContain('<discord-action>');
     expect(section).toContain('spawnAgent');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Action parsing on spawn output
+// ---------------------------------------------------------------------------
+
+function makeActionFlags(): ActionCategoryFlags {
+  return {
+    channels: false,
+    messaging: true,
+    guild: false,
+    moderation: false,
+    polls: false,
+    tasks: true,
+    crons: false,
+    botProfile: false,
+    forge: false,
+    plan: false,
+    memory: false,
+    defer: false,
+    config: false,
+  };
+}
+
+describe('executeSpawnAction — action parsing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Restore default mock implementations
+    mockParseDiscordActions.mockImplementation((_text, _flags) => ({
+      cleanText: _text,
+      actions: [],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    }));
+    mockExecuteDiscordActions.mockResolvedValue([]);
+    mockAppendActionResults.mockImplementation((body) => body);
+    mockAppendUnavailableNotice.mockImplementation((text) => text);
+    mockAppendParseFailureNotice.mockImplementation((text) => text);
+  });
+
+  it('parses action blocks and strips them from posted text', async () => {
+    const rawOutput = 'Here is some text\n<discord-action>{"type":"taskCreate","title":"test"}</discord-action>\nMore text';
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: rawOutput },
+      { type: 'done' },
+    ]);
+
+    mockParseDiscordActions.mockReturnValueOnce({
+      cleanText: 'Here is some text\n\nMore text',
+      actions: [{ type: 'taskCreate', title: 'test' } as any],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecuteDiscordActions.mockResolvedValueOnce([{ ok: true, summary: 'Task created' }]);
+    mockAppendActionResults.mockReturnValueOnce('Here is some text\n\nMore text\nDone: Task created');
+
+    const channel = makeMockChannel();
+    const result = await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Create a task' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime, actionFlags: makeActionFlags() }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockParseDiscordActions).toHaveBeenCalledWith(rawOutput, expect.objectContaining({ messaging: true }));
+    expect(mockExecuteDiscordActions).toHaveBeenCalledTimes(1);
+    // The posted text should be the cleaned text with results appended
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Here is some text') }),
+    );
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.not.stringContaining('<discord-action>') }),
+    );
+  });
+
+  it('appends action results to posted output', async () => {
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: 'Some output' },
+      { type: 'done' },
+    ]);
+
+    mockParseDiscordActions.mockReturnValueOnce({
+      cleanText: 'Some output',
+      actions: [{ type: 'taskCreate', title: 'test' } as any],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecuteDiscordActions.mockResolvedValueOnce([{ ok: true, summary: 'Task created: test' }]);
+    mockAppendActionResults.mockReturnValueOnce('Some output\nDone: Task created: test');
+
+    const channel = makeMockChannel();
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime, actionFlags: makeActionFlags() }),
+    );
+
+    expect(mockAppendActionResults).toHaveBeenCalledWith(
+      'Some output',
+      expect.arrayContaining([expect.objectContaining({ type: 'taskCreate' })]),
+      expect.arrayContaining([expect.objectContaining({ ok: true })]),
+    );
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Done: Task created: test') }),
+    );
+  });
+
+  it('posts raw text unchanged when actionFlags is not provided (backward compat)', async () => {
+    const rawOutput = 'Raw text with <discord-action>{"type":"taskCreate"}</discord-action>';
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: rawOutput },
+      { type: 'done' },
+    ]);
+
+    const channel = makeMockChannel();
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime }), // no actionFlags
+    );
+
+    // parseDiscordActions should NOT be called
+    expect(mockParseDiscordActions).not.toHaveBeenCalled();
+    // The raw text (including action blocks) should be posted as-is
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: rawOutput }),
+    );
+  });
+
+  it('posts cleaned text with error appended when action execution fails', async () => {
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: 'Agent text' },
+      { type: 'done' },
+    ]);
+
+    mockParseDiscordActions.mockReturnValueOnce({
+      cleanText: 'Agent text',
+      actions: [{ type: 'taskCreate', title: 'test' } as any],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecuteDiscordActions.mockResolvedValueOnce([{ ok: false, error: 'Missing permissions' }]);
+    mockAppendActionResults.mockReturnValueOnce('Agent text\nFailed: Missing permissions');
+
+    const channel = makeMockChannel();
+    const result = await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Create task' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime, actionFlags: makeActionFlags() }),
+    );
+
+    expect(result.ok).toBe(true); // The spawn itself succeeded
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Failed: Missing permissions') }),
+    );
+  });
+
+  it('does not parse action blocks inside code fences', async () => {
+    const rawOutput = '```\n<discord-action>{"type":"taskCreate"}</discord-action>\n```';
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: rawOutput },
+      { type: 'done' },
+    ]);
+
+    // parseDiscordActions should return no actions (block is inside code fence)
+    mockParseDiscordActions.mockReturnValueOnce({
+      cleanText: rawOutput,
+      actions: [],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+
+    const channel = makeMockChannel();
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Show example' },
+      makeCtx(channel),
+      makeSpawnCtx({ runtime, actionFlags: makeActionFlags() }),
+    );
+
+    expect(mockExecuteDiscordActions).not.toHaveBeenCalled();
+    // Text should be posted as-is (code fence preserved)
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: rawOutput }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Abort registry integration
+// ---------------------------------------------------------------------------
+
+describe('executeSpawnAction — abort registry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('registers in abort registry and passes signal to runtime.invoke', async () => {
+    const abortSignal = new AbortController().signal;
+    const dispose = vi.fn();
+    mockRegisterAbort.mockReturnValueOnce({ signal: abortSignal, dispose });
+
+    const runtime = makeRuntime([{ type: 'text_delta', text: 'ok' }, { type: 'done' }]);
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    expect(mockRegisterAbort).toHaveBeenCalledOnce();
+    // Key should start with 'spawn-'
+    const key = mockRegisterAbort.mock.calls[0]![0];
+    expect(key).toMatch(/^spawn-/);
+
+    // Signal should be passed through to runtime.invoke
+    expect(runtime.invoke).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: abortSignal }),
+    );
+  });
+
+  it('calls dispose after successful completion', async () => {
+    const dispose = vi.fn();
+    mockRegisterAbort.mockReturnValueOnce({ signal: new AbortController().signal, dispose });
+
+    const runtime = makeRuntime([{ type: 'text_delta', text: 'ok' }, { type: 'done' }]);
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('calls dispose after runtime error event', async () => {
+    const dispose = vi.fn();
+    mockRegisterAbort.mockReturnValueOnce({ signal: new AbortController().signal, dispose });
+
+    const runtime = makeRuntime([{ type: 'error', message: 'boom' }]);
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('calls dispose after runtime throws', async () => {
+    const dispose = vi.fn();
+    mockRegisterAbort.mockReturnValueOnce({ signal: new AbortController().signal, dispose });
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* () {
+        throw new Error('connection failed');
+      }),
+    };
+
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('does not register abort when recursion depth blocks execution', async () => {
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ depth: 1 }),
+    );
+
+    expect(mockRegisterAbort).not.toHaveBeenCalled();
+  });
+
+  it('does not register abort for validation failures', async () => {
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: '', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx(),
+    );
+
+    expect(mockRegisterAbort).not.toHaveBeenCalled();
+  });
+
+  it('registers separate abort entries for each agent in parallel batch', async () => {
+    const disposes: ReturnType<typeof vi.fn>[] = [];
+    mockRegisterAbort.mockImplementation(() => {
+      const d = vi.fn();
+      disposes.push(d);
+      return { signal: new AbortController().signal, dispose: d };
+    });
+
+    const runtime = makeRuntime([{ type: 'text_delta', text: 'ok' }, { type: 'done' }]);
+    await executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'First' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Second' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Third' },
+      ],
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    // Each agent should register independently
+    expect(mockRegisterAbort).toHaveBeenCalledTimes(3);
+    // All should be disposed after completion
+    for (const d of disposes) {
+      expect(d).toHaveBeenCalledOnce();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Abort propagation (tryAbortAll → signal → runtime)
+// ---------------------------------------------------------------------------
+
+/**
+ * Helper: creates a runtime that yields one event then blocks until aborted.
+ * Calls `onStarted` after yielding the first event so the test can coordinate.
+ */
+function makeBlockingRuntime(onStarted: () => void): RuntimeAdapter {
+  return {
+    id: 'other',
+    capabilities: new Set(),
+    invoke: vi.fn(async function* (_params: any) {
+      yield { type: 'text_delta' as const, text: 'partial' };
+      onStarted();
+      await new Promise<void>((_resolve, reject) => {
+        const sig = _params.signal as AbortSignal | undefined;
+        if (sig?.aborted) {
+          reject(new DOMException('The operation was aborted', 'AbortError'));
+          return;
+        }
+        sig?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted', 'AbortError'));
+        }, { once: true });
+      });
+    }),
+  };
+}
+
+describe('abort propagation — tryAbortAll kills spawned agents', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAbortMap.clear();
+    // Restore the factory implementation (may have been overridden by a previous test).
+    mockRegisterAbort.mockImplementation((key: string) => {
+      const controller = new AbortController();
+      mockAbortMap.set(key, controller);
+      return { signal: controller.signal, dispose: vi.fn(() => mockAbortMap.delete(key)) };
+    });
+  });
+
+  it('tryAbortAll kills in-flight spawned agent and returns abort-aware result', async () => {
+    let runtimeStarted!: () => void;
+    const started = new Promise<void>(r => { runtimeStarted = r; });
+    const runtime = makeBlockingRuntime(() => runtimeStarted());
+
+    const resultPromise = executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Slow task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    await started;
+    // Abort all active streams (simulates !stop)
+    mockTryAbortAll();
+
+    const result = await resultPromise;
+    // Should be abort-aware, not a generic error
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.summary).toContain('aborted');
+  });
+
+  it('tryAbortAll aborts all in-flight spawns in a parallel batch', async () => {
+    let runtimesStarted = 0;
+    let allStarted!: () => void;
+    const allStartedPromise = new Promise<void>(r => { allStarted = r; });
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (_params: any) {
+        yield { type: 'text_delta' as const, text: 'partial' };
+        runtimesStarted++;
+        if (runtimesStarted === 3) allStarted();
+        await new Promise<void>((_resolve, reject) => {
+          const sig = _params.signal as AbortSignal | undefined;
+          if (sig?.aborted) {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+            return;
+          }
+          sig?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+          }, { once: true });
+        });
+      }),
+    };
+
+    const resultsPromise = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 2' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 3' },
+      ],
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    await allStartedPromise;
+    mockTryAbortAll();
+
+    const results = await resultsPromise;
+    expect(results).toHaveLength(3);
+    for (const r of results) {
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.summary).toContain('aborted');
+    }
+  });
+
+  it('skips runtime invocation for spawns that acquire limiter permit after abort', async () => {
+    const { createConcurrencyLimiter } = await import('../runtime/concurrency-limit.js');
+    const limiter = createConcurrencyLimiter(2)!;
+
+    let runtimesStarted = 0;
+    let bothStarted!: () => void;
+    const bothStartedPromise = new Promise<void>(r => { bothStarted = r; });
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (_params: any) {
+        yield { type: 'text_delta' as const, text: 'partial' };
+        runtimesStarted++;
+        if (runtimesStarted === 2) bothStarted();
+        await new Promise<void>((_resolve, reject) => {
+          const sig = _params.signal as AbortSignal | undefined;
+          if (sig?.aborted) {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+            return;
+          }
+          sig?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+          }, { once: true });
+        });
+      }),
+    };
+
+    const resultsPromise = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 2' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 3', label: 'three' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Task 4', label: 'four' },
+      ],
+      makeCtx(),
+      makeSpawnCtx({ runtime, limiter }),
+    );
+
+    // Wait for the first 2 to start (they hold the limiter permits).
+    await bothStartedPromise;
+    mockTryAbortAll();
+
+    const results = await resultsPromise;
+    expect(results).toHaveLength(4);
+    // All results should indicate abort
+    for (const r of results) {
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.summary).toContain('aborted');
+    }
+    // Tasks 3 & 4 should skip runtime.invoke because signal was aborted before acquire returned.
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Global limiter — cross-caller concurrency
+// ---------------------------------------------------------------------------
+
+function makeDeferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe('global limiter — cross-caller concurrency', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAbortMap.clear();
+    mockRegisterAbort.mockImplementation((key: string) => {
+      const controller = new AbortController();
+      mockAbortMap.set(key, controller);
+      return { signal: controller.signal, dispose: vi.fn(() => mockAbortMap.delete(key)) };
+    });
+  });
+
+  it('two concurrent executeSpawnActions calls share the same limiter and never exceed maxConcurrent', async () => {
+    const { createConcurrencyLimiter } = await import('../runtime/concurrency-limit.js');
+    const limiter = createConcurrencyLimiter(2)!;
+
+    let concurrentCount = 0;
+    let maxSeen = 0;
+    const gates: Array<{ resolve: () => void }> = [];
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* () {
+        concurrentCount++;
+        maxSeen = Math.max(maxSeen, concurrentCount);
+        const gate = makeDeferred<void>();
+        gates.push(gate);
+        await gate.promise;
+        yield { type: 'text_delta' as const, text: 'ok' };
+        yield { type: 'done' as const };
+        concurrentCount--;
+      }),
+    };
+
+    const ctx = makeCtx();
+    const spawnCtx = makeSpawnCtx({ runtime, limiter });
+
+    // Launch two separate executeSpawnActions calls concurrently,
+    // each with 2 actions → 4 spawns total, all sharing the same limiter(2).
+    const p1 = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'A1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'A2' },
+      ],
+      ctx,
+      spawnCtx,
+    );
+    const p2 = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'B1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'B2' },
+      ],
+      ctx,
+      spawnCtx,
+    );
+
+    // Wait for the first 2 to start (they hold the 2 permits).
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(2);
+    });
+
+    // At this point, exactly 2 are running — the other 2 are waiting for permits.
+    expect(concurrentCount).toBe(2);
+    expect(maxSeen).toBe(2);
+
+    // Release one slot → a waiting spawn should start.
+    gates[0]!.resolve();
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(3);
+    });
+    expect(maxSeen).toBe(2); // still never exceeded 2
+
+    // Release the rest.
+    gates[1]!.resolve();
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(4);
+    });
+    gates[2]!.resolve();
+    gates[3]!.resolve();
+
+    const [results1, results2] = await Promise.all([p1, p2]);
+    expect(results1).toHaveLength(2);
+    expect(results2).toHaveLength(2);
+    expect([...results1, ...results2].every((r) => r.ok)).toBe(true);
+    expect(maxSeen).toBe(2);
+  });
+
+  it('all spawns fire concurrently when no limiter is set (backward compat)', async () => {
+    let concurrentCount = 0;
+    let maxSeen = 0;
+    const gates: Array<{ resolve: () => void }> = [];
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* () {
+        concurrentCount++;
+        maxSeen = Math.max(maxSeen, concurrentCount);
+        const gate = makeDeferred<void>();
+        gates.push(gate);
+        await gate.promise;
+        yield { type: 'text_delta' as const, text: 'ok' };
+        yield { type: 'done' as const };
+        concurrentCount--;
+      }),
+    };
+
+    const ctx = makeCtx();
+    const spawnCtx = makeSpawnCtx({ runtime }); // no limiter
+
+    const p = executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'T1' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'T2' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'T3' },
+      ],
+      ctx,
+      spawnCtx,
+    );
+
+    // All 3 should start immediately with no gating.
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(3);
+    });
+    expect(concurrentCount).toBe(3);
+    expect(maxSeen).toBe(3);
+
+    // Release all.
+    for (const g of gates) g.resolve();
+    const results = await p;
+    expect(results).toHaveLength(3);
+    expect(results.every((r) => r.ok)).toBe(true);
   });
 });
