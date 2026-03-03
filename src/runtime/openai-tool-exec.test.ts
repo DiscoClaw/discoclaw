@@ -196,6 +196,16 @@ describe('list_files', () => {
     expect(r.result).toContain('Invalid glob pattern');
   });
 
+  it('rejects absolute branch hidden in brace expansion', async () => {
+    const r = await executeToolCall(
+      'list_files',
+      { pattern: '{**/*.ts,/etc/*}', path: tmpDir },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
   it('fails closed if glob yields an out-of-root entry', async () => {
     const fsWithGlob = fs as unknown as {
       glob?: (pattern: string, options: { cwd: string }) => AsyncIterable<string>;

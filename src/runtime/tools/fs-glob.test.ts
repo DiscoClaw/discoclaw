@@ -77,6 +77,12 @@ describe('fs-glob execute', () => {
     expect(r.result).toContain('Invalid glob pattern');
   });
 
+  it('rejects absolute branch hidden in brace expansion', async () => {
+    const r = await execute({ pattern: '{**/*.ts,/etc/*}', path: tmpDir }, [tmpDir]);
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
   it('rejects drive-prefixed absolute patterns', async () => {
     const r = await execute({ pattern: 'C:\\Windows\\*', path: tmpDir }, [tmpDir]);
     expect(r.ok).toBe(false);

@@ -216,11 +216,28 @@ async function handleEditFile(
 }
 
 function validateListFilesPattern(pattern: string): string | null {
+  if (typeof pattern !== 'string' || pattern.includes('\0')) {
+    return 'pattern contains invalid characters';
+  }
+
   if (path.isAbsolute(pattern) || path.win32.isAbsolute(pattern)) {
     return 'pattern must be relative';
   }
 
-  const segments = pattern.split(/[/\\]+/);
+  if (/^[A-Za-z]:/.test(pattern)) {
+    return 'pattern must be relative';
+  }
+
+  const normalized = pattern.replace(/\\/g, '/');
+  // Reject absolute path branches hidden inside brace/extglob alternatives.
+  if (/(^|[({,|])\s*\/+/.test(normalized)) {
+    return 'pattern must be relative';
+  }
+
+  // Treat common glob wrappers as separators so traversal hidden in braces,
+  // extglob groups, or character classes is still rejected.
+  const normalizedForTraversalCheck = normalized.replace(/[{},()[\]|]/g, '/');
+  const segments = normalizedForTraversalCheck.split('/');
   if (segments.some((segment) => segment === '..')) {
     return 'pattern cannot contain parent directory traversal';
   }
@@ -298,11 +315,22 @@ async function handleListFiles(
     }
   }
 
-  if (matches.length === 0) {
+  // Defense in depth: containment-check every output line right before returning.
+  const verifiedMatches: string[] = [];
+  for (const match of matches) {
+    try {
+      const safeEntry = await normalizeContainedGlobMatch(match, baseDir, allowedRoots);
+      verifiedMatches.push(safeEntry);
+    } catch {
+      return { result: `Unsafe glob match rejected: ${match}`, ok: false };
+    }
+  }
+
+  if (verifiedMatches.length === 0) {
     return { result: 'No files matched', ok: true };
   }
 
-  return { result: matches.join('\n'), ok: true };
+  return { result: verifiedMatches.join('\n'), ok: true };
 }
 
 /** Recursively collect relative file paths. */

@@ -114,18 +114,22 @@ function validateListFilesPattern(pattern: string): string | null {
     return 'pattern must be relative';
   }
 
+  if (/^[A-Za-z]:/.test(pattern)) {
+    return 'pattern must be relative';
+  }
+
+  const normalized = pattern.replace(/\\/g, '/');
+  // Reject absolute path branches hidden inside brace/extglob alternatives.
+  if (/(^|[({,|])\s*\/+/.test(normalized)) {
+    return 'pattern must be relative';
+  }
+
   // Treat common glob wrappers as separators so traversal hidden in braces,
   // extglob groups, or character classes is still rejected.
-  const normalizedForTraversalCheck = pattern
-    .replace(/\\/g, '/')
-    .replace(/[{},()[\]]/g, '/');
+  const normalizedForTraversalCheck = normalized.replace(/[{},()[\]|]/g, '/');
   const segments = normalizedForTraversalCheck.split('/');
   if (segments.some((segment) => segment === '..')) {
     return 'pattern cannot contain parent directory traversal';
-  }
-
-  if (/^[A-Za-z]:/.test(pattern)) {
-    return 'pattern must be relative';
   }
 
   return null;
