@@ -72,7 +72,7 @@ export async function executeForgeAction(
       }
 
       const orchestrator = forgeCtx.orchestratorFactory();
-      setActiveOrchestrator(orchestrator);
+      setActiveOrchestrator(orchestrator, ctx.channelId);
 
       // Fire and forget — forge runs asynchronously with progress callbacks.
       const release = await acquireWriterLock();
@@ -117,7 +117,7 @@ export async function executeForgeAction(
       }
 
       const orchestrator = forgeCtx.orchestratorFactory();
-      setActiveOrchestrator(orchestrator);
+      setActiveOrchestrator(orchestrator, ctx.channelId);
 
       const release = await acquireWriterLock();
       void orchestrator

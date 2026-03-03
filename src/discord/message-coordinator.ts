@@ -1914,7 +1914,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   auditorModel: params.forgeAuditorModel,
                   log: params.log,
                 });
-                setActiveOrchestrator(resumeOrchestrator);
+                setActiveOrchestrator(resumeOrchestrator, msg.channelId);
 
                 const progressReply = await msg.reply({
                   content: `Re-auditing **${found.header.planId}**...`,
@@ -2016,7 +2016,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 taskDescription: taskSummary?.description,
                 pinnedThreadSummary: ctxResult.pinnedSummary,
               });
-              setActiveOrchestrator(createOrchestrator);
+              setActiveOrchestrator(createOrchestrator, msg.channelId);
 
               // Send initial progress message
               const progressReply = await msg.reply({
