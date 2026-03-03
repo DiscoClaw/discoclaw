@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
+import { execFile as execFileCb, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
 import { collectRuntimeText } from './runtime-utils.js';
@@ -16,7 +17,7 @@ import { extractFirstJsonValue } from './json-extract.js';
 // Types
 // ---------------------------------------------------------------------------
 
-export type PhaseKind = 'implement' | 'read' | 'audit';
+export type PhaseKind = 'implement' | 'read' | 'audit' | 'quality-gate';
 export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'failed' | 'skipped';
 
 export type PlanPhase = {
@@ -96,6 +97,8 @@ export type RunPhaseResult =
   | { result: 'corrupt'; message: string }
   | { result: 'retry_blocked'; phase: PlanPhase; message: string };
 
+const execFileAsync = promisify(execFileCb);
+
 const ROLLOUT_ERROR_PATTERNS = [
   /rollout path missing/i,
   /session state appears corrupted/i,
@@ -112,7 +115,7 @@ function isRolloutPathMissingError(error?: string): boolean {
 // ---------------------------------------------------------------------------
 
 const VALID_STATUSES: Set<string> = new Set(['pending', 'in-progress', 'done', 'failed', 'skipped']);
-const VALID_KINDS: Set<string> = new Set(['implement', 'read', 'audit']);
+const VALID_KINDS: Set<string> = new Set(['implement', 'read', 'audit', 'quality-gate']);
 const PHASES_STATE_VERSION = 1;
 
 /** Known workspace filenames that should be normalized to workspace/ prefix. */
@@ -389,11 +392,20 @@ export function decomposePlan(planContent: string, planId: string, planFile: str
     });
     phases.push({
       id: 'phase-3',
+      title: 'Quality gate',
+      kind: 'quality-gate',
+      description: 'Run build and test commands to verify implementation.',
+      status: 'pending',
+      dependsOn: ['phase-2'],
+      contextFiles: [],
+    });
+    phases.push({
+      id: 'phase-4',
       title: 'Post-implementation audit',
       kind: 'audit',
       description: 'Audit the implementation against the plan specification.',
       status: 'pending',
-      dependsOn: ['phase-2'],
+      dependsOn: ['phase-3'],
       contextFiles: [planFile],
     });
   } else {
@@ -423,15 +435,27 @@ export function decomposePlan(planContent: string, planId: string, planFile: str
       });
     }
 
+    // Quality gate phase
+    const qualityGateId = `phase-${groups.length + 1}`;
+    phases.push({
+      id: qualityGateId,
+      title: 'Quality gate',
+      kind: 'quality-gate',
+      description: 'Run build and test commands to verify implementation.',
+      status: 'pending',
+      dependsOn: implPhaseIds,
+      contextFiles: [],
+    });
+
     // Post-implementation audit phase
     const auditContextFiles = filePaths.map(normalizeWorkspacePath);
     phases.push({
-      id: `phase-${groups.length + 1}`,
+      id: `phase-${groups.length + 2}`,
       title: 'Post-implementation audit',
       kind: 'audit',
       description: 'Audit all changes against the plan specification.',
       status: 'pending',
-      dependsOn: implPhaseIds,
+      dependsOn: [qualityGateId],
       contextFiles: auditContextFiles,
     });
   }
@@ -762,6 +786,46 @@ export function extractObjective(planContent: string): string {
   return objMatch?.[1]?.trim() ?? '(no objective found in plan)';
 }
 
+/**
+ * Extract shell commands from the plan's ## Testing section.
+ * Only fenced code blocks tagged ```bash or ```sh are considered.
+ * Falls back to ['pnpm build', 'pnpm test'] if no matching blocks found.
+ */
+export function extractTestingCommands(planContent: string): string[] {
+  const testingSection = extractTopLevelSection(planContent, 'Testing');
+  if (!testingSection) return ['pnpm build', 'pnpm test'];
+
+  const commands: string[] = [];
+  const lines = testingSection.split('\n');
+  let inBashFence = false;
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (!inBashFence) {
+      if (/^```(?:bash|sh)\s*$/.test(trimmed)) {
+        inBashFence = true;
+        continue;
+      }
+      // Skip non-bash fences
+      if (trimmed.startsWith('```')) {
+        // Enter a non-bash fence — skip until closing
+        const closingIdx = lines.indexOf('```', lines.indexOf(line) + 1);
+        // We'll just handle it inline: set a flag but don't capture
+        continue;
+      }
+    } else {
+      if (trimmed.startsWith('```')) {
+        inBashFence = false;
+        continue;
+      }
+      const cmd = line.trim();
+      if (cmd) commands.push(cmd);
+    }
+  }
+
+  return commands.length > 0 ? commands : ['pnpm build', 'pnpm test'];
+}
+
 // ---------------------------------------------------------------------------
 // Prompt builder
 // ---------------------------------------------------------------------------
@@ -777,6 +841,13 @@ export function buildPhasePrompt(
   lines.push('');
   lines.push(extractObjective(planContent));
   lines.push('');
+
+  if (phase.kind === 'quality-gate') {
+    lines.push('## Task');
+    lines.push('');
+    lines.push('Run build and test commands to verify the implementation. This is a deterministic shell execution — no AI agent involvement.');
+    return lines.join('\n');
+  }
 
   // Inject pre-read workspace context for implement phases
   if (injectedContext) {
@@ -1327,6 +1398,37 @@ export async function executePhase(
   | { status: 'failed'; output: string; error: string }
   | { status: 'audit_failed'; output: string; error: string; verdict: AuditVerdict }
 > {
+  // Quality-gate: deterministic shell execution, no AI agent
+  if (phase.kind === 'quality-gate') {
+    const commands = extractTestingCommands(planContent);
+    const outputLines: string[] = [];
+    const timeout = opts.timeoutMs;
+    const maxBuffer = 10 * 1024 * 1024; // 10 MB
+
+    for (const cmd of commands) {
+      try {
+        const { stdout, stderr } = await execFileAsync('sh', ['-c', cmd], {
+          cwd: opts.projectCwd,
+          shell: false,
+          timeout,
+          maxBuffer,
+        });
+        outputLines.push(`$ ${cmd}\n${stdout}${stderr ? '\n' + stderr : ''}`);
+      } catch (err: unknown) {
+        const isTimeout = err instanceof Error && 'killed' in err && (err as { killed?: boolean }).killed;
+        const stderr = typeof (err as { stderr?: unknown }).stderr === 'string' ? (err as { stderr: string }).stderr : '';
+        const stdout = typeof (err as { stdout?: unknown }).stdout === 'string' ? (err as { stdout: string }).stdout : '';
+        const detail = isTimeout
+          ? `Command timed out after ${timeout}ms: ${cmd}`
+          : `Command failed: ${cmd}\n${stdout}${stderr ? '\n' + stderr : ''}`;
+        outputLines.push(`$ ${cmd}\n${detail}`);
+        return { status: 'failed', output: outputLines.join('\n\n'), error: detail };
+      }
+    }
+
+    return { status: 'done', output: outputLines.join('\n\n') };
+  }
+
   // Derive tools from phase kind
   const tools = phase.kind === 'implement'
     ? ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash']
@@ -1456,7 +1558,7 @@ export async function runNextPhase(
   const isGitAvailable = gitAvailable(opts.projectCwd);
 
   const allowRetryDespiteFailure = isRolloutPathMissingError(phase.error);
-  if (phase.status === 'failed' && phase.kind !== 'audit' && !allowRetryDespiteFailure) {
+  if (phase.status === 'failed' && phase.kind !== 'audit' && phase.kind !== 'quality-gate' && !allowRetryDespiteFailure) {
     if (isGitAvailable) {
       if (!phase.modifiedFiles || phase.modifiedFiles.length === 0) {
         return {
@@ -1735,8 +1837,8 @@ export async function runNextPhase(
   };
   writePhasesFile(phasesFilePath, allPhases);
 
-  // 12. Git commit on success
-  if (result.status === 'done' && isGitAvailable && modifiedFiles.length > 0) {
+  // 12. Git commit on success (skip for quality-gate — no source changes to commit)
+  if (result.status === 'done' && isGitAvailable && modifiedFiles.length > 0 && phase.kind !== 'quality-gate') {
     try {
       execFileSync('git', ['add', ...modifiedFiles], { cwd: opts.projectCwd, stdio: 'pipe' });
       const commitMsg = `${allPhases.planId} ${phase.id}: ${phase.title}`;

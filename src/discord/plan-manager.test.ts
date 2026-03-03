@@ -28,6 +28,7 @@ import {
   readPhasesFile,
   executePhase,
   runNextPhase,
+  extractTestingCommands,
 } from './plan-manager.js';
 import type { PlanPhases, PlanPhase, PhaseExecutionOpts, PlanRunEvent } from './plan-manager.js';
 
@@ -359,32 +360,40 @@ describe('extractChangeSpec', () => {
 // ---------------------------------------------------------------------------
 
 describe('decomposePlan', () => {
-  it('plan with file changes → impl + audit phases', () => {
+  it('plan with file changes → impl + quality-gate + audit phases', () => {
     const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
     expect(phases.planId).toBe('plan-011');
-    expect(phases.phases.length).toBeGreaterThanOrEqual(2);
+    expect(phases.phases.length).toBeGreaterThanOrEqual(3);
 
     const implPhases = phases.phases.filter((p) => p.kind === 'implement');
+    const qgPhases = phases.phases.filter((p) => p.kind === 'quality-gate');
     const auditPhases = phases.phases.filter((p) => p.kind === 'audit');
     expect(implPhases.length).toBeGreaterThanOrEqual(1);
+    expect(qgPhases.length).toBe(1);
     expect(auditPhases.length).toBe(1);
 
-    // Audit depends on all impl phases
-    const auditPhase = auditPhases[0]!;
+    // Quality-gate depends on all impl phases
+    const qgPhase = qgPhases[0]!;
     for (const impl of implPhases) {
-      expect(auditPhase.dependsOn).toContain(impl.id);
+      expect(qgPhase.dependsOn).toContain(impl.id);
     }
+
+    // Audit depends on quality-gate
+    const auditPhase = auditPhases[0]!;
+    expect(auditPhase.dependsOn).toEqual([qgPhase.id]);
   });
 
-  it('plan with no file paths → read, implement, audit phases', () => {
+  it('plan with no file paths → read, implement, quality-gate, audit phases', () => {
     const planPath = 'workspace/plans/plan-010.md';
     const phases = decomposePlan(SAMPLE_PLAN_NO_CHANGES, 'plan-010', planPath);
-    expect(phases.phases).toHaveLength(3);
+    expect(phases.phases).toHaveLength(4);
     expect(phases.phases[0]!.kind).toBe('read');
     expect(phases.phases[1]!.kind).toBe('implement');
-    const auditPhase = phases.phases[2]!;
+    expect(phases.phases[2]!.kind).toBe('quality-gate');
+    expect(phases.phases[2]!.dependsOn).toEqual(['phase-2']);
+    const auditPhase = phases.phases[3]!;
     expect(auditPhase.kind).toBe('audit');
-    expect(auditPhase.dependsOn).toEqual(['phase-2']);
+    expect(auditPhase.dependsOn).toEqual(['phase-3']);
     expect(auditPhase.contextFiles).toEqual([planPath]);
   });
 
@@ -2752,5 +2761,510 @@ describe('buildPostRunSummary', () => {
     expect(summary).toContain('[!]');
     expect(summary).toContain('[-]');
     expect(summary).toContain('abc1234');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractTestingCommands
+// ---------------------------------------------------------------------------
+
+describe('extractTestingCommands', () => {
+  it('extracts commands from ```bash fenced block', () => {
+    const plan = [
+      '## Objective',
+      '',
+      'Do something.',
+      '',
+      '## Testing',
+      '',
+      '```bash',
+      'pnpm build',
+      'pnpm test',
+      '```',
+    ].join('\n');
+    expect(extractTestingCommands(plan)).toEqual(['pnpm build', 'pnpm test']);
+  });
+
+  it('extracts commands from ```sh fenced block', () => {
+    const plan = [
+      '## Testing',
+      '',
+      '```sh',
+      'npm run lint',
+      '```',
+    ].join('\n');
+    expect(extractTestingCommands(plan)).toEqual(['npm run lint']);
+  });
+
+  it('ignores bare/untagged fenced blocks', () => {
+    const plan = [
+      '## Testing',
+      '',
+      '```',
+      'not a command',
+      '```',
+    ].join('\n');
+    expect(extractTestingCommands(plan)).toEqual(['pnpm build', 'pnpm test']);
+  });
+
+  it('ignores non-bash-tagged fenced blocks', () => {
+    const plan = [
+      '## Testing',
+      '',
+      '```typescript',
+      'expect(true).toBe(true);',
+      '```',
+    ].join('\n');
+    expect(extractTestingCommands(plan)).toEqual(['pnpm build', 'pnpm test']);
+  });
+
+  it('falls back to defaults when no ## Testing section', () => {
+    const plan = [
+      '## Objective',
+      '',
+      'Do something.',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts`',
+    ].join('\n');
+    expect(extractTestingCommands(plan)).toEqual(['pnpm build', 'pnpm test']);
+  });
+
+  it('falls back to defaults when ## Testing has no code blocks', () => {
+    const plan = [
+      '## Testing',
+      '',
+      'Unit tests for all functions.',
+    ].join('\n');
+    expect(extractTestingCommands(plan)).toEqual(['pnpm build', 'pnpm test']);
+  });
+
+  it('extracts from multiple bash blocks', () => {
+    const plan = [
+      '## Testing',
+      '',
+      '```bash',
+      'pnpm build',
+      '```',
+      '',
+      'Then run tests:',
+      '',
+      '```bash',
+      'pnpm test -- --run',
+      '```',
+    ].join('\n');
+    expect(extractTestingCommands(plan)).toEqual(['pnpm build', 'pnpm test -- --run']);
+  });
+
+  it('skips empty lines inside code blocks', () => {
+    const plan = [
+      '## Testing',
+      '',
+      '```bash',
+      'pnpm build',
+      '',
+      'pnpm test',
+      '```',
+    ].join('\n');
+    expect(extractTestingCommands(plan)).toEqual(['pnpm build', 'pnpm test']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// decomposePlan quality-gate insertion
+// ---------------------------------------------------------------------------
+
+describe('decomposePlan quality-gate', () => {
+  it('inserts quality-gate phase between last implement and audit (file-paths branch)', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    const kinds = phases.phases.map((p) => p.kind);
+    const qgIdx = kinds.indexOf('quality-gate');
+    const auditIdx = kinds.indexOf('audit');
+    const lastImplIdx = kinds.lastIndexOf('implement');
+
+    expect(qgIdx).toBeGreaterThan(-1);
+    expect(qgIdx).toBeGreaterThan(lastImplIdx);
+    expect(auditIdx).toBeGreaterThan(qgIdx);
+  });
+
+  it('quality-gate depends on all implement phase IDs', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    const implPhaseIds = phases.phases.filter((p) => p.kind === 'implement').map((p) => p.id);
+    const qgPhase = phases.phases.find((p) => p.kind === 'quality-gate')!;
+    expect(qgPhase.dependsOn).toEqual(implPhaseIds);
+  });
+
+  it('audit phase depends solely on quality-gate (file-paths branch)', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    const qgPhase = phases.phases.find((p) => p.kind === 'quality-gate')!;
+    const auditPhase = phases.phases.find((p) => p.kind === 'audit')!;
+    expect(auditPhase.dependsOn).toEqual([qgPhase.id]);
+  });
+
+  it('quality-gate has no contextFiles or changeSpec', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    const qgPhase = phases.phases.find((p) => p.kind === 'quality-gate')!;
+    expect(qgPhase.contextFiles).toEqual([]);
+    expect(qgPhase.changeSpec).toBeUndefined();
+  });
+
+  it('inserts quality-gate in no-file-paths branch', () => {
+    const phases = decomposePlan(SAMPLE_PLAN_NO_CHANGES, 'plan-010', 'workspace/plans/plan-010.md');
+    const kinds = phases.phases.map((p) => p.kind);
+    expect(kinds).toEqual(['read', 'implement', 'quality-gate', 'audit']);
+  });
+
+  it('no-file-paths branch: audit depends on quality-gate', () => {
+    const phases = decomposePlan(SAMPLE_PLAN_NO_CHANGES, 'plan-010', 'workspace/plans/plan-010.md');
+    const qgPhase = phases.phases.find((p) => p.kind === 'quality-gate')!;
+    const auditPhase = phases.phases.find((p) => p.kind === 'audit')!;
+    expect(auditPhase.dependsOn).toEqual([qgPhase.id]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPhasePrompt quality-gate
+// ---------------------------------------------------------------------------
+
+describe('buildPhasePrompt quality-gate', () => {
+  it('returns a minimal description string for quality-gate', () => {
+    const qgPhase: PlanPhase = {
+      id: 'phase-3',
+      title: 'Quality gate',
+      kind: 'quality-gate',
+      description: 'Run build and test commands to verify implementation.',
+      status: 'pending',
+      dependsOn: ['phase-2'],
+      contextFiles: [],
+    };
+    const prompt = buildPhasePrompt(qgPhase, SAMPLE_PLAN);
+    expect(prompt).toContain('deterministic shell execution');
+    expect(prompt).not.toContain('Audit');
+    expect(prompt).not.toContain('Change Specification');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executePhase quality-gate
+// ---------------------------------------------------------------------------
+
+describe('executePhase quality-gate', () => {
+  const qgPhase: PlanPhase = {
+    id: 'phase-3',
+    title: 'Quality gate',
+    kind: 'quality-gate',
+    description: 'Run build and test commands.',
+    status: 'in-progress',
+    dependsOn: ['phase-2'],
+    contextFiles: [],
+  };
+
+  const basePhases: PlanPhases = {
+    planId: 'plan-001',
+    planFile: 'test.md',
+    planContentHash: 'abc',
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+    phases: [qgPhase],
+  };
+
+  let tmpDir: string;
+  let projectDir: string;
+  let wsDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir();
+    projectDir = path.join(tmpDir, 'project');
+    wsDir = path.join(tmpDir, 'workspace');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.mkdir(wsDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeOpts(runtime: RuntimeAdapter): PhaseExecutionOpts {
+    return {
+      runtime,
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 10000,
+      workspaceCwd: wsDir,
+    };
+  }
+
+  it('returns done when commands succeed', async () => {
+    const plan = [
+      '## Testing',
+      '',
+      '```bash',
+      'echo "hello"',
+      '```',
+    ].join('\n');
+    const result = await executePhase(qgPhase, plan, basePhases, makeOpts(makeSuccessRuntime('ignored')));
+    expect(result.status).toBe('done');
+    expect(result.output).toContain('hello');
+  });
+
+  it('returns failed when a command fails', async () => {
+    const plan = [
+      '## Testing',
+      '',
+      '```bash',
+      'exit 1',
+      '```',
+    ].join('\n');
+    const result = await executePhase(qgPhase, plan, basePhases, makeOpts(makeSuccessRuntime('ignored')));
+    expect(result.status).toBe('failed');
+  });
+
+  it('does not invoke the runtime adapter', async () => {
+    let invoked = false;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke() {
+        invoked = true;
+        yield { type: 'text_final', text: 'should not run' };
+      },
+    };
+
+    const plan = [
+      '## Testing',
+      '',
+      '```bash',
+      'echo ok',
+      '```',
+    ].join('\n');
+    await executePhase(qgPhase, plan, basePhases, makeOpts(runtime));
+    expect(invoked).toBe(false);
+  });
+
+  it('falls back to default commands when no ## Testing section', async () => {
+    // Default commands (pnpm build, pnpm test) will fail in tmpDir — that's fine,
+    // we just verify the error mentions the command
+    const plan = '## Objective\n\nDo something.\n';
+    const result = await executePhase(qgPhase, plan, basePhases, makeOpts(makeSuccessRuntime('ignored')));
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error).toContain('pnpm build');
+    }
+  });
+
+  it('runs commands sequentially and stops on first failure', async () => {
+    const plan = [
+      '## Testing',
+      '',
+      '```bash',
+      'echo first',
+      'exit 1',
+      'echo third',
+      '```',
+    ].join('\n');
+    const result = await executePhase(qgPhase, plan, basePhases, makeOpts(makeSuccessRuntime('ignored')));
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.output).toContain('first');
+      expect(result.output).not.toContain('third');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runNextPhase quality-gate
+// ---------------------------------------------------------------------------
+
+describe('runNextPhase quality-gate', () => {
+  let tmpDir: string;
+  let projectDir: string;
+  let wsDir: string;
+  let plansDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir();
+    projectDir = path.join(tmpDir, 'project');
+    wsDir = path.join(tmpDir, 'workspace');
+    plansDir = path.join(wsDir, 'plans');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.mkdir(plansDir, { recursive: true });
+
+    try {
+      execSync('git init', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git config user.email "test@test.com"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git config user.name "Test"', { cwd: projectDir, stdio: 'pipe' });
+      await fs.writeFile(path.join(projectDir, 'README.md'), 'test');
+      execSync('git add . && git commit -m "init"', { cwd: projectDir, stdio: 'pipe' });
+    } catch {
+      // git not available
+    }
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const progressMsgs: string[] = [];
+  const onProgress = async (msg: string) => { progressMsgs.push(msg); };
+
+  beforeEach(() => {
+    progressMsgs.length = 0;
+  });
+
+  it('failed quality-gate is freely retryable (not blocked by modifiedFiles check)', async () => {
+    const planWithBash = [
+      '# Plan: QG Test',
+      '',
+      '**ID:** plan-qg',
+      '**Task:** ws-test',
+      '**Created:** 2026-02-12',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '',
+      '## Objective',
+      '',
+      'Test quality gate retry.',
+      '',
+      '## Testing',
+      '',
+      '```bash',
+      'echo ok',
+      '```',
+    ].join('\n');
+
+    const planPath = path.join(plansDir, 'plan-qg-test.md');
+    await fs.writeFile(planPath, planWithBash);
+
+    const phases: PlanPhases = {
+      planId: 'plan-qg',
+      planFile: 'workspace/plans/plan-qg-test.md',
+      planContentHash: computePlanHash(planWithBash),
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'Implement',
+          kind: 'implement',
+          description: 'Implement.',
+          status: 'done',
+          dependsOn: [],
+          contextFiles: [],
+          output: 'Done.',
+        },
+        {
+          id: 'phase-2',
+          title: 'Quality gate',
+          kind: 'quality-gate',
+          description: 'Run tests.',
+          status: 'failed',
+          error: 'pnpm test failed',
+          dependsOn: ['phase-1'],
+          contextFiles: [],
+          // No modifiedFiles or failureHashes — would block implement phases
+        },
+        {
+          id: 'phase-3',
+          title: 'Audit',
+          kind: 'audit',
+          description: 'Audit.',
+          status: 'pending',
+          dependsOn: ['phase-2'],
+          contextFiles: [],
+        },
+      ],
+    };
+    const phasesPath = path.join(plansDir, 'plan-qg-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const opts: PhaseExecutionOpts = {
+      runtime: makeSuccessRuntime('ignored'),
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 10000,
+      workspaceCwd: wsDir,
+    };
+
+    const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
+    // Should NOT be retry_blocked
+    expect(result.result).not.toBe('retry_blocked');
+    // Should proceed to run quality-gate (which will succeed with 'echo ok')
+    expect(result.result).toBe('done');
+  });
+
+  it('quality-gate success does not create a git commit', async () => {
+    const planWithBash = [
+      '# Plan: QG commit test',
+      '',
+      '**ID:** plan-qg2',
+      '**Task:** ws-test',
+      '**Created:** 2026-02-12',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '',
+      '## Objective',
+      '',
+      'Test quality gate no commit.',
+      '',
+      '## Testing',
+      '',
+      '```bash',
+      'touch output.txt',
+      '```',
+    ].join('\n');
+
+    const planPath = path.join(plansDir, 'plan-qg2-test.md');
+    await fs.writeFile(planPath, planWithBash);
+
+    const phases: PlanPhases = {
+      planId: 'plan-qg2',
+      planFile: 'workspace/plans/plan-qg2-test.md',
+      planContentHash: computePlanHash(planWithBash),
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'Implement',
+          kind: 'implement',
+          description: 'Implement.',
+          status: 'done',
+          dependsOn: [],
+          contextFiles: [],
+          output: 'Done.',
+        },
+        {
+          id: 'phase-2',
+          title: 'Quality gate',
+          kind: 'quality-gate',
+          description: 'Run tests.',
+          status: 'pending',
+          dependsOn: ['phase-1'],
+          contextFiles: [],
+        },
+      ],
+    };
+    const phasesPath = path.join(plansDir, 'plan-qg2-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const opts: PhaseExecutionOpts = {
+      runtime: makeSuccessRuntime('ignored'),
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 10000,
+      workspaceCwd: wsDir,
+    };
+
+    const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
+    expect(result.result).toBe('done');
+
+    // No git commit should be recorded
+    const updated = readPhasesFile(phasesPath);
+    const qgPhase = updated.phases.find((p) => p.kind === 'quality-gate')!;
+    expect(qgPhase.gitCommit).toBeUndefined();
   });
 });
