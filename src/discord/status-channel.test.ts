@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createStatusPoster, sanitizeErrorMessage, sanitizePhaseError } from './status-channel.js';
+import { createStatusPoster, formatVersionLine, sanitizeErrorMessage, sanitizePhaseError } from './status-channel.js';
 
 function mockChannel() {
   return { send: vi.fn().mockResolvedValue(undefined) } as any;
@@ -233,6 +233,84 @@ describe('bootReport', () => {
     await poster.bootReport!({ ...baseData, permissionsTier: 'standard' });
     const msg = sentContent(ch);
     expect(msg).toContain('Permissions · standard');
+  });
+
+  it('shows "(latest)" when npmVersion equals npmLatestVersion', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, npmVersion: '0.5.8', npmLatestVersion: '0.5.8', buildVersion: 'abc1234' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Version · DiscoClaw v0.5.8 (latest) · abc1234');
+  });
+
+  it('shows update arrow when npmLatestVersion differs from npmVersion', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, npmVersion: '0.5.8', npmLatestVersion: '0.5.9', buildVersion: 'abc1234' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Version · DiscoClaw v0.5.8 → v0.5.9 available · abc1234');
+  });
+
+  it('shows version without status when npmLatestVersion is null (registry unreachable)', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, npmVersion: '0.5.8', npmLatestVersion: null, buildVersion: 'abc1234' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Version · DiscoClaw v0.5.8 · abc1234');
+    expect(msg).not.toContain('latest');
+    expect(msg).not.toContain('available');
+  });
+
+  it('falls back to git hash only when npmVersion is absent', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, buildVersion: 'abc1234' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Version · DiscoClaw abc1234');
+  });
+
+  it('shows "(unknown)" when neither npmVersion nor buildVersion is present', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Version · DiscoClaw (unknown)');
+  });
+});
+
+describe('formatVersionLine', () => {
+  it('shows version with (latest) and git hash', () => {
+    expect(formatVersionLine({ npmVersion: '1.0.0', npmLatestVersion: '1.0.0', buildVersion: 'abc1234' }))
+      .toBe('v1.0.0 (latest) · abc1234');
+  });
+
+  it('shows update available with git hash', () => {
+    expect(formatVersionLine({ npmVersion: '1.0.0', npmLatestVersion: '1.1.0', buildVersion: 'abc1234' }))
+      .toBe('v1.0.0 → v1.1.0 available · abc1234');
+  });
+
+  it('shows version without status when latest is null', () => {
+    expect(formatVersionLine({ npmVersion: '1.0.0', npmLatestVersion: null, buildVersion: 'abc1234' }))
+      .toBe('v1.0.0 · abc1234');
+  });
+
+  it('shows version without status when latest is undefined', () => {
+    expect(formatVersionLine({ npmVersion: '1.0.0', buildVersion: 'abc1234' }))
+      .toBe('v1.0.0 · abc1234');
+  });
+
+  it('shows version alone when no git hash', () => {
+    expect(formatVersionLine({ npmVersion: '1.0.0', npmLatestVersion: '1.0.0' }))
+      .toBe('v1.0.0 (latest)');
+  });
+
+  it('shows git hash alone when no npm version', () => {
+    expect(formatVersionLine({ buildVersion: 'abc1234' }))
+      .toBe('abc1234');
+  });
+
+  it('returns (unknown) when nothing is provided', () => {
+    expect(formatVersionLine({})).toBe('(unknown)');
   });
 });
 
