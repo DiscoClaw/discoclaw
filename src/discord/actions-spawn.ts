@@ -10,6 +10,7 @@ import type { DeferActionRequest } from './actions-defer.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { splitDiscord } from './output-utils.js';
+import { registerAbort } from './abort-registry.js';
 import {
   buildContextFiles,
   buildPromptPreamble,
@@ -131,6 +132,9 @@ export async function executeSpawnAction(
 
       const fullPrompt = preamble + '\n\n' + action.prompt;
 
+      // Register in the abort registry so tryAbortAll() (via !stop) can kill this agent.
+      const abortKey = `spawn-${Date.now()}-${label}`;
+      const { signal, dispose: abortDispose } = registerAbort(abortKey);
       try {
         let text = '';
         const stream = spawnCtx.runtime.invoke({
@@ -140,6 +144,7 @@ export async function executeSpawnAction(
           tools: effectiveTools,
           addDirs: uniqueAddDirs,
           timeoutMs,
+          signal,
         });
 
         for await (const event of stream) {
@@ -200,6 +205,8 @@ export async function executeSpawnAction(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, error: `spawnAgent (${label}) failed: ${msg}` };
+      } finally {
+        abortDispose();
       }
     }
   }

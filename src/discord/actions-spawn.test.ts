@@ -11,6 +11,20 @@ import type { ActionContext, ActionCategoryFlags } from './actions.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 
 // ---------------------------------------------------------------------------
+// Mock abort-registry
+// ---------------------------------------------------------------------------
+
+vi.mock('./abort-registry.js', () => ({
+  registerAbort: vi.fn(() => {
+    const controller = new AbortController();
+    return { signal: controller.signal, dispose: vi.fn() };
+  }),
+}));
+
+import { registerAbort } from './abort-registry.js';
+const mockRegisterAbort = vi.mocked(registerAbort);
+
+// ---------------------------------------------------------------------------
 // Mock prompt-common utilities
 // ---------------------------------------------------------------------------
 
@@ -919,5 +933,134 @@ describe('executeSpawnAction — action parsing', () => {
     expect(channel.send).toHaveBeenCalledWith(
       expect.objectContaining({ content: rawOutput }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Abort registry integration
+// ---------------------------------------------------------------------------
+
+describe('executeSpawnAction — abort registry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('registers in abort registry and passes signal to runtime.invoke', async () => {
+    const abortSignal = new AbortController().signal;
+    const dispose = vi.fn();
+    mockRegisterAbort.mockReturnValueOnce({ signal: abortSignal, dispose });
+
+    const runtime = makeRuntime([{ type: 'text_delta', text: 'ok' }, { type: 'done' }]);
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    expect(mockRegisterAbort).toHaveBeenCalledOnce();
+    // Key should start with 'spawn-'
+    const key = mockRegisterAbort.mock.calls[0]![0];
+    expect(key).toMatch(/^spawn-/);
+
+    // Signal should be passed through to runtime.invoke
+    expect(runtime.invoke).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: abortSignal }),
+    );
+  });
+
+  it('calls dispose after successful completion', async () => {
+    const dispose = vi.fn();
+    mockRegisterAbort.mockReturnValueOnce({ signal: new AbortController().signal, dispose });
+
+    const runtime = makeRuntime([{ type: 'text_delta', text: 'ok' }, { type: 'done' }]);
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('calls dispose after runtime error event', async () => {
+    const dispose = vi.fn();
+    mockRegisterAbort.mockReturnValueOnce({ signal: new AbortController().signal, dispose });
+
+    const runtime = makeRuntime([{ type: 'error', message: 'boom' }]);
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('calls dispose after runtime throws', async () => {
+    const dispose = vi.fn();
+    mockRegisterAbort.mockReturnValueOnce({ signal: new AbortController().signal, dispose });
+
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* () {
+        throw new Error('connection failed');
+      }),
+    };
+
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('does not register abort when recursion depth blocks execution', async () => {
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx({ depth: 1 }),
+    );
+
+    expect(mockRegisterAbort).not.toHaveBeenCalled();
+  });
+
+  it('does not register abort for validation failures', async () => {
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: '', prompt: 'Do task' },
+      makeCtx(),
+      makeSpawnCtx(),
+    );
+
+    expect(mockRegisterAbort).not.toHaveBeenCalled();
+  });
+
+  it('registers separate abort entries for each agent in parallel batch', async () => {
+    const disposes: ReturnType<typeof vi.fn>[] = [];
+    mockRegisterAbort.mockImplementation(() => {
+      const d = vi.fn();
+      disposes.push(d);
+      return { signal: new AbortController().signal, dispose: d };
+    });
+
+    const runtime = makeRuntime([{ type: 'text_delta', text: 'ok' }, { type: 'done' }]);
+    await executeSpawnActions(
+      [
+        { type: 'spawnAgent', channel: 'general', prompt: 'First' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Second' },
+        { type: 'spawnAgent', channel: 'general', prompt: 'Third' },
+      ],
+      makeCtx(),
+      makeSpawnCtx({ runtime }),
+    );
+
+    // Each agent should register independently
+    expect(mockRegisterAbort).toHaveBeenCalledTimes(3);
+    // All should be disposed after completion
+    for (const d of disposes) {
+      expect(d).toHaveBeenCalledOnce();
+    }
   });
 });
