@@ -126,3 +126,11 @@ With `FORGE_AUTO_IMPLEMENT=1`, the review still happens, but any REVIEW that mee
 | → CLOSED | `!plan close` | `plan-commands.ts` |
 | → CLOSED | All phases complete (auto-close) | `plan-commands.ts` (`closePlanIfComplete`) |
 | → CANCELLED | Forge cancellation (`!forge cancel`, 🛑 reaction, `!stop`) | `forge-commands.ts` (AbortSignal raised, interrupts active invocation) |
+
+---
+
+## 5. Quality Gate
+
+Between the last `implement` phase and the `audit` phase, the phase runner inserts a **quality-gate** phase. This phase is a deterministic shell execution — no AI agent, no prompt — that runs `pnpm build && pnpm test` (or custom commands extracted from the plan's `## Testing` section) and blocks the audit phase if they fail.
+
+The quality gate ensures that code changes compile and pass tests before the audit agent reviews them, preventing wasted audit cycles on broken code. Because it is a pure subprocess call, it is fast, reproducible, and freely retryable.

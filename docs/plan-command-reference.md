@@ -134,7 +134,8 @@ Show or generate the phase decomposition for a plan. If no phases file exists, g
 
 [ ] **phase-1:** Implement src/webhook.ts [implement]
 [ ] **phase-2:** Implement src/webhook.test.ts [implement] (depends: phase-1)
-[ ] **phase-3:** Post-implementation audit [audit] (depends: phase-1, phase-2)
+[ ] **phase-3:** Quality gate [quality-gate] (depends: phase-1, phase-2)
+[ ] **phase-4:** Post-implementation audit [audit] (depends: phase-3)
 ```
 
 **Status indicators:** `[ ]` pending, `[~]` in-progress, `[x]` done, `[!]` failed, `[-]` skipped

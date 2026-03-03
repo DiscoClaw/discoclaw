@@ -117,6 +117,7 @@ When `extractFilePaths()` yields nothing, the fallback phases are now `read` →
 |------|-------------|---------------|
 | `implement` | Make code changes | Read, Write, Edit, Glob, Grep, Bash |
 | `read` | Read and analyze files | Read, Glob, Grep |
+| `quality-gate` | Run build + test commands (deterministic shell execution, no AI agent) | Bash only (subprocess) |
 | `audit` | Audit implementation against plan | Read, Glob, Grep |
 
 ### Dependency chains
@@ -152,6 +153,8 @@ On successful `implement` phases, the runner:
 3. Commits with message: `{planId} {phaseId}: {title}`
 4. Records the commit hash in the phases file
 
+`quality-gate` phases are exempt from auto-commit — they run build and test commands but do not modify tracked files.
+
 ### Retry semantics
 
 When retrying a failed phase:
@@ -161,6 +164,8 @@ When retrying a failed phase:
 4. Re-execute the phase
 
 If a file has been modified since the failure, it's skipped during revert (the retry proceeds with current state).
+
+`quality-gate` and `audit` phases are freely retryable — they have no `modifiedFiles` or `failureHashes` to check, so the runner re-executes them directly without the revert dance.
 
 ### Skip semantics
 
