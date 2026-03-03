@@ -9,7 +9,7 @@ import { KeyedQueue } from '../group-queue.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { discordSessionKey } from './session-key.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildDisplayResultLines, buildAllResultLines, appendActionResults } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildDisplayResultLines, buildAllResultLines, appendActionResults } from './actions.js';
 import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './actions.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
@@ -56,7 +56,7 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, setStopReaction, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice, closeFenceIfOpen } from './output-utils.js';
-import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble } from './prompt-common.js';
+import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
@@ -2284,10 +2284,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             buildOpenTasksSection(params.taskCtx?.store),
           ]);
 
-          const inlinedContext = await inlineContextFiles(
+          const inlinedContext = await inlineContextFilesWithMeta(
             contextFiles,
             { required: new Set(params.discordChannelContext?.paContextFiles ?? []) },
           );
+
+          let actionsReferenceSection = '';
+          let actionSchemaSelection:
+            | {
+              includedCategories: string[];
+              tierBuckets: { core: string[]; channelContextual: string[]; keywordTriggered: string[] };
+              keywordHits: string[];
+            }
+            | null = null;
 
           // Consume one-shot startup injection (cleared after first use).
           let startupLine = '';
@@ -2297,7 +2306,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           let prompt =
-            buildPromptPreamble(inlinedContext) + '\n\n' +
+            buildPromptPreamble(inlinedContext.text) + '\n\n' +
             (taskSection
               ? `---\n${taskSection}\n\n`
               : '') +
@@ -2332,8 +2341,47 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           if (params.discordActionsEnabled && !isDm) {
-            prompt += '\n\n---\n' + discordActionsPromptSection(actionFlags, params.botDisplayName);
+            const actionSelection = buildTieredDiscordActionsPromptSection(
+              actionFlags,
+              params.botDisplayName,
+              {
+                channelName: channelCtx.channelName ?? undefined,
+                channelContextPath: channelCtx.contextPath,
+                isThread,
+                userText: String(msg.content ?? ''),
+              },
+            );
+            actionsReferenceSection = actionSelection.prompt;
+            actionSchemaSelection = {
+              includedCategories: actionSelection.includedCategories,
+              tierBuckets: actionSelection.tierBuckets,
+              keywordHits: actionSelection.keywordHits,
+            };
+            prompt += '\n\n---\n' + actionsReferenceSection;
           }
+
+          const promptSectionEstimates = buildPromptSectionEstimates({
+            contextSections: inlinedContext.sections,
+            channelContextPath: channelCtx.contextPath,
+            durableSection,
+            summarySection,
+            taskSection,
+            openTasksSection,
+            actionsReferenceSection,
+          });
+          params.log?.info(
+            {
+              flow: 'message',
+              sessionKey,
+              sections: promptSectionEstimates.sections,
+              totalChars: promptSectionEstimates.totalChars,
+              totalEstTokens: promptSectionEstimates.totalEstTokens,
+              includedCategories: actionSchemaSelection?.includedCategories ?? [],
+              tierBuckets: actionSchemaSelection?.tierBuckets ?? { core: [], channelContextual: [], keywordTriggered: [] },
+              keywordHits: actionSchemaSelection?.keywordHits ?? [],
+            },
+            'message:prompt:section-estimates',
+          );
 
           const addDirs: string[] = [];
           if (params.useGroupDirCwd) addDirs.push(params.workspaceCwd);
