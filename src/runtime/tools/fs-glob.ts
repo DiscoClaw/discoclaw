@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { OpenAIFunctionTool, ToolResult } from './types.js';
-import { resolveAndCheck } from './path-security.js';
+import { assertPathAllowed, resolveAndCheck } from './path-security.js';
 
 export const name = 'list_files';
 
@@ -21,11 +21,14 @@ export const schema: OpenAIFunctionTool = {
   type: 'function',
   function: {
     name: 'list_files',
-    description: 'Find files matching a glob pattern.',
+    description: 'Find files matching a relative glob pattern within allowed roots.',
     parameters: {
       type: 'object',
       properties: {
-        pattern: { type: 'string', description: 'Glob pattern to match (e.g. "**/*.ts").' },
+        pattern: {
+          type: 'string',
+          description: 'Relative in-root glob pattern to match (e.g. "**/*.ts").',
+        },
         path: { type: 'string', description: 'Directory to search in.' },
       },
       required: ['pattern'],
@@ -43,6 +46,9 @@ export async function execute(
   if (!pattern) return { result: 'pattern is required', ok: false };
 
   try {
+    const validationError = validateListFilesPattern(pattern);
+    if (validationError) return { result: `Invalid glob pattern: ${validationError}`, ok: false };
+
     const baseDir = searchPath
       ? await resolveAndCheck(searchPath, allowedRoots)
       : allowedRoots[0];
@@ -53,7 +59,12 @@ export async function execute(
       // Node 22+ fs.glob
       const globFn = (fs as unknown as { glob: (pattern: string, opts: Record<string, unknown>) => AsyncIterable<string> }).glob;
       for await (const entry of globFn(pattern, { cwd: baseDir })) {
-        matches.push(entry);
+        try {
+          const safeEntry = await normalizeContainedGlobMatch(entry, baseDir, allowedRoots);
+          matches.push(safeEntry);
+        } catch {
+          return { result: `Unsafe glob match rejected: ${entry}`, ok: false };
+        }
         if (matches.length >= MAX_RESULTS) break;
       }
     } else {
@@ -61,7 +72,12 @@ export async function execute(
       const allFiles = await collectFiles(baseDir, baseDir, MAX_SCAN_FILES);
       for (const file of allFiles) {
         if (simpleGlobMatch(file, pattern)) {
-          matches.push(file);
+          try {
+            const safeEntry = await normalizeContainedGlobMatch(file, baseDir, allowedRoots);
+            matches.push(safeEntry);
+          } catch {
+            return { result: `Unsafe glob match rejected: ${file}`, ok: false };
+          }
           if (matches.length >= MAX_RESULTS) break;
         }
       }
@@ -76,6 +92,41 @@ export async function execute(
     const message = err instanceof Error ? err.message : String(err);
     return { result: message, ok: false };
   }
+}
+
+function validateListFilesPattern(pattern: string): string | null {
+  if (path.isAbsolute(pattern) || path.win32.isAbsolute(pattern)) {
+    return 'pattern must be relative';
+  }
+
+  const segments = pattern.split(/[/\\]+/);
+  if (segments.some((segment) => segment === '..')) {
+    return 'pattern cannot contain parent directory traversal';
+  }
+
+  return null;
+}
+
+async function normalizeContainedGlobMatch(
+  entry: string,
+  baseDir: string,
+  allowedRoots: string[],
+): Promise<string> {
+  const candidate = path.resolve(baseDir, entry);
+  await assertPathAllowed(candidate, allowedRoots);
+
+  const relativeToBase = path.relative(baseDir, candidate);
+  if (
+    relativeToBase === '' ||
+    relativeToBase === '.' ||
+    relativeToBase.startsWith(`..${path.sep}`) ||
+    relativeToBase === '..' ||
+    path.isAbsolute(relativeToBase)
+  ) {
+    throw new Error(`Glob match escaped base path: ${entry}`);
+  }
+
+  return relativeToBase.split(path.sep).join('/');
 }
 
 /** Recursively collect relative file paths. */
