@@ -233,6 +233,9 @@ function validateListFilesPattern(pattern: string): string | null {
   if (/(^|[({,|])\s*\/+/.test(normalized)) {
     return 'pattern must be relative';
   }
+  if (/(^|[({,|])\s*[A-Za-z]:/.test(normalized)) {
+    return 'pattern must be relative';
+  }
 
   // Treat common glob wrappers as separators so traversal hidden in braces,
   // extglob groups, or character classes is still rejected.
@@ -240,6 +243,21 @@ function validateListFilesPattern(pattern: string): string | null {
   const segments = normalizedForTraversalCheck.split('/');
   if (segments.some((segment) => segment === '..')) {
     return 'pattern cannot contain parent directory traversal';
+  }
+
+  // Reject segments that can evaluate to ".." via glob syntax
+  // (e.g. "[.][.]", "{.,.}{.,.}", "@(..|foo)").
+  if (typeof path.matchesGlob === 'function') {
+    for (const segment of normalized.split('/')) {
+      if (!segment || segment === '.') continue;
+      try {
+        if (path.matchesGlob('..', segment)) {
+          return 'pattern cannot contain parent directory traversal';
+        }
+      } catch {
+        return 'pattern contains malformed glob syntax';
+      }
+    }
   }
 
   return null;

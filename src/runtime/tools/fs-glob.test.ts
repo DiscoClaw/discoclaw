@@ -101,6 +101,18 @@ describe('fs-glob execute', () => {
     expect(r.result).toContain('Invalid glob pattern');
   });
 
+  it('rejects drive-prefixed absolute branch hidden in brace expansion', async () => {
+    const r = await execute({ pattern: '{**/*.ts,C:\\Windows\\*}', path: tmpDir }, [tmpDir]);
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
+  it('rejects drive-prefixed absolute branch hidden in extglob alternatives', async () => {
+    const r = await execute({ pattern: '@(C:\\Windows\\*|**/*.ts)', path: tmpDir }, [tmpDir]);
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob pattern');
+  });
+
   it('fails closed if glob yields an out-of-root entry', async () => {
     const fsWithGlob = fs as unknown as {
       glob?: (pattern: string, options: { cwd: string }) => AsyncIterable<string>;

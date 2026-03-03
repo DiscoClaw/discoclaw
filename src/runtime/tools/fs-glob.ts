@@ -123,6 +123,9 @@ function validateListFilesPattern(pattern: string): string | null {
   if (/(^|[({,|])\s*\/+/.test(normalized)) {
     return 'pattern must be relative';
   }
+  if (/(^|[({,|])\s*[A-Za-z]:/.test(normalized)) {
+    return 'pattern must be relative';
+  }
 
   // Treat common glob wrappers as separators so traversal hidden in braces,
   // extglob groups, or character classes is still rejected.
