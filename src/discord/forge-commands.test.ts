@@ -2683,3 +2683,67 @@ describe('ForgeOrchestrator onEvent threading', () => {
     expect(result.rounds).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Post-loop structural check
+// ---------------------------------------------------------------------------
+
+describe('post-loop structural check', () => {
+  it('warns when auditor approves a plan missing a required section after revision', async () => {
+    const tmpDir = await makeTmpDir();
+    // Complete draft with all required sections
+    const draftPlan = `# Plan: Test\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n- src/foo.ts\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditBlocking = '**Concern 1: Missing details**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+    // Revision strips ## Testing section
+    const revisedPlanNoTesting = `# Plan: Test\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something better.\n\n## Scope\n\nStuff.\n\n## Changes\n\n- src/foo.ts — enhanced\n\n## Risks\n\n- None.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    // Draft -> Audit (blocking) -> Revise (missing Testing) -> Audit (clean)
+    const runtime = makeMockRuntime([draftPlan, auditBlocking, revisedPlanNoTesting, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    // structuralWarning should be populated
+    expect(result.structuralWarning).toBeDefined();
+    expect(result.structuralWarning).toContain('Testing');
+
+    // Progress message should include the warning
+    const completeMsg = progress.find((p) => p.includes('Forge complete'));
+    expect(completeMsg).toBeDefined();
+    expect(completeMsg).toContain('Structural warning');
+    expect(completeMsg).toContain('Testing');
+
+    // Plan file should contain the structural warning note
+    const planContent = await fs.readFile(result.filePath, 'utf-8');
+    expect(planContent).toContain('Structural warning (automated)');
+    expect(planContent).toContain('Testing');
+  });
+
+  it('no warning when auditor approves a structurally complete plan', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing with proper structure.\n\n## Scope\n\nIn scope: everything related to testing.\n\n## Changes\n\n### File-by-file breakdown\n\n#### \`src/foo.ts\`\n\nAdd bar function.\n\n## Risks\n\n- Low risk of breaking existing tests.\n\n## Testing\n\n- Unit tests for the new feature.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    // structuralWarning should be undefined
+    expect(result.structuralWarning).toBeUndefined();
+
+    // Progress message should NOT include structural warning
+    const completeMsg = progress.find((p) => p.includes('Forge complete'));
+    expect(completeMsg).toBeDefined();
+    expect(completeMsg).not.toContain('Structural warning');
+  });
+});
