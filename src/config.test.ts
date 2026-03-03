@@ -606,6 +606,52 @@ describe('parseConfig', () => {
       .toThrow(/RUNTIME_MAX_BUDGET_USD must be a positive number/);
   });
 
+  // --- Global supervisor ---
+  it('defaults global supervisor config for legacy behavior', () => {
+    const { config } = parseConfig(env());
+    expect(config.globalSupervisorEnabled).toBe(false);
+    expect(config.globalSupervisorAuditStream).toBe('stderr');
+    expect(config.globalSupervisorMaxCycles).toBe(3);
+    expect(config.globalSupervisorMaxRetries).toBe(2);
+    expect(config.globalSupervisorMaxEscalationLevel).toBe(2);
+    expect(config.globalSupervisorMaxTotalEvents).toBe(5000);
+    expect(config.globalSupervisorMaxWallTimeMs).toBe(0);
+  });
+
+  it('parses global supervisor overrides', () => {
+    const { config } = parseConfig(env({
+      DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED: '1',
+      DISCOCLAW_GLOBAL_SUPERVISOR_AUDIT_STREAM: 'stdout',
+      DISCOCLAW_GLOBAL_SUPERVISOR_MAX_CYCLES: '5',
+      DISCOCLAW_GLOBAL_SUPERVISOR_MAX_RETRIES: '4',
+      DISCOCLAW_GLOBAL_SUPERVISOR_MAX_ESCALATION_LEVEL: '3',
+      DISCOCLAW_GLOBAL_SUPERVISOR_MAX_TOTAL_EVENTS: '1200',
+      DISCOCLAW_GLOBAL_SUPERVISOR_MAX_WALL_TIME_MS: '45000',
+    }));
+    expect(config.globalSupervisorEnabled).toBe(true);
+    expect(config.globalSupervisorAuditStream).toBe('stdout');
+    expect(config.globalSupervisorMaxCycles).toBe(5);
+    expect(config.globalSupervisorMaxRetries).toBe(4);
+    expect(config.globalSupervisorMaxEscalationLevel).toBe(3);
+    expect(config.globalSupervisorMaxTotalEvents).toBe(1200);
+    expect(config.globalSupervisorMaxWallTimeMs).toBe(45000);
+  });
+
+  it('throws on invalid global supervisor config values', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_GLOBAL_SUPERVISOR_MAX_CYCLES: '0' })))
+      .toThrow(/DISCOCLAW_GLOBAL_SUPERVISOR_MAX_CYCLES must be a positive number/);
+    expect(() => parseConfig(env({ DISCOCLAW_GLOBAL_SUPERVISOR_MAX_RETRIES: '-1' })))
+      .toThrow(/DISCOCLAW_GLOBAL_SUPERVISOR_MAX_RETRIES must be a non-negative number/);
+    expect(() => parseConfig(env({ DISCOCLAW_GLOBAL_SUPERVISOR_MAX_ESCALATION_LEVEL: '-1' })))
+      .toThrow(/DISCOCLAW_GLOBAL_SUPERVISOR_MAX_ESCALATION_LEVEL must be a non-negative number/);
+    expect(() => parseConfig(env({ DISCOCLAW_GLOBAL_SUPERVISOR_MAX_TOTAL_EVENTS: '0' })))
+      .toThrow(/DISCOCLAW_GLOBAL_SUPERVISOR_MAX_TOTAL_EVENTS must be a positive number/);
+    expect(() => parseConfig(env({ DISCOCLAW_GLOBAL_SUPERVISOR_MAX_WALL_TIME_MS: '-1' })))
+      .toThrow(/DISCOCLAW_GLOBAL_SUPERVISOR_MAX_WALL_TIME_MS must be a non-negative number/);
+    expect(() => parseConfig(env({ DISCOCLAW_GLOBAL_SUPERVISOR_AUDIT_STREAM: 'file' })))
+      .toThrow(/DISCOCLAW_GLOBAL_SUPERVISOR_AUDIT_STREAM must be one of stdout\|stderr/);
+  });
+
   // --- Append system prompt ---
   it('parses CLAUDE_APPEND_SYSTEM_PROMPT when set', () => {
     const { config } = parseConfig(env({ CLAUDE_APPEND_SYSTEM_PROMPT: 'You are Weston.' }));

@@ -181,6 +181,13 @@ export type DiscoclawConfig = {
 
   runtimeFallbackModel?: string;
   runtimeMaxBudgetUsd?: number;
+  globalSupervisorEnabled: boolean;
+  globalSupervisorAuditStream: 'stdout' | 'stderr';
+  globalSupervisorMaxCycles: number;
+  globalSupervisorMaxRetries: number;
+  globalSupervisorMaxEscalationLevel: number;
+  globalSupervisorMaxTotalEvents: number;
+  globalSupervisorMaxWallTimeMs: number;
   appendSystemPrompt?: string;
 
   claudeBin: string;
@@ -632,6 +639,18 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
         }
         return n;
       })(),
+      globalSupervisorEnabled: parseBoolean(env, 'DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED', false),
+      globalSupervisorAuditStream: parseEnum(
+        env,
+        'DISCOCLAW_GLOBAL_SUPERVISOR_AUDIT_STREAM',
+        ['stdout', 'stderr'] as const,
+        'stderr',
+      )!,
+      globalSupervisorMaxCycles: parsePositiveInt(env, 'DISCOCLAW_GLOBAL_SUPERVISOR_MAX_CYCLES', 3),
+      globalSupervisorMaxRetries: parseNonNegativeInt(env, 'DISCOCLAW_GLOBAL_SUPERVISOR_MAX_RETRIES', 2),
+      globalSupervisorMaxEscalationLevel: parseNonNegativeInt(env, 'DISCOCLAW_GLOBAL_SUPERVISOR_MAX_ESCALATION_LEVEL', 2),
+      globalSupervisorMaxTotalEvents: parsePositiveInt(env, 'DISCOCLAW_GLOBAL_SUPERVISOR_MAX_TOTAL_EVENTS', 5_000),
+      globalSupervisorMaxWallTimeMs: parseNonNegativeInt(env, 'DISCOCLAW_GLOBAL_SUPERVISOR_MAX_WALL_TIME_MS', 0),
       appendSystemPrompt: (() => {
         const raw = parseTrimmedString(env, 'CLAUDE_APPEND_SYSTEM_PROMPT');
         if (raw == null) return undefined;
