@@ -11,6 +11,7 @@ import { resolveChannel, findChannelRaw, describeChannelType } from './action-ut
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { splitDiscord } from './output-utils.js';
 import { registerAbort } from './abort-registry.js';
+import { registerSpawn } from './spawn-registry.js';
 import {
   buildContextFiles,
   buildPromptPreamble,
@@ -141,6 +142,7 @@ export async function executeSpawnAction(
       // Register in the abort registry so tryAbortAll() (via !stop) can kill this agent.
       const abortKey = `spawn-${++spawnCounter}-${label}`;
       const { signal, dispose: abortDispose } = registerAbort(abortKey);
+      const { dispose: spawnDispose } = registerSpawn(abortKey, label);
       try {
         let text = '';
         const stream = spawnCtx.runtime.invoke({
@@ -215,6 +217,7 @@ export async function executeSpawnAction(
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, error: `spawnAgent (${label}) failed: ${msg}` };
       } finally {
+        spawnDispose();
         abortDispose();
       }
     }
