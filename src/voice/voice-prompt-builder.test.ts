@@ -8,6 +8,8 @@ import {
   loadVoiceIdentity,
   buildVoicePrompt,
   buildVoiceFollowUpPrompt,
+  buildVoicePromptSectionEstimates,
+  VOICE_INTERNAL_CONTEXT_SEPARATOR,
   VOICE_IDENTITY_MAX_CHARS,
 } from './voice-prompt-builder.js';
 import { VOICE_STYLE_INSTRUCTION } from './voice-style-prompt.js';
@@ -334,6 +336,40 @@ describe('buildVoicePrompt', () => {
   it('produces a prompt under 6KB with minimal inputs', () => {
     const result = buildVoicePrompt(baseParts);
     expect(result.length).toBeLessThan(6 * 1024);
+  });
+});
+
+describe('buildVoicePromptSectionEstimates', () => {
+  it('uses Math.ceil(chars / 4) for section token estimates', () => {
+    const result = buildVoicePromptSectionEstimates({
+      identity: 'abcde',
+      durableMemory: 'xyz',
+      voiceSystemPrompt: 's',
+      actionsSection: 'abc',
+      userText: 'hello world',
+    });
+
+    expect(result.sections.identity.chars).toBe(5);
+    expect(result.sections.identity.estTokens).toBe(Math.ceil(5 / 4));
+    expect(result.sections.actionsReference.chars).toBe(3);
+    expect(result.sections.actionsReference.estTokens).toBe(Math.ceil(3 / 4));
+    expect(result.sections.voiceSystemPrompt.chars).toBe(1);
+    expect(result.sections.voiceSystemPrompt.estTokens).toBe(Math.ceil(1 / 4));
+  });
+
+  it('marks optional sections as excluded when empty', () => {
+    const result = buildVoicePromptSectionEstimates({
+      identity: '',
+      durableMemory: '',
+      actionsSection: '',
+      userText: 'hi',
+    });
+
+    expect(result.sections.actionsReference.included).toBe(false);
+    expect(result.sections.voiceSystemPrompt.included).toBe(false);
+    expect(result.sections.durableMemory.included).toBe(false);
+    expect(result.sections.separator.chars).toBe(VOICE_INTERNAL_CONTEXT_SEPARATOR.length);
+    expect(result.sections.userText.included).toBe(true);
   });
 });
 
