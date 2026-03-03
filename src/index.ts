@@ -16,13 +16,13 @@ import { createGeminiRestRuntime } from './runtime/gemini-rest.js';
 import { createAnthropicRestRuntime } from './runtime/anthropic-rest.js';
 import { createConcurrencyLimiter, withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
-import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDiscordChannelContext } from './discord/channel-context.js';
+import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { buildDurableMemorySection } from './discord/prompt-common.js';
 import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
-import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection, buildAllResultLines } from './discord/actions.js';
+import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines } from './discord/actions.js';
 import { DiscordTransportClient } from './discord/transport-client.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
-import { loadVoiceIdentity, buildVoicePrompt, buildVoiceFollowUpPrompt } from './voice/voice-prompt-builder.js';
+import { loadVoiceIdentity, buildVoicePrompt, buildVoiceFollowUpPrompt, buildVoicePromptSectionEstimates } from './voice/voice-prompt-builder.js';
 import { sanitizeForVoice } from './voice/voice-sanitize.js';
 import type { Turn } from './voice/conversation-buffer.js';
 import type { SubsystemContexts } from './discord/actions.js';
@@ -1255,7 +1255,7 @@ if (taskCtx) {
 
   if (forgeCommandsEnabled && discordActionsForge) {
     botParams.forgeCtx = {
-      orchestratorFactory: () =>
+      orchestratorFactory: (overrides) =>
         new ForgeOrchestrator({
           runtime: limitedRuntime,
           drafterRuntime,
@@ -1271,10 +1271,13 @@ if (taskCtx) {
           drafterModel: botParams.forgeDrafterModel,
           auditorModel: botParams.forgeAuditorModel,
           log,
+          ...(overrides ?? {}),
         }),
       plansDir,
       workspaceCwd,
       taskStore: effectiveTaskStore,
+      progressThrottleMs: forgeProgressThrottleMs,
+      toolAwareStreaming,
       onProgress: async (msg) => {
         // Action-initiated forges log progress rather than posting to a channel.
         log.info({ msg }, 'forge:action:progress');
@@ -1409,6 +1412,14 @@ if (taskCtx) {
         resolvedVoiceChannelId = byName?.id;
       }
     }
+    const voiceChannelContext = (voiceGuild && resolvedVoiceChannelId)
+      ? resolveDiscordChannelContext({
+          ctx: discordChannelContext,
+          isDm: false,
+          channelId: resolvedVoiceChannelId,
+          threadParentId: null,
+        })
+      : undefined;
 
     // Build voice action flags — intersect voice-specific allowlist with env config.
     const voiceActionFlags = buildVoiceActionFlags({
@@ -1449,21 +1460,59 @@ if (taskCtx) {
           })
         : '';
 
-      const actionsSection = voiceActionsEnabled
-        ? discordActionsPromptSection(voiceActionFlags, botDisplayName)
-        : '';
+      let actionSchemaSelection:
+        | {
+          includedCategories: string[];
+          tierBuckets: { core: string[]; channelContextual: string[]; keywordTriggered: string[] };
+          keywordHits: string[];
+        }
+        | null = null;
+      const actionsSection = (() => {
+        if (!voiceActionsEnabled) return '';
+        const actionSelection = buildTieredDiscordActionsPromptSection(
+          voiceActionFlags,
+          botDisplayName,
+          {
+            channelName: voiceChannelContext?.channelName ?? cfg.voiceHomeChannel,
+            channelContextPath: voiceChannelContext?.contextPath,
+            isThread: false,
+            userText: text,
+          },
+        );
+        actionSchemaSelection = {
+          includedCategories: actionSelection.includedCategories,
+          tierBuckets: actionSelection.tierBuckets,
+          keywordHits: actionSelection.keywordHits,
+        };
+        return actionSelection.prompt;
+      })();
 
       const userTextWithHistory = history
         ? `Conversation history (recent voice exchanges):\n${history}\n\nCurrent user message:\n${text}`
         : text;
 
-      const prompt = buildVoicePrompt({
+      const promptParts = {
         identity,
         durableMemory: durableSection,
         voiceSystemPrompt: cfg.voiceSystemPrompt,
         actionsSection,
         userText: userTextWithHistory,
-      });
+      };
+      const prompt = buildVoicePrompt(promptParts);
+      const promptSectionEstimates = buildVoicePromptSectionEstimates(promptParts);
+      log.info(
+        {
+          flow: 'voice',
+          channelId: resolvedVoiceChannelId,
+          sections: promptSectionEstimates.sections,
+          totalChars: promptSectionEstimates.totalChars,
+          totalEstTokens: promptSectionEstimates.totalEstTokens,
+          includedCategories: actionSchemaSelection?.includedCategories ?? [],
+          tierBuckets: actionSchemaSelection?.tierBuckets ?? { core: [], channelContextual: [], keywordTriggered: [] },
+          keywordHits: actionSchemaSelection?.keywordHits ?? [],
+        },
+        'voice:prompt:section-estimates',
+      );
 
       let currentPrompt = prompt;
       let responseText = '';
@@ -2015,4 +2064,3 @@ publishBootReport({
   npmLatestVersion,
   log,
 });
-
