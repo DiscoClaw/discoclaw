@@ -202,6 +202,7 @@ export type DiscoclawConfig = {
   strictMcpConfig: boolean;
   sessionScanning: boolean;
   toolAwareStreaming: boolean;
+  streamPreviewRaw: boolean;
   multiTurn: boolean;
   multiTurnHangTimeoutMs: number;
   multiTurnIdleTimeoutMs: number;
@@ -830,6 +831,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       strictMcpConfig: parseBoolean(env, 'CLAUDE_STRICT_MCP_CONFIG', true),
       sessionScanning: parseBoolean(env, 'DISCOCLAW_SESSION_SCANNING', true),
       toolAwareStreaming: parseBoolean(env, 'DISCOCLAW_TOOL_AWARE_STREAMING', true),
+      streamPreviewRaw: parseBoolean(env, 'DISCOCLAW_STREAM_PREVIEW_RAW', false),
       multiTurn: parseBoolean(env, 'DISCOCLAW_MULTI_TURN', true),
       multiTurnHangTimeoutMs: parsePositiveInt(env, 'DISCOCLAW_MULTI_TURN_HANG_TIMEOUT_MS', 60000),
       multiTurnIdleTimeoutMs: parsePositiveInt(env, 'DISCOCLAW_MULTI_TURN_IDLE_TIMEOUT_MS', 300000),
