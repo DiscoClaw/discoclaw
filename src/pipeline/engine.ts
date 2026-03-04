@@ -190,6 +190,7 @@ async function collectText(
 
   let finalText = '';
   let deltaText = '';
+  let sawDone = false;
   try {
     for await (const evt of events) {
       // Feed event to loop detector before any other processing.
@@ -199,6 +200,8 @@ async function collectText(
         finalText = evt.text;
       } else if (evt.type === 'text_delta') {
         deltaText += evt.text;
+      } else if (evt.type === 'done') {
+        sawDone = true;
       } else if (evt.type === 'error') {
         throw new Error(evt.message);
       }
@@ -214,7 +217,17 @@ async function collectText(
     throw new Error(`Runtime aborted: runaway tool-calling loop detected — ${loopPattern}`);
   }
 
-  return finalText || deltaText;
+  if (!sawDone) {
+    throw new Error('Runtime stream ended without done event (response may be non-terminal)');
+  }
+
+  return sanitizeCollectedPromptStepText(finalText || deltaText);
+}
+
+const NON_TERMINAL_PROGRESS_LINE_RE = /^[ \t]*\[progress\].*(?:\r?\n|$)/gim;
+
+function sanitizeCollectedPromptStepText(text: string): string {
+  return text.replace(NON_TERMINAL_PROGRESS_LINE_RE, '');
 }
 
 /**
