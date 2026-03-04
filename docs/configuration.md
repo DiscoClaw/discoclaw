@@ -137,6 +137,7 @@ See [docs/plan-and-forge.md](plan-and-forge.md) for usage details.
 | `PLAN_PHASE_MAX_CONTEXT_FILES` | `5` | Max context files per phase |
 | `PLAN_PHASE_TIMEOUT_MS` | `1800000` (30 min) | Timeout per phase execution |
 | `PLAN_PHASE_AUDIT_FIX_MAX` | `3` | Max audit-fix attempts per phase |
+| `PLAN_FORGE_HEARTBEAT_INTERVAL_MS` | `45000` | Default heartbeat interval (ms) for command-path phase progress updates in `!plan run*` and `!forge`; `0` disables periodic heartbeats |
 | `DISCOCLAW_FORGE_COMMANDS_ENABLED` | `true` | Enable `!forge` bang commands |
 | `FORGE_MAX_AUDIT_ROUNDS` | `5` | Max audit rounds in forge |
 | `FORGE_DRAFTER_MODEL` | — | Model override for forge drafter |
