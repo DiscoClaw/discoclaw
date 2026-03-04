@@ -380,6 +380,16 @@ _Filled in during/after implementation._
     expect(params.tools).toEqual(['Read', 'Glob', 'Grep']);
     // addDirs should point to the project cwd, not workspaceCwd
     expect(params.addDirs).toEqual([projectCwd]);
+    expect(params.supervisor).toEqual({
+      profile: 'plan_phase',
+      treatAbortedAsRetryable: true,
+      maxSignatureRepeats: 3,
+      limits: {
+        maxCycles: 6,
+        maxRetries: 5,
+        maxEscalationLevel: 4,
+      },
+    });
   });
 
   it('non-tools_fs runtime receives no tools or addDirs', async () => {
@@ -405,6 +415,16 @@ _Filled in during/after implementation._
     expect(params.tools).toEqual([]);
     // addDirs should be undefined (collectRuntimeText converts [] to undefined)
     expect(params.addDirs).toBeUndefined();
+    expect(params.supervisor).toEqual({
+      profile: 'plan_phase',
+      treatAbortedAsRetryable: true,
+      maxSignatureRepeats: 3,
+      limits: {
+        maxCycles: 6,
+        maxRetries: 5,
+        maxEscalationLevel: 4,
+      },
+    });
   });
 
   it('empty plan ID', async () => {

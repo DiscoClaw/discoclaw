@@ -5,12 +5,23 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { collectRuntimeText } from './runtime-utils.js';
-import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
+import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy } from '../runtime/types.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { extractFirstJsonValue } from './json-extract.js';
+
+const PLAN_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
+  profile: 'plan_phase',
+  treatAbortedAsRetryable: true,
+  maxSignatureRepeats: 3,
+  limits: {
+    maxCycles: 6,
+    maxRetries: 5,
+    maxEscalationLevel: 4,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1361,7 +1372,12 @@ export async function executePhase(
       tools,
       addDirs,
       opts.timeoutMs,
-      { requireFinalEvent: true, onEvent: opts.onEvent, signal: opts.signal },
+      {
+        requireFinalEvent: true,
+        onEvent: opts.onEvent,
+        signal: opts.signal,
+        supervisor: PLAN_PHASE_SUPERVISOR_POLICY,
+      },
     );
 
     if (phase.kind === 'audit') {
@@ -1649,7 +1665,12 @@ export async function runNextPhase(
             ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
             fixAddDirs,
             opts.timeoutMs,
-            { requireFinalEvent: true, onEvent: opts.onEvent, signal: opts.signal },
+            {
+              requireFinalEvent: true,
+              onEvent: opts.onEvent,
+              signal: opts.signal,
+              supervisor: PLAN_PHASE_SUPERVISOR_POLICY,
+            },
           );
         } catch (err) {
           opts.log?.warn({ err, phase: phase.id, attempt }, 'plan-manager: audit fix agent failed');
