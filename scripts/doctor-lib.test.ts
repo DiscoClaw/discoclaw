@@ -230,4 +230,11 @@ describe('doctor-lib: checkRuntimeBinaries', () => {
     expect(c?.ok).toBe(false);
     expect(c?.info).toBeFalsy();
   });
+
+  it('requires OPENAI_API_KEY when DISCOCLAW_FAST_RUNTIME=openai', () => {
+    const checks = checkRuntimeBinaries({ DISCOCLAW_FAST_RUNTIME: 'openai' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENAI_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
 });

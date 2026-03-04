@@ -130,6 +130,25 @@ describe('init wizard helpers', () => {
     expect(content).toContain('DISCOCLAW_CRON_FORUM=1000000000000000003');
   });
 
+  it('includes codex fast-runtime split keys in generated env content', () => {
+    const content = buildEnvContent(
+      {
+        DISCORD_TOKEN: 'a.b.c',
+        DISCORD_ALLOW_USER_IDS: '1000000000000000001',
+        PRIMARY_RUNTIME: 'codex',
+        OPENAI_API_KEY: 'sk-fast-key',
+        DISCOCLAW_FAST_RUNTIME: 'openai',
+        DISCOCLAW_TIER_OPENAI_FAST: 'gpt-5-mini',
+      },
+      new Date('2026-03-04T00:00:00.000Z'),
+    );
+
+    expect(content).toContain('PRIMARY_RUNTIME=codex');
+    expect(content).toContain('OPENAI_API_KEY=sk-fast-key');
+    expect(content).toContain('DISCOCLAW_FAST_RUNTIME=openai');
+    expect(content).toContain('DISCOCLAW_TIER_OPENAI_FAST=gpt-5-mini');
+  });
+
   it('writes DISCOCLAW_DATA_DIR in required section when provided', () => {
     const content = buildEnvContent(
       {
@@ -312,6 +331,43 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4');
     expect(newEnv).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
     expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${path.join(tmpDir, 'data')}`);
+  });
+
+  it('writes codex fast-runtime split config when provider 4 and OpenAI key are provided', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
+    const previousCwd = process.cwd();
+    const answers = [
+      '', // install directory (default)
+      '', // Press Enter to continue
+      '', // data directory (default cwd/data)
+      'a.b.c', // DISCORD_TOKEN
+      '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '5000000000000000001', // DISCORD_GUILD_ID
+      '4', // provider selection -> Codex
+      'sk-fast-key', // optional fast OpenAI API key
+      'n', // enable voice -> no
+    ];
+
+    process.chdir(tmpDir);
+
+    vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('binary not found');
+    });
+    vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await runInitWizard();
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
+    expect(newEnv).toContain('PRIMARY_RUNTIME=codex');
+    expect(newEnv).toContain('OPENAI_API_KEY=sk-fast-key');
+    expect(newEnv).toContain('DISCOCLAW_FAST_RUNTIME=openai');
+    expect(newEnv).toContain('DISCOCLAW_TIER_OPENAI_FAST=gpt-5-mini');
   });
 
   it('always writes DISCOCLAW_DATA_DIR when a custom path is given', async () => {

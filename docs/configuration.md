@@ -23,6 +23,7 @@ Boolean values accept `0`/`1` or `true`/`false`.
 |----------|---------|-------------|
 | `PRIMARY_RUNTIME` | `claude` | Runtime adapter: `claude`, `openai`, `openrouter`, `gemini`, `codex` |
 | `RUNTIME_MODEL` | `capable` | Model tier for chat invocations |
+| `DISCOCLAW_FAST_RUNTIME` | — | Optional runtime override for fast-tier workloads (summary, cron auto-tag/model classify, task auto-tag) |
 | `RUNTIME_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` | Comma-separated tools available to the runtime |
 | `RUNTIME_TIMEOUT_MS` | `1800000` (30 min) | Per-invocation timeout |
 | `RUNTIME_FALLBACK_MODEL` | — | Fallback model if primary fails |

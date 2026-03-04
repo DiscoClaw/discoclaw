@@ -55,7 +55,7 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, setStopReaction, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
@@ -132,6 +132,7 @@ export type BotParams = {
   runtimeModel: string;
   runtimeTools: string[];
   runtimeTimeoutMs: number;
+  fastRuntime?: RuntimeAdapter;
   discordActionsEnabled: boolean;
   discordActionsChannels: boolean;
   discordActionsMessaging: boolean;
@@ -1227,6 +1228,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           phaseTimeoutMs: params.planPhaseTimeoutMs ?? 5 * 60_000,
           maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
           maxPlanRunPhases: MAX_PLAN_RUN_PHASES,
+          longRunWatchdog,
+          longRunStillRunningDelayMs: params.longRunStillRunningDelayMs,
           skipCompletionNotify: true,
           onTaskClosed: params.planCtx?.onTaskClosed,
           onProgress: async (progressMsg: string) => {
@@ -1847,6 +1850,29 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   content: `Auditing **${auditPlanId}**...`,
                   allowedMentions: NO_MENTIONS,
                 });
+                const auditWatchdogRunId = buildWatchdogRunId('plan-audit', msg.channelId, progressReply.id, auditPlanId);
+                let auditWatchdogDone = false;
+                const finishAuditWatchdog = async (outcome: LongRunOutcome): Promise<void> => {
+                  if (auditWatchdogDone) return;
+                  auditWatchdogDone = true;
+                  await completeWatchdogRun({
+                    watchdog: longRunWatchdog,
+                    runId: auditWatchdogRunId,
+                    outcome,
+                    log: params.log,
+                    flow: 'plan-audit',
+                  });
+                };
+                await startWatchdogRun({
+                  watchdog: longRunWatchdog,
+                  runId: auditWatchdogRunId,
+                  channelId: msg.channelId,
+                  messageId: progressReply.id,
+                  sessionKey,
+                  stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                  log: params.log,
+                  flow: 'plan-audit',
+                });
 
                 const plansDir = path.join(params.workspaceCwd, 'plans');
                 const rawAuditorModel = params.forgeAuditorModel ?? params.runtimeModel;
@@ -1862,13 +1888,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 try {
                   const auditFound = await findPlanFile(plansDir, auditPlanId);
                   if (!auditFound) {
-                    await progressReply.edit({ content: `Audit failed: plan not found: ${auditPlanId}`, allowedMentions: NO_MENTIONS });
+                    try {
+                      await progressReply.edit({ content: `Audit failed: plan not found: ${auditPlanId}`, allowedMentions: NO_MENTIONS });
+                    } catch {
+                      // best-effort
+                    }
+                    await finishAuditWatchdog('failed');
                     return;
                   }
                   const auditPlanContent = await fs.readFile(auditFound.filePath, 'utf-8');
                   auditProjectCwd = resolveProjectCwd(auditPlanContent, params.workspaceCwd);
                 } catch (err) {
-                  await progressReply.edit({ content: `Audit failed: ${String(err instanceof Error ? err.message : err)}`, allowedMentions: NO_MENTIONS });
+                  try {
+                    await progressReply.edit({ content: `Audit failed: ${String(err instanceof Error ? err.message : err)}`, allowedMentions: NO_MENTIONS });
+                  } catch {
+                    // best-effort
+                  }
+                  await finishAuditWatchdog('failed');
                   return;
                 }
 
@@ -1900,6 +1936,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     } catch {
                       // edit failure (message deleted, etc.) — best-effort
                     }
+                    await finishAuditWatchdog(result.ok ? 'succeeded' : 'failed');
                   },
                   async (err) => {
                     try {
@@ -1910,6 +1947,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     } catch {
                       // best-effort
                     }
+                    await finishAuditWatchdog('failed');
                   },
                 );
                 return;
@@ -3072,19 +3110,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               try {
                 await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
                 replyFinalized = true;
-                const elapsedMs = Date.now() - t0;
-                if (
-                  params.completionNotifyEnabled &&
-                  followUpDepth === 0 &&
-                  !invokeHadError &&
-                  !abortSignal?.aborted &&
-                  elapsedMs >= (params.completionNotifyThresholdMs ?? 0)
-                ) {
-                  try {
-                    await msg.channel.send({ content: buildCompletionNotice(elapsedMs), allowedMentions: NO_MENTIONS });
-                    params.log?.info({ sessionKey, elapsedMs }, 'discord:completion-notice posted');
-                  } catch { /* best-effort */ }
-                }
               } catch (editErr) {
                 // Thread archived by a taskClose action — the close summary was already
                 // posted inside closeTaskThread, so the only thing lost is Claude's
@@ -3286,14 +3311,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       // block the next message for this session key (fast-tier can take several seconds).
       if (pendingSummaryWork) {
         const work = pendingSummaryWork;
+        const fastRuntime = params.fastRuntime ?? params.runtime;
         // eslint-disable-next-line @typescript-eslint/no-floating-promises
         summaryWorkQueue.run(sessionKey, async () => {
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
 
-          let newSummary = await generateSummary(params.runtime, {
+          let newSummary = await generateSummary(fastRuntime, {
             previousSummary: work.existingSummary,
             recentExchange: work.exchange,
-            model: resolveModel(params.summaryModel, params.runtime.id),
+            model: resolveModel(params.summaryModel, fastRuntime.id),
             cwd: params.workspaceCwd,
             maxChars: params.summaryMaxChars,
             timeoutMs: 30_000,
@@ -3310,9 +3336,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
             const targetTokens = Math.max(1, Math.floor(thresholdTokens * targetRatio));
             const summaryBeforeRecompress = newSummary;
-            const recompressed = await recompressSummary(params.runtime, {
+            const recompressed = await recompressSummary(fastRuntime, {
               summary: summaryBeforeRecompress,
-              model: resolveModel(params.summaryModel, params.runtime.id),
+              model: resolveModel(params.summaryModel, fastRuntime.id),
               cwd: params.workspaceCwd,
               thresholdTokens,
               targetTokens,
@@ -3356,12 +3382,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (params.summaryToDurableEnabled && (!isBotMessage || params.botMessageMemoryWriteEnabled)) {
             const ch = asThreadChannel(msg.channel);
             await applyUserTurnToDurable({
-              runtime: params.runtime,
+              runtime: fastRuntime,
               userMessageText: work.userMessageText ?? String(msg.content ?? ''),
               userId: msg.author.id,
               durableDataDir: params.durableDataDir,
               durableMaxItems: params.durableMaxItems,
-              model: resolveModel(params.summaryModel, params.runtime.id),
+              model: resolveModel(params.summaryModel, fastRuntime.id),
               cwd: params.workspaceCwd,
               channelId: msg.channelId,
               messageId: msg.id,

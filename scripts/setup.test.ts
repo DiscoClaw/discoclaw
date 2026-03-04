@@ -142,6 +142,21 @@ describe('setup: .env content generation', () => {
     expect(content).toContain('CODEX_MODEL=codex-latest');
     expect(content).toContain('CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX=1');
   });
+
+  it('includes fast-runtime split values for codex+openai when provided', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      PRIMARY_RUNTIME: 'codex',
+      OPENAI_API_KEY: 'sk-fast',
+      DISCOCLAW_FAST_RUNTIME: 'openai',
+      DISCOCLAW_TIER_OPENAI_FAST: 'gpt-5-mini',
+    });
+    expect(content).toContain('PRIMARY_RUNTIME=codex');
+    expect(content).toContain('OPENAI_API_KEY=sk-fast');
+    expect(content).toContain('DISCOCLAW_FAST_RUNTIME=openai');
+    expect(content).toContain('DISCOCLAW_TIER_OPENAI_FAST=gpt-5-mini');
+  });
 });
 
 describe('setup: atomic write design', () => {

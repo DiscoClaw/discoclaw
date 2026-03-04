@@ -173,6 +173,20 @@ export async function runInitWizard(): Promise<void> {
     }
   }
 
+  async function askOptional(
+    prompt: string,
+    validate: (val: string) => string | null,
+  ): Promise<string> {
+    while (true) {
+      if (canceled) return '';
+      const val = await ask(prompt);
+      if (!val.trim()) return '';
+      const err = validate(val.trim());
+      if (!err) return val.trim();
+      console.log(`  Error: ${err}. Try again.\n`);
+    }
+  }
+
   // ── Welcome ──────────────────────────────────────────────────────────────
 
   console.log(`\nDiscoclaw Init\n==============`);
