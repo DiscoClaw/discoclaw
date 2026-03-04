@@ -1,8 +1,7 @@
-import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { buildPromptPreamble as buildRootPolicyPreamble } from '../root-policy.js';
+import { getTrackedDefaultsPreamble } from '../instructions/system-defaults.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import {
   compactActiveItems,
@@ -25,9 +24,6 @@ import type { RuntimeCapability } from '../runtime/types.js';
 import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';
 import { inferModelTier, filterToolsByTier } from '../runtime/tool-tiers.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 // ---------------------------------------------------------------------------
 // Root policy preamble
 // ---------------------------------------------------------------------------
@@ -35,26 +31,8 @@ const __dirname = path.dirname(__filename);
 /** Immutable root policy text — evaluated once at module load. */
 export const ROOT_POLICY = buildRootPolicyPreamble();
 
-function loadTrackedDefaultsPreamble(): string {
-  const trackedDefaultsPath = path.join(
-    __dirname,
-    '..',
-    '..',
-    'templates',
-    'workspace',
-    'DISCOCLAW.md',
-  );
-  try {
-    const trackedDefaults = fsSync.readFileSync(trackedDefaultsPath, 'utf-8').trimEnd();
-    if (!trackedDefaults) return '';
-    return `--- DISCOCLAW.md (tracked defaults) ---\n${trackedDefaults}`;
-  } catch {
-    return '';
-  }
-}
-
 /** Tracked default instructions injected between ROOT_POLICY and workspace context. */
-export const TRACKED_DEFAULTS_PREAMBLE = loadTrackedDefaultsPreamble();
+export const TRACKED_DEFAULTS_PREAMBLE = getTrackedDefaultsPreamble();
 
 /**
  * Deterministic preamble precedence:
