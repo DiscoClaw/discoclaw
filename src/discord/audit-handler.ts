@@ -84,13 +84,23 @@ export function auditPlanStructure(content: string): AuditConcern[] {
   // Check for a Changes section with file paths
   const changesBody = getSection(parsed, 'Changes').trim();
   if (changesBody) {
-    const hasFilePaths = /`[^`]+\.[a-z]+`/.test(changesBody);
+    const filePathMatches = [...changesBody.matchAll(/`([^`\n]+(?:\/[^`\n]+)*\.[a-z0-9]+)`/gi)].map((m) => m[1]!.trim());
+    const hasFilePaths = filePathMatches.length > 0;
     if (changesBody.length > 10 && !hasFilePaths) {
       concerns.push({
         title: 'Changes section lacks file paths',
         description: 'The Changes section does not reference specific file paths. Plans should list concrete file-by-file changes.',
         severity: 'medium',
       });
+    } else if (hasFilePaths) {
+      const placeholderPaths = filePathMatches.filter((p) => isPlaceholderFilePath(p));
+      if (placeholderPaths.length > 0) {
+        concerns.push({
+          title: 'Changes section uses placeholder file paths',
+          description: 'The Changes section includes placeholder paths like `path/to/file.ts`. Replace them with concrete repo-relative paths.',
+          severity: 'medium',
+        });
+      }
     }
   }
 
@@ -115,6 +125,11 @@ export function deriveVerdict(concerns: AuditConcern[]): AuditVerdict {
   if (hasMedium) return { maxSeverity: 'medium', shouldLoop: true };
   if (concerns.length > 0) return { maxSeverity: 'minor', shouldLoop: false };
   return { maxSeverity: 'none', shouldLoop: false };
+}
+
+function isPlaceholderFilePath(filePath: string): boolean {
+  const normalized = filePath.trim().replace(/^\.\//, '');
+  return /^path\/to(?:\/|$)/i.test(normalized);
 }
 
 function formatStructuralNotes(concerns: AuditConcern[]): string {

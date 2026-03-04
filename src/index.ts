@@ -95,6 +95,7 @@ import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupC
 import { loadOverrides, saveOverrides, clearOverrides, resolveOverridesPath, type RuntimeOverrides } from './runtime-overrides.js';
 import type { ModelRole } from './discord/actions-config.js';
 import { parseGlobalSupervisorBail, type GlobalSupervisorAuditPayload } from './runtime/global-supervisor.js';
+import type { StreamingPreviewMode } from './discord/output-utils.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -522,7 +523,7 @@ const claudeDebugFile = cfg.claudeDebugFile ?? null;
 const strictMcpConfig = cfg.strictMcpConfig;
 const sessionScanning = cfg.sessionScanning;
 const toolAwareStreaming = cfg.toolAwareStreaming;
-const streamPreviewMode = cfg.streamPreviewRaw ? 'raw' : 'compact';
+const streamPreviewMode: StreamingPreviewMode = cfg.streamPreviewRaw ? 'raw' : 'compact';
 const multiTurn = cfg.multiTurn;
 const multiTurnHangTimeoutMs = cfg.multiTurnHangTimeoutMs;
 const multiTurnIdleTimeoutMs = cfg.multiTurnIdleTimeoutMs;

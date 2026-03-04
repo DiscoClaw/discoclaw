@@ -129,14 +129,19 @@ export function isTemplateEchoed(output: string): boolean {
     if (bodyText.includes(phrase)) return true;
   }
 
-  // Check for .plan-template.md placeholder phrases.  Require 2+ hits
-  // because a single `path/to/file.ts` could appear in a genuine plan
-  // that references the template pattern.
+  // Check for .plan-template.md example phrases. Require 2+ hits so a
+  // single matching line doesn't trigger false positives in genuine plans.
   const templatePhrases = [
+    // Legacy template examples (kept for compatibility with older plans)
     '`path/to/file.ts` — what changes and why',
     '`path/to/other.ts` — what changes and why',
     '`path/to/new.ts` — purpose',
     '`path/to/old.ts` — why it\'s safe to remove',
+    // Current template examples
+    '`src/discord/plan-commands.ts` — what changes and why',
+    '`src/discord/plan-manager.ts` — what changes and why',
+    '`src/discord/plan-helpers.ts` — purpose',
+    '`src/discord/legacy-plan-parser.ts` — why it\'s safe to remove',
   ];
   let templateHits = 0;
   for (const phrase of templatePhrases) {
@@ -210,8 +215,8 @@ export function buildDrafterPrompt(
     '## Instructions',
     '',
     '- **Read the codebase using your tools (Read, Glob, Grep) first**, then write the plan. Do not guess — base every section on what you find in the actual code.',
-    '- **`## Changes` is a required top-level section.** List every file that will be created, modified, or deleted with concrete file paths. Do not place file change information inside a `## Phases` section or any other section — changes belong exclusively in `## Changes`. If you need to describe implementation sequencing, use a separate `## Phases` section.',
-    '- Be specific in the `## Changes` section — include actual file paths, function names, and type signatures.',
+    '- **`## Changes` is a required top-level section.** List every file that will be created, modified, or deleted with concrete repo-relative file paths (for example, `src/discord/forge-commands.ts`). Do not place file change information inside a `## Phases` section or any other section — changes belong exclusively in `## Changes`. If you need to describe implementation sequencing, use a separate `## Phases` section.',
+    '- In `## Changes`, each file entry must include a backtick-wrapped path and specific planned edits (function names and type signatures when relevant). Do not use placeholder paths like `path/to/file.ts`.',
     '- Identify real risks and dependencies based on the actual codebase.',
     '- Write concrete, verifiable test cases.',
     '- Include documentation updates in the Changes section when adding new features, config options, or public APIs. Consider: docs/*.md, .env.example files, README.md, INVENTORY.md, and inline code comments.',
@@ -409,6 +414,7 @@ export function buildRevisionPrompt(
     '- Address all blocking severity concerns. Consider medium concerns if the fix is straightforward, but do not loop over them.',
     '- Read the codebase using your tools if needed to resolve concerns.',
     '- Keep the same plan structure and format.',
+    '- In `## Changes`, every file entry must use a concrete backtick-wrapped repo-relative path (for example, `src/discord/forge-commands.ts`). Replace placeholder paths like `path/to/file.ts`.',
     '- Preserve resolutions from prior audit rounds that were accepted — do not weaken, revert, or remove them unless the current audit explicitly challenges them.',
     '- **Push back on re-raised concerns.** If a concern is a refinement or restatement of something already resolved in a prior round, you may note it as "previously addressed" in the resolution and decline to make further changes. The auditor should raise genuinely new issues, not re-litigate resolved ones from a slightly different angle.',
     '- **Reject perfectionism beyond the plan\'s goal.** If a concern demands a standard higher than what the plan set out to achieve (e.g., provably decodable payloads when the goal is "reject obviously broken ones"), acknowledge the concern but explain why the current approach is sufficient. Not every valid observation requires a code change.',

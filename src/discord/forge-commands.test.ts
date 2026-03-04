@@ -547,6 +547,18 @@ describe('isTemplateEchoed', () => {
     expect(isTemplateEchoed(echoedTemplate)).toBe(true);
   });
 
+  it('returns true for output echoing current .plan-template.md examples (2+ hits)', () => {
+    const echoedTemplate = [
+      '## Changes',
+      '',
+      '### File-by-file breakdown',
+      '',
+      '- `src/discord/plan-commands.ts` — what changes and why',
+      '- `src/discord/plan-manager.ts` — what changes and why',
+    ].join('\n');
+    expect(isTemplateEchoed(echoedTemplate)).toBe(true);
+  });
+
   it('returns false for a single real template phrase (not enough signal)', () => {
     const singlePhrase = [
       '## Changes',
@@ -641,6 +653,8 @@ describe('buildDrafterPrompt', () => {
     expect(prompt).not.toContain('{{PLAN_ID}}');
     expect(prompt).toContain('Some context');
     expect(prompt).toContain('Read the codebase');
+    expect(prompt).toContain('concrete repo-relative file paths');
+    expect(prompt).toContain('Do not use placeholder paths like `path/to/file.ts`');
     // Instructions come before template
     expect(prompt.indexOf('## Instructions')).toBeLessThan(prompt.indexOf('## Expected Output Structure'));
     // Anti-echo instruction
@@ -755,6 +769,12 @@ describe('buildRevisionPrompt', () => {
   it('includes instruction to preserve prior resolutions', () => {
     const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
     expect(prompt).toContain('Preserve resolutions from prior audit rounds');
+  });
+
+  it('requires concrete repo-relative file paths in Changes during revision', () => {
+    const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
+    expect(prompt).toContain('concrete backtick-wrapped repo-relative path');
+    expect(prompt).toContain('Replace placeholder paths like `path/to/file.ts`');
   });
 
   it('references blocking severity concerns (not high and medium)', () => {

@@ -274,7 +274,7 @@ Skipped **phase-1**: Implement src/webhook.ts (was failed)
 
 Run a standalone audit against an existing plan. Performs a two-stage review:
 
-1. **Structural pre-flight** (instant) — checks for required sections (Objective, Scope, Changes, Risks, Testing), placeholder text, and missing file paths. If blocking or medium severity issues are found, the audit stops here and reports them without invoking the AI.
+1. **Structural pre-flight** (instant) — checks for required sections (Objective, Scope, Changes, Risks, Testing), placeholder text, missing file paths, and placeholder file paths (for example, `path/to/file.ts`). If blocking or medium severity issues are found, the audit stops here and reports them without invoking the AI.
 2. **AI-powered audit** (30-60s) — invokes an adversarial auditor agent that deep-reviews the plan for correctness, completeness, risk gaps, and test coverage. Only runs if the structural check passes (or has only minor/suggestion concerns).
 
 Both results are appended as a single review entry in the plan's Audit Log section.
