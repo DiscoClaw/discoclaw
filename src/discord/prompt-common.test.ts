@@ -6,6 +6,7 @@ import type { TaskData } from '../tasks/types.js';
 
 import {
   ROOT_POLICY,
+  TRACKED_DEFAULTS_PREAMBLE,
   OPEN_TASKS_MAX_CHARS,
   _resetToolsAuditState,
   buildDurableMemorySection,
@@ -49,21 +50,39 @@ describe('ROOT_POLICY', () => {
   });
 });
 
+describe('TRACKED_DEFAULTS_PREAMBLE', () => {
+  it('loads tracked defaults from repository templates', () => {
+    expect(TRACKED_DEFAULTS_PREAMBLE).toContain('--- DISCOCLAW.md (tracked defaults) ---');
+    expect(TRACKED_DEFAULTS_PREAMBLE).toContain('# DISCOCLAW.md - System Instructions');
+  });
+});
+
 describe('buildPromptPreamble', () => {
-  it('returns ROOT_POLICY alone when inlinedContext is empty', () => {
-    expect(buildPromptPreamble('')).toBe(ROOT_POLICY);
+  it('returns ROOT_POLICY followed by tracked defaults when inlinedContext is empty', () => {
+    expect(buildPromptPreamble('')).toBe(
+      [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE].filter((section) => section.length > 0).join('\n\n'),
+    );
   });
 
-  it('prepends ROOT_POLICY before inlined context', () => {
+  it('prepends ROOT_POLICY and tracked defaults before inlined context', () => {
     const ctx = 'Some workspace context';
     const result = buildPromptPreamble(ctx);
-    expect(result).toBe(ROOT_POLICY + '\n\n' + ctx);
+    expect(result).toBe(
+      [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, ctx].filter((section) => section.length > 0).join('\n\n'),
+    );
   });
 
-  it('ROOT_POLICY comes before any inlined content', () => {
-    const ctx = 'channel rules';
+  it('enforces deterministic order: security policy > tracked defaults > AGENTS.md > later context', () => {
+    const ctx = [
+      '--- AGENTS.md ---\nUser override rules',
+      '--- MEMORY.md ---\nmemory details',
+      '--- channel.md ---\nchannel context',
+    ].join('\n\n');
     const result = buildPromptPreamble(ctx);
-    expect(result.indexOf(ROOT_POLICY)).toBeLessThan(result.indexOf(ctx));
+    expect(result.indexOf(ROOT_POLICY)).toBeLessThan(result.indexOf(TRACKED_DEFAULTS_PREAMBLE));
+    expect(result.indexOf(TRACKED_DEFAULTS_PREAMBLE)).toBeLessThan(result.indexOf('--- AGENTS.md ---'));
+    expect(result.indexOf('--- AGENTS.md ---')).toBeLessThan(result.indexOf('--- MEMORY.md ---'));
+    expect(result.indexOf('--- AGENTS.md ---')).toBeLessThan(result.indexOf('--- channel.md ---'));
   });
 
   it('inlined context is preserved verbatim', () => {
@@ -326,9 +345,9 @@ describe('loadWorkspacePaFiles', () => {
     expect(files).toEqual([
       path.join(workspace, 'SOUL.md'),
       path.join(workspace, 'IDENTITY.md'),
-      path.join(workspace, 'DISCOCLAW.md'),
       path.join(workspace, 'AGENTS.md'),
     ]);
+    expect(files).not.toContain(path.join(workspace, 'DISCOCLAW.md'));
   });
 
   it('returns PA files when opts is omitted', async () => {
