@@ -57,6 +57,8 @@ export class LongRunningProcess {
   private turnMerged = '';
   private turnResultText = '';
   private turnInToolUse = false;
+  private turnActiveTools = new Map<number, string>();
+  private turnToolInputBufs = new Map<number, string>();
   private turnSeenImages = new Set<string>();
   private turnImageCount = 0;
 
@@ -174,6 +176,8 @@ export class LongRunningProcess {
     this.turnMerged = '';
     this.turnResultText = '';
     this.turnInToolUse = false;
+    this.turnActiveTools = new Map();
+    this.turnToolInputBufs = new Map();
     this.turnSeenImages = new Set<string>();
     this.turnImageCount = 0;
     this.stdoutBuffer = '';
@@ -305,6 +309,9 @@ export class LongRunningProcess {
 
       // Detect end-of-turn: a `result` event signals Claude finished this turn.
       if (anyEvt.type === 'result') {
+        const usageEvt = this.extractUsageEvent(anyEvt.usage);
+        if (usageEvt) this.pushEvent(usageEvt);
+
         const rt = extractResultText(evt);
         if (rt) this.turnResultText = rt;
 
@@ -319,6 +326,55 @@ export class LongRunningProcess {
 
         this.finalizeTurn();
         return;
+      }
+
+      // Claude stream_event wrappers include structured tool + usage metadata.
+      if (anyEvt.type === 'stream_event' && anyEvt.event && typeof anyEvt.event === 'object') {
+        const inner = anyEvt.event as Record<string, unknown>;
+        const idx = typeof inner.index === 'number' ? inner.index : null;
+
+        if (inner.type === 'content_block_start' && idx !== null && inner.content_block && typeof inner.content_block === 'object') {
+          const block = inner.content_block as Record<string, unknown>;
+          if (block.type === 'tool_use' && typeof block.name === 'string') {
+            this.turnActiveTools.set(idx, block.name);
+            this.turnToolInputBufs.set(idx, '');
+          }
+          continue;
+        }
+
+        if (inner.type === 'content_block_delta' && idx !== null && inner.delta && typeof inner.delta === 'object') {
+          const delta = inner.delta as Record<string, unknown>;
+          if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+            const existing = this.turnToolInputBufs.get(idx);
+            if (existing !== undefined) this.turnToolInputBufs.set(idx, existing + delta.partial_json);
+            continue;
+          }
+        }
+
+        if (inner.type === 'content_block_stop' && idx !== null) {
+          const name = this.turnActiveTools.get(idx);
+          if (name) {
+            let input: unknown;
+            const buf = this.turnToolInputBufs.get(idx);
+            if (buf) {
+              try { input = JSON.parse(buf); } catch { /* partial/invalid JSON */ }
+            }
+            this.turnActiveTools.delete(idx);
+            this.turnToolInputBufs.delete(idx);
+            this.pushEvent({ type: 'tool_start', name, ...(input ? { input } : {}) });
+            this.pushEvent({ type: 'tool_end', name, ok: true });
+          }
+          continue;
+        }
+
+        const usageEvt = this.extractUsageEvent(inner.usage)
+          ?? this.extractUsageEvent((inner.message && typeof inner.message === 'object')
+            ? (inner.message as Record<string, unknown>).usage
+            : undefined);
+        if (usageEvt) {
+          this.pushEvent(usageEvt);
+          continue;
+        }
       }
 
       // Extract streaming text.
@@ -336,6 +392,27 @@ export class LongRunningProcess {
         if (img) this.pushImageIfNew(img);
       }
     }
+  }
+
+  private extractUsageEvent(raw: unknown): Extract<EngineEvent, { type: 'usage' }> | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const usage = raw as Record<string, unknown>;
+    const asNumber = (value: unknown): number | undefined => (
+      typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    );
+    const inputTokens = asNumber(usage.input_tokens ?? usage.inputTokens);
+    const outputTokens = asNumber(usage.output_tokens ?? usage.outputTokens);
+    const totalTokens = asNumber(usage.total_tokens ?? usage.totalTokens);
+    const costUsd = asNumber(usage.cost_usd ?? usage.costUsd);
+    if (
+      inputTokens === undefined &&
+      outputTokens === undefined &&
+      totalTokens === undefined &&
+      costUsd === undefined
+    ) {
+      return null;
+    }
+    return { type: 'usage', inputTokens, outputTokens, totalTokens, costUsd };
   }
 
   private isContextOverflow(text: string): boolean {

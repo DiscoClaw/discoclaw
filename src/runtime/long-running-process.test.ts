@@ -311,6 +311,65 @@ describe('LongRunningProcess', () => {
     expect(events.find((e) => e.type === 'text_final')?.text).toBe('The answer is 42.');
   });
 
+  it('emits tool_start and tool_end from stream_event tool_use blocks', async () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+
+    const proc = new LongRunningProcess(baseOpts);
+    proc.spawn();
+
+    queueMicrotask(() => {
+      mock.stdout.emit('data',
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_1', name: 'Read' } } }) + '\n' +
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_' } } }) + '\n' +
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: 'path":"/tmp/foo.ts"}' } } }) + '\n' +
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 1 } }) + '\n' +
+        JSON.stringify({ type: 'result', result: 'Done' }) + '\n',
+      );
+    });
+
+    const events: any[] = [];
+    for await (const evt of proc.sendTurn('test')) {
+      events.push(evt);
+    }
+
+    const start = events.find((e) => e.type === 'tool_start');
+    const end = events.find((e) => e.type === 'tool_end');
+    expect(start).toBeTruthy();
+    expect(start.name).toBe('Read');
+    expect(start.input).toEqual({ file_path: '/tmp/foo.ts' });
+    expect(end).toBeTruthy();
+    expect(end.name).toBe('Read');
+    expect(end.ok).toBe(true);
+  });
+
+  it('emits usage events from stream_event and result payloads', async () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+
+    const proc = new LongRunningProcess(baseOpts);
+    proc.spawn();
+
+    queueMicrotask(() => {
+      mock.stdout.emit('data',
+        JSON.stringify({ type: 'stream_event', event: { type: 'message_start', message: { usage: { input_tokens: 12 } } } }) + '\n' +
+        JSON.stringify({ type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 3 } } }) + '\n' +
+        JSON.stringify({ type: 'result', result: 'Done', usage: { total_tokens: 15 } }) + '\n',
+      );
+    });
+
+    const events: any[] = [];
+    for await (const evt of proc.sendTurn('test')) {
+      events.push(evt);
+    }
+
+    const usageEvents = events.filter((e) => e.type === 'usage');
+    expect(usageEvents).toHaveLength(3);
+    expect(usageEvents[0]).toMatchObject({ inputTokens: 12 });
+    expect(usageEvents[1]).toMatchObject({ outputTokens: 3 });
+    expect(usageEvents[2]).toMatchObject({ totalTokens: 15 });
+  });
+
   it('sendTurn with images writes content-block array to stdin', async () => {
     const mock = createMockSubprocess();
     (execa as any).mockReturnValue(mock.proc);
