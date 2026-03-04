@@ -14,18 +14,11 @@ const TEMPLATE_FILES = [
   'AGENTS.md',
   'TOOLS.md',
   'MEMORY.md',
-  'DISCOCLAW.md',
 ];
 
 /**
- * System-owned files that are overwritten from the template on every boot.
- * These contain discoclaw's operational instructions — not user content.
- */
-const SYSTEM_OWNED_FILES = new Set(['DISCOCLAW.md']);
-
-/**
  * Marker strings from the legacy AGENTS.md template where system-owned
- * instructions lived before DISCOCLAW.md was introduced.
+ * instructions lived in workspace files before runtime-injected defaults.
  */
 const LEGACY_AGENTS_MARKERS = [
   '## Rebuild & Restart Workflow',
@@ -68,8 +61,24 @@ async function warnIfLegacyAgentsContainsSystemInstructions(
 
   log?.warn(
     { workspaceCwd, matchedMarkers },
-    'workspace:bootstrap legacy AGENTS.md system sections detected — this can conflict with managed DISCOCLAW.md instructions. ' +
+    'workspace:bootstrap legacy AGENTS.md system sections detected — this can conflict with runtime default instructions. ' +
       'Keep personal rules in AGENTS.md and remove migrated system sections.',
+  );
+}
+
+async function warnIfLegacyDiscoclawPresent(workspaceCwd: string, log?: BootstrapLog): Promise<void> {
+  const legacyDiscoclawPath = path.join(workspaceCwd, 'DISCOCLAW.md');
+  try {
+    await fs.access(legacyDiscoclawPath);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+
+  log?.warn(
+    { workspaceCwd, file: 'DISCOCLAW.md' },
+    'workspace:bootstrap legacy DISCOCLAW.md detected — file is no longer managed and was left untouched. ' +
+      'Default instructions are injected at runtime; keep user overrides in AGENTS.md.',
   );
 }
 
@@ -97,8 +106,10 @@ export async function isOnboardingComplete(workspaceCwd: string): Promise<boolea
 /**
  * Ensure workspace PA template files exist. Copies any missing files from
  * `templates/workspace/` to the workspace directory. Never overwrites existing
- * user-owned files. System-owned files (DISCOCLAW.md) are overwritten on every
- * boot to ensure users receive the latest operational instructions.
+ * user-owned files.
+ *
+ * Compatibility note: legacy workspace/DISCOCLAW.md files are left untouched.
+ * Managed defaults now come from runtime-injected tracked instructions.
  *
  * When onboarding is complete (IDENTITY.md has real content), BOOTSTRAP.md is
  * excluded from scaffolding and any existing copy is auto-deleted to prevent
@@ -131,7 +142,6 @@ export async function ensureWorkspaceBootstrapFiles(
     if (file === 'BOOTSTRAP.md' && onboarded) continue;
 
     const dest = path.join(workspaceCwd, file);
-    const isSystemOwned = SYSTEM_OWNED_FILES.has(file);
 
     let fileExists = false;
     try {
@@ -141,8 +151,8 @@ export async function ensureWorkspaceBootstrapFiles(
       // File doesn't exist — will be created below.
     }
 
-    // Skip existing user-owned files (never overwrite user content).
-    if (fileExists && !isSystemOwned) continue;
+    // Never overwrite existing user-owned files.
+    if (fileExists) continue;
 
     const src = path.join(templatesDir, file);
     await fs.copyFile(src, dest);
@@ -154,13 +164,8 @@ export async function ensureWorkspaceBootstrapFiles(
       await fs.writeFile(dest, content.replace('- **Timezone:**', `- **Timezone:** ${systemTz}`), 'utf-8');
     }
 
-    if (!fileExists) {
-      created.push(file);
-      log?.info({ file, workspaceCwd }, 'workspace:bootstrap recreated missing file');
-    } else {
-      // System-owned file was overwritten with latest template.
-      log?.info({ file, workspaceCwd }, 'workspace:bootstrap updated system-owned file');
-    }
+    created.push(file);
+    log?.info({ file, workspaceCwd }, 'workspace:bootstrap recreated missing file');
   }
 
   // BOOTSTRAP.md-specific post-loop logic.
@@ -213,6 +218,7 @@ export async function ensureWorkspaceBootstrapFiles(
   // Ensure the daily log directory exists for file-based memory.
   await fs.mkdir(path.join(workspaceCwd, 'memory'), { recursive: true });
 
+  await warnIfLegacyDiscoclawPresent(workspaceCwd, log);
   await warnIfLegacyAgentsContainsSystemInstructions(workspaceCwd, log);
 
   if (created.length > 0) {
