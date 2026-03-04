@@ -1,5 +1,5 @@
 import type { MessageReaction, PartialMessageReaction, User, PartialUser } from 'discord.js';
-import type { ImageData } from '../runtime/types.js';
+import type { ImageData, EngineEvent } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
 import { ensureGroupDir } from '../discord.js';
 import type { KeyedQueue } from '../group-queue.js';
