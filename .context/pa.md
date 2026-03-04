@@ -14,14 +14,14 @@ For architecture details, see `.context/architecture.md`.
 | `SOUL.md` | Core personality and values | User | Every prompt |
 | `IDENTITY.md` | Name and vibe | User | Every prompt |
 | `USER.md` | Who you're helping | User | Every prompt |
-| `templates/workspace/DISCOCLAW.md` | Tracked default instructions (runtime-injected) | Discoclaw repo (tracked) | Every prompt |
+| `templates/instructions/SYSTEM_DEFAULTS.md` | Tracked default instructions (runtime-injected) | Discoclaw repo (tracked) | Every prompt |
 | `AGENTS.md` | Personal rules and preferences | User (never overwritten) | Every prompt |
 | `TOOLS.md` | Available tools and integrations | Discoclaw | Every prompt |
 | `MEMORY.md` | Curated long-term memory | User | DM prompts |
 | `BOOTSTRAP.md` | First-run onboarding (deleted after) | User | Once |
 
 Templates live in `templates/workspace/` and are scaffolded on first run (copy-if-missing).
-Tracked defaults come from `templates/workspace/DISCOCLAW.md` and are injected at runtime.
+Tracked defaults come from `templates/instructions/SYSTEM_DEFAULTS.md` and are injected at runtime.
 Legacy `workspace/DISCOCLAW.md` files are not authoritative.
 
 ## Operational Essentials
@@ -120,7 +120,7 @@ See `.context/memory.md` for full architecture, examples, and config reference.
 
 Instruction precedence is deterministic:
 1. immutable security policy (`ROOT_POLICY`)
-2. tracked defaults (`templates/workspace/DISCOCLAW.md`)
+2. tracked defaults (`templates/instructions/SYSTEM_DEFAULTS.md`)
 3. `workspace/AGENTS.md` overrides
 4. memory/context sections
 

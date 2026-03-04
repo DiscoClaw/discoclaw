@@ -41,7 +41,7 @@ No env var keys, no database schema changes, no API surface changes.
 
 Default system instructions are no longer read from a workspace-managed
 `workspace/DISCOCLAW.md` file. They now come from a tracked runtime-injected
-defaults layer in the repository (`templates/workspace/DISCOCLAW.md`).
+defaults layer in the repository (`templates/instructions/SYSTEM_DEFAULTS.md`).
 
 Prompt precedence is now deterministic:
 

@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const TRACKED_DEFAULTS_FILE_NAME = 'DISCOCLAW.md';
-export const TRACKED_DEFAULTS_SECTION_LABEL = 'DISCOCLAW.md (tracked defaults)';
+export const TRACKED_DEFAULTS_DIR = 'instructions';
+export const TRACKED_DEFAULTS_FILE_NAME = 'SYSTEM_DEFAULTS.md';
+export const TRACKED_DEFAULTS_SECTION_LABEL = 'SYSTEM_DEFAULTS.md (tracked defaults)';
 
 let cachedPath: string | null = null;
 let cachedPreamble: string | null = null;
@@ -16,7 +17,7 @@ let cachedPreamble: string | null = null;
  * Works in both src/* and dist/* layouts.
  */
 export function resolveTrackedDefaultsPath(baseDir: string = __dirname): string {
-  return path.resolve(baseDir, '..', '..', 'templates', 'workspace', TRACKED_DEFAULTS_FILE_NAME);
+  return path.resolve(baseDir, '..', '..', 'templates', TRACKED_DEFAULTS_DIR, TRACKED_DEFAULTS_FILE_NAME);
 }
 
 /** Render tracked defaults in the canonical prompt section format. */
@@ -28,7 +29,8 @@ export function renderTrackedDefaultsSection(content: string): string {
 
 /**
  * Load tracked defaults from disk with memoization.
- * Fallback behavior on missing/unreadable files is an empty string.
+ * Missing/unreadable files return an explicit warning section so the
+ * tracked-defaults prompt tier is never silently dropped.
  */
 export function loadTrackedDefaultsPreamble(opts?: {
   trackedDefaultsPath?: string;
@@ -44,8 +46,14 @@ export function loadTrackedDefaultsPreamble(opts?: {
   try {
     const content = fsSync.readFileSync(trackedDefaultsPath, 'utf-8');
     preamble = renderTrackedDefaultsSection(content);
-  } catch {
-    preamble = '';
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    preamble = renderTrackedDefaultsSection(
+      `[tracked defaults unavailable: failed to read ${trackedDefaultsPath}: ${message}]`,
+    );
+    console.warn(
+      `instructions:tracked-defaults failed to read ${trackedDefaultsPath}; injecting fallback section (${message})`,
+    );
   }
 
   cachedPath = trackedDefaultsPath;

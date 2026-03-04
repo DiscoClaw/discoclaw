@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  TRACKED_DEFAULTS_DIR,
   TRACKED_DEFAULTS_FILE_NAME,
   TRACKED_DEFAULTS_SECTION_LABEL,
   _resetTrackedDefaultsCacheForTests,
@@ -12,15 +13,15 @@ import {
 } from './system-defaults.js';
 
 describe('resolveTrackedDefaultsPath', () => {
-  it('resolves to templates/workspace/DISCOCLAW.md by default', async () => {
+  it('resolves to templates/instructions/SYSTEM_DEFAULTS.md by default', async () => {
     const resolved = resolveTrackedDefaultsPath();
-    expect(resolved.endsWith(path.join('templates', 'workspace', TRACKED_DEFAULTS_FILE_NAME))).toBe(true);
+    expect(resolved.endsWith(path.join('templates', TRACKED_DEFAULTS_DIR, TRACKED_DEFAULTS_FILE_NAME))).toBe(true);
     await expect(fs.access(resolved)).resolves.toBeUndefined();
   });
 
   it('resolves relative to a provided base directory', () => {
     const resolved = resolveTrackedDefaultsPath('/tmp/repo/src/instructions');
-    expect(resolved).toBe(path.resolve('/tmp/repo/templates/workspace/DISCOCLAW.md'));
+    expect(resolved).toBe(path.resolve('/tmp/repo/templates/instructions/SYSTEM_DEFAULTS.md'));
   });
 });
 
@@ -52,16 +53,23 @@ describe('loadTrackedDefaultsPreamble', () => {
     dirs.length = 0;
   });
 
-  it('falls back to empty string when the tracked defaults file is missing', () => {
-    const missingPath = path.join(os.tmpdir(), `missing-${Date.now()}-DISCOCLAW.md`);
+  it('returns an explicit warning section and logs when the tracked defaults file is missing', () => {
+    const missingPath = path.join(os.tmpdir(), `missing-${Date.now()}-SYSTEM_DEFAULTS.md`);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = loadTrackedDefaultsPreamble({ trackedDefaultsPath: missingPath, forceReload: true });
-    expect(result).toBe('');
+    expect(result).toContain(`--- ${TRACKED_DEFAULTS_SECTION_LABEL} ---`);
+    expect(result).toContain('[tracked defaults unavailable: failed to read');
+    expect(result).toContain(missingPath);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(`instructions:tracked-defaults failed to read ${missingPath}`),
+    );
+    warnSpy.mockRestore();
   });
 
   it('caches by path and only reloads when forced', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tracked-defaults-'));
     dirs.push(dir);
-    const trackedDefaultsPath = path.join(dir, 'DISCOCLAW.md');
+    const trackedDefaultsPath = path.join(dir, 'SYSTEM_DEFAULTS.md');
 
     await fs.writeFile(trackedDefaultsPath, 'first version\n', 'utf-8');
     const first = loadTrackedDefaultsPreamble({ trackedDefaultsPath, forceReload: true });

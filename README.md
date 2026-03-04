@@ -89,7 +89,7 @@ DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by 
 Prompt instruction layering is deterministic and enforced in this order:
 
 1. **Immutable security policy** (hard-coded root rules)
-2. **Tracked defaults** (runtime-injected from `templates/workspace/DISCOCLAW.md`)
+2. **Tracked defaults** (runtime-injected from `templates/instructions/SYSTEM_DEFAULTS.md`)
 3. **User override** (`workspace/AGENTS.md`)
 4. **Memory/context layers** (workspace identity files, channel context, durable/rolling memory, etc.)
 

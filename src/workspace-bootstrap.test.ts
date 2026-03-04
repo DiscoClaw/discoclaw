@@ -543,79 +543,79 @@ describe('ensureWorkspaceBootstrapFiles — unlink error handling', () => {
 // Ensures templates contain critical operational knowledge so a fresh install
 // produces a fully operational bot without manual additions.
 
-describe('template content — DISCOCLAW.md', () => {
-  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
-  let discoclaw: string;
+describe('template content — SYSTEM_DEFAULTS.md', () => {
+  const templatesDir = path.join(__dirname, '..', 'templates', 'instructions');
+  let systemDefaults: string;
 
   it('template file exists and is non-empty', async () => {
-    discoclaw = await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw.length).toBeGreaterThan(0);
+    systemDefaults = await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults.length).toBeGreaterThan(0);
   });
 
   it('contains tracked-defaults runtime-injection guidance', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('tracked default instruction source');
-    expect(discoclaw).toContain('not a workspace-managed file');
-    expect(discoclaw).toContain('Runtime Instruction Precedence');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('tracked default instruction source');
+    expect(systemDefaults).toContain('not a workspace-managed file');
+    expect(systemDefaults).toContain('Runtime Instruction Precedence');
   });
 
   it('contains Discord action batching rules', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('Discord Action Batching');
-    expect(discoclaw).toContain('Multiple actions of the same type in a single response are fully supported');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('Discord Action Batching');
+    expect(systemDefaults).toContain('Multiple actions of the same type in a single response are fully supported');
   });
 
   it('contains response economy guidance', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('Response Economy');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('Response Economy');
   });
 
   it('contains knowledge cutoff awareness section', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('Knowledge Cutoff Awareness');
-    expect(discoclaw).toContain('use the web to verify');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('Knowledge Cutoff Awareness');
+    expect(systemDefaults).toContain('use the web to verify');
   });
 
   it('contains session completion workflow', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('Landing the Plane');
-    expect(discoclaw).toContain('git push');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('Landing the Plane');
+    expect(systemDefaults).toContain('git push');
   });
 
   it('contains plan-audit-implement workflow', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('Plan-Audit-Implement Workflow');
-    expect(discoclaw).toContain('DRAFT');
-    expect(discoclaw).toContain('APPROVED');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('Plan-Audit-Implement Workflow');
+    expect(systemDefaults).toContain('DRAFT');
+    expect(systemDefaults).toContain('APPROVED');
   });
 
   it('references TOOLS.md for forge/plan/memory action types', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('See TOOLS.md');
-    expect(discoclaw).toContain('discord-action');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('See TOOLS.md');
+    expect(systemDefaults).toContain('discord-action');
   });
 
   it('contains Discord formatting rules', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('Discord Formatting');
-    expect(discoclaw).toContain('No markdown tables in Discord');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('Discord Formatting');
+    expect(systemDefaults).toContain('No markdown tables in Discord');
   });
 
   it('contains task creation guidance', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('Task Management');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('Task Management');
   });
 
   it('contains git commit hash guidance', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('Git Commits');
-    expect(discoclaw).toContain('short commit hash');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('Git Commits');
+    expect(systemDefaults).toContain('short commit hash');
   });
 
   it('uses correct !memory remember syntax (not !memory add)', async () => {
-    discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('!memory remember');
-    expect(discoclaw).not.toContain('!memory add');
+    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    expect(systemDefaults).toContain('!memory remember');
+    expect(systemDefaults).not.toContain('!memory add');
   });
 });
 
@@ -633,9 +633,10 @@ describe('template content — AGENTS.md', () => {
     expect(agents).toContain('never overwrite');
   });
 
-  it('references DISCOCLAW.md for system instructions', async () => {
+  it('references runtime-injected tracked defaults for system instructions', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('DISCOCLAW.md');
+    expect(agents).toContain('tracked');
+    expect(agents).toContain('not from a workspace-managed file');
   });
 
   it('contains memory vs instructions guidance', async () => {
@@ -648,9 +649,9 @@ describe('template content — AGENTS.md', () => {
     expect(agents).toContain('Make It Yours');
   });
 
-  it('does not contain system instructions (those are in DISCOCLAW.md now)', async () => {
+  it('does not contain system instructions (those are in tracked defaults)', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    // These sections have moved to DISCOCLAW.md.
+    // These sections live in templates/instructions/SYSTEM_DEFAULTS.md.
     expect(agents).not.toContain('Discord Action Batching');
     expect(agents).not.toContain('Response Economy');
     expect(agents).not.toContain('Knowledge Cutoff Awareness');
@@ -742,17 +743,25 @@ describe('template content — TOOLS.md', () => {
 });
 
 describe('template content — no personalization leak', () => {
-  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  const workspaceTemplatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  const instructionsTemplatesDir = path.join(__dirname, '..', 'templates', 'instructions');
   const FORBIDDEN_TOKENS = ['David', 'Escondido', 'Chelsea', 'marshmonkey'];
 
-  for (const file of ['AGENTS.md', 'TOOLS.md', 'DISCOCLAW.md']) {
+  for (const file of ['AGENTS.md', 'TOOLS.md']) {
     it(`${file} does not contain user-specific tokens`, async () => {
-      const content = await fs.readFile(path.join(templatesDir, file), 'utf-8');
+      const content = await fs.readFile(path.join(workspaceTemplatesDir, file), 'utf-8');
       for (const token of FORBIDDEN_TOKENS) {
         expect(content).not.toContain(token);
       }
     });
   }
+
+  it('SYSTEM_DEFAULTS.md does not contain user-specific tokens', async () => {
+    const content = await fs.readFile(path.join(instructionsTemplatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
+    for (const token of FORBIDDEN_TOKENS) {
+      expect(content).not.toContain(token);
+    }
+  });
 });
 
 describe('scaffolded workspace contains operational content', () => {

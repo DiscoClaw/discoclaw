@@ -1419,7 +1419,7 @@ describe('ForgeOrchestrator', () => {
     await orchestrator.run('Test', async () => {});
 
     const drafterPrompt = prompts[0] ?? '';
-    expect(drafterPrompt).toContain('--- DISCOCLAW.md (tracked defaults) ---');
+    expect(drafterPrompt).toContain('--- SYSTEM_DEFAULTS.md (tracked defaults) ---');
     expect(drafterPrompt).not.toContain(legacySentinel);
   });
 
