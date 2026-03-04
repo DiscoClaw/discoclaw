@@ -407,9 +407,24 @@ describe('selectStreamingOutput', () => {
       finalText: 'final answer',
       statusTick: 0,
     });
-    // Should be bold + code block (renderActivityTail)
+    // Activity-only output includes a seeded runtime line (no blank code block).
     expect(out).toContain('**Reading file...**');
     expect(out).toContain('```text');
+    expect(out).toContain('[activity] Reading file...');
+  });
+
+  it('activity seeded preview escapes and truncates label formatting', () => {
+    const label = 'reading ```file``` *' + 'x'.repeat(80) + '*';
+    const out = selectStreamingOutput({
+      deltaText: '',
+      activityLabel: label,
+      finalText: '',
+      statusTick: 0,
+    });
+    const firstLine = out.split('\n')[0] ?? '';
+    expect(firstLine).toContain('\\`\\`\\`');
+    expect(firstLine).toContain('\\*');
+    expect(firstLine).toContain('\u2026');
   });
 
   it('finalText wins over default thinking', () => {
@@ -431,9 +446,10 @@ describe('selectStreamingOutput', () => {
       finalText: '',
       statusTick: 2,
     });
-    // tick 2 → "Thinking..."
+    // tick 2 → "Thinking..." plus seeded waiting line
     expect(out).toContain('**Thinking...**');
     expect(out).toContain('```text');
+    expect(out).toContain('[stream] waiting for runtime output');
   });
 
   it('thinking label tick advances correctly', () => {
@@ -618,6 +634,18 @@ describe('selectStreamingOutput', () => {
     expect(out).not.toContain('discord-action');
     expect(out).not.toContain('taskClose');
     expect(out).toContain('Done closing task');
+  });
+
+  it('deltaText with only action tags falls back to seeded preview output', () => {
+    const out = selectStreamingOutput({
+      deltaText: '<discord-action>{"type":"taskClose","taskId":"ws-001"}</discord-action>',
+      activityLabel: '',
+      finalText: '',
+      statusTick: 0,
+    });
+    expect(out).toContain('**Thinking.**');
+    expect(out).toContain('```');
+    expect(out).toContain('[stream] waiting for runtime output');
   });
 
   it('strips <discord-action> tags from finalText before rendering', () => {
