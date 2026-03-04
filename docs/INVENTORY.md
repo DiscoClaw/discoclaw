@@ -17,6 +17,7 @@ Legend: **done** | *stub* | ~~cut~~
 | PID lock (single instance) | `src/pidlock.ts` | **done** |
 | Graceful shutdown | `src/index.ts` | **done** |
 | Streaming + fence-safe chunking (2 000 char) | `src/discord.ts` (wire-up), `src/discord/message-coordinator.ts` (handler logic) | **done** |
+| Presentation-layer runtime text adapter (concise Discord-safe runtime/plan progress text; internal event payloads remain unchanged/internal-only) | `src/discord/runtime-event-text-adapter.ts`, `src/discord/message-coordinator.ts` | **done** |
 | Image input (Discord attachments → Claude) | `src/discord/image-download.ts` | **done** |
 | Message batching (combine queued messages into single prompt during active invocation) | `src/discord/message-batching.ts` | **done** |
 | Startup self-healing (missing workspace files, stale cron/task thread refs, corrupted JSON stores) | `src/health/startup-healing.ts`, `src/workspace-bootstrap.ts` | **done** |
@@ -186,6 +187,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Cron subsystem | 3 tests | **done** |
 | Integration (fail-closed, prompt-context, status, channel-context) | 4 tests | **done** |
 | Pipeline engine | 51 tests | **done** |
+| Runtime-event text adapter coverage (runtime signal redaction/truncation and plan phase lifecycle phrasing) | `src/discord/runtime-event-text-adapter.test.ts` | **done** |
 
 ## 15. Documentation
 
