@@ -1524,6 +1524,32 @@ describe('streaming behavior', () => {
     expect(hasStderr).toBe(true);
   });
 
+  it('streams tool lifecycle and usage events into delta text', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'tool_start', name: 'readFile', input: { path: 'README.md' } };
+        yield { type: 'usage', inputTokens: 11, outputTokens: 7, totalTokens: 18, costUsd: 0.0012 };
+        yield { type: 'tool_end', name: 'readFile', ok: true, output: 'ok' };
+        yield { type: 'text_final', text: 'Done' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const allEditContents = replyObj.edit.mock.calls.map((c: any) => c[0].content);
+    expect(allEditContents.some((c: string) => c.includes('[tool:start] readFile'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('[usage] in=11 out=7 total=18'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('[tool:end] readFile ok'))).toBe(true);
+  });
+
   it('waits for pending keepalive streaming edits before finalizing', async () => {
     vi.useFakeTimers();
     try {

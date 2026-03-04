@@ -1,5 +1,5 @@
 import type { MessageReaction, PartialMessageReaction, User, PartialUser } from 'discord.js';
-import type { ImageData } from '../runtime/types.js';
+import type { ImageData, EngineEvent } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
 import { ensureGroupDir } from '../discord.js';
 import type { KeyedQueue } from '../group-queue.js';
@@ -14,7 +14,7 @@ import { tryAbort, isActivelyStreaming } from './abort-registry.js';
 import { getActiveOrchestrator, getActiveForgeChannelId } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection, buildPromptSectionEstimates } from './prompt-common.js';
 import { editThenSendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
-import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
+import { formatBoldLabel, thinkingLabel, selectStreamingOutput, formatRuntimePreviewSignal } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
@@ -516,6 +516,7 @@ function createReactionHandler(
           const collectedImages: ImageData[] = [];
           let statusTick = 1;
           const t0 = Date.now();
+          const previewMode = params.streamPreviewMode ?? 'compact';
           metrics.recordInvokeStart('reaction');
           params.log?.info({ flow: 'reaction', sessionKey }, 'obs.invoke.start');
           let invokeError: string | null = null;
@@ -533,6 +534,7 @@ function createReactionHandler(
             const out = selectStreamingOutput({
               deltaText, activityLabel: '', finalText,
               statusTick: statusTick++,
+              previewMode,
               showPreview: Date.now() - t0 >= 7000,
               elapsedMs: Date.now() - t0,
             });
@@ -546,6 +548,13 @@ function createReactionHandler(
                 }
               });
             await streamEditQueue;
+          };
+
+          const appendRuntimeSignal = async (evt: EngineEvent) => {
+            const line = formatRuntimePreviewSignal(evt, previewMode);
+            if (!line) return;
+            deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
+            await maybeEdit(false);
           };
 
           // Stream stall warning state.
@@ -591,10 +600,13 @@ function createReactionHandler(
               } else if (evt.type === 'text_delta') {
                 deltaText += evt.text;
                 await maybeEdit(false);
-              } else if (evt.type === 'log_line') {
-                const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
-                deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
-                await maybeEdit(false);
+              } else if (
+                evt.type === 'log_line' ||
+                evt.type === 'tool_start' ||
+                evt.type === 'tool_end' ||
+                evt.type === 'usage'
+              ) {
+                await appendRuntimeSignal(evt);
               } else if (evt.type === 'image_data') {
                 collectedImages.push(evt.image);
               } else if (evt.type === 'error') {

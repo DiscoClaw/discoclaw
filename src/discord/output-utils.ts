@@ -270,6 +270,17 @@ function renderStreamingTail(text: string, mode: StreamingPreviewMode): string {
   return renderDiscordTail(stripActionTags(text), maxLines, maxWidth);
 }
 
+function hasVisiblePreviewText(text: string): boolean {
+  const sanitized = stripActionTags(text).replace(/\r\n?/g, '\n');
+  return sanitized
+    .split('\n')
+    .some((line) => line.trim().length > 0);
+}
+
+function renderLabeledPreview(label: string, body: string, mode: StreamingPreviewMode): string {
+  return `${formatBoldLabel(label)}\n${renderStreamingTail(body, mode)}`;
+}
+
 /**
  * Strip `<discord-action>...</discord-action>` blocks from text so raw JSON
  * never leaks into streaming previews visible to users.
@@ -300,9 +311,24 @@ export function selectStreamingOutput(opts: {
   }
   if (opts.deltaText) {
     const label = prefix + thinkingLabel(opts.statusTick);
-    return `**${label}**\n${renderStreamingTail(opts.deltaText, previewMode)}`;
+    if (!hasVisiblePreviewText(opts.deltaText)) {
+      const fallback = opts.activityLabel
+        ? `[activity] ${prefix + opts.activityLabel}`
+        : '[stream] waiting for runtime output';
+      return renderLabeledPreview(label, fallback, previewMode);
+    }
+    return renderLabeledPreview(label, opts.deltaText, previewMode);
   }
-  if (opts.activityLabel) return renderActivityTail(prefix + opts.activityLabel);
-  if (opts.finalText) return renderStreamingTail(opts.finalText, previewMode);
-  return renderActivityTail(prefix + thinkingLabel(opts.statusTick));
+  if (opts.activityLabel) {
+    const label = prefix + opts.activityLabel;
+    return renderLabeledPreview(label, `[activity] ${label}`, previewMode);
+  }
+  if (opts.finalText) {
+    if (!hasVisiblePreviewText(opts.finalText)) {
+      return renderStreamingTail('[stream] no previewable output', previewMode);
+    }
+    return renderStreamingTail(opts.finalText, previewMode);
+  }
+  const thinking = prefix + thinkingLabel(opts.statusTick);
+  return renderLabeledPreview(thinking, '[stream] waiting for runtime output', previewMode);
 }
