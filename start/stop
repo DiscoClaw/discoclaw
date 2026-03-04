@@ -1,0 +1,12 @@
+Tool-aware narration preview cadence lifecycle.
+
+start:
+- When tool-aware queue is in tool_active and receives buffered narration deltas.
+- Begin periodic preview emission at the configured cadence.
+
+stop:
+- On tool_end, error, done, text_final, or dispose.
+- Clear preview cadence timers to avoid post-run emissions.
+
+Safety boundary:
+- Preview narration is display-only and must not be used as canonical action-parse input.
