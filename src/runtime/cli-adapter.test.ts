@@ -179,6 +179,48 @@ describe('createCliRuntime', () => {
     expect(events[events.length - 1]).toEqual({ type: 'done' });
   });
 
+  it('successful text mode with empty output emits text_final then done', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdoutChunks: [],
+      exitCode: 0,
+    }));
+
+    const rt = createCliRuntime(baseStrategy(), {});
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(events).toEqual([
+      { type: 'text_final', text: '' },
+      { type: 'done' },
+    ]);
+  });
+
+  it('successful JSONL mode with empty output emits text_final then done', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdoutChunks: [],
+      exitCode: 0,
+    }));
+
+    const rt = createCliRuntime(baseStrategy({
+      getOutputMode: () => 'jsonl',
+    }), {});
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(events).toEqual([
+      { type: 'text_final', text: '' },
+      { type: 'done' },
+    ]);
+  });
+
   it('uses strategy handleExitError for non-zero exits', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stdoutChunks: ['partial text'],

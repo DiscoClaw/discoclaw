@@ -690,17 +690,13 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         // Success.
         if (outputMode === 'text') {
           const final = (stdout || mergedStdout).trimEnd();
-          if (final) {
-            emittedUserOutput = true;
-            push({ type: 'text_final', text: final });
-          }
+          if (final) emittedUserOutput = true;
+          push({ type: 'text_final', text: final });
         } else {
           const raw = resultText.trim() || (merged.trim() ? merged.trimEnd() : '');
           const final = stripToolUseBlocks(raw);
-          if (final) {
-            emittedUserOutput = true;
-            push({ type: 'text_final', text: final });
-          }
+          if (final) emittedUserOutput = true;
+          push({ type: 'text_final', text: final });
         }
 
         push({ type: 'done' });
