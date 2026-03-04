@@ -54,17 +54,29 @@ vi.mock('./transport-client.js', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeRuntime(events: EngineEvent[]) {
+type RuntimeStep = EngineEvent | { sleepMs: number };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function makeRuntime(steps: RuntimeStep[]) {
   return {
     id: 'test',
     capabilities: {},
     async *invoke(): AsyncIterable<EngineEvent> {
-      for (const evt of events) yield evt;
+      for (const step of steps) {
+        if ('sleepMs' in step) {
+          await sleep(step.sleepMs);
+          continue;
+        }
+        yield step;
+      }
     },
   };
 }
 
-function makeParams(runtime: any) {
+function makeParams(runtime: any, overrides: Record<string, unknown> = {}) {
   return {
     allowUserIds: new Set(['user-1']),
     allowBotIds: new Set<string>(),
@@ -122,6 +134,7 @@ function makeParams(runtime: any) {
       recordActionResult: vi.fn(),
     },
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    ...overrides,
   } as any;
 }
 
@@ -215,5 +228,60 @@ describe('🛑 removal happens before action execution (taskClose regression)', 
     const actionsIdx = order.indexOf('actions-executed');
     expect(removeIdx).toBeGreaterThanOrEqual(0);
     expect(actionsIdx).toBeGreaterThan(removeIdx);
+  });
+
+  it('removes 🛑 before executeDiscordActions runs with tool-aware streaming events', async () => {
+    const order: string[] = [];
+
+    const { reply, removeStopReaction } = makeReplyMock();
+    removeStopReaction.mockImplementation(async () => { order.push('stop-reaction-removed'); });
+    executeDiscordActionsMock.mockImplementation(async () => {
+      order.push('actions-executed');
+      return [{ ok: true, summary: 'Task closed' }];
+    });
+
+    const msg = makeGuildMessage(reply);
+    const runtime = makeRuntime([
+      { type: 'tool_start', name: 'Read' },
+      { type: 'text_delta', text: 'Checking workspace...' },
+      { type: 'tool_end', name: 'Read', ok: true, output: 'ok' },
+      { type: 'text_final', text: 'Closing the task.\n<discord-action>{"type":"taskClose","taskId":"ws-001","reason":"Done"}</discord-action>' },
+      { type: 'done' },
+    ]);
+
+    const params = makeParams(runtime, { toolAwareStreaming: true });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(removeStopReaction).toHaveBeenCalledTimes(1);
+    expect(parseDiscordActionsMock).toHaveBeenCalledTimes(1);
+    expect(executeDiscordActionsMock).toHaveBeenCalledTimes(1);
+
+    const removeIdx = order.indexOf('stop-reaction-removed');
+    const actionsIdx = order.indexOf('actions-executed');
+    expect(removeIdx).toBeGreaterThanOrEqual(0);
+    expect(actionsIdx).toBeGreaterThan(removeIdx);
+  });
+
+  it('does not parse actions when stream ends without text_final and markers exist only in preview text', async () => {
+    const { reply } = makeReplyMock();
+    const msg = makeGuildMessage(reply);
+    const runtime = makeRuntime([
+      { type: 'tool_start', name: 'Read' },
+      { type: 'text_delta', text: '<discord-action>{"type":"taskClose","taskId":"ws-001","reason":"Done"}</discord-action>' },
+      { sleepMs: 1400 },
+      { type: 'done' },
+    ]);
+
+    const params = makeParams(runtime, { toolAwareStreaming: true });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(parseDiscordActionsMock).not.toHaveBeenCalled();
+    expect(executeDiscordActionsMock).not.toHaveBeenCalled();
   });
 });
