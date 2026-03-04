@@ -149,7 +149,9 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | First-run scaffolding | `src/workspace-bootstrap.ts` | **done** |
-| Templates (SOUL, IDENTITY, USER, DISCOCLAW, AGENTS, TOOLS) | `templates/workspace/` | **done** |
+| Workspace templates scaffolded on first run (BOOTSTRAP, SOUL, IDENTITY, USER, AGENTS, TOOLS, MEMORY) | `templates/workspace/`, `src/workspace-bootstrap.ts` | **done** |
+| Tracked default instructions (runtime-injected `DISCOCLAW.md`, not workspace-managed) | `templates/workspace/DISCOCLAW.md`, `src/discord/prompt-common.ts` | **done** |
+| Deterministic prompt precedence (`ROOT_POLICY` > tracked defaults > `workspace/AGENTS.md` > memory/context) | `src/discord/prompt-common.ts`, `CLAUDE.md` | **done** |
 | MCP config template | `templates/mcp.json` | **done** |
 | Dropbox-backed symlinks (content, workspace, exports) | filesystem | **done** |
 
