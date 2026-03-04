@@ -335,6 +335,7 @@ const planPhasesEnabled = cfg.planPhasesEnabled;
 const planPhaseMaxContextFiles = cfg.planPhaseMaxContextFiles;
 const planPhaseTimeoutMs = cfg.planPhaseTimeoutMs;
 const planPhaseMaxAuditFixAttempts = cfg.planPhaseMaxAuditFixAttempts;
+const planForgeHeartbeatIntervalMs = cfg.planForgeHeartbeatIntervalMs;
 const forgeCommandsEnabled = cfg.forgeCommandsEnabled;
 const forgeMaxAuditRounds = cfg.forgeMaxAuditRounds;
 const forgeDrafterModel = cfg.forgeDrafterModel;
@@ -1128,6 +1129,7 @@ const botParams = {
   planPhaseMaxContextFiles,
   planPhaseTimeoutMs,
   planPhaseMaxAuditFixAttempts,
+  planForgeHeartbeatIntervalMs,
   forgeCommandsEnabled,
   forgeMaxAuditRounds,
   forgeDrafterModel,

@@ -94,6 +94,7 @@ import type { AttachmentLike } from './image-download.js';
 import { DiscordTransportClient } from './transport-client.js';
 import type { LongRunWatchdog } from './long-run-watchdog.js';
 import { adaptPlanRunEventText, adaptRuntimeEventText } from './runtime-event-text-adapter.js';
+import { createPhaseStatusHeartbeatController, resolvePlanHeaderHeartbeatPolicy } from './phase-status-heartbeat.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
@@ -185,6 +186,7 @@ export type BotParams = {
   planPhaseMaxContextFiles?: number;
   planPhaseTimeoutMs?: number;
   planPhaseMaxAuditFixAttempts?: number;
+  planForgeHeartbeatIntervalMs?: number;
   forgeCommandsEnabled?: boolean;
   forgeMaxAuditRounds?: number;
   forgeDrafterModel?: string;
@@ -1484,6 +1486,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   // Acquire lock for initial validation only
                   let phasesFilePath: string;
                   let planFilePath: string;
+                  let planContentForHeartbeat = '';
                   let projectCwd: string;
                   let progressReply: ReplyTarget;
 
@@ -1504,6 +1507,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                     phasesFilePath = prepResult.phasesFilePath;
                     planFilePath = prepResult.planFilePath;
+                    planContentForHeartbeat = prepResult.planContent;
 
                     try {
                       projectCwd = resolveProjectCwd(prepResult.planContent, params.workspaceCwd);
@@ -1570,6 +1574,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       } catch (err) {
                         params.log?.warn({ err, planId, phaseId: event.phase.id }, 'plan-run: phase-start post failed');
                       }
+                      try {
+                        await transitionHeartbeatPhase(`${event.phase.id}: ${event.phase.title}`);
+                      } catch (err) {
+                        params.log?.warn({ err, planId, phaseId: event.phase.id }, 'plan-run: heartbeat transition failed');
+                      }
                     } else if (event.type === 'phase_complete') {
                       const phaseMsg = phaseStartMessages.get(event.phase.id);
                       if (!phaseMsg) return;
@@ -1593,6 +1602,62 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   const onPlanRunEvent = params.toolAwareStreaming
                     ? planRunStreaming.onEvent
                     : undefined;
+
+                  const formatPhaseFileStatus = (): string => {
+                    try {
+                      const phaseState = readPhasesFile(phasesFilePath, { log: params.log });
+                      const total = phaseState.phases.length;
+                      let done = 0;
+                      let failed = 0;
+                      let skipped = 0;
+                      let inProgress = 0;
+                      let pending = 0;
+                      for (const phase of phaseState.phases) {
+                        if (phase.status === 'done') done++;
+                        else if (phase.status === 'failed') failed++;
+                        else if (phase.status === 'skipped') skipped++;
+                        else if (phase.status === 'in-progress') inProgress++;
+                        else pending++;
+                      }
+                      const terminal = done + failed + skipped;
+                      return `Status ${terminal}/${total} terminal (done ${done}, in-progress ${inProgress}, pending ${pending}, failed ${failed}, skipped ${skipped}).`;
+                    } catch {
+                      return 'Phase status unavailable.';
+                    }
+                  };
+
+                  const planRunHeartbeat = createPhaseStatusHeartbeatController({
+                    flowLabel: `Plan run ${planId}`,
+                    policy: resolvePlanHeaderHeartbeatPolicy(
+                      planContentForHeartbeat,
+                      params.planForgeHeartbeatIntervalMs,
+                    ),
+                    onUpdate: async (message, event) => {
+                      if (event.type === 'terminal') return;
+                      await onProgress(`${message} ${formatPhaseFileStatus()}`, { force: true });
+                    },
+                    onError: (err, event) => {
+                      params.log?.warn({ err, planId, eventType: event.type }, 'plan-run: heartbeat update failed');
+                    },
+                  });
+                  let heartbeatPhaseStarted = false;
+                  let heartbeatTerminalEmitted = false;
+                  const transitionHeartbeatPhase = async (phaseLabel: string) => {
+                    if (!heartbeatPhaseStarted) {
+                      heartbeatPhaseStarted = true;
+                      await planRunHeartbeat.startPhase(phaseLabel);
+                      return;
+                    }
+                    await planRunHeartbeat.transitionPhase(phaseLabel);
+                  };
+                  const completePlanRunHeartbeat = async (
+                    outcome: 'succeeded' | 'failed' | 'cancelled',
+                    detail?: string,
+                  ) => {
+                    if (heartbeatTerminalEmitted) return;
+                    heartbeatTerminalEmitted = true;
+                    await planRunHeartbeat.complete(outcome, detail);
+                  };
 
                   const timeoutMs = params.planPhaseTimeoutMs ?? 5 * 60_000;
                   // Register plan run with abort registry so !stop can kill it.
@@ -1697,8 +1762,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       params.log?.error({ err: loopErr, phasesRun, planId }, 'plan-run: crash in phase loop');
                     }
 
-                    planRunStreaming.dispose();
-
                     // Build summary — always runs regardless of how the loop terminated
                     const fmtElapsed = (ms: number) => ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`;
                     const phaseList = phaseResults.map(p => `[x] ${p.id}: ${p.title} (${fmtElapsed(p.elapsedMs)})`).join('\n');
@@ -1744,29 +1807,29 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       }
                     }
 
-                    await editSummary(summaryMsg);
-
-                    // Post a separate final summary message in the channel flow (full runs only)
-                    if (!isRunOne) {
-                      try {
-                        await msg.channel.send({ content: summaryMsg, allowedMentions: NO_MENTIONS });
-                      } catch (err) {
-                        params.log?.warn({ err, planId }, 'plan-run: final summary channel post failed');
-                      }
-                    }
-
                     // Auto-close plan if all phases are terminal
-                    const closeResult = await closePlanIfComplete(
-                      phasesFilePath,
-                      planFilePath,
-                      planOpts.taskStore,
-                      acquireWriterLock,
-                      params.log,
-                      planOpts.onTaskClosed,
-                    );
-                    if (closeResult.closed) {
-                      await editSummary(summaryMsg + '\n\nPlan and backing task auto-closed.');
+                    try {
+                      const closeResult = await closePlanIfComplete(
+                        phasesFilePath,
+                        planFilePath,
+                        planOpts.taskStore,
+                        acquireWriterLock,
+                        params.log,
+                        planOpts.onTaskClosed,
+                      );
+                      if (closeResult.closed) {
+                        summaryMsg += '\n\nPlan and backing task auto-closed.';
+                      }
+                    } catch (closeErr) {
+                      params.log?.warn({ err: closeErr, planId }, 'plan-run: auto-close failed');
                     }
+                    await completePlanRunHeartbeat(
+                      stopReason === null ? 'succeeded' : (stopReason === 'shutdown' ? 'cancelled' : 'failed'),
+                      stopReason === null
+                        ? `${phasesRun} phase${phasesRun !== 1 ? 's' : ''} completed.`
+                        : stopMessage || undefined,
+                    );
+                    await editSummary(summaryMsg);
                     planRunWatchdogOutcome = stopReason === null ? 'succeeded' : 'failed';
                   })().then(
                     () => { /* success — cleanup handled by outer finally */ },
@@ -1775,6 +1838,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       (async () => {
                         try {
                           const errMsg = `Plan run crashed: ${sanitizeErrorMessage(String(err))}`;
+                          await completePlanRunHeartbeat('failed', errMsg);
                           await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
                         } catch (editErr) {
                           if (errorCode(editErr) === 10008) {
@@ -1786,6 +1850,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   ).catch((err) => {
                     params.log?.error({ err }, 'plan-run: unhandled rejection in callback');
                   }).finally(async () => {
+                    planRunStreaming.dispose();
+                    planRunHeartbeat.dispose();
                     await completeWatchdogRun({
                       watchdog: longRunWatchdog,
                       runId: planRunWatchdogId,
@@ -2091,6 +2157,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   timeoutMs: params.forgeTimeoutMs ?? 5 * 60_000,
                   drafterModel: params.forgeDrafterModel,
                   auditorModel: params.forgeAuditorModel,
+                  planForgeHeartbeatIntervalMs: params.planForgeHeartbeatIntervalMs,
                   log: params.log,
                 });
                 setActiveOrchestrator(resumeOrchestrator, msg.channelId);
@@ -2228,6 +2295,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 timeoutMs: params.forgeTimeoutMs ?? 5 * 60_000,
                 drafterModel: params.forgeDrafterModel,
                 auditorModel: params.forgeAuditorModel,
+                planForgeHeartbeatIntervalMs: params.planForgeHeartbeatIntervalMs,
                 log: params.log,
                 existingTaskId: ctxResult.existingTaskId,
                 taskDescription: taskSummary?.description,

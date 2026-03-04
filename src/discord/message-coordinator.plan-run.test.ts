@@ -155,6 +155,7 @@ function makeParams() {
     planCommandsEnabled: true,
     planPhasesEnabled: true,
     planPhaseMaxContextFiles: 5,
+    planForgeHeartbeatIntervalMs: 45_000,
     forgeCommandsEnabled: false,
     summaryToDurableEnabled: false,
     shortTermMemoryEnabled: false,
@@ -327,7 +328,7 @@ describe('message coordinator plan run phase-start posts', () => {
     });
   });
 
-  it('posts a final summary channel message after a full plan run', async () => {
+  it('posts a final summary update after a full plan run', async () => {
     const { runNextPhase } = await import('./plan-manager.js');
     (runNextPhase as any)
       .mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
@@ -351,13 +352,67 @@ describe('message coordinator plan run phase-start posts', () => {
 
     await handler(msg as any);
     await vi.waitFor(() => {
-      // The final channel.send should include a plan-run-complete summary
-      const finalSend = msg.channel.send.mock.calls.find((call: any[]) => {
+      // The final progress edit should include a plan-run-complete summary.
+      const finalEdit = msg.progressReply.edit.mock.calls.find((call: any[]) => {
         const content = String(call[0]?.content ?? '');
         return content.includes('plan-042') && content.includes('phase');
       });
-      expect(finalSend).toBeDefined();
+      expect(finalEdit).toBeDefined();
     });
+  });
+
+  it('passes env-configured heartbeat policy into !plan run controller wiring', async () => {
+    const heartbeat = await import('./phase-status-heartbeat.js');
+    const createHeartbeatSpy = vi.spyOn(heartbeat, 'createPhaseStatusHeartbeatController');
+
+    const params = { ...makeParams(), planForgeHeartbeatIntervalMs: 12_000 };
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue as any);
+    const msg = makeMessage('!plan run plan-042');
+
+    await handler(msg as any);
+    await vi.waitFor(() => {
+      expect(createHeartbeatSpy).toHaveBeenCalledWith(expect.objectContaining({
+        policy: expect.objectContaining({ enabled: true, intervalMs: 12_000 }),
+      }));
+    });
+
+    createHeartbeatSpy.mockRestore();
+  });
+
+  it('passes per-plan Heartbeat metadata into !plan run controller wiring', async () => {
+    const heartbeat = await import('./phase-status-heartbeat.js');
+    const createHeartbeatSpy = vi.spyOn(heartbeat, 'createPhaseStatusHeartbeatController');
+    const { preparePlanRun } = await import('./plan-commands.js');
+    (preparePlanRun as any).mockResolvedValueOnce({
+      phasesFilePath: '/tmp/plans/plan-042-phases.md',
+      planFilePath: '/tmp/plans/plan-042-test.md',
+      planContent: [
+        '# Plan: Test',
+        '',
+        '**ID:** plan-042',
+        '**Heartbeat:** off',
+        '',
+        '---',
+        '',
+        '## Objective',
+      ].join('\n'),
+      nextPhase: { id: 'phase-1', title: 'First phase', kind: 'implement', status: 'pending', deps: [], contextFiles: [] },
+    });
+
+    const params = { ...makeParams(), planForgeHeartbeatIntervalMs: 12_000 };
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue as any);
+    const msg = makeMessage('!plan run plan-042');
+
+    await handler(msg as any);
+    await vi.waitFor(() => {
+      expect(createHeartbeatSpy).toHaveBeenCalledWith(expect.objectContaining({
+        policy: expect.objectContaining({ enabled: false, intervalMs: 12_000 }),
+      }));
+    });
+
+    createHeartbeatSpy.mockRestore();
   });
 
   it('returns usage for !plan run-phase without a phase id', async () => {

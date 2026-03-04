@@ -966,6 +966,25 @@ describe('ForgeOrchestrator', () => {
     expect(result.planSummary).toContain('plan-001');
   });
 
+  it('wires env heartbeat policy into forge heartbeat controller', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = makePlanContent({ planId: 'plan-test-001', status: 'DRAFT' });
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime, { planForgeHeartbeatIntervalMs: 12_000 });
+    const heartbeat = await import('./phase-status-heartbeat.js');
+    const createHeartbeatSpy = vi.spyOn(heartbeat, 'createPhaseStatusHeartbeatController');
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    expect(createHeartbeatSpy).toHaveBeenCalledWith(expect.objectContaining({
+      policy: expect.objectContaining({ enabled: true, intervalMs: 12_000 }),
+    }));
+    createHeartbeatSpy.mockRestore();
+  });
+
   it('completes in 2 rounds when first audit has blocking concerns', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
@@ -2012,12 +2031,13 @@ describe('ForgeOrchestrator', () => {
 // ForgeOrchestrator.resume()
 // ---------------------------------------------------------------------------
 
-function makePlanContent(overrides: { status?: string; title?: string; planId?: string; reviews?: number; includeChanges?: boolean } = {}): string {
+function makePlanContent(overrides: { status?: string; title?: string; planId?: string; reviews?: number; includeChanges?: boolean; heartbeat?: string } = {}): string {
   const status = overrides.status ?? 'REVIEW';
   const title = overrides.title ?? 'Test Plan';
   const planId = overrides.planId ?? 'plan-001';
   const includeChanges = overrides.includeChanges ?? true;
   const reviews = overrides.reviews ?? 0;
+  const heartbeat = overrides.heartbeat;
 
   const lines = [
     `# Plan: ${title}`,
@@ -2027,6 +2047,7 @@ function makePlanContent(overrides: { status?: string; title?: string; planId?: 
     `**Created:** 2026-01-01`,
     `**Status:** ${status}`,
     `**Project:** discoclaw`,
+    ...(heartbeat !== undefined ? [`**Heartbeat:** ${heartbeat}`] : []),
     '',
     '---',
     '',
@@ -2095,6 +2116,29 @@ describe('ForgeOrchestrator.resume()', () => {
     expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
     // Should NOT contain draft-phase progress
     expect(progress.some((p) => p.includes('Drafting'))).toBe(false);
+  });
+
+  it('wires per-plan Heartbeat metadata into resumed forge heartbeat controller', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(
+      tmpDir,
+      makeMockRuntime(['**Verdict:** Ready to approve.']),
+      { planForgeHeartbeatIntervalMs: 12_000 },
+    );
+    const heartbeat = await import('./phase-status-heartbeat.js');
+    const createHeartbeatSpy = vi.spyOn(heartbeat, 'createPhaseStatusHeartbeatController');
+
+    const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW', heartbeat: 'off' });
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    await orchestrator.resume('plan-001', filePath, 'Test Plan', async () => {});
+
+    expect(createHeartbeatSpy).toHaveBeenCalledWith(expect.objectContaining({
+      policy: expect.objectContaining({ enabled: false, intervalMs: 12_000 }),
+    }));
+    createHeartbeatSpy.mockRestore();
   });
 
   it('handles audit-then-revise loop', async () => {

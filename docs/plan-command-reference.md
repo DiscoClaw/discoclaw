@@ -179,6 +179,19 @@ Execute all pending phases sequentially (up to 50, safety cap). Requires the pla
 
 **Auto-close:** When all phases reach a terminal status (done or skipped), the plan is automatically set to `CLOSED` and its backing task is closed. This happens in both the command path (`!plan run` in Discord) and the action path (`planRun` via Discord actions).
 
+**Command-path heartbeat lifecycle (`!plan run`, `!plan run-one`, `!plan run-phase`, and command-triggered `!forge`):**
+- Start: `Plan run plan-017: starting phase-1: Implement src/webhook.ts...`
+- Periodic heartbeat: `Plan run plan-017: phase-1: Implement src/webhook.ts still running (45s elapsed)`
+- Transition: `Plan run plan-017: phase-1: Implement src/webhook.ts complete (52s). Starting phase-2: Implement src/webhook.test.ts...`
+- `!plan run` heartbeats append live phase counts from the phases file (for example: `Status 1/3 terminal (done 1, in-progress 1, pending 1, failed 0, skipped 0).`).
+- Terminal behavior is single-post: the heartbeat controller's terminal event is not posted separately; command path emits one final terminal outcome message (`complete`, `stopped`, `interrupted`, or `crashed`).
+
+**Per-plan heartbeat metadata controls (command path):**
+- Add `**Heartbeat:** <value>` to the plan header metadata (above the first `---`) to override the heartbeat policy for that plan.
+- Accepted values: positive millisecond numbers (`45000`) or duration strings (`45s`, `2m`, `1h`).
+- Disable periodic heartbeats with `0`, `off`, `none`, `disable`, `disabled`, or `false`.
+- Invalid/empty values fall back to `PLAN_FORGE_HEARTBEAT_INTERVAL_MS` (default `45000` ms). Enabled values are clamped to a 1s minimum.
+
 ```
 !plan run plan-017
 ```
@@ -328,7 +341,7 @@ Show available forge commands.
 - `!forge cancel` — cancel the running forge
 ```
 
-> **Architecture note:** The `!forge help` text is defined inline in `discord.ts` (inside the `forgeCmd.action === 'help'` branch), not in `forge-commands.ts`. All `!forge` command dispatch happens in `discord.ts` rather than in the commands module — this is a known architectural quirk, not a recommended pattern.
+> **Architecture note:** The `!forge help` text is defined inline in `src/discord/message-coordinator.ts` (inside the `forgeCmd.action === 'help'` branch), not in `forge-commands.ts`. All `!forge` command dispatch happens in the message coordinator rather than in the commands module — this is a known architectural quirk, not a recommended pattern.
 
 **Context alignment:** When a `!forge` is started, the drafter prompt is fed the task description and any pinned thread posts via the same shared `gatherConversationContext()` helper that `!plan` uses. That helper also captures replied-to messages, starter/recent thread posts, and fallback history, so both commands always reference the same conversation context even inside an existing task thread.
 
@@ -343,12 +356,15 @@ Create a plan and automatically draft, audit, and revise it. Runs in the backgro
 **Progress messages (edited in-place):**
 ```
 Starting forge: Add rate limiting to the webhook endpoint
-Forging plan-018... Drafting (reading codebase)
-Forging plan-018... Draft complete. Audit round 1/5...
-Forging plan-018... Audit round 1 found medium concerns. Revising...
-Forging plan-018... Revision complete. Audit round 2/5...
+Forge plan-018: starting Draft round 1/5...
+Forge plan-018: Draft round 1/5 still running (45s elapsed)
+Forge plan-018: Draft round 1/5 complete (74s). Starting Audit round 1/5...
+Forge plan-018: Audit round 1/5 still running (38s elapsed)
+Forge plan-018: Audit round 1/5 complete (61s). Starting Revision after round 1/5...
 Forge complete. Plan plan-018 ready for review (2 rounds, 87s)
 ```
+
+**Single terminal post behavior (command path):** `!forge` heartbeats cover starts/transitions/periodic elapsed updates only. Terminal outcomes (`complete`, `cancelled`, `error`, `CAP_REACHED`) are emitted once in the final forge status post/edit.
 
 **Concurrent session rejection:** Only one forge can run at a time. Issuing `!forge <desc>` while a forge is running returns:
 
@@ -356,7 +372,7 @@ Forge complete. Plan plan-018 ready for review (2 rounds, 87s)
 A forge is already running. Use `!forge cancel` to stop it first.
 ```
 
-This is checked in `discord.ts` via the `forgeOrchestrator?.isRunning` guard. Additionally, `ForgeOrchestrator.run()` throws if called while `running === true` as defense-in-depth.
+This is checked in `src/discord/message-coordinator.ts` via the `getActiveOrchestrator()?.isRunning` guard. Additionally, `ForgeOrchestrator.run()` throws if called while `running === true` as defense-in-depth.
 
 ### `!forge status`
 
@@ -404,7 +420,8 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | `PLAN_PHASES_ENABLED` | `true` | `parseBoolean` | Enable/disable phase decomposition and execution controls (`!plan phases`, `!plan run`, `!plan run-one`, `!plan run-phase`, `!plan skip`, `!plan skip-to`) |
 | `PLAN_PHASE_MAX_CONTEXT_FILES` | `5` | `parsePositiveInt` | Max files per phase batch |
 | `PLAN_PHASE_TIMEOUT_MS` | `1800000` (30 min) | `parsePositiveNumber` | Per-phase execution timeout |
-| `PLAN_PHASE_AUDIT_FIX_MAX` | `2` | `parseNonNegativeInt` | Max audit-fix attempts per phase before marking failed |
+| `PLAN_PHASE_AUDIT_FIX_MAX` | `3` | `parseNonNegativeInt` | Max audit-fix attempts per phase before marking failed |
+| `PLAN_FORGE_HEARTBEAT_INTERVAL_MS` | `45000` | `parseNonNegativeInt` | Default heartbeat interval for command-path phase status updates (`!plan run*`, `!forge`). `0` disables periodic heartbeats; phase starts/transitions and the single terminal outcome post still occur. |
 
 ### Forge commands
 

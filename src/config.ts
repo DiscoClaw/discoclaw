@@ -79,6 +79,7 @@ export type DiscoclawConfig = {
   planPhaseMaxContextFiles: number;
   planPhaseTimeoutMs: number;
   planPhaseMaxAuditFixAttempts: number;
+  planForgeHeartbeatIntervalMs: number;
   forgeCommandsEnabled: boolean;
   forgeMaxAuditRounds: number;
   forgeDrafterModel?: string;
@@ -268,6 +269,7 @@ function parsePositiveNumber(
 }
 
 const DEFAULT_THIRTY_MINUTES_MS = 1_800_000;
+const DEFAULT_PLAN_FORGE_HEARTBEAT_INTERVAL_MS = 45_000;
 
 function parseNonNegativeInt(
   env: NodeJS.ProcessEnv,
@@ -734,6 +736,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       planPhaseMaxContextFiles: parsePositiveInt(env, 'PLAN_PHASE_MAX_CONTEXT_FILES', 5),
       planPhaseTimeoutMs: parsePositiveNumber(env, 'PLAN_PHASE_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       planPhaseMaxAuditFixAttempts: parseNonNegativeInt(env, 'PLAN_PHASE_AUDIT_FIX_MAX', 3),
+      planForgeHeartbeatIntervalMs: parseNonNegativeInt(
+        env,
+        'PLAN_FORGE_HEARTBEAT_INTERVAL_MS',
+        DEFAULT_PLAN_FORGE_HEARTBEAT_INTERVAL_MS,
+      ),
       forgeCommandsEnabled: parseBoolean(env, 'DISCOCLAW_FORGE_COMMANDS_ENABLED', true),
       forgeMaxAuditRounds: parsePositiveInt(env, 'FORGE_MAX_AUDIT_ROUNDS', 5),
       forgeDrafterModel: parseTrimmedString(env, 'FORGE_DRAFTER_MODEL'),
