@@ -610,7 +610,7 @@ const STEP_TOOL_NAMES: ReadonlySet<StepToolName> = new Set([
   'step.wait',
 ]);
 
-const ACTIVE_STEP_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set(['queued', 'running', 'waiting']);
+const ACTIVE_STEP_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set(['running', 'waiting']);
 const STEP_MAX_ATTEMPTS_TOTAL = 3;
 const STEP_RETRY_DELAYS_MS = [1_000, 2_000] as const;
 const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1_000;
@@ -684,6 +684,34 @@ function emptyPipelineStore(): PipelineStore {
   return { version: PIPELINE_STORE_VERSION, runs: {} };
 }
 
+function pipelineStoreBackupPath(storePath: string): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `${storePath}.corrupt.${timestamp}.${randomUUID().slice(0, 8)}`;
+}
+
+async function recoverCorruptPipelineStore(
+  storePath: string,
+  reason: string,
+): Promise<{ store: PipelineStore; error?: string }> {
+  const backupPath = pipelineStoreBackupPath(storePath);
+  const emptyStore = emptyPipelineStore();
+  try {
+    await fs.mkdir(path.dirname(storePath), { recursive: true });
+    try {
+      await fs.rename(storePath, backupPath);
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw err;
+      }
+    }
+    await savePipelineStore(storePath, emptyStore);
+    return { store: emptyStore };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { store: emptyPipelineStore(), error: `${reason}; corruption recovery failed: ${message}` };
+  }
+}
+
 function resolvePipelineStorePath(allowedRoots: string[], opts?: ExecuteToolCallOpts): string {
   if (opts?.pipelineStorePath && opts.pipelineStorePath.trim() !== '') {
     return path.resolve(opts.pipelineStorePath);
@@ -694,17 +722,22 @@ function resolvePipelineStorePath(allowedRoots: string[], opts?: ExecuteToolCall
 async function loadPipelineStore(storePath: string): Promise<{ store: PipelineStore; error?: string }> {
   try {
     const raw = await fs.readFile(storePath, 'utf-8');
-    const parsed = JSON.parse(raw) as unknown;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch {
+      return recoverCorruptPipelineStore(storePath, 'pipeline store is malformed (invalid JSON)');
+    }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { store: emptyPipelineStore(), error: 'pipeline store is malformed (expected object root)' };
+      return recoverCorruptPipelineStore(storePath, 'pipeline store is malformed (expected object root)');
     }
     const obj = parsed as Record<string, unknown>;
     if (obj.version !== PIPELINE_STORE_VERSION) {
-      return { store: emptyPipelineStore(), error: 'pipeline store has unsupported version' };
+      return recoverCorruptPipelineStore(storePath, 'pipeline store has unsupported version');
     }
     const runsRaw = obj.runs;
     if (!runsRaw || typeof runsRaw !== 'object' || Array.isArray(runsRaw)) {
-      return { store: emptyPipelineStore(), error: 'pipeline store is malformed (runs must be an object)' };
+      return recoverCorruptPipelineStore(storePath, 'pipeline store is malformed (runs must be an object)');
     }
     return { store: obj as PipelineStore };
   } catch (err: unknown) {
@@ -944,7 +977,44 @@ async function savePipelineStore(storePath: string, store: PipelineStore): Promi
   try {
     await fs.mkdir(path.dirname(storePath), { recursive: true });
     const tmpPath = `${storePath}.tmp.${process.pid}.${randomUUID()}`;
-    await fs.writeFile(tmpPath, JSON.stringify(store, null, 2) + '\n', 'utf-8');
+    const persistedRuns: Record<string, Record<string, unknown>> = {};
+    for (const [runId, run] of Object.entries(store.runs)) {
+      persistedRuns[runId] = {
+        run_id: run.runId,
+        runtime: run.runtime,
+        adapter: run.adapter,
+        pipeline_name: run.pipelineName,
+        pipeline_input_hash: run.pipelineInputHash,
+        idempotency_key: run.idempotencyKey ?? null,
+        request_hash: run.requestHash,
+        workspace_root: run.workspaceRoot,
+        status: run.status,
+        current_step: run.currentStep,
+        steps: run.steps.map((step) => ({
+          tool: step.tool,
+          arguments: step.arguments,
+          status: step.status,
+          ok: step.ok ?? null,
+          result: step.result ?? null,
+          updated_at: step.updatedAt,
+        })),
+        created_at: run.createdAt,
+        updated_at: run.updatedAt,
+        completed_at: run.completedAt ?? null,
+        cancelled_at: run.cancelledAt ?? null,
+        attempts_by_step: run.attemptsByStep,
+        last_attempt_at_by_step: run.lastAttemptAtByStep,
+        next_retry_due_at_by_step: run.nextRetryDueAtByStep,
+        cancel_requested: run.cancelRequested,
+        last_error: run.lastError ?? null,
+        failure_code: run.failureCode ?? null,
+      };
+    }
+    const persistedStore = {
+      version: store.version,
+      runs: persistedRuns,
+    };
+    await fs.writeFile(tmpPath, JSON.stringify(persistedStore, null, 2) + '\n', 'utf-8');
     await fs.rename(tmpPath, storePath);
   } finally {
     release?.();
@@ -1367,14 +1437,13 @@ async function loadStepToolContext(
     await savePipelineStore(storePath, store);
   }
 
+  if (run.cancelRequested) {
+    return { failure: stepFailure(operation, 'E_POLICY_BLOCKED', 'run cancel has been requested') };
+  }
   if (run.status === 'queued') {
     run.status = 'running';
     run.updatedAt = nowIso();
     await savePipelineStore(storePath, store);
-  }
-
-  if (run.cancelRequested) {
-    return { failure: stepFailure(operation, 'E_POLICY_BLOCKED', 'run cancel has been requested') };
   }
   if (!ACTIVE_STEP_RUN_STATUSES.has(run.status)) {
     return { failure: stepFailure(operation, 'E_POLICY_BLOCKED', `run status is not active: ${run.status}`) };
@@ -1748,18 +1817,15 @@ async function handlePipelineTool(
   }
 
   if (operation === 'pipeline.status') {
-    return pipelineSuccess(run, run.status !== 'failed');
+    return pipelineSuccess(run);
   }
 
   if (operation === 'pipeline.resume') {
+    if (run.status === 'succeeded' || run.status === 'cancelled') {
+      return pipelineSuccess(run);
+    }
     if (run.cancelRequested) {
       return pipelineFailure(operation, 'E_POLICY_BLOCKED', `pipeline run cancel has been requested: ${runId}`);
-    }
-    if (run.status === 'succeeded') {
-      return pipelineFailure(operation, 'E_POLICY_BLOCKED', `pipeline run already succeeded: ${runId}`);
-    }
-    if (run.status === 'cancelled') {
-      return pipelineFailure(operation, 'E_POLICY_BLOCKED', `pipeline run is cancelled: ${runId}`);
     }
     if (run.status === 'failed' && run.failureCode === 'E_RETRY_EXHAUSTED') {
       return pipelineFailure(operation, 'E_RETRY_EXHAUSTED', `retry exhausted for run: ${runId}`);
