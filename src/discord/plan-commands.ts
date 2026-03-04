@@ -628,8 +628,9 @@ export async function handlePlanSkip(
     return `Failed to read phases file: ${String(err)}`;
   }
 
-  // Find the first in-progress or failed phase
-  const target = phases.phases.find((p) => p.status === 'in-progress' || p.status === 'failed');
+  // Prefer skipping an actively blocked phase; otherwise skip the next runnable pending phase.
+  const target = phases.phases.find((p) => p.status === 'in-progress' || p.status === 'failed')
+    ?? getNextPhase(phases);
   if (!target) return 'Nothing to skip.';
 
   phases = updatePhaseStatus(phases, target.id, 'skipped');

@@ -992,6 +992,77 @@ describe('step.run/assert/retry/wait', () => {
     expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
   });
 
+  it('step.run requires step.retry before rerunning a failed step', async () => {
+    const started = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'not_a_real_tool', arguments: {} }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    const runId = parseJsonResult(started.result)['run_id'] as string;
+
+    const firstRun = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'not_a_real_tool']) },
+    );
+    expect(firstRun.ok).toBe(false);
+    expect(parseJsonResult(firstRun.result)['failure_code']).toBe('E_TOOL_UNAVAILABLE');
+
+    const secondRun = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'not_a_real_tool']) },
+    );
+    expect(secondRun.ok).toBe(false);
+    const payload = parseJsonResult(secondRun.result);
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect(String(payload['message'])).toContain('step.retry');
+  });
+
+  it('step.wait requires step.retry when current step is failed with no retry scheduled', async () => {
+    const started = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'not_a_real_tool', arguments: {} }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    const runId = parseJsonResult(started.result)['run_id'] as string;
+
+    const firstRun = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'not_a_real_tool']) },
+    );
+    expect(firstRun.ok).toBe(false);
+
+    const wait = await executeToolCall(
+      'step.wait',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.wait']) },
+    );
+    expect(wait.ok).toBe(false);
+    const payload = parseJsonResult(wait.result);
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect(String(payload['message'])).toContain('step.retry');
+  });
+
   it('step.retry schedules retries and enforces deterministic retry exhaustion', async () => {
     const started = await executeToolCall(
       'pipeline.start',

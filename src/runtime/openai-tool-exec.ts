@@ -1331,8 +1331,25 @@ async function handleStepTool(
   }
 
   if (operation === 'step.wait') {
-    const nowMs = Date.now();
     const dueAt = ctx.run.nextRetryDueAtByStep[ctx.stepStateKey];
+    if (ctx.step.status === 'failed' && !dueAt) {
+      return stepFailure(
+        operation,
+        'E_POLICY_BLOCKED',
+        `retry has not been scheduled for failed step ${ctx.stepIndex}; call step.retry first`,
+        { run: summarizePipelineRun(ctx.run) },
+      );
+    }
+    if (ctx.step.status === 'done' || ctx.step.status === 'cancelled') {
+      return stepFailure(
+        operation,
+        'E_POLICY_BLOCKED',
+        `current step is not retry-eligible (status=${ctx.step.status})`,
+        { run: summarizePipelineRun(ctx.run) },
+      );
+    }
+
+    const nowMs = Date.now();
     if (!dueAt) {
       if (ctx.run.status !== 'running') {
         ctx.run.status = 'running';
@@ -1423,6 +1440,23 @@ async function handleStepTool(
       attempts_used: attempts,
       run: summarizePipelineRun(ctx.run),
     });
+  }
+
+  if (ctx.step.status === 'failed') {
+    return stepFailure(
+      operation,
+      'E_POLICY_BLOCKED',
+      `current step is failed (status=${ctx.step.status}); call step.retry before step.run`,
+      { run: summarizePipelineRun(ctx.run) },
+    );
+  }
+  if (ctx.step.status === 'done' || ctx.step.status === 'cancelled') {
+    return stepFailure(
+      operation,
+      'E_POLICY_BLOCKED',
+      `current step is not executable (status=${ctx.step.status})`,
+      { run: summarizePipelineRun(ctx.run) },
+    );
   }
 
   const dueAt = ctx.run.nextRetryDueAtByStep[ctx.stepStateKey];
