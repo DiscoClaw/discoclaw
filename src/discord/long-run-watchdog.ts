@@ -151,6 +151,7 @@ export class LongRunWatchdog {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private checkInInFlight = new Set<string>();
   private finalInFlight = new Set<string>();
+  private startedRunIds = new Set<string>();
 
   constructor(opts: LongRunWatchdogOpts) {
     this.dataFilePath = opts.dataFilePath;
@@ -193,6 +194,7 @@ export class LongRunWatchdog {
         updatedAt: now,
       };
       this.store.runs[run.runId] = run;
+      this.startedRunIds.add(run.runId);
       await this.persistStore();
       this.scheduleCheckInTimer(run);
       out = { run: cloneRun(run), deduped: false };
@@ -252,8 +254,12 @@ export class LongRunWatchdog {
       let changed = false;
 
       for (const run of Object.values(this.store.runs)) {
-        this.clearCheckInTimer(run.runId);
         if (run.status === 'running') {
+          if (this.startedRunIds.has(run.runId)) {
+            this.scheduleCheckInTimer(run);
+            continue;
+          }
+          this.clearCheckInTimer(run.runId);
           run.status = 'completed';
           run.completion = 'interrupted';
           run.completedAt = now;
@@ -262,8 +268,10 @@ export class LongRunWatchdog {
           run.finalError = null;
           interruptedRuns++;
           changed = true;
+        } else {
+          this.clearCheckInTimer(run.runId);
         }
-        if (run.status === 'completed' && !run.finalPosted) {
+        if (run.status === 'completed' && !run.finalPosted && this.requiresFinalPost(run)) {
           runIdsToRetry.push(run.runId);
         }
       }
@@ -415,7 +423,7 @@ export class LongRunWatchdog {
         await this.ensureLoaded();
         const run = this.store.runs[runId];
         if (!run) return;
-        if (run.status !== 'completed' || run.finalPosted) return;
+        if (run.status !== 'completed' || run.finalPosted || !this.requiresFinalPost(run)) return;
 
         run.finalPostAttempts += 1;
         run.lastFinalAttemptAt = this.now();
@@ -451,5 +459,12 @@ export class LongRunWatchdog {
     } finally {
       this.finalInFlight.delete(runId);
     }
+  }
+
+  private requiresFinalPost(run: LongRunWatchdogRun): boolean {
+    if (run.completion === 'interrupted') return true;
+    if (run.checkInPosted) return true;
+    if (run.completedAt !== null && run.completedAt >= run.checkInDueAt) return true;
+    return false;
   }
 }

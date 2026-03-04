@@ -50,6 +50,8 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
       'GEMINI_BIN',
       'GEMINI_MODEL',
       'OPENAI_API_KEY',
+      'DISCOCLAW_FAST_RUNTIME',
+      'DISCOCLAW_TIER_OPENAI_FAST',
       'CODEX_BIN',
       'CODEX_MODEL',
       'CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX',
@@ -350,6 +352,16 @@ export async function runInitWizard(): Promise<void> {
     );
   } else if (finalChoice === '4') {
     values.PRIMARY_RUNTIME = 'codex';
+    const openaiFastKey = await askOptional(
+      'Optional OpenAI API key for fast tier (gpt-5-mini) [leave empty to skip]: ',
+      () => null,
+    );
+    if (openaiFastKey) {
+      values.OPENAI_API_KEY = openaiFastKey;
+      values.DISCOCLAW_FAST_RUNTIME = 'openai';
+      values.DISCOCLAW_TIER_OPENAI_FAST = 'gpt-5-mini';
+      console.log('  Fast-tier split enabled: chat=codex, fast=openai (gpt-5-mini).');
+    }
   } else if (finalChoice === '5') {
     values.PRIMARY_RUNTIME = 'openrouter';
     console.log('  Note: the OpenRouter adapter is HTTP-only.');

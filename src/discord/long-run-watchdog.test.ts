@@ -44,7 +44,7 @@ describe('LongRunWatchdog', () => {
       dataFilePath: filePath,
       postStillRunning,
       postFinal,
-      stillRunningDelayMs: 10_000,
+      stillRunningDelayMs: 1_000,
     });
 
     await watchdog.start({
@@ -53,6 +53,9 @@ describe('LongRunWatchdog', () => {
       messageId: 'msg-1',
       sessionKey: 'sess-1',
     });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await watchdog._waitForIdleForTest();
+    expect(postStillRunning).toHaveBeenCalledTimes(1);
     await watchdog.complete('run-1', { outcome: 'succeeded' });
 
     expect(postFinal).toHaveBeenCalledTimes(1);
@@ -64,6 +67,38 @@ describe('LongRunWatchdog', () => {
 
     const persisted = await readRun(filePath, 'run-1');
     expect(persisted?.finalPosted).toBe(true);
+    watchdog.dispose();
+  });
+
+  it('does not post a final follow-up for fast runs that never posted check-in', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const postStillRunning = vi.fn(async () => {});
+    const postFinal = vi.fn(async () => {});
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning,
+      postFinal,
+      stillRunningDelayMs: 10_000,
+    });
+
+    await watchdog.start({
+      runId: 'run-fast',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+    });
+    await watchdog.complete('run-fast', { outcome: 'succeeded' });
+
+    expect(postStillRunning).toHaveBeenCalledTimes(0);
+    expect(postFinal).toHaveBeenCalledTimes(0);
+    const state = await watchdog.getRun('run-fast');
+    expect(state?.status).toBe('completed');
+    expect(state?.checkInPosted).toBe(false);
+    expect(state?.finalPosted).toBe(false);
+
+    const sweep = await watchdog.startupSweep();
+    expect(sweep.finalRetried).toBe(0);
+    expect(sweep.finalPosted).toBe(0);
+    expect(sweep.finalFailed).toBe(0);
     watchdog.dispose();
   });
 
@@ -158,7 +193,10 @@ describe('LongRunWatchdog', () => {
       runId: 'run-retry',
       channelId: 'chan-1',
       messageId: 'msg-1',
+      stillRunningDelayMs: 1_000,
     });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await watchdog._waitForIdleForTest();
     await watchdog.complete('run-retry', { outcome: 'succeeded' });
 
     const afterComplete = await watchdog.getRun('run-retry');
@@ -192,7 +230,7 @@ describe('LongRunWatchdog', () => {
       dataFilePath: filePath,
       postStillRunning: postStillRunningA,
       postFinal: postFinalA,
-      stillRunningDelayMs: 60_000,
+      stillRunningDelayMs: 1_000,
     });
     await beforeRestart.start({
       runId: 'run-interrupted',
@@ -200,6 +238,8 @@ describe('LongRunWatchdog', () => {
       messageId: 'msg-1',
       sessionKey: 'sess-1',
     });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await beforeRestart._waitForIdleForTest();
     beforeRestart.dispose();
 
     const postStillRunningB = vi.fn(async () => {});
@@ -223,5 +263,76 @@ describe('LongRunWatchdog', () => {
     expect(state?.completion).toBe('interrupted');
     expect(state?.finalPosted).toBe(true);
     afterRestart.dispose();
+  });
+
+  it('startup sweep posts final status for orphaned interrupted runs even without persisted check-in', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const postStillRunningA = vi.fn(async () => {});
+    const postFinalA = vi.fn(async () => {});
+
+    const beforeRestart = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: postStillRunningA,
+      postFinal: postFinalA,
+      stillRunningDelayMs: 60_000,
+    });
+    await beforeRestart.start({
+      runId: 'run-interrupted-no-checkin',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+      sessionKey: 'sess-1',
+    });
+    beforeRestart.dispose();
+
+    const postStillRunningB = vi.fn(async () => {});
+    const postFinalB = vi.fn(async (run: { completion: string | null }) => {
+      expect(run.completion).toBe('interrupted');
+    });
+    const afterRestart = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: postStillRunningB,
+      postFinal: postFinalB,
+      stillRunningDelayMs: 60_000,
+    });
+
+    const sweep = await afterRestart.startupSweep();
+    expect(sweep.interruptedRuns).toBe(1);
+    expect(sweep.finalRetried).toBe(1);
+    expect(sweep.finalPosted).toBe(1);
+    expect(postFinalB).toHaveBeenCalledTimes(1);
+
+    const state = await afterRestart.getRun('run-interrupted-no-checkin');
+    expect(state?.status).toBe('completed');
+    expect(state?.completion).toBe('interrupted');
+    expect(state?.checkInPosted).toBe(false);
+    expect(state?.finalPosted).toBe(true);
+    afterRestart.dispose();
+  });
+
+  it('startup sweep does not interrupt runs started in the current process', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const postStillRunning = vi.fn(async () => {});
+    const postFinal = vi.fn(async () => {});
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning,
+      postFinal,
+    });
+
+    await watchdog.start({
+      runId: 'run-fresh',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+      stillRunningDelayMs: 10_000,
+    });
+
+    const sweep = await watchdog.startupSweep();
+    expect(sweep.interruptedRuns).toBe(0);
+    expect(sweep.finalRetried).toBe(0);
+
+    const state = await watchdog.getRun('run-fresh');
+    expect(state?.status).toBe('running');
+    expect(state?.completion).toBeNull();
+    watchdog.dispose();
   });
 });

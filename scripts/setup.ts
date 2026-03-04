@@ -167,6 +167,16 @@ if (providerChoice === '1') {
   if (codexBin) values.CODEX_BIN = codexBin;
   const codexModel = await askOptional('Codex model [leave empty for default]: ', () => null);
   if (codexModel) values.CODEX_MODEL = codexModel;
+  const openaiFastKey = await askOptional(
+    'Optional OpenAI API key for fast tier (gpt-5-mini) [leave empty to skip]: ',
+    () => null,
+  );
+  if (openaiFastKey) {
+    values.OPENAI_API_KEY = openaiFastKey;
+    values.DISCOCLAW_FAST_RUNTIME = 'openai';
+    values.DISCOCLAW_TIER_OPENAI_FAST = 'gpt-5-mini';
+    console.log('  Fast-tier split enabled: chat=codex, fast=openai (gpt-5-mini).');
+  }
   const bypassApprovals = await ask('Enable CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX? [y/N] ');
   if (bypassApprovals.toLowerCase() === 'y') {
     values.CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX = '1';
