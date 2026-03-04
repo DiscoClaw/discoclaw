@@ -1018,11 +1018,43 @@ async function executePipelineRun(
   log: LogFn | undefined,
   opts: ExecuteToolCallOpts | undefined,
 ): Promise<void> {
+  if (run.cancelRequested || run.status === 'cancelled') {
+    run.status = 'cancelled';
+    const cancelledAt = run.cancelledAt ?? nowIso();
+    run.cancelledAt = cancelledAt;
+    run.updatedAt = cancelledAt;
+    for (let i = run.currentStep; i < run.steps.length; i++) {
+      const step = run.steps[i]!;
+      if (step.status === 'pending' || step.status === 'running') {
+        step.status = 'cancelled';
+        step.updatedAt = cancelledAt;
+      }
+    }
+    await savePipelineStore(storePath, store);
+    return;
+  }
+
   run.status = 'running';
   run.updatedAt = nowIso();
   await savePipelineStore(storePath, store);
 
   while (run.currentStep < run.steps.length) {
+    if (run.cancelRequested || run.status === 'cancelled') {
+      run.status = 'cancelled';
+      const cancelledAt = run.cancelledAt ?? nowIso();
+      run.cancelledAt = cancelledAt;
+      run.updatedAt = cancelledAt;
+      for (let i = run.currentStep; i < run.steps.length; i++) {
+        const pending = run.steps[i]!;
+        if (pending.status === 'pending' || pending.status === 'running') {
+          pending.status = 'cancelled';
+          pending.updatedAt = cancelledAt;
+        }
+      }
+      await savePipelineStore(storePath, store);
+      return;
+    }
+
     const step = run.steps[run.currentStep]!;
     const key = stepKey(run.currentStep);
     if (step.status === 'done') {
@@ -1513,6 +1545,9 @@ async function handlePipelineTool(
       for (const existing of Object.values(store.runs)) {
         if (!isWithinIdempotencyWindow(existing, nowMs)) continue;
         if (existing.idempotencyKey !== dedupeLookupKey) continue;
+        if (existing.workspaceRoot && existing.workspaceRoot !== invocationWorkspaceRoot) {
+          return workspaceAffinityFailure(operation, existing.workspaceRoot, invocationWorkspaceRoot);
+        }
         if (existing.requestHash !== requestHash) {
           return pipelineFailure(
             operation,
@@ -1527,6 +1562,7 @@ async function handlePipelineTool(
       for (const existing of Object.values(store.runs)) {
         if (!isWithinIdempotencyWindow(existing, nowMs)) continue;
         if (existing.idempotencyKey !== null) continue;
+        if (existing.workspaceRoot && existing.workspaceRoot !== invocationWorkspaceRoot) continue;
         if (existing.runtime !== runtime || existing.adapter !== adapter || existing.pipelineName !== pipelineName) continue;
         if (existing.pipelineInputHash !== pipelineInputHash) continue;
         if (!stepArgumentsEquivalent(canonicalStepsForHash(parsedSteps.steps), existing.steps)) continue;
@@ -1596,6 +1632,9 @@ async function handlePipelineTool(
   }
 
   if (operation === 'pipeline.resume') {
+    if (run.cancelRequested) {
+      return pipelineFailure(operation, 'E_POLICY_BLOCKED', `pipeline run cancel has been requested: ${runId}`);
+    }
     if (run.status === 'succeeded') {
       return pipelineFailure(operation, 'E_POLICY_BLOCKED', `pipeline run already succeeded: ${runId}`);
     }
@@ -1610,6 +1649,20 @@ async function handlePipelineTool(
       if (currentStep?.status === 'running') {
         return pipelineFailure(operation, 'E_POLICY_BLOCKED', `pipeline run is already running: ${runId}`);
       }
+    }
+    if (run.status === 'waiting' && run.currentStep < run.steps.length) {
+      const key = stepKey(run.currentStep);
+      const dueAt = run.nextRetryDueAtByStep[key];
+      if (typeof dueAt === 'string' && dueAt.trim() !== '') {
+        const dueMs = Date.parse(dueAt);
+        if (Number.isFinite(dueMs) && dueMs > Date.now()) {
+          return pipelineFailure(operation, 'E_POLICY_BLOCKED', `retry not due yet for run: ${runId} (next_retry_due_at=${dueAt})`);
+        }
+      }
+      run.nextRetryDueAtByStep[key] = null;
+      run.status = 'running';
+      run.updatedAt = nowIso();
+      await savePipelineStore(storePath, store);
     }
 
     if (run.status === 'failed' && run.currentStep < run.steps.length) {
@@ -1699,6 +1752,20 @@ export async function executeToolCall(
   }
 
   if (opts?.pipelineStepMode && (name.startsWith('pipeline.') || name.startsWith('step.'))) {
+    if (name.startsWith('pipeline.')) {
+      return pipelineFailure(
+        name as PipelineToolName,
+        'E_POLICY_BLOCKED',
+        'Nested pipeline.* and step.* calls are not allowed inside pipeline steps',
+      );
+    }
+    if (STEP_TOOL_NAMES.has(name as StepToolName)) {
+      return stepFailure(
+        name as StepToolName,
+        'E_POLICY_BLOCKED',
+        'Nested pipeline.* and step.* calls are not allowed inside pipeline steps',
+      );
+    }
     return { result: 'Nested pipeline.* and step.* calls are not allowed inside pipeline steps', ok: false };
   }
   if (opts?.enableHybridPipeline === false && (name.startsWith('pipeline.') || name.startsWith('step.'))) {
@@ -1742,7 +1809,7 @@ export async function executeToolCall(
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       log?.(`tool:${name} error: ${message}`);
-      return { result: message, ok: false };
+      return pipelineFailure(name as PipelineToolName, 'E_TOOL_UNAVAILABLE', message);
     }
   }
 

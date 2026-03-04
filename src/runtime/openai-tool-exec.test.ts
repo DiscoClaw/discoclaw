@@ -640,6 +640,51 @@ describe('pipeline.start/status/resume/cancel', () => {
     expect(parseJsonResult(secondResume.result)['status']).toBe('succeeded');
   });
 
+  it('pipeline.resume blocks execution when current step retry is not due yet', async () => {
+    const start = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'not_a_real_tool', arguments: {} }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(start.ok).toBe(true);
+    const runId = parseJsonResult(start.result)['run_id'] as string;
+
+    const run1 = await executeToolCall(
+      'step.run',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.run', 'not_a_real_tool']) },
+    );
+    expect(run1.ok).toBe(false);
+
+    const retry = await executeToolCall(
+      'step.retry',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.retry']) },
+    );
+    expect(retry.ok).toBe(true);
+
+    const resumed = await executeToolCall(
+      'pipeline.resume',
+      { run_id: runId },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.resume', 'not_a_real_tool']) },
+    );
+    expect(resumed.ok).toBe(false);
+    const payload = parseJsonResult(resumed.result);
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect(String(payload['message'])).toContain('retry not due yet');
+  });
+
   it('pipeline.cancel marks pending steps cancelled', async () => {
     const start = await executeToolCall(
       'pipeline.start',
@@ -708,6 +753,51 @@ describe('pipeline.start/status/resume/cancel', () => {
     }
   });
 
+  it('pipeline.start blocks idempotent replay when invocation workspace root differs', async () => {
+    const otherRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-other-root-'));
+    const sharedPipelineStorePath = path.join(tmpDir, 'shared-pipeline-store-2.json');
+    try {
+      const first = await executeToolCall(
+        'pipeline.start',
+        {
+          pipeline_name: 'workspace-affinity',
+          idempotency_key: 'workspace-affinity-idem',
+          auto_run: false,
+          steps: [{ tool: 'write_file', arguments: { file_path: 'root.txt', content: 'x' } }],
+        },
+        [tmpDir],
+        undefined,
+        {
+          allowedToolNames: new Set(['pipeline.start']),
+          pipelineStorePath: sharedPipelineStorePath,
+        },
+      );
+      expect(first.ok).toBe(true);
+
+      const second = await executeToolCall(
+        'pipeline.start',
+        {
+          pipeline_name: 'workspace-affinity',
+          idempotency_key: 'workspace-affinity-idem',
+          auto_run: false,
+          steps: [{ tool: 'write_file', arguments: { file_path: 'root.txt', content: 'x' } }],
+        },
+        [otherRoot],
+        undefined,
+        {
+          allowedToolNames: new Set(['pipeline.start']),
+          pipelineStorePath: sharedPipelineStorePath,
+        },
+      );
+      expect(second.ok).toBe(false);
+      const payload = parseJsonResult(second.result);
+      expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+      expect(String(payload['message'])).toContain('workspace_root mismatch');
+    } finally {
+      await fs.rm(otherRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects nested pipeline calls when executing a pipeline step', async () => {
     const start = await executeToolCall(
       'pipeline.start',
@@ -723,6 +813,43 @@ describe('pipeline.start/status/resume/cancel', () => {
     expect(payload['status']).toBe('failed');
     expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
     expect(payload['last_error']).toMatch(/nested pipeline/i);
+  });
+
+  it('returns structured E_POLICY_BLOCKED when nested pipeline.* is called directly in pipelineStepMode', async () => {
+    const result = await executeToolCall(
+      'pipeline.status',
+      { run_id: 'any' },
+      [tmpDir],
+      undefined,
+      { pipelineStepMode: true },
+    );
+    expect(result.ok).toBe(false);
+    const payload = parseJsonResult(result.result);
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect(String(payload['message'])).toContain('Nested pipeline');
+  });
+
+  it('returns structured E_TOOL_UNAVAILABLE when pipeline store persistence throws', async () => {
+    const blockingFile = path.join(tmpDir, 'not-a-directory');
+    await fs.writeFile(blockingFile, 'x');
+
+    const result = await executeToolCall(
+      'pipeline.start',
+      {
+        auto_run: false,
+        steps: [{ tool: 'read_file', arguments: { file_path: 'x.txt' } }],
+      },
+      [tmpDir],
+      undefined,
+      {
+        allowedToolNames: new Set(['pipeline.start']),
+        pipelineStorePath: path.join(blockingFile, 'pipeline-store.json'),
+      },
+    );
+    expect(result.ok).toBe(false);
+    const payload = parseJsonResult(result.result);
+    expect(payload['operation']).toBe('pipeline.start');
+    expect(payload['failure_code']).toBe('E_TOOL_UNAVAILABLE');
   });
 });
 
