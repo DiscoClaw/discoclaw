@@ -55,7 +55,7 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, setStopReaction, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice, closeFenceIfOpen } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
@@ -94,7 +94,7 @@ import type { AttachmentLike } from './image-download.js';
 import { DiscordTransportClient } from './transport-client.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
-export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed };
+export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
 
 export type BotParams = {
   token: string;
@@ -198,6 +198,7 @@ export type BotParams = {
   statusChannel?: string;
   bootstrapEnsureTasksForum?: boolean;
   toolAwareStreaming?: boolean;
+  streamPreviewMode?: 'compact' | 'raw';
   streamStallWarningMs: number;
   actionFollowupDepth: number;
   reactionHandlerEnabled: boolean;
@@ -2545,6 +2546,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let invokeErrorMessage = '';
             let lastEditAt = 0;
             const minEditIntervalMs = 1250;
+            const previewMode = params.streamPreviewMode ?? 'compact';
             hadTextFinal = false;
 
             // On follow-up iterations, send a new placeholder message.
@@ -2565,7 +2567,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const now = Date.now();
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               lastEditAt = now;
-              const out = selectStreamingOutput({ deltaText, activityLabel, finalText, statusTick: statusTick++, showPreview: Date.now() - t0 >= 7000, elapsedMs: Date.now() - t0 });
+              const out = selectStreamingOutput({
+                deltaText,
+                activityLabel,
+                finalText,
+                statusTick: statusTick++,
+                previewMode,
+                elapsedMs: Date.now() - t0,
+              });
               streamEditQueue = streamEditQueue
                 .catch(() => undefined)
                 .then(async () => {
@@ -2576,6 +2585,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   }
                 });
               await streamEditQueue;
+            };
+
+            const appendRuntimeSignal = async (
+              evt: Parameters<typeof formatRuntimePreviewSignal>[0],
+              opts?: { edit?: boolean },
+            ) => {
+              const line = formatRuntimePreviewSignal(evt, previewMode);
+              if (!line) return;
+              deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
+              if (opts?.edit ?? true) await maybeEdit(false);
             };
 
             // Stream stall warning state.
@@ -2613,7 +2632,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     maybeEdit(true);
                   } else if (action.type === 'show_activity') {
                     activityLabel = action.label;
-                    deltaText = '';
                     // eslint-disable-next-line @typescript-eslint/no-floating-promises
                     maybeEdit(true);
                   }
@@ -2645,6 +2663,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   // Tool-aware mode: route relevant events through the queue.
                   if (evt.type === 'text_delta' || evt.type === 'text_final' ||
                       evt.type === 'tool_start' || evt.type === 'tool_end') {
+                    if (evt.type === 'tool_start') {
+                      await appendRuntimeSignal(evt, { edit: false });
+                    } else if (evt.type === 'tool_end') {
+                      await appendRuntimeSignal(evt);
+                    }
                     taq.handleEvent(evt);
                   } else if (evt.type === 'error') {
                     invokeHadError = true;
@@ -2659,16 +2682,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
                       params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
                     }
-                  } else if (evt.type === 'log_line') {
-                    // Bypass queue for log lines.
-                    const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
-                    deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
-                    await maybeEdit(false);
+                  } else if (evt.type === 'log_line' || evt.type === 'usage') {
+                    // Bypass queue for non-text runtime signals.
+                    await appendRuntimeSignal(evt);
                   } else if (evt.type === 'image_data') {
                     collectedImages.push(evt.image);
                   }
                 } else {
-                  // Flat mode: existing behavior unchanged.
+                  // Flat mode: stream text/final directly and append runtime signals.
                   if (evt.type === 'text_final') {
                     hadTextFinal = true;
                     finalText = evt.text;
@@ -2688,10 +2709,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   } else if (evt.type === 'text_delta') {
                     deltaText += evt.text;
                     await maybeEdit(false);
-                  } else if (evt.type === 'log_line') {
-                    const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
-                    deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
-                    await maybeEdit(false);
+                  } else if (
+                    evt.type === 'log_line' ||
+                    evt.type === 'tool_start' ||
+                    evt.type === 'tool_end' ||
+                    evt.type === 'usage'
+                  ) {
+                    await appendRuntimeSignal(evt);
                   } else if (evt.type === 'image_data') {
                     collectedImages.push(evt.image);
                   }

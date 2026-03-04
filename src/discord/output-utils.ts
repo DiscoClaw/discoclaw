@@ -1,3 +1,5 @@
+import type { EngineEvent } from '../runtime/types.js';
+
 /**
  * If the text ends inside an unclosed fenced code block, append the matching
  * closing fence so that any subsequently appended text lands outside the block.
@@ -197,6 +199,77 @@ export function buildCompletionNotice(elapsedMs: number): string {
   return `Done ${formatElapsed(elapsedMs)}`;
 }
 
+export type StreamingPreviewMode = 'compact' | 'raw';
+
+function truncatePreviewSignal(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars - 1) + '\u2026';
+}
+
+function sanitizePreviewSignalText(text: string, maxChars: number): string {
+  const singleLine = stripActionTags(text)
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n+/g, ' \\n ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return truncatePreviewSignal(singleLine, maxChars);
+}
+
+function stringifyPreviewSignalPayload(payload: unknown): string {
+  if (typeof payload === 'string') return payload;
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
+function formatUsageSignal(evt: Extract<EngineEvent, { type: 'usage' }>, mode: StreamingPreviewMode): string {
+  const parts: string[] = [];
+  if (typeof evt.inputTokens === 'number') parts.push(`in=${evt.inputTokens}`);
+  if (typeof evt.outputTokens === 'number') parts.push(`out=${evt.outputTokens}`);
+  if (typeof evt.totalTokens === 'number') parts.push(`total=${evt.totalTokens}`);
+  if (typeof evt.costUsd === 'number') {
+    const precision = mode === 'raw' ? 6 : 4;
+    parts.push(`cost=$${evt.costUsd.toFixed(precision)}`);
+  }
+  return parts.length > 0 ? `[usage] ${parts.join(' ')}` : '[usage]';
+}
+
+export function formatRuntimePreviewSignal(
+  evt: EngineEvent,
+  mode: StreamingPreviewMode = 'compact',
+): string | null {
+  switch (evt.type) {
+    case 'tool_start': {
+      if (mode === 'compact') return `[tool:start] ${evt.name}`;
+      const input = evt.input === undefined ? '' : sanitizePreviewSignalText(stringifyPreviewSignalPayload(evt.input), 300);
+      return input ? `[tool:start] ${evt.name} input=${input}` : `[tool:start] ${evt.name}`;
+    }
+    case 'tool_end': {
+      if (mode === 'compact') return `[tool:end] ${evt.name} ${evt.ok ? 'ok' : 'failed'}`;
+      const output = evt.output === undefined ? '' : sanitizePreviewSignalText(stringifyPreviewSignalPayload(evt.output), 300);
+      const status = evt.ok ? 'ok' : 'failed';
+      return output ? `[tool:end] ${evt.name} ${status} output=${output}` : `[tool:end] ${evt.name} ${status}`;
+    }
+    case 'log_line': {
+      const prefix = evt.stream === 'stderr' ? '[stderr]' : '[stdout]';
+      const maxChars = mode === 'raw' ? 400 : 180;
+      return `${prefix} ${sanitizePreviewSignalText(evt.line, maxChars)}`;
+    }
+    case 'usage':
+      return formatUsageSignal(evt, mode);
+    default:
+      return null;
+  }
+}
+
+function renderStreamingTail(text: string, mode: StreamingPreviewMode): string {
+  const maxLines = mode === 'raw' ? 14 : 8;
+  const maxWidth = mode === 'raw' ? 120 : 72;
+  return renderDiscordTail(stripActionTags(text), maxLines, maxWidth);
+}
+
 /**
  * Strip `<discord-action>...</discord-action>` blocks from text so raw JSON
  * never leaks into streaming previews visible to users.
@@ -213,10 +286,12 @@ export function selectStreamingOutput(opts: {
   activityLabel: string;
   finalText: string;
   statusTick: number;
+  previewMode?: StreamingPreviewMode;
   showPreview?: boolean;
   elapsedMs?: number;
 }): string {
   const preview = opts.showPreview ?? true;
+  const previewMode = opts.previewMode ?? 'compact';
   const prefix = opts.elapsedMs !== undefined ? formatElapsed(opts.elapsedMs) + ' ' : '';
   // finalText always bypasses the gate — completion/error output renders immediately.
   if (!preview && !opts.finalText && !opts.deltaText) {
@@ -225,9 +300,9 @@ export function selectStreamingOutput(opts: {
   }
   if (opts.deltaText) {
     const label = prefix + thinkingLabel(opts.statusTick);
-    return `**${label}**\n${renderDiscordTail(stripActionTags(opts.deltaText))}`;
+    return `**${label}**\n${renderStreamingTail(opts.deltaText, previewMode)}`;
   }
   if (opts.activityLabel) return renderActivityTail(prefix + opts.activityLabel);
-  if (opts.finalText) return renderDiscordTail(stripActionTags(opts.finalText));
+  if (opts.finalText) return renderStreamingTail(opts.finalText, previewMode);
   return renderActivityTail(prefix + thinkingLabel(opts.statusTick));
 }
