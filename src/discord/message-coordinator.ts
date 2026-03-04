@@ -92,6 +92,7 @@ import { resolveModel } from '../runtime/model-tiers.js';
 import { getDefaultTimezone } from '../cron/default-timezone.js';
 import type { AttachmentLike } from './image-download.js';
 import { DiscordTransportClient } from './transport-client.js';
+import type { LongRunWatchdog } from './long-run-watchdog.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
@@ -219,6 +220,10 @@ export type BotParams = {
   existingTasksId?: string;
   completionNotifyEnabled?: boolean;
   completionNotifyThresholdMs?: number;
+  /** Optional lifecycle watchdog for long-running Discord operations. */
+  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete' | 'startupSweep'>;
+  /** Optional override for watchdog still-running check-in delay. */
+  longRunStillRunningDelayMs?: number;
   serviceName?: string;
   // Voice subsystem config — threaded from DiscoclawConfig.
   voiceEnabled?: boolean;
@@ -352,6 +357,58 @@ function errorCode(err: unknown): number | null {
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+type LongRunOutcome = 'succeeded' | 'failed';
+type LongRunWatchdogLike = Pick<LongRunWatchdog, 'start' | 'complete' | 'startupSweep'>;
+
+function buildWatchdogRunId(
+  scope: string,
+  ...parts: Array<string | number | null | undefined>
+): string {
+  const encoded = parts
+    .filter((part): part is string | number => part !== null && part !== undefined && String(part).length > 0)
+    .map(part => encodeURIComponent(String(part)));
+  return [scope, ...encoded].join(':');
+}
+
+async function startWatchdogRun(opts: {
+  watchdog?: LongRunWatchdogLike;
+  runId: string;
+  channelId: string;
+  messageId: string;
+  sessionKey?: string;
+  stillRunningDelayMs?: number;
+  log?: LoggerLike;
+  flow: string;
+}): Promise<void> {
+  if (!opts.watchdog) return;
+  try {
+    await opts.watchdog.start({
+      runId: opts.runId,
+      channelId: opts.channelId,
+      messageId: opts.messageId,
+      sessionKey: opts.sessionKey,
+      stillRunningDelayMs: opts.stillRunningDelayMs,
+    });
+  } catch (err) {
+    opts.log?.warn({ err, runId: opts.runId }, `${opts.flow}: watchdog start failed`);
+  }
+}
+
+async function completeWatchdogRun(opts: {
+  watchdog?: LongRunWatchdogLike;
+  runId: string | null;
+  outcome: LongRunOutcome;
+  log?: LoggerLike;
+  flow: string;
+}): Promise<void> {
+  if (!opts.watchdog || !opts.runId) return;
+  try {
+    await opts.watchdog.complete(opts.runId, { outcome: opts.outcome });
+  } catch (err) {
+    opts.log?.warn({ err, runId: opts.runId, outcome: opts.outcome }, `${opts.flow}: watchdog complete failed`);
+  }
 }
 
 function toSendTarget(candidate: unknown): SendTarget | null {
@@ -551,6 +608,17 @@ function isQueueLevelCommand(m: CoordinatorMessage, params: Omit<BotParams, 'tok
 }
 
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
+  const longRunWatchdog = params.longRunWatchdog;
+  if (longRunWatchdog) {
+    void longRunWatchdog.startupSweep().then((result) => {
+      if (result.interruptedRuns > 0 || result.finalRetried > 0 || result.finalFailed > 0) {
+        params.log?.info(result, 'long-run-watchdog: startup sweep complete');
+      }
+    }).catch((err) => {
+      params.log?.warn({ err }, 'long-run-watchdog: startup sweep failed');
+    });
+  }
+
   // --- Onboarding state ---
   let onboardingSession: OnboardingFlow | null = null;
   let activeOnboardingUserId: string | null = null;
@@ -1302,6 +1370,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
         let reply: ReplyTarget | null = null;
         let abortSignal: AbortSignal | undefined;
+        let primaryWatchdogRunId: string | null = null;
+        let primaryWatchdogOutcome: LongRunOutcome = 'succeeded';
         try {
           // Handle !memory commands before session creation or the "..." placeholder.
           if (!isBotMessage && params.memoryCommandsEnabled) {
@@ -1452,6 +1522,24 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     throw err; // outer catch cleans up running plan tracking
                   }
                   validationLock(); // release validation lock before phase execution
+                  const planRunWatchdogId = buildWatchdogRunId(
+                    'plan-command',
+                    planId,
+                    msg.channelId,
+                    msg.id,
+                    usageCmd,
+                    targetPhaseId,
+                  );
+                  await startWatchdogRun({
+                    watchdog: longRunWatchdog,
+                    runId: planRunWatchdogId,
+                    channelId: msg.channelId,
+                    messageId: progressReply.id,
+                    sessionKey,
+                    stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                    log: params.log,
+                    flow: 'plan-run',
+                  });
 
                   const planRunStreaming = createStreamingProgress(
                     progressReply,
@@ -1528,6 +1616,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   };
 
                   // Fire-and-forget: phase execution loop
+                  let planRunWatchdogOutcome: LongRunOutcome = 'failed';
                   // eslint-disable-next-line @typescript-eslint/no-floating-promises
                   (async () => {
                     const phaseResults: Array<{ id: string; title: string; elapsedMs: number }> = [];
@@ -1671,6 +1760,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     if (closeResult.closed) {
                       await editSummary(summaryMsg + '\n\nPlan and backing task auto-closed.');
                     }
+                    planRunWatchdogOutcome = stopReason === null ? 'succeeded' : 'failed';
                   })().then(
                     () => { /* success — cleanup handled by outer finally */ },
                     (err) => {
@@ -1688,6 +1778,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     },
                   ).catch((err) => {
                     params.log?.error({ err }, 'plan-run: unhandled rejection in callback');
+                  }).finally(async () => {
+                    await completeWatchdogRun({
+                      watchdog: longRunWatchdog,
+                      runId: planRunWatchdogId,
+                      outcome: planRunWatchdogOutcome,
+                      log: params.log,
+                      flow: 'plan-run',
+                    });
                   }).finally(() => {
                     planAbort.dispose();
                     removeRunningPlan(planId);
@@ -1959,6 +2057,22 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   content: `Re-auditing **${found.header.planId}**...`,
                   allowedMentions: NO_MENTIONS,
                 });
+                const forgeResumeWatchdogId = buildWatchdogRunId(
+                  'forge-command-resume',
+                  found.header.planId,
+                  msg.channelId,
+                  msg.id,
+                );
+                await startWatchdogRun({
+                  watchdog: longRunWatchdog,
+                  runId: forgeResumeWatchdogId,
+                  channelId: msg.channelId,
+                  messageId: progressReply.id,
+                  sessionKey,
+                  stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                  log: params.log,
+                  flow: 'forge:resume',
+                });
 
                 const forgeResumeStreaming = createStreamingProgress(
                   progressReply,
@@ -1977,19 +2091,32 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // eslint-disable-next-line @typescript-eslint/no-floating-promises
                 resumeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress, forgeResumeOnEvent).then(
                   async (result) => {
+                    let outcome: LongRunOutcome = result.error ? 'failed' : 'succeeded';
                     forgeResumeStreaming.dispose();
                     setActiveOrchestrator(null);
                     forgeReleaseLock();
-                    // On message-gone (10008), onProgress already handled the channel.send fallback;
-                    // if result has an error, the orchestrator's error path already called onProgress.
-                    if (result.planSummary && !result.error) {
-                      try {
-                        await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
-                      } catch {
-                        // best-effort
+                    try {
+                      // On message-gone (10008), onProgress already handled the channel.send fallback;
+                      // if result has an error, the orchestrator's error path already called onProgress.
+                      if (result.planSummary && !result.error) {
+                        try {
+                          await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
+                        } catch {
+                          outcome = 'failed';
+                        }
                       }
+                      await sendForgeImplementationFollowup(result);
+                    } catch {
+                      outcome = 'failed';
+                    } finally {
+                      await completeWatchdogRun({
+                        watchdog: longRunWatchdog,
+                        runId: forgeResumeWatchdogId,
+                        outcome,
+                        log: params.log,
+                        flow: 'forge:resume',
+                      });
                     }
-                    await sendForgeImplementationFollowup(result);
                   },
                   async (err) => {
                     forgeResumeStreaming.dispose();
@@ -2003,6 +2130,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       if (errorCode(editErr) === 10008) {
                         try { await msg.channel.send({ content: `Forge resume crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                       }
+                    } finally {
+                      await completeWatchdogRun({
+                        watchdog: longRunWatchdog,
+                        runId: forgeResumeWatchdogId,
+                        outcome: 'failed',
+                        log: params.log,
+                        flow: 'forge:resume',
+                      });
                     }
                   },
                 ).catch((err) => {
@@ -2063,6 +2198,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 content: `Starting forge: ${forgeCmd.args}`,
                 allowedMentions: NO_MENTIONS,
               });
+              const forgeCreateWatchdogId = buildWatchdogRunId(
+                'forge-command-create',
+                msg.channelId,
+                msg.id,
+              );
+              await startWatchdogRun({
+                watchdog: longRunWatchdog,
+                runId: forgeCreateWatchdogId,
+                channelId: msg.channelId,
+                messageId: progressReply.id,
+                sessionKey,
+                stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                log: params.log,
+                flow: 'forge:create',
+              });
 
               const forgeCreateStreaming = createStreamingProgress(
                 progressReply,
@@ -2082,18 +2232,31 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
               createOrchestrator.run(forgeCmd.args, onProgress, forgeContext, forgeCreateOnEvent).then(
                 async (result) => {
+                  let outcome: LongRunOutcome = result.error ? 'failed' : 'succeeded';
                   forgeCreateStreaming.dispose();
                   setActiveOrchestrator(null);
                   forgeReleaseLock();
-                  // Send plan summary as a follow-up message
-                  if (result.planSummary && !result.error) {
-                    try {
-                      await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
-                    } catch {
-                      // best-effort
+                  try {
+                    // Send plan summary as a follow-up message
+                    if (result.planSummary && !result.error) {
+                      try {
+                        await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
+                      } catch {
+                        outcome = 'failed';
+                      }
                     }
+                    await sendForgeImplementationFollowup(result);
+                  } catch {
+                    outcome = 'failed';
+                  } finally {
+                    await completeWatchdogRun({
+                      watchdog: longRunWatchdog,
+                      runId: forgeCreateWatchdogId,
+                      outcome,
+                      log: params.log,
+                      flow: 'forge:create',
+                    });
                   }
-                  await sendForgeImplementationFollowup(result);
                 },
                 async (err) => {
                   forgeCreateStreaming.dispose();
@@ -2107,6 +2270,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     if (errorCode(editErr) === 10008) {
                       try { await msg.channel.send({ content: `Forge crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                     }
+                  } finally {
+                    await completeWatchdogRun({
+                      watchdog: longRunWatchdog,
+                      runId: forgeCreateWatchdogId,
+                      outcome: 'failed',
+                      log: params.log,
+                      flow: 'forge:create',
+                    });
                   }
                 },
               ).catch((err) => {
@@ -2200,6 +2371,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           reply = await activeMsg.reply({ content: formatBoldLabel(thinkingLabel(0)), allowedMentions: NO_MENTIONS });
+          primaryWatchdogRunId = buildWatchdogRunId('message', msg.channelId, activeMsg.id);
+          await startWatchdogRun({
+            watchdog: longRunWatchdog,
+            runId: primaryWatchdogRunId,
+            channelId: msg.channelId,
+            messageId: reply.id,
+            sessionKey,
+            stillRunningDelayMs: params.longRunStillRunningDelayMs,
+            log: params.log,
+            flow: 'message',
+          });
 
           // Track this reply for graceful shutdown cleanup and cleanup on early error.
           let replyFinalized = false;
@@ -2253,6 +2435,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               allowedMentions: NO_MENTIONS,
             });
             replyFinalized = true;
+            primaryWatchdogOutcome = 'failed';
             return;
           }
 
@@ -3070,6 +3253,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
         } catch (err) {
+          primaryWatchdogOutcome = 'failed';
           metrics.increment('discord.handler.error');
           params.log?.error({ err, sessionKey }, 'discord:handler failed');
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -3084,6 +3268,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           } catch {
             // Ignore secondary errors writing to Discord.
           }
+        } finally {
+          const outcome: LongRunOutcome = (primaryWatchdogOutcome === 'failed' || abortSignal?.aborted || isShuttingDown())
+            ? 'failed'
+            : 'succeeded';
+          await completeWatchdogRun({
+            watchdog: longRunWatchdog,
+            runId: primaryWatchdogRunId,
+            outcome,
+            log: params.log,
+            flow: 'message',
+          });
         }
       });
 

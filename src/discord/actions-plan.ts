@@ -15,6 +15,7 @@ import type { HandlePlanCommandOpts, PlanFileHeader } from './plan-commands.js';
 import { runNextPhase, resolveProjectCwd, readPhasesFile, buildPostRunSummary } from './plan-manager.js';
 import type { PlanRunEvent } from './plan-manager.js';
 import type { TaskStore } from '../tasks/store.js';
+import type { LongRunWatchdog } from './long-run-watchdog.js';
 import {
   acquireWriterLock,
   addRunningPlan,
@@ -72,6 +73,10 @@ export type PlanContext = {
   onRunComplete?: (content: string) => Promise<void>;
   /** Called after a backing task is closed, so callers can sync Discord thread tags. */
   onTaskClosed?: (taskId: string) => void;
+  /** Optional lifecycle watchdog for long-running plan runs. */
+  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete'>;
+  /** Optional override for watchdog still-running check-in delay. */
+  longRunStillRunningDelayMs?: number;
 };
 
 type MessageEditTarget = {
@@ -100,6 +105,10 @@ function extractPhaseStopMessage(phaseResult: { result: string } & Record<string
   const message = phaseResult.message;
   if (typeof message === 'string' && message.trim()) return message;
   return phaseResult.result;
+}
+
+function buildPlanRunWatchdogId(planId: string, ctx: ActionContext): string {
+  return `plan-action:${ctx.channelId}:${ctx.messageId}:${planId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,8 +309,24 @@ export async function executePlanAction(
       const PROGRESS_THROTTLE_MS = 3_000;
 
       addRunningPlan(action.planId);
+      const watchdogRunId = buildPlanRunWatchdogId(runPlanId, ctx);
+      const watchdog = planCtx.longRunWatchdog;
+      if (watchdog) {
+        try {
+          await watchdog.start({
+            runId: watchdogRunId,
+            channelId: ctx.channelId,
+            messageId: ctx.messageId,
+            sessionKey: runPlanId,
+            stillRunningDelayMs: planCtx.longRunStillRunningDelayMs,
+          });
+        } catch (err) {
+          planCtx.log?.warn({ err, runId: watchdogRunId, planId: runPlanId }, 'plan:action:run watchdog start failed');
+        }
+      }
 
       // Fire and forget — plan run executes asynchronously.
+      let watchdogOutcome: 'succeeded' | 'failed' = 'failed';
       void (async () => {
         // Send initial status message and set up live edits (best-effort).
         let runChannel: { send: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> } | undefined;
@@ -517,10 +542,22 @@ export async function executePlanAction(
         } catch {
           // best-effort
         }
+        const runHadFailure = Boolean(stopReason || runError || hitMaxPhases);
+        watchdogOutcome = runHadFailure ? 'failed' : 'succeeded';
       })().catch((err) => {
         planCtx.log?.error({ err, planId: runPlanId }, 'plan:action:run failed');
+      }).finally(async () => {
+        if (watchdog) {
+          try {
+            await watchdog.complete(watchdogRunId, { outcome: watchdogOutcome });
+          } catch (err) {
+            planCtx.log?.warn({ err, runId: watchdogRunId, planId: runPlanId }, 'plan:action:run watchdog complete failed');
+          }
+        }
       }).finally(() => {
         removeRunningPlan(runPlanId);
+      }).catch((err) => {
+        planCtx.log?.error({ err, planId: runPlanId }, 'plan:action:run unhandled rejection in callback');
       });
 
       return { ok: true, summary: `Plan run started for **${action.planId}** — starting phase ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}` };
