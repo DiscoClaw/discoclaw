@@ -328,7 +328,7 @@ describe('message coordinator plan run phase-start posts', () => {
     });
   });
 
-  it('posts a final summary channel message after a full plan run', async () => {
+  it('posts a final summary update after a full plan run', async () => {
     const { runNextPhase } = await import('./plan-manager.js');
     (runNextPhase as any)
       .mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
@@ -352,12 +352,12 @@ describe('message coordinator plan run phase-start posts', () => {
 
     await handler(msg as any);
     await vi.waitFor(() => {
-      // The final channel.send should include a plan-run-complete summary
-      const finalSend = msg.channel.send.mock.calls.find((call: any[]) => {
+      // The final progress edit should include a plan-run-complete summary.
+      const finalEdit = msg.progressReply.edit.mock.calls.find((call: any[]) => {
         const content = String(call[0]?.content ?? '');
         return content.includes('plan-042') && content.includes('phase');
       });
-      expect(finalSend).toBeDefined();
+      expect(finalEdit).toBeDefined();
     });
   });
 
