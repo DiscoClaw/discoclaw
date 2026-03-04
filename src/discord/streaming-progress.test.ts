@@ -95,7 +95,7 @@ describe('createStreamingProgress', () => {
 
     const streamedEdits = message.edits.slice(1);
     expect(streamedEdits.some((edit) => edit.includes('fetching context...'))).toBe(true);
-    expect(streamedEdits.some((edit) => edit.includes('[tool:end]'))).toBe(false);
+    expect(streamedEdits.some((edit) => edit.includes('finished.'))).toBe(false);
     ctrl.dispose();
   });
 
@@ -120,7 +120,7 @@ describe('createStreamingProgress', () => {
     await vi.advanceTimersByTimeAsync(2600);
     const gammaEdit = message.edits.findIndex((edit) => edit.includes('alpha beta gamma'));
     expect(gammaEdit).toBeGreaterThan(betaEdit);
-    expect(message.edits.some((edit) => edit.includes('[tool:end]'))).toBe(false);
+    expect(message.edits.some((edit) => edit.includes('finished.'))).toBe(false);
     ctrl.dispose();
   });
 
@@ -146,10 +146,10 @@ describe('createStreamingProgress', () => {
     await vi.advanceTimersByTimeAsync(1300);
 
     const allEdits = message.edits.join('\n');
-    expect(allEdits).toContain('[tool:start] Read');
-    expect(allEdits).toContain('[stdout] reading file');
-    expect(allEdits).toContain('[usage] in=11 out=7 total=18 cost=$0.0012');
-    expect(allEdits).toContain('[tool:end] Read ok');
+    expect(allEdits).toContain('Using Read...');
+    expect(allEdits).toContain('Update: reading file');
+    expect(allEdits).toContain('Usage: in 11, out 7, total 18, cost $0.0012.');
+    expect(allEdits).toContain('Read finished.');
     expect(allEdits).not.toContain('<discord-action>');
     ctrl.dispose();
   });
@@ -187,10 +187,12 @@ describe('createStreamingProgress', () => {
     await vi.advanceTimersByTimeAsync(1300);
 
     const allEdits = message.edits.join('\n');
-    expect(allEdits).toContain('[tool:start] Bash input=');
-    expect(allEdits).toContain('[usage] in=11 out=7 total=18 cost=$0.001200');
-    expect(allEdits).toContain('[tool:end] Bash ok output=');
-    expect(allEdits).toContain('[stdout] runtime');
+    expect(allEdits).toContain('Using Bash...');
+    expect(allEdits).toContain('Usage: in 11, out 7, total 18, cost $0.001200.');
+    expect(allEdits).toContain('Bash finished.');
+    expect(allEdits).toContain('Update: runtime');
+    expect(allEdits).not.toContain('input=');
+    expect(allEdits).not.toContain('output=');
     expect(allEdits).not.toContain('<discord-action>');
 
     const lastEdit = message.edits[message.edits.length - 1]!;
@@ -220,8 +222,8 @@ describe('createStreamingProgress', () => {
     await vi.advanceTimersByTimeAsync(1300);
 
     const lastEdit = message.edits[message.edits.length - 1]!;
-    expect(lastEdit).toContain('warmup complete');
-    expect(lastEdit).toContain('[tool:start] Bash');
+    expect(lastEdit).toContain('Update: warmup complete');
+    expect(lastEdit).toContain('Using Bash...');
     ctrl.dispose();
   });
 
@@ -246,7 +248,42 @@ describe('createStreamingProgress', () => {
 
     const lastEdit = message.edits[message.edits.length - 1]!;
     expect(lastEdit).not.toContain('phase-1 stale signal');
-    expect(lastEdit).toContain('[tool:start] Read');
+    expect(lastEdit).toContain('Using Read...');
+    ctrl.dispose();
+  });
+
+  it('keeps runtime event payloads unchanged while adapting display text', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    const evt = {
+      type: 'tool_start',
+      name: 'Read',
+      input: { path: '/tmp/file.ts', flags: ['r'] },
+    } as EngineEvent;
+    const original = JSON.parse(JSON.stringify(evt));
+    ctrl.onEvent(evt);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    expect(evt).toEqual(original);
+    ctrl.dispose();
+  });
+
+  it('redacts structured json payload fragments from visible runtime updates', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({
+      type: 'log_line',
+      stream: 'stdout',
+      line: 'runtime emitted {"type":"status","step":"draft"}',
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const allEdits = message.edits.join('\n');
+    expect(allEdits).toContain('Runtime update (details omitted).');
+    expect(allEdits).not.toContain('"type":"status"');
     ctrl.dispose();
   });
 

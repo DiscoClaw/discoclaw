@@ -1,8 +1,9 @@
 import type { EngineEvent } from '../runtime/types.js';
 import { ToolAwareQueue } from './tool-aware-queue.js';
-import { formatRuntimePreviewSignal, selectStreamingOutput } from './output-utils.js';
+import { selectStreamingOutput } from './output-utils.js';
 import type { StreamingPreviewMode } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { adaptRuntimeEventText } from './runtime-event-text-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,10 +41,6 @@ function errorCode(err: unknown): number | null {
   if (typeof err !== 'object' || err === null || !('code' in err)) return null;
   const code = (err as { code?: unknown }).code;
   return typeof code === 'number' ? code : null;
-}
-
-function formatRuntimeSignal(evt: EngineEvent, streamPreviewMode: StreamingPreviewMode): string | null {
-  return formatRuntimePreviewSignal(evt, streamPreviewMode);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +141,7 @@ export function createStreamingProgress(
   }
 
   const onEvent: StreamingProgressController['onEvent'] = (evt) => {
-    const signalLine = formatRuntimeSignal(evt, streamPreviewMode);
+    const signalLine = adaptRuntimeEventText(evt, { mode: streamPreviewMode });
     if (signalLine) appendSignalLine(signalLine);
     queue.handleEvent(evt);
     void maybeStreamEdit(false);

@@ -1518,8 +1518,8 @@ describe('streaming behavior', () => {
     const replyObj = reaction.message._replyObj;
     // Some intermediate edit should contain the log lines.
     const allEditContents = replyObj.edit.mock.calls.map((c: any) => c[0].content);
-    const hasStdout = allEditContents.some((c: string) => c.includes('[stdout]'));
-    const hasStderr = allEditContents.some((c: string) => c.includes('[stderr]'));
+    const hasStdout = allEditContents.some((c: string) => c.includes('Update: building...'));
+    const hasStderr = allEditContents.some((c: string) => c.includes('Warning: warn: deprecated'));
     expect(hasStdout).toBe(true);
     expect(hasStderr).toBe(true);
   });
@@ -1545,9 +1545,66 @@ describe('streaming behavior', () => {
 
     const replyObj = reaction.message._replyObj;
     const allEditContents = replyObj.edit.mock.calls.map((c: any) => c[0].content);
-    expect(allEditContents.some((c: string) => c.includes('[tool:start] readFile'))).toBe(true);
-    expect(allEditContents.some((c: string) => c.includes('[usage] in=11 out=7 total=18'))).toBe(true);
-    expect(allEditContents.some((c: string) => c.includes('[tool:end] readFile ok'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('Using readFile...'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('Usage: in 11, out 7, total 18, cost $0.0012.'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('readFile finished.'))).toBe(true);
+  });
+
+  it('redacts structured runtime payload fragments from streaming preview text', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'log_line', stream: 'stdout', line: 'runtime emitted {"type":"status","step":"draft"}' };
+        yield { type: 'log_line', stream: 'stderr', line: 'warn {"ok":false,"details":"private"}' };
+        yield { type: 'text_final', text: 'Done' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+    expect(allEdits).toContain('Runtime update (details omitted).');
+    expect(allEdits).toContain('Runtime warning (details omitted).');
+    expect(allEdits).not.toContain('"type":"status"');
+    expect(allEdits).not.toContain('"ok":false');
+  });
+
+  it('keeps runtime event payloads unchanged while adapting streaming preview text', async () => {
+    const toolStartEvt: EngineEvent = {
+      type: 'tool_start',
+      name: 'Read',
+      input: { path: '/tmp/file.ts', flags: ['r'] },
+    };
+    const original = JSON.parse(JSON.stringify(toolStartEvt));
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield toolStartEvt;
+        yield { type: 'text_final', text: 'Done' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime, streamPreviewMode: 'raw' });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(toolStartEvt).toEqual(original);
+    const replyObj = reaction.message._replyObj;
+    const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+    expect(allEdits).toContain('Using Read...');
+    expect(allEdits).not.toContain('/tmp/file.ts');
+    expect(allEdits).not.toContain('flags');
   });
 
   it('waits for pending keepalive streaming edits before finalizing', async () => {
@@ -1625,6 +1682,51 @@ describe('streaming behavior', () => {
           String(call?.[0]?.content ?? '').includes('Final answer'),
         ),
       ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('emits periodic still-running progress while stalled with no runtime events', async () => {
+    vi.useFakeTimers();
+    try {
+      const unblockRuntime = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtimeStarted = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtime: RuntimeAdapter = {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(): AsyncIterable<EngineEvent> {
+          runtimeStarted.resolve();
+          await unblockRuntime.promise;
+          yield { type: 'done' };
+        },
+      };
+
+      const params = makeParams({ runtime, streamStallWarningMs: 1 });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      const reaction = mockReaction();
+
+      const pending = handler(reaction as any, mockUser() as any);
+      await runtimeStarted.promise;
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      const replyObj = reaction.message._replyObj;
+      const allEditContents = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? ''));
+      const combined = allEditContents.join('\n');
+      expect(combined).toContain('Stream may be stalled');
+      expect(combined).toContain('Still running');
+
+      unblockRuntime.resolve();
+      await pending;
     } finally {
       vi.useRealTimers();
     }

@@ -392,6 +392,53 @@ describe('executePlanAction', () => {
       }
     });
 
+    it('adapts runtime events to concise Discord text without leaking raw JSON payloads', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      const rawStructuredPayload = '{"event":"engine_update","token_count":42}';
+      const runtimeEvent = { type: 'log_line', stream: 'stdout', line: rawStructuredPayload } as const;
+
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        opts.onEvent?.(runtimeEvent);
+        return { result: 'nothing_to_run' };
+      });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const editContents = setup.msg.edit.mock.calls.map((call) => String(call[0]!.content));
+      expect(editContents.some((text) => text.includes('Runtime update (details omitted).'))).toBe(true);
+      expect(editContents.some((text) => text.includes(rawStructuredPayload))).toBe(false);
+      // The internal runtime event payload remains untouched.
+      expect(runtimeEvent.line).toBe(rawStructuredPayload);
+    });
+
+    it('can disable tool-aware runtime event streaming for plan actions', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      let capturedOnEvent: unknown = 'unset';
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        capturedOnEvent = opts.onEvent;
+        return { result: 'nothing_to_run' };
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus', toolAwareStreaming: false }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(capturedOnEvent).toBeUndefined();
+    });
+
     it('fails without planId', async () => {
       const result = await executePlanAction(
         { type: 'planRun', planId: '' },
@@ -556,7 +603,7 @@ describe('executePlanAction', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       const contents = setup.fn.mock.calls.map((call) => String(call[0]!.content));
-      expect(contents.some((text) => text.includes('**First phase**...'))).toBe(true);
+      expect(contents.some((text) => text.includes('Starting phase: First phase...'))).toBe(true);
     });
 
     it('deduplicates phase-start posts for repeated progress lines in the same run', async () => {
@@ -585,7 +632,7 @@ describe('executePlanAction', () => {
 
       const phaseStartMessages = setup.fn.mock.calls
         .map((call) => String(call[0]!.content))
-        .filter((content) => content.includes('**First phase**...'));
+        .filter((content) => content.includes('Starting phase: First phase...'));
       expect(phaseStartMessages).toHaveLength(1);
     });
 
@@ -629,7 +676,7 @@ describe('executePlanAction', () => {
 
       expect(setup.fn).toHaveBeenCalledOnce();
       const sent = String(setup.fn.mock.calls[0]![0]!.content);
-      expect(sent).toContain('**First phase**...');
+      expect(sent).toContain('Starting phase: First phase...');
       expect(setup.msg.edit).not.toHaveBeenCalled();
     });
 
@@ -759,7 +806,9 @@ describe('executePlanAction', () => {
       expect(sendMsgs.length).toBeGreaterThanOrEqual(2);
       const phaseMsg = sendMsgs[1]!;
       expect(phaseMsg.edit).toHaveBeenCalled();
-      const doneEdit = phaseMsg.edit.mock.calls.find((call) => String(call[0]!.content).includes('[x]'));
+      const doneEdit = phaseMsg.edit.mock.calls.find((call) =>
+        String(call[0]!.content).includes('Phase complete: First phase.'),
+      );
       expect(doneEdit).toBeDefined();
       expect(String(doneEdit![0]!.content)).toContain('First phase');
     });
@@ -808,7 +857,9 @@ describe('executePlanAction', () => {
       expect(sendMsgs.length).toBeGreaterThanOrEqual(2);
       const phaseMsg = sendMsgs[1]!;
       expect(phaseMsg.edit).toHaveBeenCalled();
-      const failEdit = phaseMsg.edit.mock.calls.find((call) => String(call[0]!.content).includes('[!]'));
+      const failEdit = phaseMsg.edit.mock.calls.find((call) =>
+        String(call[0]!.content).includes('Phase failed: First phase.'),
+      );
       expect(failEdit).toBeDefined();
       expect(String(failEdit![0]!.content)).toContain('First phase');
     });

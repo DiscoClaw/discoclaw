@@ -235,7 +235,7 @@ describe('message coordinator plan run phase-start posts', () => {
     await vi.waitFor(() => {
       expect(runNextPhase).toHaveBeenCalled();
       expect(msg.channel.send).toHaveBeenCalledWith(expect.objectContaining({
-        content: '**Post implementation audit**...',
+        content: 'Starting phase: Post implementation audit...',
       }));
     });
   });
@@ -261,7 +261,7 @@ describe('message coordinator plan run phase-start posts', () => {
     await vi.waitFor(() => {
       const phaseStartPosts = msg.channel.send.mock.calls
         .map((call: any[]) => String(call[0]?.content ?? ''))
-        .filter((content: string) => content.includes('**First phase**...'));
+        .filter((content: string) => content.includes('Starting phase: First phase...'));
       expect(phaseStartPosts).toHaveLength(1);
     });
   });
@@ -290,10 +290,10 @@ describe('message coordinator plan run phase-start posts', () => {
     await handler(msg as any);
     await vi.waitFor(() => {
       expect(msg.channel.send).toHaveBeenCalledWith(expect.objectContaining({
-        content: '**First phase**...',
+        content: 'Starting phase: First phase...',
       }));
       expect(msg.phaseMsg.edit).toHaveBeenCalledWith(expect.objectContaining({
-        content: '[x] **First phase**',
+        content: 'Phase complete: First phase.',
       }));
     });
   });
@@ -322,7 +322,7 @@ describe('message coordinator plan run phase-start posts', () => {
     await handler(msg as any);
     await vi.waitFor(() => {
       expect(msg.phaseMsg.edit).toHaveBeenCalledWith(expect.objectContaining({
-        content: '[!] **First phase**',
+        content: 'Phase failed: First phase.',
       }));
     });
   });

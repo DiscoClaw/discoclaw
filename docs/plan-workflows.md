@@ -181,6 +181,19 @@ Fallback (full replay):
 !plan run plan-017
 ```
 
+### DRAFT: Runtime Event Text Adapter Rollout
+
+Goal: keep Discord progress text concise and human-readable without changing internal event contracts.
+
+Adapter boundary and invariants:
+
+1. Runtime and phase engines continue emitting typed internal payloads (`EngineEvent`, `PlanRunEvent`) unchanged.
+2. A presentation adapter (`adaptRuntimeEventText`, `adaptPlanRunEventText`) maps selected events to short Discord-safe text.
+3. Structured payload fragments (JSON-like runtime logs and action tags) are redacted from previews.
+4. Internal payloads remain available to internal consumers and logs; only adapted text is user-facing.
+
+Current rollout status: **DRAFT** pending review sign-off on wording quality and redaction behavior.
+
 ---
 
 ## Branch Workflow
@@ -243,6 +256,7 @@ These steps mirror the rebuild workflow in `AGENTS.md`/`TOOLS.md` and ensure we 
 | `src/discord/plan-commands.ts` | Plan command parsing, plan file CRUD, phase CLI wrappers, `preparePlanRun()` |
 | `src/discord/forge-commands.ts` | Forge command parsing, `ForgeOrchestrator` class, audit verdict parsing, prompt builders |
 | `src/discord/plan-manager.ts` | Phase decomposition, serialization, staleness detection, phase execution, git integration |
+| `src/discord/runtime-event-text-adapter.ts` | Presentation-layer runtime/plan text adapter (`EngineEvent`/`PlanRunEvent` → concise Discord progress text) with structured-payload redaction; does not mutate event payload contracts |
 | `src/discord/streaming-progress.ts` | `createStreamingProgress()` — reusable controller that wires a `ToolAwareQueue` to a Discord progress message; drives live tool-activity labels and streaming text preview via `selectStreamingOutput` at 1250ms; used by forge create, forge resume, and plan-run paths in `discord.ts` |
 | `src/discord.ts` | Discord message handler: command dispatch for both `!plan` and `!forge`, writer lock, forge lifecycle management |
 | `src/config.ts` | All plan/forge env var parsing |
