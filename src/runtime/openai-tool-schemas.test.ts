@@ -97,6 +97,16 @@ describe('buildToolSchemas', () => {
       'step.wait',
     ]);
   });
+
+  it('ignores explicit pipeline.* labels without Pipeline category', () => {
+    const schemas = buildToolSchemas(['Read', 'pipeline.status']);
+    expect(schemas.map((s) => s.function.name)).toEqual(['read_file']);
+  });
+
+  it('ignores explicit step.* labels without Step category', () => {
+    const schemas = buildToolSchemas(['Read', 'step.wait']);
+    expect(schemas.map((s) => s.function.name)).toEqual(['read_file']);
+  });
 });
 
 describe('OPENAI_TO_DISCO_NAME', () => {

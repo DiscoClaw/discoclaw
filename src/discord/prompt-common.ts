@@ -381,9 +381,17 @@ export async function resolveEffectiveTools(opts: {
   }
 
   if (opts.runtimeId && opts.runtimeId !== 'openai' && opts.runtimeId !== 'openrouter') {
-    const droppedHybrid = effectiveTools.filter((tool) => tool === 'Pipeline' || tool === 'Step');
+    const droppedHybrid = effectiveTools.filter((tool) =>
+      tool === 'Pipeline'
+      || tool === 'Step'
+      || tool.startsWith('pipeline.')
+      || tool.startsWith('step.'));
     if (droppedHybrid.length > 0) {
-      effectiveTools = effectiveTools.filter((tool) => tool !== 'Pipeline' && tool !== 'Step');
+      effectiveTools = effectiveTools.filter((tool) =>
+        tool !== 'Pipeline'
+        && tool !== 'Step'
+        && !tool.startsWith('pipeline.')
+        && !tool.startsWith('step.'));
       const note = `${opts.runtimeId} does not support hybrid tools: ${droppedHybrid.join(', ')}`;
       runtimeCapabilityNote = runtimeCapabilityNote ? `${runtimeCapabilityNote}; ${note}` : note;
       opts.log?.warn(

@@ -363,7 +363,16 @@ function parseRuntimeTools(env: NodeJS.ProcessEnv, warnings: string[]): string[]
     throw new Error('RUNTIME_TOOLS was set but no tools were parsed');
   }
 
-  const unknown = tools.filter((t) => !KNOWN_TOOLS.has(t));
+  const explicitHybridLabels = tools.filter((t) => t.startsWith('pipeline.') || t.startsWith('step.'));
+  if (explicitHybridLabels.length > 0) {
+    warnings.push(
+      `RUNTIME_TOOLS includes explicit hybrid tool labels (${explicitHybridLabels.join(', ')}). ` +
+      'Use category allowlisting (Pipeline/Step); explicit labels are ignored.',
+    );
+  }
+
+  const filteredTools = tools.filter((t) => !t.startsWith('pipeline.') && !t.startsWith('step.'));
+  const unknown = filteredTools.filter((t) => !KNOWN_TOOLS.has(t));
   if (unknown.length > 0) {
     warnings.push(
       `RUNTIME_TOOLS includes unknown tools (${unknown.join(', ')}). ` +
@@ -371,7 +380,7 @@ function parseRuntimeTools(env: NodeJS.ProcessEnv, warnings: string[]): string[]
     );
   }
 
-  return tools;
+  return filteredTools;
 }
 
 export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {

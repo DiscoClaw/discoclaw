@@ -374,6 +374,10 @@ const TOOL_DEFS: Record<string, OpenAIFunctionTool> = {
 export function buildToolSchemas(enabledTools: string[]): OpenAIFunctionTool[] {
   const expanded = new Set<string>();
   for (const tool of enabledTools) {
+    if (tool.startsWith('pipeline.') || tool.startsWith('step.')) {
+      // Hybrid primitives are category-gated via Pipeline/Step only.
+      continue;
+    }
     if (tool === 'Pipeline') {
       expanded.add('pipeline.start');
       expanded.add('pipeline.status');

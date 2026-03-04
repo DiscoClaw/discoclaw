@@ -496,6 +496,55 @@ describe('pipeline.start/status/resume/cancel', () => {
     expect(parseJsonResult(resumed.result)['status']).toBe('succeeded');
   });
 
+  it('pipeline.resume recovers persisted running runs with running current step', async () => {
+    const storePath = path.join(tmpDir, 'running-store.json');
+    const runId = 'run-recover-running-1';
+    const now = new Date().toISOString();
+    const store = {
+      version: 1,
+      runs: {
+        [runId]: {
+          runId,
+          runtime: 'openai',
+          adapter: 'openai',
+          pipelineName: 'recover-running',
+          pipelineInputHash: 'input-hash',
+          idempotencyKey: 'recover-running-idem',
+          requestHash: 'request-hash',
+          workspaceRoot: tmpDir,
+          status: 'running',
+          currentStep: 0,
+          steps: [
+            {
+              tool: 'write_file',
+              arguments: { file_path: 'recover-running.txt', content: 'ok' },
+              status: 'running',
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+          updatedAt: now,
+          attemptsByStep: { '0': 1 },
+          lastAttemptAtByStep: { '0': now },
+          nextRetryDueAtByStep: { '0': null },
+          cancelRequested: false,
+        },
+      },
+    };
+    await fs.writeFile(storePath, JSON.stringify(store, null, 2) + '\n', 'utf-8');
+
+    const resumed = await executeToolCall(
+      'pipeline.resume',
+      { run_id: runId },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.resume', 'write_file']), pipelineStorePath: storePath },
+    );
+    expect(resumed.ok).toBe(true);
+    expect(parseJsonResult(resumed.result)['status']).toBe('succeeded');
+    await expect(fs.readFile(path.join(tmpDir, 'recover-running.txt'), 'utf-8')).resolves.toBe('ok');
+  });
+
   it('pipeline.start dedupes explicit idempotency key with equivalent payload', async () => {
     const first = await executeToolCall(
       'pipeline.start',
@@ -1211,6 +1260,57 @@ describe('step.run/assert/retry/wait', () => {
     expect(retry3.ok).toBe(false);
     const payload = parseJsonResult(retry3.result);
     expect(payload['failure_code']).toBe('E_RETRY_EXHAUSTED');
+  });
+
+  it('step primitives reject terminal failed runs as inactive', async () => {
+    const storePath = path.join(tmpDir, 'failed-store.json');
+    const runId = 'run-terminal-failed-1';
+    const now = new Date().toISOString();
+    const store = {
+      version: 1,
+      runs: {
+        [runId]: {
+          runId,
+          runtime: 'openai',
+          adapter: 'openai',
+          pipelineName: 'terminal-failed',
+          pipelineInputHash: 'input-hash',
+          idempotencyKey: 'terminal-failed-idem',
+          requestHash: 'request-hash',
+          workspaceRoot: tmpDir,
+          status: 'failed',
+          currentStep: 0,
+          steps: [
+            {
+              tool: 'not_a_real_tool',
+              arguments: {},
+              status: 'failed',
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+          updatedAt: now,
+          attemptsByStep: { '0': 3 },
+          lastAttemptAtByStep: { '0': now },
+          nextRetryDueAtByStep: { '0': null },
+          cancelRequested: false,
+          failureCode: 'E_RETRY_EXHAUSTED',
+        },
+      },
+    };
+    await fs.writeFile(storePath, JSON.stringify(store, null, 2) + '\n', 'utf-8');
+
+    const asserted = await executeToolCall(
+      'step.assert',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.assert']), pipelineStorePath: storePath },
+    );
+    expect(asserted.ok).toBe(false);
+    const payload = parseJsonResult(asserted.result);
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect(String(payload['message'])).toContain('run status is not active: failed');
   });
 });
 

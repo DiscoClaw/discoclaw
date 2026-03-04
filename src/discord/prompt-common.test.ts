@@ -922,7 +922,7 @@ describe('resolveEffectiveTools audit logging', () => {
 
     const result = await resolveEffectiveTools({
       workspaceCwd: workspace,
-      runtimeTools: ['Read', 'Pipeline', 'Step'],
+      runtimeTools: ['Read', 'Pipeline', 'Step', 'pipeline.resume', 'step.run'],
       runtimeCapabilities: new Set(['tools_fs', 'tools_exec', 'tools_web', 'streaming_text']),
       runtimeId: 'codex',
       log,
@@ -931,5 +931,7 @@ describe('resolveEffectiveTools audit logging', () => {
     expect(result.effectiveTools).toEqual(['Read']);
     expect(result.runtimeCapabilityNote).toContain('Pipeline');
     expect(result.runtimeCapabilityNote).toContain('Step');
+    expect(result.runtimeCapabilityNote).not.toContain('pipeline.resume');
+    expect(result.runtimeCapabilityNote).not.toContain('step.run');
   });
 });

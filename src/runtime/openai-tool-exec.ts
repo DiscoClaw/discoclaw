@@ -52,7 +52,7 @@ export type ExecuteToolCallOpts = {
   allowedToolNames?: ReadonlySet<string>;
   /**
    * Optional override for pipeline durable state storage path.
-   * Defaults to `<allowedRoots[0]>/.discoclaw/openai-pipeline-runs.json`.
+   * Defaults to `<allowedRoots[0]>/data/hybrid-pipeline-runs.json`.
    */
   pipelineStorePath?: string;
   /**
@@ -610,7 +610,7 @@ const STEP_TOOL_NAMES: ReadonlySet<StepToolName> = new Set([
   'step.wait',
 ]);
 
-const ACTIVE_STEP_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set(['running', 'waiting', 'failed']);
+const ACTIVE_STEP_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set(['running', 'waiting']);
 const STEP_MAX_ATTEMPTS_TOTAL = 3;
 const STEP_RETRY_DELAYS_MS = [1_000, 2_000] as const;
 const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1_000;
@@ -687,7 +687,7 @@ function resolvePipelineStorePath(allowedRoots: string[], opts?: ExecuteToolCall
   if (opts?.pipelineStorePath && opts.pipelineStorePath.trim() !== '') {
     return path.resolve(opts.pipelineStorePath);
   }
-  return path.join(allowedRoots[0], '.discoclaw', 'openai-pipeline-runs.json');
+  return path.join(allowedRoots[0], 'data', 'hybrid-pipeline-runs.json');
 }
 
 async function loadPipelineStore(storePath: string): Promise<{ store: PipelineStore; error?: string }> {
@@ -730,7 +730,17 @@ function normalizeStepStatus(status: unknown): PipelineStepStatus {
   return 'pending';
 }
 
-function normalizePipelineRun(run: PipelineRun): void {
+function normalizePipelineRun(run: PipelineRun, runIdHint?: string): void {
+  const runRecord = run as unknown as Record<string, unknown>;
+  if (typeof run.runId !== 'string' || run.runId.trim() === '') {
+    const legacyRunId = runRecord.run_id;
+    if (typeof legacyRunId === 'string' && legacyRunId.trim() !== '') {
+      run.runId = legacyRunId;
+    } else if (typeof runIdHint === 'string' && runIdHint.trim() !== '') {
+      run.runId = runIdHint;
+    }
+  }
+
   if (typeof run.runtime !== 'string' || run.runtime.trim() === '') {
     run.runtime = 'openai';
   }
@@ -738,15 +748,73 @@ function normalizePipelineRun(run: PipelineRun): void {
     run.adapter = run.runtime;
   }
   if (typeof run.pipelineName !== 'string' || run.pipelineName.trim() === '') {
-    run.pipelineName = 'default';
+    const legacyPipelineName = runRecord.pipeline_name;
+    run.pipelineName = typeof legacyPipelineName === 'string' && legacyPipelineName.trim() !== ''
+      ? legacyPipelineName
+      : 'default';
   }
   if (typeof run.pipelineInputHash !== 'string' || run.pipelineInputHash.trim() === '') {
-    run.pipelineInputHash = sha256(stableJson(null));
+    const legacyPipelineInputHash = runRecord.pipeline_input_hash;
+    run.pipelineInputHash = typeof legacyPipelineInputHash === 'string' && legacyPipelineInputHash.trim() !== ''
+      ? legacyPipelineInputHash
+      : sha256(stableJson(null));
+  }
+  if ((run.idempotencyKey as unknown) === undefined) {
+    const legacyIdempotencyKey = runRecord.idempotency_key;
+    if (legacyIdempotencyKey === null || typeof legacyIdempotencyKey === 'string') {
+      run.idempotencyKey = legacyIdempotencyKey;
+    }
   }
   if (run.idempotencyKey !== null && typeof run.idempotencyKey !== 'string') {
     run.idempotencyKey = null;
   } else if (typeof run.idempotencyKey === 'string' && run.idempotencyKey.trim() === '') {
     run.idempotencyKey = null;
+  }
+  if (typeof run.requestHash !== 'string' || run.requestHash.trim() === '') {
+    const legacyRequestHash = runRecord.request_hash;
+    if (typeof legacyRequestHash === 'string' && legacyRequestHash.trim() !== '') {
+      run.requestHash = legacyRequestHash;
+    }
+  }
+  if (!Array.isArray(run.steps)) {
+    const legacySteps = runRecord.steps;
+    run.steps = Array.isArray(legacySteps) ? legacySteps as PipelineStep[] : [];
+  }
+  if (typeof run.createdAt !== 'string' || run.createdAt.trim() === '') {
+    const legacyCreatedAt = runRecord.created_at;
+    run.createdAt = typeof legacyCreatedAt === 'string' && legacyCreatedAt.trim() !== ''
+      ? legacyCreatedAt
+      : nowIso();
+  }
+  if (typeof run.updatedAt !== 'string' || run.updatedAt.trim() === '') {
+    const legacyUpdatedAt = runRecord.updated_at;
+    run.updatedAt = typeof legacyUpdatedAt === 'string' && legacyUpdatedAt.trim() !== ''
+      ? legacyUpdatedAt
+      : run.createdAt;
+  }
+  if (run.completedAt === undefined) {
+    const legacyCompletedAt = runRecord.completed_at;
+    if (typeof legacyCompletedAt === 'string' && legacyCompletedAt.trim() !== '') {
+      run.completedAt = legacyCompletedAt;
+    }
+  }
+  if (run.cancelledAt === undefined) {
+    const legacyCancelledAt = runRecord.cancelled_at;
+    if (typeof legacyCancelledAt === 'string' && legacyCancelledAt.trim() !== '') {
+      run.cancelledAt = legacyCancelledAt;
+    }
+  }
+  if (run.lastError === undefined) {
+    const legacyLastError = runRecord.last_error;
+    if (typeof legacyLastError === 'string' && legacyLastError.trim() !== '') {
+      run.lastError = legacyLastError;
+    }
+  }
+  if (run.failureCode === undefined) {
+    const legacyFailureCode = runRecord.failure_code;
+    if (typeof legacyFailureCode === 'string') {
+      run.failureCode = legacyFailureCode as FailureCode;
+    }
   }
   if (typeof run.requestHash !== 'string' || run.requestHash.trim() === '') {
     run.requestHash = sha256(stableJson({
@@ -758,29 +826,42 @@ function normalizePipelineRun(run: PipelineRun): void {
     }));
   }
   if (typeof run.workspaceRoot !== 'string' || run.workspaceRoot.trim() === '') {
-    run.workspaceRoot = '';
+    const legacyWorkspaceRoot = runRecord.workspace_root;
+    run.workspaceRoot = typeof legacyWorkspaceRoot === 'string' && legacyWorkspaceRoot.trim() !== ''
+      ? legacyWorkspaceRoot
+      : '';
   }
 
   run.status = normalizeRunStatus(run.status);
-  run.cancelRequested = run.cancelRequested === true || run.status === 'cancelled';
+  run.cancelRequested = run.cancelRequested === true || runRecord.cancel_requested === true || run.status === 'cancelled';
 
   if (!Number.isInteger(run.currentStep) || run.currentStep < 0) {
-    run.currentStep = 0;
+    const legacyCurrentStep = runRecord.current_step;
+    run.currentStep = Number.isInteger(legacyCurrentStep) && (legacyCurrentStep as number) >= 0
+      ? legacyCurrentStep as number
+      : 0;
   }
   if (run.currentStep > run.steps.length) {
     run.currentStep = run.steps.length;
   }
 
   for (const step of run.steps) {
+    const stepRecord = step as unknown as Record<string, unknown>;
     step.status = normalizeStepStatus(step.status);
     if (typeof step.updatedAt !== 'string' || step.updatedAt.trim() === '') {
-      step.updatedAt = run.updatedAt;
+      const legacyUpdatedAt = stepRecord.updated_at;
+      step.updatedAt = typeof legacyUpdatedAt === 'string' && legacyUpdatedAt.trim() !== ''
+        ? legacyUpdatedAt
+        : run.updatedAt;
+    }
+    if (!step.arguments || typeof step.arguments !== 'object' || Array.isArray(step.arguments)) {
+      step.arguments = {};
     }
   }
 
-  const attemptsRaw = run.attemptsByStep as unknown;
-  const lastAttemptRaw = run.lastAttemptAtByStep as unknown;
-  const nextRetryRaw = run.nextRetryDueAtByStep as unknown;
+  const attemptsRaw = (run.attemptsByStep as unknown) ?? runRecord.attempts_by_step;
+  const lastAttemptRaw = (run.lastAttemptAtByStep as unknown) ?? runRecord.last_attempt_at_by_step;
+  const nextRetryRaw = (run.nextRetryDueAtByStep as unknown) ?? runRecord.next_retry_due_at_by_step;
 
   const attempts: Record<string, number> = {};
   const lastAttempt: Record<string, string | null> = {};
@@ -834,8 +915,8 @@ function normalizePipelineRun(run: PipelineRun): void {
 }
 
 function normalizePipelineStore(store: PipelineStore): void {
-  for (const run of Object.values(store.runs)) {
-    normalizePipelineRun(run);
+  for (const [runId, run] of Object.entries(store.runs)) {
+    normalizePipelineRun(run, runId);
   }
 }
 
@@ -1257,6 +1338,18 @@ async function loadStepToolContext(
     };
   }
 
+  if (
+    run.status === 'failed'
+    && run.failureCode !== 'E_RETRY_EXHAUSTED'
+    && run.currentStep >= 0
+    && run.currentStep < run.steps.length
+    && run.steps[run.currentStep]?.status === 'failed'
+  ) {
+    run.status = 'waiting';
+    run.updatedAt = nowIso();
+    await savePipelineStore(storePath, store);
+  }
+
   if (run.status === 'queued') {
     run.status = 'running';
     run.updatedAt = nowIso();
@@ -1654,10 +1747,16 @@ async function handlePipelineTool(
     if (run.status === 'failed' && run.failureCode === 'E_RETRY_EXHAUSTED') {
       return pipelineFailure(operation, 'E_RETRY_EXHAUSTED', `retry exhausted for run: ${runId}`);
     }
-    if (run.status === 'running') {
-      const currentStep = run.currentStep < run.steps.length ? run.steps[run.currentStep] : undefined;
-      if (currentStep?.status === 'running') {
-        return pipelineFailure(operation, 'E_POLICY_BLOCKED', `pipeline run is already running: ${runId}`);
+    if (run.status === 'running' && run.currentStep < run.steps.length) {
+      const currentStep = run.steps[run.currentStep]!;
+      if (currentStep.status === 'running') {
+        const recoveredAt = nowIso();
+        currentStep.status = 'pending';
+        currentStep.ok = undefined;
+        currentStep.result = undefined;
+        currentStep.updatedAt = recoveredAt;
+        run.updatedAt = recoveredAt;
+        await savePipelineStore(storePath, store);
       }
     }
     if (run.status === 'waiting' && run.currentStep < run.steps.length) {
