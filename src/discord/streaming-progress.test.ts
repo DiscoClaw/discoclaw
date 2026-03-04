@@ -106,7 +106,7 @@ describe('createStreamingProgress', () => {
 
     const allEdits = message.edits.join('\n');
     expect(allEdits).toContain('[tool:start] Read');
-    expect(allEdits).toContain('[stdout] reading  file');
+    expect(allEdits).toContain('[stdout] reading file');
     expect(allEdits).toContain('[usage] in=11 out=7 total=18 cost=$0.0012');
     expect(allEdits).toContain('[tool:end] Read ok');
     expect(allEdits).not.toContain('<discord-action>');
