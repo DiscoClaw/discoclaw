@@ -392,7 +392,7 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs).not.toContain('resume');
   });
 
-  it('empty stdout emits done without text_final', async () => {
+  it('empty stdout emits empty text_final and done', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stdout: '',
       exitCode: 0,
@@ -409,8 +409,7 @@ describe('Codex CLI runtime adapter', () => {
       cwd: '/tmp',
     }));
 
-    // No text_final for empty response.
-    expect(events.find((e) => e.type === 'text_final')).toBeUndefined();
+    expect(events.find((e) => e.type === 'text_final')).toEqual({ type: 'text_final', text: '' });
     expect(events[events.length - 1]!.type).toBe('done');
   });
 
