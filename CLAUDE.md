@@ -45,8 +45,18 @@ exists, that's your first run — read it, follow it, then delete it.
 
 ### Workspace file ownership
 
-- **`workspace/DISCOCLAW.md`** — system instructions, auto-managed by discoclaw. Overwritten from `templates/workspace/DISCOCLAW.md` on every boot. Do not edit.
+- **`templates/workspace/DISCOCLAW.md`** — tracked default instructions, injected at runtime. This is the source of system defaults.
 - **`workspace/AGENTS.md`** — user rules and preferences. Never overwritten by discoclaw. Users customize this file freely.
+- Legacy `workspace/DISCOCLAW.md` files are not authoritative.
+
+### Runtime instruction precedence
+
+Prompt assembly is deterministic:
+
+1. immutable security policy (`ROOT_POLICY`)
+2. tracked defaults (`templates/workspace/DISCOCLAW.md`)
+3. `workspace/AGENTS.md` overrides
+4. memory/context sections (and later runtime context)
 
 ## Working Rules
 

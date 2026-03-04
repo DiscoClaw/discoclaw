@@ -53,7 +53,7 @@ describe('ROOT_POLICY', () => {
 describe('TRACKED_DEFAULTS_PREAMBLE', () => {
   it('loads tracked defaults from repository templates', () => {
     expect(TRACKED_DEFAULTS_PREAMBLE).toContain('--- DISCOCLAW.md (tracked defaults) ---');
-    expect(TRACKED_DEFAULTS_PREAMBLE).toContain('# DISCOCLAW.md - System Instructions');
+    expect(TRACKED_DEFAULTS_PREAMBLE).toContain('# DISCOCLAW.md - Tracked Default Instructions');
   });
 });
 

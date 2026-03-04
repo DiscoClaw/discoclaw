@@ -30,3 +30,28 @@ If you have `DISCOCLAW_CRON_FORUM=<channel-id>` set explicitly, that value remai
 | CLI / setup prompts | references to "agents" | references to "automations" |
 
 No env var keys, no database schema changes, no API surface changes.
+
+---
+
+## workspace `DISCOCLAW.md` deprecation (tracked defaults + `AGENTS.md` override)
+
+**Affects:** Existing deployments that previously customized `workspace/DISCOCLAW.md`.
+
+### What changed
+
+Default system instructions are no longer read from a workspace-managed
+`workspace/DISCOCLAW.md` file. They now come from a tracked runtime-injected
+defaults layer in the repository (`templates/workspace/DISCOCLAW.md`).
+
+Prompt precedence is now deterministic:
+
+1. immutable security policy
+2. tracked defaults
+3. `workspace/AGENTS.md` (user overrides)
+4. memory/context sections
+
+### What you need to do
+
+- Keep personal rules and behavior overrides in `workspace/AGENTS.md`.
+- If you previously edited `workspace/DISCOCLAW.md`, move those custom rules to `workspace/AGENTS.md`.
+- Treat any existing `workspace/DISCOCLAW.md` as legacy reference only; it is not authoritative.

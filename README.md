@@ -84,6 +84,18 @@ DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by 
 4. Streams the response back, chunked to fit Discord's message limits
 5. Parses and executes any Discord actions the assistant emitted
 
+### Instruction precedence
+
+Prompt instruction layering is deterministic and enforced in this order:
+
+1. **Immutable security policy** (hard-coded root rules)
+2. **Tracked defaults** (runtime-injected from `templates/workspace/DISCOCLAW.md`)
+3. **User override** (`workspace/AGENTS.md`)
+4. **Memory/context layers** (workspace identity files, channel context, durable/rolling memory, etc.)
+
+`workspace/DISCOCLAW.md` is no longer a managed or authoritative instruction source.
+If you still have a legacy copy, treat it as historical reference only.
+
 ### Message batching
 
 When multiple messages arrive while the bot is thinking (i.e., an AI invocation is already active for that session), they're automatically combined into a single prompt rather than queued individually. This means rapid follow-up messages are processed together, giving the bot full context in one shot. Commands (`!`-prefixed messages) bypass batching and are always processed individually.

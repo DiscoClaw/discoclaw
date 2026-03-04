@@ -552,10 +552,11 @@ describe('template content — DISCOCLAW.md', () => {
     expect(discoclaw.length).toBeGreaterThan(0);
   });
 
-  it('contains auto-managed warning', async () => {
+  it('contains tracked-defaults runtime-injection guidance', async () => {
     discoclaw ??= await fs.readFile(path.join(templatesDir, 'DISCOCLAW.md'), 'utf-8');
-    expect(discoclaw).toContain('Auto-managed by Discoclaw');
-    expect(discoclaw).toContain('overwritten on every boot');
+    expect(discoclaw).toContain('tracked default instruction source');
+    expect(discoclaw).toContain('not a workspace-managed file');
+    expect(discoclaw).toContain('Runtime Instruction Precedence');
   });
 
   it('contains Discord action batching rules', async () => {
