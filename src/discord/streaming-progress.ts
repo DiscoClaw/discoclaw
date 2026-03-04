@@ -71,6 +71,7 @@ export function createStreamingProgress(
   let activityLabel = '';
   let deltaText = '';
   let finalText = '';
+  let toolPreviewSnapshot = '';
   let statusTick = 0;
   let lastStreamEditAt = 0;
   let progressMessageGone = false;
@@ -94,11 +95,20 @@ export function createStreamingProgress(
     return new ToolAwareQueue((action) => {
       if (action.type === 'show_activity') {
         activityLabel = action.label;
+      } else if (action.type === 'preview_text') {
+        if (action.text.startsWith(toolPreviewSnapshot)) {
+          deltaText += action.text.slice(toolPreviewSnapshot.length);
+        } else {
+          deltaText += action.text;
+        }
+        toolPreviewSnapshot = action.text;
       } else if (action.type === 'stream_text') {
         deltaText += action.text;
+        toolPreviewSnapshot = '';
       } else if (action.type === 'set_final') {
         finalText = action.text;
         deltaText = '';
+        toolPreviewSnapshot = '';
         activityLabel = '';
       }
     });
@@ -151,6 +161,7 @@ export function createStreamingProgress(
     activityLabel = '';
     deltaText = '';
     finalText = '';
+    toolPreviewSnapshot = '';
     queue = createQueue();
 
     try {

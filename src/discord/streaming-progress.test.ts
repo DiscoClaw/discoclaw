@@ -83,6 +83,47 @@ describe('createStreamingProgress', () => {
     ctrl.dispose();
   });
 
+  it('tool_start with narration deltas renders preview edits before tool_end', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({ type: 'tool_start', name: 'Bash', input: { command: 'sleep 2' } } as EngineEvent);
+    ctrl.onEvent({ type: 'text_delta', text: 'fetching context...' } as EngineEvent);
+
+    await vi.advanceTimersByTimeAsync(2600);
+
+    const streamedEdits = message.edits.slice(1);
+    expect(streamedEdits.some((edit) => edit.includes('fetching context...'))).toBe(true);
+    expect(streamedEdits.some((edit) => edit.includes('[tool:end]'))).toBe(false);
+    ctrl.dispose();
+  });
+
+  it('repeated narration chunks produce repeated preview edits on cadence', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({ type: 'tool_start', name: 'Bash', input: { command: 'long run' } } as EngineEvent);
+
+    ctrl.onEvent({ type: 'text_delta', text: 'alpha ' } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(2600);
+    const alphaEdit = message.edits.findIndex((edit) => edit.includes('alpha '));
+    expect(alphaEdit).toBeGreaterThan(-1);
+
+    ctrl.onEvent({ type: 'text_delta', text: 'beta ' } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(2600);
+    const betaEdit = message.edits.findIndex((edit) => edit.includes('alpha beta '));
+    expect(betaEdit).toBeGreaterThan(alphaEdit);
+
+    ctrl.onEvent({ type: 'text_delta', text: 'gamma' } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(2600);
+    const gammaEdit = message.edits.findIndex((edit) => edit.includes('alpha beta gamma'));
+    expect(gammaEdit).toBeGreaterThan(betaEdit);
+    expect(message.edits.some((edit) => edit.includes('[tool:end]'))).toBe(false);
+    ctrl.dispose();
+  });
+
   it('onEvent emits visible tool/log/usage runtime signal lines', async () => {
     const message = makeMessage();
     const ctrl = createStreamingProgress(message, 0);
