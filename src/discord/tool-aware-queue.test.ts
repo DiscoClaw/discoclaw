@@ -18,6 +18,90 @@ function collect() {
 }
 
 describe('ToolAwareQueue', () => {
+  it('emits periodic preview_text during long tool_active when narration is buffered', () => {
+    const { actions, emit } = collect();
+    const taq = new ToolAwareQueue(emit, {
+      flushDelayMs: 800,
+      postToolDelayMs: 500,
+      toolActivePreviewIntervalMs: 100,
+    });
+
+    taq.handleEvent({ type: 'tool_start', name: 'Bash' });
+    taq.handleEvent({ type: 'text_delta', text: 'Working' });
+
+    vi.advanceTimersByTime(99);
+    expect(actions.filter((a) => a.type === 'preview_text')).toHaveLength(0);
+
+    vi.advanceTimersByTime(1);
+    expect(actions.filter((a) => a.type === 'preview_text')).toEqual([
+      { type: 'preview_text', text: 'Working' },
+    ]);
+
+    taq.handleEvent({ type: 'text_delta', text: ' hard' });
+    vi.advanceTimersByTime(100);
+    expect(actions.filter((a) => a.type === 'preview_text')).toEqual([
+      { type: 'preview_text', text: 'Working' },
+      { type: 'preview_text', text: 'Working hard' },
+    ]);
+
+    taq.dispose();
+  });
+
+  it('preview cadence stops after tool_end, error, and dispose', () => {
+    const runUntilStop = (stopEvent: EngineEvent | 'dispose') => {
+      const { actions, emit } = collect();
+      const taq = new ToolAwareQueue(emit, {
+        flushDelayMs: 800,
+        postToolDelayMs: 500,
+        toolActivePreviewIntervalMs: 100,
+      });
+
+      taq.handleEvent({ type: 'tool_start', name: 'Bash' });
+      taq.handleEvent({ type: 'text_delta', text: 'Streaming preview' });
+
+      vi.advanceTimersByTime(100);
+      expect(actions.filter((a) => a.type === 'preview_text')).toHaveLength(1);
+
+      if (stopEvent === 'dispose') {
+        taq.dispose();
+      } else {
+        taq.handleEvent(stopEvent);
+      }
+
+      vi.advanceTimersByTime(500);
+      expect(actions.filter((a) => a.type === 'preview_text')).toHaveLength(1);
+
+      taq.dispose();
+    };
+
+    runUntilStop({ type: 'tool_end', name: 'Bash', ok: true });
+    runUntilStop({ type: 'error', message: 'boom' });
+    runUntilStop('dispose');
+  });
+
+  it('text_final during tool_active still emits only set_final for terminal output', () => {
+    const { actions, emit } = collect();
+    const taq = new ToolAwareQueue(emit, {
+      flushDelayMs: 800,
+      postToolDelayMs: 500,
+      toolActivePreviewIntervalMs: 100,
+    });
+
+    taq.handleEvent({ type: 'tool_start', name: 'Bash' });
+    taq.handleEvent({ type: 'text_delta', text: 'intermediate tool narration' });
+    taq.handleEvent({ type: 'text_final', text: 'Final answer' });
+
+    expect(actions.filter((a) => a.type === 'set_final')).toEqual([
+      { type: 'set_final', text: 'Final answer' },
+    ]);
+    expect(actions.filter((a) => a.type === 'stream_text')).toHaveLength(0);
+
+    vi.advanceTimersByTime(1000);
+    expect(actions.filter((a) => a.type === 'preview_text')).toHaveLength(0);
+
+    taq.dispose();
+  });
+
   it('text-only response: text deltas buffered then streamed after flush delay', () => {
     const { actions, emit } = collect();
     const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
