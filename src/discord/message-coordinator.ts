@@ -1358,7 +1358,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               };
 
               // Phase-related commands require PLAN_PHASES_ENABLED
-              if (planCmd.action === 'run' || planCmd.action === 'run-one' || planCmd.action === 'skip' || planCmd.action === 'phases') {
+              if (planCmd.action === 'run' || planCmd.action === 'run-one' || planCmd.action === 'run-phase' || planCmd.action === 'skip' || planCmd.action === 'skip-to' || planCmd.action === 'phases') {
                 if (!(params.planPhasesEnabled ?? true)) {
                   await msg.reply({
                     content: 'Phase decomposition is disabled. Set PLAN_PHASES_ENABLED=true to enable.',
@@ -1368,18 +1368,32 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 }
               }
 
-              // --- !plan run / !plan run-one --- (shared handler, async, fire-and-forget)
-              if (planCmd.action === 'run' || planCmd.action === 'run-one') {
-                const isRunOne = planCmd.action === 'run-one';
+              // --- !plan run / !plan run-one / !plan run-phase --- (shared handler, async, fire-and-forget)
+              if (planCmd.action === 'run' || planCmd.action === 'run-one' || planCmd.action === 'run-phase') {
+                const isRunPhase = planCmd.action === 'run-phase';
+                const isRunOne = planCmd.action === 'run-one' || isRunPhase;
                 const maxPhases = isRunOne ? 1 : MAX_PLAN_RUN_PHASES;
-                const usageCmd = isRunOne ? 'run-one' : 'run';
+                const usageCmd = isRunPhase ? 'run-phase' : isRunOne ? 'run-one' : 'run';
+                let planId = '';
+                let targetPhaseId: string | undefined;
 
-                if (!planCmd.args) {
-                  await msg.reply({ content: `Usage: \`!plan ${usageCmd} <plan-id>\``, allowedMentions: NO_MENTIONS });
-                  return;
+                if (isRunPhase) {
+                  const tokens = planCmd.args.split(/\s+/).map((token) => token.trim()).filter(Boolean);
+                  if (tokens.length !== 2) {
+                    await msg.reply({ content: 'Usage: `!plan run-phase <plan-id> <phase-id>`', allowedMentions: NO_MENTIONS });
+                    return;
+                  }
+                  [planId, targetPhaseId] = tokens;
+                } else {
+                  planId = planCmd.args.trim();
+                  if (!planId) {
+                    await msg.reply({ content: `Usage: \`!plan ${usageCmd} <plan-id>\``, allowedMentions: NO_MENTIONS });
+                    return;
+                  }
                 }
 
-                const planId = planCmd.args;
+                const convergenceGuidance = `Convergence guard/manual intervention: review \`!plan phases ${planId}\`, then use \`!plan run-phase ${planId} <phase-id>\` or \`!plan skip-to ${planId} <phase-id>\` to resume safely.`;
+                const regenerateGuidance = `If phase data is stale, run \`!plan phases --regenerate ${planId}\`.`;
 
                 // Concurrency guard: reject if a multi-phase run is already active for this plan
                 if (isPlanRunning(planId)) {
@@ -1398,7 +1412,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                   const validationLock = await acquireWriterLock();
                   try {
-                    const prepResult = await preparePlanRun(planId, planOpts);
+                    const prepResult = await preparePlanRun(planId, planOpts, targetPhaseId);
                     if ('error' in prepResult) {
                       // Distinguish "all done" from actual errors via NO_PHASES_SENTINEL
                       const isAllDone = prepResult.error.startsWith(NO_PHASES_SENTINEL);
@@ -1426,7 +1440,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       return;
                     }
 
-                    const startMsg = isRunOne
+                    const startMsg = isRunPhase
+                      ? `Running target phase for **${planId}** — ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}...`
+                      : isRunOne
                       ? `Running ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}...`
                       : `Running all phases for **${planId}** — starting ${prepResult.nextPhase.id}: ${prepResult.nextPhase.title}...`;
                     progressReply = await msg.reply({ content: startMsg, allowedMentions: NO_MENTIONS });
@@ -1529,7 +1545,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         let phaseResult;
                         const phaseStart = Date.now();
                         try {
-                          phaseResult = await runNextPhase(phasesFilePath, planFilePath, phaseOpts, onProgress);
+                          phaseResult = await runNextPhase(phasesFilePath, planFilePath, phaseOpts, onProgress, targetPhaseId);
                         } finally {
                           releaseLock();
                         }
@@ -1555,7 +1571,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           const fixNote = phaseResult.fixAttemptsUsed != null
                             ? ` after ${phaseResult.fixAttemptsUsed} automatic fix attempt(s)`
                             : '';
-                          stopMessage = `Audit phase **${phaseResult.phase.id}** found **${phaseResult.verdict.maxSeverity}** severity deviations${fixNote}. Use \`!plan run ${planId}\` to re-run the audit, \`!plan skip ${planId}\` to skip it, or \`!plan phases --regenerate ${planId}\` to regenerate phases.`;
+                          stopMessage = `Audit phase **${phaseResult.phase.id}** found **${phaseResult.verdict.maxSeverity}** severity deviations${fixNote}.`;
                           break;
                         } else if (phaseResult.result === 'stale') {
                           stopReason = 'error';
@@ -1567,7 +1583,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           break;
                         } else if (phaseResult.result === 'retry_blocked') {
                           stopReason = 'error';
-                          stopMessage = `Phase **${phaseResult.phase.id}** retry blocked. Use \`!plan skip ${planId}\` or \`!plan phases --regenerate ${planId}\`.`;
+                          stopMessage = `Phase **${phaseResult.phase.id}** retry blocked: ${sanitizeErrorMessage(phaseResult.message)}`;
                           break;
                         } else {
                           break;
@@ -1594,7 +1610,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     if (isRunOne) {
                       // Single-phase format (matches old !plan run UX)
                       if (stopReason === 'error') {
-                        summaryMsg = `${stopMessage}\nUse \`!plan run-one ${planId}\` to retry or \`!plan skip ${planId}\` to skip.`;
+                        summaryMsg = `${stopMessage}\n${convergenceGuidance} ${regenerateGuidance}`;
                       } else if (phasesRun > 0) {
                         const p = phaseResults[0];
                         summaryMsg = `Phase **${p.id}** done: ${p.title}`;
@@ -1607,7 +1623,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     } else if (stopReason === null && phasesRun === 0) {
                       summaryMsg = `All phases already complete for ${planId}.`;
                     } else if (stopReason === 'error') {
-                      summaryMsg = `Plan run stopped: ${stopMessage}. ${phasesRun}/${phasesRun + 1} phases completed.\nUse \`!plan run ${planId}\` to retry or \`!plan skip ${planId}\` to skip.`;
+                      summaryMsg = `Plan run stopped: ${stopMessage} ${phasesRun}/${phasesRun + 1} phases completed.\n${convergenceGuidance} ${regenerateGuidance}`;
                       if (phaseList) summaryMsg += `\n${phaseList}`;
                     } else if (stopReason === 'limit') {
                       summaryMsg = `Plan run stopped after ${MAX_PLAN_RUN_PHASES} phases (safety limit). Use \`!plan run ${planId}\` to continue.\n${phaseList}`;
@@ -1693,6 +1709,25 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const releaseLock = await acquireWriterLock();
                 try {
                   const response = await handlePlanSkip(planCmd.args, planOpts);
+                  await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+                } finally {
+                  releaseLock();
+                }
+                return;
+              }
+
+              // --- !plan skip-to ---
+              if (planCmd.action === 'skip-to') {
+                const tokens = planCmd.args.split(/\s+/).map((token) => token.trim()).filter(Boolean);
+                if (tokens.length !== 2) {
+                  await msg.reply({ content: 'Usage: `!plan skip-to <plan-id> <phase-id>`', allowedMentions: NO_MENTIONS });
+                  return;
+                }
+
+                const releaseLock = await acquireWriterLock();
+                try {
+                  const normalizedCmd = { ...planCmd, args: `${tokens[0]} ${tokens[1]}` };
+                  const response = await handlePlanCommand(normalizedCmd, planOpts);
                   await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
                 } finally {
                   releaseLock();

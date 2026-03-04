@@ -95,7 +95,7 @@ All actions are gated by category env flags (off by default except channels).
 | Crons (scheduled tasks) | create, update, list, show, pause, resume, delete, trigger, sync, tagMapReload | `actions-crons.ts` | **done** |
 | Bot profile | setStatus, setActivity, setNickname | `actions-bot-profile.ts` | **done** |
 | Forge (autonomous plan drafting) | create, resume, status, cancel | `actions-forge.ts` | **done** |
-| Plan management (autonomous) | list, show, approve, close, create, run | `actions-plan.ts` | **done** |
+| Plan management (autonomous) | list, show, approve, close, create, run (full-loop execution; shares phase runner with targeted resume + convergence guard paths) | `actions-plan.ts` | **done** |
 | Memory (durable memory mutation) | remember, forget, show | `actions-memory.ts` | **done** |
 | Defer scheduler (in-process timers with concurrency limits) | — | `src/discord/defer-scheduler.ts` | **done** |
 | Deferred runner (wires defer action type into action/runtime pipeline) | — | `src/discord/deferred-runner.ts` | **done** |
@@ -275,7 +275,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | `!models` | Lists registered runtime adapters | `src/discord/models-command.ts` | **done** |
 | `!update` | Pulls latest code and restarts | `src/discord/update-command.ts` | **done** |
 | `!memory` | Memory read/write subcommands (see section 4) | `src/discord/memory-commands.ts` | **done** |
-| `!plan` | Plan management subcommands | `src/discord/plan-commands.ts` | **done** |
+| `!plan` | Plan management subcommands, including targeted phase controls (`run-phase`, `skip-to`) and regeneration resequencing (`phases --regenerate --keep-done`) | `src/discord/plan-commands.ts` | **done** |
 | `!forge` | Forge control subcommands | `src/discord/forge-commands.ts` | **done** |
 | `!voice` | Voice subsystem commands: `status` (connection + config), `set <name>` (switch Deepgram TTS voice at runtime, ephemeral), `help` | `src/discord/voice-command.ts` (primary), `src/discord/voice-status-command.ts` (status renderer) | **done** |
 | `!secret` | DM-only command to securely set/unset `.env` secrets (e.g. API keys); bypasses AI runtime, no echo | `src/discord/secret-commands.ts` | **done** |
