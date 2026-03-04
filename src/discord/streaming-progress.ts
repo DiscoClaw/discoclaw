@@ -23,13 +23,45 @@ export type StreamingProgressController = {
   dispose: () => void;
 };
 
+export type StreamingProgressPreviewMode = 'always' | 'delayed';
+
+export type StreamingProgressOpts = {
+  previewMode?: StreamingProgressPreviewMode;
+  previewDelayMs?: number;
+};
+
 /** The faster edit interval used for streaming preview edits (matches normal message handler). */
 const STREAMING_EDIT_INTERVAL_MS = 1250;
+const DEFAULT_PREVIEW_DELAY_MS = 7000;
 
 function errorCode(err: unknown): number | null {
   if (typeof err !== 'object' || err === null || !('code' in err)) return null;
   const code = (err as { code?: unknown }).code;
   return typeof code === 'number' ? code : null;
+}
+
+function formatUsageSignal(evt: Extract<EngineEvent, { type: 'usage' }>): string {
+  const parts: string[] = [];
+  if (typeof evt.inputTokens === 'number') parts.push(`in=${evt.inputTokens}`);
+  if (typeof evt.outputTokens === 'number') parts.push(`out=${evt.outputTokens}`);
+  if (typeof evt.totalTokens === 'number') parts.push(`total=${evt.totalTokens}`);
+  if (typeof evt.costUsd === 'number') parts.push(`cost=$${evt.costUsd.toFixed(4)}`);
+  return parts.length > 0 ? `[usage] ${parts.join(' ')}` : '[usage]';
+}
+
+function formatRuntimeSignal(evt: EngineEvent): string | null {
+  switch (evt.type) {
+    case 'tool_start':
+      return `[tool:start] ${evt.name}`;
+    case 'tool_end':
+      return `[tool:end] ${evt.name} ${evt.ok ? 'ok' : 'failed'}`;
+    case 'log_line':
+      return `${evt.stream === 'stderr' ? '[stderr]' : '[stdout]'} ${evt.line}`;
+    case 'usage':
+      return formatUsageSignal(evt);
+    default:
+      return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -51,6 +83,7 @@ function errorCode(err: unknown): number | null {
 export function createStreamingProgress(
   progressReply: { edit: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown> },
   progressThrottleMs: number,
+  opts?: StreamingProgressOpts,
 ): StreamingProgressController {
   // Streaming state driven by the ToolAwareQueue
   let activityLabel = '';
@@ -60,6 +93,8 @@ export function createStreamingProgress(
   let lastStreamEditAt = 0;
   let progressMessageGone = false;
   const startedAt = Date.now();
+  const previewMode = opts?.previewMode ?? 'always';
+  const previewDelayMs = Math.max(0, opts?.previewDelayMs ?? DEFAULT_PREVIEW_DELAY_MS);
 
   // Static-progress throttle state (mirrors the existing onProgress pattern)
   let lastStaticEditAt = 0;
@@ -76,7 +111,6 @@ export function createStreamingProgress(
     return new ToolAwareQueue((action) => {
       if (action.type === 'show_activity') {
         activityLabel = action.label;
-        deltaText = '';
       } else if (action.type === 'stream_text') {
         deltaText += action.text;
       } else if (action.type === 'set_final') {
@@ -94,12 +128,15 @@ export function createStreamingProgress(
     // Only render when there is something streaming to show
     if (!activityLabel && !deltaText && !finalText) return;
     lastStreamEditAt = now;
+    const elapsedMs = now - startedAt;
+    const showPreview = previewMode === 'always' || elapsedMs >= previewDelayMs;
     const content = selectStreamingOutput({
       deltaText,
       activityLabel,
       finalText,
       statusTick: statusTick++,
-      elapsedMs: now - startedAt,
+      showPreview,
+      elapsedMs,
     });
     try {
       await progressReply.edit({ content, allowedMentions: NO_MENTIONS });
@@ -108,8 +145,15 @@ export function createStreamingProgress(
     }
   }
 
+  function appendSignalLine(line: string): void {
+    deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
+  }
+
   const onEvent: StreamingProgressController['onEvent'] = (evt) => {
+    const signalLine = formatRuntimeSignal(evt);
+    if (signalLine) appendSignalLine(signalLine);
     queue.handleEvent(evt);
+    void maybeStreamEdit(false);
   };
 
   const onProgress: StreamingProgressController['onProgress'] = async (msg, opts) => {

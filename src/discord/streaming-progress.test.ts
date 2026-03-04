@@ -73,23 +73,83 @@ describe('createStreamingProgress', () => {
     ctrl.dispose();
   });
 
-  it('onProgress resets the queue so stale streaming state is cleared', async () => {
+  it('onEvent emits visible tool/log/usage runtime signal lines', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({ type: 'tool_start', name: 'Read', input: '' } as EngineEvent);
+    ctrl.onEvent({
+      type: 'log_line',
+      stream: 'stdout',
+      line: 'reading <discord-action>{"type":"noop"}</discord-action> file',
+    } as EngineEvent);
+    ctrl.onEvent({
+      type: 'usage',
+      inputTokens: 11,
+      outputTokens: 7,
+      totalTokens: 18,
+      costUsd: 0.0012,
+    } as EngineEvent);
+    ctrl.onEvent({ type: 'tool_end', name: 'Read', output: '', ok: true } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const allEdits = message.edits.join('\n');
+    expect(allEdits).toContain('[tool:start] Read');
+    expect(allEdits).toContain('[stdout] reading  file');
+    expect(allEdits).toContain('[usage] in=11 out=7 total=18 cost=$0.0012');
+    expect(allEdits).toContain('[tool:end] Read ok');
+    expect(allEdits).not.toContain('<discord-action>');
+    ctrl.dispose();
+  });
+
+  it('tool activity no longer clears recent preview lines mid-run', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({
+      type: 'log_line',
+      stream: 'stdout',
+      line: 'warmup complete',
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    ctrl.onEvent({
+      type: 'tool_start',
+      name: 'Bash',
+      input: { command: 'echo test' },
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const lastEdit = message.edits[message.edits.length - 1]!;
+    expect(lastEdit).toContain('warmup complete');
+    expect(lastEdit).toContain('[tool:start] Bash');
+    ctrl.dispose();
+  });
+
+  it('onProgress resets the queue so stale streaming state is cleared between phases', async () => {
     const message = makeMessage();
     const ctrl = createStreamingProgress(message, 0);
 
     // Feed some streaming state
-    ctrl.onEvent({ type: 'text_delta', text: 'stale text' } as EngineEvent);
+    ctrl.onEvent({
+      type: 'log_line',
+      stream: 'stdout',
+      line: 'phase-1 stale signal',
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
 
     // New phase boundary
     await ctrl.onProgress('Phase 2 starting...', { force: true });
+    ctrl.onEvent({ type: 'tool_start', name: 'Read', input: '' } as EngineEvent);
 
     // Advance interval — should not show stale text since queue was reset
     await vi.advanceTimersByTimeAsync(1300);
 
     const lastEdit = message.edits[message.edits.length - 1]!;
-    // After reset, streaming state is cleared; last edit is the progress message
-    // or empty streaming output — not stale text
-    expect(lastEdit).not.toContain('stale text');
+    expect(lastEdit).not.toContain('phase-1 stale signal');
+    expect(lastEdit).toContain('[tool:start] Read');
     ctrl.dispose();
   });
 
