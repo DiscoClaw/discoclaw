@@ -1,6 +1,7 @@
 import type { EngineEvent } from '../runtime/types.js';
 import { ToolAwareQueue } from './tool-aware-queue.js';
-import { selectStreamingOutput } from './output-utils.js';
+import { formatRuntimePreviewSignal, selectStreamingOutput } from './output-utils.js';
+import type { StreamingPreviewMode } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ export type StreamingProgressPreviewMode = 'always' | 'delayed';
 export type StreamingProgressOpts = {
   previewMode?: StreamingProgressPreviewMode;
   previewDelayMs?: number;
+  streamPreviewMode?: StreamingPreviewMode;
 };
 
 /** The faster edit interval used for streaming preview edits (matches normal message handler). */
@@ -40,28 +42,8 @@ function errorCode(err: unknown): number | null {
   return typeof code === 'number' ? code : null;
 }
 
-function formatUsageSignal(evt: Extract<EngineEvent, { type: 'usage' }>): string {
-  const parts: string[] = [];
-  if (typeof evt.inputTokens === 'number') parts.push(`in=${evt.inputTokens}`);
-  if (typeof evt.outputTokens === 'number') parts.push(`out=${evt.outputTokens}`);
-  if (typeof evt.totalTokens === 'number') parts.push(`total=${evt.totalTokens}`);
-  if (typeof evt.costUsd === 'number') parts.push(`cost=$${evt.costUsd.toFixed(4)}`);
-  return parts.length > 0 ? `[usage] ${parts.join(' ')}` : '[usage]';
-}
-
-function formatRuntimeSignal(evt: EngineEvent): string | null {
-  switch (evt.type) {
-    case 'tool_start':
-      return `[tool:start] ${evt.name}`;
-    case 'tool_end':
-      return `[tool:end] ${evt.name} ${evt.ok ? 'ok' : 'failed'}`;
-    case 'log_line':
-      return `${evt.stream === 'stderr' ? '[stderr]' : '[stdout]'} ${evt.line}`;
-    case 'usage':
-      return formatUsageSignal(evt);
-    default:
-      return null;
-  }
+function formatRuntimeSignal(evt: EngineEvent, streamPreviewMode: StreamingPreviewMode): string | null {
+  return formatRuntimePreviewSignal(evt, streamPreviewMode);
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +77,7 @@ export function createStreamingProgress(
   const startedAt = Date.now();
   const previewMode = opts?.previewMode ?? 'always';
   const previewDelayMs = Math.max(0, opts?.previewDelayMs ?? DEFAULT_PREVIEW_DELAY_MS);
+  const streamPreviewMode = opts?.streamPreviewMode ?? 'compact';
 
   // Static-progress throttle state (mirrors the existing onProgress pattern)
   let lastStaticEditAt = 0;
@@ -135,6 +118,7 @@ export function createStreamingProgress(
       activityLabel,
       finalText,
       statusTick: statusTick++,
+      previewMode: streamPreviewMode,
       showPreview,
       elapsedMs,
     });
@@ -150,7 +134,7 @@ export function createStreamingProgress(
   }
 
   const onEvent: StreamingProgressController['onEvent'] = (evt) => {
-    const signalLine = formatRuntimeSignal(evt);
+    const signalLine = formatRuntimeSignal(evt, streamPreviewMode);
     if (signalLine) appendSignalLine(signalLine);
     queue.handleEvent(evt);
     void maybeStreamEdit(false);

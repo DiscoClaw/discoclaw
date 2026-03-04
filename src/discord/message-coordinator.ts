@@ -1456,6 +1456,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   const planRunStreaming = createStreamingProgress(
                     progressReply,
                     params.forgeProgressThrottleMs ?? 3000,
+                    { streamPreviewMode: params.streamPreviewMode ?? 'compact' },
                   );
                   const postedPhaseStarts = new Set<string>();
                   const phaseStartMessages = new Map<string, MessageEditTarget>();
@@ -1962,6 +1963,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const forgeResumeStreaming = createStreamingProgress(
                   progressReply,
                   params.forgeProgressThrottleMs ?? 3000,
+                  { streamPreviewMode: params.streamPreviewMode ?? 'compact' },
                 );
 
                 const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
@@ -2065,6 +2067,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const forgeCreateStreaming = createStreamingProgress(
                 progressReply,
                 params.forgeProgressThrottleMs ?? 3000,
+                { streamPreviewMode: params.streamPreviewMode ?? 'compact' },
               );
 
               const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {

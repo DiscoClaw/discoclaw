@@ -21,6 +21,16 @@ function makeMessage() {
   return message;
 }
 
+function firstFencedContentLines(rendered: string): string[] {
+  const open = '```text\n';
+  const start = rendered.indexOf(open);
+  if (start < 0) return [];
+  const bodyStart = start + open.length;
+  const end = rendered.indexOf('\n```', bodyStart);
+  if (end < 0) return [];
+  return rendered.slice(bodyStart, end).split('\n');
+}
+
 describe('createStreamingProgress', () => {
   it('onProgress edits the message with the provided text', async () => {
     const message = makeMessage();
@@ -100,6 +110,52 @@ describe('createStreamingProgress', () => {
     expect(allEdits).toContain('[usage] in=11 out=7 total=18 cost=$0.0012');
     expect(allEdits).toContain('[tool:end] Read ok');
     expect(allEdits).not.toContain('<discord-action>');
+    ctrl.dispose();
+  });
+
+  it('supports raw stream preview mode for richer runtime signals and wider tails', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0, { streamPreviewMode: 'raw' });
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({
+      type: 'tool_start',
+      name: 'Bash',
+      input: {
+        command: 'echo hi <discord-action>{"type":"noop"}</discord-action>',
+      },
+    } as EngineEvent);
+    ctrl.onEvent({
+      type: 'log_line',
+      stream: 'stdout',
+      line: `runtime ${'x'.repeat(95)} <discord-action>{"type":"noop"}</discord-action> done`,
+    } as EngineEvent);
+    ctrl.onEvent({
+      type: 'usage',
+      inputTokens: 11,
+      outputTokens: 7,
+      totalTokens: 18,
+      costUsd: 0.0012,
+    } as EngineEvent);
+    ctrl.onEvent({
+      type: 'tool_end',
+      name: 'Bash',
+      output: 'ok <discord-action>{"type":"noop"}</discord-action>',
+      ok: true,
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const allEdits = message.edits.join('\n');
+    expect(allEdits).toContain('[tool:start] Bash input=');
+    expect(allEdits).toContain('[usage] in=11 out=7 total=18 cost=$0.001200');
+    expect(allEdits).toContain('[tool:end] Bash ok output=');
+    expect(allEdits).toContain('[stdout] runtime');
+    expect(allEdits).not.toContain('<discord-action>');
+
+    const lastEdit = message.edits[message.edits.length - 1]!;
+    const rawLines = firstFencedContentLines(lastEdit);
+    expect(rawLines).toHaveLength(14);
+    expect(rawLines.some((line) => line.length > 72)).toBe(true);
     ctrl.dispose();
   });
 
