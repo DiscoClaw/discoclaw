@@ -23,7 +23,7 @@ import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPr
 import { DiscordTransportClient } from './discord/transport-client.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
 import { loadVoiceIdentity, buildVoicePrompt, buildVoiceFollowUpPrompt, buildVoicePromptSectionEstimates } from './voice/voice-prompt-builder.js';
-import { sanitizeForVoice } from './voice/voice-sanitize.js';
+import { sanitizeForVoice, sanitizeVoiceReplyForSpeech } from './voice/voice-sanitize.js';
 import type { Turn } from './voice/conversation-buffer.js';
 import type { SubsystemContexts } from './discord/actions.js';
 import { shouldTriggerFollowUp } from './discord/action-categories.js';
@@ -1649,7 +1649,18 @@ if (taskCtx) {
         break;
       }
 
-      return responseText;
+      const guarded = sanitizeVoiceReplyForSpeech(responseText);
+      if (guarded.removedToolLines > 0 || guarded.trimmedDanglingTail) {
+        log.warn(
+          {
+            removedToolLines: guarded.removedToolLines,
+            trimmedDanglingTail: guarded.trimmedDanglingTail,
+          },
+          'voice: reply guarded before TTS',
+        );
+      }
+
+      return guarded.text;
     };
 
     // Backfill callback: on voice-channel join, fetch recent voice-log messages

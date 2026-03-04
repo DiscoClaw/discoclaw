@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeForVoice } from './voice-sanitize.js';
+import { sanitizeForVoice, sanitizeVoiceReplyForSpeech } from './voice-sanitize.js';
 
 describe('sanitizeForVoice', () => {
   // -- Task IDs ---------------------------------------------------------------
@@ -141,5 +141,39 @@ describe('sanitizeForVoice', () => {
   it('trims leading/trailing whitespace from result', () => {
     const input = '  `ws-1` hello  ';
     expect(sanitizeForVoice(input)).toBe('hello');
+  });
+});
+
+describe('sanitizeVoiceReplyForSpeech', () => {
+  it('blocks raw tool/query command text from being spoken', () => {
+    const input = 'query_linear task:"Implement hybrid pipeline runtime wiring"';
+    const result = sanitizeVoiceReplyForSpeech(input);
+    expect(result.text).toBe('I need a moment to check that.');
+    expect(result.removedToolLines).toBe(1);
+    expect(result.trimmedDanglingTail).toBe(false);
+  });
+
+  it('strips tool lines while preserving user-facing text', () => {
+    const input = [
+      'query_linear task:"Implement hybrid pipeline runtime wiring"',
+      'Task is in progress and focused on runtime wiring.',
+    ].join('\n');
+    const result = sanitizeVoiceReplyForSpeech(input);
+    expect(result.text).toBe('Task is in progress and focused on runtime wiring.');
+    expect(result.removedToolLines).toBe(1);
+  });
+
+  it('trims dangling truncated tail from a partial sentence', () => {
+    const input = [
+      "The Discord results don't contain any information about a hybrid pipeline runtime wiring feature.",
+      "I don't have enough context to answer accurately.",
+      '',
+      'Can you point me to where this is being discussed or worked on? A channel name, a task title, or a person working on it would',
+    ].join('\n');
+    const result = sanitizeVoiceReplyForSpeech(input);
+    expect(result.text).toBe(
+      "The Discord results don't contain any information about a hybrid pipeline runtime wiring feature.\nI don't have enough context to answer accurately.\n\nCan you point me to where this is being discussed or worked on?",
+    );
+    expect(result.trimmedDanglingTail).toBe(true);
   });
 });
