@@ -20,6 +20,7 @@ import {
 import type { ForgeOrchestratorOpts } from './forge-commands.js';
 import type { RuntimeAdapter, EngineEvent, RuntimeInvokeParams } from '../runtime/types.js';
 import { TaskStore } from '../tasks/store.js';
+import { ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE } from './prompt-common.js';
 
 async function makeTmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'forge-test-'));
@@ -1352,6 +1353,74 @@ describe('ForgeOrchestrator', () => {
     // Auditor prompt (second call) should NOT include tools context
     expect(prompts[1]).not.toContain('Browser escalation: WebFetch');
     expect(prompts[1]).not.toContain('tools.md (repo)');
+  });
+
+  it('injects root policy and tracked defaults into drafter context summary without workspace DISCOCLAW.md', async () => {
+    const tmpDir = await makeTmpDir();
+    await fs.writeFile(path.join(tmpDir, 'AGENTS.md'), '# AGENTS.md\nUser override rules.', 'utf-8');
+
+    const draftPlan = `# Plan: Test\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const prompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        prompts.push(params.prompt);
+        const responses = [draftPlan, auditClean];
+        const text = responses[prompts.length - 1] ?? '(no response)';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+    await orchestrator.run('Test', async () => {});
+
+    const drafterPrompt = prompts[0] ?? '';
+    const rootIdx = drafterPrompt.indexOf(ROOT_POLICY);
+    const trackedIdx = drafterPrompt.indexOf(TRACKED_DEFAULTS_PREAMBLE);
+    const agentsIdx = drafterPrompt.indexOf('--- AGENTS.md ---');
+
+    expect(rootIdx).toBeGreaterThanOrEqual(0);
+    expect(trackedIdx).toBeGreaterThanOrEqual(0);
+    expect(agentsIdx).toBeGreaterThanOrEqual(0);
+    expect(rootIdx).toBeLessThan(trackedIdx);
+    expect(trackedIdx).toBeLessThan(agentsIdx);
+  });
+
+  it('ignores workspace DISCOCLAW.md and uses tracked defaults in drafter context summary', async () => {
+    const tmpDir = await makeTmpDir();
+    const legacySentinel = 'LEGACY_WORKSPACE_DISCOCLAW_SHOULD_NOT_BE_INCLUDED';
+    await fs.writeFile(path.join(tmpDir, 'DISCOCLAW.md'), legacySentinel, 'utf-8');
+
+    const draftPlan = `# Plan: Test\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const prompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(params) {
+        prompts.push(params.prompt);
+        const responses = [draftPlan, auditClean];
+        const text = responses[prompts.length - 1] ?? '(no response)';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+    await orchestrator.run('Test', async () => {});
+
+    const drafterPrompt = prompts[0] ?? '';
+    expect(drafterPrompt).toContain('--- SYSTEM_DEFAULTS.md (tracked defaults) ---');
+    expect(drafterPrompt).not.toContain(legacySentinel);
   });
 
   it('passes read-only tools to auditor invoke call', async () => {

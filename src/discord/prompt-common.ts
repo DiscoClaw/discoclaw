@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildPromptPreamble as buildRootPolicyPreamble } from '../root-policy.js';
+import { getTrackedDefaultsPreamble } from '../instructions/system-defaults.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import {
   compactActiveItems,
@@ -30,13 +31,19 @@ import { inferModelTier, filterToolsByTier } from '../runtime/tool-tiers.js';
 /** Immutable root policy text — evaluated once at module load. */
 export const ROOT_POLICY = buildRootPolicyPreamble();
 
+/** Tracked default instructions injected between ROOT_POLICY and workspace context. */
+export const TRACKED_DEFAULTS_PREAMBLE = getTrackedDefaultsPreamble();
+
 /**
- * Prepend the immutable root policy to any inlined context string.
- * When inlinedContext is non-empty the result is `ROOT_POLICY + '\n\n' + inlinedContext`;
- * when empty just `ROOT_POLICY` is returned.
+ * Deterministic preamble precedence:
+ * 1) immutable ROOT_POLICY
+ * 2) tracked defaults (runtime-injected from repository)
+ * 3) user/workspace inlined context (e.g. AGENTS.md, memory, channel context)
  */
 export function buildPromptPreamble(inlinedContext: string): string {
-  return inlinedContext ? ROOT_POLICY + '\n\n' + inlinedContext : ROOT_POLICY;
+  return [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, inlinedContext]
+    .filter((section) => section.length > 0)
+    .join('\n\n');
 }
 
 export function estimateTokensFromChars(chars: number): number {
@@ -116,7 +123,7 @@ export async function loadWorkspacePaFiles(
   opts?: { skip?: boolean },
 ): Promise<string[]> {
   if (opts?.skip) return [];
-  const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'DISCOCLAW.md', 'AGENTS.md', 'TOOLS.md'];
+  const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'AGENTS.md', 'TOOLS.md'];
   const paFiles: string[] = [];
 
   // Only include BOOTSTRAP.md when onboarding is still in progress.

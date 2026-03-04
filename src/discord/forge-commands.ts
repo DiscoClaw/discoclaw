@@ -11,6 +11,7 @@ import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { getSection, parsePlan } from './plan-parser.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
+import { buildPromptPreamble } from './prompt-common.js';
 export { parseAuditVerdict };
 export type { AuditVerdict };
 
@@ -1143,7 +1144,7 @@ export class ForgeOrchestrator {
       pinnedThreadSummary?: string;
     },
   ): Promise<string> {
-    const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'DISCOCLAW.md', 'AGENTS.md', 'TOOLS.md'];
+    const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'AGENTS.md', 'TOOLS.md'];
     const sections: string[] = [];
     for (const name of contextFiles) {
       const p = path.join(this.opts.workspaceCwd, name);
@@ -1178,10 +1179,7 @@ export class ForgeOrchestrator {
       sections.push(`--- pinned-thread summary ---\n${opts.pinnedThreadSummary.trim()}`);
     }
 
-    if (sections.length === 0) {
-      return '(No workspace context files found.)';
-    }
-    return sections.join('\n\n');
+    return buildPromptPreamble(sections.join('\n\n'));
   }
 
   private async loadProjectContext(): Promise<string | undefined> {

@@ -8,6 +8,7 @@ import { safeCronId } from './job-lock.js';
 import { CronRunControl } from './run-control.js';
 import { loadRunStats } from './run-stats.js';
 import { loadWorkspacePaFiles } from '../discord/prompt-common.js';
+import { TRACKED_DEFAULTS_SECTION_LABEL } from '../instructions/system-defaults.js';
 import * as discordActions from '../discord/actions.js';
 import type { ActionCategoryFlags } from '../discord/actions.js';
 import type { CronJob, ParsedCronDef } from './types.js';
@@ -717,7 +718,11 @@ describe('executeCronJob workspace PA context', () => {
     expect(invokeSpy).toHaveBeenCalledOnce();
     const prompt = invokeSpy.mock.calls[0][0].prompt;
     expect(prompt).toContain('You are executing a scheduled cron job');
-    expect(prompt).not.toContain('--- ');
+    expect(prompt).not.toContain('--- SOUL.md ---');
+    expect(prompt).not.toContain('--- IDENTITY.md ---');
+    expect(prompt).not.toContain('--- USER.md ---');
+    expect(prompt).not.toContain('--- AGENTS.md ---');
+    expect(prompt).not.toContain('--- TOOLS.md ---');
 
     const guild = (ctx.client as any).guilds.cache.get('guild-1');
     const channel = guild.channels.cache.get('general');
@@ -791,7 +796,11 @@ describe('executeCronJob workspace PA context', () => {
     expect(invokeSpy).toHaveBeenCalledOnce();
     const prompt = invokeSpy.mock.calls[0][0].prompt;
     expect(prompt).toContain('You are executing a scheduled cron job');
-    expect(prompt).not.toContain('--- ');
+    expect(prompt).not.toContain('--- SOUL.md ---');
+    expect(prompt).not.toContain('--- IDENTITY.md ---');
+    expect(prompt).not.toContain('--- USER.md ---');
+    expect(prompt).not.toContain('--- AGENTS.md ---');
+    expect(prompt).not.toContain('--- TOOLS.md ---');
 
     const guild = (ctx.client as any).guilds.cache.get('guild-1');
     const channel = guild.channels.cache.get('general');
@@ -817,6 +826,8 @@ describe('executeCronJob workspace PA context', () => {
   });
 
   it('prompt starts with ## Security Policy when no PA files exist', async () => {
+    await expect(fs.access(path.join(wsDir, 'DISCOCLAW.md'))).rejects.toThrow();
+
     const { runtime, invokeSpy } = makeCapturingRuntime('Hello!');
     const ctx = makeCtx({ runtime, cwd: wsDir });
     const job = makeJob();
@@ -825,6 +836,7 @@ describe('executeCronJob workspace PA context', () => {
 
     const prompt = invokeSpy.mock.calls[0][0].prompt;
     expect(prompt).toMatch(/^## Security Policy/);
+    expect(prompt).toContain(`--- ${TRACKED_DEFAULTS_SECTION_LABEL} ---`);
   });
 
   it('uses cronExecModel over ctx.model when set', async () => {
