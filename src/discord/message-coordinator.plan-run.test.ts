@@ -7,10 +7,23 @@ vi.mock('../workspace-bootstrap.js', () => ({
 vi.mock('./plan-commands.js', () => ({
   parsePlanCommand: vi.fn((content: string) => {
     const trimmed = content.trim();
-    if (!trimmed.startsWith('!plan run ')) return null;
-    return { action: 'run', args: trimmed.slice('!plan run '.length) };
+    if (!trimmed.startsWith('!plan')) return null;
+    const rest = trimmed.slice('!plan'.length).trim();
+    const [action = '', ...argParts] = rest.split(/\s+/).filter(Boolean);
+    const args = argParts.join(' ');
+    if (action === 'run' || action === 'run-one' || action === 'run-phase' || action === 'skip' || action === 'skip-to') {
+      return { action, args };
+    }
+    return null;
   }),
-  handlePlanCommand: vi.fn(async () => 'ok'),
+  handlePlanCommand: vi.fn(async (cmd: { action: string; args: string }) => {
+    if (cmd.action === 'skip-to') {
+      const tokens = cmd.args.split(/\s+/).filter(Boolean);
+      if (tokens.length !== 2) return 'Usage: `!plan skip-to <plan-id> <phase-id>`';
+      return `Skip-to ready for **${tokens[1]}**.`;
+    }
+    return 'ok';
+  }),
   preparePlanRun: vi.fn(async () => ({
     phasesFilePath: '/tmp/plans/plan-042-phases.md',
     planFilePath: '/tmp/plans/plan-042-test.md',
@@ -283,6 +296,102 @@ describe('message coordinator plan run phase-start posts', () => {
         return content.includes('plan-042') && content.includes('phase');
       });
       expect(finalSend).toBeDefined();
+    });
+  });
+
+  it('returns usage for !plan run-phase without a phase id', async () => {
+    const { preparePlanRun } = await import('./plan-commands.js');
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(makeParams(), queue as any);
+    const msg = makeMessage('!plan run-phase plan-042');
+
+    await handler(msg as any);
+
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'Usage: `!plan run-phase <plan-id> <phase-id>`',
+    }));
+    expect(preparePlanRun).not.toHaveBeenCalled();
+  });
+
+  it('routes !plan run-phase target id into preparePlanRun and runNextPhase', async () => {
+    const { preparePlanRun } = await import('./plan-commands.js');
+    const { runNextPhase } = await import('./plan-manager.js');
+    (runNextPhase as any).mockImplementationOnce(async () => ({ result: 'nothing_to_run' }));
+
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(makeParams(), queue as any);
+    const msg = makeMessage('!plan run-phase plan-042 phase-3');
+
+    await handler(msg as any);
+    await vi.waitFor(() => {
+      expect(preparePlanRun).toHaveBeenCalledWith(
+        'plan-042',
+        expect.objectContaining({ workspaceCwd: '/tmp/workspace' }),
+        'phase-3',
+      );
+      expect(runNextPhase).toHaveBeenCalledWith(
+        '/tmp/plans/plan-042-phases.md',
+        '/tmp/plans/plan-042-test.md',
+        expect.any(Object),
+        expect.any(Function),
+        'phase-3',
+      );
+    });
+  });
+
+  it('returns usage for !plan skip-to without a phase id', async () => {
+    const { acquireWriterLock } = await import('./forge-plan-registry.js');
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(makeParams(), queue as any);
+    const msg = makeMessage('!plan skip-to plan-042');
+
+    await handler(msg as any);
+
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'Usage: `!plan skip-to <plan-id> <phase-id>`',
+    }));
+    expect(acquireWriterLock).not.toHaveBeenCalled();
+  });
+
+  it('handles !plan skip-to via lock-wrapped plan command handler', async () => {
+    const { acquireWriterLock } = await import('./forge-plan-registry.js');
+    const { handlePlanCommand } = await import('./plan-commands.js');
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(makeParams(), queue as any);
+    const msg = makeMessage('!plan skip-to plan-042 phase-4');
+
+    await handler(msg as any);
+
+    expect(acquireWriterLock).toHaveBeenCalled();
+    expect(handlePlanCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'skip-to', args: 'plan-042 phase-4' }),
+      expect.objectContaining({ workspaceCwd: '/tmp/workspace' }),
+    );
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'Skip-to ready for **phase-4**.',
+    }));
+  });
+
+  it('includes convergence-guard/manual-intervention guidance in stop summaries', async () => {
+    const { runNextPhase } = await import('./plan-manager.js');
+    (runNextPhase as any).mockImplementationOnce(async () => ({
+      result: 'retry_blocked',
+      phase: { id: 'phase-1', title: 'First phase', kind: 'implement', status: 'failed', dependsOn: [], contextFiles: [] },
+      message: 'retry blocked',
+    }));
+
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(makeParams(), queue as any);
+    const msg = makeMessage('!plan run plan-042');
+
+    await handler(msg as any);
+    await vi.waitFor(() => {
+      const summaryEdits = msg.progressReply.edit.mock.calls
+        .map((call: any[]) => String(call[0]?.content ?? ''));
+      expect(summaryEdits.some((content: string) =>
+        content.includes('Convergence guard/manual intervention')
+        && content.includes('!plan run-phase plan-042 <phase-id>')
+        && content.includes('!plan skip-to plan-042 <phase-id>'))).toBe(true);
     });
   });
 });
