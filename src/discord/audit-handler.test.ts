@@ -22,6 +22,19 @@ function makeMockRuntime(response: string): RuntimeAdapter {
     invoke(_params) {
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text: response };
+        yield { type: 'done' };
+      })();
+    },
+  };
+}
+
+function makeMockRuntimeMissingDone(response: string): RuntimeAdapter {
+  return {
+    id: 'claude_code' as const,
+    capabilities: new Set(['streaming_text' as const]),
+    invoke(_params) {
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        yield { type: 'text_final', text: response };
       })();
     },
   };
@@ -254,6 +267,32 @@ describe('handlePlanAudit', () => {
     expect(lock.released).toBe(true);
   });
 
+  it('standalone audit strips non-terminal [progress] lines before persisting', async () => {
+    await writeTestPlan(plansDir);
+    const rawOutput = '[progress] thinking\nNo concerns found.\n\n**Verdict:** Ready to approve.\n[progress] wrapping up';
+    const runtime = makeMockRuntime(rawOutput);
+    const lock = makeLockFn();
+    const result = await handlePlanAudit(baseOpts(plansDir, runtime, lock, tmpDir));
+
+    expect(result.ok).toBe(true);
+    const updated = await fs.readFile(path.join(plansDir, 'plan-099-test-plan.md'), 'utf-8');
+    expect(updated).toContain('No concerns found.');
+    expect(updated).toContain('**Verdict:** Ready to approve.');
+    expect(updated).not.toContain('[progress]');
+  });
+
+  it('returns error when audit stream ends without done event', async () => {
+    await writeTestPlan(plansDir);
+    const runtime = makeMockRuntimeMissingDone('No concerns found.\n\n**Verdict:** Ready to approve.');
+    const lock = makeLockFn();
+    const result = await handlePlanAudit(baseOpts(plansDir, runtime, lock, tmpDir));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('without done event');
+    }
+  });
+
   it('plan not found', async () => {
     await fs.mkdir(plansDir, { recursive: true });
     const runtime = makeMockRuntime('unused');
@@ -392,6 +431,7 @@ _Filled in during/after implementation._
         invokeSpy(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text: 'No concerns.\n\n**Verdict:** Ready to approve.' };
+          yield { type: 'done' };
         })();
       },
     };
@@ -429,6 +469,7 @@ _Filled in during/after implementation._
         invokeSpy(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text: 'No concerns.\n\n**Verdict:** Ready to approve.' };
+          yield { type: 'done' };
         })();
       },
     };
