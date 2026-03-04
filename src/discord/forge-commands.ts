@@ -12,6 +12,7 @@ import type { AuditVerdict } from './forge-audit-verdict.js';
 import { getSection, parsePlan } from './plan-parser.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import { buildPromptPreamble } from './prompt-common.js';
+import { createPhaseStatusHeartbeatController } from './phase-status-heartbeat.js';
 export { parseAuditVerdict };
 export type { AuditVerdict };
 
@@ -857,37 +858,268 @@ export class ForgeOrchestrator {
 
     // The effective max round number is startRound + maxAuditRounds - 1
     const maxRound = startRound + this.opts.maxAuditRounds - 1;
-
-    while (round < maxRound) {
-      if (this.cancelRequested) {
-        this.opts.log?.info({ planId, round, phase: 'loop-entry' }, 'forge:cancelled');
-        await this.updatePlanStatus(filePath, 'CANCELLED');
-        await onProgress(`Forge ${planId} cancelled.`, { force: true });
-        return {
-          planId,
-          filePath,
-          finalVerdict: 'CANCELLED',
-          rounds: round - startRound + 1,
-          reachedMaxRounds: false,
-        };
+    const forgeHeartbeat = createPhaseStatusHeartbeatController({
+      flowLabel: `Forge ${planId}`,
+      onUpdate: async (message, event) => {
+        if (event.type === 'terminal') return;
+        await onProgress(message, { force: true });
+      },
+      onError: (err, event) => {
+        this.opts.log?.warn({ err, planId, eventType: event.type }, 'forge:heartbeat update failed');
+      },
+    });
+    let heartbeatPhaseStarted = false;
+    let heartbeatCompleted = false;
+    const setHeartbeatPhase = async (phaseLabel: string) => {
+      if (!heartbeatPhaseStarted) {
+        heartbeatPhaseStarted = true;
+        await forgeHeartbeat.startPhase(phaseLabel);
+        return;
       }
+      await forgeHeartbeat.transitionPhase(phaseLabel);
+    };
+    const completeHeartbeat = async (
+      outcome: 'succeeded' | 'failed' | 'cancelled',
+      detail?: string,
+    ) => {
+      if (heartbeatCompleted) return;
+      heartbeatCompleted = true;
+      await forgeHeartbeat.complete(outcome, detail);
+    };
 
-      round++;
+    try {
+      while (round < maxRound) {
+        if (this.cancelRequested) {
+          this.opts.log?.info({ planId, round, phase: 'loop-entry' }, 'forge:cancelled');
+          await this.updatePlanStatus(filePath, 'CANCELLED');
+          await onProgress(`Forge ${planId} cancelled.`, { force: true });
+          await completeHeartbeat('cancelled', `Cancelled before round ${round + 1}/${maxRound}.`);
+          return {
+            planId,
+            filePath,
+            finalVerdict: 'CANCELLED',
+            rounds: round - startRound + 1,
+            reachedMaxRounds: false,
+          };
+        }
 
-      // Draft phase (only on first round of a fresh forge, not resume)
-      if (round === 1 && startRound === 1 && templateContent && contextSummary) {
-        await onProgress(`Forging ${planId}... Drafting (reading codebase)`);
+        round++;
 
-        const drafterPrompt = buildDrafterPrompt(
-          description,
-          templateContent,
-          contextSummary,
+        // Draft phase (only on first round of a fresh forge, not resume)
+        if (round === 1 && startRound === 1 && templateContent && contextSummary) {
+          await setHeartbeatPhase(`Draft round ${round}/${maxRound}`);
+          await onProgress(`Forging ${planId}... Drafting (reading codebase)`);
+
+          const drafterPrompt = buildDrafterPrompt(
+            description,
+            templateContent,
+            contextSummary,
+          );
+
+          const draftPipelineResult = await this.runWithRetry({
+            steps: [{
+              kind: 'prompt',
+              prompt: drafterPrompt,
+              runtime: effectiveDrafterRt,
+              model: drafterModel,
+              tools: readOnlyTools,
+              addDirs,
+              timeoutMs: this.opts.timeoutMs,
+              sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+            }],
+            runtime: this.opts.runtime,
+            cwd: this.opts.cwd,
+            model: this.opts.model,
+            signal: this.abortController.signal,
+          }, 'Draft', onProgress, (result) => {
+            const output = result.outputs[0] ?? '';
+            if (isTemplateEchoed(output)) {
+              this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
+              throw new Error('drafter echoed the template');
+            }
+          }, (retryDef) => ({
+            ...retryDef,
+            steps: retryDef.steps.map((step) =>
+              step.kind === 'prompt'
+                ? {
+                  ...step,
+                  prompt: TEMPLATE_ECHO_RETRY_PREFIX + step.prompt,
+                }
+                : step,
+            ),
+          }));
+          if (!draftPipelineResult) {
+            this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
+            await this.updatePlanStatus(filePath, 'CANCELLED');
+            await onProgress(`Forge ${planId} cancelled.`, { force: true });
+            await completeHeartbeat('cancelled', `Cancelled during draft in round ${round}/${maxRound}.`);
+            return {
+              planId,
+              filePath,
+              finalVerdict: 'CANCELLED',
+              rounds: round - startRound + 1,
+              reachedMaxRounds: false,
+            };
+          }
+          const draftOutput = draftPipelineResult.outputs[0] ?? '';
+
+          // Write the draft — preserve the header (planId, taskId) from the created file.
+          planContent = this.mergeDraftWithHeader(planContent, draftOutput);
+          await this.atomicWrite(filePath, planContent);
+
+          // Update task title to match the drafter's Plan title (raw user input is often messy).
+          const drafterTitleMatch = draftOutput.match(/^# Plan:\s*(.+)$/m);
+          const mergedHeader = parsePlanFileHeader(planContent);
+          const drafterTitle = drafterTitleMatch?.[1]?.trim();
+          const taskId = mergedHeader ? resolvePlanHeaderTaskId(mergedHeader) : '';
+          if (taskId && drafterTitle && drafterTitle !== description) {
+            try {
+              this.opts.taskStore.update(taskId, { title: drafterTitle });
+            } catch {
+              // best-effort — task title update failure shouldn't block the forge
+            }
+          }
+        } else if (round > startRound) {
+          await onProgress(
+            `Forging ${planId}... Revision complete. Audit round ${round}/${maxRound}...`,
+          );
+        }
+
+        // Audit phase
+        await setHeartbeatPhase(`Audit round ${round}/${maxRound}`);
+        await onProgress(
+          round === startRound && startRound === 1
+            ? `Forging ${planId}... Draft complete. Audit round ${round}/${maxRound}...`
+            : `Forging ${planId}... Audit round ${round}/${maxRound}...`,
         );
 
-        const draftPipelineResult = await this.runWithRetry({
+        const auditorRt = this.opts.auditorRuntime ?? this.opts.runtime;
+        const isClaudeAuditor = auditorRt.id === 'claude_code';
+        const auditorHasFileTools = auditorRt.capabilities.has('tools_fs');
+        const hasExplicitAuditorModel = Boolean(this.opts.auditorModel);
+        const effectiveAuditorModel = isClaudeAuditor
+          ? resolveModel(rawAuditorModel, auditorRt.id)
+          : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditorRt.id) : '');
+
+        const auditorPrompt = buildAuditorPrompt(
+          planContent,
+          round,
+          projectContext,
+          { hasTools: auditorHasFileTools },
+        );
+        const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(auditorRt, onEvent) : auditorRt;
+        const auditPipelineResult = await this.runWithRetry({
           steps: [{
             kind: 'prompt',
-            prompt: drafterPrompt,
+            prompt: auditorPrompt,
+            runtime: effectiveAuditorRt,
+            model: effectiveAuditorModel,
+            tools: auditorHasFileTools ? readOnlyTools : [],
+            ...(auditorHasFileTools ? { addDirs } : {}),
+            timeoutMs: this.opts.timeoutMs,
+            sessionKey: auditorRt.capabilities.has('sessions') ? auditorSessionKey : undefined,
+          }],
+          runtime: this.opts.runtime,
+          cwd: this.opts.cwd,
+          model: this.opts.model,
+          signal: this.abortController.signal,
+        }, `Audit round ${round}`, onProgress);
+        if (!auditPipelineResult) {
+          this.opts.log?.info({ planId, round, phase: 'audit' }, 'forge:cancelled');
+          await this.updatePlanStatus(filePath, 'CANCELLED');
+          await onProgress(`Forge ${planId} cancelled.`, { force: true });
+          await completeHeartbeat('cancelled', `Cancelled during audit round ${round}/${maxRound}.`);
+          return {
+            planId,
+            filePath,
+            finalVerdict: 'CANCELLED',
+            rounds: round - startRound + 1,
+            reachedMaxRounds: false,
+          };
+        }
+        const auditOutput = auditPipelineResult.outputs[0] ?? '';
+
+        lastAuditNotes = auditOutput;
+        lastVerdict = parseAuditVerdict(auditOutput);
+
+        // Append audit notes to the plan file
+        planContent = appendAuditRound(planContent, round, auditOutput, lastVerdict);
+        await this.atomicWrite(filePath, planContent);
+
+        // Check if we should loop
+        if (!lastVerdict.shouldLoop) {
+          // Post-loop structural check: verify a revision hasn't stripped required sections.
+          // Truncate to content before ## Audit Log so audit notes don't confuse parsePlan.
+          let structuralWarning: string | undefined;
+          const auditLogIdx = planContent.indexOf('\n## Audit Log');
+          const bodyForCheck = auditLogIdx !== -1 ? planContent.slice(0, auditLogIdx) : planContent;
+          const postConcerns = auditPlanStructure(bodyForCheck);
+          const postVerdict = deriveVerdict(postConcerns);
+          if (postVerdict.shouldLoop) {
+            const missing = postConcerns
+              .filter((c) => c.severity === 'high' || c.severity === 'medium')
+              .map((c) => c.title)
+              .join(', ');
+            structuralWarning = missing;
+            planContent = appendAuditRound(
+              planContent,
+              round + 1,
+              `**Structural warning (automated):** ${missing}`,
+              { maxSeverity: 'medium', shouldLoop: false },
+            );
+            await this.atomicWrite(filePath, planContent);
+          }
+
+          await this.updatePlanStatus(filePath, 'REVIEW');
+          // Re-read to get updated status in the summary
+          planContent = await fs.readFile(filePath, 'utf-8');
+          const summary = buildPlanSummary(planContent);
+          const elapsed = Math.round((Date.now() - t0) / 1000);
+          const roundLabel = `${round - startRound + 1} round${round - startRound + 1 > 1 ? 's' : ''}`;
+          const warningSuffix = structuralWarning
+            ? ` ⚠️ Structural warning: ${structuralWarning}`
+            : '';
+          await onProgress(
+            `Forge complete. Plan ${planId} ready for review (${roundLabel}, ${elapsed}s)${warningSuffix}`,
+            { force: true },
+          );
+          await completeHeartbeat(
+            'succeeded',
+            `Completed ${round - startRound + 1} round${round - startRound + 1 > 1 ? 's' : ''}.`,
+          );
+          return {
+            planId,
+            filePath,
+            finalVerdict: lastVerdict.maxSeverity,
+            rounds: round - startRound + 1,
+            reachedMaxRounds: false,
+            planSummary: summary,
+            structuralWarning,
+          };
+        }
+
+        // Check if we've hit the cap
+        if (round >= maxRound) {
+          break;
+        }
+
+        // Revision phase
+        await setHeartbeatPhase(`Revision after round ${round}/${maxRound}`);
+        await onProgress(
+          `Forging ${planId}... Audit round ${round} found ${lastVerdict.maxSeverity} concerns. Revising...`,
+        );
+
+        const revisionPrompt = buildRevisionPrompt(
+          planContent,
+          auditOutput,
+          description,
+          projectContext,
+        );
+
+        const revisionPipelineResult = await this.runWithRetry({
+          steps: [{
+            kind: 'prompt',
+            prompt: revisionPrompt,
             runtime: effectiveDrafterRt,
             model: drafterModel,
             tools: readOnlyTools,
@@ -899,27 +1131,12 @@ export class ForgeOrchestrator {
           cwd: this.opts.cwd,
           model: this.opts.model,
           signal: this.abortController.signal,
-        }, 'Draft', onProgress, (result) => {
-          const output = result.outputs[0] ?? '';
-          if (isTemplateEchoed(output)) {
-            this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
-            throw new Error('drafter echoed the template');
-          }
-        }, (retryDef) => ({
-          ...retryDef,
-          steps: retryDef.steps.map((step) =>
-            step.kind === 'prompt'
-              ? {
-                ...step,
-                prompt: TEMPLATE_ECHO_RETRY_PREFIX + step.prompt,
-              }
-              : step,
-          ),
-        }));
-        if (!draftPipelineResult) {
-          this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
+        }, `Revision after round ${round}`, onProgress);
+        if (!revisionPipelineResult) {
+          this.opts.log?.info({ planId, round, phase: 'revision' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
           await onProgress(`Forge ${planId} cancelled.`, { force: true });
+          await completeHeartbeat('cancelled', `Cancelled during revision after round ${round}/${maxRound}.`);
           return {
             planId,
             filePath,
@@ -928,213 +1145,48 @@ export class ForgeOrchestrator {
             reachedMaxRounds: false,
           };
         }
-        const draftOutput = draftPipelineResult.outputs[0] ?? '';
+        const revisionOutput = revisionPipelineResult.outputs[0] ?? '';
 
-        // Write the draft — preserve the header (planId, taskId) from the created file.
-        planContent = this.mergeDraftWithHeader(planContent, draftOutput);
+        planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
         await this.atomicWrite(filePath, planContent);
-
-        // Update task title to match the drafter's Plan title (raw user input is often messy).
-        const drafterTitleMatch = draftOutput.match(/^# Plan:\s*(.+)$/m);
-        const mergedHeader = parsePlanFileHeader(planContent);
-        const drafterTitle = drafterTitleMatch?.[1]?.trim();
-        const taskId = mergedHeader ? resolvePlanHeaderTaskId(mergedHeader) : '';
-        if (taskId && drafterTitle && drafterTitle !== description) {
-          try {
-            this.opts.taskStore.update(taskId, { title: drafterTitle });
-          } catch {
-            // best-effort — task title update failure shouldn't block the forge
-          }
-        }
-      } else if (round > startRound) {
-        await onProgress(
-          `Forging ${planId}... Revision complete. Audit round ${round}/${maxRound}...`,
-        );
       }
 
-      // Audit phase
-      await onProgress(
-        round === startRound && startRound === 1
-          ? `Forging ${planId}... Draft complete. Audit round ${round}/${maxRound}...`
-          : `Forging ${planId}... Audit round ${round}/${maxRound}...`,
+      // Cap reached
+      planContent = planContent.replace(
+        /(\n---\n\n## Implementation Notes)/,
+        `\n\nVERDICT: CAP_REACHED\n$1`,
       );
-
-      const auditorRt = this.opts.auditorRuntime ?? this.opts.runtime;
-      const isClaudeAuditor = auditorRt.id === 'claude_code';
-      const auditorHasFileTools = auditorRt.capabilities.has('tools_fs');
-      const hasExplicitAuditorModel = Boolean(this.opts.auditorModel);
-      const effectiveAuditorModel = isClaudeAuditor
-        ? resolveModel(rawAuditorModel, auditorRt.id)
-        : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditorRt.id) : '');
-
-      const auditorPrompt = buildAuditorPrompt(
-        planContent,
-        round,
-        projectContext,
-        { hasTools: auditorHasFileTools },
-      );
-      const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(auditorRt, onEvent) : auditorRt;
-      const auditPipelineResult = await this.runWithRetry({
-        steps: [{
-          kind: 'prompt',
-          prompt: auditorPrompt,
-          runtime: effectiveAuditorRt,
-          model: effectiveAuditorModel,
-          tools: auditorHasFileTools ? readOnlyTools : [],
-          ...(auditorHasFileTools ? { addDirs } : {}),
-          timeoutMs: this.opts.timeoutMs,
-          sessionKey: auditorRt.capabilities.has('sessions') ? auditorSessionKey : undefined,
-        }],
-        runtime: this.opts.runtime,
-        cwd: this.opts.cwd,
-        model: this.opts.model,
-        signal: this.abortController.signal,
-      }, `Audit round ${round}`, onProgress);
-      if (!auditPipelineResult) {
-        this.opts.log?.info({ planId, round, phase: 'audit' }, 'forge:cancelled');
-        await this.updatePlanStatus(filePath, 'CANCELLED');
-        await onProgress(`Forge ${planId} cancelled.`, { force: true });
-        return {
-          planId,
-          filePath,
-          finalVerdict: 'CANCELLED',
-          rounds: round - startRound + 1,
-          reachedMaxRounds: false,
-        };
-      }
-      const auditOutput = auditPipelineResult.outputs[0] ?? '';
-
-      lastAuditNotes = auditOutput;
-      lastVerdict = parseAuditVerdict(auditOutput);
-
-      // Append audit notes to the plan file
-      planContent = appendAuditRound(planContent, round, auditOutput, lastVerdict);
       await this.atomicWrite(filePath, planContent);
+      await this.updatePlanStatus(filePath, 'REVIEW');
+      // Re-read to get updated status in the summary
+      planContent = await fs.readFile(filePath, 'utf-8');
+      const summary = buildPlanSummary(planContent);
 
-      // Check if we should loop
-      if (!lastVerdict.shouldLoop) {
-        // Post-loop structural check: verify a revision hasn't stripped required sections.
-        // Truncate to content before ## Audit Log so audit notes don't confuse parsePlan.
-        let structuralWarning: string | undefined;
-        const auditLogIdx = planContent.indexOf('\n## Audit Log');
-        const bodyForCheck = auditLogIdx !== -1 ? planContent.slice(0, auditLogIdx) : planContent;
-        const postConcerns = auditPlanStructure(bodyForCheck);
-        const postVerdict = deriveVerdict(postConcerns);
-        if (postVerdict.shouldLoop) {
-          const missing = postConcerns
-            .filter((c) => c.severity === 'high' || c.severity === 'medium')
-            .map((c) => c.title)
-            .join(', ');
-          structuralWarning = missing;
-          planContent = appendAuditRound(
-            planContent,
-            round + 1,
-            `**Structural warning (automated):** ${missing}`,
-            { maxSeverity: 'medium', shouldLoop: false },
-          );
-          await this.atomicWrite(filePath, planContent);
-        }
-
-        await this.updatePlanStatus(filePath, 'REVIEW');
-        // Re-read to get updated status in the summary
-        planContent = await fs.readFile(filePath, 'utf-8');
-        const summary = buildPlanSummary(planContent);
-        const elapsed = Math.round((Date.now() - t0) / 1000);
-        const roundLabel = `${round - startRound + 1} round${round - startRound + 1 > 1 ? 's' : ''}`;
-        const warningSuffix = structuralWarning
-          ? ` ⚠️ Structural warning: ${structuralWarning}`
-          : '';
-        await onProgress(
-          `Forge complete. Plan ${planId} ready for review (${roundLabel}, ${elapsed}s)${warningSuffix}`,
-          { force: true },
-        );
-        return {
-          planId,
-          filePath,
-          finalVerdict: lastVerdict.maxSeverity,
-          rounds: round - startRound + 1,
-          reachedMaxRounds: false,
-          planSummary: summary,
-          structuralWarning,
-        };
-      }
-
-      // Check if we've hit the cap
-      if (round >= maxRound) {
-        break;
-      }
-
-      // Revision phase
       await onProgress(
-        `Forging ${planId}... Audit round ${round} found ${lastVerdict.maxSeverity} concerns. Revising...`,
+        `Forge stopped after ${this.opts.maxAuditRounds} audit rounds — concerns remain. Review manually: \`!plan show ${planId}\``,
+        { force: true },
       );
+      await completeHeartbeat('failed', `Reached audit round cap at ${round}/${maxRound}.`);
 
-      const revisionPrompt = buildRevisionPrompt(
-        planContent,
-        auditOutput,
-        description,
-        projectContext,
+      return {
+        planId,
+        filePath,
+        finalVerdict: lastVerdict.maxSeverity,
+        rounds: round - startRound + 1,
+        reachedMaxRounds: true,
+        planSummary: summary,
+      };
+    } catch (err) {
+      await completeHeartbeat(
+        this.cancelRequested ? 'cancelled' : 'failed',
+        this.cancelRequested
+          ? `Cancelled at round ${Math.max(startRound, round)}/${maxRound}.`
+          : `Error: ${String(err instanceof Error ? err.message : err)}`,
       );
-
-      const revisionPipelineResult = await this.runWithRetry({
-        steps: [{
-          kind: 'prompt',
-          prompt: revisionPrompt,
-          runtime: effectiveDrafterRt,
-          model: drafterModel,
-          tools: readOnlyTools,
-          addDirs,
-          timeoutMs: this.opts.timeoutMs,
-          sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-        }],
-        runtime: this.opts.runtime,
-        cwd: this.opts.cwd,
-        model: this.opts.model,
-        signal: this.abortController.signal,
-      }, `Revision after round ${round}`, onProgress);
-      if (!revisionPipelineResult) {
-        this.opts.log?.info({ planId, round, phase: 'revision' }, 'forge:cancelled');
-        await this.updatePlanStatus(filePath, 'CANCELLED');
-        await onProgress(`Forge ${planId} cancelled.`, { force: true });
-        return {
-          planId,
-          filePath,
-          finalVerdict: 'CANCELLED',
-          rounds: round - startRound + 1,
-          reachedMaxRounds: false,
-        };
-      }
-      const revisionOutput = revisionPipelineResult.outputs[0] ?? '';
-
-      planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
-      await this.atomicWrite(filePath, planContent);
+      throw err;
+    } finally {
+      forgeHeartbeat.dispose();
     }
-
-    // Cap reached
-    planContent = planContent.replace(
-      /(\n---\n\n## Implementation Notes)/,
-      `\n\nVERDICT: CAP_REACHED\n$1`,
-    );
-    await this.atomicWrite(filePath, planContent);
-    await this.updatePlanStatus(filePath, 'REVIEW');
-    // Re-read to get updated status in the summary
-    planContent = await fs.readFile(filePath, 'utf-8');
-    const summary = buildPlanSummary(planContent);
-
-    const elapsed = Math.round((Date.now() - t0) / 1000);
-    await onProgress(
-      `Forge stopped after ${this.opts.maxAuditRounds} audit rounds — concerns remain. Review manually: \`!plan show ${planId}\``,
-      { force: true },
-    );
-
-    return {
-      planId,
-      filePath,
-      finalVerdict: lastVerdict.maxSeverity,
-      rounds: round - startRound + 1,
-      reachedMaxRounds: true,
-      planSummary: summary,
-    };
   }
 
   private async buildContextSummary(
