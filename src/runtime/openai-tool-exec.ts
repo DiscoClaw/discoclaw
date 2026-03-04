@@ -610,7 +610,7 @@ const STEP_TOOL_NAMES: ReadonlySet<StepToolName> = new Set([
   'step.wait',
 ]);
 
-const ACTIVE_STEP_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set(['running', 'waiting']);
+const ACTIVE_STEP_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set(['running', 'waiting', 'failed']);
 const STEP_MAX_ATTEMPTS_TOTAL = 3;
 const STEP_RETRY_DELAYS_MS = [1_000, 2_000] as const;
 const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1_000;
@@ -741,9 +741,11 @@ function normalizePipelineRun(run: PipelineRun): void {
     run.pipelineName = 'default';
   }
   if (typeof run.pipelineInputHash !== 'string' || run.pipelineInputHash.trim() === '') {
-    run.pipelineInputHash = sha256(stableJson(canonicalStepsForHash(run.steps)));
+    run.pipelineInputHash = sha256(stableJson(null));
   }
   if (run.idempotencyKey !== null && typeof run.idempotencyKey !== 'string') {
+    run.idempotencyKey = null;
+  } else if (typeof run.idempotencyKey === 'string' && run.idempotencyKey.trim() === '') {
     run.idempotencyKey = null;
   }
   if (typeof run.requestHash !== 'string' || run.requestHash.trim() === '') {
@@ -960,20 +962,6 @@ function isWithinIdempotencyWindow(run: PipelineRun, nowMs: number): boolean {
   const created = Date.parse(run.createdAt);
   if (!Number.isFinite(created)) return false;
   return (nowMs - created) <= IDEMPOTENCY_WINDOW_MS;
-}
-
-function stepArgumentsEquivalent(
-  a: Array<{ tool: string; arguments: Record<string, unknown> }>,
-  b: PipelineStep[],
-): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const left = a[i]!;
-    const right = b[i]!;
-    if (left.tool !== right.tool) return false;
-    if (stableJson(left.arguments) !== stableJson(right.arguments)) return false;
-  }
-  return true;
 }
 
 function summarizePipelineRun(run: PipelineRun): Record<string, unknown> {
@@ -1500,7 +1488,7 @@ async function handleStepTool(
   if (!result.ok) {
     const failureCode = classifyFailureCode(result.result);
     ctx.step.status = 'failed';
-    ctx.run.status = 'waiting';
+    ctx.run.status = 'failed';
     ctx.run.failureCode = failureCode;
     ctx.run.lastError = `step ${ctx.stepIndex + 1} (${ctx.step.tool}) failed: ${result.result}`;
     await savePipelineStore(ctx.storePath, ctx.store);
@@ -1560,7 +1548,7 @@ async function handlePipelineTool(
 
     const pipelineName = parsePipelineName(args);
     const autoRun = parseAutoRun(args);
-    const canonicalInput = stableJson(args.input ?? canonicalStepsForHash(parsedSteps.steps));
+    const canonicalInput = stableJson(args.input ?? null);
     const pipelineInputHash = sha256(canonicalInput);
     const explicitIdempotencyKey = parseIdempotencyKey(args);
     const derivedIdempotencyKey = computeDerivedIdempotencyKey(runtime, adapter, pipelineName, canonicalInput);
@@ -1575,33 +1563,21 @@ async function handlePipelineTool(
     }));
     const nowMs = Date.now();
 
-    if (explicitIdempotencyKey) {
-      for (const existing of Object.values(store.runs)) {
-        if (!isWithinIdempotencyWindow(existing, nowMs)) continue;
-        if (existing.idempotencyKey !== dedupeLookupKey) continue;
-        if (existing.workspaceRoot && existing.workspaceRoot !== invocationWorkspaceRoot) {
-          return workspaceAffinityFailure(operation, existing.workspaceRoot, invocationWorkspaceRoot);
-        }
-        if (existing.requestHash !== requestHash) {
-          return pipelineFailure(
-            operation,
-            'E_IDEMPOTENCY_CONFLICT',
-            `idempotency key conflict for ${explicitIdempotencyKey}`,
-            { run: summarizePipelineRun(existing) },
-          );
-        }
-        return pipelineSuccess(existing, existing.status !== 'failed');
+    for (const existing of Object.values(store.runs)) {
+      if (!isWithinIdempotencyWindow(existing, nowMs)) continue;
+      if (existing.idempotencyKey !== dedupeLookupKey) continue;
+      if (existing.workspaceRoot && existing.workspaceRoot !== invocationWorkspaceRoot) {
+        return workspaceAffinityFailure(operation, existing.workspaceRoot, invocationWorkspaceRoot);
       }
-    } else {
-      for (const existing of Object.values(store.runs)) {
-        if (!isWithinIdempotencyWindow(existing, nowMs)) continue;
-        if (existing.idempotencyKey !== null) continue;
-        if (existing.workspaceRoot && existing.workspaceRoot !== invocationWorkspaceRoot) continue;
-        if (existing.runtime !== runtime || existing.adapter !== adapter || existing.pipelineName !== pipelineName) continue;
-        if (existing.pipelineInputHash !== pipelineInputHash) continue;
-        if (!stepArgumentsEquivalent(canonicalStepsForHash(parsedSteps.steps), existing.steps)) continue;
-        return pipelineSuccess(existing, existing.status !== 'failed');
+      if (existing.requestHash !== requestHash) {
+        return pipelineFailure(
+          operation,
+          'E_IDEMPOTENCY_CONFLICT',
+          `idempotency key conflict for ${dedupeLookupKey}`,
+          { run: summarizePipelineRun(existing) },
+        );
       }
+      return pipelineSuccess(existing, existing.status !== 'failed');
     }
 
     const runId = parseRunId(args) ?? `plr_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
@@ -1625,7 +1601,7 @@ async function handlePipelineTool(
       adapter,
       pipelineName,
       pipelineInputHash,
-      idempotencyKey: explicitIdempotencyKey ?? null,
+      idempotencyKey: dedupeLookupKey,
       requestHash,
       workspaceRoot: invocationWorkspaceRoot,
       status: autoRun ? 'running' : 'queued',
@@ -1687,11 +1663,15 @@ async function handlePipelineTool(
     if (run.status === 'waiting' && run.currentStep < run.steps.length) {
       const key = stepKey(run.currentStep);
       const dueAt = run.nextRetryDueAtByStep[key];
-      if (typeof dueAt === 'string' && dueAt.trim() !== '') {
-        const dueMs = Date.parse(dueAt);
-        if (Number.isFinite(dueMs) && dueMs > Date.now()) {
-          return pipelineFailure(operation, 'E_POLICY_BLOCKED', `retry not due yet for run: ${runId} (next_retry_due_at=${dueAt})`);
-        }
+      if (typeof dueAt !== 'string' || dueAt.trim() === '') {
+        return pipelineFailure(operation, 'E_POLICY_BLOCKED', `retry has not been scheduled for run: ${runId}; call step.retry first`);
+      }
+      const dueMs = Date.parse(dueAt);
+      if (!Number.isFinite(dueMs)) {
+        return pipelineFailure(operation, 'E_POLICY_BLOCKED', `retry schedule is malformed for run: ${runId} (next_retry_due_at=${dueAt})`);
+      }
+      if (dueMs > Date.now()) {
+        return pipelineFailure(operation, 'E_POLICY_BLOCKED', `retry not due yet for run: ${runId} (next_retry_due_at=${dueAt})`);
       }
       run.nextRetryDueAtByStep[key] = null;
       run.status = 'running';
@@ -1702,10 +1682,23 @@ async function handlePipelineTool(
     if (run.status === 'failed' && run.currentStep < run.steps.length) {
       const step = run.steps[run.currentStep]!;
       if (step.status === 'failed') {
+        const key = stepKey(run.currentStep);
+        const dueAt = run.nextRetryDueAtByStep[key];
+        if (typeof dueAt !== 'string' || dueAt.trim() === '') {
+          return pipelineFailure(operation, 'E_POLICY_BLOCKED', `retry has not been scheduled for run: ${runId}; call step.retry first`);
+        }
+        const dueMs = Date.parse(dueAt);
+        if (!Number.isFinite(dueMs)) {
+          return pipelineFailure(operation, 'E_POLICY_BLOCKED', `retry schedule is malformed for run: ${runId} (next_retry_due_at=${dueAt})`);
+        }
+        if (dueMs > Date.now()) {
+          return pipelineFailure(operation, 'E_POLICY_BLOCKED', `retry not due yet for run: ${runId} (next_retry_due_at=${dueAt})`);
+        }
         step.status = 'pending';
         step.ok = undefined;
         step.result = undefined;
         step.updatedAt = nowIso();
+        run.nextRetryDueAtByStep[key] = null;
       }
       run.lastError = undefined;
       run.failureCode = undefined;

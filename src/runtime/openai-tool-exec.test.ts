@@ -583,8 +583,39 @@ describe('pipeline.start/status/resume/cancel', () => {
     expect(payload['adapter']).toBe('openrouter');
     expect(payload['pipeline_name']).toBe('metadata-check');
     expect(typeof payload['pipeline_input_hash']).toBe('string');
-    expect(payload['idempotency_key']).toBe(null);
+    expect(typeof payload['idempotency_key']).toBe('string');
     expect(payload['status']).toBe('queued');
+  });
+
+  it('pipeline.start derived idempotency key is based on canonical input, not step list', async () => {
+    const first = await executeToolCall(
+      'pipeline.start',
+      {
+        pipeline_name: 'derived-input-contract',
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'a.txt', content: 'A' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(first.ok).toBe(true);
+
+    const second = await executeToolCall(
+      'pipeline.start',
+      {
+        pipeline_name: 'derived-input-contract',
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'b.txt', content: 'B' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(second.ok).toBe(false);
+    const payload = parseJsonResult(second.result);
+    expect(payload['failure_code']).toBe('E_IDEMPOTENCY_CONFLICT');
+    expect(String(payload['message'])).toContain('idempotency key conflict');
   });
 
   it('pipeline.step execution fails deterministically when a step tool is not allowlisted', async () => {
@@ -605,7 +636,7 @@ describe('pipeline.start/status/resume/cancel', () => {
     expect(payload['last_error']).toMatch(/not allowlisted/i);
   });
 
-  it('pipeline.resume retries failed current step after allowlist change', async () => {
+  it('pipeline.resume requires retry scheduling before rerunning failed step', async () => {
     const start = await executeToolCall(
       'pipeline.start',
       {
@@ -629,15 +660,39 @@ describe('pipeline.start/status/resume/cancel', () => {
     expect(firstResume.ok).toBe(false);
     expect(parseJsonResult(firstResume.result)['status']).toBe('failed');
 
-    const secondResume = await executeToolCall(
+    const secondResumeBlocked = await executeToolCall(
       'pipeline.resume',
       { run_id: runId },
       [tmpDir],
       undefined,
       { allowedToolNames: new Set(['pipeline.resume', 'write_file']) },
     );
-    expect(secondResume.ok).toBe(true);
-    expect(parseJsonResult(secondResume.result)['status']).toBe('succeeded');
+    expect(secondResumeBlocked.ok).toBe(false);
+    const blockedPayload = parseJsonResult(secondResumeBlocked.result);
+    expect(blockedPayload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect(String(blockedPayload['message'])).toContain('call step.retry first');
+
+    const retry = await executeToolCall(
+      'step.retry',
+      { run_id: runId, expected_current_step: 0 },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['step.retry']) },
+    );
+    expect(retry.ok).toBe(true);
+
+    // step.retry enforces backoff; wait until due before resuming.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    const thirdResume = await executeToolCall(
+      'pipeline.resume',
+      { run_id: runId },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.resume', 'write_file']) },
+    );
+    expect(thirdResume.ok).toBe(true);
+    expect(parseJsonResult(thirdResume.result)['status']).toBe('succeeded');
   });
 
   it('pipeline.resume blocks execution when current step retry is not due yet', async () => {
