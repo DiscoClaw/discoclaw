@@ -32,6 +32,17 @@ function activityContentLines(rendered: string): string[] {
   return lines.slice(2, -1);
 }
 
+/** Extract content lines from the first ```text fenced block in any rendered output. */
+function firstFencedContentLines(rendered: string): string[] {
+  const open = '```text\n';
+  const start = rendered.indexOf(open);
+  if (start < 0) return [];
+  const bodyStart = start + open.length;
+  const end = rendered.indexOf('\n```', bodyStart);
+  if (end < 0) return [];
+  return rendered.slice(bodyStart, end).split('\n');
+}
+
 // ---------------------------------------------------------------------------
 // renderDiscordTail
 // ---------------------------------------------------------------------------
@@ -619,6 +630,62 @@ describe('selectStreamingOutput', () => {
     expect(out).not.toContain('discord-action');
     expect(out).not.toContain('taskClose');
     expect(out).toContain('All done');
+  });
+
+  it('previewMode=raw renders a denser and wider streaming tail than compact', () => {
+    const lines = Array.from(
+      { length: 16 },
+      (_v, i) => `line-${i + 1}-${'x'.repeat(90)}`,
+    );
+    const deltaText = lines.join('\n');
+
+    const compact = selectStreamingOutput({
+      deltaText,
+      activityLabel: '',
+      finalText: '',
+      statusTick: 0,
+      previewMode: 'compact',
+    });
+    const raw = selectStreamingOutput({
+      deltaText,
+      activityLabel: '',
+      finalText: '',
+      statusTick: 0,
+      previewMode: 'raw',
+    });
+
+    const compactLines = firstFencedContentLines(compact);
+    const rawLines = firstFencedContentLines(raw);
+
+    expect(compactLines).toHaveLength(8);
+    expect(rawLines).toHaveLength(14);
+    expect(compactLines[0].startsWith('line-9-')).toBe(true);
+    expect(rawLines[0].startsWith('line-3-')).toBe(true);
+    expect(compactLines[7].length).toBe(72);
+    expect(compactLines[7].endsWith('\u2026')).toBe(true);
+    expect(rawLines[13]).toBe(lines[15]);
+    expect(rawLines[13].length).toBeGreaterThan(72);
+  });
+
+  it('strips action tags from noisy runtime-signal text in preview output', () => {
+    const out = selectStreamingOutput({
+      deltaText: [
+        '[stdout] preparing output <discord-action>{"type":"sendMessage","channel":"general"}</discord-action>',
+        '[stderr] warning <discord-action>{"type":"channelCreate","name":"ops"}</discord-action>',
+        '[usage] in=21 out=8 total=29',
+      ].join('\n'),
+      activityLabel: '',
+      finalText: '',
+      statusTick: 0,
+      previewMode: 'raw',
+    });
+
+    expect(out).toContain('[stdout] preparing output');
+    expect(out).toContain('[stderr] warning');
+    expect(out).toContain('[usage] in=21 out=8 total=29');
+    expect(out).not.toContain('discord-action');
+    expect(out).not.toContain('sendMessage');
+    expect(out).not.toContain('channelCreate');
   });
 });
 

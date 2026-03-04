@@ -870,6 +870,16 @@ describe('parseConfig', () => {
     );
   });
 
+  it('defaults streamPreviewRaw to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.streamPreviewRaw).toBe(false);
+  });
+
+  it('parses DISCOCLAW_STREAM_PREVIEW_RAW=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_STREAM_PREVIEW_RAW: '1' }));
+    expect(config.streamPreviewRaw).toBe(true);
+  });
+
   // --- Stream stall detection ---
   it('defaults streamStallTimeoutMs to 600000', () => {
     const { config } = parseConfig(env());

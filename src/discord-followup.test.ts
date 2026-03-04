@@ -17,6 +17,25 @@ function makeQueue() {
   };
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+function contentFromEditArg(arg: unknown): string {
+  if (typeof arg === 'string') return arg;
+  if (arg && typeof arg === 'object' && 'content' in arg) {
+    const value = (arg as { content?: unknown }).content;
+    return typeof value === 'string' ? value : '';
+  }
+  return '';
+}
+
+function replyEditContents(replyObj: { edit: ReturnType<typeof vi.fn> }): string[] {
+  return replyObj.edit.mock.calls.map((call: unknown[]) => contentFromEditArg(call[0]));
+}
+
 function makeMsg(overrides: Partial<any> = {}) {
   const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
   const guild = makeMockGuild([
@@ -800,6 +819,122 @@ describe('auto-follow-up for query actions', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('streams non-blank preview lines for tool lifecycle-only events', async () => {
+    const runtimeStarted = deferred<void>();
+    const allowToolEnd = deferred<void>();
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        runtimeStarted.resolve();
+        yield { type: 'tool_start', name: 'readFile', input: { path: 'README.md' } } as any;
+        await allowToolEnd.promise;
+        yield { type: 'tool_end', name: 'readFile', ok: true, output: 'ok' } as any;
+        yield { type: 'done' } as any;
+      }),
+    } as any;
+
+    const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
+    const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    const pending = handler(msg);
+
+    await runtimeStarted.promise;
+
+    allowToolEnd.resolve();
+    await pending;
+
+    const finalContent = replyEditContents(replyObj).at(-1) ?? '';
+    expect(finalContent).toContain('[tool:start] readFile');
+    expect(finalContent).toContain('[tool:end] readFile ok');
+  });
+
+  it('shows stdout/stderr/usage preview lines continuously as runtime signals arrive', async () => {
+    vi.useFakeTimers();
+    try {
+      const runtimeStarted = deferred<void>();
+      const runtime = {
+        invoke: vi.fn(async function* () {
+          runtimeStarted.resolve();
+          yield { type: 'log_line', stream: 'stdout', line: 'phase 1 started' } as any;
+          yield { type: 'text_delta', text: 'phase 1 tick\n' } as any;
+          await new Promise((resolve) => setTimeout(resolve, 1300));
+          yield { type: 'log_line', stream: 'stderr', line: 'phase 1 warning' } as any;
+          yield { type: 'text_delta', text: 'phase 2 tick\n' } as any;
+          await new Promise((resolve) => setTimeout(resolve, 1300));
+          yield { type: 'usage', inputTokens: 21, outputTokens: 8, totalTokens: 29, costUsd: 0.0123 } as any;
+          yield { type: 'text_delta', text: 'phase 3 tick\n' } as any;
+          yield { type: 'done' } as any;
+        }),
+      } as any;
+
+      const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
+      const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
+      const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+      const pending = handler(msg);
+
+      await runtimeStarted.promise;
+      for (let i = 0; i < 20 && replyObj.edit.mock.calls.length === 0; i++) {
+        await Promise.resolve();
+      }
+
+      let latest = replyEditContents(replyObj).at(-1) ?? '';
+      expect(latest).toContain('[stdout] phase 1 started');
+      expect(latest).not.toContain('[stderr]');
+      expect(latest).not.toContain('[usage]');
+
+      await vi.advanceTimersByTimeAsync(1300);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      latest = replyEditContents(replyObj).at(-1) ?? '';
+      expect(latest).toContain('[stdout] phase 1 started');
+      expect(latest).toContain('[stderr] phase 1 warning');
+      expect(latest).not.toContain('[usage]');
+
+      await vi.advanceTimersByTimeAsync(1300);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      latest = replyEditContents(replyObj).at(-1) ?? '';
+      expect(latest).toContain('[usage] in=21 out=8 total=29');
+
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows preview early during active runs without a delayed blank period', async () => {
+    const runtimeStarted = deferred<void>();
+    const allowDone = deferred<void>();
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        runtimeStarted.resolve();
+        yield { type: 'log_line', stream: 'stdout', line: 'warming runtime cache' } as any;
+        yield { type: 'text_delta', text: 'warming tick\n' } as any;
+        await allowDone.promise;
+        yield { type: 'done' } as any;
+      }),
+    } as any;
+
+    const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
+    const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    const pending = handler(msg);
+
+    await runtimeStarted.promise;
+    for (let i = 0; i < 20 && replyObj.edit.mock.calls.length === 0; i++) {
+      await Promise.resolve();
+    }
+
+    expect(replyObj.edit).toHaveBeenCalled();
+    const firstEdit = replyEditContents(replyObj)[0] ?? '';
+    expect(firstEdit).not.toBe('...');
+    expect(firstEdit).toContain('[stdout] warming runtime cache');
+
+    allowDone.resolve();
+    await pending;
   });
 });
 

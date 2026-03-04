@@ -1,6 +1,7 @@
 import type { EngineEvent } from '../runtime/types.js';
 import { ToolAwareQueue } from './tool-aware-queue.js';
-import { selectStreamingOutput } from './output-utils.js';
+import { formatRuntimePreviewSignal, selectStreamingOutput } from './output-utils.js';
+import type { StreamingPreviewMode } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 
 // ---------------------------------------------------------------------------
@@ -23,13 +24,26 @@ export type StreamingProgressController = {
   dispose: () => void;
 };
 
+export type StreamingProgressPreviewMode = 'always' | 'delayed';
+
+export type StreamingProgressOpts = {
+  previewMode?: StreamingProgressPreviewMode;
+  previewDelayMs?: number;
+  streamPreviewMode?: StreamingPreviewMode;
+};
+
 /** The faster edit interval used for streaming preview edits (matches normal message handler). */
 const STREAMING_EDIT_INTERVAL_MS = 1250;
+const DEFAULT_PREVIEW_DELAY_MS = 7000;
 
 function errorCode(err: unknown): number | null {
   if (typeof err !== 'object' || err === null || !('code' in err)) return null;
   const code = (err as { code?: unknown }).code;
   return typeof code === 'number' ? code : null;
+}
+
+function formatRuntimeSignal(evt: EngineEvent, streamPreviewMode: StreamingPreviewMode): string | null {
+  return formatRuntimePreviewSignal(evt, streamPreviewMode);
 }
 
 // ---------------------------------------------------------------------------
@@ -51,6 +65,7 @@ function errorCode(err: unknown): number | null {
 export function createStreamingProgress(
   progressReply: { edit: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown> },
   progressThrottleMs: number,
+  opts?: StreamingProgressOpts,
 ): StreamingProgressController {
   // Streaming state driven by the ToolAwareQueue
   let activityLabel = '';
@@ -60,6 +75,9 @@ export function createStreamingProgress(
   let lastStreamEditAt = 0;
   let progressMessageGone = false;
   const startedAt = Date.now();
+  const previewMode = opts?.previewMode ?? 'always';
+  const previewDelayMs = Math.max(0, opts?.previewDelayMs ?? DEFAULT_PREVIEW_DELAY_MS);
+  const streamPreviewMode = opts?.streamPreviewMode ?? 'compact';
 
   // Static-progress throttle state (mirrors the existing onProgress pattern)
   let lastStaticEditAt = 0;
@@ -76,7 +94,6 @@ export function createStreamingProgress(
     return new ToolAwareQueue((action) => {
       if (action.type === 'show_activity') {
         activityLabel = action.label;
-        deltaText = '';
       } else if (action.type === 'stream_text') {
         deltaText += action.text;
       } else if (action.type === 'set_final') {
@@ -94,12 +111,16 @@ export function createStreamingProgress(
     // Only render when there is something streaming to show
     if (!activityLabel && !deltaText && !finalText) return;
     lastStreamEditAt = now;
+    const elapsedMs = now - startedAt;
+    const showPreview = previewMode === 'always' || elapsedMs >= previewDelayMs;
     const content = selectStreamingOutput({
       deltaText,
       activityLabel,
       finalText,
       statusTick: statusTick++,
-      elapsedMs: now - startedAt,
+      previewMode: streamPreviewMode,
+      showPreview,
+      elapsedMs,
     });
     try {
       await progressReply.edit({ content, allowedMentions: NO_MENTIONS });
@@ -108,8 +129,15 @@ export function createStreamingProgress(
     }
   }
 
+  function appendSignalLine(line: string): void {
+    deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
+  }
+
   const onEvent: StreamingProgressController['onEvent'] = (evt) => {
+    const signalLine = formatRuntimeSignal(evt, streamPreviewMode);
+    if (signalLine) appendSignalLine(signalLine);
     queue.handleEvent(evt);
+    void maybeStreamEdit(false);
   };
 
   const onProgress: StreamingProgressController['onProgress'] = async (msg, opts) => {

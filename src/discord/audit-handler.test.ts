@@ -174,6 +174,33 @@ describe('auditPlanStructure', () => {
     const concerns = auditPlanStructure(content);
     expect(concerns.some((c) => c.title === 'Changes section lacks file paths')).toBe(true);
   });
+
+  it('flags Changes section with placeholder file paths only', () => {
+    const content = MINIMAL_PLAN.replace(
+      /## Changes[\s\S]*?## Risks/m,
+      '## Changes\n\n### File-by-file breakdown\n\n- `path/to/file.ts` — do a thing\n- `path/to/other.ts` — do another thing\n\n## Risks',
+    );
+    const concerns = auditPlanStructure(content);
+    expect(concerns.some((c) => c.title === 'Changes section uses placeholder file paths')).toBe(true);
+  });
+
+  it('flags Changes section when any placeholder file path is present', () => {
+    const content = MINIMAL_PLAN.replace(
+      /## Changes[\s\S]*?## Risks/m,
+      '## Changes\n\n### File-by-file breakdown\n\n- `path/to/file.ts` — template placeholder still present\n- `src/discord/forge-commands.ts` — concrete change target\n\n## Risks',
+    );
+    const concerns = auditPlanStructure(content);
+    expect(concerns.some((c) => c.title === 'Changes section uses placeholder file paths')).toBe(true);
+  });
+
+  it('allows Changes section when all file paths are concrete', () => {
+    const content = MINIMAL_PLAN.replace(
+      /## Changes[\s\S]*?## Risks/m,
+      '## Changes\n\n### File-by-file breakdown\n\n- `src/discord/forge-commands.ts` — concrete change target\n- `docs/plan-command-reference.md` — docs update\n\n## Risks',
+    );
+    const concerns = auditPlanStructure(content);
+    expect(concerns.some((c) => c.title === 'Changes section uses placeholder file paths')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
