@@ -13,6 +13,7 @@ import {
   VOICE_IDENTITY_MAX_CHARS,
 } from './voice-prompt-builder.js';
 import { VOICE_STYLE_INSTRUCTION } from './voice-style-prompt.js';
+import { ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, buildPromptPreamble } from '../discord/prompt-common.js';
 
 // ---------------------------------------------------------------------------
 // extractSections
@@ -230,6 +231,8 @@ describe('loadVoiceIdentity', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildVoicePrompt', () => {
+  const VOICE_PROMPT_MINIMAL_MAX_CHARS = 12 * 1024;
+
   const baseParts = {
     identity: '--- IDENTITY.md ---\nTestBot',
     durableMemory: '',
@@ -237,9 +240,10 @@ describe('buildVoicePrompt', () => {
     userText: 'What time is it?',
   };
 
-  it('includes root policy preamble', () => {
+  it('starts with shared preamble (root policy + tracked defaults + identity)', () => {
     const result = buildVoicePrompt(baseParts);
-    expect(result).toContain('Security Policy');
+    const expectedPreamble = buildPromptPreamble(baseParts.identity);
+    expect(result.startsWith(expectedPreamble)).toBe(true);
   });
 
   it('includes identity section', () => {
@@ -304,10 +308,10 @@ describe('buildVoicePrompt', () => {
 
   it('omits durable memory section when empty', () => {
     const result = buildVoicePrompt(baseParts);
-    expect(result).not.toContain('Durable memory');
+    expect(result).not.toContain('---\nDurable memory (user-specific notes):\n');
   });
 
-  it('orders sections correctly: policy > identity > actions > style > memory > separator > user', () => {
+  it('orders sections correctly: policy > tracked defaults > identity > actions > style > memory > separator > user', () => {
     const result = buildVoicePrompt({
       ...baseParts,
       actionsSection: '## Discord Actions\nactions-here',
@@ -315,7 +319,8 @@ describe('buildVoicePrompt', () => {
       durableMemory: 'memory-content',
     });
 
-    const policyIdx = result.indexOf('Security Policy');
+    const policyIdx = result.indexOf(ROOT_POLICY);
+    const trackedDefaultsIdx = result.indexOf(TRACKED_DEFAULTS_PREAMBLE);
     const identityIdx = result.indexOf('TestBot');
     const actionsIdx = result.indexOf('actions-here');
     const systemPromptIdx = result.indexOf('custom-system-prompt');
@@ -324,7 +329,8 @@ describe('buildVoicePrompt', () => {
     const separatorIdx = result.indexOf('sections above are internal');
     const userIdx = result.indexOf('What time is it?');
 
-    expect(policyIdx).toBeLessThan(identityIdx);
+    expect(policyIdx).toBeLessThan(trackedDefaultsIdx);
+    expect(trackedDefaultsIdx).toBeLessThan(identityIdx);
     expect(identityIdx).toBeLessThan(actionsIdx);
     expect(actionsIdx).toBeLessThan(systemPromptIdx);
     expect(systemPromptIdx).toBeLessThan(styleIdx);
@@ -333,9 +339,9 @@ describe('buildVoicePrompt', () => {
     expect(separatorIdx).toBeLessThan(userIdx);
   });
 
-  it('produces a prompt under 6KB with minimal inputs', () => {
+  it('keeps minimal prompt under guarded budget after tracked-default injection', () => {
     const result = buildVoicePrompt(baseParts);
-    expect(result.length).toBeLessThan(6 * 1024);
+    expect(result.length).toBeLessThanOrEqual(VOICE_PROMPT_MINIMAL_MAX_CHARS);
   });
 });
 
