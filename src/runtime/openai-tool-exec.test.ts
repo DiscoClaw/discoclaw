@@ -1029,6 +1029,8 @@ describe('step.run/assert/retry/wait', () => {
     expect(asserted.ok).toBe(true);
     const payload = parseJsonResult(asserted.result);
     expect(payload['operation']).toBe('step.assert');
+    const run = payload['run'] as Record<string, unknown>;
+    expect(run['status']).toBe('running');
     expect(payload['step_status']).toBe('pending');
   });
 

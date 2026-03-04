@@ -610,10 +610,11 @@ const STEP_TOOL_NAMES: ReadonlySet<StepToolName> = new Set([
   'step.wait',
 ]);
 
-const ACTIVE_STEP_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set(['running', 'waiting']);
+const ACTIVE_STEP_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set(['queued', 'running', 'waiting']);
 const STEP_MAX_ATTEMPTS_TOTAL = 3;
 const STEP_RETRY_DELAYS_MS = [1_000, 2_000] as const;
 const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const PIPELINE_STORE_WRITE_QUEUE: Map<string, Promise<void>> = new Map();
 
 type PipelineStep = {
   tool: string;
@@ -931,10 +932,26 @@ function prunePipelineRuns(store: PipelineStore): void {
 }
 
 async function savePipelineStore(storePath: string, store: PipelineStore): Promise<void> {
-  await fs.mkdir(path.dirname(storePath), { recursive: true });
-  const tmpPath = `${storePath}.tmp.${process.pid}`;
-  await fs.writeFile(tmpPath, JSON.stringify(store, null, 2) + '\n', 'utf-8');
-  await fs.rename(tmpPath, storePath);
+  const previous = PIPELINE_STORE_WRITE_QUEUE.get(storePath) ?? Promise.resolve();
+  let release: (() => void) | undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => current);
+  PIPELINE_STORE_WRITE_QUEUE.set(storePath, queued);
+
+  await previous;
+  try {
+    await fs.mkdir(path.dirname(storePath), { recursive: true });
+    const tmpPath = `${storePath}.tmp.${process.pid}.${randomUUID()}`;
+    await fs.writeFile(tmpPath, JSON.stringify(store, null, 2) + '\n', 'utf-8');
+    await fs.rename(tmpPath, storePath);
+  } finally {
+    release?.();
+    if (PIPELINE_STORE_WRITE_QUEUE.get(storePath) === queued) {
+      PIPELINE_STORE_WRITE_QUEUE.delete(storePath);
+    }
+  }
 }
 
 function parseRunId(args: Record<string, unknown>): string | undefined {
