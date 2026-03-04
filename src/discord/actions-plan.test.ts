@@ -392,6 +392,53 @@ describe('executePlanAction', () => {
       }
     });
 
+    it('adapts runtime events to concise Discord text without leaking raw JSON payloads', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      const rawStructuredPayload = '{"event":"engine_update","token_count":42}';
+      const runtimeEvent = { type: 'log_line', stream: 'stdout', line: rawStructuredPayload } as const;
+
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        opts.onEvent?.(runtimeEvent);
+        return { result: 'nothing_to_run' };
+      });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const editContents = setup.msg.edit.mock.calls.map((call) => String(call[0]!.content));
+      expect(editContents.some((text) => text.includes('Runtime update (details omitted).'))).toBe(true);
+      expect(editContents.some((text) => text.includes(rawStructuredPayload))).toBe(false);
+      // The internal runtime event payload remains untouched.
+      expect(runtimeEvent.line).toBe(rawStructuredPayload);
+    });
+
+    it('can disable tool-aware runtime event streaming for plan actions', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      let capturedOnEvent: unknown = 'unset';
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        capturedOnEvent = opts.onEvent;
+        return { result: 'nothing_to_run' };
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus', toolAwareStreaming: false }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(capturedOnEvent).toBeUndefined();
+    });
+
     it('fails without planId', async () => {
       const result = await executePlanAction(
         { type: 'planRun', planId: '' },
