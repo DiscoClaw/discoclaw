@@ -273,7 +273,7 @@ Master switch and per-category flags for Discord actions. See [docs/discord-acti
 | `DISCOCLAW_HEALTH_COMMANDS_ENABLED` | `true` | Enable `!health` bang command |
 | `DISCOCLAW_HEALTH_VERBOSE_ALLOWLIST` | — | User IDs allowed verbose health output |
 | `DISCOCLAW_SESSION_SCANNING` | `true` | Enable session scanning |
-| `DISCOCLAW_TOOL_AWARE_STREAMING` | `true` | Enable tool-aware streaming |
+| `DISCOCLAW_TOOL_AWARE_STREAMING` | `true` | Enable tool-aware streaming, including periodic buffered narration previews during long `tool_active` phases, while preserving existing action safety gates and finalization behavior. |
 | `DISCOCLAW_STREAM_PREVIEW_RAW` | `false` | Render a denser `Thinking...` preview when `true` (14-line tail, 120-char width, richer runtime signals). `false` keeps compact mode (8-line tail, 72-char width). Preview text remains sanitized in both modes (`<discord-action>` tags, including partial trailing tags, are stripped). |
 | `DISCOCLAW_MULTI_TURN` | `true` | Enable multi-turn sessions |
 | `DISCOCLAW_MULTI_TURN_HANG_TIMEOUT_MS` | `60000` | Timeout for hung multi-turn sessions |
