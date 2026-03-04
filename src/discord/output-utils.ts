@@ -281,6 +281,11 @@ function renderLabeledPreview(label: string, body: string, mode: StreamingPrevie
   return `${formatBoldLabel(label)}\n${renderStreamingTail(body, mode)}`;
 }
 
+function buildWaitingPreviewLine(elapsedMs?: number): string {
+  if (elapsedMs === undefined) return '[stream] waiting for runtime output';
+  return `[stream] waiting for runtime output ${formatElapsed(elapsedMs)}`;
+}
+
 /**
  * Strip `<discord-action>...</discord-action>` blocks from text so raw JSON
  * never leaks into streaming previews visible to users.
@@ -314,7 +319,7 @@ export function selectStreamingOutput(opts: {
     if (!hasVisiblePreviewText(opts.deltaText)) {
       const fallback = opts.activityLabel
         ? `[activity] ${prefix + opts.activityLabel}`
-        : '[stream] waiting for runtime output';
+        : buildWaitingPreviewLine(opts.elapsedMs);
       return renderLabeledPreview(label, fallback, previewMode);
     }
     return renderLabeledPreview(label, opts.deltaText, previewMode);
@@ -330,5 +335,5 @@ export function selectStreamingOutput(opts: {
     return renderStreamingTail(opts.finalText, previewMode);
   }
   const thinking = prefix + thinkingLabel(opts.statusTick);
-  return renderLabeledPreview(thinking, '[stream] waiting for runtime output', previewMode);
+  return renderLabeledPreview(thinking, buildWaitingPreviewLine(opts.elapsedMs), previewMode);
 }
