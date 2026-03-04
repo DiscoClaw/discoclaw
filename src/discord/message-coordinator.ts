@@ -2760,6 +2760,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           while (true) {
             let finalText = '';
             let deltaText = '';
+            let previewOnlyDeltaText = '';
+            let toolPreviewSnapshot = '';
             const collectedImages: ImageData[] = [];
             let activityLabel = '';
             let statusTick = 1;
@@ -2792,7 +2794,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               lastEditAt = now;
               const out = selectStreamingOutput({
-                deltaText,
+                deltaText: deltaText + previewOnlyDeltaText,
                 activityLabel,
                 finalText,
                 statusTick: statusTick++,
@@ -2845,13 +2847,26 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             // text during tool execution and streams the final answer cleanly.
             const taq = params.toolAwareStreaming
               ? new ToolAwareQueue((action) => {
-                  if (action.type === 'stream_text') {
+                  if (action.type === 'preview_text') {
+                    if (action.text.startsWith(toolPreviewSnapshot)) {
+                      previewOnlyDeltaText += action.text.slice(toolPreviewSnapshot.length);
+                    } else {
+                      previewOnlyDeltaText += action.text;
+                    }
+                    toolPreviewSnapshot = action.text;
+                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                    maybeEdit(false);
+                  } else if (action.type === 'stream_text') {
                     deltaText += action.text;
+                    previewOnlyDeltaText = '';
+                    toolPreviewSnapshot = '';
                     // eslint-disable-next-line @typescript-eslint/no-floating-promises
                     maybeEdit(false);
                   } else if (action.type === 'set_final') {
                     hadTextFinal = true;
                     finalText = action.text;
+                    previewOnlyDeltaText = '';
+                    toolPreviewSnapshot = '';
                     // eslint-disable-next-line @typescript-eslint/no-floating-promises
                     maybeEdit(true);
                   } else if (action.type === 'show_activity') {
