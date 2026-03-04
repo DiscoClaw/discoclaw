@@ -127,6 +127,19 @@ Phases declare dependencies via `dependsOn`. A phase can run only when all depen
 2. Retry any `failed` phase
 3. First `pending` phase with all deps met
 
+### Target-phase execution path
+
+`!plan run-phase <plan-id> <phase-id>` uses the same execution engine as `run`/`run-one`, but with a target selector:
+
+1. `preparePlanRun(planId, ..., targetPhaseId)` validates plan status, staleness, and dependency graph integrity
+2. `selectRunnablePhase(phases, targetPhaseId)` enforces target constraints:
+   - target phase exists
+   - target is not already `done`/`skipped`
+   - all target dependencies are terminal (`done` or `skipped`)
+3. `runNextPhase(..., targetPhaseId)` executes exactly that phase in single-phase mode
+
+If any check fails, the run is blocked before execution with a specific message (missing phase, unmet deps, non-runnable status, etc.).
+
 ### Staleness detection
 
 Phases are generated with a `planContentHash` — a 16-character truncated SHA-256 of the plan file content at generation time, computed by `computePlanHash()` in `plan-manager.ts`.
@@ -141,7 +154,18 @@ Plan file has changed since phases were generated — the existing phases may no
 This regenerates phases from the current plan content. All phase statuses are reset to `pending` — previously completed phases will be re-executed. Git commits from completed phases are preserved on the branch, but the phase tracker loses their `done` status.
 ```
 
-The remedy is always `!plan phases --regenerate <plan-id>`.
+Default remedy is `!plan phases --regenerate <plan-id>`. When you want to preserve prior completed work, use `!plan phases --regenerate --keep-done <plan-id>` to resequence with done-phase carryover.
+
+### `--keep-done` resequencing and dependency validation
+
+`resequenceKeepingDone(previous, regenerated)` applies completion carryover after regeneration:
+
+1. Build semantic signatures for old `done` phases (title, kind, description, sorted context files, change spec)
+2. Match regenerated phases by signature and copy done metadata (`status`, output, commit hash, modified files, convergence metadata)
+3. Mark unmatched prior done phases as dropped
+4. Revalidate dependencies for copied phases; if a copied phase now depends on missing or non-terminal deps, demote it back to `pending` and clear done metadata
+
+After resequencing, `validatePhaseDependencies()` still runs and reports missing deps/cycles. This ensures `--keep-done` cannot preserve an invalid execution graph.
 
 ### Per-phase git commits
 
@@ -162,9 +186,17 @@ When retrying a failed phase:
 
 If a file has been modified since the failure, it's skipped during revert (the retry proceeds with current state).
 
+### Audit convergence guard
+
+Audit phases track an `auditConvergence` signature (`computeAuditConvergenceSignature`) built from audit output + modified file set. If the same failing signature repeats `AUDIT_CONVERGENCE_REPEAT_LIMIT` times (currently 2), `runNextPhase()` returns `retry_blocked` instead of continuing replay loops.
+
+This guard prevents infinite audit-fix/re-audit churn and forces manual intervention. Operator recovery is then explicit: inspect phases, use `!plan run-phase` for a targeted retry, or `!plan skip-to` to move past the blocked segment.
+
 ### Skip semantics
 
 `!plan skip` changes the first `in-progress` or `failed` phase to `skipped`. Downstream phases that depend on it can proceed (skipped counts as "met" for dependency resolution).
+
+`!plan skip-to <plan-id> <phase-id>` applies a wider skip transform: earlier non-terminal phases (and non-terminal transitive dependencies of the target) are marked `skipped`, then the target phase is validated as runnable.
 
 ---
 

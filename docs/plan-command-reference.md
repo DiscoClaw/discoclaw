@@ -30,10 +30,12 @@ Show available plan commands.
 - `!plan show <plan-id|task-id>` — show plan details
 - `!plan approve <plan-id|task-id>` — approve for implementation
 - `!plan close <plan-id|task-id>` — close/abandon a plan
-- `!plan phases <plan-id>` — show/generate phase checklist
+- `!plan phases [--regenerate] [--keep-done] <plan-id>` — show/generate phase checklist
 - `!plan run <plan-id>` — execute all remaining phases
 - `!plan run-one <plan-id>` — execute next pending phase only
+- `!plan run-phase <plan-id> <phase-id>` — execute one specific runnable phase
 - `!plan skip <plan-id>` — skip a failed/in-progress phase
+- `!plan skip-to <plan-id> <phase-id>` — skip forward and resume at a target phase
 - `!plan audit <plan-id>` — run a standalone audit against a plan
 ```
 
@@ -147,9 +149,33 @@ Regenerate phases from the current plan content, overwriting the existing phases
 !plan phases --regenerate plan-017
 ```
 
+This always rebuilds the phase graph from scratch; phase statuses reset to `pending`.
+
+### `!plan phases --regenerate --keep-done <plan-id>`
+
+Regenerate phases but preserve completed work when a regenerated phase still matches the old phase semantically (title, kind, description, context files, change spec).
+
+```
+!plan phases --regenerate --keep-done plan-017
+```
+
+**Output:**
+```
+Resequenced with `--keep-done`: kept 2 done phase(s), dropped 1.
+Kept done phases: phase-1, phase-2
+Dropped done phases: phase-3 (done phase was removed or changed during resequencing)
+Dependency validation: OK.
+```
+
+**Failure modes and guardrails:**
+- `--keep-done` without `--regenerate` is rejected.
+- Unknown flags are rejected (for example `--foo`).
+- A previously done phase is demoted back to `pending` if its dependencies are missing or non-terminal after regeneration.
+- If no phases file exists yet, `--keep-done` is ignored and all regenerated phases start `pending`.
+
 ### `!plan run <plan-id>`
 
-Execute all pending phases sequentially (up to 50, safety cap). Requires the plan to be in `APPROVED` or `IMPLEMENTING` status. Acquires the workspace writer lock per-phase, validates staleness, then fires in the background. Stops on failure, audit deviation, staleness, or shutdown — resume with another `!plan run`.
+Execute all pending phases sequentially (up to 50, safety cap). Requires the plan to be in `APPROVED` or `IMPLEMENTING` status. Acquires the workspace writer lock per-phase, validates staleness, then fires in the background. Stops on failure, audit deviation, convergence guard block, staleness, or shutdown — resume with targeted commands or another `!plan run`.
 
 **Auto-close:** When all phases reach a terminal status (done or skipped), the plan is automatically set to `CLOSED` and its backing task is closed. This happens in both the command path (`!plan run` in Discord) and the action path (`planRun` via Discord actions).
 
@@ -174,7 +200,7 @@ Plan run complete for **plan-017**: 3 phases executed (87s)
 **On failure (stops at the failed phase):**
 ```
 Plan run stopped: Phase **phase-2** timed out after 30 minutes. 1/2 phases completed.
-Use `!plan run plan-017` to retry or `!plan skip plan-017` to skip.
+Convergence guard/manual intervention: review `!plan phases plan-017`, then use `!plan run-phase plan-017 <phase-id>` or `!plan skip-to plan-017 <phase-id>` to resume safely. If phase data is stale, run `!plan phases --regenerate plan-017`.
 ```
 
 ### `!plan run-one <plan-id>`
@@ -190,6 +216,46 @@ Execute only the next pending phase (single-phase mode). Same validation and loc
 Running phase-1: Implement src/webhook.ts...
 Phase **phase-1** done: Implement src/webhook.ts
 ```
+
+### `!plan run-phase <plan-id> <phase-id>`
+
+Execute exactly one specific phase after validating that the phase exists and all of its dependencies are terminal (`done` or `skipped`).
+
+```
+!plan run-phase plan-017 phase-3
+```
+
+**Output (success):**
+```
+Running target phase for **plan-017** — phase-3: Post-implementation audit...
+Phase **phase-3** done: Post-implementation audit
+```
+
+**Common failure modes:**
+- Target phase does not exist.
+- Target phase is already `done` or `skipped`.
+- Target phase has unmet dependencies (for example `phase-2 (failed)`).
+- Plan status is not runnable (`APPROVED` or `IMPLEMENTING` required).
+- Retry/convergence guard blocks replay; response includes guidance to use `!plan run-phase` or `!plan skip-to`.
+
+### `!plan skip-to <plan-id> <phase-id>`
+
+Skip forward to a target phase by marking earlier non-terminal phases (and non-terminal dependency-closure phases) as `skipped`, then validating the target is runnable.
+
+```
+!plan skip-to plan-017 phase-4
+```
+
+**Output:**
+```
+Skip-to ready for **phase-4**. Skipped 2 phase(s): phase-2, phase-3.
+```
+
+**Common failure modes:**
+- Dependency graph is invalid (missing dependency or cycle).
+- Target phase not found.
+- Target phase already terminal (`done`/`skipped`).
+- Target dependency is missing or still non-terminal after skip candidates are applied.
 
 ### `!plan skip <plan-id>`
 
@@ -335,7 +401,7 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 | Variable | Default | Parser | Description |
 |----------|---------|--------|-------------|
 | `DISCOCLAW_PLAN_COMMANDS_ENABLED` | `true` | `parseBoolean` | Enable/disable `!plan` commands |
-| `PLAN_PHASES_ENABLED` | `true` | `parseBoolean` | Enable/disable phase decomposition (`!plan phases`, `!plan run`, `!plan skip`) |
+| `PLAN_PHASES_ENABLED` | `true` | `parseBoolean` | Enable/disable phase decomposition and execution controls (`!plan phases`, `!plan run`, `!plan run-one`, `!plan run-phase`, `!plan skip`, `!plan skip-to`) |
 | `PLAN_PHASE_MAX_CONTEXT_FILES` | `5` | `parsePositiveInt` | Max files per phase batch |
 | `PLAN_PHASE_TIMEOUT_MS` | `1800000` (30 min) | `parsePositiveNumber` | Per-phase execution timeout |
 | `PLAN_PHASE_AUDIT_FIX_MAX` | `2` | `parseNonNegativeInt` | Max audit-fix attempts per phase before marking failed |

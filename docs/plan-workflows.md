@@ -91,24 +91,52 @@ The lock is module-level in `discord.ts` — it covers all sessions within a sin
 Phase fails →
 ```
 Plan run stopped: Phase **phase-2** failed: Build error in webhook.test.ts. 1/2 phases completed.
-Use `!plan run plan-017` to retry or `!plan skip plan-017` to skip.
+Convergence guard/manual intervention: review `!plan phases plan-017`, then use `!plan run-phase plan-017 <phase-id>` or `!plan skip-to plan-017 <phase-id>` to resume safely.
 ```
 
-**Option A: Retry** — The runner auto-reverts files changed by the failed attempt, then re-executes:
+**Option A: Targeted retry** — Re-run only the blocked phase (preferred when prior phases are valid):
 ```
+!plan run-phase plan-017 phase-2
+```
+
+**Option B: Skip ahead intentionally** — If you accept bypassing failed work:
+```
+!plan skip-to plan-017 phase-3
+!plan run-phase plan-017 phase-3
+```
+
+**Option C: Edit plan + resequence while preserving completed phases (preferred over full replay):**
+1. Edit the plan file
+2. `!plan phases --regenerate --keep-done plan-017`
+3. Inspect kept/dropped phase summary from the command output
+4. Resume exactly where needed:
+```
+!plan run-phase plan-017 <phase-id>
+```
+
+**Option D: Full regenerate replay** — Use only when resequencing drops too much prior progress:
+```
+!plan phases --regenerate plan-017
 !plan run plan-017
 ```
 
-**Option B: Skip** — Move past the failed phase:
-```
-!plan skip plan-017
-!plan run plan-017    ← continues with remaining phases
-```
+### Recovering from convergence-guarded audit replay
 
-**Option C: Regenerate** — If the plan itself needs changes:
-1. Edit the plan file
-2. `!plan phases --regenerate plan-017`
-3. `!plan run plan-017`
+When audit fix/re-audit loops converge on the same failing signature, the runner stops with a convergence guard message instead of looping indefinitely.
+
+Recommended recovery:
+1. `!plan phases plan-017` — inspect failed audit phase and dependencies
+2. Apply manual code fixes or adjust plan intent
+3. If the plan changed: `!plan phases --regenerate --keep-done plan-017`
+4. Resume narrowly:
+```
+!plan run-phase plan-017 <audit-phase-id>
+```
+5. If needed, bypass to a later phase:
+```
+!plan skip-to plan-017 <phase-id>
+!plan run-phase plan-017 <phase-id>
+```
 
 ### Cancelling a forge mid-flight
 
@@ -141,6 +169,13 @@ Plan file has changed since phases were generated — the existing phases may no
 This regenerates phases from the current plan content. All phase statuses are reset to `pending` — previously completed phases will be re-executed. Git commits from completed phases are preserved on the branch, but the phase tracker loses their `done` status.
 ```
 
+Preferred recovery (preserve prior done phases when safe):
+```
+!plan phases --regenerate --keep-done plan-017
+!plan run-phase plan-017 <next-phase-id>
+```
+
+Fallback (full replay):
 ```
 !plan phases --regenerate plan-017
 !plan run plan-017
@@ -220,13 +255,13 @@ These steps mirror the rebuild workflow in `AGENTS.md`/`TOOLS.md` and ensure we 
 
 - **Writer lock:** Promise-chain mutex (`workspaceWriterLock` in `discord.ts`) serializes all plan/forge file writes within a single process.
 - **Forge singleton:** Only one `ForgeOrchestrator` instance can be running at a time (module-level variable in `discord.ts`).
-- **Phase execution:** `!plan run` auto-chains all pending phases in a loop (up to `MAX_PLAN_RUN_PHASES` = 50). `!plan run-one` executes a single phase. Both are fire-and-forget from the Discord queue. The writer lock is acquired and released per-phase to avoid starvation.
+- **Phase execution:** `!plan run` auto-chains pending phases in a loop (up to `MAX_PLAN_RUN_PHASES` = 50). `!plan run-one` and `!plan run-phase` execute one phase. All are fire-and-forget from the Discord queue. The writer lock is acquired and released per-phase to avoid starvation.
 - **Single-user design:** No multi-user concurrency guards. The Discord allowlist is the access boundary.
 
 ### Command dispatch split
 
 `!plan` commands are dispatched in `discord.ts` but handled primarily by `plan-commands.ts`:
-- `run`, `run-one`, `skip`, and `phases` are intercepted in `discord.ts` for lock acquisition and async execution
+- `run`, `run-one`, `run-phase`, `skip`, `skip-to`, and `phases` are intercepted in `discord.ts` for lock acquisition and async execution
 - All other subcommands pass through to `handlePlanCommand()` in `plan-commands.ts`
 
 `!forge` commands are fully dispatched in `discord.ts`:

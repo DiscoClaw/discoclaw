@@ -46,7 +46,16 @@ This is intentional: stale phases may no longer match the plan's intent. The esc
 !plan run plan-NNN
 ```
 
-Regeneration overwrites the phases file and resets all phase statuses to `pending`. Git commits from already-completed phases are preserved on the branch, but the phase tracker loses their `done` status — the runner will re-execute them. Edit the plan before running whenever possible to avoid this.
+When you need to preserve already-completed work, use the resequencing path:
+
+```
+!plan phases --regenerate --keep-done plan-NNN
+!plan run-phase plan-NNN <phase-id>
+```
+
+`--keep-done` preserves prior `done` phases only when regenerated phases still match semantically and dependency validation remains sound. Done phases are dropped back to `pending` if they changed, were removed, or now depend on missing/non-terminal phases.
+
+Full regeneration remains available and resets all phase statuses to `pending`. In both paths, existing git commits are preserved on the branch; only phase-tracker status is recalculated.
 
 ---
 
