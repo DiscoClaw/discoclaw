@@ -269,6 +269,31 @@ describe('collectRuntimeText strict completion contract', () => {
       collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, { requireDoneEvent: true }),
     ).resolves.toBe('ok');
   });
+
+  it('ignores text_delta emitted after text_final and before done', async () => {
+    const runtime = makeMultiEventRuntime([
+      { type: 'text_delta', text: 'partial text' },
+      { type: 'text_final', text: 'final text' },
+      { type: 'text_delta', text: '\n[progress] still working' },
+      { type: 'done' },
+    ]);
+
+    await expect(
+      collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, { requireDoneEvent: true }),
+    ).resolves.toBe('final text');
+  });
+
+  it('throws when runtime emits any event after done', async () => {
+    const runtime = makeMultiEventRuntime([
+      { type: 'text_final', text: 'ok' },
+      { type: 'done' },
+      { type: 'text_delta', text: 'late text' },
+    ]);
+
+    await expect(
+      collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, { requireDoneEvent: true }),
+    ).rejects.toThrow('after done');
+  });
 });
 
 describe('collectRuntimeText progress sanitization', () => {

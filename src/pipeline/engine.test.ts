@@ -115,6 +115,35 @@ describe('runPipeline', () => {
     expect(result.outputs[0]).toBe('final text');
   });
 
+  it('treats empty text_final as authoritative even when text_delta was emitted', async () => {
+    const result = await runPipeline(
+      baseParams({
+        steps: [step('prompt')],
+        runtime: makeRuntime([
+          { type: 'text_delta', text: 'non-terminal progress' },
+          { type: 'text_final', text: '' },
+          { type: 'done' },
+        ]),
+      }),
+    );
+    expect(result.outputs[0]).toBe('');
+  });
+
+  it('fails when runtime emits an event after done', async () => {
+    await expect(
+      runPipeline(
+        baseParams({
+          steps: [step('prompt')],
+          runtime: makeRuntime([
+            { type: 'text_final', text: 'ok' },
+            { type: 'done' },
+            { type: 'text_delta', text: 'late text' },
+          ]),
+        }),
+      ),
+    ).rejects.toThrow('after done');
+  });
+
   it('strips [progress] lines from prompt-step outputs before reuse', async () => {
     const capturedPrompts: string[] = [];
     const runtime: RuntimeAdapter = {

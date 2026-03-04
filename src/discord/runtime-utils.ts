@@ -77,6 +77,10 @@ export async function collectRuntimeText(
       ...(combinedSignal ? { signal: combinedSignal } : {}),
       ...(opts?.supervisor ? { supervisor: opts.supervisor } : {}),
     })) {
+      if (sawDone) {
+        throw new Error(`Runtime stream emitted ${evt.type} event after done (done must be terminal)`);
+      }
+
       // Feed event to loop detector before any other processing.
       detector?.onEvent(evt);
 
@@ -85,8 +89,8 @@ export async function collectRuntimeText(
         text = evt.text;
         sawFinal = true;
       } else if (evt.type === 'text_delta') {
-        // Accumulate deltas in case text_final isn't emitted
-        text += evt.text;
+        // Accumulate deltas only until text_final is seen.
+        if (!sawFinal) text += evt.text;
       } else if (evt.type === 'done') {
         sawDone = true;
       } else if (evt.type === 'error') {

@@ -179,6 +179,42 @@ describe('createCliRuntime', () => {
     expect(events[events.length - 1]).toEqual({ type: 'done' });
   });
 
+  it('successful JSONL mode without resultText keeps text_final empty', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdoutChunks: [
+        '{"type":"delta","text":"A"}\n',
+        '{"type":"delta","text":"B"}\n',
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createCliRuntime(baseStrategy({
+      getOutputMode: () => 'jsonl',
+      parseLine: (evt) => {
+        if (!evt || typeof evt !== 'object') return null;
+        const value = evt as { type?: unknown; text?: unknown };
+        if (value.type === 'delta' && typeof value.text === 'string') {
+          return { text: value.text };
+        }
+        return null;
+      },
+    }), {});
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const deltaText = events
+      .filter((evt): evt is Extract<EngineEvent, { type: 'text_delta' }> => evt.type === 'text_delta')
+      .map((evt) => evt.text)
+      .join('');
+    expect(deltaText).toBe('AB');
+    expect(events).toContainEqual({ type: 'text_final', text: '' });
+    expect(events[events.length - 1]).toEqual({ type: 'done' });
+  });
+
   it('successful text mode with empty output emits text_final then done', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stdoutChunks: [],

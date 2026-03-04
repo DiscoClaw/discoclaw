@@ -190,14 +190,20 @@ async function collectText(
 
   let finalText = '';
   let deltaText = '';
+  let sawFinal = false;
   let sawDone = false;
   try {
     for await (const evt of events) {
+      if (sawDone) {
+        throw new Error(`Runtime stream emitted ${evt.type} event after done (done must be terminal)`);
+      }
+
       // Feed event to loop detector before any other processing.
       detector?.onEvent(evt);
 
       if (evt.type === 'text_final') {
         finalText = evt.text;
+        sawFinal = true;
       } else if (evt.type === 'text_delta') {
         deltaText += evt.text;
       } else if (evt.type === 'done') {
@@ -221,7 +227,7 @@ async function collectText(
     throw new Error('Runtime stream ended without done event (response may be non-terminal)');
   }
 
-  return sanitizeCollectedPromptStepText(finalText || deltaText);
+  return sanitizeCollectedPromptStepText(sawFinal ? finalText : deltaText);
 }
 
 const NON_TERMINAL_PROGRESS_LINE_RE = /^[ \t]*\[progress\].*(?:\r?\n|$)/gim;
