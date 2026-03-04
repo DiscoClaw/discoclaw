@@ -392,7 +392,7 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs).not.toContain('resume');
   });
 
-  it('empty stdout emits done without text_final', async () => {
+  it('empty stdout emits empty text_final and done', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stdout: '',
       exitCode: 0,
@@ -409,8 +409,7 @@ describe('Codex CLI runtime adapter', () => {
       cwd: '/tmp',
     }));
 
-    // No text_final for empty response.
-    expect(events.find((e) => e.type === 'text_final')).toBeUndefined();
+    expect(events.find((e) => e.type === 'text_final')).toEqual({ type: 'text_final', text: '' });
     expect(events[events.length - 1]!.type).toBe('done');
   });
 
@@ -1009,6 +1008,42 @@ describe('Codex CLI runtime adapter', () => {
     expect((final as { text: string }).text).toBe('The answer is 42.');
     expect((final as { text: string }).text).not.toContain('Let me think');
     expect((final as { text: string }).text).not.toContain('Considering the options');
+  });
+
+  it('without agent_message, reasoning deltas do not become text_final', async () => {
+    const jsonlOutput = [
+      '{"type":"thread.started","thread_id":"reason-thread-no-agent"}',
+      '{"type":"item.completed","item":{"type":"reasoning","summary":"Thinking through options..."}}',
+      '{"type":"item.completed","item":{"type":"reasoning","text":"Still reasoning..."}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonlOutput,
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Reason only',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'reason-session-no-agent',
+    }));
+
+    const deltaTexts = events
+      .filter((e) => e.type === 'text_delta')
+      .map((d) => (d as { text: string }).text);
+    expect(deltaTexts).toContain('Thinking through options...');
+    expect(deltaTexts).toContain('Still reasoning...');
+
+    const final = events.find((e) => e.type === 'text_final');
+    expect(final).toEqual({ type: 'text_final', text: '' });
+    expect(events[events.length - 1]!.type).toBe('done');
   });
 
   it('reasoning item with empty or missing text is silently skipped', async () => {

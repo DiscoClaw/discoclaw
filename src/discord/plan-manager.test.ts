@@ -58,6 +58,7 @@ function makeSuccessRuntime(text: string): RuntimeAdapter {
   return makeRuntime([
     { type: 'text_delta', text },
     { type: 'text_final', text },
+    { type: 'done' },
   ]);
 }
 
@@ -1337,6 +1338,7 @@ describe('executePhase', () => {
       async *invoke(params) {
         capturedPrompt = params.prompt;
         yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
       },
     };
 
@@ -1353,6 +1355,7 @@ describe('executePhase', () => {
       async *invoke(params) {
         capturedSignal = params.signal;
         yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
       },
     };
 
@@ -1377,6 +1380,7 @@ describe('executePhase', () => {
       async *invoke(params) {
         capturedSupervisor = params.supervisor;
         yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
       },
     };
 
@@ -1419,6 +1423,7 @@ describe('executePhase', () => {
       async *invoke(params) {
         capturedAddDirs = params.addDirs;
         yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
       },
     };
 
@@ -1438,6 +1443,7 @@ describe('executePhase', () => {
       async *invoke(params) {
         capturedAddDirs = params.addDirs;
         yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
       },
     };
 
@@ -1456,6 +1462,7 @@ describe('executePhase', () => {
       async *invoke(params) {
         capturedAddDirs = params.addDirs;
         yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
       },
     };
 
@@ -1472,6 +1479,7 @@ describe('executePhase', () => {
     const events: EngineEvent[] = [
       { type: 'text_delta', text: 'working...' },
       { type: 'text_final', text: 'Done!' },
+      { type: 'done' },
     ];
     const runtime = makeRuntime(events);
     const received: EngineEvent[] = [];
@@ -1489,6 +1497,7 @@ describe('executePhase', () => {
       { type: 'text_delta', text: 'a' },
       { type: 'text_delta', text: 'b' },
       { type: 'text_final', text: 'ab' },
+      { type: 'done' },
     ];
     const runtime = makeRuntime(events);
     const received: EngineEvent[] = [];
@@ -1499,7 +1508,7 @@ describe('executePhase', () => {
     const result = await executePhase(phase, SAMPLE_PLAN, basePhases, opts);
 
     expect(result.status).toBe('done');
-    expect(received.map((e) => e.type)).toEqual(['text_delta', 'text_delta', 'text_final']);
+    expect(received.map((e) => e.type)).toEqual(['text_delta', 'text_delta', 'text_final', 'done']);
   });
 
   it('throwing onEvent does not abort phase execution', async () => {
@@ -1511,6 +1520,29 @@ describe('executePhase', () => {
 
     expect(result.status).toBe('done');
     expect(result.output).toBe('Done!');
+  });
+
+  it('returns failed when stream ends without done event', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke() {
+        yield { type: 'text_final', text: 'Looks complete but missing terminal done.' };
+      },
+    };
+
+    const result = await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(runtime));
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error).toContain('without done event');
+    }
+  });
+
+  it('strips non-terminal [progress] lines from phase output', async () => {
+    const rawOutput = '[progress] still working\nFinal answer\n[progress] cleaning up';
+    const result = await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(rawOutput)));
+    expect(result.status).toBe('done');
+    expect(result.output).toBe('Final answer\n');
   });
 });
 
@@ -2481,16 +2513,19 @@ describe('runNextPhase audit fix loop', () => {
           const text = '**Concern 1: Missing validation**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else if (callCount === 2) {
           // Fix agent
           const text = 'Fixed the validation issue.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else {
           // Re-audit: passes
           const text = 'No concerns. **Verdict:** Ready to approve.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         }
       },
     };
@@ -2534,6 +2569,7 @@ describe('runNextPhase audit fix loop', () => {
         const text = '**Concern 1: Still broken**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
         yield { type: 'text_delta', text };
         yield { type: 'text_final', text };
+        yield { type: 'done' };
       },
     };
 
@@ -2627,6 +2663,7 @@ describe('runNextPhase audit fix loop', () => {
           const text = '**Concern 1: Problem**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else {
           // Fix agent: throws error (every time)
           yield { type: 'error', message: 'Runtime crashed' };
@@ -2667,26 +2704,31 @@ describe('runNextPhase audit fix loop', () => {
           const text = '**Concern 1: Missing validation**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else if (callCount === 2) {
           // First fix agent
           const text = 'Attempted fix.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else if (callCount === 3) {
           // First re-audit: still fails
           const text = '**Concern 1: Still broken**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else if (callCount === 4) {
           // Second fix agent
           const text = 'Fixed properly this time.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else {
           // Second re-audit: passes
           const text = 'No concerns. **Verdict:** Ready to approve.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         }
       },
     };
@@ -2729,16 +2771,19 @@ describe('runNextPhase audit fix loop', () => {
           const text = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else if (callCount === 2) {
           // Fix agent
           const text = 'Fixed.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else {
           // Re-audit: passes
           const text = 'No concerns. **Verdict:** Ready to approve.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         }
       },
     };
@@ -2784,14 +2829,17 @@ describe('runNextPhase audit fix loop', () => {
           const text = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else if (callCount === 2) {
           const text = 'Fixed.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else {
           const text = 'No concerns. **Verdict:** Ready to approve.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         }
       },
     };
@@ -2839,12 +2887,14 @@ describe('runNextPhase audit fix loop', () => {
           const text = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else if (callCount === 2) {
           // Fix agent: succeeds
           fsSync.writeFileSync(path.join(projectDir, 'fix-attempt.txt'), 'from-fix-agent', 'utf-8');
           const text = 'Fixed the issues.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else {
           // Re-audit: runtime error
           yield { type: 'error', message: 'Model timeout' };
@@ -2889,11 +2939,13 @@ describe('runNextPhase audit fix loop', () => {
           const text = 'Attempted fix.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         } else {
           // Audit calls: always fail
           const text = '**Concern 1: Still broken**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         }
       },
     };

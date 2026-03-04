@@ -248,7 +248,11 @@ export async function handlePlanAudit(opts: PlanAuditOpts): Promise<PlanAuditRes
       auditorHasFileTools ? readOnlyTools : [],
       auditorHasFileTools ? [opts.cwd] : [],
       opts.timeoutMs,
-      { supervisor: PLAN_PHASE_SUPERVISOR_POLICY },
+      {
+        requireFinalEvent: true,
+        requireDoneEvent: true,
+        supervisor: PLAN_PHASE_SUPERVISOR_POLICY,
+      },
     );
   } catch (err) {
     return { ok: false, error: `Auditor agent failed: ${String(err instanceof Error ? err.message : err)}` };

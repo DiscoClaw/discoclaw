@@ -249,3 +249,78 @@ describe('collectRuntimeText onEvent', () => {
     expect(result).toBe('final');
   });
 });
+
+describe('collectRuntimeText strict completion contract', () => {
+  it('throws when requireDoneEvent is true and runtime never emits done', async () => {
+    const runtime = makeMultiEventRuntime([{ type: 'text_final', text: 'ok' }]);
+
+    await expect(
+      collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, { requireDoneEvent: true }),
+    ).rejects.toThrow('without done event');
+  });
+
+  it('returns final text when requireDoneEvent is true and runtime emits done', async () => {
+    const runtime = makeMultiEventRuntime([
+      { type: 'text_final', text: 'ok' },
+      { type: 'done' },
+    ]);
+
+    await expect(
+      collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, { requireDoneEvent: true }),
+    ).resolves.toBe('ok');
+  });
+
+  it('ignores text_delta emitted after text_final and before done', async () => {
+    const runtime = makeMultiEventRuntime([
+      { type: 'text_delta', text: 'partial text' },
+      { type: 'text_final', text: 'final text' },
+      { type: 'text_delta', text: '\n[progress] still working' },
+      { type: 'done' },
+    ]);
+
+    await expect(
+      collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, { requireDoneEvent: true }),
+    ).resolves.toBe('final text');
+  });
+
+  it('throws when runtime emits any event after done', async () => {
+    const runtime = makeMultiEventRuntime([
+      { type: 'text_final', text: 'ok' },
+      { type: 'done' },
+      { type: 'text_delta', text: 'late text' },
+    ]);
+
+    await expect(
+      collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000, { requireDoneEvent: true }),
+    ).rejects.toThrow('after done');
+  });
+});
+
+describe('collectRuntimeText progress sanitization', () => {
+  it('removes [progress] lines from text_final payload', async () => {
+    const runtime = makeMultiEventRuntime([
+      {
+        type: 'text_final',
+        text: 'Result line\n[progress] reading files\n[progress] thinking\nFinal answer',
+      },
+      { type: 'done' },
+    ]);
+
+    const result = await collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000);
+
+    expect(result).toBe('Result line\nFinal answer');
+  });
+
+  it('removes [progress] lines from delta-only fallback output', async () => {
+    const runtime = makeMultiEventRuntime([
+      { type: 'text_delta', text: 'Start\n' },
+      { type: 'text_delta', text: '[progress] indexing workspace\n' },
+      { type: 'text_delta', text: 'Done' },
+      { type: 'done' },
+    ]);
+
+    const result = await collectRuntimeText(runtime, 'p', 'm', '/tmp', [], [], 30000);
+
+    expect(result).toBe('Start\nDone');
+  });
+});

@@ -90,6 +90,17 @@ describe('runPipeline', () => {
     expect(result.outputs[0]).toBe('Hello world');
   });
 
+  it('fails when runtime stream ends without done event', async () => {
+    await expect(
+      runPipeline(
+        baseParams({
+          steps: [step('prompt')],
+          runtime: makeRuntime([{ type: 'text_final', text: 'Looks complete but is non-terminal.' }]),
+        }),
+      ),
+    ).rejects.toThrow('Pipeline step 0 failed: Runtime stream ended without done event (response may be non-terminal)');
+  });
+
   it('prefers text_final over accumulated text_delta', async () => {
     const result = await runPipeline(
       baseParams({
@@ -102,6 +113,65 @@ describe('runPipeline', () => {
       }),
     );
     expect(result.outputs[0]).toBe('final text');
+  });
+
+  it('treats empty text_final as authoritative even when text_delta was emitted', async () => {
+    const result = await runPipeline(
+      baseParams({
+        steps: [step('prompt')],
+        runtime: makeRuntime([
+          { type: 'text_delta', text: 'non-terminal progress' },
+          { type: 'text_final', text: '' },
+          { type: 'done' },
+        ]),
+      }),
+    );
+    expect(result.outputs[0]).toBe('');
+  });
+
+  it('fails when runtime emits an event after done', async () => {
+    await expect(
+      runPipeline(
+        baseParams({
+          steps: [step('prompt')],
+          runtime: makeRuntime([
+            { type: 'text_final', text: 'ok' },
+            { type: 'done' },
+            { type: 'text_delta', text: 'late text' },
+          ]),
+        }),
+      ),
+    ).rejects.toThrow('after done');
+  });
+
+  it('strips [progress] lines from prompt-step outputs before reuse', async () => {
+    const capturedPrompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        capturedPrompts.push(params.prompt);
+        if (params.prompt === 'first') {
+          yield { type: 'text_delta', text: '[progress] reading files\n' };
+          yield { type: 'text_delta', text: 'clean output\n' };
+          yield { type: 'text_delta', text: '[progress] wrapping up' };
+          yield { type: 'done' };
+          return;
+        }
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+
+    const result = await runPipeline(
+      baseParams({
+        steps: [step('first'), step('use {{prev.output}}')],
+        runtime,
+      }),
+    );
+
+    expect(result.outputs[0]).toBe('clean output\n');
+    expect(capturedPrompts[1]).toBe('use clean output\n');
   });
 
   it('interpolates {{prev.output}} in a static prompt string', async () => {
@@ -522,9 +592,9 @@ describe('runPipeline', () => {
       capabilities: new Set(['streaming_text']),
       async *invoke(params): AsyncIterable<EngineEvent> {
         invoked.push(params.prompt);
-        if (params.prompt === 'first') controller.abort();
         yield { type: 'text_final', text: `out:${params.prompt}` };
         yield { type: 'done' };
+        if (params.prompt === 'first') controller.abort();
       },
     };
 

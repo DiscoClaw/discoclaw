@@ -452,7 +452,9 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
               }
 
               // Handle result text.
-              if (parsed.resultText) resultText = parsed.resultText;
+              if ('resultText' in parsed) {
+                resultText = typeof parsed.resultText === 'string' ? parsed.resultText : '';
+              }
 
               // Handle images.
               if (parsed.image && imageCount < MAX_IMAGES_PER_INVOCATION) {
@@ -493,11 +495,11 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
             if (hasToolClose) inToolUse = false;
           } else if (evt) {
             const rt = extractResultText(evt);
-            if (rt) resultText = rt;
+            if (rt !== null) resultText = rt;
 
             const blocks = extractResultContentBlocks(evt);
             if (blocks) {
-              if (blocks.text) resultText = blocks.text;
+              resultText = blocks.text;
               for (const img of blocks.images) {
                 if (imageCount >= MAX_IMAGES_PER_INVOCATION) break;
                 const key = imageDedupeKey(img);
@@ -625,7 +627,9 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
                   merged += parsed.text;
                   pushUserText(parsed.text);
                 }
-                if (parsed.resultText) resultText = parsed.resultText;
+                if ('resultText' in parsed) {
+                  resultText = typeof parsed.resultText === 'string' ? parsed.resultText : '';
+                }
                 if (parsed.image && imageCount < MAX_IMAGES_PER_INVOCATION) {
                   const key = imageDedupeKey(parsed.image);
                   if (!seenImages.has(key)) {
@@ -690,17 +694,16 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         // Success.
         if (outputMode === 'text') {
           const final = (stdout || mergedStdout).trimEnd();
-          if (final) {
-            emittedUserOutput = true;
-            push({ type: 'text_final', text: final });
-          }
+          if (final) emittedUserOutput = true;
+          push({ type: 'text_final', text: final });
         } else {
-          const raw = resultText.trim() || (merged.trim() ? merged.trimEnd() : '');
-          const final = stripToolUseBlocks(raw);
-          if (final) {
-            emittedUserOutput = true;
-            push({ type: 'text_final', text: final });
-          }
+          const raw = resultText.trimEnd();
+          // Claude stream-json can omit a terminal `result` event in some flows.
+          // In that case, preserve previous behavior by finalizing from merged deltas.
+          const fallback = strategy.id === 'claude_code' ? merged.trimEnd() : '';
+          const final = stripToolUseBlocks(raw || fallback);
+          if (final) emittedUserOutput = true;
+          push({ type: 'text_final', text: final });
         }
 
         push({ type: 'done' });

@@ -6,6 +6,8 @@ import { LoopDetector, type LoopDetectorOpts } from '../runtime/loop-detector.js
  *
  * When `opts.requireFinalEvent` is true, throws if the stream ends without
  * a `text_final` event (distinguishes a complete response from a truncated one).
+ * When `opts.requireDoneEvent` is true, throws if the stream ends without a
+ * terminal `done` event (distinguishes terminal completion from non-terminal progress).
  *
  * When `opts.onEvent` is provided, each event is forwarded to it before
  * processing — used to drive live streaming preview in Discord progress messages.
@@ -14,6 +16,9 @@ import { LoopDetector, type LoopDetectorOpts } from '../runtime/loop-detector.js
  * events for degenerate patterns (consecutive repeats, ping-pong, frequency
  * dominance). If the critical threshold is hit, the runtime stream is aborted.
  * Pass a partial `LoopDetectorOpts` to override thresholds, or `false` to disable.
+ *
+ * Collected output is sanitized before return to remove non-terminal
+ * `[progress]` lines that should never be treated as final answer content.
  */
 export async function collectRuntimeText(
   runtime: RuntimeAdapter,
@@ -25,6 +30,7 @@ export async function collectRuntimeText(
   timeoutMs: number,
   opts?: {
     requireFinalEvent?: boolean;
+    requireDoneEvent?: boolean;
     sessionKey?: string;
     signal?: AbortSignal;
     onEvent?: (evt: EngineEvent) => void;
@@ -58,6 +64,7 @@ export async function collectRuntimeText(
 
   let text = '';
   let sawFinal = false;
+  let sawDone = false;
   try {
     for await (const evt of runtime.invoke({
       prompt,
@@ -70,6 +77,10 @@ export async function collectRuntimeText(
       ...(combinedSignal ? { signal: combinedSignal } : {}),
       ...(opts?.supervisor ? { supervisor: opts.supervisor } : {}),
     })) {
+      if (sawDone) {
+        throw new Error(`Runtime stream emitted ${evt.type} event after done (done must be terminal)`);
+      }
+
       // Feed event to loop detector before any other processing.
       detector?.onEvent(evt);
 
@@ -78,8 +89,10 @@ export async function collectRuntimeText(
         text = evt.text;
         sawFinal = true;
       } else if (evt.type === 'text_delta') {
-        // Accumulate deltas in case text_final isn't emitted
-        text += evt.text;
+        // Accumulate deltas only until text_final is seen.
+        if (!sawFinal) text += evt.text;
+      } else if (evt.type === 'done') {
+        sawDone = true;
       } else if (evt.type === 'error') {
         throw new Error(`Runtime error: ${evt.message}`);
       }
@@ -96,5 +109,14 @@ export async function collectRuntimeText(
   if (opts?.requireFinalEvent && !sawFinal) {
     throw new Error('Runtime stream ended without text_final event (response may be truncated)');
   }
-  return text;
+  if (opts?.requireDoneEvent && !sawDone) {
+    throw new Error('Runtime stream ended without done event (response may be non-terminal)');
+  }
+  return sanitizeCollectedRuntimeText(text);
+}
+
+const NON_TERMINAL_PROGRESS_LINE_RE = /^[ \t]*\[progress\].*(?:\r?\n|$)/gim;
+
+function sanitizeCollectedRuntimeText(text: string): string {
+  return text.replace(NON_TERMINAL_PROGRESS_LINE_RE, '');
 }

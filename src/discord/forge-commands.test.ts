@@ -36,6 +36,7 @@ function makeMockRuntime(responses: string[]): RuntimeAdapter {
       callIndex++;
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
+        yield { type: 'done' };
       })();
     },
   };
@@ -56,6 +57,7 @@ function makeMockRuntimeWithError(errorOnCall: number, responses: string[]): Run
       const text = responses[idx] ?? '(no response)';
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
+        yield { type: 'done' };
       })();
     },
   };
@@ -107,6 +109,7 @@ function makeRetryableRuntime(callMap: Array<string | 'error'>): RuntimeAdapter 
       const text = entry;
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
+        yield { type: 'done' };
       })();
     },
   };
@@ -1071,6 +1074,7 @@ describe('ForgeOrchestrator', () => {
         if (idx === 0) {
           return (async function* (): AsyncGenerator<EngineEvent> {
             yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
           })();
         }
         // idx 1 and 2 (audit attempt + retry) both error
@@ -1220,6 +1224,7 @@ describe('ForgeOrchestrator', () => {
           // Cancel mid-draft, then yield — post-return guard returns null
           orchestrator.requestCancel();
           yield { type: 'text_final', text: '# Plan: Test\n' };
+          yield { type: 'done' };
         })();
       },
     };
@@ -1254,6 +1259,7 @@ describe('ForgeOrchestrator', () => {
           // First call blocks until we resolve
           await firstCallDone;
           yield { type: 'text_final', text: '# Plan: Test\n' };
+          yield { type: 'done' };
         })();
       },
     };
@@ -1299,6 +1305,7 @@ describe('ForgeOrchestrator', () => {
         const text = responses[prompts.length - 1] ?? '(no response)';
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         })();
       },
     };
@@ -1339,6 +1346,7 @@ describe('ForgeOrchestrator', () => {
         const text = responses[prompts.length - 1] ?? '(no response)';
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         })();
       },
     };
@@ -1372,6 +1380,7 @@ describe('ForgeOrchestrator', () => {
         const text = responses[prompts.length - 1] ?? '(no response)';
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         })();
       },
     };
@@ -1410,6 +1419,7 @@ describe('ForgeOrchestrator', () => {
         const text = responses[prompts.length - 1] ?? '(no response)';
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         })();
       },
     };
@@ -1440,6 +1450,7 @@ describe('ForgeOrchestrator', () => {
         const text = responses[invocations.length - 1] ?? '(no response)';
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         })();
       },
     };
@@ -1595,6 +1606,7 @@ describe('ForgeOrchestrator', () => {
           // The post-return guard should catch this before the output is processed.
           orchestrator.requestCancel();
           yield { type: 'text_final', text: draftPlan };
+          yield { type: 'done' };
         })();
       },
     };
@@ -1921,6 +1933,7 @@ describe('ForgeOrchestrator', () => {
         const text = responses[prompts.length - 1] ?? '(no response)';
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         })();
       },
     };
@@ -1975,6 +1988,7 @@ describe('ForgeOrchestrator', () => {
         const text = responses[prompts.length - 1] ?? '(no response)';
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
+          yield { type: 'done' };
         })();
       },
     };
@@ -2333,6 +2347,7 @@ function makeCaptureRuntime(responses: string[]): {
       callIndex++;
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
+        yield { type: 'done' };
       })();
     },
   };
@@ -2459,6 +2474,7 @@ describe('auditorRuntime support', () => {
         auditorInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
         })();
       },
     };
@@ -2504,6 +2520,7 @@ describe('auditorRuntime support', () => {
         auditorInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
         })();
       },
     };
@@ -2533,6 +2550,7 @@ describe('auditorRuntime support', () => {
         auditorInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
         })();
       },
     };
@@ -2588,6 +2606,7 @@ describe('drafterRuntime support', () => {
         drafterInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text: MINIMAL_DRAFT_PLAN };
+          yield { type: 'done' };
         })();
       },
     };
@@ -2615,6 +2634,7 @@ describe('drafterRuntime support', () => {
         drafterInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text: MINIMAL_DRAFT_PLAN };
+          yield { type: 'done' };
         })();
       },
     };
@@ -2656,6 +2676,7 @@ describe('drafterRuntime support', () => {
         drafterInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text: MINIMAL_DRAFT_PLAN };
+          yield { type: 'done' };
         })();
       },
     };
@@ -2681,6 +2702,7 @@ describe('drafterRuntime support', () => {
         drafterInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text: MINIMAL_DRAFT_PLAN };
+          yield { type: 'done' };
         })();
       },
     };
@@ -2709,6 +2731,7 @@ function makeMockRuntimeWithEvents(responseMap: Array<{ text: string; events?: E
       return (async function* (): AsyncGenerator<EngineEvent> {
         for (const evt of entry.events ?? []) yield evt;
         yield { type: 'text_final', text: entry.text };
+        yield { type: 'done' };
       })();
     },
   };

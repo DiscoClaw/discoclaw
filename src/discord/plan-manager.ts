@@ -134,6 +134,7 @@ const VALID_STATUSES: Set<string> = new Set(['pending', 'in-progress', 'done', '
 const VALID_KINDS: Set<string> = new Set(['implement', 'read', 'audit']);
 const PHASES_STATE_VERSION = 1;
 const AUDIT_CONVERGENCE_REPEAT_LIMIT = 2;
+const NON_TERMINAL_PROGRESS_LINE_RE = /^[ \t]*\[progress\].*(?:\r?\n|$)/gim;
 
 /** Known workspace filenames that should be normalized to workspace/ prefix. */
 const KNOWN_WORKSPACE_FILES = new Set([
@@ -144,6 +145,10 @@ const KNOWN_WORKSPACE_FILES = new Set([
 const PROJECT_DIRS: Record<string, string> = {
   discoclaw: path.join(os.homedir(), 'code/discoclaw'),
 };
+
+function sanitizePhaseOutput(text: string): string {
+  return text.replace(NON_TERMINAL_PROGRESS_LINE_RE, '');
+}
 
 
 // ---------------------------------------------------------------------------
@@ -1680,20 +1685,27 @@ export async function executePhase(
       opts.timeoutMs,
       {
         requireFinalEvent: true,
+        requireDoneEvent: true,
         onEvent: opts.onEvent,
         signal: opts.signal,
         supervisor: PLAN_PHASE_SUPERVISOR_POLICY,
       },
     );
+    const sanitizedOutput = sanitizePhaseOutput(output);
 
     if (phase.kind === 'audit') {
-      const verdict = parseAuditVerdict(output);
+      const verdict = parseAuditVerdict(sanitizedOutput);
       if (verdict.shouldLoop) {
-        return { status: 'audit_failed', output, error: `Audit found ${verdict.maxSeverity} severity deviations`, verdict };
+        return {
+          status: 'audit_failed',
+          output: sanitizedOutput,
+          error: `Audit found ${verdict.maxSeverity} severity deviations`,
+          verdict,
+        };
       }
     }
 
-    return { status: 'done', output };
+    return { status: 'done', output: sanitizedOutput };
   } catch (err) {
     const errorMsg = String(err instanceof Error ? err.message : err);
     return { status: 'failed', output: '', error: errorMsg };
@@ -1992,6 +2004,7 @@ export async function runNextPhase(
             opts.timeoutMs,
             {
               requireFinalEvent: true,
+              requireDoneEvent: true,
               onEvent: opts.onEvent,
               signal: opts.signal,
               supervisor: PLAN_PHASE_SUPERVISOR_POLICY,
@@ -2134,9 +2147,10 @@ export async function runNextPhase(
   }
 
   // 11. Write done/failed status to disk
+  const sanitizedPhaseOutput = sanitizePhaseOutput(result.output);
   const diskStatus = result.status === 'audit_failed' ? 'failed' : result.status;
   const diskError = result.status === 'done' ? undefined : result.error;
-  allPhases = updatePhaseStatus(allPhases, phase.id, diskStatus, result.output, diskError);
+  allPhases = updatePhaseStatus(allPhases, phase.id, diskStatus, sanitizedPhaseOutput, diskError);
   // Attach modifiedFiles and failureHashes to the phase
   allPhases = {
     ...allPhases,
