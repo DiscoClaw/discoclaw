@@ -24,6 +24,7 @@ import {
 } from './forge-plan-registry.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { createStreamingProgress } from './streaming-progress.js';
+import { adaptPlanRunEventText } from './runtime-event-text-adapter.js';
 
 const DEFAULT_PLAN_PHASE_TIMEOUT_MS = 1_800_000;
 
@@ -343,7 +344,7 @@ export async function executePlanAction(
             if (phaseStartMessages.has(event.phase.id) || !runChannel) return;
             try {
               const sent = await runChannel.send({
-                content: `**${event.phase.title}**...`,
+                content: adaptPlanRunEventText(event),
                 allowedMentions: NO_MENTIONS,
               });
               const editable = asMessageEditTarget(sent);
@@ -356,10 +357,9 @@ export async function executePlanAction(
           } else if (event.type === 'phase_complete') {
             const phaseMsg = phaseStartMessages.get(event.phase.id);
             if (!phaseMsg) return;
-            const indicator = event.status === 'done' ? '[x]' : event.status === 'failed' ? '[!]' : '[-]';
             try {
               await phaseMsg.edit({
-                content: `${indicator} **${event.phase.title}**`,
+                content: adaptPlanRunEventText(event),
                 allowedMentions: NO_MENTIONS,
               });
             } catch {

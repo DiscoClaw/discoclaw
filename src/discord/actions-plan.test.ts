@@ -603,7 +603,7 @@ describe('executePlanAction', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       const contents = setup.fn.mock.calls.map((call) => String(call[0]!.content));
-      expect(contents.some((text) => text.includes('**First phase**...'))).toBe(true);
+      expect(contents.some((text) => text.includes('Starting phase: First phase...'))).toBe(true);
     });
 
     it('deduplicates phase-start posts for repeated progress lines in the same run', async () => {
@@ -632,7 +632,7 @@ describe('executePlanAction', () => {
 
       const phaseStartMessages = setup.fn.mock.calls
         .map((call) => String(call[0]!.content))
-        .filter((content) => content.includes('**First phase**...'));
+        .filter((content) => content.includes('Starting phase: First phase...'));
       expect(phaseStartMessages).toHaveLength(1);
     });
 
@@ -676,7 +676,7 @@ describe('executePlanAction', () => {
 
       expect(setup.fn).toHaveBeenCalledOnce();
       const sent = String(setup.fn.mock.calls[0]![0]!.content);
-      expect(sent).toContain('**First phase**...');
+      expect(sent).toContain('Starting phase: First phase...');
       expect(setup.msg.edit).not.toHaveBeenCalled();
     });
 
@@ -806,7 +806,9 @@ describe('executePlanAction', () => {
       expect(sendMsgs.length).toBeGreaterThanOrEqual(2);
       const phaseMsg = sendMsgs[1]!;
       expect(phaseMsg.edit).toHaveBeenCalled();
-      const doneEdit = phaseMsg.edit.mock.calls.find((call) => String(call[0]!.content).includes('[x]'));
+      const doneEdit = phaseMsg.edit.mock.calls.find((call) =>
+        String(call[0]!.content).includes('Phase complete: First phase.'),
+      );
       expect(doneEdit).toBeDefined();
       expect(String(doneEdit![0]!.content)).toContain('First phase');
     });
@@ -855,7 +857,9 @@ describe('executePlanAction', () => {
       expect(sendMsgs.length).toBeGreaterThanOrEqual(2);
       const phaseMsg = sendMsgs[1]!;
       expect(phaseMsg.edit).toHaveBeenCalled();
-      const failEdit = phaseMsg.edit.mock.calls.find((call) => String(call[0]!.content).includes('[!]'));
+      const failEdit = phaseMsg.edit.mock.calls.find((call) =>
+        String(call[0]!.content).includes('Phase failed: First phase.'),
+      );
       expect(failEdit).toBeDefined();
       expect(String(failEdit![0]!.content)).toContain('First phase');
     });
