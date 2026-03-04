@@ -12,7 +12,7 @@ import type { AuditVerdict } from './forge-audit-verdict.js';
 import { getSection, parsePlan } from './plan-parser.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import { buildPromptPreamble } from './prompt-common.js';
-import { createPhaseStatusHeartbeatController } from './phase-status-heartbeat.js';
+import { createPhaseStatusHeartbeatController, resolvePlanHeaderHeartbeatPolicy } from './phase-status-heartbeat.js';
 export { parseAuditVerdict };
 export type { AuditVerdict };
 
@@ -48,6 +48,7 @@ export type ForgeOrchestratorOpts = {
   maxAuditRounds: number;
   progressThrottleMs: number;
   timeoutMs: number;
+  planForgeHeartbeatIntervalMs?: number;
   drafterModel?: string;
   auditorModel?: string;
   log?: LoggerLike;
@@ -855,11 +856,16 @@ export class ForgeOrchestrator {
     let planContent = await fs.readFile(filePath, 'utf-8');
     let lastAuditNotes = '';
     let lastVerdict: AuditVerdict = { maxSeverity: 'none', shouldLoop: false };
+    const heartbeatPolicy = resolvePlanHeaderHeartbeatPolicy(
+      planContent,
+      this.opts.planForgeHeartbeatIntervalMs,
+    );
 
     // The effective max round number is startRound + maxAuditRounds - 1
     const maxRound = startRound + this.opts.maxAuditRounds - 1;
     const forgeHeartbeat = createPhaseStatusHeartbeatController({
       flowLabel: `Forge ${planId}`,
+      policy: heartbeatPolicy,
       onUpdate: async (message, event) => {
         if (event.type === 'terminal') return;
         await onProgress(message, { force: true });

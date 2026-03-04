@@ -94,7 +94,7 @@ import type { AttachmentLike } from './image-download.js';
 import { DiscordTransportClient } from './transport-client.js';
 import type { LongRunWatchdog } from './long-run-watchdog.js';
 import { adaptPlanRunEventText, adaptRuntimeEventText } from './runtime-event-text-adapter.js';
-import { createPhaseStatusHeartbeatController } from './phase-status-heartbeat.js';
+import { createPhaseStatusHeartbeatController, resolvePlanHeaderHeartbeatPolicy } from './phase-status-heartbeat.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
@@ -186,6 +186,7 @@ export type BotParams = {
   planPhaseMaxContextFiles?: number;
   planPhaseTimeoutMs?: number;
   planPhaseMaxAuditFixAttempts?: number;
+  planForgeHeartbeatIntervalMs?: number;
   forgeCommandsEnabled?: boolean;
   forgeMaxAuditRounds?: number;
   forgeDrafterModel?: string;
@@ -1485,6 +1486,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   // Acquire lock for initial validation only
                   let phasesFilePath: string;
                   let planFilePath: string;
+                  let planContentForHeartbeat = '';
                   let projectCwd: string;
                   let progressReply: ReplyTarget;
 
@@ -1505,6 +1507,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                     phasesFilePath = prepResult.phasesFilePath;
                     planFilePath = prepResult.planFilePath;
+                    planContentForHeartbeat = prepResult.planContent;
 
                     try {
                       projectCwd = resolveProjectCwd(prepResult.planContent, params.workspaceCwd);
@@ -1625,6 +1628,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                   const planRunHeartbeat = createPhaseStatusHeartbeatController({
                     flowLabel: `Plan run ${planId}`,
+                    policy: resolvePlanHeaderHeartbeatPolicy(
+                      planContentForHeartbeat,
+                      params.planForgeHeartbeatIntervalMs,
+                    ),
                     onUpdate: async (message, event) => {
                       if (event.type === 'terminal') return;
                       await onProgress(`${message} ${formatPhaseFileStatus()}`, { force: true });
@@ -2150,6 +2157,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   timeoutMs: params.forgeTimeoutMs ?? 5 * 60_000,
                   drafterModel: params.forgeDrafterModel,
                   auditorModel: params.forgeAuditorModel,
+                  planForgeHeartbeatIntervalMs: params.planForgeHeartbeatIntervalMs,
                   log: params.log,
                 });
                 setActiveOrchestrator(resumeOrchestrator, msg.channelId);
@@ -2287,6 +2295,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 timeoutMs: params.forgeTimeoutMs ?? 5 * 60_000,
                 drafterModel: params.forgeDrafterModel,
                 auditorModel: params.forgeAuditorModel,
+                planForgeHeartbeatIntervalMs: params.planForgeHeartbeatIntervalMs,
                 log: params.log,
                 existingTaskId: ctxResult.existingTaskId,
                 taskDescription: taskSummary?.description,

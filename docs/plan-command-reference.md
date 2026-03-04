@@ -341,7 +341,7 @@ Show available forge commands.
 - `!forge cancel` — cancel the running forge
 ```
 
-> **Architecture note:** The `!forge help` text is defined inline in `discord.ts` (inside the `forgeCmd.action === 'help'` branch), not in `forge-commands.ts`. All `!forge` command dispatch happens in `discord.ts` rather than in the commands module — this is a known architectural quirk, not a recommended pattern.
+> **Architecture note:** The `!forge help` text is defined inline in `src/discord/message-coordinator.ts` (inside the `forgeCmd.action === 'help'` branch), not in `forge-commands.ts`. All `!forge` command dispatch happens in the message coordinator rather than in the commands module — this is a known architectural quirk, not a recommended pattern.
 
 **Context alignment:** When a `!forge` is started, the drafter prompt is fed the task description and any pinned thread posts via the same shared `gatherConversationContext()` helper that `!plan` uses. That helper also captures replied-to messages, starter/recent thread posts, and fallback history, so both commands always reference the same conversation context even inside an existing task thread.
 
@@ -372,7 +372,7 @@ Forge complete. Plan plan-018 ready for review (2 rounds, 87s)
 A forge is already running. Use `!forge cancel` to stop it first.
 ```
 
-This is checked in `discord.ts` via the `forgeOrchestrator?.isRunning` guard. Additionally, `ForgeOrchestrator.run()` throws if called while `running === true` as defense-in-depth.
+This is checked in `src/discord/message-coordinator.ts` via the `getActiveOrchestrator()?.isRunning` guard. Additionally, `ForgeOrchestrator.run()` throws if called while `running === true` as defense-in-depth.
 
 ### `!forge status`
 

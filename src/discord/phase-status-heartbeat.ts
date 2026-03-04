@@ -119,6 +119,34 @@ export function parsePhaseStatusHeartbeatPolicy(
   };
 }
 
+export function extractPlanHeaderHeartbeatValue(planContent: string): string | null {
+  if (!planContent) return null;
+  const lines = planContent.split('\n');
+  let heartbeatValue: string | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '---') break;
+    const metadata = trimmed.match(/^\*\*([^:*]+):\*\*\s*(.*)$/);
+    if (!metadata) continue;
+    const key = (metadata[1] ?? '').trim().toLowerCase();
+    if (key !== 'heartbeat') continue;
+    heartbeatValue = (metadata[2] ?? '').trim();
+  }
+
+  return heartbeatValue;
+}
+
+export function resolvePlanHeaderHeartbeatPolicy(
+  planContent: string,
+  fallbackPolicy?: string | number | Partial<PhaseStatusHeartbeatPolicy> | null,
+): PhaseStatusHeartbeatPolicy {
+  const defaults = parsePhaseStatusHeartbeatPolicy(fallbackPolicy);
+  const rawPlanHeartbeat = extractPlanHeaderHeartbeatValue(planContent);
+  if (rawPlanHeartbeat == null) return defaults;
+  return parsePhaseStatusHeartbeatPolicy(rawPlanHeartbeat, defaults);
+}
+
 export function formatHeartbeatDuration(ms: number): string {
   const safe = Math.max(0, Math.floor(ms));
   if (safe < 1000) return `${safe}ms`;

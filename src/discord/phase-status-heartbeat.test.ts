@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createPhaseStatusHeartbeatController,
+  extractPlanHeaderHeartbeatValue,
   formatHeartbeatDuration,
   formatPhaseStatusHeartbeatEvent,
   parsePhaseStatusHeartbeatPolicy,
+  resolvePlanHeaderHeartbeatPolicy,
 } from './phase-status-heartbeat.js';
 
 beforeEach(() => {
@@ -27,6 +29,39 @@ describe('parsePhaseStatusHeartbeatPolicy', () => {
 
   it('falls back to defaults for invalid inputs', () => {
     expect(parsePhaseStatusHeartbeatPolicy('nonsense')).toEqual({ enabled: true, intervalMs: 45_000 });
+  });
+});
+
+describe('resolvePlanHeaderHeartbeatPolicy', () => {
+  it('parses Heartbeat metadata from the plan header before the first separator', () => {
+    const content = [
+      '# Plan: Example',
+      '',
+      '**Heartbeat:** 90s',
+      '',
+      '---',
+      '',
+      '## Objective',
+      '',
+      '**Heartbeat:** off',
+    ].join('\n');
+
+    expect(extractPlanHeaderHeartbeatValue(content)).toBe('90s');
+    expect(resolvePlanHeaderHeartbeatPolicy(content, 12_000)).toEqual({ enabled: true, intervalMs: 90_000 });
+  });
+
+  it('falls back to configured defaults when header value is invalid', () => {
+    const content = [
+      '# Plan: Example',
+      '',
+      '**Heartbeat:** nonsense',
+      '',
+      '---',
+      '',
+      '## Objective',
+    ].join('\n');
+
+    expect(resolvePlanHeaderHeartbeatPolicy(content, 12_000)).toEqual({ enabled: true, intervalMs: 12_000 });
   });
 });
 
