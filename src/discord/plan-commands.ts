@@ -5,7 +5,6 @@ import type { TaskStore } from '../tasks/store.js';
 import {
   decomposePlan,
   readPhasesFile,
-  getNextPhase,
   resequenceKeepingDone,
   selectRunnablePhase,
   updatePhaseStatus,
@@ -743,9 +742,8 @@ export async function handlePlanSkip(
     return `Failed to read phases file: ${String(err)}`;
   }
 
-  // Prefer skipping an actively blocked phase; otherwise skip the next runnable pending phase.
-  const target = phases.phases.find((p) => p.status === 'in-progress' || p.status === 'failed')
-    ?? getNextPhase(phases);
+  // Skip only actively blocked phases.
+  const target = phases.phases.find((p) => p.status === 'in-progress' || p.status === 'failed');
   if (!target) return 'Nothing to skip.';
 
   phases = updatePhaseStatus(phases, target.id, 'skipped');

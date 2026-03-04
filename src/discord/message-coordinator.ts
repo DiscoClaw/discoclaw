@@ -1583,7 +1583,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           break;
                         } else if (phaseResult.result === 'retry_blocked') {
                           stopReason = 'error';
-                          stopMessage = `Phase **${phaseResult.phase.id}** retry blocked by convergence guard.`;
+                          stopMessage = `Phase **${phaseResult.phase.id}** retry blocked: ${sanitizeErrorMessage(phaseResult.message)}`;
                           break;
                         } else {
                           break;

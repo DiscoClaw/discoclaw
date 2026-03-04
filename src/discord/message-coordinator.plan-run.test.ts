@@ -374,10 +374,11 @@ describe('message coordinator plan run phase-start posts', () => {
 
   it('includes convergence-guard/manual-intervention guidance in stop summaries', async () => {
     const { runNextPhase } = await import('./plan-manager.js');
+    const retryDetail = 'Phase failed but has no modifiedFiles — cannot safely determine what to revert.';
     (runNextPhase as any).mockImplementationOnce(async () => ({
       result: 'retry_blocked',
       phase: { id: 'phase-1', title: 'First phase', kind: 'implement', status: 'failed', dependsOn: [], contextFiles: [] },
-      message: 'retry blocked',
+      message: retryDetail,
     }));
 
     const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
@@ -388,6 +389,8 @@ describe('message coordinator plan run phase-start posts', () => {
     await vi.waitFor(() => {
       const summaryEdits = msg.progressReply.edit.mock.calls
         .map((call: any[]) => String(call[0]?.content ?? ''));
+      expect(summaryEdits.some((content: string) =>
+        content.includes(retryDetail))).toBe(true);
       expect(summaryEdits.some((content: string) =>
         content.includes('Convergence guard/manual intervention')
         && content.includes('!plan run-phase plan-042 <phase-id>')

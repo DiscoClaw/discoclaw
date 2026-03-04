@@ -274,8 +274,8 @@ Skipped **phase-1**: Implement src/webhook.ts (was failed)
 
 Run a standalone audit against an existing plan. Performs a two-stage review:
 
-1. **Structural pre-flight** (instant) — checks for required sections (Objective, Scope, Changes, Risks, Testing), placeholder text, and missing file paths. If high or medium severity issues are found, the audit stops here and reports them without invoking the AI.
-2. **AI-powered audit** (30-60s) — invokes an adversarial auditor agent that deep-reviews the plan for correctness, completeness, risk gaps, and test coverage. Only runs if the structural check passes (or has only low-severity concerns).
+1. **Structural pre-flight** (instant) — checks for required sections (Objective, Scope, Changes, Risks, Testing), placeholder text, and missing file paths. If blocking or medium severity issues are found, the audit stops here and reports them without invoking the AI.
+2. **AI-powered audit** (30-60s) — invokes an adversarial auditor agent that deep-reviews the plan for correctness, completeness, risk gaps, and test coverage. Only runs if the structural check passes (or has only minor/suggestion concerns).
 
 Both results are appended as a single review entry in the plan's Audit Log section.
 
@@ -290,12 +290,12 @@ Auditing **plan-017**...
 
 **On success:**
 ```
-Audit complete for **plan-017** — review 1, verdict: **low** (ready to approve). See `!plan show plan-017` for details.
+Audit complete for **plan-017** — review 1, verdict: **minor** (ready to approve). See `!plan show plan-017` for details.
 ```
 
 **On failure (structural gate):**
 ```
-Audit complete for **plan-017** — review 1, verdict: **high** (needs revision). See `!plan show plan-017` for details.
+Audit complete for **plan-017** — review 1, verdict: **blocking** (needs revision). See `!plan show plan-017` for details.
 ```
 
 **Configuration:** Uses `FORGE_AUDITOR_MODEL` for the AI agent (falls back to `RUNTIME_MODEL`). Timeout follows `FORGE_TIMEOUT_MS`.

@@ -1585,7 +1585,7 @@ describe('handlePlanSkip', () => {
     expect(result).toContain('No phases file found');
   });
 
-  it('skips next runnable pending phase when no failed/in-progress phases', async () => {
+  it('returns nothing to skip when no failed/in-progress phases exist', async () => {
     const tmpDir = await makeTmpDir();
     const plansDir = path.join(tmpDir, 'plans');
     await fs.mkdir(plansDir, { recursive: true });
@@ -1613,8 +1613,7 @@ describe('handlePlanSkip', () => {
     );
 
     const result = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
-    expect(result).toContain('Skipped');
-    expect(result).toContain('was pending');
+    expect(result).toBe('Nothing to skip.');
   });
 
   it('skips a failed phase and writes to disk', async () => {
@@ -1665,7 +1664,7 @@ describe('handlePlanSkip', () => {
     expect(updatedContent).toContain('**Status:** skipped');
   });
 
-  it('skips pending phases in dependency order across repeated calls until exhausted', async () => {
+  it('skips failed phase once, then stops without skipping pending phases', async () => {
     const tmpDir = await makeTmpDir();
     const plansDir = path.join(tmpDir, 'plans');
     await fs.mkdir(plansDir, { recursive: true });
@@ -1693,13 +1692,21 @@ describe('handlePlanSkip', () => {
       baseOpts({ workspaceCwd: tmpDir }),
     );
 
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const phasesJsonPath = path.join(plansDir, 'plan-001-phases.json');
+    let phasesContent = await fs.readFile(phasesPath, 'utf-8');
+    phasesContent = phasesContent.replace('**Status:** pending', '**Status:** failed');
+    await fs.writeFile(phasesPath, phasesContent, 'utf-8');
+    const phasesJson = JSON.parse(await fs.readFile(phasesJsonPath, 'utf-8'));
+    const firstPending = phasesJson.phases.find((p: any) => p.status === 'pending');
+    if (firstPending) firstPending.status = 'failed';
+    await fs.writeFile(phasesJsonPath, JSON.stringify(phasesJson, null, 2) + '\n', 'utf-8');
+
     const first = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
     const second = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
-    const third = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
 
     expect(first).toContain('phase-1');
-    expect(second).toContain('phase-2');
-    expect(third).toBe('Nothing to skip.');
+    expect(second).toBe('Nothing to skip.');
   });
 });
 

@@ -411,9 +411,9 @@ export function decomposePlan(planContent: string, planId: string, planFile: str
     });
     phases.push({
       id: 'phase-2',
-      title: 'Manual implementation planning',
-      kind: 'read',
-      description: 'Identify concrete files and manual steps required before implementation can safely proceed.',
+      title: 'Manual implementation execution',
+      kind: 'implement',
+      description: 'Implement the plan manually based on the analysis output.',
       status: 'pending',
       dependsOn: ['phase-1'],
       contextFiles: [planFile],
@@ -1728,6 +1728,15 @@ function gitDiffNames(cwd: string): Set<string> | null {
   }
 }
 
+function gitIsTracked(cwd: string, file: string): boolean {
+  try {
+    execFileSync('git', ['ls-files', '--error-unmatch', '--', file], { cwd, stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function hashFileContent(filePath: string): string {
   try {
     const content = fsSync.readFileSync(filePath, 'utf-8');
@@ -1856,11 +1865,11 @@ export async function runNextPhase(
       }
 
       // Hash matches — safe to revert
-      if (preSnapshot.has(file)) {
-        // File was in pre-snapshot, so it's tracked + dirty or staged
+      if (gitIsTracked(opts.projectCwd, file)) {
+        // Tracked files are restored via checkout.
         trackedToRevert.push(file);
       } else {
-        // File was not in pre-execution snapshot = created by failed attempt
+        // Untracked files are removed via git clean.
         untrackedToClean.push(file);
       }
     }
@@ -1875,7 +1884,7 @@ export async function runNextPhase(
 
     if (untrackedToClean.length > 0) {
       try {
-        execFileSync('git', ['clean', '-f', '--', ...untrackedToClean], { cwd: opts.projectCwd, stdio: 'pipe' });
+        execFileSync('git', ['clean', '-fd', '--', ...untrackedToClean], { cwd: opts.projectCwd, stdio: 'pipe' });
       } catch (err) {
         opts.log?.warn({ err, files: untrackedToClean }, 'plan-manager: clean untracked files failed');
       }
@@ -1929,6 +1938,7 @@ export async function runNextPhase(
     if (!isGitAvailable) {
       await onProgress('Automatic fix loop skipped \u2014 git not available.');
     } else {
+      const fixLoopBaseline = gitDiffNames(opts.projectCwd);
       let lastAuditOutput = result.output;
       let lastSeverity = result.verdict.maxSeverity;
       const realWorkspace = safeRealpath(opts.workspaceCwd);
@@ -2006,17 +2016,55 @@ export async function runNextPhase(
         // result.status === 'failed' (runtime error on re-audit) — consumed attempt, continue
       }
 
-      // Exhausted fix attempts — rollback all uncommitted changes
+      // Exhausted fix attempts — rollback only changes introduced during this audit-fix loop
       if (result.status === 'audit_failed' || result.status === 'failed') {
         fixAttemptsUsed = fixAttemptsUsed ?? maxFixAttempts;
-        try {
-          execFileSync('git', ['checkout', '.'], { cwd: opts.projectCwd, stdio: 'pipe' });
-          execFileSync('git', ['clean', '-fd'], { cwd: opts.projectCwd, stdio: 'pipe' });
-          await onProgress('Fix attempts exhausted \u2014 rolled back fix-agent changes.');
-        } catch (rollbackErr) {
+        const fixLoopAfter = gitDiffNames(opts.projectCwd);
+        if (!fixLoopBaseline || !fixLoopAfter) {
           await onProgress(
-            `Fix attempts exhausted \u2014 rollback failed: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}. Working tree may contain partial fix-agent changes.`,
+            'Fix attempts exhausted \u2014 scoped rollback skipped (unable to compute git snapshots). Working tree may contain partial fix-agent changes.',
           );
+        } else {
+          const rollbackCandidates = [...fixLoopAfter].filter((file) => !fixLoopBaseline.has(file));
+          const trackedToRevert: string[] = [];
+          const untrackedToClean: string[] = [];
+          for (const file of rollbackCandidates) {
+            if (gitIsTracked(opts.projectCwd, file)) {
+              trackedToRevert.push(file);
+            } else {
+              untrackedToClean.push(file);
+            }
+          }
+
+          let rollbackFailed = false;
+          if (trackedToRevert.length > 0) {
+            try {
+              execFileSync('git', ['checkout', '--', ...trackedToRevert], { cwd: opts.projectCwd, stdio: 'pipe' });
+            } catch (rollbackErr) {
+              rollbackFailed = true;
+              opts.log?.warn({ err: rollbackErr, files: trackedToRevert }, 'plan-manager: scoped rollback checkout failed');
+            }
+          }
+          if (untrackedToClean.length > 0) {
+            try {
+              execFileSync('git', ['clean', '-fd', '--', ...untrackedToClean], { cwd: opts.projectCwd, stdio: 'pipe' });
+            } catch (rollbackErr) {
+              rollbackFailed = true;
+              opts.log?.warn({ err: rollbackErr, files: untrackedToClean }, 'plan-manager: scoped rollback clean failed');
+            }
+          }
+
+          if (rollbackFailed) {
+            await onProgress(
+              'Fix attempts exhausted \u2014 scoped rollback partially failed. Working tree may contain partial fix-agent changes.',
+            );
+          } else if (rollbackCandidates.length === 0) {
+            await onProgress('Fix attempts exhausted \u2014 no new fix-agent changes detected to roll back.');
+          } else {
+            await onProgress(
+              `Fix attempts exhausted \u2014 rolled back ${rollbackCandidates.length} fix-agent file change(s) introduced in this phase.`,
+            );
+          }
         }
         // Normalize: fix loop exhaustion always returns audit_failed, even if
         // the last iteration was a runtime error ('failed') rather than an audit failure.

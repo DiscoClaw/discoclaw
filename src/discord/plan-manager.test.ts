@@ -3,6 +3,7 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { EngineEvent } from '../runtime/types.js';
@@ -400,8 +401,8 @@ describe('decomposePlan', () => {
     expect(phases.phases).toHaveLength(3);
     expect(phases.phases[0]!.kind).toBe('read');
     expect(phases.phases[0]!.title.toLowerCase()).toContain('analyze');
-    expect(phases.phases[1]!.kind).toBe('read');
-    expect(phases.phases[1]!.title.toLowerCase()).toContain('manual');
+    expect(phases.phases[1]!.kind).toBe('implement');
+    expect(phases.phases[1]!.title.toLowerCase()).toContain('implementation');
     const auditPhase = phases.phases[2]!;
     expect(auditPhase.kind).toBe('audit');
     expect(auditPhase.dependsOn).toEqual(['phase-2']);
@@ -1770,6 +1771,32 @@ describe('runNextPhase', () => {
     }
   });
 
+  it('retry cleanup removes untracked failed-attempt artifacts when hashes match', async () => {
+    if (!fsSync.existsSync(path.join(projectDir, '.git'))) return;
+
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    phases.phases[0]!.status = 'failed';
+    const artifactRelPath = 'failed-attempt.txt';
+    const artifactAbsPath = path.join(projectDir, artifactRelPath);
+    const artifactContent = 'failed-attempt-artifact';
+    await fs.writeFile(artifactAbsPath, artifactContent, 'utf-8');
+
+    phases.phases[0]!.modifiedFiles = [artifactRelPath];
+    phases.phases[0]!.failureHashes = {
+      [artifactRelPath]: createHash('sha256').update(artifactContent).digest('hex').slice(0, 16),
+    };
+
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    expect(result.result).toBe('done');
+    expect(fsSync.existsSync(artifactAbsPath)).toBe(false);
+  });
+
   it('rollout corruption bypasses retry guard', async () => {
     const planPath = path.join(plansDir, 'plan-011-test.md');
     await fs.writeFile(planPath, SAMPLE_PLAN);
@@ -2490,15 +2517,21 @@ describe('runNextPhase audit fix loop', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writeAuditPhases(phasesPath);
 
-    // Create an uncommitted file that should be cleaned up by rollback
-    await fs.writeFile(path.join(projectDir, 'dirty-file.txt'), 'should be cleaned');
+    // Create pre-existing uncommitted file that should NOT be touched by scoped rollback.
+    await fs.writeFile(path.join(projectDir, 'dirty-file.txt'), 'pre-existing');
 
-    // Every audit returns HIGH severity — fixes never work
+    // Every audit returns blocking severity — fixes never work.
+    // Fix attempts create a file that should be scoped-rolled back.
+    let callCount = 0;
     const runtime: RuntimeAdapter = {
       id: 'claude_code',
       capabilities: new Set(['streaming_text']),
       async *invoke() {
-        const text = '**Concern 1: Still broken**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+        callCount++;
+        if (callCount === 2 || callCount === 4) {
+          fsSync.writeFileSync(path.join(projectDir, 'fix-attempt.txt'), `attempt-${callCount}`, 'utf-8');
+        }
+        const text = '**Concern 1: Still broken**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
         yield { type: 'text_delta', text };
         yield { type: 'text_final', text };
       },
@@ -2516,8 +2549,10 @@ describe('runNextPhase audit fix loop', () => {
 
     const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
     expect(result.result).toBe('audit_failed');
-    // Rollback should have cleaned the dirty file
-    expect(fsSync.existsSync(path.join(projectDir, 'dirty-file.txt'))).toBe(false);
+    // Scoped rollback should clean fix-loop-introduced files only.
+    expect(fsSync.existsSync(path.join(projectDir, 'fix-attempt.txt'))).toBe(false);
+    // Pre-existing dirty file remains untouched.
+    expect(fsSync.existsSync(path.join(projectDir, 'dirty-file.txt'))).toBe(true);
     expect(progressMsgs.some(m => m.includes('rolled back'))).toBe(true);
   });
 
@@ -2806,6 +2841,7 @@ describe('runNextPhase audit fix loop', () => {
           yield { type: 'text_final', text };
         } else if (callCount === 2) {
           // Fix agent: succeeds
+          fsSync.writeFileSync(path.join(projectDir, 'fix-attempt.txt'), 'from-fix-agent', 'utf-8');
           const text = 'Fixed the issues.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
@@ -2829,16 +2865,17 @@ describe('runNextPhase audit fix loop', () => {
     const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
     // Re-audit runtime error should be normalized to audit_failed after fix loop exhaustion
     expect(result.result).toBe('audit_failed');
+    expect(fsSync.existsSync(path.join(projectDir, 'fix-attempt.txt'))).toBe(false);
     expect(progressMsgs.some(m => m.includes('rolled back'))).toBe(true);
   });
 
-  it('rollback failure does not throw — returns audit_failed with warning', async () => {
+  it('rollback snapshot failure does not throw — returns audit_failed with warning', async () => {
     const planPath = path.join(plansDir, 'plan-011-test.md');
     await fs.writeFile(planPath, SAMPLE_PLAN);
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writeAuditPhases(phasesPath);
 
-    // RuntimeAdapter: audit HIGH → fix agent (corrupts git) → re-audit HIGH → rollback fails
+    // RuntimeAdapter: audit blocking → fix agent (corrupts git) → re-audit blocking → scoped rollback snapshot fails
     let callCount = 0;
     const runtime: RuntimeAdapter = {
       id: 'claude_code',
@@ -2854,7 +2891,7 @@ describe('runNextPhase audit fix loop', () => {
           yield { type: 'text_final', text };
         } else {
           // Audit calls: always fail
-          const text = '**Concern 1: Still broken**\n**Severity: HIGH**\n\n**Verdict:** Needs revision.';
+          const text = '**Concern 1: Still broken**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
         }
@@ -2874,8 +2911,8 @@ describe('runNextPhase audit fix loop', () => {
     const result = await runNextPhase(phasesPath, planPath, opts, onProgress);
     // Should return audit_failed, not throw
     expect(result.result).toBe('audit_failed');
-    // Should have emitted a rollback failed warning
-    expect(progressMsgs.some(m => m.includes('rollback failed'))).toBe(true);
+    // Should have emitted a scoped rollback warning
+    expect(progressMsgs.some(m => m.includes('scoped rollback skipped'))).toBe(true);
     // fixAttemptsUsed should be set
     if (result.result === 'audit_failed') {
       expect(result.fixAttemptsUsed).toBe(1);
