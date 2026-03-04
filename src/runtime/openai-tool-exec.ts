@@ -1039,7 +1039,7 @@ async function executePipelineRun(
   await savePipelineStore(storePath, store);
 
   while (run.currentStep < run.steps.length) {
-    if (run.cancelRequested || run.status === 'cancelled') {
+    if (run.cancelRequested) {
       run.status = 'cancelled';
       const cancelledAt = run.cancelledAt ?? nowIso();
       run.cancelledAt = cancelledAt;
