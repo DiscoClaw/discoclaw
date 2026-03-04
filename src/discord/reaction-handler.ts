@@ -14,7 +14,7 @@ import { tryAbort, isActivelyStreaming } from './abort-registry.js';
 import { getActiveOrchestrator, getActiveForgeChannelId } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection, buildPromptSectionEstimates } from './prompt-common.js';
 import { editThenSendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
-import { formatBoldLabel, thinkingLabel, selectStreamingOutput, formatRuntimePreviewSignal } from './output-utils.js';
+import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
@@ -22,8 +22,10 @@ import { downloadTextAttachments } from './file-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import { adaptRuntimeEventText } from './runtime-event-text-adapter.js';
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
+const STREAM_STALL_PROGRESS_UPDATE_MS = 20_000;
 
 export type ReactionMode = 'add' | 'remove';
 
@@ -551,7 +553,7 @@ function createReactionHandler(
           };
 
           const appendRuntimeSignal = async (evt: EngineEvent) => {
-            const line = formatRuntimePreviewSignal(evt, previewMode);
+            const line = adaptRuntimeEventText(evt, { mode: previewMode });
             if (!line) return;
             deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
             await maybeEdit(false);
@@ -561,14 +563,22 @@ function createReactionHandler(
           let lastEventAt = Date.now();
           let activeToolCount = 0;
           let stallWarned = false;
+          let lastStallProgressAt = 0;
 
           const keepalive = setInterval(() => {
             // Stall warning: append to deltaText when events stop arriving.
             if (params.streamStallWarningMs > 0) {
               const stallElapsed = Date.now() - lastEventAt;
-              if (stallElapsed > params.streamStallWarningMs && activeToolCount === 0 && !stallWarned) {
-                stallWarned = true;
-                deltaText += (deltaText ? '\n' : '') + `\n*Stream may be stalled (${Math.round(stallElapsed / 1000)}s no activity)...*`;
+              if (stallElapsed > params.streamStallWarningMs && activeToolCount === 0) {
+                const stallSeconds = Math.round(stallElapsed / 1000);
+                if (!stallWarned) {
+                  stallWarned = true;
+                  lastStallProgressAt = Date.now();
+                  deltaText += (deltaText ? '\n' : '') + `\n*Stream may be stalled (${stallSeconds}s no activity)...*`;
+                } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
+                  lastStallProgressAt = Date.now();
+                  deltaText += (deltaText ? '\n' : '') + `\n*Still running (${stallSeconds}s no activity)...*`;
+                }
               }
             }
             // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -590,6 +600,7 @@ function createReactionHandler(
               // Track event flow for stall warning.
               lastEventAt = Date.now();
               stallWarned = false;
+              lastStallProgressAt = 0;
               if (evt.type === 'tool_start') activeToolCount++;
               else if (evt.type === 'tool_end') activeToolCount = Math.max(0, activeToolCount - 1);
 

@@ -84,7 +84,7 @@ export type PlanContext = {
 };
 
 type MessageEditTarget = {
-  edit(opts: { content: string; allowedMentions: unknown }): Promise<unknown>;
+  edit(opts: { content: string; allowedMentions?: unknown }): Promise<unknown>;
 };
 
 type MessageSendTarget = {
@@ -333,12 +333,12 @@ export async function executePlanAction(
       let watchdogOutcome: 'succeeded' | 'failed' = 'failed';
       void (async () => {
         // Send initial status message and set up live edits (best-effort).
-        let runChannel: { send: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> } | undefined;
-        let statusMsg: { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> } | undefined;
+        let runChannel: MessageSendTarget | undefined;
+        let statusMsg: MessageEditTarget | undefined;
         let streamingController: ReturnType<typeof createStreamingProgress> | undefined;
         let lastStatusEditAt = 0;
 
-        const phaseStartMessages = new Map<string, { edit: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown> }>();
+        const phaseStartMessages = new Map<string, MessageEditTarget>();
         const onPlanEvent = async (event: PlanRunEvent): Promise<void> => {
           if (event.type === 'phase_start') {
             if (phaseStartMessages.has(event.phase.id) || !runChannel) return;

@@ -93,9 +93,12 @@ import { getDefaultTimezone } from '../cron/default-timezone.js';
 import type { AttachmentLike } from './image-download.js';
 import { DiscordTransportClient } from './transport-client.js';
 import type { LongRunWatchdog } from './long-run-watchdog.js';
+import { adaptPlanRunEventText, adaptRuntimeEventText } from './runtime-event-text-adapter.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
+
+const STREAM_STALL_PROGRESS_UPDATE_MS = 20_000;
 
 export type BotParams = {
   token: string;
@@ -1557,8 +1560,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       if (postedPhaseStarts.has(event.phase.id)) return;
                       postedPhaseStarts.add(event.phase.id);
                       try {
+                        const startText = adaptPlanRunEventText(event);
                         const phaseMsg = await msg.channel.send({
-                          content: `**${event.phase.title}**...`,
+                          content: startText,
                           allowedMentions: NO_MENTIONS,
                         });
                         const phaseEditTarget = phaseMsg as MessageEditTarget;
@@ -1569,10 +1573,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     } else if (event.type === 'phase_complete') {
                       const phaseMsg = phaseStartMessages.get(event.phase.id);
                       if (!phaseMsg) return;
-                      const indicator = event.status === 'done' ? '[x]' : event.status === 'failed' ? '[!]' : '[-]';
                       try {
+                        const completeText = adaptPlanRunEventText(event);
                         await phaseMsg.edit({
-                          content: `${indicator} **${event.phase.title}**`,
+                          content: completeText,
                           allowedMentions: NO_MENTIONS,
                         });
                       } catch (err) {
@@ -2817,7 +2821,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               evt: Parameters<typeof formatRuntimePreviewSignal>[0],
               opts?: { edit?: boolean },
             ) => {
-              const line = formatRuntimePreviewSignal(evt, previewMode);
+              const line = adaptRuntimeEventText(evt, { mode: previewMode });
               if (!line) return;
               deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
               if (opts?.edit ?? true) await maybeEdit(false);
@@ -2827,6 +2831,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let lastEventAt = Date.now();
             let activeToolCount = 0;
             let stallWarned = false;
+            let lastStallProgressAt = 0;
 
             // If the runtime produces no stdout/stderr (auth/network hangs), avoid leaving the
             // placeholder `...` indefinitely by periodically updating the message.
@@ -2834,9 +2839,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // Stall warning: append to deltaText when events stop arriving.
               if (params.streamStallWarningMs > 0) {
                 const stallElapsed = Date.now() - lastEventAt;
-                if (stallElapsed > params.streamStallWarningMs && activeToolCount === 0 && !stallWarned) {
-                  stallWarned = true;
-                  deltaText += (deltaText ? '\n' : '') + `\n*Stream may be stalled (${Math.round(stallElapsed / 1000)}s no activity)...*`;
+                if (stallElapsed > params.streamStallWarningMs && activeToolCount === 0) {
+                  const stallSeconds = Math.round(stallElapsed / 1000);
+                  if (!stallWarned) {
+                    stallWarned = true;
+                    lastStallProgressAt = Date.now();
+                    deltaText += (deltaText ? '\n' : '') + `\n*Stream may be stalled (${stallSeconds}s no activity)...*`;
+                  } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
+                    lastStallProgressAt = Date.now();
+                    deltaText += (deltaText ? '\n' : '') + `\n*Still running (${stallSeconds}s no activity)...*`;
+                  }
                 }
               }
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -2895,6 +2907,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // Track event flow for stall warning.
                 lastEventAt = Date.now();
                 stallWarned = false;
+                lastStallProgressAt = 0;
                 if (evt.type === 'tool_start') activeToolCount++;
                 else if (evt.type === 'tool_end') activeToolCount = Math.max(0, activeToolCount - 1);
 

@@ -821,6 +821,45 @@ describe('auto-follow-up for query actions', () => {
     }
   });
 
+  it('emits periodic still-running progress while stalled with no runtime events', async () => {
+    vi.useFakeTimers();
+    try {
+      const unblockRuntime = deferred<void>();
+      const runtimeStarted = deferred<void>();
+      const runtime = {
+        invoke: vi.fn(async function* () {
+          runtimeStarted.resolve();
+          await unblockRuntime.promise;
+          yield { type: 'done' } as any;
+        }),
+      } as any;
+
+      const replyObj = {
+        edit: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined),
+      };
+      const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
+      const handler = createMessageCreateHandler(
+        baseParams(runtime, { streamStallWarningMs: 1 }),
+        makeQueue(),
+      );
+
+      const pending = handler(msg);
+      await runtimeStarted.promise;
+
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      const edits = replyEditContents(replyObj).join('\n');
+      expect(edits).toContain('Stream may be stalled');
+      expect(edits).toContain('Still running');
+
+      unblockRuntime.resolve();
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('streams non-blank preview lines for tool lifecycle-only events', async () => {
     const runtimeStarted = deferred<void>();
     const allowToolEnd = deferred<void>();
@@ -845,8 +884,10 @@ describe('auto-follow-up for query actions', () => {
     await pending;
 
     const finalContent = replyEditContents(replyObj).at(-1) ?? '';
-    expect(finalContent).toContain('[tool:start] readFile');
-    expect(finalContent).toContain('[tool:end] readFile ok');
+    expect(finalContent).toContain('Using readFile...');
+    expect(finalContent).toContain('readFile finished.');
+    expect(finalContent).not.toContain('[tool:start]');
+    expect(finalContent).not.toContain('[tool:end]');
   });
 
   it('shows stdout/stderr/usage preview lines continuously as runtime signals arrive', async () => {
@@ -879,30 +920,62 @@ describe('auto-follow-up for query actions', () => {
       }
 
       let latest = replyEditContents(replyObj).at(-1) ?? '';
-      expect(latest).toContain('[stdout] phase 1 started');
-      expect(latest).not.toContain('[stderr]');
-      expect(latest).not.toContain('[usage]');
+      expect(latest).toContain('Update: phase 1 started');
+      expect(latest).not.toContain('Warning:');
+      expect(latest).not.toContain('Usage:');
 
       await vi.advanceTimersByTimeAsync(1300);
       await Promise.resolve();
       await Promise.resolve();
 
       latest = replyEditContents(replyObj).at(-1) ?? '';
-      expect(latest).toContain('[stdout] phase 1 started');
-      expect(latest).toContain('[stderr] phase 1 warning');
-      expect(latest).not.toContain('[usage]');
+      expect(latest).toContain('Update: phase 1 started');
+      expect(latest).toContain('Warning: phase 1 warning');
+      expect(latest).not.toContain('Usage:');
 
       await vi.advanceTimersByTimeAsync(1300);
       await Promise.resolve();
       await Promise.resolve();
 
       latest = replyEditContents(replyObj).at(-1) ?? '';
-      expect(latest).toContain('[usage] in=21 out=8 total=29');
+      expect(latest).toContain('Usage: in 21, out 8, total 29, cost $0.0123.');
 
       await pending;
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('redacts structured runtime payloads from Discord preview text', async () => {
+    const runtimeStarted = deferred<void>();
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        runtimeStarted.resolve();
+        yield {
+          type: 'log_line',
+          stream: 'stdout',
+          line: 'runtime payload {"type":"phase_start","planId":"plan-123"}',
+        } as any;
+        yield { type: 'done' } as any;
+      }),
+    } as any;
+
+    const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
+    const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    const pending = handler(msg);
+
+    await runtimeStarted.promise;
+    for (let i = 0; i < 20 && replyObj.edit.mock.calls.length === 0; i++) {
+      await Promise.resolve();
+    }
+    await pending;
+
+    const latest = replyEditContents(replyObj).at(-1) ?? '';
+    expect(latest).toContain('Runtime update (details omitted).');
+    expect(latest).not.toContain('plan-123');
+    expect(latest).not.toContain('phase_start');
+    expect(latest).not.toContain('{"type"');
   });
 
   it('shows preview early during active runs without a delayed blank period', async () => {
@@ -931,7 +1004,7 @@ describe('auto-follow-up for query actions', () => {
     expect(replyObj.edit).toHaveBeenCalled();
     const firstEdit = replyEditContents(replyObj)[0] ?? '';
     expect(firstEdit).not.toBe('...');
-    expect(firstEdit).toContain('[stdout] warming runtime cache');
+    expect(firstEdit).toContain('Update: warming runtime cache');
 
     allowDone.resolve();
     await pending;
