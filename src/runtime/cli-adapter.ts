@@ -698,7 +698,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'text_final', text: final });
         } else {
           const raw = resultText.trimEnd();
-          const final = stripToolUseBlocks(raw);
+          // Claude stream-json can omit a terminal `result` event in some flows.
+          // In that case, preserve previous behavior by finalizing from merged deltas.
+          const fallback = strategy.id === 'claude_code' ? merged.trimEnd() : '';
+          const final = stripToolUseBlocks(raw || fallback);
           if (final) emittedUserOutput = true;
           push({ type: 'text_final', text: final });
         }
