@@ -1,7 +1,7 @@
 {
   "name": "discoclaw",
   "version": "0.5.8",
-  "description": "Minimal Discord bridge routing messages to AI runtimes",
+  "description": "Personal AI orchestrator that turns Discord into a persistent workspace",
   "license": "MIT",
   "repository": {
     "type": "git",

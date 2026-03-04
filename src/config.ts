@@ -22,6 +22,7 @@ export type DiscoclawConfig = {
   allowChannelIds: Set<string>;
   restrictChannelIds: boolean;
   primaryRuntime: string;
+  fastRuntime?: string;
 
   runtimeModel: string;
   runtimeTools: string[];
@@ -513,6 +514,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
 
   const primaryRuntime = parseRuntimeName(env, 'PRIMARY_RUNTIME') ?? 'claude';
+  const fastRuntime = parseRuntimeName(env, 'DISCOCLAW_FAST_RUNTIME');
   const forgeDrafterRuntime = parseRuntimeName(env, 'FORGE_DRAFTER_RUNTIME');
   const forgeAuditorRuntime = parseRuntimeName(env, 'FORGE_AUDITOR_RUNTIME');
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
@@ -524,6 +526,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const imagegenDefaultModel = parseTrimmedString(env, 'IMAGEGEN_DEFAULT_MODEL');
   if (primaryRuntime === 'openai' && !openaiApiKey) {
     warnings.push('PRIMARY_RUNTIME=openai but OPENAI_API_KEY is not set; startup will fail unless another runtime is selected.');
+  }
+  if (fastRuntime === 'openai' && !openaiApiKey) {
+    warnings.push('DISCOCLAW_FAST_RUNTIME=openai but OPENAI_API_KEY is not set; fast-tier invocations will fall back to PRIMARY_RUNTIME.');
   }
   if (forgeDrafterRuntime === 'openai' && !openaiApiKey) {
     warnings.push('FORGE_DRAFTER_RUNTIME=openai but OPENAI_API_KEY is not set; drafter will fall back to the primary runtime.');
@@ -607,6 +612,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   if (primaryRuntime === 'openrouter' && !openrouterApiKey) {
     warnings.push('PRIMARY_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; startup will fail unless another runtime is selected.');
   }
+  if (fastRuntime === 'openrouter' && !openrouterApiKey) {
+    warnings.push('DISCOCLAW_FAST_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; fast-tier invocations will fall back to PRIMARY_RUNTIME.');
+  }
   if (forgeDrafterRuntime === 'openrouter' && !openrouterApiKey) {
     warnings.push('FORGE_DRAFTER_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; drafter will fall back to the primary runtime.');
   }
@@ -639,6 +647,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       allowChannelIds,
       restrictChannelIds,
       primaryRuntime,
+      fastRuntime,
 
       runtimeModel,
       runtimeTools: parseRuntimeTools(env, warnings),

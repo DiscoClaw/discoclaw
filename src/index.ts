@@ -32,6 +32,8 @@ import type { DeferActionRequest } from './discord/actions-defer.js';
 import { configureDeferredScheduler, type ConfigureDeferredSchedulerOpts } from './discord/deferred-runner.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
+import { LongRunWatchdog, type LongRunWatchdogRun } from './discord/long-run-watchdog.js';
+import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { executeCronJob } from './cron/executor.js';
@@ -89,6 +91,7 @@ import {
   collectActiveProviders,
   logRuntimeDebugConfig,
   registerRuntimeWithGlobalPolicies,
+  resolveFastRuntime,
   resolveForgeRuntimes,
 } from './index.runtime.js';
 import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupChecks } from './index.post-connect.js';
@@ -128,6 +131,7 @@ const allowChannelIds = cfg.allowChannelIds;
 const restrictChannelIds = cfg.restrictChannelIds;
 
 const primaryRuntimeName = cfg.primaryRuntime;
+const fastRuntimeName = cfg.fastRuntime;
 let runtimeModel = cfg.runtimeModel;
 const runtimeTools = cfg.runtimeTools;
 const runtimeTimeoutMs = cfg.runtimeTimeoutMs;
@@ -200,6 +204,7 @@ let voiceManager: VoiceConnectionManager | null = null;
 let audioPipeline: AudioPipelineManager | null = null;
 let voicePresenceHandler: VoicePresenceHandler | null = null;
 let deferSchedulerRef: DeferScheduler<DeferActionRequest, ActionContext> | null = null;
+let longRunWatchdog: LongRunWatchdog | null = null;
 const memorySampler = new MemorySampler();
 globalMetrics.setMemorySampler(memorySampler);
 memorySampler.sample();
@@ -222,6 +227,9 @@ const shutdown = async () => {
   } catch (err) {
     log.warn({ err }, 'shutdown:failed to write shutdown context');
   }
+
+  // Cancel watchdog timers before draining replies.
+  longRunWatchdog?.dispose();
 
   // Cancel deferred timers first — before drain — so they cannot fire and produce
   // new in-flight replies during the drain window.
@@ -364,6 +372,83 @@ const cronTagMapPath = cfg.cronTagMapPathOverride
   || path.join(cronStatsDir, 'tag-map.json');
 const cronTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'cron', 'cron-tag-map.json');
 const cronStatsPath = path.join(cronStatsDir, 'cron-run-stats.json');
+const longRunStillRunningDelayMs = Math.max(1, completionNotifyThresholdMs);
+const longRunWatchdogDataPath = path.join(pidLockDir, 'long-run-watchdog.json');
+const emptyLongRunSweepResult = {
+  interruptedRuns: 0,
+  finalRetried: 0,
+  finalPosted: 0,
+  finalFailed: 0,
+};
+let longRunWatchdogClientRef: Awaited<ReturnType<typeof startDiscordBot>>['client'] | null = null;
+
+async function postLongRunWatchdogNotice(run: Pick<LongRunWatchdogRun, 'runId' | 'channelId' | 'messageId'>, content: string): Promise<void> {
+  const clientRef = longRunWatchdogClientRef;
+  if (!clientRef) {
+    throw new Error('Discord client unavailable');
+  }
+
+  const channel = clientRef.channels.cache.get(run.channelId)
+    ?? await clientRef.channels.fetch(run.channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) {
+    throw new Error(`watchdog channel unavailable (${run.channelId})`);
+  }
+
+  const send = (channel as { send?: unknown }).send;
+  if (typeof send !== 'function') {
+    throw new Error(`watchdog channel is not sendable (${run.channelId})`);
+  }
+
+  const channelLike = channel as {
+    send: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
+    messages?: {
+      fetch?: (id: string) => Promise<unknown>;
+    };
+  };
+  const fetchMessage = channelLike.messages?.fetch;
+  if (typeof fetchMessage === 'function') {
+    const source = await fetchMessage.call(channelLike.messages, run.messageId).catch(() => null);
+    const reply = (source as { reply?: unknown } | null)?.reply;
+    if (typeof reply === 'function') {
+      await reply.call(source, { content, allowedMentions: NO_MENTIONS });
+      return;
+    }
+  }
+
+  await channelLike.send({ content, allowedMentions: NO_MENTIONS });
+}
+
+function buildLongRunFinalNotice(run: Pick<LongRunWatchdogRun, 'completion'>, source: 'complete' | 'startup-sweep'): string {
+  const base = run.completion === 'succeeded'
+    ? 'Run complete.'
+    : run.completion === 'failed'
+      ? 'Run ended with errors.'
+      : 'Run interrupted by restart/shutdown.';
+  return source === 'startup-sweep' ? `${base} (Recovered after restart.)` : base;
+}
+
+const messageCoordinatorWatchdog = completionNotifyEnabled
+  ? (() => {
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: longRunWatchdogDataPath,
+      stillRunningDelayMs: longRunStillRunningDelayMs,
+      postStillRunning: async (run) => {
+        await postLongRunWatchdogNotice(run, 'Still running. I will post another update when this finishes.');
+      },
+      postFinal: async (run, meta) => {
+        await postLongRunWatchdogNotice(run, buildLongRunFinalNotice(run, meta.source));
+      },
+      log,
+    });
+    longRunWatchdog = watchdog;
+    return {
+      start: watchdog.start.bind(watchdog),
+      complete: watchdog.complete.bind(watchdog),
+      // Startup sweep is intentionally run after Discord connect from index.ts.
+      startupSweep: async () => ({ ...emptyLongRunSweepResult }),
+    };
+  })()
+  : undefined;
 
 if (requireChannelContext && !discordChannelContext) {
   log.error({ contentDir }, 'DISCORD_REQUIRE_CHANNEL_CONTEXT=1 but channel context failed to initialize');
@@ -406,6 +491,7 @@ if (mcpResult.status === 'missing') {
 } else {
   const serverNames = mcpResult.servers.map((s) => s.name);
   const claudeInUse = primaryRuntimeName === 'claude'
+    || fastRuntimeName === 'claude'
     || cfg.forgeDrafterRuntime === 'claude'
     || cfg.forgeAuditorRuntime === 'claude';
   let msg = serverNames.length === 0
@@ -733,7 +819,10 @@ if (cfg.geminiApiKey) {
   );
 }
 
-const claudeRequested = primaryRuntimeName === 'claude' || cfg.forgeDrafterRuntime === 'claude' || cfg.forgeAuditorRuntime === 'claude';
+const claudeRequested = primaryRuntimeName === 'claude'
+  || fastRuntimeName === 'claude'
+  || cfg.forgeDrafterRuntime === 'claude'
+  || cfg.forgeAuditorRuntime === 'claude';
 if (claudeRequested) {
   registerClaudeRuntime();
 }
@@ -750,12 +839,19 @@ if (!runtime) {
   process.exit(1);
 }
 const limitedRuntime = runtime;
+const fastRuntime = resolveFastRuntime({
+  primaryRuntimeName,
+  primaryRuntime: limitedRuntime,
+  fastRuntime: fastRuntimeName,
+  runtimeRegistry,
+  log,
+});
 
 runtimeModel = resolveModel(cfg.runtimeModel, runtime.id);
-summaryModel = resolveModel(cfg.summaryModel, runtime.id);
-cronModel = resolveModel(cfg.cronModel, runtime.id);
-cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, runtime.id);
-  tasksAutoTagModel = resolveModel(cfg.tasksAutoTagModel, runtime.id);
+summaryModel = resolveModel(cfg.summaryModel, fastRuntime.id);
+cronModel = resolveModel(cfg.cronModel, fastRuntime.id);
+cronAutoTagModel = resolveModel(cfg.cronAutoTagModel, fastRuntime.id);
+tasksAutoTagModel = resolveModel(cfg.tasksAutoTagModel, fastRuntime.id);
 const voiceModel = resolveModel(cfg.voiceModel, runtime.id);
 const cronExecModel = resolveModel(cfg.cronExecModel, runtime.id);
 const voiceModelRef: { model: string; runtime?: RuntimeAdapter; runtimeName?: string } = { model: voiceModel };
@@ -901,7 +997,7 @@ const clearOverride = (role?: ModelRole): void => {
 };
 
 log.info(
-  { primaryRuntime: primaryRuntimeName, runtimeId: runtime.id, model: runtimeModel },
+  { primaryRuntime: primaryRuntimeName, runtimeId: runtime.id, model: runtimeModel, fastRuntimeId: fastRuntime.id },
   'runtime:primary selected',
 );
 
@@ -940,6 +1036,7 @@ const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({
 
 const activeProviders = collectActiveProviders({
   primaryRuntimeId: runtime.id,
+  fastRuntime,
   forgeCommandsEnabled,
   drafterRuntime,
   auditorRuntime,
@@ -966,6 +1063,7 @@ const botParams = {
   autoJoinThreads,
   useRuntimeSessions,
   runtime: limitedRuntime,
+  fastRuntime,
   sessionManager,
   workspaceCwd,
   projectCwd: projectRoot,
@@ -1039,6 +1137,8 @@ const botParams = {
   forgeAutoImplement,
   completionNotifyEnabled,
   completionNotifyThresholdMs,
+  longRunWatchdog: messageCoordinatorWatchdog,
+  longRunStillRunningDelayMs,
   drafterRuntime,
   auditorRuntime,
   summaryToDurableEnabled,
@@ -1169,7 +1269,19 @@ try {
   process.exit(1);
 }
 botStatus = status;
+longRunWatchdogClientRef = client;
 if (deferOpts) deferOpts.status = botStatus;
+
+if (longRunWatchdog) {
+  try {
+    const sweepResult = await longRunWatchdog.startupSweep();
+    if (sweepResult.interruptedRuns > 0 || sweepResult.finalRetried > 0 || sweepResult.finalFailed > 0) {
+      log.info(sweepResult, 'long-run-watchdog: startup sweep complete');
+    }
+  } catch (err) {
+    log.warn({ err }, 'long-run-watchdog: startup sweep failed');
+  }
+}
 
 const { credentialCheckReport, credentialReport } = await runPostConnectStartupChecks({
   system,
@@ -1208,7 +1320,7 @@ if (tasksEnabled) {
     tasksSyncFailureRetryEnabled,
     tasksSyncFailureRetryDelayMs,
     tasksSyncDeferredRetryDelayMs,
-    runtime,
+    runtime: fastRuntime,
     resolveModel,
     metrics: globalMetrics,
     statusPoster: botStatus ?? undefined,
@@ -1327,6 +1439,8 @@ if (taskCtx) {
         // Action-initiated forges log progress rather than posting to a channel.
         log.info({ msg }, 'forge:action:progress');
       },
+      longRunWatchdog: longRunWatchdog ?? undefined,
+      longRunStillRunningDelayMs,
       log,
     };
     log.info('forge:action context initialized');
@@ -1354,6 +1468,8 @@ if (taskCtx) {
           log.warn({ err, taskId }, 'plan:onTaskClosed sync error');
         }
       },
+      longRunWatchdog: longRunWatchdog ?? undefined,
+      longRunStillRunningDelayMs,
     };
     log.info('plan:action context initialized');
   }
@@ -1382,11 +1498,11 @@ if (taskCtx) {
       // Env-default models — used by !models reset to revert live state.
       envDefaults: {
         chat: resolveModel(cfg.runtimeModel, runtime.id),
-        fast: resolveModel(cfg.summaryModel, runtime.id),
-        summary: resolveModel(cfg.summaryModel, runtime.id),
+        fast: resolveModel(cfg.summaryModel, fastRuntime.id),
+        summary: resolveModel(cfg.summaryModel, fastRuntime.id),
         'forge-drafter': cfg.forgeDrafterModel ?? '',
         'forge-auditor': cfg.forgeAuditorModel ?? '',
-        cron: resolveModel(cfg.cronAutoTagModel, runtime.id),
+        cron: resolveModel(cfg.cronAutoTagModel, fastRuntime.id),
         'cron-exec': cronExecModel,
         voice: resolveModel(cfg.voiceModel, runtime.id),
       },
@@ -1849,7 +1965,7 @@ if (cronEnabled && effectiveCronForum) {
     tagMapPath: cronTagMapPath,
     tagMap: cronTagMap,
     statsStore: cronStats,
-    runtime,
+    runtime: fastRuntime,
     autoTag: cronAutoTag,
     autoTagModel: cronAutoTagModel,
     cwd: workspaceCwd,
@@ -1907,7 +2023,7 @@ if (cronEnabled && effectiveCronForum) {
       client,
       forumChannelNameOrId: effectiveCronForum,
       scheduler: cronScheduler,
-      runtime,
+      runtime: fastRuntime,
       cronModel,
       cwd: workspaceCwd,
       allowUserIds,
@@ -1940,7 +2056,7 @@ if (cronEnabled && effectiveCronForum) {
       forumId: cronForumResult.forumId,
       scheduler: activeCronScheduler,
       statsStore: cronStats,
-      runtime,
+      runtime: fastRuntime,
       tagMap: cronTagMap,
       tagMapPath: cronTagMapPath,
       autoTag: cronAutoTag,

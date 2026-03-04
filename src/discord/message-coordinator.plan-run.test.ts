@@ -1,4 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 vi.mock('../workspace-bootstrap.js', () => ({
   isOnboardingComplete: vi.fn(async () => true),
@@ -52,6 +55,64 @@ vi.mock('./forge-plan-registry.js', () => ({
   removeRunningPlan: vi.fn(),
   isPlanRunning: vi.fn(() => false),
 }));
+
+vi.mock('./actions-plan.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./actions-plan.js')>();
+  return {
+    ...actual,
+    executePlanAction: vi.fn(async (action: { type?: string }) => {
+      if (action?.type === 'planRun') return { ok: true, summary: 'Auto plan run summary' };
+      return { ok: true, summary: 'ok' };
+    }),
+  };
+});
+
+vi.mock('./forge-auto-implement.js', () => ({
+  autoImplementForgePlan: vi.fn(async (
+    opts: { planId: string },
+    deps: { planApprove: (planId: string) => Promise<void>; planRun: (planId: string) => Promise<{ summary: string }> },
+  ) => {
+    await deps.planApprove(opts.planId);
+    const run = await deps.planRun(opts.planId);
+    return { status: 'auto', planId: opts.planId, summary: run.summary };
+  }),
+}));
+
+vi.mock('./forge-commands.js', () => {
+  class ForgeOrchestrator {
+    isRunning = false;
+    requestCancel = vi.fn();
+    run = vi.fn(async () => ({
+      planId: 'plan-123',
+      filePath: '/tmp/plan-123.md',
+      finalVerdict: 'none',
+      rounds: 1,
+      reachedMaxRounds: false,
+      planSummary: 'Plan summary',
+    }));
+    resume = vi.fn(async (planId: string) => ({
+      planId,
+      filePath: `/tmp/${planId}.md`,
+      finalVerdict: 'none',
+      rounds: 1,
+      reachedMaxRounds: false,
+      planSummary: 'Plan summary',
+    }));
+  }
+
+  return {
+    parseForgeCommand: vi.fn((content: string) => {
+      const trimmed = content.trim();
+      if (!trimmed.startsWith('!forge')) return null;
+      const rest = trimmed.slice('!forge'.length).trim();
+      if (!rest) return { action: 'help', args: '' };
+      if (rest === 'status' || rest === 'cancel' || rest === 'help') return { action: rest, args: '' };
+      return { action: 'create', args: rest };
+    }),
+    ForgeOrchestrator,
+    buildPlanImplementationMessage: vi.fn((_skipReason?: string, planId?: string) => `manual ${planId ?? ''}`.trim()),
+  };
+});
 
 function makeParams() {
   const metrics = { increment: vi.fn() };
@@ -396,5 +457,55 @@ describe('message coordinator plan run phase-start posts', () => {
         && content.includes('!plan run-phase plan-042 <phase-id>')
         && content.includes('!plan skip-to plan-042 <phase-id>'))).toBe(true);
     });
+  });
+
+  it('wires watchdog fields into forge auto-implement planRun context', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-forge-auto-'));
+    const planFilePath = path.join(tmpDir, 'plan-123.md');
+    await fs.writeFile(planFilePath, '# Plan', 'utf8');
+
+    const { looksLikePlanId, findPlanFile } = await import('./plan-commands.js');
+    (looksLikePlanId as any).mockImplementation((value: string) => value === 'plan-123');
+    (findPlanFile as any).mockResolvedValue({
+      filePath: planFilePath,
+      header: { planId: 'plan-123', title: 'Plan 123' },
+    });
+
+    const watchdog = {
+      start: vi.fn(async () => ({ run: {}, deduped: false })),
+      complete: vi.fn(async () => ({})),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+
+    const params = {
+      ...makeParams(),
+      forgeCommandsEnabled: true,
+      forgeAutoImplement: true,
+      longRunWatchdog: watchdog,
+      longRunStillRunningDelayMs: 43210,
+    };
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue as any);
+    const msg = makeMessage('!forge plan-123');
+
+    await handler(msg as any);
+
+    const { executePlanAction } = await import('./actions-plan.js');
+    await vi.waitFor(() => {
+      const planRunCalls = (executePlanAction as any).mock.calls.filter(
+        (call: any[]) => call[0]?.type === 'planRun',
+      );
+      expect(planRunCalls).toHaveLength(1);
+      const planCtx = planRunCalls[0][2];
+      expect(planCtx.longRunWatchdog).toBe(watchdog);
+      expect(planCtx.longRunStillRunningDelayMs).toBe(43210);
+    });
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
   });
 });

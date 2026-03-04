@@ -569,6 +569,7 @@ describe('selectStreamingOutput', () => {
       elapsedMs: 5000,
     });
     expect(out).toContain('**(5s) Thinking..**');
+    expect(out).toContain('[stream] waiting for runtime output (5s)');
   });
 
   it('no elapsed prefix on final-text-only output', () => {

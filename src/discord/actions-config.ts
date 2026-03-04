@@ -53,6 +53,7 @@ export type ConfigMutableParams = {
   runtimeModel: string;
   summaryModel: string;
   runtime?: RuntimeAdapter;
+  fastRuntime?: RuntimeAdapter;
   forgeDrafterModel?: string;
   forgeAuditorModel?: string;
   cronCtx?: {
@@ -122,13 +123,14 @@ export function executeConfigAction(
             skipPersist = true; // Don't persist runtime swaps; persisting the runtime name as a model string would break on reload.
             // Swap runtime across all invocation paths.
             const runtimeModel = newRuntime.defaultModel ?? '';
+            const effectiveFastRuntime = bp.fastRuntime ?? newRuntime;
             bp.runtime = newRuntime;
             bp.runtimeModel = runtimeModel;
             configCtx.runtime = newRuntime;
             configCtx.runtimeName = normalized;
             if (bp.cronCtx) {
-              bp.cronCtx.runtime = newRuntime;
-              bp.cronCtx.syncCoordinator?.setRuntime?.(newRuntime);
+              bp.cronCtx.runtime = effectiveFastRuntime;
+              bp.cronCtx.syncCoordinator?.setRuntime?.(effectiveFastRuntime);
               if (bp.cronCtx.executorCtx) {
                 bp.cronCtx.executorCtx.runtime = newRuntime;
                 bp.cronCtx.executorCtx.model = runtimeModel;
@@ -264,7 +266,9 @@ export function executeConfigAction(
 
       const resolveRid = action.role === 'voice' && bp.voiceModelCtx?.runtime
         ? bp.voiceModelCtx.runtime.id
-        : configCtx.runtime.id;
+        : (action.role === 'fast' || action.role === 'summary' || action.role === 'cron')
+          ? (bp.fastRuntime?.id ?? configCtx.runtime.id)
+          : configCtx.runtime.id;
       const resolvedDisplay = resolveModel(model, resolveRid);
       const resolvedNote = resolvedDisplay && resolvedDisplay !== model ? ` (resolves to ${resolvedDisplay})` : '';
       return { ok: true, summary: `Model updated: ${changes.join(', ')}${resolvedNote}` };
@@ -388,15 +392,19 @@ export function executeConfigAction(
       }
 
       const adapterDefault = configCtx.runtime.defaultModel;
+      const fastRid = bp.fastRuntime?.id ?? rid;
       const lines = rows.map(([role, model, desc, overrideMarker]) => {
-        const resolved = resolveModel(model, rid);
+        const useFastRuntime = role === 'summary' || role === 'cron-auto-tag' || role === 'tasks-auto-tag';
+        const roleRid = useFastRuntime ? fastRid : rid;
+        const resolved = resolveModel(model, roleRid);
+        const runtimeNote = useFastRuntime && fastRid !== rid ? ` [runtime: ${fastRid}]` : '';
         let display: string;
         if (model) {
           display = resolved && resolved !== model ? `${model} → ${resolved}` : model;
         } else {
           display = adapterDefault || '(adapter default)';
         }
-        return `**${role}**: \`${display}\`${overrideMarker} — ${desc}`;
+        return `**${role}**: \`${display}\`${overrideMarker}${runtimeNote} — ${desc}`;
       });
 
       if (bp.voiceModelCtx) {

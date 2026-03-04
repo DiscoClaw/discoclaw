@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { parseConfig } from './config.js';
-import { registerRuntimeWithGlobalPolicies, wrapRuntimeWithGlobalPolicies } from './index.runtime.js';
+import {
+  collectActiveProviders,
+  registerRuntimeWithGlobalPolicies,
+  resolveFastRuntime,
+  wrapRuntimeWithGlobalPolicies,
+} from './index.runtime.js';
 import { RuntimeRegistry } from './runtime/registry.js';
 import { GLOBAL_SUPERVISOR_ENABLED_ENV } from './runtime/global-supervisor.js';
 import type { ConcurrencyLimiter } from './runtime/concurrency-limit.js';
@@ -34,6 +39,17 @@ function configEnv(overrides: Record<string, string | undefined> = {}): NodeJS.P
     DISCOCLAW_CRON_FORUM: '1000000000000000001',
     DISCOCLAW_TASKS_FORUM: '1000000000000000002',
     ...overrides,
+  };
+}
+
+function makeRuntime(id: RuntimeAdapter['id']): RuntimeAdapter {
+  return {
+    id,
+    capabilities: new Set(['streaming_text']),
+    async *invoke(): AsyncIterable<EngineEvent> {
+      yield { type: 'text_final', text: id };
+      yield { type: 'done' };
+    },
   };
 }
 
@@ -216,5 +232,63 @@ describe('registerRuntimeWithGlobalPolicies', () => {
     expect(calls).toBe(1);
     expect(events.some((evt) => evt.type === 'log_line' && evt.stream === 'stdout')).toBe(true);
     expect(audit.some((a) => a['phase'] === 'decide' && a['decision'] === 'bail' && a['reason'] === 'max_retries_exceeded')).toBe(true);
+  });
+});
+
+describe('resolveFastRuntime', () => {
+  it('returns primary runtime when DISCOCLAW_FAST_RUNTIME is unset', () => {
+    const runtimeRegistry = new RuntimeRegistry();
+    const primary = makeRuntime('codex');
+    runtimeRegistry.register('codex', primary);
+    const resolved = resolveFastRuntime({
+      primaryRuntimeName: 'codex',
+      primaryRuntime: primary,
+      runtimeRegistry,
+      log: { info: () => undefined, warn: () => undefined },
+    });
+    expect(resolved).toBe(primary);
+  });
+
+  it('resolves DISCOCLAW_FAST_RUNTIME to a registered runtime', () => {
+    const runtimeRegistry = new RuntimeRegistry();
+    const primary = makeRuntime('codex');
+    const fast = makeRuntime('openai');
+    runtimeRegistry.register('codex', primary);
+    runtimeRegistry.register('openai', fast);
+    const resolved = resolveFastRuntime({
+      primaryRuntimeName: 'codex',
+      primaryRuntime: primary,
+      fastRuntime: 'openai',
+      runtimeRegistry,
+      log: { info: () => undefined, warn: () => undefined },
+    });
+    expect(resolved).toBe(fast);
+  });
+
+  it('falls back to primary runtime when DISCOCLAW_FAST_RUNTIME is unknown', () => {
+    const runtimeRegistry = new RuntimeRegistry();
+    const primary = makeRuntime('codex');
+    runtimeRegistry.register('codex', primary);
+    const resolved = resolveFastRuntime({
+      primaryRuntimeName: 'codex',
+      primaryRuntime: primary,
+      fastRuntime: 'openai',
+      runtimeRegistry,
+      log: { info: () => undefined, warn: () => undefined },
+    });
+    expect(resolved).toBe(primary);
+  });
+});
+
+describe('collectActiveProviders', () => {
+  it('includes fast runtime provider when it differs from primary', () => {
+    const providers = collectActiveProviders({
+      primaryRuntimeId: 'codex',
+      fastRuntime: makeRuntime('openai'),
+      forgeCommandsEnabled: false,
+      drafterRuntime: undefined,
+      auditorRuntime: undefined,
+    });
+    expect(providers).toEqual(new Set(['codex', 'openai']));
   });
 });

@@ -1086,6 +1086,52 @@ describe('Codex CLI runtime adapter', () => {
     expect(events[events.length - 1]!.type).toBe('done');
   });
 
+  it('maps command_execution items to tool_start/tool_end streaming events', async () => {
+    const jsonlOutput = [
+      '{"type":"thread.started","thread_id":"tool-thread-1"}',
+      '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc \\"cat package.json\\"","status":"in_progress"}}',
+      '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc \\"cat package.json\\"","aggregated_output":"{\\n  \\"name\\": \\"discoclaw\\"\\n}\\n","exit_code":0,"status":"completed"}}',
+      '{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"discoclaw"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":123,"output_tokens":45,"total_tokens":168}}',
+    ].join('\n') + '\n';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonlOutput,
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Read package name',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'tool-session',
+    }));
+
+    expect(events).toContainEqual({
+      type: 'tool_start',
+      name: 'command_execution',
+      input: { command: '/bin/bash -lc "cat package.json"' },
+    });
+
+    const toolEnd = events.find((e) => e.type === 'tool_end') as Extract<EngineEvent, { type: 'tool_end' }> | undefined;
+    expect(toolEnd).toBeDefined();
+    expect(toolEnd!.name).toBe('command_execution');
+    expect(toolEnd!.ok).toBe(true);
+    expect(toolEnd!.output).toMatchObject({
+      command: '/bin/bash -lc "cat package.json"',
+      exitCode: 0,
+    });
+
+    const usageEvt = events.find((e) => e.type === 'usage') as Extract<EngineEvent, { type: 'usage' }> | undefined;
+    expect(usageEvt).toBeDefined();
+    expect(usageEvt).toMatchObject({ inputTokens: 123, outputTokens: 45, totalTokens: 168 });
+  });
+
   it('different sessionKeys get independent sessions', async () => {
     const jsonlA = [
       '{"type":"thread.started","thread_id":"thread-aaa"}',

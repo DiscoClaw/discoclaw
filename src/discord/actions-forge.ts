@@ -8,6 +8,7 @@ import { buildPlanSummary } from './forge-commands.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
+import type { LongRunWatchdog } from './long-run-watchdog.js';
 import {
   getActiveOrchestrator,
   getActiveForgeId,
@@ -52,6 +53,10 @@ export type ForgeContext = {
   log?: LoggerLike;
   /** Recursion depth — 0 for user/cron origins, 1+ for action-triggered sub-invocations. */
   depth?: number;
+  /** Optional lifecycle watchdog for long-running forge runs. */
+  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete'>;
+  /** Optional override for watchdog still-running check-in delay. */
+  longRunStillRunningDelayMs?: number;
 };
 
 type SendFn = (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
@@ -85,15 +90,20 @@ async function buildProgressCallbacks(
 ): Promise<{
   onProgress: (msg: string, opts?: { force?: boolean }) => Promise<void>;
   onEvent?: ReturnType<typeof createStreamingProgress>['onEvent'];
-  sendPlanSummary: (summary?: string) => Promise<void>;
+  sendPlanSummary: (summary?: string) => Promise<boolean>;
   dispose: () => void;
 }> {
   const fallback = {
     onProgress: forgeCtx.onProgress,
     onEvent: undefined as ReturnType<typeof createStreamingProgress>['onEvent'] | undefined,
     sendPlanSummary: async (summary?: string) => {
-      if (!summary) return;
-      await forgeCtx.onProgress(summary, { force: true });
+      if (!summary) return true;
+      try {
+        await forgeCtx.onProgress(summary, { force: true });
+        return true;
+      } catch {
+        return false;
+      }
     },
     dispose: () => {},
   };
@@ -117,11 +127,12 @@ async function buildProgressCallbacks(
       onProgress: controller.onProgress,
       onEvent: enableToolAwareStreaming ? controller.onEvent : undefined,
       sendPlanSummary: async (summary?: string) => {
-        if (!summary) return;
+        if (!summary) return true;
         try {
           await send({ content: summary, allowedMentions: NO_MENTIONS });
+          return true;
         } catch {
-          // best-effort
+          return false;
         }
       },
       dispose: controller.dispose,
@@ -130,6 +141,10 @@ async function buildProgressCallbacks(
     forgeCtx.log?.warn({ err, channelId: ctx.channelId }, 'forge:action progress channel unavailable');
     return fallback;
   }
+}
+
+function buildForgeWatchdogId(kind: 'create' | 'resume', ctx: ActionContext, suffix: string): string {
+  return `forge-action:${kind}:${ctx.channelId}:${ctx.messageId}:${suffix}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,16 +182,46 @@ export async function executeForgeAction(
         taskDescription: threadTask.taskDescription,
       });
       setActiveOrchestrator(orchestrator, ctx.channelId);
+      const watchdog = forgeCtx.longRunWatchdog;
+      const watchdogRunId = buildForgeWatchdogId('create', ctx, action.description.trim().slice(0, 64) || 'run');
+      if (watchdog) {
+        try {
+          await watchdog.start({
+            runId: watchdogRunId,
+            channelId: ctx.channelId,
+            messageId: ctx.messageId,
+            stillRunningDelayMs: forgeCtx.longRunStillRunningDelayMs,
+          });
+        } catch (err) {
+          forgeCtx.log?.warn({ err, runId: watchdogRunId }, 'forge:action:create watchdog start failed');
+        }
+      }
 
       // Fire and forget — forge runs asynchronously with progress callbacks.
       const release = await acquireWriterLock();
       void orchestrator
         .run(action.description, progress.onProgress, action.context, progress.onEvent)
         .then(async (result) => {
-          await progress.sendPlanSummary(result.planSummary);
+          let outcome: 'succeeded' | 'failed' = result.error ? 'failed' : 'succeeded';
+          const postedSummary = await progress.sendPlanSummary(result.planSummary);
+          if (!postedSummary) outcome = 'failed';
+          if (watchdog) {
+            try {
+              await watchdog.complete(watchdogRunId, { outcome });
+            } catch (err) {
+              forgeCtx.log?.warn({ err, runId: watchdogRunId }, 'forge:action:create watchdog complete failed');
+            }
+          }
         })
-        .catch((err) => {
+        .catch(async (err) => {
           forgeCtx.log?.error({ err }, 'forge:action:create failed');
+          if (watchdog) {
+            try {
+              await watchdog.complete(watchdogRunId, { outcome: 'failed' });
+            } catch (completeErr) {
+              forgeCtx.log?.warn({ err: completeErr, runId: watchdogRunId }, 'forge:action:create watchdog complete failed');
+            }
+          }
         })
         .finally(() => {
           progress.dispose();
@@ -221,15 +266,45 @@ export async function executeForgeAction(
       );
       const orchestrator = forgeCtx.orchestratorFactory();
       setActiveOrchestrator(orchestrator, ctx.channelId);
+      const watchdog = forgeCtx.longRunWatchdog;
+      const watchdogRunId = buildForgeWatchdogId('resume', ctx, found.header.planId);
+      if (watchdog) {
+        try {
+          await watchdog.start({
+            runId: watchdogRunId,
+            channelId: ctx.channelId,
+            messageId: ctx.messageId,
+            stillRunningDelayMs: forgeCtx.longRunStillRunningDelayMs,
+          });
+        } catch (err) {
+          forgeCtx.log?.warn({ err, runId: watchdogRunId, planId: found.header.planId }, 'forge:action:resume watchdog start failed');
+        }
+      }
 
       const release = await acquireWriterLock();
       void orchestrator
         .resume(found.header.planId, found.filePath, found.header.title, progress.onProgress, progress.onEvent)
         .then(async (result) => {
-          await progress.sendPlanSummary(result.planSummary);
+          let outcome: 'succeeded' | 'failed' = result.error ? 'failed' : 'succeeded';
+          const postedSummary = await progress.sendPlanSummary(result.planSummary);
+          if (!postedSummary) outcome = 'failed';
+          if (watchdog) {
+            try {
+              await watchdog.complete(watchdogRunId, { outcome });
+            } catch (err) {
+              forgeCtx.log?.warn({ err, runId: watchdogRunId, planId: found.header.planId }, 'forge:action:resume watchdog complete failed');
+            }
+          }
         })
-        .catch((err) => {
+        .catch(async (err) => {
           forgeCtx.log?.error({ err, planId: action.planId }, 'forge:action:resume failed');
+          if (watchdog) {
+            try {
+              await watchdog.complete(watchdogRunId, { outcome: 'failed' });
+            } catch (completeErr) {
+              forgeCtx.log?.warn({ err: completeErr, runId: watchdogRunId, planId: found.header.planId }, 'forge:action:resume watchdog complete failed');
+            }
+          }
         })
         .finally(() => {
           progress.dispose();

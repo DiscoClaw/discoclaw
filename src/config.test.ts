@@ -25,6 +25,7 @@ describe('parseConfig', () => {
     expect(config.allowBotIds).toEqual(new Set());
     expect(config.botMessageMemoryWriteEnabled).toBe(false);
     expect(config.primaryRuntime).toBe('claude');
+    expect(config.fastRuntime).toBeUndefined();
     expect(config.runtimeModel).toBe('capable');
     expect(config.summaryModel).toBe('fast');
     expect(config.summaryMaxTokens).toBe(1500);
@@ -127,9 +128,19 @@ describe('parseConfig', () => {
     expect(config.primaryRuntime).toBe('claude');
   });
 
+  it('parses DISCOCLAW_FAST_RUNTIME and normalizes claude_code alias', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_FAST_RUNTIME: 'claude_code' }));
+    expect(config.fastRuntime).toBe('claude');
+  });
+
   it('warns when PRIMARY_RUNTIME=openai without OPENAI_API_KEY', () => {
     const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'openai', OPENAI_API_KEY: undefined }));
     expect(warnings.some((w) => w.includes('PRIMARY_RUNTIME=openai'))).toBe(true);
+  });
+
+  it('warns when DISCOCLAW_FAST_RUNTIME=openai without OPENAI_API_KEY', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_FAST_RUNTIME: 'openai', OPENAI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_FAST_RUNTIME=openai'))).toBe(true);
   });
 
   it('does not warn about action category flags when master actions are enabled', () => {
@@ -448,6 +459,11 @@ describe('parseConfig', () => {
   it('warns when PRIMARY_RUNTIME=openrouter without OPENROUTER_API_KEY', () => {
     const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'openrouter', OPENROUTER_API_KEY: undefined }));
     expect(warnings.some((w) => w.includes('PRIMARY_RUNTIME=openrouter'))).toBe(true);
+  });
+
+  it('warns when DISCOCLAW_FAST_RUNTIME=openrouter without OPENROUTER_API_KEY', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_FAST_RUNTIME: 'openrouter', OPENROUTER_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('DISCOCLAW_FAST_RUNTIME=openrouter'))).toBe(true);
   });
 
   it('warns when FORGE_DRAFTER_RUNTIME=openrouter without OPENROUTER_API_KEY', () => {

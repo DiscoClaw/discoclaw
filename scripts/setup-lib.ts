@@ -32,6 +32,8 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
       'GEMINI_BIN',
       'GEMINI_MODEL',
       'OPENAI_API_KEY',
+      'DISCOCLAW_FAST_RUNTIME',
+      'DISCOCLAW_TIER_OPENAI_FAST',
       'CODEX_BIN',
       'CODEX_MODEL',
       'CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX',

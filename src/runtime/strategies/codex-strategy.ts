@@ -19,9 +19,24 @@ const CODEX_NOISY_LINE_PATTERNS = [
 
 const CODEX_DIAGNOSTIC_LINE_PATTERN =
   /\berror\b|\bfailed\b|timed out|timeout|not found|permission denied|invalid|denied|unauthorized|forbidden|expired|rate limit|disconnected/i;
+const CODEX_PREVIEW_TEXT_MAX = 400;
 
 function isNoisyCodexLine(line: string): boolean {
   return CODEX_NOISY_LINE_PATTERNS.some((re) => re.test(line));
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function compactText(value: string, max = CODEX_PREVIEW_TEXT_MAX): string {
+  const oneLine = value.replace(/\r\n?/g, '\n').replace(/\s+/g, ' ').trim();
+  if (oneLine.length <= max) return oneLine;
+  return oneLine.slice(0, max - 1) + '\u2026';
 }
 
 /**
@@ -135,10 +150,62 @@ export function createCodexStrategy(defaultModel: string): CliAdapterStrategy {
         return {}; // Handled — no text to emit.
       }
 
+      // Emit usage for streaming preview.
+      if (anyEvt.type === 'turn.completed') {
+        const usage = asObject(anyEvt.usage);
+        if (!usage) return { activity: true };
+        const inputTokens = asFiniteNumber(usage.input_tokens ?? usage.inputTokens);
+        const outputTokens = asFiniteNumber(usage.output_tokens ?? usage.outputTokens);
+        const totalTokens = asFiniteNumber(usage.total_tokens ?? usage.totalTokens);
+        const costUsd = asFiniteNumber(usage.cost_usd ?? usage.costUsd);
+        return {
+          activity: true,
+          extraEvents: [{
+            type: 'usage',
+            ...(inputTokens !== undefined ? { inputTokens } : {}),
+            ...(outputTokens !== undefined ? { outputTokens } : {}),
+            ...(totalTokens !== undefined ? { totalTokens } : {}),
+            ...(costUsd !== undefined ? { costUsd } : {}),
+          }],
+        };
+      }
+
       // Extract text from completed items.
-      if (anyEvt.type === 'item.completed') {
-        const item = anyEvt.item as Record<string, unknown> | undefined;
-        if (!item) return null;
+      if (anyEvt.type === 'item.started' || anyEvt.type === 'item.completed') {
+        const item = asObject(anyEvt.item);
+        if (!item) return { activity: true };
+
+        // Surface command execution progress as tool events so Discord
+        // streaming doesn't look idle during long tool-heavy runs.
+        if (item.type === 'command_execution') {
+          const commandRaw = typeof item.command === 'string' ? item.command : 'command_execution';
+          const command = compactText(commandRaw);
+          if (anyEvt.type === 'item.started') {
+            return {
+              activity: true,
+              extraEvents: [{ type: 'tool_start', name: 'command_execution', input: { command } }],
+            };
+          }
+          const exitCode = asFiniteNumber(item.exit_code ?? item.exitCode);
+          const outputRaw = typeof item.aggregated_output === 'string'
+            ? compactText(item.aggregated_output)
+            : undefined;
+          return {
+            activity: true,
+            extraEvents: [{
+              type: 'tool_end',
+              name: 'command_execution',
+              ok: exitCode === undefined ? true : exitCode === 0,
+              output: {
+                command,
+                ...(exitCode !== undefined ? { exitCode } : {}),
+                ...(outputRaw ? { output: outputRaw } : {}),
+              },
+            }],
+          };
+        }
+
+        if (anyEvt.type !== 'item.completed') return { activity: true };
 
         // Reasoning items: stream as text_delta for the preview, but do not set
         // resultText so the final reply remains answer-only.

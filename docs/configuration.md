@@ -23,6 +23,7 @@ Boolean values accept `0`/`1` or `true`/`false`.
 |----------|---------|-------------|
 | `PRIMARY_RUNTIME` | `claude` | Runtime adapter: `claude`, `openai`, `openrouter`, `gemini`, `codex` |
 | `RUNTIME_MODEL` | `capable` | Model tier for chat invocations |
+| `DISCOCLAW_FAST_RUNTIME` | — | Optional runtime override for fast-tier workloads (summary, cron auto-tag/model classify, task auto-tag) |
 | `RUNTIME_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` | Comma-separated tools available to the runtime |
 | `RUNTIME_TIMEOUT_MS` | `1800000` (30 min) | Per-invocation timeout |
 | `RUNTIME_FALLBACK_MODEL` | — | Fallback model if primary fails |
@@ -283,9 +284,16 @@ Master switch and per-category flags for Discord actions. See [docs/discord-acti
 | `DISCOCLAW_STREAM_STALL_WARNING_MS` | `300000` | Warning threshold for stalled streams |
 | `DISCOCLAW_MAX_CONCURRENT_INVOCATIONS` | `0` (unlimited) | Max concurrent AI invocations |
 | `DISCOCLAW_DEBUG_RUNTIME` | `false` | Enable runtime debug logging |
-| `DISCOCLAW_COMPLETION_NOTIFY` | `true` | Notify on long completion |
-| `DISCOCLAW_COMPLETION_NOTIFY_THRESHOLD_MS` | `30000` | Threshold for completion notification |
+| `DISCOCLAW_COMPLETION_NOTIFY` | `true` | Enable long-run follow-up status updates. Uses in-process deferred timers during normal execution and persisted lifecycle recovery on startup after interruption. |
+| `DISCOCLAW_COMPLETION_NOTIFY_THRESHOLD_MS` | `30000` | Delay before the in-process "still running" follow-up timer fires. Applies only while the process stays alive; interrupted runs are recovered from persisted state on startup. |
 | `DISCOCLAW_BOT_MESSAGE_MEMORY_WRITE` | `false` | Write bot messages to memory |
+
+Completion notify behavior:
+
+- Normal path: schedules an in-process deferred "still running" follow-up when runtime duration passes `DISCOCLAW_COMPLETION_NOTIFY_THRESHOLD_MS`.
+- Recovery path: lifecycle state is persisted and swept on startup so interrupted long-running operations still receive a follow-up/final status after restart.
+- Persistence-first invariant: run completion is persisted before attempting the final post/edit, and `finalPosted` is set only after a successful post/edit.
+- Duplicate handling: startup recovery suppresses repeat finals when `finalPosted` is already true; crash boundaries may duplicate a follow-up/final update, but should not omit it.
 
 ## Reactions
 

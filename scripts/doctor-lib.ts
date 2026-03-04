@@ -34,7 +34,7 @@ function normalizeRuntimeName(raw: string): string {
 /**
  * Check whether the Claude, Gemini, and Codex CLI binaries are present, and whether
  * required API keys (OPENAI_API_KEY) are set.
- * Reads PRIMARY_RUNTIME, FORGE_DRAFTER_RUNTIME, and FORGE_AUDITOR_RUNTIME from env
+ * Reads PRIMARY_RUNTIME, DISCOCLAW_FAST_RUNTIME, FORGE_DRAFTER_RUNTIME, and FORGE_AUDITOR_RUNTIME from env
  * to decide which binaries/keys are required. A missing needed binary or key is a fail;
  * a missing unneeded one is informational (ok: true, info: true).
  */
@@ -45,6 +45,9 @@ export function checkRuntimeBinaries(
   const primaryRuntime = (env.PRIMARY_RUNTIME ?? '').trim()
     ? normalizeRuntimeName(env.PRIMARY_RUNTIME!)
     : 'claude';
+  const fastRuntime = (env.DISCOCLAW_FAST_RUNTIME ?? '').trim()
+    ? normalizeRuntimeName(env.DISCOCLAW_FAST_RUNTIME!)
+    : null;
   const drafterRuntime = (env.FORGE_DRAFTER_RUNTIME ?? '').trim()
     ? normalizeRuntimeName(env.FORGE_DRAFTER_RUNTIME!)
     : null;
@@ -54,6 +57,7 @@ export function checkRuntimeBinaries(
 
   const neededRuntimes = new Set<string>([
     primaryRuntime,
+    ...(fastRuntime ? [fastRuntime] : []),
     ...(drafterRuntime ? [drafterRuntime] : []),
     ...(auditorRuntime ? [auditorRuntime] : []),
   ]);

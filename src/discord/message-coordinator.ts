@@ -55,7 +55,7 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, setStopReaction, isShuttingDown } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
-import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, buildCompletionNotice, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
@@ -92,6 +92,7 @@ import { resolveModel } from '../runtime/model-tiers.js';
 import { getDefaultTimezone } from '../cron/default-timezone.js';
 import type { AttachmentLike } from './image-download.js';
 import { DiscordTransportClient } from './transport-client.js';
+import type { LongRunWatchdog } from './long-run-watchdog.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
@@ -131,6 +132,7 @@ export type BotParams = {
   runtimeModel: string;
   runtimeTools: string[];
   runtimeTimeoutMs: number;
+  fastRuntime?: RuntimeAdapter;
   discordActionsEnabled: boolean;
   discordActionsChannels: boolean;
   discordActionsMessaging: boolean;
@@ -219,6 +221,10 @@ export type BotParams = {
   existingTasksId?: string;
   completionNotifyEnabled?: boolean;
   completionNotifyThresholdMs?: number;
+  /** Optional lifecycle watchdog for long-running Discord operations. */
+  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete' | 'startupSweep'>;
+  /** Optional override for watchdog still-running check-in delay. */
+  longRunStillRunningDelayMs?: number;
   serviceName?: string;
   // Voice subsystem config — threaded from DiscoclawConfig.
   voiceEnabled?: boolean;
@@ -352,6 +358,58 @@ function errorCode(err: unknown): number | null {
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+type LongRunOutcome = 'succeeded' | 'failed';
+type LongRunWatchdogLike = Pick<LongRunWatchdog, 'start' | 'complete' | 'startupSweep'>;
+
+function buildWatchdogRunId(
+  scope: string,
+  ...parts: Array<string | number | null | undefined>
+): string {
+  const encoded = parts
+    .filter((part): part is string | number => part !== null && part !== undefined && String(part).length > 0)
+    .map(part => encodeURIComponent(String(part)));
+  return [scope, ...encoded].join(':');
+}
+
+async function startWatchdogRun(opts: {
+  watchdog?: LongRunWatchdogLike;
+  runId: string;
+  channelId: string;
+  messageId: string;
+  sessionKey?: string;
+  stillRunningDelayMs?: number;
+  log?: LoggerLike;
+  flow: string;
+}): Promise<void> {
+  if (!opts.watchdog) return;
+  try {
+    await opts.watchdog.start({
+      runId: opts.runId,
+      channelId: opts.channelId,
+      messageId: opts.messageId,
+      sessionKey: opts.sessionKey,
+      stillRunningDelayMs: opts.stillRunningDelayMs,
+    });
+  } catch (err) {
+    opts.log?.warn({ err, runId: opts.runId }, `${opts.flow}: watchdog start failed`);
+  }
+}
+
+async function completeWatchdogRun(opts: {
+  watchdog?: LongRunWatchdogLike;
+  runId: string | null;
+  outcome: LongRunOutcome;
+  log?: LoggerLike;
+  flow: string;
+}): Promise<void> {
+  if (!opts.watchdog || !opts.runId) return;
+  try {
+    await opts.watchdog.complete(opts.runId, { outcome: opts.outcome });
+  } catch (err) {
+    opts.log?.warn({ err, runId: opts.runId, outcome: opts.outcome }, `${opts.flow}: watchdog complete failed`);
+  }
 }
 
 function toSendTarget(candidate: unknown): SendTarget | null {
@@ -551,6 +609,17 @@ function isQueueLevelCommand(m: CoordinatorMessage, params: Omit<BotParams, 'tok
 }
 
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
+  const longRunWatchdog = params.longRunWatchdog;
+  if (longRunWatchdog) {
+    void longRunWatchdog.startupSweep().then((result) => {
+      if (result.interruptedRuns > 0 || result.finalRetried > 0 || result.finalFailed > 0) {
+        params.log?.info(result, 'long-run-watchdog: startup sweep complete');
+      }
+    }).catch((err) => {
+      params.log?.warn({ err }, 'long-run-watchdog: startup sweep failed');
+    });
+  }
+
   // --- Onboarding state ---
   let onboardingSession: OnboardingFlow | null = null;
   let activeOnboardingUserId: string | null = null;
@@ -1159,6 +1228,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           phaseTimeoutMs: params.planPhaseTimeoutMs ?? 5 * 60_000,
           maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
           maxPlanRunPhases: MAX_PLAN_RUN_PHASES,
+          longRunWatchdog,
+          longRunStillRunningDelayMs: params.longRunStillRunningDelayMs,
           skipCompletionNotify: true,
           onTaskClosed: params.planCtx?.onTaskClosed,
           onProgress: async (progressMsg: string) => {
@@ -1302,6 +1373,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
         let reply: ReplyTarget | null = null;
         let abortSignal: AbortSignal | undefined;
+        let primaryWatchdogRunId: string | null = null;
+        let primaryWatchdogOutcome: LongRunOutcome = 'succeeded';
         try {
           // Handle !memory commands before session creation or the "..." placeholder.
           if (!isBotMessage && params.memoryCommandsEnabled) {
@@ -1452,6 +1525,24 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     throw err; // outer catch cleans up running plan tracking
                   }
                   validationLock(); // release validation lock before phase execution
+                  const planRunWatchdogId = buildWatchdogRunId(
+                    'plan-command',
+                    planId,
+                    msg.channelId,
+                    msg.id,
+                    usageCmd,
+                    targetPhaseId,
+                  );
+                  await startWatchdogRun({
+                    watchdog: longRunWatchdog,
+                    runId: planRunWatchdogId,
+                    channelId: msg.channelId,
+                    messageId: progressReply.id,
+                    sessionKey,
+                    stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                    log: params.log,
+                    flow: 'plan-run',
+                  });
 
                   const planRunStreaming = createStreamingProgress(
                     progressReply,
@@ -1528,6 +1619,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   };
 
                   // Fire-and-forget: phase execution loop
+                  let planRunWatchdogOutcome: LongRunOutcome = 'failed';
                   // eslint-disable-next-line @typescript-eslint/no-floating-promises
                   (async () => {
                     const phaseResults: Array<{ id: string; title: string; elapsedMs: number }> = [];
@@ -1671,6 +1763,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     if (closeResult.closed) {
                       await editSummary(summaryMsg + '\n\nPlan and backing task auto-closed.');
                     }
+                    planRunWatchdogOutcome = stopReason === null ? 'succeeded' : 'failed';
                   })().then(
                     () => { /* success — cleanup handled by outer finally */ },
                     (err) => {
@@ -1688,6 +1781,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     },
                   ).catch((err) => {
                     params.log?.error({ err }, 'plan-run: unhandled rejection in callback');
+                  }).finally(async () => {
+                    await completeWatchdogRun({
+                      watchdog: longRunWatchdog,
+                      runId: planRunWatchdogId,
+                      outcome: planRunWatchdogOutcome,
+                      log: params.log,
+                      flow: 'plan-run',
+                    });
                   }).finally(() => {
                     planAbort.dispose();
                     removeRunningPlan(planId);
@@ -1749,6 +1850,29 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   content: `Auditing **${auditPlanId}**...`,
                   allowedMentions: NO_MENTIONS,
                 });
+                const auditWatchdogRunId = buildWatchdogRunId('plan-audit', msg.channelId, progressReply.id, auditPlanId);
+                let auditWatchdogDone = false;
+                const finishAuditWatchdog = async (outcome: LongRunOutcome): Promise<void> => {
+                  if (auditWatchdogDone) return;
+                  auditWatchdogDone = true;
+                  await completeWatchdogRun({
+                    watchdog: longRunWatchdog,
+                    runId: auditWatchdogRunId,
+                    outcome,
+                    log: params.log,
+                    flow: 'plan-audit',
+                  });
+                };
+                await startWatchdogRun({
+                  watchdog: longRunWatchdog,
+                  runId: auditWatchdogRunId,
+                  channelId: msg.channelId,
+                  messageId: progressReply.id,
+                  sessionKey,
+                  stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                  log: params.log,
+                  flow: 'plan-audit',
+                });
 
                 const plansDir = path.join(params.workspaceCwd, 'plans');
                 const rawAuditorModel = params.forgeAuditorModel ?? params.runtimeModel;
@@ -1764,13 +1888,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 try {
                   const auditFound = await findPlanFile(plansDir, auditPlanId);
                   if (!auditFound) {
-                    await progressReply.edit({ content: `Audit failed: plan not found: ${auditPlanId}`, allowedMentions: NO_MENTIONS });
+                    try {
+                      await progressReply.edit({ content: `Audit failed: plan not found: ${auditPlanId}`, allowedMentions: NO_MENTIONS });
+                    } catch {
+                      // best-effort
+                    }
+                    await finishAuditWatchdog('failed');
                     return;
                   }
                   const auditPlanContent = await fs.readFile(auditFound.filePath, 'utf-8');
                   auditProjectCwd = resolveProjectCwd(auditPlanContent, params.workspaceCwd);
                 } catch (err) {
-                  await progressReply.edit({ content: `Audit failed: ${String(err instanceof Error ? err.message : err)}`, allowedMentions: NO_MENTIONS });
+                  try {
+                    await progressReply.edit({ content: `Audit failed: ${String(err instanceof Error ? err.message : err)}`, allowedMentions: NO_MENTIONS });
+                  } catch {
+                    // best-effort
+                  }
+                  await finishAuditWatchdog('failed');
                   return;
                 }
 
@@ -1802,6 +1936,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     } catch {
                       // edit failure (message deleted, etc.) — best-effort
                     }
+                    await finishAuditWatchdog(result.ok ? 'succeeded' : 'failed');
                   },
                   async (err) => {
                     try {
@@ -1812,6 +1947,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     } catch {
                       // best-effort
                     }
+                    await finishAuditWatchdog('failed');
                   },
                 );
                 return;
@@ -1959,6 +2095,22 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   content: `Re-auditing **${found.header.planId}**...`,
                   allowedMentions: NO_MENTIONS,
                 });
+                const forgeResumeWatchdogId = buildWatchdogRunId(
+                  'forge-command-resume',
+                  found.header.planId,
+                  msg.channelId,
+                  msg.id,
+                );
+                await startWatchdogRun({
+                  watchdog: longRunWatchdog,
+                  runId: forgeResumeWatchdogId,
+                  channelId: msg.channelId,
+                  messageId: progressReply.id,
+                  sessionKey,
+                  stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                  log: params.log,
+                  flow: 'forge:resume',
+                });
 
                 const forgeResumeStreaming = createStreamingProgress(
                   progressReply,
@@ -1977,19 +2129,32 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // eslint-disable-next-line @typescript-eslint/no-floating-promises
                 resumeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress, forgeResumeOnEvent).then(
                   async (result) => {
+                    let outcome: LongRunOutcome = result.error ? 'failed' : 'succeeded';
                     forgeResumeStreaming.dispose();
                     setActiveOrchestrator(null);
                     forgeReleaseLock();
-                    // On message-gone (10008), onProgress already handled the channel.send fallback;
-                    // if result has an error, the orchestrator's error path already called onProgress.
-                    if (result.planSummary && !result.error) {
-                      try {
-                        await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
-                      } catch {
-                        // best-effort
+                    try {
+                      // On message-gone (10008), onProgress already handled the channel.send fallback;
+                      // if result has an error, the orchestrator's error path already called onProgress.
+                      if (result.planSummary && !result.error) {
+                        try {
+                          await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
+                        } catch {
+                          outcome = 'failed';
+                        }
                       }
+                      await sendForgeImplementationFollowup(result);
+                    } catch {
+                      outcome = 'failed';
+                    } finally {
+                      await completeWatchdogRun({
+                        watchdog: longRunWatchdog,
+                        runId: forgeResumeWatchdogId,
+                        outcome,
+                        log: params.log,
+                        flow: 'forge:resume',
+                      });
                     }
-                    await sendForgeImplementationFollowup(result);
                   },
                   async (err) => {
                     forgeResumeStreaming.dispose();
@@ -2003,6 +2168,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       if (errorCode(editErr) === 10008) {
                         try { await msg.channel.send({ content: `Forge resume crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                       }
+                    } finally {
+                      await completeWatchdogRun({
+                        watchdog: longRunWatchdog,
+                        runId: forgeResumeWatchdogId,
+                        outcome: 'failed',
+                        log: params.log,
+                        flow: 'forge:resume',
+                      });
                     }
                   },
                 ).catch((err) => {
@@ -2063,6 +2236,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 content: `Starting forge: ${forgeCmd.args}`,
                 allowedMentions: NO_MENTIONS,
               });
+              const forgeCreateWatchdogId = buildWatchdogRunId(
+                'forge-command-create',
+                msg.channelId,
+                msg.id,
+              );
+              await startWatchdogRun({
+                watchdog: longRunWatchdog,
+                runId: forgeCreateWatchdogId,
+                channelId: msg.channelId,
+                messageId: progressReply.id,
+                sessionKey,
+                stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                log: params.log,
+                flow: 'forge:create',
+              });
 
               const forgeCreateStreaming = createStreamingProgress(
                 progressReply,
@@ -2082,18 +2270,31 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
               createOrchestrator.run(forgeCmd.args, onProgress, forgeContext, forgeCreateOnEvent).then(
                 async (result) => {
+                  let outcome: LongRunOutcome = result.error ? 'failed' : 'succeeded';
                   forgeCreateStreaming.dispose();
                   setActiveOrchestrator(null);
                   forgeReleaseLock();
-                  // Send plan summary as a follow-up message
-                  if (result.planSummary && !result.error) {
-                    try {
-                      await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
-                    } catch {
-                      // best-effort
+                  try {
+                    // Send plan summary as a follow-up message
+                    if (result.planSummary && !result.error) {
+                      try {
+                        await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
+                      } catch {
+                        outcome = 'failed';
+                      }
                     }
+                    await sendForgeImplementationFollowup(result);
+                  } catch {
+                    outcome = 'failed';
+                  } finally {
+                    await completeWatchdogRun({
+                      watchdog: longRunWatchdog,
+                      runId: forgeCreateWatchdogId,
+                      outcome,
+                      log: params.log,
+                      flow: 'forge:create',
+                    });
                   }
-                  await sendForgeImplementationFollowup(result);
                 },
                 async (err) => {
                   forgeCreateStreaming.dispose();
@@ -2107,6 +2308,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     if (errorCode(editErr) === 10008) {
                       try { await msg.channel.send({ content: `Forge crashed: ${sanitizeErrorMessage(String(err))}`, allowedMentions: NO_MENTIONS }); } catch { /* best-effort */ }
                     }
+                  } finally {
+                    await completeWatchdogRun({
+                      watchdog: longRunWatchdog,
+                      runId: forgeCreateWatchdogId,
+                      outcome: 'failed',
+                      log: params.log,
+                      flow: 'forge:create',
+                    });
                   }
                 },
               ).catch((err) => {
@@ -2200,6 +2409,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           reply = await activeMsg.reply({ content: formatBoldLabel(thinkingLabel(0)), allowedMentions: NO_MENTIONS });
+          primaryWatchdogRunId = buildWatchdogRunId('message', msg.channelId, activeMsg.id);
+          await startWatchdogRun({
+            watchdog: longRunWatchdog,
+            runId: primaryWatchdogRunId,
+            channelId: msg.channelId,
+            messageId: reply.id,
+            sessionKey,
+            stillRunningDelayMs: params.longRunStillRunningDelayMs,
+            log: params.log,
+            flow: 'message',
+          });
 
           // Track this reply for graceful shutdown cleanup and cleanup on early error.
           let replyFinalized = false;
@@ -2253,6 +2473,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               allowedMentions: NO_MENTIONS,
             });
             replyFinalized = true;
+            primaryWatchdogOutcome = 'failed';
             return;
           }
 
@@ -2889,19 +3110,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               try {
                 await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
                 replyFinalized = true;
-                const elapsedMs = Date.now() - t0;
-                if (
-                  params.completionNotifyEnabled &&
-                  followUpDepth === 0 &&
-                  !invokeHadError &&
-                  !abortSignal?.aborted &&
-                  elapsedMs >= (params.completionNotifyThresholdMs ?? 0)
-                ) {
-                  try {
-                    await msg.channel.send({ content: buildCompletionNotice(elapsedMs), allowedMentions: NO_MENTIONS });
-                    params.log?.info({ sessionKey, elapsedMs }, 'discord:completion-notice posted');
-                  } catch { /* best-effort */ }
-                }
               } catch (editErr) {
                 // Thread archived by a taskClose action — the close summary was already
                 // posted inside closeTaskThread, so the only thing lost is Claude's
@@ -3070,6 +3278,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
         } catch (err) {
+          primaryWatchdogOutcome = 'failed';
           metrics.increment('discord.handler.error');
           params.log?.error({ err, sessionKey }, 'discord:handler failed');
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -3084,6 +3293,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           } catch {
             // Ignore secondary errors writing to Discord.
           }
+        } finally {
+          const outcome: LongRunOutcome = (primaryWatchdogOutcome === 'failed' || abortSignal?.aborted || isShuttingDown())
+            ? 'failed'
+            : 'succeeded';
+          await completeWatchdogRun({
+            watchdog: longRunWatchdog,
+            runId: primaryWatchdogRunId,
+            outcome,
+            log: params.log,
+            flow: 'message',
+          });
         }
       });
 
@@ -3091,14 +3311,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       // block the next message for this session key (fast-tier can take several seconds).
       if (pendingSummaryWork) {
         const work = pendingSummaryWork;
+        const fastRuntime = params.fastRuntime ?? params.runtime;
         // eslint-disable-next-line @typescript-eslint/no-floating-promises
         summaryWorkQueue.run(sessionKey, async () => {
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
 
-          let newSummary = await generateSummary(params.runtime, {
+          let newSummary = await generateSummary(fastRuntime, {
             previousSummary: work.existingSummary,
             recentExchange: work.exchange,
-            model: resolveModel(params.summaryModel, params.runtime.id),
+            model: resolveModel(params.summaryModel, fastRuntime.id),
             cwd: params.workspaceCwd,
             maxChars: params.summaryMaxChars,
             timeoutMs: 30_000,
@@ -3115,9 +3336,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
             const targetTokens = Math.max(1, Math.floor(thresholdTokens * targetRatio));
             const summaryBeforeRecompress = newSummary;
-            const recompressed = await recompressSummary(params.runtime, {
+            const recompressed = await recompressSummary(fastRuntime, {
               summary: summaryBeforeRecompress,
-              model: resolveModel(params.summaryModel, params.runtime.id),
+              model: resolveModel(params.summaryModel, fastRuntime.id),
               cwd: params.workspaceCwd,
               thresholdTokens,
               targetTokens,
@@ -3161,12 +3382,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (params.summaryToDurableEnabled && (!isBotMessage || params.botMessageMemoryWriteEnabled)) {
             const ch = asThreadChannel(msg.channel);
             await applyUserTurnToDurable({
-              runtime: params.runtime,
+              runtime: fastRuntime,
               userMessageText: work.userMessageText ?? String(msg.content ?? ''),
               userId: msg.author.id,
               durableDataDir: params.durableDataDir,
               durableMaxItems: params.durableMaxItems,
-              model: resolveModel(params.summaryModel, params.runtime.id),
+              model: resolveModel(params.summaryModel, fastRuntime.id),
               cwd: params.workspaceCwd,
               channelId: msg.channelId,
               messageId: msg.id,

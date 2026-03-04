@@ -42,10 +42,20 @@ type ResolveForgeRuntimesOptions = {
   log: RuntimeLog;
 };
 
-function resolveOptionalForgeRuntime(
+type OptionalRuntimeFieldLabel =
+  | 'FORGE_DRAFTER_RUNTIME'
+  | 'FORGE_AUDITOR_RUNTIME'
+  | 'DISCOCLAW_FAST_RUNTIME';
+
+function resolveOptionalRuntime(
   runtimeName: string,
-  opts: ResolveForgeRuntimesOptions,
-  fieldLabel: 'FORGE_DRAFTER_RUNTIME' | 'FORGE_AUDITOR_RUNTIME',
+  opts: {
+    primaryRuntimeName: string;
+    primaryRuntime: RuntimeAdapter;
+    runtimeRegistry: RuntimeRegistry;
+    log: RuntimeLog;
+  },
+  fieldLabel: OptionalRuntimeFieldLabel,
 ): RuntimeAdapter | undefined {
   if (runtimeName === opts.primaryRuntimeName) return opts.primaryRuntime;
   const resolved = opts.runtimeRegistry.get(runtimeName);
@@ -87,21 +97,34 @@ export function resolveForgeRuntimes(opts: ResolveForgeRuntimesOptions): {
   auditorRuntime: RuntimeAdapter | undefined;
 } {
   const drafterRuntime = opts.forgeDrafterRuntime
-    ? resolveOptionalForgeRuntime(opts.forgeDrafterRuntime, opts, 'FORGE_DRAFTER_RUNTIME')
+    ? resolveOptionalRuntime(opts.forgeDrafterRuntime, opts, 'FORGE_DRAFTER_RUNTIME')
     : undefined;
   const auditorRuntime = opts.forgeAuditorRuntime
-    ? resolveOptionalForgeRuntime(opts.forgeAuditorRuntime, opts, 'FORGE_AUDITOR_RUNTIME')
+    ? resolveOptionalRuntime(opts.forgeAuditorRuntime, opts, 'FORGE_AUDITOR_RUNTIME')
     : undefined;
   return { drafterRuntime, auditorRuntime };
 }
 
+export function resolveFastRuntime(opts: {
+  primaryRuntimeName: string;
+  primaryRuntime: RuntimeAdapter;
+  fastRuntime?: string;
+  runtimeRegistry: RuntimeRegistry;
+  log: RuntimeLog;
+}): RuntimeAdapter {
+  if (!opts.fastRuntime) return opts.primaryRuntime;
+  return resolveOptionalRuntime(opts.fastRuntime, opts, 'DISCOCLAW_FAST_RUNTIME') ?? opts.primaryRuntime;
+}
+
 export function collectActiveProviders(opts: {
   primaryRuntimeId: string;
+  fastRuntime?: RuntimeAdapter;
   forgeCommandsEnabled: boolean;
   drafterRuntime: RuntimeAdapter | undefined;
   auditorRuntime: RuntimeAdapter | undefined;
 }): Set<string> {
   const activeProviders = new Set<string>([opts.primaryRuntimeId]);
+  if (opts.fastRuntime?.id) activeProviders.add(opts.fastRuntime.id);
   if (!opts.forgeCommandsEnabled) return activeProviders;
   if (opts.drafterRuntime?.id) activeProviders.add(opts.drafterRuntime.id);
   if (opts.auditorRuntime?.id) activeProviders.add(opts.auditorRuntime.id);
