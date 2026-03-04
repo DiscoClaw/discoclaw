@@ -32,6 +32,8 @@ import type { DeferActionRequest } from './discord/actions-defer.js';
 import { configureDeferredScheduler, type ConfigureDeferredSchedulerOpts } from './discord/deferred-runner.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
+import { LongRunWatchdog, type LongRunWatchdogRun } from './discord/long-run-watchdog.js';
+import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { executeCronJob } from './cron/executor.js';
@@ -200,6 +202,7 @@ let voiceManager: VoiceConnectionManager | null = null;
 let audioPipeline: AudioPipelineManager | null = null;
 let voicePresenceHandler: VoicePresenceHandler | null = null;
 let deferSchedulerRef: DeferScheduler<DeferActionRequest, ActionContext> | null = null;
+let longRunWatchdog: LongRunWatchdog | null = null;
 const memorySampler = new MemorySampler();
 globalMetrics.setMemorySampler(memorySampler);
 memorySampler.sample();
@@ -222,6 +225,9 @@ const shutdown = async () => {
   } catch (err) {
     log.warn({ err }, 'shutdown:failed to write shutdown context');
   }
+
+  // Cancel watchdog timers before draining replies.
+  longRunWatchdog?.dispose();
 
   // Cancel deferred timers first — before drain — so they cannot fire and produce
   // new in-flight replies during the drain window.
@@ -364,6 +370,78 @@ const cronTagMapPath = cfg.cronTagMapPathOverride
   || path.join(cronStatsDir, 'tag-map.json');
 const cronTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'cron', 'cron-tag-map.json');
 const cronStatsPath = path.join(cronStatsDir, 'cron-run-stats.json');
+const longRunStillRunningDelayMs = Math.max(1, completionNotifyThresholdMs);
+const longRunWatchdogDataPath = path.join(pidLockDir, 'long-run-watchdog.json');
+const emptyLongRunSweepResult = {
+  interruptedRuns: 0,
+  finalRetried: 0,
+  finalPosted: 0,
+  finalFailed: 0,
+};
+let longRunWatchdogClientRef: Awaited<ReturnType<typeof startDiscordBot>>['client'] | null = null;
+
+async function postLongRunWatchdogNotice(run: Pick<LongRunWatchdogRun, 'runId' | 'channelId' | 'messageId'>, content: string): Promise<void> {
+  const clientRef = longRunWatchdogClientRef;
+  if (!clientRef) {
+    throw new Error('Discord client unavailable');
+  }
+
+  const channel = clientRef.channels.cache.get(run.channelId)
+    ?? await clientRef.channels.fetch(run.channelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || channel.isDMBased()) {
+    throw new Error(`watchdog channel unavailable (${run.channelId})`);
+  }
+
+  const send = (channel as { send?: unknown }).send;
+  if (typeof send !== 'function') {
+    throw new Error(`watchdog channel is not sendable (${run.channelId})`);
+  }
+
+  const channelLike = channel as {
+    send: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
+    messages?: {
+      fetch?: (id: string) => Promise<unknown>;
+    };
+  };
+  const fetchMessage = channelLike.messages?.fetch;
+  if (typeof fetchMessage === 'function') {
+    const source = await fetchMessage.call(channelLike.messages, run.messageId).catch(() => null);
+    const reply = (source as { reply?: unknown } | null)?.reply;
+    if (typeof reply === 'function') {
+      await reply.call(source, { content, allowedMentions: NO_MENTIONS });
+      return;
+    }
+  }
+
+  await channelLike.send({ content, allowedMentions: NO_MENTIONS });
+}
+
+function buildLongRunFinalNotice(run: Pick<LongRunWatchdogRun, 'completion'>, source: 'complete' | 'startup-sweep'): string {
+  const base = run.completion === 'succeeded'
+    ? 'Run complete.'
+    : run.completion === 'failed'
+      ? 'Run ended with errors.'
+      : 'Run interrupted by restart/shutdown.';
+  return source === 'startup-sweep' ? `${base} (Recovered after restart.)` : base;
+}
+
+longRunWatchdog = new LongRunWatchdog({
+  dataFilePath: longRunWatchdogDataPath,
+  stillRunningDelayMs: longRunStillRunningDelayMs,
+  postStillRunning: async (run) => {
+    await postLongRunWatchdogNotice(run, 'Still running. I will post another update when this finishes.');
+  },
+  postFinal: async (run, meta) => {
+    await postLongRunWatchdogNotice(run, buildLongRunFinalNotice(run, meta.source));
+  },
+  log,
+});
+const messageCoordinatorWatchdog = {
+  start: longRunWatchdog.start.bind(longRunWatchdog),
+  complete: longRunWatchdog.complete.bind(longRunWatchdog),
+  // Startup sweep is intentionally run after Discord connect from index.ts.
+  startupSweep: async () => ({ ...emptyLongRunSweepResult }),
+};
 
 if (requireChannelContext && !discordChannelContext) {
   log.error({ contentDir }, 'DISCORD_REQUIRE_CHANNEL_CONTEXT=1 but channel context failed to initialize');
@@ -1039,6 +1117,8 @@ const botParams = {
   forgeAutoImplement,
   completionNotifyEnabled,
   completionNotifyThresholdMs,
+  longRunWatchdog: messageCoordinatorWatchdog,
+  longRunStillRunningDelayMs,
   drafterRuntime,
   auditorRuntime,
   summaryToDurableEnabled,
@@ -1169,7 +1249,17 @@ try {
   process.exit(1);
 }
 botStatus = status;
+longRunWatchdogClientRef = client;
 if (deferOpts) deferOpts.status = botStatus;
+
+try {
+  const sweepResult = await longRunWatchdog.startupSweep();
+  if (sweepResult.interruptedRuns > 0 || sweepResult.finalRetried > 0 || sweepResult.finalFailed > 0) {
+    log.info(sweepResult, 'long-run-watchdog: startup sweep complete');
+  }
+} catch (err) {
+  log.warn({ err }, 'long-run-watchdog: startup sweep failed');
+}
 
 const { credentialCheckReport, credentialReport } = await runPostConnectStartupChecks({
   system,
@@ -1327,6 +1417,8 @@ if (taskCtx) {
         // Action-initiated forges log progress rather than posting to a channel.
         log.info({ msg }, 'forge:action:progress');
       },
+      longRunWatchdog,
+      longRunStillRunningDelayMs,
       log,
     };
     log.info('forge:action context initialized');
@@ -1354,6 +1446,8 @@ if (taskCtx) {
           log.warn({ err, taskId }, 'plan:onTaskClosed sync error');
         }
       },
+      longRunWatchdog,
+      longRunStillRunningDelayMs,
     };
     log.info('plan:action context initialized');
   }
