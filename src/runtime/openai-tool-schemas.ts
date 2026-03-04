@@ -197,9 +197,14 @@ const TOOL_DEFS: Record<string, OpenAIFunctionTool> = {
         type: 'object',
         properties: {
           run_id: { type: 'string', description: 'Optional caller-specified run identifier.' },
+          pipeline_name: { type: 'string', description: 'Optional logical pipeline name for idempotency and routing context.' },
+          idempotency_key: { type: 'string', description: 'Optional caller-provided idempotency key.' },
           auto_run: {
             type: 'boolean',
             description: 'When true (default), execute from the first step immediately.',
+          },
+          input: {
+            description: 'Optional pipeline input payload used for request identity hashing.',
           },
           steps: {
             type: 'array',

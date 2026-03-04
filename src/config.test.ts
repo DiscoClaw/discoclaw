@@ -673,10 +673,10 @@ describe('parseConfig', () => {
     expect(config.appendSystemPrompt).toHaveLength(4000);
   });
 
-  // --- Default tools include Glob, Grep, Write ---
-  it('default RUNTIME_TOOLS includes Glob, Grep, Write', () => {
+  // --- Default tools include core + hybrid categories ---
+  it('default RUNTIME_TOOLS includes Pipeline and Step', () => {
     const { config } = parseConfig(env());
-    expect(config.runtimeTools).toEqual(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch']);
+    expect(config.runtimeTools).toEqual(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Pipeline', 'Step']);
   });
 
   // --- Reaction remove handler ---

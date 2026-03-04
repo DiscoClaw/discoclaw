@@ -903,7 +903,7 @@ describe('resolveEffectiveTools audit logging', () => {
       log,
     });
 
-    expect(result.effectiveTools).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep']);
+    expect(result.effectiveTools).toEqual(['Read']);
     expect(result.runtimeCapabilityNote).toContain('Bash');
     expect(result.runtimeCapabilityNote).toContain('WebSearch');
     expect(log.warn).toHaveBeenCalledWith(
@@ -913,5 +913,23 @@ describe('resolveEffectiveTools audit logging', () => {
       }),
       expect.stringContaining('dropped unsupported tools'),
     );
+  });
+
+  it('drops hybrid-only tools for non-openai runtimes', async () => {
+    const workspace = await tmpDir();
+    await fs.writeFile(path.join(workspace, 'PERMISSIONS.json'), '{"tier":"full"}');
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const result = await resolveEffectiveTools({
+      workspaceCwd: workspace,
+      runtimeTools: ['Read', 'Pipeline', 'Step'],
+      runtimeCapabilities: new Set(['tools_fs', 'tools_exec', 'tools_web', 'streaming_text']),
+      runtimeId: 'codex',
+      log,
+    });
+
+    expect(result.effectiveTools).toEqual(['Read']);
+    expect(result.runtimeCapabilityNote).toContain('Pipeline');
+    expect(result.runtimeCapabilityNote).toContain('Step');
   });
 });

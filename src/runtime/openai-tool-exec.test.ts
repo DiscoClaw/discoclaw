@@ -450,7 +450,7 @@ describe('pipeline.start/status/resume/cancel', () => {
 
     expect(start.ok).toBe(true);
     const started = parseJsonResult(start.result);
-    expect(started['status']).toBe('completed');
+    expect(started['status']).toBe('succeeded');
     expect(started['total_steps']).toBe(2);
 
     const runId = started['run_id'] as string;
@@ -463,7 +463,7 @@ describe('pipeline.start/status/resume/cancel', () => {
     );
     expect(status.ok).toBe(true);
     const statusJson = parseJsonResult(status.result);
-    expect(statusJson['status']).toBe('completed');
+    expect(statusJson['status']).toBe('succeeded');
   });
 
   it('pipeline.start with auto_run=false can be resumed', async () => {
@@ -481,8 +481,10 @@ describe('pipeline.start/status/resume/cancel', () => {
       { allowedToolNames: new Set(['pipeline.start', 'pipeline.resume', 'write_file', 'read_file']) },
     );
     expect(start.ok).toBe(true);
+    const started = parseJsonResult(start.result);
+    expect(started['status']).toBe('queued');
 
-    const runId = (parseJsonResult(start.result)['run_id'] as string);
+    const runId = (started['run_id'] as string);
     const resumed = await executeToolCall(
       'pipeline.resume',
       { run_id: runId },
@@ -491,7 +493,98 @@ describe('pipeline.start/status/resume/cancel', () => {
       { allowedToolNames: new Set(['pipeline.resume', 'write_file', 'read_file']) },
     );
     expect(resumed.ok).toBe(true);
-    expect(parseJsonResult(resumed.result)['status']).toBe('completed');
+    expect(parseJsonResult(resumed.result)['status']).toBe('succeeded');
+  });
+
+  it('pipeline.start dedupes explicit idempotency key with equivalent payload', async () => {
+    const first = await executeToolCall(
+      'pipeline.start',
+      {
+        pipeline_name: 'eq',
+        idempotency_key: 'idem-explicit-1',
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'idem.txt', content: 'v1' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(first.ok).toBe(true);
+    const firstPayload = parseJsonResult(first.result);
+
+    const second = await executeToolCall(
+      'pipeline.start',
+      {
+        pipeline_name: 'eq',
+        idempotency_key: 'idem-explicit-1',
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'idem.txt', content: 'v1' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(second.ok).toBe(true);
+    const secondPayload = parseJsonResult(second.result);
+    expect(secondPayload['run_id']).toBe(firstPayload['run_id']);
+  });
+
+  it('pipeline.start returns E_IDEMPOTENCY_CONFLICT for same key + non-equivalent payload', async () => {
+    const first = await executeToolCall(
+      'pipeline.start',
+      {
+        pipeline_name: 'conflict',
+        idempotency_key: 'idem-explicit-2',
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'conflict.txt', content: 'v1' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(first.ok).toBe(true);
+
+    const second = await executeToolCall(
+      'pipeline.start',
+      {
+        pipeline_name: 'conflict',
+        idempotency_key: 'idem-explicit-2',
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'conflict.txt', content: 'v2' } }],
+      },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']) },
+    );
+    expect(second.ok).toBe(false);
+    const payload = parseJsonResult(second.result);
+    expect(payload['failure_code']).toBe('E_IDEMPOTENCY_CONFLICT');
+  });
+
+  it('pipeline.start includes routing + idempotency metadata in run payload', async () => {
+    const started = await executeToolCall(
+      'pipeline.start',
+      {
+        pipeline_name: 'metadata-check',
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'meta.txt', content: 'x' } }],
+      },
+      [tmpDir],
+      undefined,
+      {
+        allowedToolNames: new Set(['pipeline.start']),
+        runtimeId: 'openrouter',
+        adapterId: 'openrouter',
+      },
+    );
+    expect(started.ok).toBe(true);
+    const payload = parseJsonResult(started.result);
+    expect(payload['runtime']).toBe('openrouter');
+    expect(payload['adapter']).toBe('openrouter');
+    expect(payload['pipeline_name']).toBe('metadata-check');
+    expect(typeof payload['pipeline_input_hash']).toBe('string');
+    expect(payload['idempotency_key']).toBe(null);
+    expect(payload['status']).toBe('queued');
   });
 
   it('pipeline.step execution fails deterministically when a step tool is not allowlisted', async () => {
@@ -544,7 +637,7 @@ describe('pipeline.start/status/resume/cancel', () => {
       { allowedToolNames: new Set(['pipeline.resume', 'write_file']) },
     );
     expect(secondResume.ok).toBe(true);
-    expect(parseJsonResult(secondResume.result)['status']).toBe('completed');
+    expect(parseJsonResult(secondResume.result)['status']).toBe('succeeded');
   });
 
   it('pipeline.cancel marks pending steps cancelled', async () => {
@@ -576,6 +669,45 @@ describe('pipeline.start/status/resume/cancel', () => {
     expect(payload['status']).toBe('cancelled');
   });
 
+  it('rejects resume when invocation workspace root does not match run workspace_root', async () => {
+    const otherRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-other-root-'));
+    const sharedPipelineStorePath = path.join(tmpDir, 'shared-pipeline-store.json');
+    try {
+      const start = await executeToolCall(
+        'pipeline.start',
+        {
+          auto_run: false,
+          steps: [{ tool: 'write_file', arguments: { file_path: 'root.txt', content: 'x' } }],
+        },
+        [tmpDir],
+        undefined,
+        {
+          allowedToolNames: new Set(['pipeline.start']),
+          pipelineStorePath: sharedPipelineStorePath,
+        },
+      );
+      expect(start.ok).toBe(true);
+      const runId = parseJsonResult(start.result)['run_id'] as string;
+
+      const resumed = await executeToolCall(
+        'pipeline.resume',
+        { run_id: runId },
+        [otherRoot],
+        undefined,
+        {
+          allowedToolNames: new Set(['pipeline.resume', 'write_file']),
+          pipelineStorePath: sharedPipelineStorePath,
+        },
+      );
+      expect(resumed.ok).toBe(false);
+      const payload = parseJsonResult(resumed.result);
+      expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+      expect(String(payload['message'])).toContain('workspace_root mismatch');
+    } finally {
+      await fs.rm(otherRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects nested pipeline calls when executing a pipeline step', async () => {
     const start = await executeToolCall(
       'pipeline.start',
@@ -589,7 +721,23 @@ describe('pipeline.start/status/resume/cancel', () => {
     expect(start.ok).toBe(false);
     const payload = parseJsonResult(start.result);
     expect(payload['status']).toBe('failed');
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
     expect(payload['last_error']).toMatch(/nested pipeline/i);
+  });
+});
+
+describe('hybrid feature gate', () => {
+  it('returns E_TOOL_UNAVAILABLE when hybrid pipeline tools are disabled', async () => {
+    const result = await executeToolCall(
+      'pipeline.start',
+      { steps: [{ tool: 'read_file', arguments: { file_path: 'x' } }] },
+      [tmpDir],
+      undefined,
+      { allowedToolNames: new Set(['pipeline.start']), enableHybridPipeline: false },
+    );
+    expect(result.ok).toBe(false);
+    const payload = parseJsonResult(result.result);
+    expect(payload['failure_code']).toBe('E_TOOL_UNAVAILABLE');
   });
 });
 
@@ -622,7 +770,7 @@ describe('step.run/assert/retry/wait', () => {
     const payload = parseJsonResult(ran.result);
     expect(payload['operation']).toBe('step.run');
     const run = payload['run'] as Record<string, unknown>;
-    expect(run['status']).toBe('completed');
+    expect(run['status']).toBe('succeeded');
     expect(run['current_step']).toBe(1);
     await expect(fs.readFile(path.join(tmpDir, 'step-run.txt'), 'utf-8')).resolves.toBe('ok');
   });

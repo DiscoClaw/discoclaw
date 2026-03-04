@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { parseAllowBotIds, parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 
-export const KNOWN_TOOLS = new Set(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch']);
+export const KNOWN_TOOLS = new Set([
+  'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Pipeline', 'Step',
+]);
 export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS = 1800;
 export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT = 5;
 export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DEPTH = 4;
@@ -92,6 +94,7 @@ export type DiscoclawConfig = {
   openaiBaseUrl?: string;
   openaiModel: string;
   openaiCompatToolsEnabled: boolean;
+  openaiCompatHybridPipelineEnabled: boolean;
 
   // Imagegen provider keys
   imagegenGeminiApiKey?: string;
@@ -349,7 +352,7 @@ function parseAvatarPath(env: NodeJS.ProcessEnv, name: string): string | undefin
 
 function parseRuntimeTools(env: NodeJS.ProcessEnv, warnings: string[]): string[] {
   const raw = parseTrimmedString(env, 'RUNTIME_TOOLS');
-  if (!raw) return ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
+  if (!raw) return Array.from(KNOWN_TOOLS);
 
   const tools = raw
     .split(/[,\s]+/g)
@@ -506,6 +509,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const openaiBaseUrl = parseTrimmedString(env, 'OPENAI_BASE_URL');
   const openaiModel = parseTrimmedString(env, 'OPENAI_MODEL') ?? 'gpt-4o';
   const openaiCompatToolsEnabled = parseBoolean(env, 'OPENAI_COMPAT_TOOLS_ENABLED', false);
+  const openaiCompatHybridPipelineEnabled = parseBoolean(env, 'OPENAI_COMPAT_HYBRID_PIPELINE_ENABLED', false);
   const imagegenGeminiApiKey = parseTrimmedString(env, 'IMAGEGEN_GEMINI_API_KEY');
   const imagegenDefaultModel = parseTrimmedString(env, 'IMAGEGEN_DEFAULT_MODEL');
   if (primaryRuntime === 'openai' && !openaiApiKey) {
@@ -726,6 +730,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openaiBaseUrl,
       openaiModel,
       openaiCompatToolsEnabled,
+      openaiCompatHybridPipelineEnabled,
       imagegenGeminiApiKey,
       imagegenDefaultModel,
 

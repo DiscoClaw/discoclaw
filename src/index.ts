@@ -663,6 +663,7 @@ if (cfg.openaiApiKey) {
     apiKey: cfg.openaiApiKey,
     defaultModel: cfg.openaiModel,
     enableTools: cfg.openaiCompatToolsEnabled,
+    enableHybridPipeline: cfg.openaiCompatHybridPipelineEnabled,
     log,
   });
   registerRuntime('openai', openaiRuntimeRaw);
@@ -675,6 +676,7 @@ if (cfg.openrouterApiKey) {
     apiKey: cfg.openrouterApiKey,
     defaultModel: cfg.openrouterModel,
     enableTools: cfg.openaiCompatToolsEnabled,
+    enableHybridPipeline: cfg.openaiCompatHybridPipelineEnabled,
     log,
   });
   registerRuntime('openrouter', openrouterRuntimeRaw);

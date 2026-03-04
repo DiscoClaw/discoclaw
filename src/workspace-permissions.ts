@@ -17,7 +17,7 @@ export const MAX_NOTE_LENGTH = 500;
 export const TIER_TOOLS: Record<Exclude<PermissionTier, 'custom'>, string[]> = {
   readonly: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
   standard: ['Read', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
-  full: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+  full: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Pipeline', 'Step'],
 };
 
 type LogFn = { warn?: (obj: Record<string, unknown>, msg: string) => void };
@@ -171,6 +171,9 @@ export function resolveTools(
   envTools: string[],
 ): string[] {
   if (!permissions) return envTools;
-  if (permissions.tier === 'custom') return permissions.tools ?? envTools;
-  return TIER_TOOLS[permissions.tier];
+  const envSet = new Set(envTools);
+  const upperBound = permissions.tier === 'custom'
+    ? (permissions.tools ?? envTools)
+    : TIER_TOOLS[permissions.tier];
+  return upperBound.filter((tool) => envSet.has(tool));
 }

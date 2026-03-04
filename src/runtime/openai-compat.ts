@@ -8,6 +8,7 @@ type CommonOpts = {
   baseUrl: string;
   defaultModel: string;
   enableTools?: boolean;
+  enableHybridPipeline?: boolean;
   log?: { debug(...args: unknown[]): void };
 };
 
@@ -75,6 +76,7 @@ function parseSSEData(line: string): string | undefined {
 }
 
 export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapter {
+  const hybridEnabled = opts.enableHybridPipeline ?? true;
   const caps: RuntimeCapability[] = ['streaming_text'];
   if (opts.enableTools) {
     caps.push('tools_fs', 'tools_exec');
@@ -132,7 +134,15 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
 
         // Determine whether to enter the tool loop
         const toolsRequested = opts.enableTools && params.tools && params.tools.length > 0;
-        const toolSchemas = toolsRequested ? buildToolSchemas(params.tools!) : [];
+        const requestedTools = params.tools ?? [];
+        const toolEligible = hybridEnabled
+          ? requestedTools
+          : requestedTools.filter((t) =>
+            t !== 'Pipeline'
+            && t !== 'Step'
+            && !t.startsWith('pipeline.')
+            && !t.startsWith('step.'));
+        const toolSchemas = toolsRequested ? buildToolSchemas(toolEligible) : [];
         const allowedToolNames = new Set(toolSchemas.map((schema) => schema.function.name));
         const useTools = toolSchemas.length > 0;
 
@@ -232,6 +242,9 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
 
                 const result = await executeToolCall(fnName, args, allowedRoots, undefined, {
                   allowedToolNames,
+                  runtimeId: opts.id ?? 'openai',
+                  adapterId: opts.id ?? 'openai',
+                  enableHybridPipeline: hybridEnabled,
                 });
                 yield { type: 'tool_end', name: discoName, output: result.result, ok: result.ok };
 
