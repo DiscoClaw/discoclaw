@@ -56,12 +56,16 @@ vi.mock('./forge-plan-registry.js', () => ({
   isPlanRunning: vi.fn(() => false),
 }));
 
-vi.mock('./actions-plan.js', () => ({
-  executePlanAction: vi.fn(async (action: { type?: string }) => {
-    if (action?.type === 'planRun') return { ok: true, summary: 'Auto plan run summary' };
-    return { ok: true, summary: 'ok' };
-  }),
-}));
+vi.mock('./actions-plan.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./actions-plan.js')>();
+  return {
+    ...actual,
+    executePlanAction: vi.fn(async (action: { type?: string }) => {
+      if (action?.type === 'planRun') return { ok: true, summary: 'Auto plan run summary' };
+      return { ok: true, summary: 'ok' };
+    }),
+  };
+});
 
 vi.mock('./forge-auto-implement.js', () => ({
   autoImplementForgePlan: vi.fn(async (
