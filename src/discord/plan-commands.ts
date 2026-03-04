@@ -6,7 +6,10 @@ import {
   decomposePlan,
   readPhasesFile,
   getNextPhase,
+  resequenceKeepingDone,
+  selectRunnablePhase,
   updatePhaseStatus,
+  validatePhaseDependencies,
   checkStaleness,
   writePhasesFile,
 } from './plan-manager.js';
@@ -19,7 +22,7 @@ import { getLatestAuditVerdictFromSection, getSection, parsePlan } from './plan-
 // ---------------------------------------------------------------------------
 
 export type PlanCommand = {
-  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'run-one' | 'skip' | 'audit';
+  action: 'help' | 'create' | 'list' | 'show' | 'approve' | 'close' | 'cancel' | 'phases' | 'run' | 'run-one' | 'run-phase' | 'skip' | 'skip-to' | 'audit';
   args: string;
   context?: string;
   /** When set, reuse this task instead of creating a new one (e.g. when issued in a task forum thread). */
@@ -40,7 +43,11 @@ export type PlanFileHeader = {
 // Parsing
 // ---------------------------------------------------------------------------
 
-const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'cancel', 'help', 'phases', 'run', 'run-one', 'skip', 'audit']);
+const RESERVED_SUBCOMMANDS = new Set(['list', 'show', 'approve', 'close', 'cancel', 'help', 'phases', 'run', 'run-one', 'run-phase', 'skip', 'skip-to', 'audit']);
+
+const PHASES_USAGE = 'Usage: `!plan phases [--regenerate] [--keep-done] <plan-id>`';
+const RUN_PHASE_USAGE = 'Usage: `!plan run-phase <plan-id> <phase-id>`';
+const SKIP_TO_USAGE = 'Usage: `!plan skip-to <plan-id> <phase-id>`';
 
 export function parsePlanCommand(content: string): PlanCommand | null {
   const trimmed = content.trim();
@@ -60,6 +67,67 @@ export function parsePlanCommand(content: string): PlanCommand | null {
 
   // Everything else is a create description
   return { action: 'create', args: rest };
+}
+
+function parsePhaseCommandArgs(args: string): { planId: string; regenerate: boolean; keepDone: boolean } | { error: string } {
+  const tokens = args.split(/\s+/).map((token) => token.trim()).filter(Boolean);
+  if (tokens.length === 0) return { error: PHASES_USAGE };
+
+  let planId = '';
+  let regenerate = false;
+  let keepDone = false;
+
+  for (const token of tokens) {
+    if (token === '--regenerate') {
+      regenerate = true;
+      continue;
+    }
+    if (token === '--keep-done') {
+      keepDone = true;
+      continue;
+    }
+    if (token.startsWith('--')) {
+      return { error: `Unknown phases flag: \`${token}\`\n${PHASES_USAGE}` };
+    }
+    if (planId) return { error: PHASES_USAGE };
+    planId = token;
+  }
+
+  if (!planId) return { error: PHASES_USAGE };
+  if (keepDone && !regenerate) {
+    return { error: `\`--keep-done\` requires \`--regenerate\`.\n${PHASES_USAGE}` };
+  }
+
+  return { planId, regenerate, keepDone };
+}
+
+function parsePlanAndPhaseArgs(args: string, usage: string): { planId: string; phaseId: string } | { error: string } {
+  const tokens = args.split(/\s+/).map((token) => token.trim()).filter(Boolean);
+  if (tokens.length !== 2) return { error: usage };
+  return {
+    planId: tokens[0]!,
+    phaseId: tokens[1]!,
+  };
+}
+
+function buildDependencyValidationLines(validation: { missing: string[]; cycles: string[] }): string[] {
+  if (validation.missing.length === 0 && validation.cycles.length === 0) {
+    return ['Dependency validation: OK.'];
+  }
+
+  const lines: string[] = ['Dependency validation: issues found.'];
+  if (validation.missing.length > 0) {
+    lines.push(`Missing dependencies: ${validation.missing.join('; ')}`);
+  }
+  if (validation.cycles.length > 0) {
+    lines.push(`Cycles: ${validation.cycles.join('; ')}`);
+  }
+  return lines;
+}
+
+function buildDependencyValidationError(prefix: string, validation: { missing: string[]; cycles: string[] }): string {
+  const details = buildDependencyValidationLines(validation).join('\n');
+  return `${prefix}\n${details}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -399,10 +467,12 @@ export async function handlePlanCommand(
         '- `!plan show <plan-id|task-id>` — show plan details',
         '- `!plan approve <plan-id|task-id>` — approve for implementation',
         '- `!plan close <plan-id|task-id>` — close/abandon a plan',
-        '- `!plan phases <plan-id>` — show/generate phase checklist',
+        '- `!plan phases [--regenerate] [--keep-done] <plan-id>` — show/generate phase checklist',
         '- `!plan run <plan-id>` — execute all remaining phases',
         '- `!plan run-one <plan-id>` — execute next pending phase only',
+        '- `!plan run-phase <plan-id> <phase-id>` — validate and target a specific phase',
         '- `!plan skip <plan-id>` — skip a failed/in-progress phase',
+        '- `!plan skip-to <plan-id> <phase-id>` — mark earlier phases skipped and resume at target phase',
         '- `!plan audit <plan-id>` — run a standalone audit against a plan',
       ].join('\n');
     }
@@ -536,37 +606,82 @@ export async function handlePlanCommand(
     }
 
     if (cmd.action === 'phases') {
-      if (!cmd.args) return 'Usage: `!plan phases <plan-id>`';
+      const parsedArgs = parsePhaseCommandArgs(cmd.args);
+      if ('error' in parsedArgs) return parsedArgs.error;
 
-      // Parse --regenerate flag
-      const regenerate = cmd.args.includes('--regenerate');
-      const planIdArg = cmd.args.replace('--regenerate', '').trim();
-      if (!planIdArg) return 'Usage: `!plan phases <plan-id>`';
-
-      const found = await findPlanFile(plansDir, planIdArg);
-      if (!found) return `Plan not found: ${planIdArg}`;
+      const found = await findPlanFile(plansDir, parsedArgs.planId);
+      if (!found) return `Plan not found: ${parsedArgs.planId}`;
 
       const phasesFileName = `${found.header.planId}-phases.md`;
       const phasesFilePath = path.join(plansDir, phasesFileName);
 
       let phases: PlanPhases;
+      const summaryLines: string[] = [];
 
       const phasesFileExists = fsSync.existsSync(phasesFilePath);
-      if (!phasesFileExists || regenerate) {
+      if (!phasesFileExists || parsedArgs.regenerate) {
         // Generate phases
         const planContent = await fs.readFile(found.filePath, 'utf-8');
         const planRelPath = `workspace/plans/${path.basename(found.filePath)}`;
-        phases = decomposePlan(planContent, found.header.planId, planRelPath, opts.maxContextFiles);
+        const regenerated = decomposePlan(planContent, found.header.planId, planRelPath, opts.maxContextFiles);
+
+        if (parsedArgs.regenerate && parsedArgs.keepDone && phasesFileExists) {
+          const previousPhases = readPhasesFile(phasesFilePath);
+          const resequenced = resequenceKeepingDone(previousPhases, regenerated);
+          phases = resequenced.phases;
+
+          summaryLines.push(
+            `Resequenced with \`--keep-done\`: kept ${resequenced.keptDone.length} done phase(s), dropped ${resequenced.droppedDone.length}.`,
+          );
+          if (resequenced.keptDone.length > 0) {
+            summaryLines.push(`Kept done phases: ${resequenced.keptDone.join(', ')}`);
+          }
+          if (resequenced.droppedDone.length > 0) {
+            const droppedDetail = resequenced.droppedDone
+              .map((d) => `${d.phaseId} (${d.reason})`)
+              .join('; ');
+            summaryLines.push(`Dropped done phases: ${droppedDetail}`);
+          }
+          if (resequenced.dependencyErrors.length > 0) {
+            summaryLines.push(`Resequencing dependency outcomes: ${resequenced.dependencyErrors.join('; ')}`);
+          }
+        } else {
+          phases = regenerated;
+          if (parsedArgs.regenerate && parsedArgs.keepDone && !phasesFileExists) {
+            summaryLines.push('`--keep-done` requested, but no existing phases file was found; generated all phases as pending.');
+          } else if (parsedArgs.regenerate) {
+            summaryLines.push('Phases regenerated from current plan content.');
+          }
+        }
+
+        summaryLines.push(...buildDependencyValidationLines(validatePhaseDependencies(phases)));
         writePhasesFile(phasesFilePath, phases);
       } else {
         phases = readPhasesFile(phasesFilePath);
+        summaryLines.push(...buildDependencyValidationLines(validatePhaseDependencies(phases)));
       }
 
-      // Format checklist
-      return formatPhasesChecklist(phases);
+      const checklist = formatPhasesChecklist(phases);
+      if (summaryLines.length === 0) return checklist;
+      return [...summaryLines, '', checklist].join('\n');
     }
 
-    // Note: 'run' and 'skip' are intercepted by discord.ts before reaching here.
+    if (cmd.action === 'run-phase') {
+      const parsedArgs = parsePlanAndPhaseArgs(cmd.args, RUN_PHASE_USAGE);
+      if ('error' in parsedArgs) return parsedArgs.error;
+
+      const prep = await preparePlanRun(parsedArgs.planId, opts, parsedArgs.phaseId);
+      if ('error' in prep) return prep.error;
+      return `Ready to run **${prep.nextPhase.id}**: ${prep.nextPhase.title}`;
+    }
+
+    if (cmd.action === 'skip-to') {
+      const parsedArgs = parsePlanAndPhaseArgs(cmd.args, SKIP_TO_USAGE);
+      if ('error' in parsedArgs) return parsedArgs.error;
+      return handlePlanSkipTo(parsedArgs.planId, parsedArgs.phaseId, opts);
+    }
+
+    // Note: run/skip commands are intercepted by message-coordinator.ts before reaching here.
 
     return 'Unknown plan command. Try `!plan` for help.';
   } catch (err) {
@@ -639,6 +754,85 @@ export async function handlePlanSkip(
   return `Skipped **${target.id}**: ${target.title} (was ${target.status})`;
 }
 
+export async function handlePlanSkipTo(
+  planId: string,
+  phaseId: string,
+  opts: HandlePlanCommandOpts,
+): Promise<string> {
+  const plansDir = resolvePlansDir(opts);
+  const found = await findPlanFile(plansDir, planId);
+  if (!found) return `Plan not found: ${planId}`;
+
+  const phasesFileName = `${found.header.planId}-phases.md`;
+  const phasesFilePath = path.join(plansDir, phasesFileName);
+
+  if (!fsSync.existsSync(phasesFilePath)) {
+    return `No phases file found for ${planId}. Run \`!plan phases ${planId}\` first.`;
+  }
+
+  let phases: PlanPhases;
+  try {
+    phases = readPhasesFile(phasesFilePath);
+  } catch (err) {
+    return `Failed to read phases file: ${String(err)}`;
+  }
+
+  const validation = validatePhaseDependencies(phases);
+  if (validation.missing.length > 0 || validation.cycles.length > 0) {
+    return buildDependencyValidationError('Cannot skip-to because phase dependencies are invalid.', validation);
+  }
+
+  const targetIndex = phases.phases.findIndex((phase) => phase.id === phaseId);
+  if (targetIndex < 0) return `Phase not found: ${phaseId}`;
+  const target = phases.phases[targetIndex]!;
+
+  if (target.status === 'done' || target.status === 'skipped') {
+    return `Phase **${target.id}** is already ${target.status}.`;
+  }
+
+  const dependencyClosure = new Set<string>();
+  const phaseById = new Map(phases.phases.map((phase) => [phase.id, phase]));
+  const stack = [...target.dependsOn];
+  while (stack.length > 0) {
+    const depId = stack.pop()!;
+    if (dependencyClosure.has(depId)) continue;
+    dependencyClosure.add(depId);
+    const dep = phaseById.get(depId);
+    if (!dep) {
+      return `Cannot skip-to ${phaseId}: target has missing dependency '${depId}'.`;
+    }
+    for (const nestedDepId of dep.dependsOn) {
+      if (!dependencyClosure.has(nestedDepId)) stack.push(nestedDepId);
+    }
+  }
+
+  let updated = phases;
+  const skippedIds: string[] = [];
+  for (let i = 0; i < phases.phases.length; i++) {
+    const phase = phases.phases[i]!;
+    if (phase.id === target.id) continue;
+    const isTerminal = phase.status === 'done' || phase.status === 'skipped';
+    if (isTerminal) continue;
+    const shouldSkip = i < targetIndex || dependencyClosure.has(phase.id);
+    if (!shouldSkip) continue;
+
+    updated = updatePhaseStatus(updated, phase.id, 'skipped');
+    skippedIds.push(phase.id);
+  }
+
+  const selection = selectRunnablePhase(updated, target.id);
+  if (selection.error) return selection.error;
+  if (!selection.phase) return `Cannot skip-to ${phaseId}: target phase is not runnable.`;
+
+  writePhasesFile(phasesFilePath, updated);
+
+  if (skippedIds.length === 0) {
+    return `Skip-to ready for **${target.id}**. No additional phases were skipped.`;
+  }
+
+  return `Skip-to ready for **${target.id}**. Skipped ${skippedIds.length} phase(s): ${skippedIds.join(', ')}.`;
+}
+
 export const NO_PHASES_SENTINEL = 'No phases to run';
 
 export type PreparePlanRunResult =
@@ -650,6 +844,7 @@ const RUNNABLE_STATUSES = new Set(['APPROVED', 'IMPLEMENTING']);
 export async function preparePlanRun(
   planId: string,
   opts: HandlePlanCommandOpts,
+  targetPhaseId?: string,
 ): Promise<PreparePlanRunResult> {
   const plansDir = resolvePlansDir(opts);
   const found = await findPlanFile(plansDir, planId);
@@ -683,13 +878,25 @@ export async function preparePlanRun(
   const staleness = checkStaleness(phases, planContent);
   if (staleness.stale) return { error: staleness.message };
 
-  const nextPhase = getNextPhase(phases);
+  const validation = validatePhaseDependencies(phases);
+  if (validation.missing.length > 0 || validation.cycles.length > 0) {
+    return { error: buildDependencyValidationError('Cannot run phases because dependencies are invalid.', validation) };
+  }
+
+  const selection = selectRunnablePhase(phases, targetPhaseId);
+  if (selection.error) return { error: selection.error };
+  const nextPhase = selection.phase;
   // NOTE: The multi-phase loop in discord.ts depends on NO_PHASES_SENTINEL only here
   // (initial validation before the loop starts). The loop itself uses runNextPhase's
   // `nothing_to_run` discriminated union result — not this sentinel string. If this
   // error message is refactored, only the initial "already all done" detection breaks,
   // and the failure mode is benign (user sees an error instead of "all done").
-  if (!nextPhase) return { error: `${NO_PHASES_SENTINEL} — all done or dependencies unmet.` };
+  if (!nextPhase) {
+    if (targetPhaseId) {
+      return { error: `Target phase '${targetPhaseId}' is not runnable.` };
+    }
+    return { error: `${NO_PHASES_SENTINEL} — all done or dependencies unmet.` };
+  }
 
   return {
     phasesFilePath,

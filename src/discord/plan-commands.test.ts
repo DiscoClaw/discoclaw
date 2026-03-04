@@ -10,6 +10,7 @@ import {
   parsePlanFileHeader,
   toSlug,
   handlePlanSkip,
+  handlePlanSkipTo,
   preparePlanRun,
   updatePlanFileStatus,
   listPlanFiles,
@@ -123,6 +124,13 @@ describe('parsePlanCommand', () => {
     });
   });
 
+  it('parses phases with --regenerate and --keep-done flags', () => {
+    expect(parsePlanCommand('!plan phases --keep-done --regenerate plan-011')).toEqual({
+      action: 'phases',
+      args: '--keep-done --regenerate plan-011',
+    });
+  });
+
   it('parses run subcommand', () => {
     expect(parsePlanCommand('!plan run plan-011')).toEqual({
       action: 'run',
@@ -137,10 +145,24 @@ describe('parsePlanCommand', () => {
     });
   });
 
+  it('parses run-phase subcommand', () => {
+    expect(parsePlanCommand('!plan run-phase plan-011 phase-2')).toEqual({
+      action: 'run-phase',
+      args: 'plan-011 phase-2',
+    });
+  });
+
   it('parses skip subcommand', () => {
     expect(parsePlanCommand('!plan skip plan-011')).toEqual({
       action: 'skip',
       args: 'plan-011',
+    });
+  });
+
+  it('parses skip-to subcommand', () => {
+    expect(parsePlanCommand('!plan skip-to plan-011 phase-3')).toEqual({
+      action: 'skip-to',
+      args: 'plan-011 phase-3',
     });
   });
 
@@ -1296,11 +1318,204 @@ describe('handlePlanCommand', () => {
     expect(result2).toContain('Phases for plan-001');
   });
 
+  it('phases — rejects --keep-done without --regenerate', async () => {
+    const result = await handlePlanCommand(
+      { action: 'phases', args: '--keep-done plan-001' },
+      baseOpts(),
+    );
+    expect(result).toContain('--keep-done');
+    expect(result).toContain('--regenerate');
+  });
+
+  it('phases — supports --regenerate --keep-done in any order and reports summary', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test keep done',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const phasesJsonPath = path.join(plansDir, 'plan-001-phases.json');
+    let content = await fs.readFile(phasesPath, 'utf-8');
+    content = content.replace('**Status:** pending', '**Status:** done');
+    await fs.writeFile(phasesPath, content, 'utf-8');
+    const phasesJson = JSON.parse(await fs.readFile(phasesJsonPath, 'utf-8'));
+    phasesJson.phases[0].status = 'done';
+    phasesJson.phases[0].output = 'done';
+    await fs.writeFile(phasesJsonPath, JSON.stringify(phasesJson, null, 2) + '\n', 'utf-8');
+
+    const result = await handlePlanCommand(
+      { action: 'phases', args: '--keep-done --regenerate plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Resequenced with `--keep-done`');
+    expect(result).toContain('Kept done phases: phase-1');
+    expect(result).toContain('Dependency validation: OK');
+    expect(result).toContain('[x] **phase-1');
+  });
+
+  it('phases — reports dropped done phases and dependency outcomes after keep-done resequencing', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const originalPlan = [
+      '# Plan: Test keep done dependency drops',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), originalPlan);
+
+    await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const phasesJsonPath = path.join(plansDir, 'plan-001-phases.json');
+    let content = await fs.readFile(phasesPath, 'utf-8');
+    content = content.replace(/\*\*Status:\*\* pending/g, '**Status:** done');
+    await fs.writeFile(phasesPath, content, 'utf-8');
+    const phasesJson = JSON.parse(await fs.readFile(phasesJsonPath, 'utf-8'));
+    for (const phase of phasesJson.phases) {
+      phase.status = 'done';
+      phase.output = 'done';
+    }
+    await fs.writeFile(phasesJsonPath, JSON.stringify(phasesJson, null, 2) + '\n', 'utf-8');
+
+    const changedPlan = originalPlan.replace('add foo', 'rewrite foo internals');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), changedPlan, 'utf-8');
+
+    const result = await handlePlanCommand(
+      { action: 'phases', args: 'plan-001 --regenerate --keep-done' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Dropped done phases:');
+    expect(result).toContain('Resequencing dependency outcomes:');
+    expect(result).toContain('depends on non-terminal phase');
+  });
+
+  it('run-phase — returns usage for missing args', async () => {
+    const result = await handlePlanCommand(
+      { action: 'run-phase', args: '' },
+      baseOpts(),
+    );
+    expect(result).toContain('Usage: `!plan run-phase');
+  });
+
+  it('run-phase — validates targeted phase dependency readiness', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Targeted run',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '- `src/bar.ts` — add bar',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    const blocked = await handlePlanCommand(
+      { action: 'run-phase', args: 'plan-001 phase-2' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+    expect(blocked).toContain('cannot run because dependencies are not terminal');
+
+    const ready = await handlePlanCommand(
+      { action: 'run-phase', args: 'plan-001 phase-1' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+    expect(ready).toContain('Ready to run **phase-1**');
+  });
+
+  it('skip-to — returns usage for missing args', async () => {
+    const result = await handlePlanCommand(
+      { action: 'skip-to', args: '' },
+      baseOpts(),
+    );
+    expect(result).toContain('Usage: `!plan skip-to');
+  });
+
+  it('skip-to — delegates to skip-to helper logic', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Skip-to command',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'skip-to', args: 'plan-001 phase-2' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+    expect(result).toContain('Skip-to ready for **phase-2**');
+  });
+
   it('help — includes phases, run, skip, audit commands', async () => {
     const result = await handlePlanCommand({ action: 'help', args: '' }, baseOpts());
     expect(result).toContain('!plan phases');
     expect(result).toContain('!plan run');
+    expect(result).toContain('!plan run-phase');
     expect(result).toContain('!plan skip');
+    expect(result).toContain('!plan skip-to');
     expect(result).toContain('!plan audit');
   });
 
@@ -1485,6 +1700,96 @@ describe('handlePlanSkip', () => {
     expect(first).toContain('phase-1');
     expect(second).toContain('phase-2');
     expect(third).toBe('Nothing to skip.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handlePlanSkipTo
+// ---------------------------------------------------------------------------
+
+describe('handlePlanSkipTo', () => {
+  it('returns not found for unknown plan', async () => {
+    const tmpDir = await makeTmpDir();
+    await fs.mkdir(path.join(tmpDir, 'plans'), { recursive: true });
+
+    const result = await handlePlanSkipTo('plan-999', 'phase-1', baseOpts({ workspaceCwd: tmpDir }));
+    expect(result).toContain('Plan not found');
+  });
+
+  it('skips earlier non-terminal phases to make target phase runnable', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Skip-to test',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const result = await handlePlanSkipTo('plan-001', 'phase-2', baseOpts({ workspaceCwd: tmpDir }));
+    expect(result).toContain('Skip-to ready for **phase-2**');
+    expect(result).toContain('phase-1');
+
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const content = await fs.readFile(phasesPath, 'utf-8');
+    expect(content).toContain('## phase-1');
+    expect(content).toContain('**Status:** skipped');
+  });
+
+  it('fails when dependency graph is invalid', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Skip-to dependency validation',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const phasesJsonPath = path.join(plansDir, 'plan-001-phases.json');
+    let content = await fs.readFile(phasesPath, 'utf-8');
+    content = content.replace('**Depends on:** (none)', '**Depends on:** missing-phase');
+    await fs.writeFile(phasesPath, content, 'utf-8');
+    const phasesJson = JSON.parse(await fs.readFile(phasesJsonPath, 'utf-8'));
+    phasesJson.phases[0].dependsOn = ['missing-phase'];
+    await fs.writeFile(phasesJsonPath, JSON.stringify(phasesJson, null, 2) + '\n', 'utf-8');
+
+    const result = await handlePlanSkipTo('plan-001', 'phase-1', baseOpts({ workspaceCwd: tmpDir }));
+    expect(result).toContain('Cannot skip-to because phase dependencies are invalid.');
+    expect(result).toContain('Dependency validation: issues found.');
   });
 });
 
@@ -1678,6 +1983,139 @@ describe('preparePlanRun', () => {
       expect(result.nextPhase.status).toBe('pending');
       expect(result.nextPhase.kind).toBeDefined();
       expect(result.planFilePath).toContain('plan-001-test.md');
+    }
+  });
+
+  it('returns targeted phase when dependencies are already terminal', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Target phase success',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const phasesJsonPath = path.join(plansDir, 'plan-001-phases.json');
+    let content = await fs.readFile(phasesPath, 'utf-8');
+    content = content.replace('**Status:** pending', '**Status:** done');
+    await fs.writeFile(phasesPath, content, 'utf-8');
+    const phasesJson = JSON.parse(await fs.readFile(phasesJsonPath, 'utf-8'));
+    phasesJson.phases[0].status = 'done';
+    await fs.writeFile(phasesJsonPath, JSON.stringify(phasesJson, null, 2) + '\n', 'utf-8');
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }), 'phase-2');
+    expect('error' in result).toBe(false);
+    if (!('error' in result)) {
+      expect(result.nextPhase.id).toBe('phase-2');
+    }
+  });
+
+  it('returns dependency error when targeted phase deps are not terminal', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Target phase blocked',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }), 'phase-2');
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('cannot run because dependencies are not terminal');
+    }
+  });
+
+  it('returns error for unknown targeted phase', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Target phase missing',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }), 'phase-999');
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('does not exist');
+    }
+  });
+
+  it('returns dependency validation error when phases graph is invalid', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Invalid dependency graph',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    const phasesPath = path.join(plansDir, 'plan-001-phases.md');
+    const phasesJsonPath = path.join(plansDir, 'plan-001-phases.json');
+    let content = await fs.readFile(phasesPath, 'utf-8');
+    content = content.replace('**Depends on:** (none)', '**Depends on:** missing-phase');
+    await fs.writeFile(phasesPath, content, 'utf-8');
+    const phasesJson = JSON.parse(await fs.readFile(phasesJsonPath, 'utf-8'));
+    phasesJson.phases[0].dependsOn = ['missing-phase'];
+    await fs.writeFile(phasesJsonPath, JSON.stringify(phasesJson, null, 2) + '\n', 'utf-8');
+
+    const result = await preparePlanRun('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    expect('error' in result).toBe(true);
+    if ('error' in result) {
+      expect(result.error).toContain('Cannot run phases because dependencies are invalid.');
+      expect(result.error).toContain('Dependency validation: issues found.');
     }
   });
 
