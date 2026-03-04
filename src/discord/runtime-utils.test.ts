@@ -82,6 +82,24 @@ describe('collectRuntimeText', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.sessionKey).toBeUndefined();
   });
+
+  it('passes supervisor policy through to runtime.invoke()', async () => {
+    const { runtime, calls } = makeCaptureRuntime();
+
+    await collectRuntimeText(
+      runtime,
+      'hello',
+      'test-model',
+      '/tmp',
+      ['Read'],
+      [],
+      30000,
+      { supervisor: { profile: 'plan_phase', treatAbortedAsRetryable: true } },
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.supervisor).toEqual({ profile: 'plan_phase', treatAbortedAsRetryable: true });
+  });
 });
 
 describe('collectRuntimeText signal', () => {

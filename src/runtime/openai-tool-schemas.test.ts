@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildToolSchemas, OPENAI_TO_DISCO_NAME } from './openai-tool-schemas.js';
 
 const ALL_DISCO_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch'];
+const ALL_DISCO_TOOLS_WITH_HYBRID = [...ALL_DISCO_TOOLS, 'Pipeline', 'Step'];
 
 describe('buildToolSchemas', () => {
   it('returns schemas for all 8 tools when all are enabled', () => {
@@ -54,6 +55,58 @@ describe('buildToolSchemas', () => {
     expect(schemas).toHaveLength(2);
     expect(schemas.map((s) => s.function.name)).toEqual(['read_file', 'bash']);
   });
+
+  it('expands Pipeline into lifecycle function tools', () => {
+    const schemas = buildToolSchemas(['Read', 'Pipeline']);
+    expect(schemas.map((s) => s.function.name)).toEqual([
+      'read_file',
+      'pipeline.start',
+      'pipeline.status',
+      'pipeline.resume',
+      'pipeline.cancel',
+    ]);
+  });
+
+  it('deduplicates lifecycle functions when Pipeline and explicit names overlap', () => {
+    const schemas = buildToolSchemas(['Pipeline', 'pipeline.status']);
+    expect(schemas.map((s) => s.function.name)).toEqual([
+      'pipeline.start',
+      'pipeline.status',
+      'pipeline.resume',
+      'pipeline.cancel',
+    ]);
+  });
+
+  it('expands Step into step primitive function tools', () => {
+    const schemas = buildToolSchemas(['Read', 'Step']);
+    expect(schemas.map((s) => s.function.name)).toEqual([
+      'read_file',
+      'step.run',
+      'step.assert',
+      'step.retry',
+      'step.wait',
+    ]);
+  });
+
+  it('deduplicates step functions when Step and explicit names overlap', () => {
+    const schemas = buildToolSchemas(['Step', 'step.wait']);
+    expect(schemas.map((s) => s.function.name)).toEqual([
+      'step.run',
+      'step.assert',
+      'step.retry',
+      'step.wait',
+    ]);
+  });
+
+  it('ignores explicit pipeline.* labels without Pipeline category', () => {
+    const schemas = buildToolSchemas(['Read', 'pipeline.status']);
+    expect(schemas.map((s) => s.function.name)).toEqual(['read_file']);
+  });
+
+  it('ignores explicit step.* labels without Step category', () => {
+    const schemas = buildToolSchemas(['Read', 'step.wait']);
+    expect(schemas.map((s) => s.function.name)).toEqual(['read_file']);
+  });
 });
 
 describe('OPENAI_TO_DISCO_NAME', () => {
@@ -66,19 +119,27 @@ describe('OPENAI_TO_DISCO_NAME', () => {
     expect(OPENAI_TO_DISCO_NAME['bash']).toBe('Bash');
     expect(OPENAI_TO_DISCO_NAME['web_search']).toBe('WebSearch');
     expect(OPENAI_TO_DISCO_NAME['web_fetch']).toBe('WebFetch');
+    expect(OPENAI_TO_DISCO_NAME['pipeline.start']).toBe('Pipeline');
+    expect(OPENAI_TO_DISCO_NAME['pipeline.status']).toBe('Pipeline');
+    expect(OPENAI_TO_DISCO_NAME['pipeline.resume']).toBe('Pipeline');
+    expect(OPENAI_TO_DISCO_NAME['pipeline.cancel']).toBe('Pipeline');
+    expect(OPENAI_TO_DISCO_NAME['step.run']).toBe('Step');
+    expect(OPENAI_TO_DISCO_NAME['step.assert']).toBe('Step');
+    expect(OPENAI_TO_DISCO_NAME['step.retry']).toBe('Step');
+    expect(OPENAI_TO_DISCO_NAME['step.wait']).toBe('Step');
   });
 
   it('is consistent with schemas — every schema name has a reverse mapping', () => {
-    const schemas = buildToolSchemas(ALL_DISCO_TOOLS);
+    const schemas = buildToolSchemas(ALL_DISCO_TOOLS_WITH_HYBRID);
     for (const schema of schemas) {
       const openaiName = schema.function.name;
       expect(OPENAI_TO_DISCO_NAME[openaiName]).toBeDefined();
       // And the reverse mapping should be one of our disco tool names
-      expect(ALL_DISCO_TOOLS).toContain(OPENAI_TO_DISCO_NAME[openaiName]);
+      expect(ALL_DISCO_TOOLS_WITH_HYBRID).toContain(OPENAI_TO_DISCO_NAME[openaiName]);
     }
   });
 
-  it('has exactly 8 entries', () => {
-    expect(Object.keys(OPENAI_TO_DISCO_NAME)).toHaveLength(8);
+  it('has exactly 16 entries', () => {
+    expect(Object.keys(OPENAI_TO_DISCO_NAME)).toHaveLength(16);
   });
 });

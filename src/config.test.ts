@@ -111,6 +111,12 @@ describe('parseConfig', () => {
     expect(warnings.some((w) => w.includes('RUNTIME_TOOLS includes unknown tools'))).toBe(true);
   });
 
+  it('ignores explicit hybrid runtime tool labels and warns to use categories', () => {
+    const { config, warnings } = parseConfig(env({ RUNTIME_TOOLS: 'Read,pipeline.start,step.run' }));
+    expect(config.runtimeTools).toEqual(['Read']);
+    expect(warnings.some((w) => w.includes('explicit hybrid tool labels'))).toBe(true);
+  });
+
   it('warns when DISCORD_CHANNEL_IDS has no valid IDs', () => {
     const { warnings } = parseConfig(env({ DISCORD_CHANNEL_IDS: 'abc def' }));
     expect(warnings.some((w) => w.includes('DISCORD_CHANNEL_IDS was set but no valid IDs'))).toBe(true);
@@ -673,10 +679,10 @@ describe('parseConfig', () => {
     expect(config.appendSystemPrompt).toHaveLength(4000);
   });
 
-  // --- Default tools include Glob, Grep, Write ---
-  it('default RUNTIME_TOOLS includes Glob, Grep, Write', () => {
+  // --- Default tools include core + hybrid categories ---
+  it('default RUNTIME_TOOLS includes Pipeline and Step', () => {
     const { config } = parseConfig(env());
-    expect(config.runtimeTools).toEqual(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch']);
+    expect(config.runtimeTools).toEqual(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Pipeline', 'Step']);
   });
 
   // --- Reaction remove handler ---

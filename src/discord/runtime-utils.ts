@@ -1,4 +1,4 @@
-import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
+import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy } from '../runtime/types.js';
 import { LoopDetector, type LoopDetectorOpts } from '../runtime/loop-detector.js';
 
 /**
@@ -29,6 +29,7 @@ export async function collectRuntimeText(
     signal?: AbortSignal;
     onEvent?: (evt: EngineEvent) => void;
     loopDetect?: false | LoopDetectorOpts;
+    supervisor?: RuntimeSupervisorPolicy;
   },
 ): Promise<string> {
   // --- Loop detection setup ---
@@ -67,6 +68,7 @@ export async function collectRuntimeText(
       timeoutMs,
       ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
       ...(combinedSignal ? { signal: combinedSignal } : {}),
+      ...(opts?.supervisor ? { supervisor: opts.supervisor } : {}),
     })) {
       // Feed event to loop detector before any other processing.
       detector?.onEvent(evt);

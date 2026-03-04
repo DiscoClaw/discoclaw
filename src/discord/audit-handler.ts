@@ -8,7 +8,7 @@ import { appendAuditRound, buildAuditorPrompt } from './forge-commands.js';
 import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { collectRuntimeText } from './runtime-utils.js';
-import type { RuntimeAdapter } from '../runtime/types.js';
+import type { RuntimeAdapter, RuntimeSupervisorPolicy } from '../runtime/types.js';
 import { getSection, parsePlan } from './plan-parser.js';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,17 @@ type AuditConcern = {
   title: string;
   description: string;
   severity: 'high' | 'medium' | 'low';
+};
+
+const PLAN_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
+  profile: 'plan_phase',
+  treatAbortedAsRetryable: true,
+  maxSignatureRepeats: 3,
+  limits: {
+    maxCycles: 6,
+    maxRetries: 5,
+    maxEscalationLevel: 4,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -222,6 +233,7 @@ export async function handlePlanAudit(opts: PlanAuditOpts): Promise<PlanAuditRes
       auditorHasFileTools ? readOnlyTools : [],
       auditorHasFileTools ? [opts.cwd] : [],
       opts.timeoutMs,
+      { supervisor: PLAN_PHASE_SUPERVISOR_POLICY },
     );
   } catch (err) {
     return { ok: false, error: `Auditor agent failed: ${String(err instanceof Error ? err.message : err)}` };

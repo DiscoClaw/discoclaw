@@ -82,6 +82,18 @@ type CycleEvaluation = {
   lastError: string | null;
 };
 
+type InvocationSupervisorBehavior = {
+  enabled: boolean;
+  limits: GlobalSupervisorLimits;
+  treatAbortedAsRetryable: boolean;
+  maxSignatureRepeats: number;
+};
+
+type CycleClassifierOpts = {
+  treatAbortedAsRetryable: boolean;
+  signalAborted: boolean;
+};
+
 const DEFAULT_LIMITS: GlobalSupervisorLimits = {
   maxCycles: 3,
   maxRetries: 2,
@@ -108,6 +120,39 @@ function normalizeLimits(override?: Partial<GlobalSupervisorLimits>): GlobalSupe
     maxEscalationLevel: normalizePositiveInt(override?.maxEscalationLevel, DEFAULT_LIMITS.maxEscalationLevel),
     maxTotalEvents: Math.max(1, normalizePositiveInt(override?.maxTotalEvents, DEFAULT_LIMITS.maxTotalEvents)),
     maxWallTimeMs: normalizePositiveInt(override?.maxWallTimeMs, DEFAULT_LIMITS.maxWallTimeMs),
+  };
+}
+
+function resolveInvocationSupervisorBehavior(
+  params: RuntimeInvokeParams,
+  baseLimits: GlobalSupervisorLimits,
+): InvocationSupervisorBehavior {
+  const policy = params.supervisor;
+  const profile = policy?.profile ?? 'default';
+  const treatAbortedAsRetryable = policy?.treatAbortedAsRetryable ?? (profile === 'plan_phase');
+  const maxSignatureRepeatsRaw = policy?.maxSignatureRepeats ?? (profile === 'plan_phase' ? 3 : 1);
+  const maxSignatureRepeats = Math.max(1, Math.floor(Number.isFinite(maxSignatureRepeatsRaw) ? maxSignatureRepeatsRaw : 1));
+
+  // Plan-phase workers get a higher retry/escalation budget by default.
+  const profileLimits: Partial<GlobalSupervisorLimits> = profile === 'plan_phase'
+    ? {
+        maxCycles: Math.max(baseLimits.maxCycles, 6),
+        maxRetries: Math.max(baseLimits.maxRetries, 5),
+        maxEscalationLevel: Math.max(baseLimits.maxEscalationLevel, 4),
+      }
+    : {};
+
+  const limits = normalizeLimits({
+    ...baseLimits,
+    ...profileLimits,
+    ...(policy?.limits ?? {}),
+  });
+
+  return {
+    enabled: policy?.enabled !== false,
+    limits,
+    treatAbortedAsRetryable,
+    maxSignatureRepeats,
   };
 }
 
@@ -146,13 +191,13 @@ function normalizeErrorSignatureText(message: string): string {
     .slice(0, 240);
 }
 
-function classifyError(message: string | null): { kind: GlobalSupervisorFailureKind; retryable: boolean } {
+function classifyError(message: string | null, opts: CycleClassifierOpts): { kind: GlobalSupervisorFailureKind; retryable: boolean } {
   if (!message) {
     return { kind: 'missing_done', retryable: true };
   }
 
   if (/abort(ed)?/i.test(message)) {
-    return { kind: 'aborted', retryable: false };
+    return { kind: 'aborted', retryable: opts.treatAbortedAsRetryable && !opts.signalAborted };
   }
 
   if (HARD_ERROR_RE.test(message)) {
@@ -170,6 +215,7 @@ function evaluateCycle(
   sawDone: boolean,
   lastError: string | null,
   threw: boolean,
+  classifierOpts: CycleClassifierOpts,
   forcedFailureKind?: GlobalSupervisorFailureKind,
 ): CycleEvaluation {
   if (!forcedFailureKind && sawDone && !lastError && !threw) {
@@ -195,7 +241,10 @@ function evaluateCycle(
   if (threw) {
     const msg = lastError ?? 'unknown exception';
     const signature = `exception:${normalizeErrorSignatureText(msg)}`;
-    const retryable = !/abort(ed)?/i.test(msg) && !HARD_ERROR_RE.test(msg);
+    const isAborted = /abort(ed)?/i.test(msg);
+    const retryable = isAborted
+      ? classifierOpts.treatAbortedAsRetryable && !classifierOpts.signalAborted
+      : !HARD_ERROR_RE.test(msg);
     return {
       ok: false,
       failureKind: 'exception',
@@ -205,7 +254,7 @@ function evaluateCycle(
     };
   }
 
-  const detail = classifyError(lastError);
+  const detail = classifyError(lastError, classifierOpts);
   return {
     ok: false,
     failureKind: detail.kind,
@@ -269,7 +318,7 @@ export function withGlobalSupervisor(runtime: RuntimeAdapter, opts: GlobalSuperv
   const enabled = opts.enabled ?? isGlobalSupervisorEnabled(opts.env ?? process.env);
   if (!enabled) return runtime;
 
-  const limits = normalizeLimits(opts.limits);
+  const baseLimits = normalizeLimits(opts.limits);
   const now = opts.now ?? (() => Date.now());
   const sleep = opts.sleep ?? sleepNoop;
   const auditStream = opts.auditStream ?? 'stderr';
@@ -277,6 +326,15 @@ export function withGlobalSupervisor(runtime: RuntimeAdapter, opts: GlobalSuperv
   return {
     ...runtime,
     async *invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent> {
+      const behavior = resolveInvocationSupervisorBehavior(params, baseLimits);
+      if (!behavior.enabled) {
+        for await (const evt of runtime.invoke(params)) {
+          yield evt;
+        }
+        return;
+      }
+
+      const { limits, treatAbortedAsRetryable, maxSignatureRepeats } = behavior;
       const startedAt = now();
       let retriesUsed = 0;
       let escalationLevel = 0;
@@ -372,7 +430,14 @@ export function withGlobalSupervisor(runtime: RuntimeAdapter, opts: GlobalSuperv
           lastError = String(err);
         }
 
-        const evaluated = evaluateCycle(sawDone, lastError, threw, forcedFailureKind);
+        const signalAborted = currentParams.signal?.aborted === true;
+        const evaluated = evaluateCycle(
+          sawDone,
+          lastError,
+          threw,
+          { treatAbortedAsRetryable, signalAborted },
+          forcedFailureKind,
+        );
 
         yield createAuditEvent(
           {
@@ -423,7 +488,7 @@ export function withGlobalSupervisor(runtime: RuntimeAdapter, opts: GlobalSuperv
           bailReason = 'max_retries_exceeded';
         } else {
           const previousCount = failureSignatures.get(evaluated.signature) ?? 0;
-          if (previousCount > 0) {
+          if (previousCount >= maxSignatureRepeats) {
             bailReason = 'deterministic_retry_blocked';
           }
         }

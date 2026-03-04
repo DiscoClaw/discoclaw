@@ -680,6 +680,13 @@ describe('OpenAI-compat tool loop', () => {
       'read_file',
       { file_path: '/tmp/test.txt' },
       ['/tmp'],
+      undefined,
+      expect.objectContaining({
+        allowedToolNames: new Set(['read_file']),
+        runtimeId: 'openai',
+        adapterId: 'openai',
+        enableHybridPipeline: true,
+      }),
     );
 
     // First request has tools and stream:false
@@ -692,6 +699,98 @@ describe('OpenAI-compat tool loop', () => {
     expect(body2.messages).toHaveLength(3); // user + assistant(tool_calls) + tool
     expect(body2.messages[2].role).toBe('tool');
     expect(body2.messages[2].content).toBe('hello world');
+  });
+
+  it('expands Step category to step primitives in tool-loop mode', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(makeToolCallResponse([
+        { id: 'call_step', name: 'step.assert', arguments: JSON.stringify({ run_id: 'r1', expected_current_step: 0 }) },
+      ]))
+      .mockResolvedValueOnce(makeTextResponse('step asserted'));
+    globalThis.fetch = fetchMock;
+
+    vi.mocked(executeToolCall).mockResolvedValue({
+      result: JSON.stringify({ ok: true, operation: 'step.assert' }),
+      ok: true,
+    });
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+      enableTools: true,
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'assert current step',
+      model: '',
+      cwd: '/tmp',
+      tools: ['Step'],
+    }));
+
+    expect(events.find((e) => e.type === 'tool_start')).toMatchObject({
+      type: 'tool_start',
+      name: 'Step',
+    });
+    expect(events.find((e) => e.type === 'tool_end')).toMatchObject({
+      type: 'tool_end',
+      name: 'Step',
+      ok: true,
+    });
+
+    expect(executeToolCall).toHaveBeenCalledWith(
+      'step.assert',
+      { run_id: 'r1', expected_current_step: 0 },
+      ['/tmp'],
+      undefined,
+      expect.objectContaining({
+        allowedToolNames: new Set(['step.run', 'step.assert', 'step.retry', 'step.wait']),
+        runtimeId: 'openai',
+        adapterId: 'openai',
+        enableHybridPipeline: true,
+      }),
+    );
+  });
+
+  it('drops hybrid tools when enableHybridPipeline=false', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(makeToolCallResponse([
+        { id: 'call_read', name: 'read_file', arguments: JSON.stringify({ file_path: '/tmp/r.txt' }) },
+      ]))
+      .mockResolvedValueOnce(makeTextResponse('done'));
+    globalThis.fetch = fetchMock;
+
+    vi.mocked(executeToolCall).mockResolvedValue({ result: 'ok', ok: true });
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+      enableTools: true,
+      enableHybridPipeline: false,
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'read with step too',
+      model: '',
+      cwd: '/tmp',
+      tools: ['Read', 'Step'],
+    }));
+
+    expect(executeToolCall).toHaveBeenCalledWith(
+      'read_file',
+      { file_path: '/tmp/r.txt' },
+      ['/tmp'],
+      undefined,
+      expect.objectContaining({
+        allowedToolNames: new Set(['read_file']),
+        enableHybridPipeline: false,
+      }),
+    );
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const toolNames = (body.tools as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    expect(toolNames).toEqual(['read_file']);
   });
 
   it('multiple tool calls in one response', async () => {
@@ -846,7 +945,54 @@ describe('OpenAI-compat tool loop', () => {
       'read_file',
       { file_path: '/home/test.txt' },
       ['/home', '/extra'],
+      undefined,
+      expect.objectContaining({
+        allowedToolNames: new Set(['read_file']),
+        runtimeId: 'openai',
+        adapterId: 'openai',
+        enableHybridPipeline: true,
+      }),
     );
+  });
+
+  it('rejects a non-allowlisted tool call deterministically in tool-loop mode', async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeToolCallResponse([
+        { id: 'call_1', name: 'write_file', arguments: JSON.stringify({ file_path: '/tmp/x', content: 'x' }) },
+      ]))
+      .mockResolvedValueOnce(makeTextResponse('Recovered after tool rejection.'));
+
+    vi.mocked(executeToolCall).mockImplementation(async (name, _args, _roots, _log, opts) => {
+      if (!opts?.allowedToolNames?.has(name)) {
+        return { result: `Tool not allowlisted for this invocation: ${name}`, ok: false };
+      }
+      return { result: 'ok', ok: true };
+    });
+
+    const rt = createOpenAICompatRuntime({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+      enableTools: true,
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Try to write',
+      model: '',
+      cwd: '/tmp',
+      tools: ['Read'],
+    }));
+
+    const toolEnd = events.find((e) => e.type === 'tool_end');
+    expect(toolEnd).toMatchObject({
+      type: 'tool_end',
+      name: 'Write',
+      ok: false,
+    });
+    expect((toolEnd as { output?: string }).output).toContain('not allowlisted');
+
+    const final = events.find((e) => e.type === 'text_final');
+    expect(final).toMatchObject({ type: 'text_final', text: 'Recovered after tool rejection.' });
   });
 
   it('enableTools true but empty params.tools uses streaming path', async () => {

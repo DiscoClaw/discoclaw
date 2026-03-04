@@ -205,7 +205,7 @@ describe('probeWorkspacePermissions', () => {
 });
 
 describe('resolveTools', () => {
-  const envTools = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
+  const envTools = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Pipeline', 'Step'];
 
   it('returns env tools when permissions is null', () => {
     expect(resolveTools(null, envTools)).toBe(envTools);
@@ -225,12 +225,21 @@ describe('resolveTools', () => {
 
   it('returns correct tools for full tier', () => {
     expect(resolveTools({ tier: 'full' }, envTools)).toEqual(
-      ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+      ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Pipeline', 'Step'],
     );
   });
 
   it('uses custom tools array for custom tier', () => {
     const custom = ['Read', 'WebSearch'];
     expect(resolveTools({ tier: 'custom', tools: custom }, envTools)).toEqual(custom);
+  });
+
+  it('intersects tier tools with env allowlist', () => {
+    const restrictedEnv = ['Read', 'Pipeline'];
+    expect(resolveTools({ tier: 'full' }, restrictedEnv)).toEqual(['Read', 'Pipeline']);
+  });
+
+  it('intersects custom tools with env allowlist', () => {
+    expect(resolveTools({ tier: 'custom', tools: ['Read', 'Write'] }, ['Read'])).toEqual(['Read']);
   });
 });

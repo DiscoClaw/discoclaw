@@ -1133,6 +1133,30 @@ describe('executePhase', () => {
     expect(capturedSignal!.aborted).toBe(true);
   });
 
+  it('applies relaxed supervisor policy for phase-worker invocations', async () => {
+    let capturedSupervisor: unknown;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params) {
+        capturedSupervisor = params.supervisor;
+        yield { type: 'text_final', text: 'ok' };
+      },
+    };
+
+    await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(runtime));
+    expect(capturedSupervisor).toEqual({
+      profile: 'plan_phase',
+      treatAbortedAsRetryable: true,
+      maxSignatureRepeats: 3,
+      limits: {
+        maxCycles: 6,
+        maxRetries: 5,
+        maxEscalationLevel: 4,
+      },
+    });
+  });
+
   it('returns failed when signal is already aborted', async () => {
     const ac = new AbortController();
     ac.abort();
@@ -2372,6 +2396,62 @@ describe('runNextPhase audit fix loop', () => {
     expect(fixAgentTools).toContain('Edit');
     expect(fixAgentTools).toContain('Glob');
     expect(fixAgentTools).toContain('Grep');
+  });
+
+  it('uses relaxed supervisor policy for audit fix loop calls', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writeAuditPhases(phasesPath);
+
+    const capturedSupervisors: unknown[] = [];
+    let callCount = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params: any) {
+        callCount++;
+        capturedSupervisors.push(params?.supervisor);
+        if (callCount === 1) {
+          const text = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else if (callCount === 2) {
+          const text = 'Fixed.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        } else {
+          const text = 'No concerns. **Verdict:** Ready to approve.';
+          yield { type: 'text_delta', text };
+          yield { type: 'text_final', text };
+        }
+      },
+    };
+
+    const opts: PhaseExecutionOpts = {
+      runtime,
+      model: 'test',
+      projectCwd: projectDir,
+      addDirs: [],
+      timeoutMs: 5000,
+      workspaceCwd: wsDir,
+      maxAuditFixAttempts: 1,
+    };
+
+    await runNextPhase(phasesPath, planPath, opts, onProgress);
+    expect(capturedSupervisors.length).toBeGreaterThanOrEqual(3);
+    for (const policy of capturedSupervisors) {
+      expect(policy).toEqual({
+        profile: 'plan_phase',
+        treatAbortedAsRetryable: true,
+        maxSignatureRepeats: 3,
+        limits: {
+          maxCycles: 6,
+          maxRetries: 5,
+          maxEscalationLevel: 4,
+        },
+      });
+    }
   });
 
   it('re-audit runtime error consumes attempt and triggers rollback', async () => {

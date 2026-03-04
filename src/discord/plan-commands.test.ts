@@ -1370,7 +1370,7 @@ describe('handlePlanSkip', () => {
     expect(result).toContain('No phases file found');
   });
 
-  it('returns nothing to skip when no failed/in-progress phases', async () => {
+  it('skips next runnable pending phase when no failed/in-progress phases', async () => {
     const tmpDir = await makeTmpDir();
     const plansDir = path.join(tmpDir, 'plans');
     await fs.mkdir(plansDir, { recursive: true });
@@ -1398,7 +1398,8 @@ describe('handlePlanSkip', () => {
     );
 
     const result = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
-    expect(result).toBe('Nothing to skip.');
+    expect(result).toContain('Skipped');
+    expect(result).toContain('was pending');
   });
 
   it('skips a failed phase and writes to disk', async () => {
@@ -1447,6 +1448,43 @@ describe('handlePlanSkip', () => {
     // Verify the file was updated
     const updatedContent = await fs.readFile(phasesPath, 'utf-8');
     expect(updatedContent).toContain('**Status:** skipped');
+  });
+
+  it('skips pending phases in dependency order across repeated calls until exhausted', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const planContent = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-001',
+      '**Task:** ws-001',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '**Created:** 2026-02-12',
+      '',
+      '## Changes',
+      '',
+      '- `src/foo.ts` — add foo',
+      '- `src/bar.ts` — add bar',
+      '- `src/baz.ts` — add baz',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(plansDir, 'plan-001-test.md'), planContent);
+
+    await handlePlanCommand(
+      { action: 'phases', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const first = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    const second = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+    const third = await handlePlanSkip('plan-001', baseOpts({ workspaceCwd: tmpDir }));
+
+    expect(first).toContain('phase-1');
+    expect(second).toContain('phase-2');
+    expect(third).toBe('Nothing to skip.');
   });
 });
 

@@ -29,6 +29,42 @@ export type RuntimeCapability =
 
 export type RuntimeId = 'claude_code' | 'openai' | 'openrouter' | 'codex' | 'gemini' | 'other';
 
+export type RuntimeSupervisorLimitsOverride = {
+  maxCycles?: number;
+  maxRetries?: number;
+  maxEscalationLevel?: number;
+  maxTotalEvents?: number;
+  maxWallTimeMs?: number;
+};
+
+export type RuntimeSupervisorPolicy = {
+  /**
+   * Optional per-invocation policy profile used by runtime wrappers.
+   * `plan_phase` is intended for forge/plan worker invocations.
+   */
+  profile?: 'default' | 'plan_phase';
+  /**
+   * Optional per-invocation gate override.
+   * When false, wrappers should pass through directly for this invocation.
+   */
+  enabled?: boolean;
+  /**
+   * Optional override for treating aborted errors as retryable.
+   * Wrapper implementations should still bail immediately when caller signal
+   * is already aborted.
+   */
+  treatAbortedAsRetryable?: boolean;
+  /**
+   * Maximum repeated failures with the same normalized signature before
+   * deterministic retry blocking bails. Minimum effective value is 1.
+   */
+  maxSignatureRepeats?: number;
+  /**
+   * Optional per-invocation supervisor limit overrides.
+   */
+  limits?: RuntimeSupervisorLimitsOverride;
+};
+
 export type RuntimeInvokeParams = {
   prompt: string;
   systemPrompt?: string;
@@ -42,6 +78,7 @@ export type RuntimeInvokeParams = {
   maxTokens?: number;
   images?: ImageData[];
   signal?: AbortSignal;
+  supervisor?: RuntimeSupervisorPolicy;
 };
 
 export interface RuntimeAdapter {

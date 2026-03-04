@@ -206,6 +206,102 @@ describe('withGlobalSupervisor', () => {
     expect(bail?.cycle).toBe(1);
   });
 
+  it('allows per-invocation supervisor disable override', async () => {
+    let calls = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        calls += 1;
+        yield { type: 'text_final', text: 'direct' };
+        yield { type: 'done' };
+      },
+    };
+
+    const wrapped = withGlobalSupervisor(runtime, {
+      env: { [GLOBAL_SUPERVISOR_ENABLED_ENV]: '1' },
+    });
+
+    const events = await collectEvents(wrapped.invoke({
+      prompt: 'x',
+      model: 'm',
+      cwd: '/tmp',
+      supervisor: { enabled: false },
+    }));
+
+    expect(calls).toBe(1);
+    expect(extractAudit(events)).toHaveLength(0);
+    expect(events).toEqual([
+      { type: 'text_final', text: 'direct' },
+      { type: 'done' },
+    ]);
+  });
+
+  it('treats aborted failures as retryable for plan_phase profile', async () => {
+    let calls = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        calls += 1;
+        if (calls === 1) {
+          yield { type: 'error', message: 'aborted by caller' };
+          yield { type: 'done' };
+          return;
+        }
+        yield { type: 'text_final', text: 'success after abort retry' };
+        yield { type: 'done' };
+      },
+    };
+
+    const wrapped = withGlobalSupervisor(runtime, {
+      env: { [GLOBAL_SUPERVISOR_ENABLED_ENV]: '1' },
+    });
+
+    const events = await collectEvents(wrapped.invoke({
+      prompt: 'x',
+      model: 'm',
+      cwd: '/tmp',
+      supervisor: { profile: 'plan_phase' },
+    }));
+    const audit = extractAudit(events);
+
+    expect(calls).toBe(2);
+    expect(audit.some((a) => a['phase'] === 'decide' && a['decision'] === 'retry')).toBe(true);
+    expect(findBailError(events)).toBeNull();
+    expect(events.some((evt) => evt.type === 'text_final' && evt.text === 'success after abort retry')).toBe(true);
+  });
+
+  it('allows additional deterministic retries for plan_phase profile', async () => {
+    let calls = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        calls += 1;
+        yield { type: 'error', message: 'OpenAI API error: 429 overloaded' };
+        yield { type: 'done' };
+      },
+    };
+
+    const wrapped = withGlobalSupervisor(runtime, {
+      env: { [GLOBAL_SUPERVISOR_ENABLED_ENV]: '1' },
+      limits: { maxCycles: 10, maxRetries: 10 },
+    });
+
+    const events = await collectEvents(wrapped.invoke({
+      prompt: 'x',
+      model: 'm',
+      cwd: '/tmp',
+      supervisor: { profile: 'plan_phase' },
+    }));
+    const bailMsg = findBailError(events);
+    const bail = bailMsg ? parseGlobalSupervisorBail(bailMsg) : null;
+
+    expect(calls).toBe(4);
+    expect(bail?.reason).toBe('deterministic_retry_blocked');
+  });
+
   it('bails when max cycle limit is reached', async () => {
     let calls = 0;
     const messages = ['timeout alpha', 'timeout beta', 'timeout gamma'];

@@ -380,6 +380,32 @@ export async function resolveEffectiveTools(opts: {
     }
   }
 
+  if (opts.runtimeId && opts.runtimeId !== 'openai' && opts.runtimeId !== 'openrouter') {
+    const droppedHybrid = effectiveTools.filter((tool) =>
+      tool === 'Pipeline'
+      || tool === 'Step'
+      || tool.startsWith('pipeline.')
+      || tool.startsWith('step.'));
+    if (droppedHybrid.length > 0) {
+      effectiveTools = effectiveTools.filter((tool) =>
+        tool !== 'Pipeline'
+        && tool !== 'Step'
+        && !tool.startsWith('pipeline.')
+        && !tool.startsWith('step.'));
+      const note = `${opts.runtimeId} does not support hybrid tools: ${droppedHybrid.join(', ')}`;
+      runtimeCapabilityNote = runtimeCapabilityNote ? `${runtimeCapabilityNote}; ${note}` : note;
+      opts.log?.warn(
+        {
+          workspaceCwd: opts.workspaceCwd,
+          runtimeId: opts.runtimeId,
+          droppedTools: droppedHybrid,
+          supportedTools: effectiveTools,
+        },
+        'runtime filter dropped hybrid-only tools for non-openai runtime',
+      );
+    }
+  }
+
   // Audit: detect effective-tools changes between invocations.
   const fingerprint = effectiveTools.slice().sort().join(',');
   const prev = toolsFingerprintMap.get(opts.workspaceCwd);
