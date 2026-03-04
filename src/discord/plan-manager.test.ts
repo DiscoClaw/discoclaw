@@ -8,6 +8,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { EngineEvent } from '../runtime/types.js';
 
 import {
+  computeAuditConvergenceSignature,
   computePlanHash,
   extractFilePaths,
   groupFiles,
@@ -16,6 +17,9 @@ import {
   serializePhases,
   deserializePhases,
   getNextPhase,
+  selectRunnablePhase,
+  resequenceKeepingDone,
+  validatePhaseDependencies,
   updatePhaseStatus,
   checkStaleness,
   buildPhasePrompt,
@@ -151,6 +155,20 @@ describe('computePlanHash', () => {
 
   it('different input = different hash', () => {
     expect(computePlanHash('abc')).not.toBe(computePlanHash('def'));
+  });
+});
+
+describe('computeAuditConvergenceSignature', () => {
+  it('is stable for equivalent output and file sets', () => {
+    const sigA = computeAuditConvergenceSignature('A\n\nB', ['src/b.ts', 'src/a.ts']);
+    const sigB = computeAuditConvergenceSignature('A\n\nB', ['src/a.ts', 'src/b.ts', 'src/a.ts']);
+    expect(sigA).toBe(sigB);
+  });
+
+  it('changes when output changes', () => {
+    const sigA = computeAuditConvergenceSignature('Issue A', ['src/a.ts']);
+    const sigB = computeAuditConvergenceSignature('Issue B', ['src/a.ts']);
+    expect(sigA).not.toBe(sigB);
   });
 });
 
@@ -376,12 +394,14 @@ describe('decomposePlan', () => {
     }
   });
 
-  it('plan with no file paths → read, implement, audit phases', () => {
+  it('plan with no file paths → explicit analysis/manual fallback phases', () => {
     const planPath = 'workspace/plans/plan-010.md';
     const phases = decomposePlan(SAMPLE_PLAN_NO_CHANGES, 'plan-010', planPath);
     expect(phases.phases).toHaveLength(3);
     expect(phases.phases[0]!.kind).toBe('read');
-    expect(phases.phases[1]!.kind).toBe('implement');
+    expect(phases.phases[0]!.title.toLowerCase()).toContain('analyze');
+    expect(phases.phases[1]!.kind).toBe('read');
+    expect(phases.phases[1]!.title.toLowerCase()).toContain('manual');
     const auditPhase = phases.phases[2]!;
     expect(auditPhase.kind).toBe('audit');
     expect(auditPhase.dependsOn).toEqual(['phase-2']);
@@ -571,6 +591,25 @@ describe('serialization', () => {
     expect(deserialized.phases[0]!.modifiedFiles).toEqual(['src/foo.ts']);
   });
 
+  it('auditConvergence round-trips via markdown serialization', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    const auditPhase = phases.phases.find((p) => p.kind === 'audit');
+    expect(auditPhase).toBeTruthy();
+    if (!auditPhase) return;
+
+    auditPhase.auditConvergence = {
+      signature: 'deadbeefdeadbeef',
+      repeatCount: 2,
+      modifiedFiles: ['src/foo.ts'],
+      blockedAt: '2026-03-01T00:00:00.000Z',
+    };
+
+    const serialized = serializePhases(phases);
+    const deserialized = deserializePhases(serialized);
+    const roundTripAudit = deserialized.phases.find((p) => p.id === auditPhase.id);
+    expect(roundTripAudit?.auditConvergence).toEqual(auditPhase.auditConvergence);
+  });
+
   it('throws on malformed file', () => {
     expect(() => deserializePhases('garbage content')).toThrow();
   });
@@ -689,6 +728,202 @@ describe('getNextPhase', () => {
     ]);
     // skipped counts as met
     expect(getNextPhase(phases)?.id).toBe('phase-2');
+  });
+});
+
+describe('selectRunnablePhase', () => {
+  const makePhases = (): PlanPhases => ({
+    planId: 'plan-001',
+    planFile: 'test.md',
+    planContentHash: 'abc',
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+    phases: [
+      {
+        id: 'phase-1',
+        title: 'phase-1',
+        kind: 'implement',
+        description: '',
+        status: 'done',
+        dependsOn: [],
+        contextFiles: [],
+      },
+      {
+        id: 'phase-2',
+        title: 'phase-2',
+        kind: 'implement',
+        description: '',
+        status: 'pending',
+        dependsOn: ['phase-1'],
+        contextFiles: [],
+      },
+    ],
+  });
+
+  it('returns requested target phase when dependencies are terminal', () => {
+    const selected = selectRunnablePhase(makePhases(), 'phase-2');
+    expect(selected.error).toBeUndefined();
+    expect(selected.phase?.id).toBe('phase-2');
+  });
+
+  it('returns explicit dependency error for unrunnable target phase', () => {
+    const phases = makePhases();
+    phases.phases[0]!.status = 'pending';
+    const selected = selectRunnablePhase(phases, 'phase-2');
+    expect(selected.phase?.id).toBe('phase-2');
+    expect(selected.error).toContain('dependencies are not terminal');
+    expect(selected.error).toContain('phase-1');
+  });
+});
+
+describe('validatePhaseDependencies', () => {
+  it('reports missing dependencies', () => {
+    const phases: PlanPhases = {
+      planId: 'plan-001',
+      planFile: 'test.md',
+      planContentHash: 'abc',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'one',
+          kind: 'implement',
+          description: '',
+          status: 'pending',
+          dependsOn: ['missing-phase'],
+          contextFiles: [],
+        },
+      ],
+    };
+    const validation = validatePhaseDependencies(phases);
+    expect(validation.missing).toEqual(['phase-1 -> missing-phase']);
+    expect(validation.cycles).toEqual([]);
+  });
+
+  it('reports cycles', () => {
+    const phases: PlanPhases = {
+      planId: 'plan-001',
+      planFile: 'test.md',
+      planContentHash: 'abc',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'one',
+          kind: 'implement',
+          description: '',
+          status: 'pending',
+          dependsOn: ['phase-2'],
+          contextFiles: [],
+        },
+        {
+          id: 'phase-2',
+          title: 'two',
+          kind: 'implement',
+          description: '',
+          status: 'pending',
+          dependsOn: ['phase-1'],
+          contextFiles: [],
+        },
+      ],
+    };
+    const validation = validatePhaseDependencies(phases);
+    expect(validation.missing).toEqual([]);
+    expect(validation.cycles.some((c) => c.includes('phase-1 -> phase-2 -> phase-1'))).toBe(true);
+  });
+});
+
+describe('resequenceKeepingDone', () => {
+  it('--keep-done keeps unchanged done phases and drops changed/invalidated done phases', () => {
+    const previous: PlanPhases = {
+      planId: 'plan-001',
+      planFile: 'test.md',
+      planContentHash: 'aaa',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'Implement alpha.ts',
+          kind: 'implement',
+          description: 'alpha',
+          status: 'done',
+          dependsOn: [],
+          contextFiles: ['src/alpha.ts'],
+          output: 'done alpha',
+        },
+        {
+          id: 'phase-2',
+          title: 'Implement beta.ts',
+          kind: 'implement',
+          description: 'beta',
+          status: 'done',
+          dependsOn: ['phase-1'],
+          contextFiles: ['src/beta.ts'],
+          output: 'done beta',
+        },
+        {
+          id: 'phase-3',
+          title: 'Post-implementation audit',
+          kind: 'audit',
+          description: 'audit',
+          status: 'done',
+          dependsOn: ['phase-2'],
+          contextFiles: ['src/alpha.ts', 'src/beta.ts'],
+          output: 'done audit',
+        },
+      ],
+    };
+
+    const regenerated: PlanPhases = {
+      ...previous,
+      planContentHash: 'bbb',
+      phases: [
+        {
+          id: 'phase-10',
+          title: 'Implement alpha.ts',
+          kind: 'implement',
+          description: 'alpha',
+          status: 'pending',
+          dependsOn: [],
+          contextFiles: ['src/alpha.ts'],
+        },
+        {
+          id: 'phase-20',
+          title: 'Implement beta.ts',
+          kind: 'implement',
+          description: 'beta changed',
+          status: 'pending',
+          dependsOn: ['phase-10'],
+          contextFiles: ['src/beta.ts'],
+        },
+        {
+          id: 'phase-30',
+          title: 'Post-implementation audit',
+          kind: 'audit',
+          description: 'audit',
+          status: 'pending',
+          dependsOn: ['phase-20'],
+          contextFiles: ['src/alpha.ts', 'src/beta.ts'],
+        },
+      ],
+    };
+
+    const resequenced = resequenceKeepingDone(previous, regenerated);
+    expect(resequenced.keptDone).toEqual(['phase-10']);
+
+    const alpha = resequenced.phases.phases.find((p) => p.id === 'phase-10')!;
+    const beta = resequenced.phases.phases.find((p) => p.id === 'phase-20')!;
+    const audit = resequenced.phases.phases.find((p) => p.id === 'phase-30')!;
+    expect(alpha.status).toBe('done');
+    expect(beta.status).toBe('pending');
+    expect(audit.status).toBe('pending');
+
+    expect(resequenced.droppedDone.some((d) => d.phaseId === 'phase-2')).toBe(true);
+    expect(resequenced.droppedDone.some((d) => d.phaseId === 'phase-30')).toBe(true);
+    expect(resequenced.dependencyErrors.some((msg) => msg.includes('phase-30'))).toBe(true);
   });
 });
 
@@ -1347,6 +1582,49 @@ describe('runNextPhase', () => {
     expect(updated.phases[0]!.status).toBe('done');
   });
 
+  it('target phase run succeeds when dependencies are terminal', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    phases.phases[0]!.status = 'done';
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(
+      phasesPath,
+      planPath,
+      makeOpts(makeSuccessRuntime('target done')),
+      onProgress,
+      phases.phases[1]!.id,
+    );
+    expect(result.result).toBe('done');
+    if (result.result === 'done') {
+      expect(result.phase.id).toBe(phases.phases[1]!.id);
+    }
+  });
+
+  it('target phase run fails with explicit missing dependency message', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    phases.phases[1]!.dependsOn = ['phase-404'];
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(
+      phasesPath,
+      planPath,
+      makeOpts(makeSuccessRuntime('target done')),
+      onProgress,
+      phases.phases[1]!.id,
+    );
+    expect(result.result).toBe('retry_blocked');
+    if (result.result === 'retry_blocked') {
+      expect(result.message).toContain('missing dependencies');
+      expect(result.message).toContain('phase-404');
+    }
+  });
+
   it('emits a typed phase_start event before execution', async () => {
     const planPath = path.join(plansDir, 'plan-011-test.md');
     await fs.writeFile(planPath, SAMPLE_PLAN);
@@ -1521,6 +1799,61 @@ describe('runNextPhase', () => {
     // No git commit should be created for this phase
     const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
     expect(updated.phases[0]!.gitCommit).toBeUndefined();
+  });
+
+  it('repeated identical audit signatures across reruns trigger manual intervention guard', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+
+    const phases: PlanPhases = {
+      planId: 'plan-011',
+      planFile: 'workspace/plans/plan-011-test.md',
+      planContentHash: computePlanHash(SAMPLE_PLAN),
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'Implement src/discord/',
+          kind: 'implement',
+          description: 'Implement changes.',
+          status: 'done',
+          dependsOn: [],
+          contextFiles: ['src/foo.ts'],
+          output: 'Done.',
+        },
+        {
+          id: 'phase-2',
+          title: 'Post-implementation audit',
+          kind: 'audit',
+          description: 'Audit all changes against the plan specification.',
+          status: 'pending',
+          dependsOn: ['phase-1'],
+          contextFiles: ['src/foo.ts'],
+        },
+      ],
+    };
+    writePhasesFile(phasesPath, phases);
+
+    const auditOutput = '**Concern 1: Missing validation**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+    const opts = makeOpts(makeSuccessRuntime(auditOutput));
+    opts.maxAuditFixAttempts = 0;
+
+    const first = await runNextPhase(phasesPath, planPath, opts, onProgress);
+    expect(first.result).toBe('audit_failed');
+
+    const second = await runNextPhase(phasesPath, planPath, opts, onProgress);
+    expect(second.result).toBe('retry_blocked');
+    if (second.result === 'retry_blocked') {
+      expect(second.message).toContain('Manual intervention required');
+      expect(second.message).toContain('identical signature');
+    }
+
+    const updated = readPhasesFile(phasesPath);
+    const auditPhase = updated.phases.find((p) => p.id === 'phase-2')!;
+    expect(auditPhase.auditConvergence?.repeatCount).toBe(2);
+    expect(auditPhase.auditConvergence?.signature).toMatch(/^[0-9a-f]{16}$/);
   });
 });
 

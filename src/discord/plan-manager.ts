@@ -30,6 +30,13 @@ const PLAN_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
 export type PhaseKind = 'implement' | 'read' | 'audit';
 export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'failed' | 'skipped';
 
+export type AuditConvergenceState = {
+  signature: string;
+  repeatCount: number;
+  modifiedFiles: string[];
+  blockedAt?: string;
+};
+
 export type PlanPhase = {
   id: string;
   title: string;
@@ -44,6 +51,7 @@ export type PlanPhase = {
   gitCommit?: string;
   modifiedFiles?: string[];
   failureHashes?: Record<string, string>;
+  auditConvergence?: AuditConvergenceState;
 };
 
 export type PlanPhases = {
@@ -125,6 +133,7 @@ function isRolloutPathMissingError(error?: string): boolean {
 const VALID_STATUSES: Set<string> = new Set(['pending', 'in-progress', 'done', 'failed', 'skipped']);
 const VALID_KINDS: Set<string> = new Set(['implement', 'read', 'audit']);
 const PHASES_STATE_VERSION = 1;
+const AUDIT_CONVERGENCE_REPEAT_LIMIT = 2;
 
 /** Known workspace filenames that should be normalized to workspace/ prefix. */
 const KNOWN_WORKSPACE_FILES = new Set([
@@ -143,6 +152,17 @@ const PROJECT_DIRS: Record<string, string> = {
 
 export function computePlanHash(planContent: string): string {
   return createHash('sha256').update(planContent).digest('hex').slice(0, 16);
+}
+
+export function computeAuditConvergenceSignature(auditOutput: string, modifiedFiles: string[]): string {
+  const normalizedOutput = auditOutput
+    .replace(/\r\n/g, '\n')
+    .trim()
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n');
+  const normalizedFiles = [...new Set(modifiedFiles.map((f) => f.trim()).filter(Boolean))].sort();
+  const payload = `${normalizedOutput}\n---\n${normalizedFiles.join('\n')}`;
+  return createHash('sha256').update(payload).digest('hex').slice(0, 16);
 }
 
 export function extractFilePaths(changesSection: string): string[] {
@@ -379,30 +399,30 @@ export function decomposePlan(planContent: string, planId: string, planFile: str
   const phases: PlanPhase[] = [];
 
   if (filePaths.length === 0) {
-    // Minimal 2-phase set for plans without file paths
+    // Manual-analysis fallback for plans without explicit file targets.
     phases.push({
       id: 'phase-1',
-      title: 'Read and analyze plan',
+      title: 'Analyze plan scope',
       kind: 'read',
-      description: 'Read the plan file and produce analysis notes.',
+      description: 'Read the plan file and produce implementation analysis notes.',
       status: 'pending',
       dependsOn: [],
       contextFiles: [planFile],
     });
     phases.push({
       id: 'phase-2',
-      title: 'Implement plan',
-      kind: 'implement',
-      description: 'Execute the plan objectives.',
+      title: 'Manual implementation planning',
+      kind: 'read',
+      description: 'Identify concrete files and manual steps required before implementation can safely proceed.',
       status: 'pending',
       dependsOn: ['phase-1'],
       contextFiles: [planFile],
     });
     phases.push({
       id: 'phase-3',
-      title: 'Post-implementation audit',
+      title: 'Manual readiness audit',
       kind: 'audit',
-      description: 'Audit the implementation against the plan specification.',
+      description: 'Audit the analysis and manual execution plan against the specification.',
       status: 'pending',
       dependsOn: ['phase-2'],
       contextFiles: [planFile],
@@ -554,6 +574,9 @@ export function serializePhases(phases: PlanPhases): string {
     if (phase.failureHashes) {
       lines.push(`**Failure hashes:** ${JSON.stringify(phase.failureHashes)}`);
     }
+    if (phase.auditConvergence) {
+      lines.push(`**Audit convergence:** ${JSON.stringify(phase.auditConvergence)}`);
+    }
     lines.push('');
     lines.push(phase.description);
 
@@ -615,6 +638,7 @@ export function deserializePhases(content: string): PlanPhases {
     const commitMatch = section.match(/^\*\*Git commit:\*\*\s*(\S+)/m);
     const modifiedMatch = section.match(/^\*\*Modified files:\*\*\s*(.+)$/m);
     const failureHashesMatch = section.match(/^\*\*Failure hashes:\*\*\s*(.+)$/m);
+    const auditConvergenceMatch = section.match(/^\*\*Audit convergence:\*\*\s*(.+)$/m);
     const outputMatch = section.match(/^\*\*Output:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Error|Change spec):\*\*|\n---|\n$)/m);
     const errorMatch = section.match(/^\*\*Error:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Output|Change spec):\*\*|\n---|\n$)/m);
     const changeSpecMatch = section.match(/^\*\*Change spec:\*\*\n([\s\S]*?)(?=\n\*\*(?:Output|Error):\*\*|\n---|\n$)/m);
@@ -645,7 +669,7 @@ export function deserializePhases(content: string): PlanPhases {
     if (metadataEnd !== -1) {
       const afterMetadata = section.slice(metadataEnd + 2);
       // Description is everything until the first **field or ---
-      const descEnd = afterMetadata.search(/^\*\*(Change spec|Output|Error|Modified files|Failure hashes):\*\*/m);
+      const descEnd = afterMetadata.search(/^\*\*(Change spec|Output|Error|Modified files|Failure hashes|Audit convergence):\*\*/m);
       const dashEnd = afterMetadata.indexOf('\n---');
       const cutoff = descEnd >= 0 ? descEnd : (dashEnd >= 0 ? dashEnd : afterMetadata.length);
       description = afterMetadata.slice(0, cutoff).trim();
@@ -673,6 +697,17 @@ export function deserializePhases(content: string): PlanPhases {
         phase.failureHashes = JSON.parse(failureHashesMatch[1]!);
       } catch {
         throw new Error(`Malformed failureHashes in ${id}`);
+      }
+    }
+    if (auditConvergenceMatch) {
+      try {
+        phase.auditConvergence = asAuditConvergence(
+          JSON.parse(auditConvergenceMatch[1]!),
+          `auditConvergence in ${id}`,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Malformed auditConvergence in ${id}: ${msg}`);
       }
     }
 
@@ -717,6 +752,245 @@ export function getNextPhase(phases: PlanPhases): PlanPhase | null {
   }
 
   return null;
+}
+
+function isTerminalStatus(status: PhaseStatus): boolean {
+  return status === 'done' || status === 'skipped';
+}
+
+export function selectRunnablePhase(
+  phases: PlanPhases,
+  targetPhaseId?: string,
+): { phase: PlanPhase | null; error?: string } {
+  if (!targetPhaseId) {
+    return { phase: getNextPhase(phases) };
+  }
+
+  const target = phases.phases.find((p) => p.id === targetPhaseId);
+  if (!target) {
+    return { phase: null, error: `Target phase '${targetPhaseId}' does not exist.` };
+  }
+
+  if (target.status === 'done' || target.status === 'skipped') {
+    return { phase: target, error: `Target phase '${target.id}' is already ${target.status}.` };
+  }
+
+  const phaseById = new Map(phases.phases.map((p) => [p.id, p]));
+  const missingDeps = target.dependsOn.filter((depId) => !phaseById.has(depId));
+  if (missingDeps.length > 0) {
+    return {
+      phase: target,
+      error: `Target phase '${target.id}' has missing dependencies: ${missingDeps.join(', ')}.`,
+    };
+  }
+
+  const unmetDeps = target.dependsOn
+    .map((depId) => phaseById.get(depId)!)
+    .filter((dep) => !isTerminalStatus(dep.status));
+  if (unmetDeps.length > 0) {
+    const detail = unmetDeps.map((dep) => `${dep.id} (${dep.status})`).join(', ');
+    return {
+      phase: target,
+      error: `Target phase '${target.id}' cannot run because dependencies are not terminal: ${detail}.`,
+    };
+  }
+
+  return { phase: target };
+}
+
+export function validatePhaseDependencies(phases: PlanPhases): { missing: string[]; cycles: string[] } {
+  const phaseById = new Map(phases.phases.map((phase) => [phase.id, phase]));
+
+  const missing: string[] = [];
+  const missingSeen = new Set<string>();
+  for (const phase of phases.phases) {
+    for (const depId of phase.dependsOn) {
+      if (phaseById.has(depId)) continue;
+      const issue = `${phase.id} -> ${depId}`;
+      if (missingSeen.has(issue)) continue;
+      missingSeen.add(issue);
+      missing.push(issue);
+    }
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const stack: string[] = [];
+  const cycleSeen = new Set<string>();
+  const cycles: string[] = [];
+
+  const dfs = (phaseId: string): void => {
+    visiting.add(phaseId);
+    stack.push(phaseId);
+
+    const phase = phaseById.get(phaseId);
+    if (phase) {
+      for (const depId of phase.dependsOn) {
+        if (!phaseById.has(depId)) continue;
+        if (visited.has(depId)) continue;
+        if (visiting.has(depId)) {
+          const cycleStart = stack.indexOf(depId);
+          if (cycleStart >= 0) {
+            const cycle = [...stack.slice(cycleStart), depId].join(' -> ');
+            if (!cycleSeen.has(cycle)) {
+              cycleSeen.add(cycle);
+              cycles.push(cycle);
+            }
+          }
+          continue;
+        }
+        dfs(depId);
+      }
+    }
+
+    stack.pop();
+    visiting.delete(phaseId);
+    visited.add(phaseId);
+  };
+
+  for (const phase of phases.phases) {
+    if (!visited.has(phase.id)) dfs(phase.id);
+  }
+
+  return { missing, cycles };
+}
+
+function phaseSemanticSignature(phase: PlanPhase): string {
+  const normalizedContext = [...phase.contextFiles].sort();
+  return JSON.stringify({
+    title: phase.title.trim(),
+    kind: phase.kind,
+    description: phase.description.trim(),
+    contextFiles: normalizedContext,
+    changeSpec: phase.changeSpec?.trim() ?? '',
+  });
+}
+
+function clonePlanPhase(phase: PlanPhase): PlanPhase {
+  return {
+    ...phase,
+    dependsOn: [...phase.dependsOn],
+    contextFiles: [...phase.contextFiles],
+    modifiedFiles: phase.modifiedFiles ? [...phase.modifiedFiles] : undefined,
+    failureHashes: phase.failureHashes ? { ...phase.failureHashes } : undefined,
+    auditConvergence: phase.auditConvergence
+      ? {
+          ...phase.auditConvergence,
+          modifiedFiles: [...phase.auditConvergence.modifiedFiles],
+        }
+      : undefined,
+  };
+}
+
+export function resequenceKeepingDone(
+  previous: PlanPhases,
+  regenerated: PlanPhases,
+): {
+  phases: PlanPhases;
+  keptDone: string[];
+  droppedDone: Array<{ phaseId: string; reason: string }>;
+  dependencyErrors: string[];
+} {
+  const resequenced: PlanPhases = {
+    ...regenerated,
+    phases: regenerated.phases.map(clonePlanPhase),
+  };
+
+  const doneBySignature = new Map<string, PlanPhase[]>();
+  const previousDone = previous.phases.filter((phase) => phase.status === 'done');
+  for (const donePhase of previousDone) {
+    const key = phaseSemanticSignature(donePhase);
+    const bucket = doneBySignature.get(key) ?? [];
+    bucket.push(donePhase);
+    doneBySignature.set(key, bucket);
+  }
+
+  const unmatchedDone = new Set(previousDone.map((phase) => phase.id));
+  const keptDone: string[] = [];
+  const droppedDone: Array<{ phaseId: string; reason: string }> = [];
+  const droppedDoneSeen = new Set<string>();
+
+  for (const phase of resequenced.phases) {
+    const key = phaseSemanticSignature(phase);
+    const bucket = doneBySignature.get(key);
+    const matched = bucket?.shift();
+    if (!matched) continue;
+
+    unmatchedDone.delete(matched.id);
+    phase.status = 'done';
+    phase.output = matched.output;
+    phase.error = undefined;
+    phase.gitCommit = matched.gitCommit;
+    phase.modifiedFiles = matched.modifiedFiles ? [...matched.modifiedFiles] : undefined;
+    phase.failureHashes = matched.failureHashes ? { ...matched.failureHashes } : undefined;
+    phase.auditConvergence = matched.auditConvergence
+      ? {
+          ...matched.auditConvergence,
+          modifiedFiles: [...matched.auditConvergence.modifiedFiles],
+        }
+      : undefined;
+    keptDone.push(phase.id);
+  }
+
+  for (const oldDoneId of unmatchedDone) {
+    droppedDone.push({
+      phaseId: oldDoneId,
+      reason: 'done phase was removed or changed during resequencing',
+    });
+  }
+
+  const phaseById = new Map(resequenced.phases.map((phase) => [phase.id, phase]));
+  const dependencyErrors: string[] = [];
+  for (const phase of resequenced.phases) {
+    if (phase.status !== 'done') continue;
+    for (const depId of phase.dependsOn) {
+      const dep = phaseById.get(depId);
+      if (!dep) {
+        const msg = `${phase.id} depends on missing phase '${depId}'`;
+        dependencyErrors.push(msg);
+        if (!droppedDoneSeen.has(phase.id)) {
+          droppedDoneSeen.add(phase.id);
+          droppedDone.push({ phaseId: phase.id, reason: msg });
+        }
+        phase.status = 'pending';
+        phase.output = undefined;
+        phase.error = undefined;
+        phase.gitCommit = undefined;
+        phase.modifiedFiles = undefined;
+        phase.failureHashes = undefined;
+        phase.auditConvergence = undefined;
+        break;
+      }
+      if (!isTerminalStatus(dep.status)) {
+        const msg = `${phase.id} depends on non-terminal phase '${depId}' (${dep.status})`;
+        dependencyErrors.push(msg);
+        if (!droppedDoneSeen.has(phase.id)) {
+          droppedDoneSeen.add(phase.id);
+          droppedDone.push({ phaseId: phase.id, reason: msg });
+        }
+        phase.status = 'pending';
+        phase.output = undefined;
+        phase.error = undefined;
+        phase.gitCommit = undefined;
+        phase.modifiedFiles = undefined;
+        phase.failureHashes = undefined;
+        phase.auditConvergence = undefined;
+        break;
+      }
+    }
+  }
+
+  const finalKeptDone = keptDone.filter((phaseId) => {
+    const phase = resequenced.phases.find((p) => p.id === phaseId);
+    return phase?.status === 'done';
+  });
+
+  return {
+    phases: resequenced,
+    keptDone: finalKeptDone,
+    droppedDone,
+    dependencyErrors: [...new Set(dependencyErrors)],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1263,6 +1537,35 @@ function asFailureHashes(value: unknown, field: string): Record<string, string> 
   return out;
 }
 
+function asAuditConvergence(value: unknown, field: string): AuditConvergenceState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Malformed phases json: ${field} must be an object`);
+  }
+  const obj = value as Record<string, unknown>;
+  const modifiedFilesRaw = obj.modifiedFiles;
+  if (!Array.isArray(modifiedFilesRaw) || modifiedFilesRaw.some((v) => typeof v !== 'string')) {
+    throw new Error(`Malformed phases json: ${field}.modifiedFiles must be string[]`);
+  }
+  const repeatCountRaw = obj.repeatCount;
+  if (typeof repeatCountRaw !== 'number' || !Number.isFinite(repeatCountRaw) || repeatCountRaw < 1) {
+    throw new Error(`Malformed phases json: ${field}.repeatCount must be a positive number`);
+  }
+  const signatureRaw = obj.signature;
+  if (typeof signatureRaw !== 'string') {
+    throw new Error(`Malformed phases json: ${field}.signature must be a string`);
+  }
+
+  const parsed: AuditConvergenceState = {
+    signature: signatureRaw,
+    repeatCount: repeatCountRaw,
+    modifiedFiles: [...modifiedFilesRaw],
+  };
+  if (typeof obj.blockedAt === 'string') {
+    parsed.blockedAt = obj.blockedAt;
+  }
+  return parsed;
+}
+
 function deserializePhasesStateJson(raw: string): PlanPhases {
   let parsed: unknown;
   try {
@@ -1313,6 +1616,9 @@ function deserializePhasesStateJson(raw: string): PlanPhases {
     }
     if (p.failureHashes !== undefined) {
       phase.failureHashes = asFailureHashes(p.failureHashes, `phases[${idx}].failureHashes`);
+    }
+    if (p.auditConvergence !== undefined) {
+      phase.auditConvergence = asAuditConvergence(p.auditConvergence, `phases[${idx}].auditConvergence`);
     }
     return phase;
   });
@@ -1440,6 +1746,7 @@ export async function runNextPhase(
   planFilePath: string,
   opts: PhaseExecutionOpts,
   onProgress: (msg: string) => Promise<void>,
+  targetPhaseId?: string,
 ): Promise<RunPhaseResult> {
   // 1. Read and deserialize phases file
   let allPhases: PlanPhases;
@@ -1462,8 +1769,16 @@ export async function runNextPhase(
     return { result: 'stale', message: staleness.message };
   }
 
-  // 3. Get next phase
-  const phase = getNextPhase(allPhases);
+  // 3. Select runnable phase (optionally targeted)
+  const selected = selectRunnablePhase(allPhases, targetPhaseId);
+  if (selected.error) {
+    if (selected.phase) {
+      return { result: 'retry_blocked', phase: selected.phase, message: selected.error };
+    }
+    return { result: 'corrupt', message: selected.error };
+  }
+
+  const phase = selected.phase;
   if (!phase) {
     return { result: 'nothing_to_run' };
   }
@@ -1738,6 +2053,38 @@ export async function runNextPhase(
     }
   }
 
+  let auditConvergence = phase.auditConvergence
+    ? {
+        ...phase.auditConvergence,
+        modifiedFiles: [...phase.auditConvergence.modifiedFiles],
+      }
+    : undefined;
+  let convergenceGuardMessage: string | undefined;
+  if (phase.kind === 'audit') {
+    if (result.status === 'audit_failed') {
+      const signature = computeAuditConvergenceSignature(result.output, modifiedFiles);
+      const repeatCount = auditConvergence?.signature === signature
+        ? auditConvergence.repeatCount + 1
+        : 1;
+      auditConvergence = {
+        signature,
+        repeatCount,
+        modifiedFiles: [...modifiedFiles],
+        blockedAt: repeatCount >= AUDIT_CONVERGENCE_REPEAT_LIMIT
+          ? new Date().toISOString()
+          : undefined,
+      };
+      if (repeatCount >= AUDIT_CONVERGENCE_REPEAT_LIMIT) {
+        convergenceGuardMessage =
+          `Manual intervention required: audit failure repeated with identical signature (${signature}) ` +
+          `${repeatCount} times. Update implementation manually, then resume from phase ${phase.id} ` +
+          'or regenerate phases.';
+      }
+    } else {
+      auditConvergence = undefined;
+    }
+  }
+
   // 11. Write done/failed status to disk
   const diskStatus = result.status === 'audit_failed' ? 'failed' : result.status;
   const diskError = result.status === 'done' ? undefined : result.error;
@@ -1751,6 +2098,7 @@ export async function runNextPhase(
         ...p,
         modifiedFiles: modifiedFiles.length > 0 ? modifiedFiles : undefined,
         failureHashes,
+        auditConvergence: p.kind === 'audit' ? auditConvergence : undefined,
       };
     }),
   };
@@ -1813,6 +2161,9 @@ export async function runNextPhase(
     const nextPhase = upcoming ? { id: upcoming.id, title: upcoming.title } : undefined;
     return { result: 'done', phase: updatedPhase, output: result.output, nextPhase };
   } else if (result.status === 'audit_failed') {
+    if (convergenceGuardMessage) {
+      return { result: 'retry_blocked', phase: updatedPhase, message: convergenceGuardMessage };
+    }
     return { result: 'audit_failed', phase: updatedPhase, output: result.output, verdict: result.verdict, fixAttemptsUsed };
   } else {
     return { result: 'failed', phase: updatedPhase, output: result.output, error: result.error ?? 'Unknown error' };
