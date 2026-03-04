@@ -522,6 +522,7 @@ const claudeDebugFile = cfg.claudeDebugFile ?? null;
 const strictMcpConfig = cfg.strictMcpConfig;
 const sessionScanning = cfg.sessionScanning;
 const toolAwareStreaming = cfg.toolAwareStreaming;
+const streamPreviewMode = cfg.streamPreviewRaw ? 'raw' : 'compact';
 const multiTurn = cfg.multiTurn;
 const multiTurnHangTimeoutMs = cfg.multiTurnHangTimeoutMs;
 const multiTurnIdleTimeoutMs = cfg.multiTurnIdleTimeoutMs;
@@ -1051,6 +1052,7 @@ const botParams = {
   existingCronsId: isSnowflake(cronForum ?? '') ? cronForum : undefined,
   existingTasksId: isSnowflake(tasksForum) ? tasksForum : undefined,
   toolAwareStreaming,
+  streamPreviewMode,
   streamStallWarningMs,
   actionFollowupDepth,
   reactionHandlerEnabled,
