@@ -69,11 +69,11 @@ export function isForgeInChannel(channelId: string): boolean {
 // Running plan IDs — tracks which plans have active phase runs.
 // ---------------------------------------------------------------------------
 
-const _runningPlanIds = new Set<string>();
+const _runningPlanIds = new Map<string, string>();
 
-/** Mark a plan as having an active phase run. */
-export function addRunningPlan(planId: string): void {
-  _runningPlanIds.add(planId);
+/** Mark a plan as having an active phase run, associated with a channel/thread. */
+export function addRunningPlan(planId: string, channelId: string): void {
+  _runningPlanIds.set(planId, channelId);
 }
 
 /** Remove a plan from the active runs set. */
@@ -88,7 +88,20 @@ export function isPlanRunning(planId: string): boolean {
 
 /** Get all currently running plan IDs (snapshot). */
 export function getRunningPlanIds(): ReadonlySet<string> {
-  return _runningPlanIds;
+  return new Set(_runningPlanIds.keys());
+}
+
+/**
+ * Check whether a forge or plan run is active in the given channel.
+ * Returns true if a forge is active in the channel (via isForgeInChannel)
+ * OR any running plan in the Map is mapped to that channel.
+ */
+export function isRunActiveInChannel(channelId: string): boolean {
+  if (isForgeInChannel(channelId)) return true;
+  for (const ch of _runningPlanIds.values()) {
+    if (ch === channelId) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +117,7 @@ export function getRunningPlanIds(): ReadonlySet<string> {
  */
 export function getForgeStatusSummary(): string {
   const planRunsSuffix = _runningPlanIds.size > 0
-    ? ` Plan runs active: ${[..._runningPlanIds].join(', ')}.`
+    ? ` Plan runs active: ${[..._runningPlanIds.keys()].join(', ')}.`
     : '';
   if (_activeOrchestrator?.isRunning) {
     const activeId = _activeOrchestrator.activePlanId;

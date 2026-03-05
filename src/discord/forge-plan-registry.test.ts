@@ -11,6 +11,7 @@ import {
   isPlanRunning,
   getRunningPlanIds,
   getForgeStatusSummary,
+  isRunActiveInChannel,
   _resetForTest,
 } from './forge-plan-registry.js';
 
@@ -165,14 +166,14 @@ describe('running plan IDs', () => {
   });
 
   it('add and check', () => {
-    addRunningPlan('plan-001');
+    addRunningPlan('plan-001', 'ch-1');
     expect(isPlanRunning('plan-001')).toBe(true);
     expect(isPlanRunning('plan-002')).toBe(false);
     expect(getRunningPlanIds().size).toBe(1);
   });
 
   it('remove', () => {
-    addRunningPlan('plan-001');
+    addRunningPlan('plan-001', 'ch-1');
     removeRunningPlan('plan-001');
     expect(isPlanRunning('plan-001')).toBe(false);
     expect(getRunningPlanIds().size).toBe(0);
@@ -184,8 +185,8 @@ describe('running plan IDs', () => {
   });
 
   it('tracks multiple plans', () => {
-    addRunningPlan('plan-001');
-    addRunningPlan('plan-002');
+    addRunningPlan('plan-001', 'ch-1');
+    addRunningPlan('plan-002', 'ch-2');
     expect(isPlanRunning('plan-001')).toBe(true);
     expect(isPlanRunning('plan-002')).toBe(true);
     expect(getRunningPlanIds().size).toBe(2);
@@ -196,8 +197,8 @@ describe('running plan IDs', () => {
   });
 
   it('duplicate add is idempotent', () => {
-    addRunningPlan('plan-001');
-    addRunningPlan('plan-001');
+    addRunningPlan('plan-001', 'ch-1');
+    addRunningPlan('plan-001', 'ch-1');
     expect(getRunningPlanIds().size).toBe(1);
   });
 });
@@ -222,8 +223,8 @@ describe('getForgeStatusSummary', () => {
   });
 
   it('reports plan runs when no forge is running', () => {
-    addRunningPlan('plan-042');
-    addRunningPlan('plan-305');
+    addRunningPlan('plan-042', 'ch-1');
+    addRunningPlan('plan-305', 'ch-2');
     const summary = getForgeStatusSummary();
     expect(summary).toContain('No forge is currently running.');
     expect(summary).toContain('plan-042');
@@ -232,7 +233,7 @@ describe('getForgeStatusSummary', () => {
 
   it('reports both forge and plan runs when both are active', () => {
     setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-007' } as any);
-    addRunningPlan('plan-099');
+    addRunningPlan('plan-099', 'ch-1');
     const summary = getForgeStatusSummary();
     expect(summary).toContain('Forge is running: plan-007.');
     expect(summary).toContain('plan-099');
@@ -245,13 +246,49 @@ describe('getForgeStatusSummary', () => {
 });
 
 // ---------------------------------------------------------------------------
+// isRunActiveInChannel
+// ---------------------------------------------------------------------------
+
+describe('isRunActiveInChannel', () => {
+  it('returns false when nothing is active', () => {
+    expect(isRunActiveInChannel('ch-1')).toBe(false);
+  });
+
+  it('returns true when a forge is active in the channel', () => {
+    setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-001' } as any, 'ch-1');
+    expect(isRunActiveInChannel('ch-1')).toBe(true);
+    expect(isRunActiveInChannel('ch-2')).toBe(false);
+  });
+
+  it('returns true when a plan run is active in the channel', () => {
+    addRunningPlan('plan-001', 'ch-1');
+    expect(isRunActiveInChannel('ch-1')).toBe(true);
+    expect(isRunActiveInChannel('ch-2')).toBe(false);
+  });
+
+  it('returns true when both forge and plan run are in the channel', () => {
+    setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-001' } as any, 'ch-1');
+    addRunningPlan('plan-002', 'ch-1');
+    expect(isRunActiveInChannel('ch-1')).toBe(true);
+  });
+
+  it('returns true for channel with plan run even if forge is in different channel', () => {
+    setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-001' } as any, 'ch-1');
+    addRunningPlan('plan-002', 'ch-2');
+    expect(isRunActiveInChannel('ch-1')).toBe(true);
+    expect(isRunActiveInChannel('ch-2')).toBe(true);
+    expect(isRunActiveInChannel('ch-3')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Reset
 // ---------------------------------------------------------------------------
 
 describe('_resetForTest', () => {
   it('clears all state', async () => {
     setActiveOrchestrator({ activePlanId: 'plan-001', isRunning: true } as any, 'channel-789');
-    addRunningPlan('plan-002');
+    addRunningPlan('plan-002', 'ch-1');
 
     // Acquire a lock and don't release — reset should clear the chain
     await acquireWriterLock();

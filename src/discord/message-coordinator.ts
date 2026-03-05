@@ -1502,7 +1502,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   return;
                 }
 
-                addRunningPlan(planId);
+                addRunningPlan(planId, msg.channelId);
                 try { // outer try: guarantees addRunningPlan cleanup
 
                   // Acquire lock for initial validation only
