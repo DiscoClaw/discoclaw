@@ -47,6 +47,7 @@ import type { MemoryContext } from './discord/actions-memory.js';
 import type { ImagegenContext } from './discord/actions-imagegen.js';
 import type { SpawnContext } from './discord/actions-spawn.js';
 import { cancelAll as cancelAllSpawns } from './discord/spawn-registry.js';
+import { tryAbortAll } from './discord/abort-registry.js';
 import { VoiceConnectionManager } from './voice/connection-manager.js';
 import { AudioPipelineManager } from './voice/audio-pipeline.js';
 import { VoicePresenceHandler } from './voice/presence-handler.js';
@@ -212,7 +213,14 @@ const memorySamplerInterval = setInterval(() => {
   memorySampler.sample();
 }, 30_000);
 memorySamplerInterval.unref?.();
+let shutdownStarted = false;
 const shutdown = async () => {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+
+  // Abort all active stream consumers so they stop spawning new pool processes.
+  tryAbortAll();
+
   // Write default shutdown context (skip if !restart already wrote a richer one).
   try {
     await writeShutdownContext(
