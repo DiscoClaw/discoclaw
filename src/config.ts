@@ -216,6 +216,7 @@ export type DiscoclawConfig = {
   streamStallWarningMs: number;
   maxConcurrentInvocations: number;
   debugRuntime: boolean;
+  debugStreamPreviewLines: boolean;
 
   healthCommandsEnabled: boolean;
   healthVerboseAllowlist: Set<string>;
@@ -861,6 +862,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       streamStallWarningMs: parseNonNegativeInt(env, 'DISCOCLAW_STREAM_STALL_WARNING_MS', 300000),
       maxConcurrentInvocations: parseNonNegativeInt(env, 'DISCOCLAW_MAX_CONCURRENT_INVOCATIONS', 0),
       debugRuntime: parseBoolean(env, 'DISCOCLAW_DEBUG_RUNTIME', false),
+      debugStreamPreviewLines: parseBoolean(env, 'DISCOCLAW_DEBUG_STREAM_PREVIEW_LINES', false),
 
       healthCommandsEnabled: parseBoolean(env, 'DISCOCLAW_HEALTH_COMMANDS_ENABLED', true),
       healthVerboseAllowlist,

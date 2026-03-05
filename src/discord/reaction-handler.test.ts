@@ -1553,6 +1553,36 @@ describe('streaming behavior', () => {
     expect(allEditContents.some((c: string) => c.includes('Finding: readFile finished.'))).toBe(true);
   });
 
+  it('keeps preview_debug visible in debug mode without requiring force-allow fallback', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'codex',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_delta', text: 'native reasoning stream\n' };
+        yield { type: 'preview_debug', source: 'codex', phase: 'started', itemType: 'reasoning' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime, debugStreamPreviewLines: true });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: 'reaction',
+        eventType: 'preview_debug',
+        allow: true,
+        effectiveAllow: true,
+        forceAllowPreviewDebug: false,
+        suppressionReason: 'guaranteed_signal',
+      }),
+      'discord:preview-line',
+    );
+  });
+
   it('redacts structured runtime payload fragments from streaming preview text', async () => {
     const runtime: RuntimeAdapter = {
       id: 'claude_code',
@@ -1658,15 +1688,10 @@ describe('streaming behavior', () => {
     expect(allEdits).not.toContain('flags');
   });
 
-  it('waits for pending keepalive streaming edits before finalizing', async () => {
+  it('times out hung keepalive streaming edits and still finalizes', async () => {
     vi.useFakeTimers();
     try {
       const unblockRuntime = (() => {
-        let resolve!: () => void;
-        const promise = new Promise<void>((r) => { resolve = r; });
-        return { promise, resolve };
-      })();
-      const unblockFirstStallEdit = (() => {
         let resolve!: () => void;
         const promise = new Promise<void>((r) => { resolve = r; });
         return { promise, resolve };
@@ -1693,7 +1718,7 @@ describe('streaming behavior', () => {
         edit: vi.fn().mockImplementation(async () => {
           stallEditCalls++;
           if (stallEditCalls === 1) {
-            await unblockFirstStallEdit.promise;
+            await new Promise<void>(() => {});
           }
         }),
         delete: vi.fn().mockResolvedValue(undefined),
@@ -1726,13 +1751,17 @@ describe('streaming behavior', () => {
         ),
       ).toBe(false);
 
-      unblockFirstStallEdit.resolve();
+      await vi.advanceTimersByTimeAsync(4100);
       await pending;
       expect(
         replyObj.edit.mock.calls.some((call: any[]) =>
           String(call?.[0]?.content ?? '').includes('Final answer'),
         ),
       ).toBe(true);
+      expect(params.log?.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ flow: 'reaction', timeoutMs: 4_000 }),
+        'discord:stream edit timeout',
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1773,8 +1802,8 @@ describe('streaming behavior', () => {
       const replyObj = reaction.message._replyObj;
       const allEditContents = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? ''));
       const combined = allEditContents.join('\n');
-      expect(combined).toContain('Stream may be stalled');
-      expect(combined).toContain('Still running');
+      expect(combined).toContain('Runtime heartbeat');
+      expect(combined).toContain('Still active');
 
       unblockRuntime.resolve();
       await pending;

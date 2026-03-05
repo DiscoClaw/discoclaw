@@ -318,6 +318,33 @@ describe('createStreamingProgress', () => {
     ctrl.dispose();
   });
 
+  it('keeps guaranteed preview_debug visible even after runtime signal budget is exhausted', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase start', { force: true });
+    for (let i = 1; i <= 14; i++) {
+      ctrl.onEvent({
+        type: 'log_line',
+        stream: 'stdout',
+        line: `signal-${i.toString().padStart(2, '0')}`,
+      } as EngineEvent);
+    }
+    ctrl.onEvent({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'started',
+      itemType: 'reasoning',
+      status: 'in_progress',
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const allEdits = message.edits.join('\n');
+    expect(allEdits).toContain(RUNTIME_SIGNAL_SUPPRESSED_LINE);
+    expect(allEdits).toContain('Hypothesis: reasoning in progress');
+    ctrl.dispose();
+  });
+
   it('resets runtime signal suppression budget at phase boundaries', async () => {
     const message = makeMessage();
     const ctrl = createStreamingProgress(message, 0);
@@ -418,7 +445,7 @@ describe('createStreamingProgress', () => {
     ctrl.dispose();
   });
 
-  it('keeps reasoning preview_debug fallback-only while text deltas are active', async () => {
+  it('keeps reasoning preview_debug visible while text deltas are active', async () => {
     const message = makeMessage();
     const ctrl = createStreamingProgress(message, 0, { useNativeTextFallback: true });
 
@@ -434,7 +461,7 @@ describe('createStreamingProgress', () => {
     await vi.advanceTimersByTimeAsync(1300);
 
     const latest = message.edits[message.edits.length - 1] ?? '';
-    expect(latest).not.toContain('Hypothesis: reasoning in progress');
+    expect(latest).toContain('Hypothesis: reasoning in progress');
     ctrl.dispose();
   });
 

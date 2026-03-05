@@ -916,6 +916,16 @@ describe('parseConfig', () => {
     expect(config.streamPreviewRaw).toBe(true);
   });
 
+  it('defaults debugStreamPreviewLines to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.debugStreamPreviewLines).toBe(false);
+  });
+
+  it('parses DISCOCLAW_DEBUG_STREAM_PREVIEW_LINES=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_DEBUG_STREAM_PREVIEW_LINES: '1' }));
+    expect(config.debugStreamPreviewLines).toBe(true);
+  });
+
   // --- Stream stall detection ---
   it('defaults streamStallTimeoutMs to 600000', () => {
     const { config } = parseConfig(env());

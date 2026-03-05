@@ -95,8 +95,8 @@ If the supervisor bails, it emits a structured error handoff:
 | `CODEX_MODEL` | `gpt-5.3-codex` | Codex model ID |
 | `CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX` | `false` | Skip Codex safety checks |
 | `CODEX_DISABLE_SESSIONS` | `false` | Disable Codex session persistence |
-| `DISCOCLAW_CODEX_VERBOSE_PREVIEW` | `false` | Emit richer reasoning/command preview lines |
-| `DISCOCLAW_CODEX_ITEM_TYPE_DEBUG` | `false` | Emit structured `item.started`/`item.completed` item-type debug events in preview |
+| `DISCOCLAW_CODEX_VERBOSE_PREVIEW` | `false` | Emit richer reasoning/command preview lines (also forces `model_reasoning_summary="auto"` for Codex runs) |
+| `DISCOCLAW_CODEX_ITEM_TYPE_DEBUG` | `false` | Emit structured `item.started`/`item.completed` item-type debug events in preview (also forces `model_reasoning_summary="auto"` for Codex runs) |
 
 ## Memory
 

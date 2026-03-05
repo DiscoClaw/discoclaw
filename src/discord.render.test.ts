@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   renderDiscordTail,
   renderActivityTail,
@@ -12,6 +12,16 @@ import {
 } from './discord.js';
 
 const ZWS = '\u200b';
+const STREAM_SANITIZE_FLAG = 'DISCOCLAW_DISABLE_STREAM_SANITIZATION';
+const priorStreamSanitizeFlag = process.env[STREAM_SANITIZE_FLAG];
+
+afterEach(() => {
+  if (priorStreamSanitizeFlag === undefined) {
+    delete process.env[STREAM_SANITIZE_FLAG];
+  } else {
+    process.env[STREAM_SANITIZE_FLAG] = priorStreamSanitizeFlag;
+  }
+});
 
 /** Extract the content lines between the opening and closing fences (for renderDiscordTail). */
 function contentLines(rendered: string): string[] {
@@ -747,6 +757,12 @@ describe('stripActionTags', () => {
     expect(result).not.toContain('discord-action');
     expect(result).not.toContain('taskCl');
     expect(result).toContain('Done closing task');
+  });
+
+  it('returns raw text unchanged when stream sanitization is disabled', () => {
+    process.env[STREAM_SANITIZE_FLAG] = '1';
+    const input = 'Done <discord-action>{"type":"taskClose"}</discord-action>';
+    expect(stripActionTags(input)).toBe(input);
   });
 });
 

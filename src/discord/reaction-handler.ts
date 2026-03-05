@@ -31,6 +31,22 @@ import {
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 const STREAM_STALL_PROGRESS_UPDATE_MS = 20_000;
+const STREAMING_EDIT_TIMEOUT_MS = 4_000;
+const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
+const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 30_000;
+
+async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const completed = await Promise.race<boolean>([
+    // Swallow edit errors in-stream; callers handle timeout-only behavior.
+    editOp.then(() => true, () => true),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return completed;
+}
 
 export type ReactionMode = 'add' | 'remove';
 
@@ -524,10 +540,13 @@ function createReactionHandler(
           let statusTick = 1;
           const t0 = Date.now();
           const previewMode = params.streamPreviewMode ?? 'compact';
+          const debugStreamPreviewLines = Boolean(params.debugStreamPreviewLines);
           metrics.recordInvokeStart('reaction');
           params.log?.info({ flow: 'reaction', sessionKey }, 'obs.invoke.start');
           let invokeError: string | null = null;
           let lastEditAt = 0;
+          let streamEditTimeoutStreak = 0;
+          let streamEditCooldownUntil = 0;
           const minEditIntervalMs = 1250;
           const runtimeSignalBudget = new RuntimeSignalBudgetTracker({
             useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
@@ -539,6 +558,7 @@ function createReactionHandler(
             if (isShuttingDown()) return;
             const currentReply = reply;
             const now = Date.now();
+            if (!force && now < streamEditCooldownUntil) return;
             if (!force && now - lastEditAt < minEditIntervalMs) return;
             lastEditAt = now;
             const out = selectStreamingOutput({
@@ -552,7 +572,33 @@ function createReactionHandler(
               .catch(() => undefined)
               .then(async () => {
                 try {
-                  await currentReply.edit({ content: out, allowedMentions: NO_MENTIONS });
+                  const completed = await waitForEditOrTimeout(
+                    currentReply.edit({ content: out, allowedMentions: NO_MENTIONS }),
+                    STREAMING_EDIT_TIMEOUT_MS,
+                  );
+                  if (!completed) {
+                    streamEditTimeoutStreak += 1;
+                    if (streamEditTimeoutStreak >= STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD) {
+                      streamEditCooldownUntil = Date.now() + STREAMING_EDIT_TIMEOUT_COOLDOWN_MS;
+                      params.log?.warn(
+                        {
+                          flow: 'reaction',
+                          sessionKey,
+                          timeoutMs: STREAMING_EDIT_TIMEOUT_MS,
+                          timeoutStreak: streamEditTimeoutStreak,
+                          cooldownMs: STREAMING_EDIT_TIMEOUT_COOLDOWN_MS,
+                        },
+                        'discord:stream edit cooldown active',
+                      );
+                    }
+                    params.log?.warn(
+                      { flow: 'reaction', sessionKey, timeoutMs: STREAMING_EDIT_TIMEOUT_MS },
+                      'discord:stream edit timeout',
+                    );
+                  } else if (streamEditTimeoutStreak > 0 || streamEditCooldownUntil > 0) {
+                    streamEditTimeoutStreak = 0;
+                    streamEditCooldownUntil = 0;
+                  }
                 } catch {
                   // Ignore Discord edit errors during streaming.
                 }
@@ -562,9 +608,35 @@ function createReactionHandler(
 
           const appendRuntimeSignal = async (evt: EngineEvent) => {
             const line = adaptRuntimeEventText(evt, { mode: previewMode });
-            if (!line) return;
+            if (!line) {
+              if (debugStreamPreviewLines) {
+                params.log?.info(
+                  { flow: 'reaction', sessionKey, eventType: evt.type, dropped: true, droppedReason: 'adapter_suppressed' },
+                  'discord:preview-line',
+                );
+              }
+              return;
+            }
             const budgetResult = runtimeSignalBudget.consume(evt);
-            if (!budgetResult.allow) {
+            const forceAllowPreviewDebug = debugStreamPreviewLines && evt.type === 'preview_debug' && !budgetResult.allow;
+            const allowLine = budgetResult.allow || forceAllowPreviewDebug;
+            if (debugStreamPreviewLines) {
+              params.log?.info(
+                {
+                  flow: 'reaction',
+                  sessionKey,
+                  eventType: evt.type,
+                  allow: budgetResult.allow,
+                  effectiveAllow: allowLine,
+                  forceAllowPreviewDebug,
+                  appendSuppression: budgetResult.appendSuppression,
+                  suppressionReason: budgetResult.reason,
+                  line: line.length > 500 ? `${line.slice(0, 499)}…` : line,
+                },
+                'discord:preview-line',
+              );
+            }
+            if (!allowLine) {
               if (budgetResult.appendSuppression) {
                 deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + RUNTIME_SIGNAL_SUPPRESSED_LINE + '\n';
                 await maybeEdit(false);
@@ -575,25 +647,39 @@ function createReactionHandler(
             await maybeEdit(false);
           };
 
-          // Stream stall warning state.
+          // Stream heartbeat state for long quiet periods.
           let lastEventAt = Date.now();
           let activeToolCount = 0;
           let stallWarned = false;
           let lastStallProgressAt = 0;
+          const formatRuntimeHeartbeatLine = (stallSeconds: number, first: boolean): string => {
+            const context = activeToolCount > 0
+              ? `${activeToolCount} tool ${activeToolCount === 1 ? 'step' : 'steps'} in flight`
+              : 'awaiting runtime output';
+            const prefix = first ? 'Runtime heartbeat' : 'Still active';
+            return `\n*${prefix} (${stallSeconds}s since last event; ${context}).*`;
+          };
 
           const keepalive = setInterval(() => {
-            // Stall warning: append to deltaText when events stop arriving.
             if (params.streamStallWarningMs > 0) {
               const stallElapsed = Date.now() - lastEventAt;
-              if (stallElapsed > params.streamStallWarningMs && activeToolCount === 0) {
+              if (stallElapsed > params.streamStallWarningMs) {
                 const stallSeconds = Math.round(stallElapsed / 1000);
                 if (!stallWarned) {
                   stallWarned = true;
                   lastStallProgressAt = Date.now();
-                  deltaText += (deltaText ? '\n' : '') + `\n*Stream may be stalled (${stallSeconds}s no activity)...*`;
+                  deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, true);
+                  params.log?.info(
+                    { flow: 'reaction', sessionKey, stallSeconds, activeToolCount },
+                    'discord:stream heartbeat',
+                  );
                 } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
                   lastStallProgressAt = Date.now();
-                  deltaText += (deltaText ? '\n' : '') + `\n*Still running (${stallSeconds}s no activity)...*`;
+                  deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, false);
+                  params.log?.info(
+                    { flow: 'reaction', sessionKey, stallSeconds, activeToolCount },
+                    'discord:stream heartbeat',
+                  );
                 }
               }
             }

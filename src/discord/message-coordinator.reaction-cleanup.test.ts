@@ -11,9 +11,9 @@ vi.mock('../workspace-bootstrap.js', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeRuntime(events: EngineEvent[]) {
+function makeRuntime(events: EngineEvent[], runtimeId = 'test') {
   return {
-    id: 'test',
+    id: runtimeId,
     capabilities: {},
     async *invoke(): AsyncIterable<EngineEvent> {
       for (const evt of events) yield evt;
@@ -21,7 +21,7 @@ function makeRuntime(events: EngineEvent[]) {
   };
 }
 
-function makeParams(runtime: any) {
+function makeParams(runtime: any, overrides: Record<string, unknown> = {}) {
   return {
     allowUserIds: new Set(['user-1']),
     allowBotIds: new Set<string>(),
@@ -78,6 +78,7 @@ function makeParams(runtime: any) {
       recordActionResult: vi.fn(),
     },
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    ...overrides,
   } as any;
 }
 
@@ -243,4 +244,108 @@ describe('🛑 reaction cleanup', () => {
     expect(reactIdx).toBeGreaterThanOrEqual(0);
     expect(removeIdx).toBeGreaterThan(reactIdx);
   });
+
+  it('logs guaranteed preview_debug and native-fallback suppression reasons in message-coordinator stream path', async () => {
+    const { reply } = makeReplyMock();
+    const msg = makeMessage(reply);
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: 'native reasoning stream\n' },
+      { type: 'preview_debug', source: 'codex', phase: 'started', itemType: 'reasoning', itemId: 'reason-1' },
+      { type: 'log_line', stream: 'stderr', line: 'hidden while native stream active' },
+      { type: 'text_final', text: 'Done.' },
+      { type: 'done' },
+    ], 'codex');
+
+    const params = makeParams(runtime, { debugStreamPreviewLines: true });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(params.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: 'message',
+        eventType: 'preview_debug',
+        allow: true,
+        effectiveAllow: true,
+        forceAllowPreviewDebug: false,
+        suppressionReason: 'guaranteed_signal',
+      }),
+      'discord:preview-line',
+    );
+    expect(params.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: 'message',
+        eventType: 'log_line',
+        allow: false,
+        effectiveAllow: false,
+        suppressionReason: 'native_fallback_active',
+      }),
+      'discord:preview-line',
+    );
+  });
+
+  it('does not block runtime invoke on initial thinking-frame edit latency', async () => {
+    let resolveFirstEdit!: () => void;
+    let firstEdit = true;
+    const { reply } = makeReplyMock();
+    reply.edit = vi.fn(() => {
+      if (firstEdit) {
+        firstEdit = false;
+        return new Promise<void>((resolve) => { resolveFirstEdit = resolve; });
+      }
+      return Promise.resolve();
+    });
+
+    let invokeStarted = false;
+    const runtime = {
+      id: 'test',
+      capabilities: {},
+      async *invoke(): AsyncIterable<EngineEvent> {
+        invokeStarted = true;
+        yield { type: 'done' };
+      },
+    };
+
+    const msg = makeMessage(reply);
+    const params = makeParams(runtime);
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    const handlerPromise = handler(msg as any);
+    await vi.waitFor(() => expect(reply.edit).toHaveBeenCalled());
+    await vi.waitFor(() => expect(invokeStarted).toBe(true));
+
+    resolveFirstEdit();
+    await handlerPromise;
+  });
+
+  it('recovers when a streaming edit hangs and still renders final output', async () => {
+    let editCalls = 0;
+    const { reply } = makeReplyMock();
+    reply.edit = vi.fn(() => {
+      editCalls++;
+      if (editCalls === 1) return new Promise<void>(() => {});
+      return Promise.resolve();
+    });
+
+    const runtime = makeRuntime([
+      { type: 'text_final', text: 'Done after timeout.' },
+      { type: 'done' },
+    ]);
+
+    const msg = makeMessage(reply);
+    const params = makeParams(runtime);
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    const allEditContents = reply.edit.mock.calls.map((c: any[]) => String(c?.[0]?.content ?? ''));
+    expect(allEditContents.some((content: string) => content.includes('Done after timeout.'))).toBe(true);
+    expect(params.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ flow: 'message', timeoutMs: 4_000 }),
+      'discord:stream edit timeout',
+    );
+  }, 15_000);
 });
