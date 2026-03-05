@@ -204,6 +204,10 @@ export function createCodexStrategy(
         args.push('-c', 'model_reasoning_summary="auto"');
       }
 
+      if (params.thinkingEffort && params.thinkingEffort !== 'none') {
+        args.push('-c', `model_reasoning_effort="${params.thinkingEffort}"`);
+      }
+
       // When session tracking is active, use --json so we can capture the thread_id
       // from the `thread.started` event.
       if (wantSession) {

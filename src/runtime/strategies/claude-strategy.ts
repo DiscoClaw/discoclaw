@@ -111,6 +111,10 @@ export const claudeStrategy: CliAdapterStrategy = {
       args.push('--verbose');
     }
 
+    if (params.thinkingEffort && params.thinkingEffort !== 'none') {
+      args.push('--effort', params.thinkingEffort);
+    }
+
     if (params.sessionId) {
       args.push('--session-id', params.sessionId);
     }
