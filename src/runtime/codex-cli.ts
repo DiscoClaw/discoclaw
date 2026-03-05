@@ -17,6 +17,7 @@ export type CodexCliRuntimeOpts = {
   disableSessions?: boolean;
   verbosePreview?: boolean;
   itemTypeDebug?: boolean;
+  appendSystemPrompt?: string;
   log?: { debug(...args: unknown[]): void; info?(...args: unknown[]): void };
 };
 
@@ -28,6 +29,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     binary: opts.codexBin,
     dangerouslySkipPermissions: opts.dangerouslyBypassApprovalsAndSandbox,
     disableSessions: opts.disableSessions,
+    appendSystemPrompt: opts.appendSystemPrompt,
     log: opts.log,
   });
 }

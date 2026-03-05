@@ -793,6 +793,7 @@ const codexRuntimeRaw = createCodexCliRuntime({
   disableSessions: cfg.codexDisableSessions,
   verbosePreview: cfg.codexVerbosePreview,
   itemTypeDebug: cfg.codexItemTypeDebug,
+  appendSystemPrompt,
   log,
 });
 registerRuntime('codex', codexRuntimeRaw);
