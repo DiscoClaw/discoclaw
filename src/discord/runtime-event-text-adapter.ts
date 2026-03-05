@@ -32,6 +32,27 @@ function hasMeaningfulRuntimeLine(text: string): boolean {
   return text.replace(/\\n/g, '').trim().length > 0;
 }
 
+function formatThinkingTail(text: string, maxChars: number): string | null {
+  if (isStreamingSanitizationDisabled()) {
+    return `Reasoning: ${text}`;
+  }
+
+  const clean = stripActionTags(text)
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+
+  const lines = clean.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return null;
+
+  const tail = lines.slice(-4);
+  const formatted = tail.map((l, i) => {
+    const prefix = i === 0 ? 'Reasoning: ' : '';
+    return truncatePreviewLine(`${prefix}${l.trim()}`, maxChars);
+  });
+
+  return formatted.join('\n');
+}
+
 /**
  * Detect structured JSON-like payloads embedded in runtime logs so internals
  * do not leak into user-facing Discord progress text.
@@ -113,6 +134,15 @@ export function adaptRuntimeEventText(
       const line = sanitizeRuntimeLine(evt.line, maxChars);
       if (!line || !hasMeaningfulRuntimeLine(line)) return null;
       if (!isStreamingSanitizationDisabled() && hasStructuredPayloadFragment(line)) {
+        const jsonMatch = line.match(/[{[]\s*"[^"]+"\s*:/);
+        if (jsonMatch) {
+          const prefix = line.slice(0, jsonMatch.index).trim();
+          if (prefix.length >= 4) {
+            return evt.stream === 'stderr'
+              ? `Warning: ${prefix}`
+              : `Update: ${prefix}`;
+          }
+        }
         return evt.stream === 'stderr'
           ? 'Runtime warning (details omitted).'
           : 'Runtime update (details omitted).';
@@ -121,11 +151,8 @@ export function adaptRuntimeEventText(
         ? `Warning: ${line}`
         : `Update: ${line}`;
     }
-    case 'thinking_delta': {
-      const snippet = sanitizeRuntimeLine(evt.text, maxChars);
-      if (!snippet || !hasMeaningfulRuntimeLine(snippet)) return null;
-      return `Reasoning: ${snippet}`;
-    }
+    case 'thinking_delta':
+      return formatThinkingTail(evt.text, maxChars);
     case 'usage':
       return formatRuntimeUsageLine(evt, mode);
     case 'preview_debug':

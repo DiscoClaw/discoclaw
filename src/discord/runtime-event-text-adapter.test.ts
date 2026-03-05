@@ -38,7 +38,7 @@ describe('adaptRuntimeEventText', () => {
     expect(text).not.toContain('<discord-action>');
   });
 
-  it('redacts structured JSON payloads from logs', () => {
+  it('shows meaningful prefix before JSON in log lines', () => {
     const stdoutText = adaptRuntimeEventText({
       type: 'log_line',
       stream: 'stdout',
@@ -49,9 +49,37 @@ describe('adaptRuntimeEventText', () => {
       stream: 'stderr',
       line: 'runtime payload {"error":"boom","stack":"trace"}',
     });
-    expect(stdoutText).toBe('Runtime update (details omitted).');
-    expect(stderrText).toBe('Runtime warning (details omitted).');
+    expect(stdoutText).toBe('Update: runtime payload');
+    expect(stderrText).toBe('Warning: runtime payload');
     expect(stdoutText).not.toContain('plan-123');
+  });
+
+  it('shows Phase transition prefix before JSON', () => {
+    const text = adaptRuntimeEventText({
+      type: 'log_line',
+      stream: 'stdout',
+      line: 'Phase transition {"from":"draft","to":"active"}',
+    });
+    expect(text).toBe('Update: Phase transition');
+    expect(text).not.toContain('draft');
+  });
+
+  it('redacts log lines that are entirely JSON', () => {
+    const text = adaptRuntimeEventText({
+      type: 'log_line',
+      stream: 'stdout',
+      line: '{"type":"phase_start","planId":"plan-123"}',
+    });
+    expect(text).toBe('Runtime update (details omitted).');
+  });
+
+  it('redacts log lines with too-short prefix before JSON', () => {
+    const text = adaptRuntimeEventText({
+      type: 'log_line',
+      stream: 'stdout',
+      line: 'ab {"type":"phase_start"}',
+    });
+    expect(text).toBe('Runtime update (details omitted).');
   });
 
   it('shows raw structured payloads when stream sanitization is disabled', () => {
@@ -115,6 +143,39 @@ describe('adaptRuntimeEventText', () => {
       itemType: 'reasoning',
       label: 'Reasoning: compare <discord-action>{"type":"noop"}</discord-action> options',
     })).toBe('Reasoning: compare options');
+  });
+
+  it('renders thinking_delta as multi-line tail with Reasoning prefix', () => {
+    const text = adaptRuntimeEventText({
+      type: 'thinking_delta',
+      text: 'First thought\nSecond thought\nThird thought\nFourth thought\nFifth thought',
+    });
+    expect(text).toBe(
+      'Reasoning: Second thought\nThird thought\nFourth thought\nFifth thought',
+    );
+    expect(text!.split('\n')).toHaveLength(4);
+    expect(text).toMatch(/^Reasoning: /);
+  });
+
+  it('renders thinking_delta with single line using Reasoning prefix', () => {
+    const text = adaptRuntimeEventText({
+      type: 'thinking_delta',
+      text: 'considering the options here',
+    });
+    expect(text).toBe('Reasoning: considering the options here');
+  });
+
+  it('thinking_delta strips action tags but preserves line breaks', () => {
+    const text = adaptRuntimeEventText({
+      type: 'thinking_delta',
+      text: 'line one <discord-action>{"type":"noop"}</discord-action>\nline two\nline three',
+    });
+    expect(text).toBe('Reasoning: line one\nline two\nline three');
+    expect(text).not.toContain('<discord-action>');
+  });
+
+  it('thinking_delta returns null for empty text', () => {
+    expect(adaptRuntimeEventText({ type: 'thinking_delta', text: '  \n  \n  ' })).toBeNull();
   });
 
   it('formats runtime errors and handles blank messages', () => {

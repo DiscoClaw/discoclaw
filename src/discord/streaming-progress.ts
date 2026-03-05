@@ -111,6 +111,9 @@ export function createStreamingProgress(
   function createQueue(): ToolAwareQueue {
     return new ToolAwareQueue((action) => {
       if (action.type === 'show_activity') {
+        if (activityLabel) {
+          appendSignalLine(activityLabel);
+        }
         activityLabel = action.label;
       } else if (action.type === 'preview_text') {
         if (action.text.startsWith(toolPreviewSnapshot)) {

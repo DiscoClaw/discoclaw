@@ -4,17 +4,17 @@ import type { EngineEvent, RuntimeId } from '../runtime/types.js';
  * Hard cap for extra runtime-derived preview lines (tool/log/usage/reasoning signals)
  * so streaming previews stay cheap and predictable.
  */
-export const MAX_RUNTIME_SIGNAL_LINES_PER_STREAM = 8;
+export const MAX_RUNTIME_SIGNAL_LINES_PER_STREAM = 30;
 
 /**
  * Fairness cap for noisy runtime logs so lifecycle/status signals still surface.
  */
-export const MAX_RUNTIME_LOG_SIGNAL_LINES_PER_STREAM = 3;
+export const MAX_RUNTIME_LOG_SIGNAL_LINES_PER_STREAM = 12;
 
 /**
  * Fairness cap for usage updates; usage can be noisy in some runtimes.
  */
-export const MAX_RUNTIME_USAGE_SIGNAL_LINES_PER_STREAM = 2;
+export const MAX_RUNTIME_USAGE_SIGNAL_LINES_PER_STREAM = 4;
 
 /**
  * While native stream text is actively flowing, synthetic status lines are held
@@ -96,6 +96,12 @@ type ConsumeResult = {
  * Shared signal budget tracker used by streaming surfaces to keep preview noise
  * bounded and fair across signal classes.
  */
+export interface RuntimeSignalBudgetLimits {
+  maxTotal?: number;
+  maxLog?: number;
+  maxUsage?: number;
+}
+
 export class RuntimeSignalBudgetTracker {
   private totalLines = 0;
   private logLines = 0;
@@ -107,9 +113,15 @@ export class RuntimeSignalBudgetTracker {
   private sawNativeTextDelta = false;
   private lastNativeTextDeltaAtMs = 0;
   private readonly useNativeTextFallback: boolean;
+  private readonly maxTotal: number;
+  private readonly maxLog: number;
+  private readonly maxUsage: number;
 
-  constructor(opts?: { useNativeTextFallback?: boolean }) {
+  constructor(opts?: { useNativeTextFallback?: boolean; budgetLimits?: RuntimeSignalBudgetLimits }) {
     this.useNativeTextFallback = opts?.useNativeTextFallback ?? false;
+    this.maxTotal = opts?.budgetLimits?.maxTotal ?? MAX_RUNTIME_SIGNAL_LINES_PER_STREAM;
+    this.maxLog = opts?.budgetLimits?.maxLog ?? MAX_RUNTIME_LOG_SIGNAL_LINES_PER_STREAM;
+    this.maxUsage = opts?.budgetLimits?.maxUsage ?? MAX_RUNTIME_USAGE_SIGNAL_LINES_PER_STREAM;
   }
 
   noteNativeTextDelta(nowMs = Date.now()): void {
@@ -180,15 +192,15 @@ export class RuntimeSignalBudgetTracker {
       return { allow: false, appendSuppression: false, reason: 'native_fallback_active' };
     }
 
-    if (this.totalLines >= MAX_RUNTIME_SIGNAL_LINES_PER_STREAM) {
+    if (this.totalLines >= this.maxTotal) {
       return this.suppress('total_budget_exhausted');
     }
 
-    if (cls === 'log' && this.logLines >= MAX_RUNTIME_LOG_SIGNAL_LINES_PER_STREAM) {
+    if (cls === 'log' && this.logLines >= this.maxLog) {
       return this.suppress('log_budget_exhausted');
     }
 
-    if (cls === 'usage' && this.usageLines >= MAX_RUNTIME_USAGE_SIGNAL_LINES_PER_STREAM) {
+    if (cls === 'usage' && this.usageLines >= this.maxUsage) {
       return this.suppress('usage_budget_exhausted');
     }
 
