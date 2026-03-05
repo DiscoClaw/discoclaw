@@ -6,6 +6,16 @@ import {
   type AttachmentLike,
 } from './image-download.js';
 
+vi.mock('../image/resize.js', () => ({
+  maybeDownscale: vi.fn(async (buffer: Buffer, mediaType: string) => ({
+    buffer,
+    mediaType,
+    resized: false,
+  })),
+}));
+
+import { maybeDownscale } from '../image/resize.js';
+
 // --- Helper buffers with valid magic bytes ---
 
 /** PNG: 8-byte signature padded to >= MIN_PNG_BYTES */
@@ -553,6 +563,52 @@ describe('downloadAttachment', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('image too small');
+  });
+
+  it('calls maybeDownscale after successful download and uses its returned buffer', async () => {
+    const originalData = makePngBuffer();
+    const downscaledData = Buffer.from('downscaled-png-data');
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(originalData.buffer.slice(originalData.byteOffset, originalData.byteOffset + originalData.byteLength)),
+    });
+    vi.mocked(maybeDownscale).mockResolvedValueOnce({
+      buffer: downscaledData,
+      mediaType: 'image/png',
+      resized: true,
+    });
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/big.png', name: 'big.png', size: originalData.length },
+      'image/png',
+    );
+
+    expect(maybeDownscale).toHaveBeenCalledWith(originalData, 'image/png');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.image.base64).toBe(downscaledData.toString('base64'));
+      expect(result.image.mediaType).toBe('image/png');
+    }
+  });
+
+  it('succeeds with original buffer if maybeDownscale throws', async () => {
+    const originalData = makePngBuffer();
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(originalData.buffer.slice(originalData.byteOffset, originalData.byteOffset + originalData.byteLength)),
+    });
+    vi.mocked(maybeDownscale).mockRejectedValueOnce(new Error('sharp crashed'));
+
+    const result = await downloadAttachment(
+      { url: 'https://cdn.discordapp.com/attachments/123/456/big.png', name: 'big.png', size: originalData.length },
+      'image/png',
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.image.base64).toBe(originalData.toString('base64'));
+      expect(result.image.mediaType).toBe('image/png');
+    }
   });
 });
 
