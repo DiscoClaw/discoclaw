@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { execa, type ResultPromise } from 'execa';
 import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData } from './types.js';
 import { tryParseJsonLine, cliExecaEnv } from './cli-shared.js';
@@ -9,6 +10,7 @@ import {
   imageDedupeKey,
   stripToolUseBlocks,
 } from './cli-output-parsers.js';
+import { SessionFileScanner } from './session-scanner.js';
 
 export type LongRunningProcessState = 'starting' | 'idle' | 'busy' | 'dead';
 
@@ -26,6 +28,7 @@ export type LongRunningProcessOpts = {
   hangTimeoutMs?: number;
   idleTimeoutMs?: number;
   verbose?: boolean;
+  sessionScanning?: boolean;
   log?: { info(...args: unknown[]): void; debug(...args: unknown[]): void };
 };
 
@@ -37,6 +40,7 @@ export class LongRunningProcess {
   private subprocess: ResultPromise | null = null;
   private _state: LongRunningProcessState = 'starting';
   private readonly opts: Required<Pick<LongRunningProcessOpts, 'hangTimeoutMs' | 'idleTimeoutMs'>> & LongRunningProcessOpts;
+  private readonly sessionId: string;
 
   private hangTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -47,6 +51,7 @@ export class LongRunningProcess {
   private turnEnded = false;
 
   private stdoutOnData: ((chunk: Buffer | string) => void) | null = null;
+  private turnScanner: SessionFileScanner | null = null;
 
   // For active turn: the queue + notify mechanism (same pattern as one-shot).
   private turnQueue: EngineEvent[] = [];
@@ -73,6 +78,7 @@ export class LongRunningProcess {
       idleTimeoutMs: 300_000,
       ...opts,
     };
+    this.sessionId = crypto.randomUUID();
   }
 
   get state(): LongRunningProcessState {
@@ -94,6 +100,7 @@ export class LongRunningProcess {
       '--output-format', 'stream-json',
       '--include-partial-messages',
       '--model', this.opts.model,
+      '--session-id', this.sessionId,
     ];
 
     if (this.opts.dangerouslySkipPermissions) {
@@ -194,6 +201,17 @@ export class LongRunningProcess {
     this.stdoutOnData = onData;
     this.subprocess!.stdout!.on('data', onData);
 
+    // Start session file scanner for real-time tool/thinking events.
+    if (this.opts.sessionScanning) {
+      this.turnScanner = new SessionFileScanner(
+        { sessionId: this.sessionId, cwd: this.opts.cwd, log: this.opts.log },
+        { onEvent: (evt) => this.pushEvent(evt) },
+      );
+      this.turnScanner.start().catch((err) =>
+        this.opts.log?.debug({ err }, 'session-scanner: start failed (LRP)'),
+      );
+    }
+
     // Start hang detection.
     this.startHangTimer();
 
@@ -249,6 +267,8 @@ export class LongRunningProcess {
         this.subprocess?.stdout?.off('data', this.stdoutOnData);
         this.stdoutOnData = null;
       }
+      this.turnScanner?.stop();
+      this.turnScanner = null;
       this.clearHangTimer();
       this.turnActive = false;
       if (this._state === 'busy') {
@@ -592,6 +612,8 @@ export class LongRunningProcess {
       this.subprocess?.stdout?.off('data', this.stdoutOnData);
       this.stdoutOnData = null;
     }
+    this.turnScanner?.stop();
+    this.turnScanner = null;
 
     this._state = 'dead';
 
