@@ -33,10 +33,13 @@ async function ensureSessionFile(cwd: string, sessionId: string): Promise<string
   return filePath;
 }
 
+// Match real Claude CLI session JSONL format:
+// assistant: { message: { role: "assistant", content: [...] } }
+// user:      { type: "user", message: { role: "user", content: [...] } }
 function makeToolUse(id: string, name: string, input?: unknown): string {
   return JSON.stringify({
-    type: 'assistant',
     message: {
+      role: 'assistant',
       content: [
         { type: 'tool_use', id, name, input: input ?? {} },
       ],
@@ -48,6 +51,7 @@ function makeToolResult(toolUseId: string, isError = false): string {
   return JSON.stringify({
     type: 'user',
     message: {
+      role: 'user',
       content: [
         { type: 'tool_result', tool_use_id: toolUseId, is_error: isError },
       ],

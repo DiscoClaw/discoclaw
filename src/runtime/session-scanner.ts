@@ -178,13 +178,16 @@ export class SessionFileScanner {
     if (!parsed || typeof parsed !== 'object') return;
     const parsedObj = parsed as {
       type?: unknown;
-      message?: { content?: unknown };
+      message?: { role?: unknown; content?: unknown };
     };
+    const role = parsedObj.message?.role;
     const content = parsedObj.message?.content;
 
     // Tool use: assistant message with tool_use content blocks
     // Also extract thinking text for preview.
-    if (parsedObj.type === 'assistant' && Array.isArray(content)) {
+    // Session JSONL wraps assistant messages as { message: { role: "assistant", ... } }
+    // (no top-level `type: "assistant"`).
+    if (role === 'assistant' && Array.isArray(content)) {
       let thinkingText = '';
       for (const block of content) {
         if (!block || typeof block !== 'object') continue;
@@ -215,7 +218,8 @@ export class SessionFileScanner {
     }
 
     // Tool result: user message with tool_result content blocks
-    if (parsedObj.type === 'user' && Array.isArray(content)) {
+    // Session JSONL uses { type: "user", message: { role: "user", ... } }.
+    if ((parsedObj.type === 'user' || role === 'user') && Array.isArray(content)) {
       for (const block of content) {
         if (!block || typeof block !== 'object') continue;
         const resultBlock = block as { type?: unknown; tool_use_id?: unknown; is_error?: unknown };
