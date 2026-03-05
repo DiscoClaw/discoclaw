@@ -325,7 +325,7 @@ export async function executePlanAction(
 
       const PROGRESS_THROTTLE_MS = 3_000;
 
-      addRunningPlan(action.planId);
+      addRunningPlan(action.planId, ctx.channelId);
       const watchdogRunId = buildPlanRunWatchdogId(runPlanId, ctx);
       const watchdog = planCtx.longRunWatchdog;
       if (watchdog) {

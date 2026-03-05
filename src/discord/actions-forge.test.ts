@@ -342,8 +342,8 @@ describe('executeForgeAction', () => {
     });
 
     it('reports plan runs when no forge is running', async () => {
-      addRunningPlan('plan-042');
-      addRunningPlan('plan-305');
+      addRunningPlan('plan-042', 'ch-1');
+      addRunningPlan('plan-305', 'ch-2');
 
       const result = await executeForgeAction(
         { type: 'forgeStatus' },
@@ -361,7 +361,7 @@ describe('executeForgeAction', () => {
     it('reports both forge and plan runs when both are active', async () => {
       const runningOrch = makeMockOrchestrator({ isRunning: true, activePlanId: 'plan-007' });
       setActiveOrchestrator(runningOrch as any);
-      addRunningPlan('plan-099');
+      addRunningPlan('plan-099', 'ch-1');
 
       const result = await executeForgeAction(
         { type: 'forgeStatus' },
@@ -377,9 +377,9 @@ describe('executeForgeAction', () => {
     });
 
     it('reports all IDs when multiple plan runs are active', async () => {
-      addRunningPlan('plan-010');
-      addRunningPlan('plan-020');
-      addRunningPlan('plan-030');
+      addRunningPlan('plan-010', 'ch-1');
+      addRunningPlan('plan-020', 'ch-2');
+      addRunningPlan('plan-030', 'ch-3');
 
       const result = await executeForgeAction(
         { type: 'forgeStatus' },

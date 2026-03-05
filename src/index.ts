@@ -80,6 +80,7 @@ import {
   drainInFlightReplies,
   hasInFlightForChannel,
 } from './discord/inflight-replies.js';
+import { isRunActiveInChannel } from './discord/forge-plan-registry.js';
 import { writeShutdownContext, patchShutdownContext, readAndClearShutdownContext, formatStartupInjection } from './discord/shutdown-context.js';
 import { getGitHash } from './version.js';
 import { getLocalVersion, getLatestNpmVersion } from './npm-managed.js';
@@ -1340,7 +1341,8 @@ if (tasksEnabled) {
     resolveModel,
     metrics: globalMetrics,
     statusPoster: botStatus ?? undefined,
-    hasInFlightForChannel,
+    hasInFlightForChannel: (channelId: string) =>
+      hasInFlightForChannel(channelId) || isRunActiveInChannel(channelId),
     log,
     systemTasksForumId: system?.tasksForumId,
     store: sharedTaskStore,

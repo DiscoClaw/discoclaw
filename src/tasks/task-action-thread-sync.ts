@@ -121,6 +121,11 @@ export async function syncClosedTaskThread(opts: {
     return false;
   }
 
+  if (opts.taskCtx.hasInFlightForChannel?.(threadId)) {
+    opts.taskCtx.log?.info({ taskId: opts.taskId, threadId }, 'tasks:thread close deferred — active run in channel');
+    return true;
+  }
+
   try {
     await closeTaskThread(opts.runCtx.client, threadId, opts.closedTask, opts.taskCtx.tagMap, opts.taskCtx.log);
     return false;
