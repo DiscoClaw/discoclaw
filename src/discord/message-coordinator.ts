@@ -3177,7 +3177,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
                       params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
                     }
-                  } else if (evt.type === 'log_line' || evt.type === 'usage' || evt.type === 'preview_debug') {
+                  } else if (evt.type === 'thinking_delta' || evt.type === 'log_line' || evt.type === 'usage' || evt.type === 'preview_debug') {
                     // Bypass queue for non-text runtime signals.
                     await appendRuntimeSignal(evt);
                   } else if (evt.type === 'image_data') {
@@ -3206,6 +3206,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     deltaText += evt.text;
                     await maybeEdit(false);
                   } else if (
+                    evt.type === 'thinking_delta' ||
                     evt.type === 'log_line' ||
                     evt.type === 'tool_start' ||
                     evt.type === 'tool_end' ||

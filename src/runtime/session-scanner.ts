@@ -29,6 +29,9 @@ function sessionFilePath(sessionId: string, cwd: string): string {
   return path.join(home, '.claude', 'projects', escaped, `${sessionId}.jsonl`);
 }
 
+const THINKING_PREVIEW_INTERVAL_MS = 3_000;
+const THINKING_PREVIEW_TAIL_CHARS = 200;
+
 type ActiveTool = { name: string; blockId: string };
 
 export class SessionFileScanner {
@@ -43,6 +46,7 @@ export class SessionFileScanner {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private reading = false;
+  private lastThinkingPreviewAt = 0;
 
   constructor(opts: SessionScannerOpts, callbacks: SessionScannerCallbacks) {
     this.filePath = sessionFilePath(opts.sessionId, opts.cwd);
@@ -174,15 +178,20 @@ export class SessionFileScanner {
     if (!parsed || typeof parsed !== 'object') return;
     const parsedObj = parsed as {
       type?: unknown;
-      message?: { content?: unknown };
+      message?: { role?: unknown; content?: unknown };
     };
+    const role = parsedObj.message?.role;
     const content = parsedObj.message?.content;
 
     // Tool use: assistant message with tool_use content blocks
-    if (parsedObj.type === 'assistant' && Array.isArray(content)) {
+    // Also extract thinking text for preview.
+    // Session JSONL wraps assistant messages as { message: { role: "assistant", ... } }
+    // (no top-level `type: "assistant"`).
+    if (role === 'assistant' && Array.isArray(content)) {
+      let thinkingText = '';
       for (const block of content) {
         if (!block || typeof block !== 'object') continue;
-        const toolBlock = block as { type?: unknown; name?: unknown; id?: unknown; input?: unknown };
+        const toolBlock = block as { type?: unknown; name?: unknown; id?: unknown; input?: unknown; thinking?: unknown };
         if (toolBlock.type === 'tool_use' && typeof toolBlock.name === 'string') {
           const blockId = String(toolBlock.id ?? '');
           this.activeTools.set(blockId, { name: toolBlock.name, blockId });
@@ -192,11 +201,25 @@ export class SessionFileScanner {
             input: toolBlock.input,
           });
         }
+        if (toolBlock.type === 'thinking' && typeof toolBlock.thinking === 'string') {
+          thinkingText = toolBlock.thinking;
+        }
+      }
+      if (thinkingText) {
+        const now = Date.now();
+        if (this.lastThinkingPreviewAt === 0 || now - this.lastThinkingPreviewAt >= THINKING_PREVIEW_INTERVAL_MS) {
+          this.lastThinkingPreviewAt = now;
+          const preview = thinkingText.length > THINKING_PREVIEW_TAIL_CHARS
+            ? thinkingText.slice(-THINKING_PREVIEW_TAIL_CHARS)
+            : thinkingText;
+          this.callbacks.onEvent({ type: 'thinking_delta', text: preview });
+        }
       }
     }
 
     // Tool result: user message with tool_result content blocks
-    if (parsedObj.type === 'user' && Array.isArray(content)) {
+    // Session JSONL uses { type: "user", message: { role: "user", ... } }.
+    if ((parsedObj.type === 'user' || role === 'user') && Array.isArray(content)) {
       for (const block of content) {
         if (!block || typeof block !== 'object') continue;
         const resultBlock = block as { type?: unknown; tool_use_id?: unknown; is_error?: unknown };
