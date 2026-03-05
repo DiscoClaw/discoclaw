@@ -1,5 +1,5 @@
 import { execa, type ResultPromise } from 'execa';
-import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData } from './types.js';
+import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData, type ThinkingEffort } from './types.js';
 import { tryParseJsonLine, cliExecaEnv } from './cli-shared.js';
 import {
   extractTextFromUnknownEvent,
@@ -26,6 +26,7 @@ export type LongRunningProcessOpts = {
   hangTimeoutMs?: number;
   idleTimeoutMs?: number;
   verbose?: boolean;
+  thinkingEffort?: ThinkingEffort;
   log?: { info(...args: unknown[]): void; debug(...args: unknown[]): void };
 };
 
@@ -113,6 +114,9 @@ export class LongRunningProcess {
     }
     if (this.opts.verbose) {
       args.push('--verbose');
+    }
+    if (this.opts.thinkingEffort && this.opts.thinkingEffort !== 'none') {
+      args.push('--effort', this.opts.thinkingEffort);
     }
     if (this.opts.tools) {
       if (this.opts.tools.length > 0) {

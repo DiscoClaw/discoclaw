@@ -123,6 +123,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           maxBudgetUsd: opts.maxBudgetUsd,
           appendSystemPrompt: opts.appendSystemPrompt,
           verbose: opts.verbose,
+          thinkingEffort: params.thinkingEffort,
           tools: params.tools,
           addDirs: params.addDirs,
           hangTimeoutMs: opts.multiTurnHangTimeoutMs,

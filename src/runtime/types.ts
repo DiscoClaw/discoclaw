@@ -75,6 +75,8 @@ export type RuntimeSupervisorPolicy = {
   limits?: RuntimeSupervisorLimitsOverride;
 };
 
+export type ThinkingEffort = 'none' | 'low' | 'medium' | 'high';
+
 export type RuntimeInvokeParams = {
   prompt: string;
   systemPrompt?: string;
@@ -88,6 +90,7 @@ export type RuntimeInvokeParams = {
   maxTokens?: number;
   images?: ImageData[];
   signal?: AbortSignal;
+  thinkingEffort?: ThinkingEffort;
   supervisor?: RuntimeSupervisorPolicy;
 };
 
