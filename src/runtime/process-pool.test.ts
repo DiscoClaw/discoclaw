@@ -167,6 +167,19 @@ describe('ProcessPool', () => {
     expect(proc3!.state).toBe('dead');
   });
 
+  it('getOrSpawn returns null after killAll (shutdown guard)', () => {
+    const pool = new ProcessPool({ maxProcesses: 3 });
+    pool.getOrSpawn('session-1', baseProcessOpts);
+    expect(pool.size).toBe(1);
+
+    pool.killAll();
+    expect(pool.size).toBe(0);
+
+    const result = pool.getOrSpawn('session-2', baseProcessOpts);
+    expect(result).toBeNull();
+    expect(pool.size).toBe(0);
+  });
+
   it('replaces dead process on getOrSpawn', () => {
     const pool = new ProcessPool({ maxProcesses: 3 });
     const proc1 = pool.getOrSpawn('session-1', baseProcessOpts);

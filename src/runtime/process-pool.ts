@@ -12,6 +12,7 @@ export class ProcessPool {
   private readonly pool = new Map<string, LongRunningProcess>();
   private readonly maxProcesses: number;
   private readonly log?: ProcessPoolOpts['log'];
+  private shuttingDown = false;
 
   constructor(opts?: ProcessPoolOpts) {
     this.maxProcesses = opts?.maxProcesses ?? 5;
@@ -23,6 +24,11 @@ export class ProcessPool {
    * Returns null if spawn fails (caller should fall back to one-shot).
    */
   getOrSpawn(sessionKey: string, processOpts: LongRunningProcessOpts): LongRunningProcess | null {
+    if (this.shuttingDown) {
+      this.log?.debug({ sessionKey }, 'process-pool: spawn blocked, pool is shutting down');
+      return null;
+    }
+
     const existing = this.pool.get(sessionKey);
     if (existing?.state === 'idle') {
       this.log?.debug({ sessionKey }, 'process-pool: reusing existing process');
@@ -84,6 +90,7 @@ export class ProcessPool {
 
   /** Kill all processes (shutdown cleanup). */
   killAll(): void {
+    this.shuttingDown = true;
     for (const [key, proc] of this.pool) {
       proc.forceKill();
       this.log?.debug({ sessionKey: key }, 'process-pool: killed process');
