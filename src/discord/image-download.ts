@@ -1,5 +1,6 @@
 import type { ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
+import { maybeDownscale } from '../image/resize.js';
 
 /** Allowed Discord CDN hosts (SSRF protection). */
 const ALLOWED_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net']);
@@ -178,11 +179,22 @@ export async function downloadAttachment(
       return { ok: false, error: `${name}: image too small to be valid ${sniffed} (${buffer.length} bytes, minimum ${minBytes})` };
     }
 
+    // Downscale oversized images to stay within Anthropic API dimension limits.
+    let finalBuffer: Buffer = buffer;
+    let finalMediaType = sniffed;
+    try {
+      const downscaled = await maybeDownscale(buffer, sniffed);
+      finalBuffer = downscaled.buffer;
+      finalMediaType = downscaled.mediaType;
+    } catch {
+      // Degrade gracefully — use original buffer if downscale fails.
+    }
+
     return {
       ok: true,
       image: {
-        base64: buffer.toString('base64'),
-        mediaType: sniffed,
+        base64: finalBuffer.toString('base64'),
+        mediaType: finalMediaType,
       },
     };
   } catch (err: unknown) {
