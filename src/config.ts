@@ -139,6 +139,7 @@ export type DiscoclawConfig = {
   codexDangerouslyBypassApprovalsAndSandbox: boolean;
   codexDisableSessions: boolean;
   codexVerbosePreview: boolean;
+  codexItemTypeDebug: boolean;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermMaxEntries: number;
@@ -793,6 +794,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       codexDangerouslyBypassApprovalsAndSandbox: parseBoolean(env, 'CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX', false),
       codexDisableSessions: parseBoolean(env, 'CODEX_DISABLE_SESSIONS', false),
       codexVerbosePreview: parseBoolean(env, 'DISCOCLAW_CODEX_VERBOSE_PREVIEW', false),
+      codexItemTypeDebug: parseBoolean(env, 'DISCOCLAW_CODEX_ITEM_TYPE_DEBUG', false),
 
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', true),
       shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', true),

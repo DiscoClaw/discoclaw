@@ -1205,6 +1205,44 @@ describe('Codex CLI runtime adapter', () => {
     expect(logLines.some((line) => line.includes('Command output:'))).toBe(true);
   });
 
+  it('itemTypeDebug emits structured preview_debug item lifecycle events', async () => {
+    const jsonlOutput = [
+      '{"type":"thread.started","thread_id":"debug-thread-1"}',
+      '{"type":"item.started","item":{"id":"item_reason_1","type":"reasoning","status":"in_progress"}}',
+      '{"type":"item.completed","item":{"id":"item_reason_1","type":"reasoning","summary":"Planning."}}',
+      '{"type":"item.started","item":{"id":"item_cmd_1","type":"command_execution","command":"pwd","status":"in_progress"}}',
+      '{"type":"item.completed","item":{"id":"item_cmd_1","type":"command_execution","command":"pwd","aggregated_output":"/tmp","exit_code":0,"status":"completed"}}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonlOutput,
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      itemTypeDebug: true,
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Show raw debug item types',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'debug-session',
+    }));
+
+    const debugEvents = events
+      .filter((e): e is Extract<EngineEvent, { type: 'preview_debug' }> => e.type === 'preview_debug');
+    expect(debugEvents.some((e) => e.phase === 'started' && e.itemType === 'reasoning')).toBe(true);
+    expect(debugEvents.some((e) => e.phase === 'completed' && e.itemType === 'reasoning')).toBe(true);
+    expect(debugEvents.some((e) => e.phase === 'started' && e.itemType === 'command_execution')).toBe(true);
+    expect(debugEvents.some((e) => e.phase === 'completed' && e.itemType === 'command_execution')).toBe(true);
+    expect(debugEvents.some((e) => e.itemType === 'agent_message')).toBe(false);
+  });
+
   it('different sessionKeys get independent sessions', async () => {
     const jsonlA = [
       '{"type":"thread.started","thread_id":"thread-aaa"}',

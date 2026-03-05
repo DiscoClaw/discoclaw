@@ -782,6 +782,7 @@ const codexRuntimeRaw = createCodexCliRuntime({
   dangerouslyBypassApprovalsAndSandbox: cfg.codexDangerouslyBypassApprovalsAndSandbox,
   disableSessions: cfg.codexDisableSessions,
   verbosePreview: cfg.codexVerbosePreview,
+  itemTypeDebug: cfg.codexItemTypeDebug,
   log,
 });
 registerRuntime('codex', codexRuntimeRaw);
@@ -792,6 +793,7 @@ log.info(
     dangerouslyBypassApprovalsAndSandbox: cfg.codexDangerouslyBypassApprovalsAndSandbox,
     disableSessions: cfg.codexDisableSessions,
     verbosePreview: cfg.codexVerbosePreview,
+    itemTypeDebug: cfg.codexItemTypeDebug,
   },
   'runtime:codex registered',
 );

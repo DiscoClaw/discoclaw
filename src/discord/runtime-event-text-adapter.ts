@@ -55,6 +55,45 @@ function formatRuntimeUsageLine(
   return `Usage: ${parts.join(', ')}.`;
 }
 
+function humanizeItemType(itemType: string): string {
+  return itemType
+    .split(/[_\s-]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function formatPreviewDebugLine(
+  evt: Extract<EngineEvent, { type: 'preview_debug' }>,
+  mode: RuntimeEventTextAdapterMode,
+  maxChars: number,
+): string | null {
+  if (evt.label) {
+    const label = sanitizeRuntimeLine(evt.label, maxChars);
+    return label || null;
+  }
+
+  if (evt.source !== 'codex') return null;
+  if (evt.itemType === 'agent_message') return null;
+
+  const normalizedItemType = sanitizeRuntimeLine(evt.itemType, 80);
+  if (!normalizedItemType || !hasMeaningfulRuntimeLine(normalizedItemType)) return null;
+
+  const phase = evt.phase;
+  const statusSuffix = mode === 'raw' && evt.status
+    ? ` (${sanitizeRuntimeLine(evt.status, 40)})`
+    : '';
+
+  if (normalizedItemType === 'reasoning') {
+    return phase === 'started'
+      ? `Reasoning started${statusSuffix}...`
+      : `Reasoning completed${statusSuffix}.`;
+  }
+
+  const item = humanizeItemType(normalizedItemType);
+  return `${item} ${phase}${statusSuffix}.`;
+}
+
 export function adaptRuntimeEventText(
   evt: EngineEvent,
   opts?: RuntimeEventTextAdapterOpts,
@@ -83,6 +122,8 @@ export function adaptRuntimeEventText(
     }
     case 'usage':
       return formatRuntimeUsageLine(evt, mode);
+    case 'preview_debug':
+      return formatPreviewDebugLine(evt, mode, maxChars);
     case 'error': {
       const message = sanitizeRuntimeLine(evt.message, maxChars);
       if (!message || !hasMeaningfulRuntimeLine(message)) return 'Runtime error.';
