@@ -272,6 +272,10 @@ export function formatRuntimePreviewSignal(
       const maxChars = mode === 'raw' ? 400 : 180;
       return `${prefix} ${sanitizePreviewSignalText(evt.line, maxChars)}`;
     }
+    case 'thinking_delta': {
+      const maxCharsThinking = mode === 'raw' ? 400 : 180;
+      return `[thinking] ${sanitizePreviewSignalText(evt.text, maxCharsThinking)}`;
+    }
     case 'usage':
       return formatUsageSignal(evt, mode);
     case 'preview_debug': {

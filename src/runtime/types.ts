@@ -11,6 +11,7 @@ export type EngineEvent =
   | { type: 'text_final'; text: string }
   | { type: 'image_data'; image: ImageData }
   | { type: 'log_line'; stream: 'stdout' | 'stderr'; line: string }
+  | { type: 'thinking_delta'; text: string }
   | {
       type: 'preview_debug';
       source: 'codex';

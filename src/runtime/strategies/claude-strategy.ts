@@ -36,20 +36,21 @@ export const PHASE_SAFETY_REMINDER =
   'Do not write to .env, root-policy.ts, ~/.ssh/, or ~/.claude/ paths. ' +
   'If a task requires any of these, report it instead of executing.';
 
-const THINKING_HEARTBEAT_INTERVAL_MS = 15_000;
-const THINKING_HEARTBEAT_LINE = 'Model reasoning in progress...';
+const THINKING_PREVIEW_INTERVAL_MS = 3_000;
+const THINKING_PREVIEW_TAIL_CHARS = 200;
 
 // Per-invocation tool tracking state (keyed by ctx to avoid cross-invocation leaks).
 type ToolTrackState = {
   activeTools: Map<number, string>;
   inputBufs: Map<number, string>;
-  lastThinkingHeartbeatAtMs: number;
+  lastThinkingPreviewAtMs: number;
+  thinkingBuf: string;
 };
 const toolState = new WeakMap<CliInvokeContext, ToolTrackState>();
 function getToolState(ctx: CliInvokeContext): ToolTrackState {
   let s = toolState.get(ctx);
   if (!s) {
-    s = { activeTools: new Map(), inputBufs: new Map(), lastThinkingHeartbeatAtMs: 0 };
+    s = { activeTools: new Map(), inputBufs: new Map(), lastThinkingPreviewAtMs: 0, thinkingBuf: '' };
     toolState.set(ctx, s);
   }
   return s;
@@ -210,18 +211,22 @@ export const claudeStrategy: CliAdapterStrategy = {
           // generation is real work, not a thinking spiral.
           return { activity: true };
         }
-        // thinking_delta, signature_delta, etc. — consumed, no text.
-        // Emit a throttled synthetic heartbeat so Discord preview stays alive
-        // without exposing private reasoning text. Intentionally do NOT set
-        // activity for thinking_delta so the spiral detector still works.
+        // thinking_delta — accumulate reasoning text and emit periodic previews
+        // so Discord shows what the model is thinking about. Intentionally do
+        // NOT set activity so the spiral/progress-stall detector still works.
         if (delta.type === 'thinking_delta') {
           const ts = getToolState(ctx);
+          if (typeof delta.thinking === 'string') ts.thinkingBuf += delta.thinking;
           const now = Date.now();
-          if (now - ts.lastThinkingHeartbeatAtMs >= THINKING_HEARTBEAT_INTERVAL_MS) {
-            ts.lastThinkingHeartbeatAtMs = now;
+          if (now - ts.lastThinkingPreviewAtMs >= THINKING_PREVIEW_INTERVAL_MS) {
+            ts.lastThinkingPreviewAtMs = now;
+            const buf = ts.thinkingBuf;
+            const preview = buf.length > THINKING_PREVIEW_TAIL_CHARS
+              ? buf.slice(-THINKING_PREVIEW_TAIL_CHARS)
+              : buf;
             return {
               extraEvents: [
-                { type: 'log_line', stream: 'stdout', line: THINKING_HEARTBEAT_LINE },
+                { type: 'thinking_delta', text: preview || 'reasoning...' },
               ],
             };
           }
@@ -250,12 +255,57 @@ export const claudeStrategy: CliAdapterStrategy = {
         return {};
       }
 
-      // All other stream_event types (message_start, message_delta, message_stop) — consumed, no text.
+      // message_start — emit a synthetic signal so the Discord preview transitions
+      // from "waiting for first runtime event" immediately when the model begins processing.
+      // Without this, the gap between subprocess spawn and the first text_delta/thinking_delta
+      // leaves sawRuntimeEvent=false and the preview stale.
+      if (inner.type === 'message_start') {
+        return {
+          extraEvents: [
+            { type: 'log_line' as const, stream: 'stdout' as const, line: 'Model connected.' },
+          ],
+        };
+      }
+
+      // All other stream_event types (message_delta, message_stop) — consumed, no text.
       return {};
     }
 
     // --- assistant partial messages (from --include-partial-messages) ---
-    if (obj.type === 'assistant') return {};
+    // Claude Code CLI emits these as content snapshots — NOT stream_event wrappers.
+    // Extract thinking text from thinking blocks for preview.
+    if (obj.type === 'assistant') {
+      let thinkingText = '';
+      if (obj.message && typeof obj.message === 'object') {
+        const content = (obj.message as Record<string, unknown>).content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block && typeof block === 'object') {
+              const b = block as Record<string, unknown>;
+              if (b.type === 'thinking' && typeof b.thinking === 'string') {
+                thinkingText = b.thinking;
+              }
+            }
+          }
+        }
+      }
+      if (thinkingText) {
+        const ts = getToolState(ctx);
+        const now = Date.now();
+        if (ts.lastThinkingPreviewAtMs === 0 || now - ts.lastThinkingPreviewAtMs >= THINKING_PREVIEW_INTERVAL_MS) {
+          ts.lastThinkingPreviewAtMs = now;
+          const preview = thinkingText.length > THINKING_PREVIEW_TAIL_CHARS
+            ? thinkingText.slice(-THINKING_PREVIEW_TAIL_CHARS)
+            : thinkingText;
+          return {
+            extraEvents: [
+              { type: 'thinking_delta', text: preview },
+            ],
+          };
+        }
+      }
+      return {};
+    }
 
     // --- result event ---
     if (obj.type === 'result') {
