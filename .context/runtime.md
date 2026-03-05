@@ -273,6 +273,35 @@ Both require `CLAUDE_OUTPUT_FORMAT=stream-json` for structured events.
 
 **Append system prompt:** When set, workspace PA files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, TOOLS.md) are skipped from the context file list (their content is already in the system prompt). PA context modules (`.context/pa.md`, `.context/pa-safety.md`) and channel-specific context are unaffected. **Note:** Do not set this on first run before `workspace/BOOTSTRAP.md` has been consumed — the skip logic also bypasses BOOTSTRAP.md loading.
 
+## Thinking Effort
+
+Cross-runtime parameter that controls how much reasoning/thinking budget the model uses. Defined as `thinkingEffort?: ThinkingEffort` on `RuntimeInvokeParams` in `src/runtime/types.ts`.
+
+### Supported values
+
+| Value | Meaning |
+|-------|---------|
+| `'none'` | Skip — no effort flag is sent (same as `undefined`) |
+| `'low'` | Minimal reasoning |
+| `'medium'` | Moderate reasoning |
+| `'high'` | Maximum reasoning |
+
+When `thinkingEffort` is `undefined` or `'none'`, no effort-related flag is passed to the underlying runtime — the model uses its default behavior.
+
+### Per-adapter translation
+
+| Adapter | CLI flag | Example |
+|---------|----------|---------|
+| Claude Code | `--effort <value>` | `claude -p --effort high -- "prompt"` |
+| Codex CLI | `-c model_reasoning_effort="<value>"` | `codex -c model_reasoning_effort="high" "prompt"` |
+| Gemini CLI | *(not yet supported)* | — |
+| Anthropic REST | *(pending — follow-up plan)* | — |
+| OpenAI-Compat / OpenRouter | *(pending — follow-up plan)* | — |
+
+### Multi-turn caveat
+
+In multi-turn mode (`DISCOCLAW_MULTI_TURN=1`), the thinking effort is applied at **spawn time** when the long-running process is created. It cannot be changed between turns within the same session — the effort level is locked for the lifetime of the subprocess.
+
 - **Session scanner** (`src/runtime/session-scanner.ts`): watches `~/.claude/projects/<escaped-cwd>/<session-id>.jsonl`, skips pre-existing content, degrades gracefully if the file never appears.
 - **Tool-aware queue** (`src/discord/tool-aware-queue.ts`): state machine that suppresses narration text before tools, shows human-readable activity labels (from `src/runtime/tool-labels.ts`), and streams the final answer after all tool use completes.
 - **Tool labels** (`src/runtime/tool-labels.ts`): maps tool names to labels like "Reading .../file.ts", "Running command...", etc.
