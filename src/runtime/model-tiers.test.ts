@@ -40,9 +40,13 @@ describe('resolveModel', () => {
   });
 
   describe('codex runtime', () => {
-    it('resolves tiers to empty string (adapter-default)', () => {
-      expect(resolveModel('fast', 'codex')).toBe('');
+    it('resolves fast → gpt-5.1-codex-mini', () => {
+      expect(resolveModel('fast', 'codex')).toBe('gpt-5.1-codex-mini');
+    });
+
+    it('resolves capable/deep to empty string (adapter-default)', () => {
       expect(resolveModel('capable', 'codex')).toBe('');
+      expect(resolveModel('deep', 'codex')).toBe('');
     });
   });
 
@@ -134,8 +138,8 @@ describe('resolveReasoningEffort', () => {
     expect(resolveReasoningEffort('deep', 'codex')).toBe('xhigh');
   });
 
-  it('returns undefined for codex fast tier (no mapping)', () => {
-    expect(resolveReasoningEffort('fast', 'codex')).toBeUndefined();
+  it('returns low for codex fast tier', () => {
+    expect(resolveReasoningEffort('fast', 'codex')).toBe('low');
   });
 
   it('returns undefined for runtimes without effort mappings', () => {

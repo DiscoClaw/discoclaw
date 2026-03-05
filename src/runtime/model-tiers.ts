@@ -18,7 +18,7 @@ const defaults: Record<string, Record<ModelTier, string>> = {
   claude_code: { fast: 'haiku', capable: 'sonnet', deep: 'claude-opus-4-6' },
   gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro', deep: 'gemini-2.5-pro' },
   openai: { fast: '', capable: '', deep: '' },
-  codex: { fast: '', capable: '', deep: '' },
+  codex: { fast: 'gpt-5.1-codex-mini', capable: '', deep: '' },
 };
 
 function buildDefault(): Record<string, Record<ModelTier, string>> {
@@ -86,7 +86,7 @@ export function resolveModel(tierOrModel: string, runtimeId: RuntimeId): string 
  * Only runtimes / tiers that need an explicit effort are listed.
  */
 const reasoningEffortDefaults: Record<string, Partial<Record<ModelTier, string>>> = {
-  codex: { capable: 'high', deep: 'xhigh' },
+  codex: { fast: 'low', capable: 'high', deep: 'xhigh' },
 };
 
 /**
