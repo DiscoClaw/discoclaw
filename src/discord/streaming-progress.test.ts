@@ -389,6 +389,55 @@ describe('createStreamingProgress', () => {
     ctrl.dispose();
   });
 
+  it('keeps tool lifecycle and non-reasoning preview_debug visible while fallback gating is active', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0, { useNativeTextFallback: true });
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({ type: 'text_delta', text: 'reasoning stream\n' } as EngineEvent);
+    ctrl.onEvent({ type: 'tool_start', name: 'Read', input: '' } as EngineEvent);
+    ctrl.onEvent({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'started',
+      itemType: 'command_execution',
+      status: 'in_progress',
+    } as EngineEvent);
+    ctrl.onEvent({
+      type: 'tool_end',
+      name: 'Read',
+      ok: true,
+      output: '',
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const latest = message.edits[message.edits.length - 1] ?? '';
+    expect(latest).toContain('Next check: Read.');
+    expect(latest).toContain('Command Execution started.');
+    expect(latest).toContain('Finding: Read finished.');
+    ctrl.dispose();
+  });
+
+  it('keeps reasoning preview_debug fallback-only while text deltas are active', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0, { useNativeTextFallback: true });
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({ type: 'text_delta', text: 'reasoning stream\n' } as EngineEvent);
+    ctrl.onEvent({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'started',
+      itemType: 'reasoning',
+      status: 'in_progress',
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const latest = message.edits[message.edits.length - 1] ?? '';
+    expect(latest).not.toContain('Hypothesis: reasoning in progress');
+    ctrl.dispose();
+  });
+
   it('keeps failed tool_end visible even when fallback gating is active', async () => {
     const message = makeMessage();
     const ctrl = createStreamingProgress(message, 0, { useNativeTextFallback: true });

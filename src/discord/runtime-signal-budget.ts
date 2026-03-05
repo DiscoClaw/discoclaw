@@ -53,6 +53,17 @@ function isCriticalRuntimeSignal(evt: EngineEvent): boolean {
   return evt.type === 'tool_end' && evt.ok === false;
 }
 
+function shouldFallbackGateSignal(evt: EngineEvent): boolean {
+  // Keep noisy signals fallback-only while native text is flowing.
+  if (evt.type === 'log_line' || evt.type === 'usage') return true;
+
+  // Reasoning lifecycle markers can be high-churn with native thinking deltas.
+  if (evt.type === 'preview_debug') return evt.itemType === 'reasoning';
+
+  // Always surface tool lifecycle and non-reasoning preview_debug.
+  return false;
+}
+
 type ConsumeResult = {
   allow: boolean;
   appendSuppression: boolean;
@@ -98,6 +109,7 @@ export class RuntimeSignalBudgetTracker {
     if (
       this.useNativeTextFallback &&
       this.sawNativeTextDelta &&
+      shouldFallbackGateSignal(evt) &&
       !isCriticalRuntimeSignal(evt) &&
       nowMs - this.lastNativeTextDeltaAtMs <= RUNTIME_SIGNAL_FALLBACK_IDLE_MS
     ) {
