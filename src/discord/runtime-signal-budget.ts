@@ -52,6 +52,7 @@ function classifyRuntimeSignal(evt: EngineEvent): RuntimeSignalClass | null {
     case 'tool_start':
     case 'tool_end':
     case 'preview_debug':
+    case 'thinking_delta':
       return 'status';
     default:
       return null;
@@ -65,6 +66,9 @@ function isCriticalRuntimeSignal(evt: EngineEvent): boolean {
 function isGuaranteedRuntimeSignal(evt: EngineEvent): boolean {
   // Always surface final tool status.
   if (evt.type === 'tool_end') return true;
+
+  // Always surface thinking previews — already throttled at the source.
+  if (evt.type === 'thinking_delta') return true;
 
   // Always surface codex lifecycle markers for reasoning + command execution.
   if (evt.type === 'preview_debug') {

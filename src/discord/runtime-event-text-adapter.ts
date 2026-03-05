@@ -121,6 +121,11 @@ export function adaptRuntimeEventText(
         ? `Warning: ${line}`
         : `Update: ${line}`;
     }
+    case 'thinking_delta': {
+      const snippet = sanitizeRuntimeLine(evt.text, maxChars);
+      if (!snippet || !hasMeaningfulRuntimeLine(snippet)) return null;
+      return `Reasoning: ${snippet}`;
+    }
     case 'usage':
       return formatRuntimeUsageLine(evt, mode);
     case 'preview_debug':

@@ -370,6 +370,34 @@ describe('LongRunningProcess', () => {
     expect(usageEvents[2]).toMatchObject({ totalTokens: 15 });
   });
 
+  it('emits thinking_delta events from thinking_delta stream events', async () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+
+    const proc = new LongRunningProcess(baseOpts);
+    proc.spawn();
+
+    queueMicrotask(() => {
+      mock.stdout.emit('data',
+        JSON.stringify({ type: 'stream_event', event: { type: 'message_start', message: {} } }) + '\n' +
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } } }) + '\n' +
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Let me think...' } } }) + '\n' +
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }) + '\n' +
+        JSON.stringify({ type: 'result', result: 'The answer.' }) + '\n',
+      );
+    });
+
+    const events: any[] = [];
+    for await (const evt of proc.sendTurn('test')) {
+      events.push(evt);
+    }
+
+    // message_start emits a log_line, thinking_delta emits thinking preview
+    const thinkingEvents = events.filter((e) => e.type === 'thinking_delta');
+    expect(thinkingEvents.length).toBeGreaterThanOrEqual(1);
+    expect(thinkingEvents[0].text).toContain('Let me think');
+  });
+
   it('sendTurn with images writes content-block array to stdin', async () => {
     const mock = createMockSubprocess();
     (execa as any).mockReturnValue(mock.proc);

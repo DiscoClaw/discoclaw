@@ -61,6 +61,8 @@ export class LongRunningProcess {
   private turnToolInputBufs = new Map<number, string>();
   private turnSeenImages = new Set<string>();
   private turnImageCount = 0;
+  private lastThinkingPreviewAt = 0;
+  private thinkingBuf = '';
 
   /** Called when this process is added to / removed from an external tracking set. */
   onCleanup?: () => void;
@@ -180,6 +182,8 @@ export class LongRunningProcess {
     this.turnToolInputBufs = new Map();
     this.turnSeenImages = new Set<string>();
     this.turnImageCount = 0;
+    this.lastThinkingPreviewAt = 0;
+    this.thinkingBuf = '';
     this.stdoutBuffer = '';
 
     // Wire up stdout parsing for this turn.
@@ -307,6 +311,36 @@ export class LongRunningProcess {
 
       const anyEvt = evt as Record<string, unknown>;
 
+      // Handle assistant partial messages (from --include-partial-messages).
+      // Claude Code CLI emits these as content snapshots — NOT stream_event wrappers.
+      // Extract thinking text for preview.
+      if (anyEvt.type === 'assistant') {
+        let thinkingText = '';
+        const msg = anyEvt.message;
+        if (msg && typeof msg === 'object') {
+          const content = (msg as Record<string, unknown>).content;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block && typeof block === 'object') {
+                const b = block as Record<string, unknown>;
+                if (b.type === 'thinking' && typeof b.thinking === 'string') {
+                  thinkingText = b.thinking;
+                }
+              }
+            }
+          }
+        }
+        if (thinkingText) {
+          const now = Date.now();
+          if (this.lastThinkingPreviewAt === 0 || now - this.lastThinkingPreviewAt >= 3_000) {
+            this.lastThinkingPreviewAt = now;
+            const preview = thinkingText.length > 200 ? thinkingText.slice(-200) : thinkingText;
+            this.pushEvent({ type: 'thinking_delta', text: preview });
+          }
+        }
+        continue;
+      }
+
       // Detect end-of-turn: a `result` event signals Claude finished this turn.
       if (anyEvt.type === 'result') {
         const usageEvt = this.extractUsageEvent(anyEvt.usage);
@@ -347,6 +381,18 @@ export class LongRunningProcess {
           if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
             const existing = this.turnToolInputBufs.get(idx);
             if (existing !== undefined) this.turnToolInputBufs.set(idx, existing + delta.partial_json);
+            continue;
+          }
+          // thinking_delta — accumulate reasoning text and emit periodic previews.
+          if (delta.type === 'thinking_delta') {
+            if (typeof delta.thinking === 'string') this.thinkingBuf += delta.thinking;
+            const now = Date.now();
+            if (now - this.lastThinkingPreviewAt >= 3_000) {
+              this.lastThinkingPreviewAt = now;
+              const buf = this.thinkingBuf;
+              const preview = buf.length > 200 ? buf.slice(-200) : buf;
+              this.pushEvent({ type: 'thinking_delta', text: preview || 'reasoning...' });
+            }
             continue;
           }
         }
