@@ -518,8 +518,25 @@ export function appendAuditRound(
 }
 
 // ---------------------------------------------------------------------------
-// Runtime event-forwarding wrapper
+// Runtime adapter wrappers
 // ---------------------------------------------------------------------------
+
+/**
+ * Wraps a RuntimeAdapter to inject `reasoningEffort` into every `invoke` call.
+ * Existing `reasoningEffort` in params is preserved (caller wins).
+ */
+function wrapWithReasoningEffort(
+  rt: RuntimeAdapter,
+  effort: string,
+): RuntimeAdapter {
+  return {
+    id: rt.id,
+    capabilities: rt.capabilities,
+    invoke(params) {
+      return rt.invoke({ ...params, reasoningEffort: params.reasoningEffort ?? effort });
+    },
+  };
+}
 
 /**
  * Wraps a RuntimeAdapter so every emitted EngineEvent is forwarded to
@@ -850,8 +867,11 @@ export class ForgeOrchestrator {
     const drafterSessionKey = `forge:${planId}:${rawDrafterModel}:drafter`;
     const auditorSessionKey = `forge:${planId}:${rawAuditorModel}:auditor`;
 
-    // Wrap drafter runtime to forward events to the onEvent callback when provided.
-    const effectiveDrafterRt = onEvent ? wrapWithEventForwarding(drafterRt, onEvent) : drafterRt;
+    // Wrap drafter with reasoning effort if resolved (before event-forwarding so both compose).
+    const reasoningDrafterRt = drafterReasoningEffort
+      ? wrapWithReasoningEffort(drafterRt, drafterReasoningEffort)
+      : drafterRt;
+    const effectiveDrafterRt = onEvent ? wrapWithEventForwarding(reasoningDrafterRt, onEvent) : reasoningDrafterRt;
 
     let round = startRound - 1; // will be incremented at top of loop
     let planContent = await fs.readFile(filePath, 'utf-8');
@@ -933,7 +953,6 @@ export class ForgeOrchestrator {
               addDirs,
               timeoutMs: this.opts.timeoutMs,
               sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-              reasoningEffort: drafterReasoningEffort,
             }],
             runtime: this.opts.runtime,
             cwd: this.opts.cwd,
@@ -1009,6 +1028,9 @@ export class ForgeOrchestrator {
           ? resolveModel(rawAuditorModel, auditorRt.id)
           : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditorRt.id) : '');
         const auditorReasoningEffort = resolveReasoningEffort(rawAuditorModel, auditorRt.id);
+        const reasoningAuditorRt = auditorReasoningEffort
+          ? wrapWithReasoningEffort(auditorRt, auditorReasoningEffort)
+          : auditorRt;
 
         const auditorPrompt = buildAuditorPrompt(
           planContent,
@@ -1016,7 +1038,7 @@ export class ForgeOrchestrator {
           projectContext,
           { hasTools: auditorHasFileTools },
         );
-        const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(auditorRt, onEvent) : auditorRt;
+        const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(reasoningAuditorRt, onEvent) : reasoningAuditorRt;
         const auditPipelineResult = await this.runWithRetry({
           steps: [{
             kind: 'prompt',
@@ -1027,7 +1049,6 @@ export class ForgeOrchestrator {
             ...(auditorHasFileTools ? { addDirs } : {}),
             timeoutMs: this.opts.timeoutMs,
             sessionKey: auditorRt.capabilities.has('sessions') ? auditorSessionKey : undefined,
-            reasoningEffort: auditorReasoningEffort,
           }],
           runtime: this.opts.runtime,
           cwd: this.opts.cwd,
@@ -1136,7 +1157,6 @@ export class ForgeOrchestrator {
             addDirs,
             timeoutMs: this.opts.timeoutMs,
             sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-            reasoningEffort: drafterReasoningEffort,
           }],
           runtime: this.opts.runtime,
           cwd: this.opts.cwd,
