@@ -177,6 +177,15 @@ When using the Claude runtime, you can connect external tool servers via MCP. Pl
 **Contributors (from source):**
 - Everything above, plus **pnpm** — enable via Corepack (`corepack enable`) or install separately
 
+### Model capability requirement
+
+DiscoClaw assumes reliable structured output for several runtime paths (for example: Discord actions, cron JSON routing, and tool-call loops).
+
+- For OpenAI-compatible and OpenRouter adapters, pick models that reliably support JSON-shaped output and function calling.
+- "OpenAI-compatible" API shape alone is not a capability guarantee.
+- If a model fails JSON/tool-call smoke tests, treat it as unsupported for DiscoClaw runtime use.
+- Use the [model validation smoke test checklist](docs/configuration.md#model-validation-smoke-test-recommended) before adopting a new model.
+
 <!-- source-of-truth: docs/discord-bot-setup.md -->
 ## Quick start
 

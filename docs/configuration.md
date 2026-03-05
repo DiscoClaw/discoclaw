@@ -72,6 +72,8 @@ If the supervisor bails, it emits a structured error handoff:
 | `OPENAI_MODEL` | `gpt-4o` | Model ID for OpenAI-compatible adapter |
 | `OPENAI_COMPAT_TOOLS_ENABLED` | `false` | Enable function-calling tool use |
 
+Requirement: choose models that reliably support structured JSON output and function calling. API compatibility alone is not sufficient.
+
 ### OpenRouter
 
 | Variable | Default | Description |
@@ -79,6 +81,20 @@ If the supervisor bails, it emits a structured error handoff:
 | `OPENROUTER_API_KEY` | — | OpenRouter API key |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter base URL |
 | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4` | Default model via OpenRouter |
+
+Same requirement applies when routing through OpenRouter: model reliability for JSON/tool-call output is required.
+
+### Model validation smoke test (recommended)
+
+Run this checklist before adopting any new OpenAI-compatible/OpenRouter model:
+
+1. **Basic response check**: send a normal prompt and verify a stable non-empty text response.
+2. **Structured JSON check**: request a small fixed JSON object (no prose, no code fences), parse it, and verify required keys are always present.
+3. **Repeatability check**: run the same JSON prompt at least 10 times; reject the model if parse/schema failures occur.
+4. **Tool-call check** (when `OPENAI_COMPAT_TOOLS_ENABLED=1`): verify the model emits valid `tool_calls`, the server executes them, and the model returns a final answer without looping.
+5. **Action/routing format check** (if you use Discord actions or cron JSON routing): verify the model returns strict machine-readable output (`<discord-action>{...}</discord-action>` blocks or bare JSON arrays) without extra wrapper prose.
+
+If any check fails consistently, treat the model as unsupported for DiscoClaw runtime use.
 
 ### Gemini CLI
 

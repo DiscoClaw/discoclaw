@@ -30,7 +30,7 @@ import {
 } from './runtime-signal-budget.js';
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
-const STREAM_STALL_PROGRESS_UPDATE_MS = 20_000;
+const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
 const STREAMING_EDIT_TIMEOUT_MS = 4_000;
 const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
 const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 30_000;
@@ -536,6 +536,7 @@ function createReactionHandler(
           let hadTextFinal = false;
           let finalText = '';
           let deltaText = '';
+          let previewOnlyDeltaText = '';
           const collectedImages: ImageData[] = [];
           let statusTick = 1;
           const t0 = Date.now();
@@ -562,7 +563,7 @@ function createReactionHandler(
             if (!force && now - lastEditAt < minEditIntervalMs) return;
             lastEditAt = now;
             const out = selectStreamingOutput({
-              deltaText, activityLabel: '', finalText,
+              deltaText: deltaText + previewOnlyDeltaText, activityLabel: '', finalText,
               statusTick: statusTick++,
               previewMode,
               showPreview: Date.now() - t0 >= 7000,
@@ -648,14 +649,34 @@ function createReactionHandler(
           };
 
           // Stream heartbeat state for long quiet periods.
-          let lastEventAt = Date.now();
+          const invokeStartedAt = Date.now();
+          let lastEventAt = invokeStartedAt;
           let activeToolCount = 0;
           let stallWarned = false;
           let lastStallProgressAt = 0;
+          let sawRuntimeEvent = false;
+          let sawReasoningEvent = false;
+          const trackReasoningGap = params.runtime.id === 'codex';
+          const markRuntimeVisibility = (evt: EngineEvent): void => {
+            previewOnlyDeltaText = '';
+            sawRuntimeEvent = true;
+            if (trackReasoningGap && !sawReasoningEvent) {
+              if (evt.type === 'preview_debug' && evt.itemType === 'reasoning') {
+                sawReasoningEvent = true;
+              } else if (evt.type === 'log_line' && /\breasoning\b/i.test(evt.line)) {
+                sawReasoningEvent = true;
+              }
+            }
+          };
           const formatRuntimeHeartbeatLine = (stallSeconds: number, first: boolean): string => {
-            const context = activeToolCount > 0
-              ? `${activeToolCount} tool ${activeToolCount === 1 ? 'step' : 'steps'} in flight`
-              : 'awaiting runtime output';
+            const invokeSeconds = Math.max(1, Math.round((Date.now() - invokeStartedAt) / 1000));
+            const context = !sawRuntimeEvent
+              ? `connected; waiting for first runtime event (${invokeSeconds}s since invoke)`
+              : trackReasoningGap && !sawReasoningEvent
+                ? `runtime events received; no reasoning emitted yet (${invokeSeconds}s since invoke)`
+                : activeToolCount > 0
+                  ? `${activeToolCount} tool ${activeToolCount === 1 ? 'step' : 'steps'} in flight`
+                  : 'awaiting runtime output';
             const prefix = first ? 'Runtime heartbeat' : 'Still active';
             return `\n*${prefix} (${stallSeconds}s since last event; ${context}).*`;
           };
@@ -670,14 +691,28 @@ function createReactionHandler(
                   lastStallProgressAt = Date.now();
                   deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, true);
                   params.log?.info(
-                    { flow: 'reaction', sessionKey, stallSeconds, activeToolCount },
+                    {
+                      flow: 'reaction',
+                      sessionKey,
+                      stallSeconds,
+                      activeToolCount,
+                      sawRuntimeEvent,
+                      sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                    },
                     'discord:stream heartbeat',
                   );
                 } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
                   lastStallProgressAt = Date.now();
                   deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, false);
                   params.log?.info(
-                    { flow: 'reaction', sessionKey, stallSeconds, activeToolCount },
+                    {
+                      flow: 'reaction',
+                      sessionKey,
+                      stallSeconds,
+                      activeToolCount,
+                      sawRuntimeEvent,
+                      sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                    },
                     'discord:stream heartbeat',
                   );
                 }
@@ -686,6 +721,11 @@ function createReactionHandler(
             // eslint-disable-next-line @typescript-eslint/no-floating-promises
             maybeEdit(true);
           }, 5000);
+
+          // Emit a connected line immediately so long cold starts are explicit.
+          previewOnlyDeltaText += '*Runtime connected; waiting for first runtime event.*\n';
+          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+          maybeEdit(true);
 
           try {
             for await (const evt of params.runtime.invoke({
@@ -700,6 +740,7 @@ function createReactionHandler(
               images: inputImages,
             })) {
               // Track event flow for stall warning.
+              markRuntimeVisibility(evt);
               lastEventAt = Date.now();
               stallWarned = false;
               lastStallProgressAt = 0;

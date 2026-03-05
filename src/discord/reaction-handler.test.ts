@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { ChannelType } from 'discord.js';
 import { createReactionAddHandler, createReactionRemoveHandler } from './reaction-handler.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
@@ -8,6 +8,21 @@ import * as reactionPrompts from './reaction-prompts.js';
 import * as abortRegistry from './abort-registry.js';
 import * as forgePlanRegistry from './forge-plan-registry.js';
 import { RUNTIME_SIGNAL_SUPPRESSED_LINE } from './runtime-signal-budget.js';
+
+const STREAM_SANITIZE_FLAG = 'DISCOCLAW_DISABLE_STREAM_SANITIZATION';
+const priorStreamSanitizeFlag = process.env[STREAM_SANITIZE_FLAG];
+
+beforeEach(() => {
+  delete process.env[STREAM_SANITIZE_FLAG];
+});
+
+afterEach(() => {
+  if (priorStreamSanitizeFlag === undefined) {
+    delete process.env[STREAM_SANITIZE_FLAG];
+  } else {
+    process.env[STREAM_SANITIZE_FLAG] = priorStreamSanitizeFlag;
+  }
+});
 
 function makeMockRuntime(response: string): RuntimeAdapter {
   return {
@@ -1739,7 +1754,7 @@ describe('streaming behavior', () => {
 
       await runtimeStarted.promise;
       await vi.advanceTimersByTimeAsync(5000);
-      expect(stallEditCalls).toBe(1);
+      expect(stallEditCalls).toBeGreaterThanOrEqual(1);
 
       unblockRuntime.resolve();
       await Promise.resolve();
@@ -1797,15 +1812,65 @@ describe('streaming behavior', () => {
 
       const pending = handler(reaction as any, mockUser() as any);
       await runtimeStarted.promise;
-      await vi.advanceTimersByTimeAsync(31_000);
+      await vi.advanceTimersByTimeAsync(41_000);
 
       const replyObj = reaction.message._replyObj;
       const allEditContents = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? ''));
       const combined = allEditContents.join('\n');
       expect(combined).toContain('Runtime heartbeat');
       expect(combined).toContain('Still active');
+      expect(combined).toContain('waiting for first runtime event');
 
       unblockRuntime.resolve();
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces explicit no-reasoning heartbeat when codex has runtime events but no reasoning signals', async () => {
+    vi.useFakeTimers();
+    try {
+      const allowDone = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtimeStarted = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtime: RuntimeAdapter = {
+        id: 'codex',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(): AsyncIterable<EngineEvent> {
+          runtimeStarted.resolve();
+          yield {
+            type: 'preview_debug',
+            source: 'codex',
+            phase: 'started',
+            itemType: 'command_execution',
+          };
+          await allowDone.promise;
+          yield { type: 'done' };
+        },
+      };
+
+      const params = makeParams({ runtime, streamStallWarningMs: 1 });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      const reaction = mockReaction();
+
+      const pending = handler(reaction as any, mockUser() as any);
+      await runtimeStarted.promise;
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      const replyObj = reaction.message._replyObj;
+      const combined = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+      expect(combined).toContain('runtime events received');
+
+      allowDone.resolve();
       await pending;
     } finally {
       vi.useRealTimers();

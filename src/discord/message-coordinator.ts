@@ -104,7 +104,7 @@ import {
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
 
-const STREAM_STALL_PROGRESS_UPDATE_MS = 20_000;
+const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
 const STREAMING_EDIT_TIMEOUT_MS = 4_000;
 const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
 const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 30_000;
@@ -3004,17 +3004,37 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             };
 
             // Stream heartbeat state for long quiet periods.
-            let lastEventAt = Date.now();
+            const invokeStartedAt = Date.now();
+            let lastEventAt = invokeStartedAt;
             let activeToolCount = 0;
             let stallWarned = false;
             let lastStallProgressAt = 0;
+            let sawRuntimeEvent = false;
+            let sawReasoningEvent = false;
+            const trackReasoningGap = params.runtime.id === 'codex';
+            const markRuntimeVisibility = (evt: EngineEvent): void => {
+              previewOnlyDeltaText = '';
+              sawRuntimeEvent = true;
+              if (trackReasoningGap && !sawReasoningEvent) {
+                if (evt.type === 'preview_debug' && evt.itemType === 'reasoning') {
+                  sawReasoningEvent = true;
+                } else if (evt.type === 'log_line' && /\breasoning\b/i.test(evt.line)) {
+                  sawReasoningEvent = true;
+                }
+              }
+            };
             const formatRuntimeHeartbeatLine = (stallSeconds: number, first: boolean): string => {
+              const invokeSeconds = Math.max(1, Math.round((Date.now() - invokeStartedAt) / 1000));
               const normalizedActivity = activityLabel.trim().replace(/\s+/g, ' ');
-              const context = activeToolCount > 0
-                ? `${activeToolCount} tool ${activeToolCount === 1 ? 'step' : 'steps'} in flight`
-                : normalizedActivity
-                  ? `activity: ${normalizedActivity}`
-                  : 'awaiting runtime output';
+              const context = !sawRuntimeEvent
+                ? `connected; waiting for first runtime event (${invokeSeconds}s since invoke)`
+                : trackReasoningGap && !sawReasoningEvent
+                  ? `runtime events received; no reasoning emitted yet (${invokeSeconds}s since invoke)`
+                  : activeToolCount > 0
+                    ? `${activeToolCount} tool ${activeToolCount === 1 ? 'step' : 'steps'} in flight`
+                    : normalizedActivity
+                      ? `activity: ${normalizedActivity}`
+                      : 'awaiting runtime output';
               const prefix = first ? 'Runtime heartbeat' : 'Still active';
               return `\n*${prefix} (${stallSeconds}s since last event; ${context}).*`;
             };
@@ -3031,14 +3051,32 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     lastStallProgressAt = Date.now();
                     deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, true);
                     params.log?.info(
-                      { flow: 'message', sessionKey, followUpDepth, stallSeconds, activeToolCount, activityLabel: activityLabel || undefined },
+                      {
+                        flow: 'message',
+                        sessionKey,
+                        followUpDepth,
+                        stallSeconds,
+                        activeToolCount,
+                        sawRuntimeEvent,
+                        sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                        activityLabel: activityLabel || undefined,
+                      },
                       'discord:stream heartbeat',
                     );
                   } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
                     lastStallProgressAt = Date.now();
                     deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, false);
                     params.log?.info(
-                      { flow: 'message', sessionKey, followUpDepth, stallSeconds, activeToolCount, activityLabel: activityLabel || undefined },
+                      {
+                        flow: 'message',
+                        sessionKey,
+                        followUpDepth,
+                        stallSeconds,
+                        activeToolCount,
+                        sawRuntimeEvent,
+                        sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                        activityLabel: activityLabel || undefined,
+                      },
                       'discord:stream heartbeat',
                     );
                   }
@@ -3082,6 +3120,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 }, { flushDelayMs: 800, postToolDelayMs: 500 })
               : null;
 
+            // Emit a connected line immediately so long cold starts are explicit.
+            previewOnlyDeltaText += '*Runtime connected; waiting for first runtime event.*\n';
             // Render an initial streaming frame immediately so users always see
             // explicit thinking/waiting feedback during the invoke. Non-blocking:
             // avoid delaying runtime startup on Discord API latency.
@@ -3104,6 +3144,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 signal: abortSignal,
               })) {
                 // Track event flow for stall warning.
+                markRuntimeVisibility(evt);
                 lastEventAt = Date.now();
                 stallWarned = false;
                 lastStallProgressAt = 0;

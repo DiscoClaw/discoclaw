@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { ChannelType } from 'discord.js';
 
 import { createMessageCreateHandler } from './discord.js';
@@ -7,6 +7,20 @@ import { inFlightReplyCount, _resetForTest as resetInFlight } from './discord/in
 import * as abortRegistry from './discord/abort-registry.js';
 import { _resetDestructiveConfirmationForTest as resetDestructiveConfirm } from './discord/destructive-confirmation.js';
 import { RUNTIME_SIGNAL_SUPPRESSED_LINE } from './discord/runtime-signal-budget.js';
+
+const STREAM_SANITIZE_FLAG = 'DISCOCLAW_DISABLE_STREAM_SANITIZATION';
+const priorStreamSanitizeFlag = process.env[STREAM_SANITIZE_FLAG];
+
+beforeEach(() => {
+  delete process.env[STREAM_SANITIZE_FLAG];
+});
+afterEach(() => {
+  if (priorStreamSanitizeFlag === undefined) {
+    delete process.env[STREAM_SANITIZE_FLAG];
+  } else {
+    process.env[STREAM_SANITIZE_FLAG] = priorStreamSanitizeFlag;
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -807,7 +821,7 @@ describe('auto-follow-up for query actions', () => {
 
       await runtimeStarted.promise;
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(stallEditCalls).toBe(1);
+      expect(stallEditCalls).toBeGreaterThanOrEqual(1);
 
       unblockRuntime.resolve();
       await Promise.resolve();
@@ -848,11 +862,11 @@ describe('auto-follow-up for query actions', () => {
       const pending = handler(msg);
       await runtimeStarted.promise;
 
-      await vi.advanceTimersByTimeAsync(31_000);
+      await vi.advanceTimersByTimeAsync(41_000);
 
       const edits = replyEditContents(replyObj).join('\n');
-      expect(edits).toContain('Stream may be stalled');
-      expect(edits).toContain('Still running');
+      expect(edits).toContain('Runtime heartbeat');
+      expect(edits).toContain('Still active');
 
       unblockRuntime.resolve();
       await pending;
@@ -921,26 +935,26 @@ describe('auto-follow-up for query actions', () => {
         await Promise.resolve();
       }
 
-      let latest = replyEditContents(replyObj).at(-1) ?? '';
-      expect(latest).toContain('Update: phase 1 started');
-      expect(latest).not.toContain('Warning:');
-      expect(latest).not.toContain('Usage:');
+      let allEdits = replyEditContents(replyObj).join('\n');
+      expect(allEdits).toContain('Runtime connected; waiting for first runtime event.');
+      expect(allEdits).not.toContain('Warning:');
+      expect(allEdits).not.toContain('Usage:');
 
       await vi.advanceTimersByTimeAsync(1300);
       await Promise.resolve();
       await Promise.resolve();
 
-      latest = replyEditContents(replyObj).at(-1) ?? '';
-      expect(latest).toContain('Update: phase 1 started');
-      expect(latest).toContain('Warning: phase 1 warning');
-      expect(latest).not.toContain('Usage:');
+      allEdits = replyEditContents(replyObj).join('\n');
+      expect(allEdits).toContain('Update: phase 1 started');
+      expect(allEdits).toContain('Warning: phase 1 warning');
+      expect(allEdits).not.toContain('Usage:');
 
       await vi.advanceTimersByTimeAsync(1300);
       await Promise.resolve();
       await Promise.resolve();
 
-      latest = replyEditContents(replyObj).at(-1) ?? '';
-      expect(latest).toContain('Usage: in 21, out 8, total 29, cost $0.0123.');
+      allEdits = replyEditContents(replyObj).join('\n');
+      expect(allEdits).toContain('Usage: in 21, out 8, total 29, cost $0.0123.');
 
       await pending;
       expect(replyEditContents(replyObj).join('\n')).toContain('Hypothesis: reasoning in progress.');
@@ -1099,10 +1113,13 @@ describe('auto-follow-up for query actions', () => {
     expect(replyObj.edit).toHaveBeenCalled();
     const firstEdit = replyEditContents(replyObj)[0] ?? '';
     expect(firstEdit).not.toBe('...');
-    expect(firstEdit).toContain('Update: warming runtime cache');
+    expect(firstEdit).toContain('Runtime connected; waiting for first runtime event.');
 
     allowDone.resolve();
     await pending;
+
+    const finalEdits = replyEditContents(replyObj).join('\n');
+    expect(finalEdits).toContain('Update: warming runtime cache');
   });
 });
 
