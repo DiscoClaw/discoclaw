@@ -257,6 +257,29 @@ describe('createCliRuntime', () => {
     ]);
   });
 
+  it('passes thinkingEffort through to strategy.buildArgs via params', async () => {
+    const buildArgsSpy = vi.fn((_ctx, _opts) => ['--prompt']);
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdoutChunks: ['done'],
+      exitCode: 0,
+    }));
+
+    const rt = createCliRuntime(baseStrategy({
+      buildArgs: buildArgsSpy,
+    }), {});
+
+    await collectEvents(rt.invoke({
+      prompt: 'hello',
+      model: 'test-model',
+      cwd: '/tmp',
+      thinkingEffort: 'medium',
+    }));
+
+    expect(buildArgsSpy).toHaveBeenCalledTimes(1);
+    const ctx = buildArgsSpy.mock.calls[0][0];
+    expect(ctx.params.thinkingEffort).toBe('medium');
+  });
+
   it('uses strategy handleExitError for non-zero exits', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stdoutChunks: ['partial text'],

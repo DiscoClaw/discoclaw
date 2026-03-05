@@ -12,6 +12,9 @@ import {
   extractResultContentBlocks,
   imageDedupeKey,
 } from './claude-code-cli.js';
+import { claudeStrategy } from './strategies/claude-strategy.js';
+import type { CliInvokeContext, UniversalCliOpts } from './cli-strategy.js';
+import type { RuntimeInvokeParams } from './types.js';
 
 beforeEach(() => {
   (execa as any).mockReset?.();
@@ -835,6 +838,37 @@ describe('pool forwarding (multi-turn opts wiring)', () => {
     }
   });
 
+  it('forwards thinkingEffort to LongRunningProcess spawn args', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'text',
+      multiTurn: true,
+      multiTurnMaxProcesses: 2,
+      multiTurnHangTimeoutMs: 1000,
+      multiTurnIdleTimeoutMs: 5000,
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({
+      prompt: 'test prompt',
+      model: 'opus',
+      cwd: '/tmp',
+      sessionKey: 'test-session',
+      thinkingEffort: 'medium',
+    })) {
+      events.push(evt);
+    }
+
+    // First call is the LRP spawn (has --input-format stream-json as LRP signature).
+    const lrpArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    expect(lrpArgs).toContain('--effort');
+    expect(lrpArgs[lrpArgs.indexOf('--effort') + 1]).toBe('medium');
+  });
+
   it('--verbose is omitted from LongRunningProcess when disabled', async () => {
     const execaMock = execa as any;
     execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
@@ -1408,6 +1442,39 @@ describe('progress stall timer (thinking spiral guard)', () => {
     resolve({ exitCode: 0, stdout: '', stderr: '' });
     await vi.advanceTimersByTimeAsync(100);
     await drainPromise;
+  });
+});
+
+describe('claudeStrategy.buildArgs thinkingEffort', () => {
+  function makeBuildArgsCtx(thinkingEffort?: 'none' | 'low' | 'medium' | 'high'): { ctx: CliInvokeContext; opts: UniversalCliOpts } {
+    const params: RuntimeInvokeParams = {
+      prompt: 'test',
+      model: 'opus',
+      cwd: '/tmp',
+      ...(thinkingEffort !== undefined ? { thinkingEffort } : {}),
+    };
+    const ctx: CliInvokeContext = { params, useStdin: false, hasImages: false };
+    const opts: UniversalCliOpts = { dangerouslySkipPermissions: true };
+    return { ctx, opts };
+  }
+
+  it('includes --effort flag when thinkingEffort is "high"', () => {
+    const { ctx, opts } = makeBuildArgsCtx('high');
+    const args = claudeStrategy.buildArgs(ctx, opts);
+    expect(args).toContain('--effort');
+    expect(args[args.indexOf('--effort') + 1]).toBe('high');
+  });
+
+  it('omits --effort flag when thinkingEffort is "none"', () => {
+    const { ctx, opts } = makeBuildArgsCtx('none');
+    const args = claudeStrategy.buildArgs(ctx, opts);
+    expect(args).not.toContain('--effort');
+  });
+
+  it('omits --effort flag when thinkingEffort is undefined', () => {
+    const { ctx, opts } = makeBuildArgsCtx(undefined);
+    const args = claudeStrategy.buildArgs(ctx, opts);
+    expect(args).not.toContain('--effort');
   });
 });
 

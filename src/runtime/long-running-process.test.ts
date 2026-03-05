@@ -451,6 +451,46 @@ describe('LongRunningProcess', () => {
     expect(callArgs[callArgs.indexOf('--append-system-prompt') + 1]).toBe('You are Weston.');
   });
 
+  it('spawns with --effort when thinkingEffort is set', () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+
+    const proc = new LongRunningProcess({
+      ...baseOpts,
+      thinkingEffort: 'high',
+    });
+    proc.spawn();
+
+    const callArgs = (execa as any).mock.calls[0]?.[1] ?? [];
+    expect(callArgs).toContain('--effort');
+    expect(callArgs[callArgs.indexOf('--effort') + 1]).toBe('high');
+  });
+
+  it('omits --effort when thinkingEffort is "none"', () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+
+    const proc = new LongRunningProcess({
+      ...baseOpts,
+      thinkingEffort: 'none',
+    });
+    proc.spawn();
+
+    const callArgs = (execa as any).mock.calls[0]?.[1] ?? [];
+    expect(callArgs).not.toContain('--effort');
+  });
+
+  it('omits --effort when thinkingEffort is undefined', () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+
+    const proc = new LongRunningProcess(baseOpts);
+    proc.spawn();
+
+    const callArgs = (execa as any).mock.calls[0]?.[1] ?? [];
+    expect(callArgs).not.toContain('--effort');
+  });
+
   it('omits new flags when not set', () => {
     const mock = createMockSubprocess();
     (execa as any).mockReturnValue(mock.proc);

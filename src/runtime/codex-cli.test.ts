@@ -10,6 +10,7 @@ vi.mock('execa', () => ({
 
 // Import after mock setup.
 const { createCodexCliRuntime, killActiveCodexSubprocesses } = await import('./codex-cli.js');
+const { createCodexStrategy } = await import('./strategies/codex-strategy.js');
 
 async function collectEvents(iter: AsyncIterable<EngineEvent>): Promise<EngineEvent[]> {
   const events: EngineEvent[] = [];
@@ -1327,5 +1328,42 @@ describe('Codex CLI runtime adapter', () => {
     const callArgs3 = mockExeca.mock.calls[2][1] as string[];
     expect(callArgs3[1]).toBe('resume');
     expect(callArgs3[2]).toBe('thread-aaa');
+  });
+});
+
+describe('codexStrategy.buildArgs thinkingEffort', () => {
+  function makeBuildArgsCtx(thinkingEffort?: 'none' | 'low' | 'medium' | 'high') {
+    const params = {
+      prompt: 'test',
+      model: 'gpt-5.3-codex',
+      cwd: '/tmp',
+      ...(thinkingEffort !== undefined ? { thinkingEffort } : {}),
+    };
+    const ctx = { params, useStdin: false, hasImages: false } as any;
+    const opts = {} as any;
+    return { ctx, opts };
+  }
+
+  it('includes model_reasoning_effort config when thinkingEffort is "medium"', () => {
+    const strategy = createCodexStrategy('gpt-5.3-codex');
+    const { ctx, opts } = makeBuildArgsCtx('medium');
+    const args = strategy.buildArgs(ctx, opts);
+    expect(args).toContain('-c');
+    expect(args).toContain('model_reasoning_effort="medium"');
+  });
+
+  it('omits model_reasoning_effort config when thinkingEffort is "none"', () => {
+    const strategy = createCodexStrategy('gpt-5.3-codex');
+    const { ctx, opts } = makeBuildArgsCtx('none');
+    const args = strategy.buildArgs(ctx, opts);
+    expect(args).not.toContain('model_reasoning_effort="none"');
+  });
+
+  it('omits model_reasoning_effort config when thinkingEffort is undefined', () => {
+    const strategy = createCodexStrategy('gpt-5.3-codex');
+    const { ctx, opts } = makeBuildArgsCtx(undefined);
+    const args = strategy.buildArgs(ctx, opts);
+    const reasoningEffortArgs = args.filter((a: string) => a.includes('model_reasoning_effort'));
+    expect(reasoningEffortArgs).toHaveLength(0);
   });
 });
