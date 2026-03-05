@@ -1618,8 +1618,8 @@ describe('streaming behavior', () => {
 
     const replyObj = reaction.message._replyObj;
     const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
-    expect(allEdits).toContain('Runtime update (details omitted).');
-    expect(allEdits).toContain('Runtime warning (details omitted).');
+    expect(allEdits).toContain('Update: runtime emitted');
+    expect(allEdits).toContain('Warning: warn');
     expect(allEdits).not.toContain('"type":"status"');
     expect(allEdits).not.toContain('"ok":false');
   });

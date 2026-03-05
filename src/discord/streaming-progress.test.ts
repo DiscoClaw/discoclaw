@@ -302,7 +302,7 @@ describe('createStreamingProgress', () => {
     await vi.advanceTimersByTimeAsync(1300);
 
     const allEdits = message.edits.join('\n');
-    expect(allEdits).toContain('Runtime update (details omitted).');
+    expect(allEdits).toContain('Update: runtime emitted');
     expect(allEdits).not.toContain('"type":"status"');
     ctrl.dispose();
   });

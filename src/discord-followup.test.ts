@@ -1017,7 +1017,7 @@ describe('auto-follow-up for query actions', () => {
     await pending;
 
     const latest = replyEditContents(replyObj).at(-1) ?? '';
-    expect(latest).toContain('Runtime update (details omitted).');
+    expect(latest).toContain('Update: runtime payload');
     expect(latest).not.toContain('plan-123');
     expect(latest).not.toContain('phase_start');
     expect(latest).not.toContain('{"type"');
