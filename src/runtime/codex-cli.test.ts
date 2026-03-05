@@ -742,6 +742,52 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs).not.toContain('read-only');
   });
 
+  it('does not force reasoning summaries when preview/debug flags are off', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(callArgs).not.toContain('model_reasoning_summary="auto"');
+  });
+
+  it('forces model_reasoning_summary=auto when itemTypeDebug is enabled', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      itemTypeDebug: true,
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(callArgs).toContain('-c');
+    expect(callArgs).toContain('model_reasoning_summary="auto"');
+  });
+
   it('passes --add-dir flags from params.addDirs', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stdout: 'ok',
@@ -1240,6 +1286,9 @@ describe('Codex CLI runtime adapter', () => {
     expect(debugEvents.some((e) => e.phase === 'completed' && e.itemType === 'reasoning')).toBe(true);
     expect(debugEvents.some((e) => e.phase === 'started' && e.itemType === 'command_execution')).toBe(true);
     expect(debugEvents.some((e) => e.phase === 'completed' && e.itemType === 'command_execution')).toBe(true);
+    expect(debugEvents.some((e) => e.itemType === 'reasoning' && e.itemId === 'item_reason_1')).toBe(true);
+    expect(debugEvents.some((e) => e.itemType === 'reasoning' && e.phase === 'completed' && e.label === 'Reasoning: Planning.')).toBe(true);
+    expect(debugEvents.some((e) => e.itemType === 'command_execution' && e.itemId === 'item_cmd_1')).toBe(true);
     expect(debugEvents.some((e) => e.itemType === 'agent_message')).toBe(false);
   });
 

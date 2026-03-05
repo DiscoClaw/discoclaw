@@ -618,6 +618,7 @@ const multiTurnMaxProcesses = cfg.multiTurnMaxProcesses;
 const streamStallTimeoutMs = cfg.streamStallTimeoutMs;
 const progressStallTimeoutMs = cfg.progressStallTimeoutMs;
 const streamStallWarningMs = cfg.streamStallWarningMs;
+const debugStreamPreviewLines = cfg.debugStreamPreviewLines;
 const maxConcurrentInvocations = cfg.maxConcurrentInvocations;
 const globalSupervisorEnabled = cfg.globalSupervisorEnabled;
 const globalSupervisorAuditStream = cfg.globalSupervisorAuditStream;
@@ -1160,6 +1161,7 @@ const botParams = {
   existingTasksId: isSnowflake(tasksForum) ? tasksForum : undefined,
   toolAwareStreaming,
   streamPreviewMode,
+  debugStreamPreviewLines,
   streamStallWarningMs,
   actionFollowupDepth,
   reactionHandlerEnabled,

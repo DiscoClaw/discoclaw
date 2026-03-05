@@ -1,6 +1,6 @@
 import type { EngineEvent } from '../runtime/types.js';
 import type { PlanRunEvent } from './plan-manager.js';
-import { stripActionTags } from './output-utils.js';
+import { isStreamingSanitizationDisabled, stripActionTags } from './output-utils.js';
 import type { StreamingPreviewMode } from './output-utils.js';
 
 const MAX_RUNTIME_LINE_CHARS_COMPACT = 120;
@@ -19,6 +19,7 @@ function truncatePreviewLine(text: string, maxChars: number): string {
 }
 
 function sanitizeRuntimeLine(text: string, maxChars: number): string {
+  if (isStreamingSanitizationDisabled()) return text;
   const clean = stripActionTags(text)
     .replace(/\r\n?/g, '\n')
     .replace(/\n+/g, ' \\n ')
@@ -111,7 +112,7 @@ export function adaptRuntimeEventText(
     case 'log_line': {
       const line = sanitizeRuntimeLine(evt.line, maxChars);
       if (!line || !hasMeaningfulRuntimeLine(line)) return null;
-      if (hasStructuredPayloadFragment(line)) {
+      if (!isStreamingSanitizationDisabled() && hasStructuredPayloadFragment(line)) {
         return evt.stream === 'stderr'
           ? 'Runtime warning (details omitted).'
           : 'Runtime update (details omitted).';

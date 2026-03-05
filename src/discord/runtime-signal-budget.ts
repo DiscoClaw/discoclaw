@@ -33,6 +33,15 @@ export function runtimeSupportsNativeThinkingStream(runtimeId: RuntimeId): boole
 }
 
 type RuntimeSignalClass = 'log' | 'usage' | 'status';
+export type RuntimeSignalDecisionReason =
+  | 'allowed'
+  | 'guaranteed_signal'
+  | 'not_runtime_signal'
+  | 'duplicate_preview_debug'
+  | 'native_fallback_active'
+  | 'total_budget_exhausted'
+  | 'log_budget_exhausted'
+  | 'usage_budget_exhausted';
 
 function classifyRuntimeSignal(evt: EngineEvent): RuntimeSignalClass | null {
   switch (evt.type) {
@@ -53,20 +62,30 @@ function isCriticalRuntimeSignal(evt: EngineEvent): boolean {
   return evt.type === 'tool_end' && evt.ok === false;
 }
 
+function isGuaranteedRuntimeSignal(evt: EngineEvent): boolean {
+  // Always surface final tool status.
+  if (evt.type === 'tool_end') return true;
+
+  // Always surface codex lifecycle markers for reasoning + command execution.
+  if (evt.type === 'preview_debug') {
+    return evt.source === 'codex' && (evt.itemType === 'reasoning' || evt.itemType === 'command_execution');
+  }
+
+  return false;
+}
+
 function shouldFallbackGateSignal(evt: EngineEvent): boolean {
   // Keep noisy signals fallback-only while native text is flowing.
   if (evt.type === 'log_line' || evt.type === 'usage') return true;
 
-  // Reasoning lifecycle markers can be high-churn with native thinking deltas.
-  if (evt.type === 'preview_debug') return evt.itemType === 'reasoning';
-
-  // Always surface tool lifecycle and non-reasoning preview_debug.
+  // Lifecycle markers are handled by the guaranteed lane.
   return false;
 }
 
 type ConsumeResult = {
   allow: boolean;
   appendSuppression: boolean;
+  reason: RuntimeSignalDecisionReason;
 };
 
 /**
@@ -78,6 +97,9 @@ export class RuntimeSignalBudgetTracker {
   private logLines = 0;
   private usageLines = 0;
   private suppressionEmitted = false;
+  private openPreviewLifecycle = new Set<string>();
+  private recentPreviewTerminalKeys = new Set<string>();
+  private recentPreviewTerminalOrder: string[] = [];
   private sawNativeTextDelta = false;
   private lastNativeTextDeltaAtMs = 0;
   private readonly useNativeTextFallback: boolean;
@@ -96,13 +118,51 @@ export class RuntimeSignalBudgetTracker {
     this.logLines = 0;
     this.usageLines = 0;
     this.suppressionEmitted = false;
+    this.openPreviewLifecycle.clear();
+    this.recentPreviewTerminalKeys.clear();
+    this.recentPreviewTerminalOrder = [];
     this.sawNativeTextDelta = false;
     this.lastNativeTextDeltaAtMs = 0;
   }
 
+  private rememberPreviewTerminalKey(key: string): void {
+    if (this.recentPreviewTerminalKeys.has(key)) return;
+    this.recentPreviewTerminalKeys.add(key);
+    this.recentPreviewTerminalOrder.push(key);
+    while (this.recentPreviewTerminalOrder.length > 64) {
+      const oldest = this.recentPreviewTerminalOrder.shift();
+      if (oldest) this.recentPreviewTerminalKeys.delete(oldest);
+    }
+  }
+
   consume(evt: EngineEvent, nowMs = Date.now()): ConsumeResult {
     const cls = classifyRuntimeSignal(evt);
-    if (!cls) return { allow: false, appendSuppression: false };
+    if (!cls) return { allow: false, appendSuppression: false, reason: 'not_runtime_signal' };
+
+    // Collapse duplicate preview lifecycle chatter when runtime provides a stable item id.
+    if (evt.type === 'preview_debug') {
+      const key = evt.itemId ? `${evt.source}:${evt.itemType}:${evt.itemId}` : null;
+      if (key) {
+        if (evt.phase === 'started') {
+          if (this.openPreviewLifecycle.has(key)) {
+            return { allow: false, appendSuppression: false, reason: 'duplicate_preview_debug' };
+          }
+          this.openPreviewLifecycle.add(key);
+        } else if (evt.phase === 'completed') {
+          const terminalKey = `${key}:${evt.phase}`;
+          if (!this.openPreviewLifecycle.has(key) && this.recentPreviewTerminalKeys.has(terminalKey)) {
+            return { allow: false, appendSuppression: false, reason: 'duplicate_preview_debug' };
+          }
+          this.openPreviewLifecycle.delete(key);
+          this.rememberPreviewTerminalKey(terminalKey);
+        }
+      }
+    }
+
+    // Guaranteed lane bypasses fallback gating and budget caps.
+    if (isGuaranteedRuntimeSignal(evt)) {
+      return { allow: true, appendSuppression: false, reason: 'guaranteed_signal' };
+    }
 
     // Option 2 behavior: when native thinking/stream text is flowing, treat
     // synthetic status lines as fallback-only (except critical failures).
@@ -113,32 +173,32 @@ export class RuntimeSignalBudgetTracker {
       !isCriticalRuntimeSignal(evt) &&
       nowMs - this.lastNativeTextDeltaAtMs <= RUNTIME_SIGNAL_FALLBACK_IDLE_MS
     ) {
-      return { allow: false, appendSuppression: false };
+      return { allow: false, appendSuppression: false, reason: 'native_fallback_active' };
     }
 
     if (this.totalLines >= MAX_RUNTIME_SIGNAL_LINES_PER_STREAM) {
-      return this.suppress();
+      return this.suppress('total_budget_exhausted');
     }
 
     if (cls === 'log' && this.logLines >= MAX_RUNTIME_LOG_SIGNAL_LINES_PER_STREAM) {
-      return this.suppress();
+      return this.suppress('log_budget_exhausted');
     }
 
     if (cls === 'usage' && this.usageLines >= MAX_RUNTIME_USAGE_SIGNAL_LINES_PER_STREAM) {
-      return this.suppress();
+      return this.suppress('usage_budget_exhausted');
     }
 
     this.totalLines += 1;
     if (cls === 'log') this.logLines += 1;
     if (cls === 'usage') this.usageLines += 1;
-    return { allow: true, appendSuppression: false };
+    return { allow: true, appendSuppression: false, reason: 'allowed' };
   }
 
-  private suppress(): ConsumeResult {
+  private suppress(reason: Extract<RuntimeSignalDecisionReason, 'total_budget_exhausted' | 'log_budget_exhausted' | 'usage_budget_exhausted'>): ConsumeResult {
     if (!this.suppressionEmitted) {
       this.suppressionEmitted = true;
-      return { allow: false, appendSuppression: true };
+      return { allow: false, appendSuppression: true, reason };
     }
-    return { allow: false, appendSuppression: false };
+    return { allow: false, appendSuppression: false, reason };
   }
 }

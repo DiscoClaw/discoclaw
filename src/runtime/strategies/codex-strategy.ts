@@ -39,6 +39,13 @@ function compactText(value: string, max = CODEX_PREVIEW_TEXT_MAX): string {
   return oneLine.slice(0, max - 1) + '\u2026';
 }
 
+function extractItemId(item: Record<string, unknown>): string | undefined {
+  const raw = item.id ?? item.item_id ?? item.itemId ?? item.call_id ?? item.callId;
+  if (typeof raw !== 'string') return undefined;
+  const id = compactText(raw, 120);
+  return id || undefined;
+}
+
 /**
  * Strip prompt content and internal details from error messages.
  * Codex CLI can include the full prompt, session paths, and auth details in stderr on failure.
@@ -80,17 +87,34 @@ export function createCodexStrategy(
 ): CliAdapterStrategy {
   const verbosePreview = Boolean(strategyOpts.verbosePreview);
   const itemTypeDebug = Boolean(strategyOpts.itemTypeDebug);
+  const forceReasoningSummaryAuto = verbosePreview || itemTypeDebug;
 
   function itemDebugEvent(phase: 'started' | 'completed', item: Record<string, unknown>) {
     const itemType = typeof item.type === 'string' ? item.type : 'item';
     if (itemType === 'agent_message') return null;
+    const itemId = extractItemId(item);
     const status = typeof item.status === 'string' ? compactText(item.status, 80) : undefined;
+    let label: string | undefined;
+
+    // Preserve concise reasoning context in the guaranteed preview_debug lane.
+    if (phase === 'completed' && itemType === 'reasoning') {
+      const summary = typeof item.summary === 'string'
+        ? item.summary
+        : typeof item.text === 'string'
+          ? item.text
+          : '';
+      const compactSummary = compactText(summary, 260);
+      if (compactSummary) label = `Reasoning: ${compactSummary}`;
+    }
+
     return {
       type: 'preview_debug' as const,
       source: 'codex' as const,
       phase,
       itemType,
+      ...(itemId ? { itemId } : {}),
       ...(status ? { status } : {}),
+      ...(label ? { label } : {}),
     };
   }
 
@@ -172,6 +196,12 @@ export function createCodexStrategy(
         args.push('--dangerously-bypass-approvals-and-sandbox');
       } else if (!existingThreadId) {
         args.push('-s', 'read-only');
+      }
+
+      // Keep reasoning summaries enabled whenever reasoning-aware preview/debug
+      // is requested so preview_debug lanes can surface model-provided context.
+      if (forceReasoningSummaryAuto) {
+        args.push('-c', 'model_reasoning_summary="auto"');
       }
 
       // When session tracking is active, use --json so we can capture the thread_id

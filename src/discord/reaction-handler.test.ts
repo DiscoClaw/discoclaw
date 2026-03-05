@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { ChannelType } from 'discord.js';
 import { createReactionAddHandler, createReactionRemoveHandler } from './reaction-handler.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
@@ -8,6 +8,21 @@ import * as reactionPrompts from './reaction-prompts.js';
 import * as abortRegistry from './abort-registry.js';
 import * as forgePlanRegistry from './forge-plan-registry.js';
 import { RUNTIME_SIGNAL_SUPPRESSED_LINE } from './runtime-signal-budget.js';
+
+const STREAM_SANITIZE_FLAG = 'DISCOCLAW_DISABLE_STREAM_SANITIZATION';
+const priorStreamSanitizeFlag = process.env[STREAM_SANITIZE_FLAG];
+
+beforeEach(() => {
+  delete process.env[STREAM_SANITIZE_FLAG];
+});
+
+afterEach(() => {
+  if (priorStreamSanitizeFlag === undefined) {
+    delete process.env[STREAM_SANITIZE_FLAG];
+  } else {
+    process.env[STREAM_SANITIZE_FLAG] = priorStreamSanitizeFlag;
+  }
+});
 
 function makeMockRuntime(response: string): RuntimeAdapter {
   return {
@@ -1553,6 +1568,36 @@ describe('streaming behavior', () => {
     expect(allEditContents.some((c: string) => c.includes('Finding: readFile finished.'))).toBe(true);
   });
 
+  it('keeps preview_debug visible in debug mode without requiring force-allow fallback', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'codex',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_delta', text: 'native reasoning stream\n' };
+        yield { type: 'preview_debug', source: 'codex', phase: 'started', itemType: 'reasoning' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime, debugStreamPreviewLines: true });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: 'reaction',
+        eventType: 'preview_debug',
+        allow: true,
+        effectiveAllow: true,
+        forceAllowPreviewDebug: false,
+        suppressionReason: 'guaranteed_signal',
+      }),
+      'discord:preview-line',
+    );
+  });
+
   it('redacts structured runtime payload fragments from streaming preview text', async () => {
     const runtime: RuntimeAdapter = {
       id: 'claude_code',
@@ -1658,15 +1703,10 @@ describe('streaming behavior', () => {
     expect(allEdits).not.toContain('flags');
   });
 
-  it('waits for pending keepalive streaming edits before finalizing', async () => {
+  it('times out hung keepalive streaming edits and still finalizes', async () => {
     vi.useFakeTimers();
     try {
       const unblockRuntime = (() => {
-        let resolve!: () => void;
-        const promise = new Promise<void>((r) => { resolve = r; });
-        return { promise, resolve };
-      })();
-      const unblockFirstStallEdit = (() => {
         let resolve!: () => void;
         const promise = new Promise<void>((r) => { resolve = r; });
         return { promise, resolve };
@@ -1693,7 +1733,7 @@ describe('streaming behavior', () => {
         edit: vi.fn().mockImplementation(async () => {
           stallEditCalls++;
           if (stallEditCalls === 1) {
-            await unblockFirstStallEdit.promise;
+            await new Promise<void>(() => {});
           }
         }),
         delete: vi.fn().mockResolvedValue(undefined),
@@ -1714,7 +1754,7 @@ describe('streaming behavior', () => {
 
       await runtimeStarted.promise;
       await vi.advanceTimersByTimeAsync(5000);
-      expect(stallEditCalls).toBe(1);
+      expect(stallEditCalls).toBeGreaterThanOrEqual(1);
 
       unblockRuntime.resolve();
       await Promise.resolve();
@@ -1726,13 +1766,17 @@ describe('streaming behavior', () => {
         ),
       ).toBe(false);
 
-      unblockFirstStallEdit.resolve();
+      await vi.advanceTimersByTimeAsync(4100);
       await pending;
       expect(
         replyObj.edit.mock.calls.some((call: any[]) =>
           String(call?.[0]?.content ?? '').includes('Final answer'),
         ),
       ).toBe(true);
+      expect(params.log?.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ flow: 'reaction', timeoutMs: 4_000 }),
+        'discord:stream edit timeout',
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1768,15 +1812,65 @@ describe('streaming behavior', () => {
 
       const pending = handler(reaction as any, mockUser() as any);
       await runtimeStarted.promise;
-      await vi.advanceTimersByTimeAsync(31_000);
+      await vi.advanceTimersByTimeAsync(41_000);
 
       const replyObj = reaction.message._replyObj;
       const allEditContents = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? ''));
       const combined = allEditContents.join('\n');
-      expect(combined).toContain('Stream may be stalled');
-      expect(combined).toContain('Still running');
+      expect(combined).toContain('Runtime heartbeat');
+      expect(combined).toContain('Still active');
+      expect(combined).toContain('waiting for first runtime event');
 
       unblockRuntime.resolve();
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces explicit no-reasoning heartbeat when codex has runtime events but no reasoning signals', async () => {
+    vi.useFakeTimers();
+    try {
+      const allowDone = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtimeStarted = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtime: RuntimeAdapter = {
+        id: 'codex',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(): AsyncIterable<EngineEvent> {
+          runtimeStarted.resolve();
+          yield {
+            type: 'preview_debug',
+            source: 'codex',
+            phase: 'started',
+            itemType: 'command_execution',
+          };
+          await allowDone.promise;
+          yield { type: 'done' };
+        },
+      };
+
+      const params = makeParams({ runtime, streamStallWarningMs: 1 });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      const reaction = mockReaction();
+
+      const pending = handler(reaction as any, mockUser() as any);
+      await runtimeStarted.promise;
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      const replyObj = reaction.message._replyObj;
+      const combined = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+      expect(combined).toContain('runtime events received');
+
+      allowDone.resolve();
       await pending;
     } finally {
       vi.useRealTimers();

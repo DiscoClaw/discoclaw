@@ -1,7 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EngineEvent } from '../runtime/types.js';
 import type { PlanRunEvent } from './plan-manager.js';
 import { adaptPlanRunEventText, adaptRuntimeEventText } from './runtime-event-text-adapter.js';
+
+const STREAM_SANITIZE_FLAG = 'DISCOCLAW_DISABLE_STREAM_SANITIZATION';
+const priorStreamSanitizeFlag = process.env[STREAM_SANITIZE_FLAG];
+
+beforeEach(() => {
+  delete process.env[STREAM_SANITIZE_FLAG];
+});
+
+afterEach(() => {
+  if (priorStreamSanitizeFlag === undefined) {
+    delete process.env[STREAM_SANITIZE_FLAG];
+  } else {
+    process.env[STREAM_SANITIZE_FLAG] = priorStreamSanitizeFlag;
+  }
+});
 
 describe('adaptRuntimeEventText', () => {
   it('renders concise tool lifecycle updates', () => {
@@ -37,6 +52,16 @@ describe('adaptRuntimeEventText', () => {
     expect(stdoutText).toBe('Runtime update (details omitted).');
     expect(stderrText).toBe('Runtime warning (details omitted).');
     expect(stdoutText).not.toContain('plan-123');
+  });
+
+  it('shows raw structured payloads when stream sanitization is disabled', () => {
+    process.env[STREAM_SANITIZE_FLAG] = '1';
+    const stdoutText = adaptRuntimeEventText({
+      type: 'log_line',
+      stream: 'stdout',
+      line: 'runtime payload {"type":"phase_start","planId":"plan-123"}',
+    });
+    expect(stdoutText).toBe('Update: runtime payload {"type":"phase_start","planId":"plan-123"}');
   });
 
   it('formats usage lines with mode-aware cost precision', () => {
@@ -80,6 +105,16 @@ describe('adaptRuntimeEventText', () => {
       phase: 'completed',
       itemType: 'command_execution <discord-action>{"type":"noop"}</discord-action>',
     })).toBe('Command Execution completed.');
+  });
+
+  it('prefers preview_debug labels and sanitizes them', () => {
+    expect(adaptRuntimeEventText({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'completed',
+      itemType: 'reasoning',
+      label: 'Reasoning: compare <discord-action>{"type":"noop"}</discord-action> options',
+    })).toBe('Reasoning: compare options');
   });
 
   it('formats runtime errors and handles blank messages', () => {

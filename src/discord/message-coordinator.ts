@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Client, Guild, TextBasedChannel } from 'discord.js';
-import type { RuntimeAdapter, ImageData } from '../runtime/types.js';
+import type { RuntimeAdapter, ImageData, EngineEvent } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import type { SessionManager } from '../sessions.js';
 import { isAllowlisted, isTrustedBot } from './allowlist.js';
@@ -104,7 +104,23 @@ import {
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
 
-const STREAM_STALL_PROGRESS_UPDATE_MS = 20_000;
+const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
+const STREAMING_EDIT_TIMEOUT_MS = 4_000;
+const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
+const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 30_000;
+
+async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const completed = await Promise.race<boolean>([
+    // Swallow edit errors in-stream; callers handle timeout-only behavior.
+    editOp.then(() => true, () => true),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return completed;
+}
 
 export type BotParams = {
   token: string;
@@ -211,6 +227,7 @@ export type BotParams = {
   bootstrapEnsureTasksForum?: boolean;
   toolAwareStreaming?: boolean;
   streamPreviewMode?: 'compact' | 'raw';
+  debugStreamPreviewLines?: boolean;
   streamStallWarningMs: number;
   actionFollowupDepth: number;
   reactionHandlerEnabled: boolean;
@@ -2857,8 +2874,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let invokeHadError = false;
             let invokeErrorMessage = '';
             let lastEditAt = 0;
+            let streamEditTimeoutStreak = 0;
+            let streamEditCooldownUntil = 0;
             const minEditIntervalMs = 1250;
             const previewMode = params.streamPreviewMode ?? 'compact';
+            const debugStreamPreviewLines = Boolean(params.debugStreamPreviewLines);
             const runtimeSignalBudget = new RuntimeSignalBudgetTracker({
               useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
             });
@@ -2875,13 +2895,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
 
             let streamEditQueue: Promise<void> = Promise.resolve();
-            const maybeEdit = async (force = false) => {
+            const maybeEdit = async (force = false, opts?: { consumeThrottle?: boolean }) => {
               const currentReply = reply;
               if (!currentReply) return;
               if (isShuttingDown()) return;
               const now = Date.now();
+              if (!force && now < streamEditCooldownUntil) return;
+              const consumeThrottle = opts?.consumeThrottle ?? true;
               if (!force && now - lastEditAt < minEditIntervalMs) return;
-              lastEditAt = now;
+              if (consumeThrottle) lastEditAt = now;
               const out = selectStreamingOutput({
                 deltaText: deltaText + previewOnlyDeltaText,
                 activityLabel,
@@ -2894,7 +2916,34 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 .catch(() => undefined)
                 .then(async () => {
                   try {
-                    await currentReply.edit({ content: out, allowedMentions: NO_MENTIONS });
+                    const completed = await waitForEditOrTimeout(
+                      currentReply.edit({ content: out, allowedMentions: NO_MENTIONS }),
+                      STREAMING_EDIT_TIMEOUT_MS,
+                    );
+                    if (!completed) {
+                      streamEditTimeoutStreak += 1;
+                      if (streamEditTimeoutStreak >= STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD) {
+                        streamEditCooldownUntil = Date.now() + STREAMING_EDIT_TIMEOUT_COOLDOWN_MS;
+                        params.log?.warn(
+                          {
+                            flow: 'message',
+                            sessionKey,
+                            followUpDepth,
+                            timeoutMs: STREAMING_EDIT_TIMEOUT_MS,
+                            timeoutStreak: streamEditTimeoutStreak,
+                            cooldownMs: STREAMING_EDIT_TIMEOUT_COOLDOWN_MS,
+                          },
+                          'discord:stream edit cooldown active',
+                        );
+                      }
+                      params.log?.warn(
+                        { flow: 'message', sessionKey, followUpDepth, timeoutMs: STREAMING_EDIT_TIMEOUT_MS },
+                        'discord:stream edit timeout',
+                      );
+                    } else if (streamEditTimeoutStreak > 0 || streamEditCooldownUntil > 0) {
+                      streamEditTimeoutStreak = 0;
+                      streamEditCooldownUntil = 0;
+                    }
                   } catch {
                     // Ignore Discord edit errors during streaming.
                   }
@@ -2907,9 +2956,43 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               opts?: { edit?: boolean },
             ) => {
               const line = adaptRuntimeEventText(evt, { mode: previewMode });
-              if (!line) return;
+              if (!line) {
+                if (debugStreamPreviewLines) {
+                  params.log?.info(
+                    {
+                      flow: 'message',
+                      sessionKey,
+                      followUpDepth,
+                      eventType: evt.type,
+                      dropped: true,
+                      droppedReason: 'adapter_suppressed',
+                    },
+                    'discord:preview-line',
+                  );
+                }
+                return;
+              }
               const budgetResult = runtimeSignalBudget.consume(evt);
-              if (!budgetResult.allow) {
+              const forceAllowPreviewDebug = debugStreamPreviewLines && evt.type === 'preview_debug' && !budgetResult.allow;
+              const allowLine = budgetResult.allow || forceAllowPreviewDebug;
+              if (debugStreamPreviewLines) {
+                params.log?.info(
+                  {
+                    flow: 'message',
+                    sessionKey,
+                    followUpDepth,
+                    eventType: evt.type,
+                    allow: budgetResult.allow,
+                    effectiveAllow: allowLine,
+                    forceAllowPreviewDebug,
+                    appendSuppression: budgetResult.appendSuppression,
+                    suppressionReason: budgetResult.reason,
+                    line: line.length > 500 ? `${line.slice(0, 499)}…` : line,
+                  },
+                  'discord:preview-line',
+                );
+              }
+              if (!allowLine) {
                 if (budgetResult.appendSuppression) {
                   deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + RUNTIME_SIGNAL_SUPPRESSED_LINE + '\n';
                   if (opts?.edit ?? true) await maybeEdit(false);
@@ -2920,27 +3003,82 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (opts?.edit ?? true) await maybeEdit(false);
             };
 
-            // Stream stall warning state.
-            let lastEventAt = Date.now();
+            // Stream heartbeat state for long quiet periods.
+            const invokeStartedAt = Date.now();
+            let lastEventAt = invokeStartedAt;
             let activeToolCount = 0;
             let stallWarned = false;
             let lastStallProgressAt = 0;
+            let sawRuntimeEvent = false;
+            let sawReasoningEvent = false;
+            const trackReasoningGap = params.runtime.id === 'codex';
+            const markRuntimeVisibility = (evt: EngineEvent): void => {
+              previewOnlyDeltaText = '';
+              sawRuntimeEvent = true;
+              if (trackReasoningGap && !sawReasoningEvent) {
+                if (evt.type === 'preview_debug' && evt.itemType === 'reasoning') {
+                  sawReasoningEvent = true;
+                } else if (evt.type === 'log_line' && /\breasoning\b/i.test(evt.line)) {
+                  sawReasoningEvent = true;
+                }
+              }
+            };
+            const formatRuntimeHeartbeatLine = (stallSeconds: number, first: boolean): string => {
+              const invokeSeconds = Math.max(1, Math.round((Date.now() - invokeStartedAt) / 1000));
+              const normalizedActivity = activityLabel.trim().replace(/\s+/g, ' ');
+              const context = !sawRuntimeEvent
+                ? `connected; waiting for first runtime event (${invokeSeconds}s since invoke)`
+                : trackReasoningGap && !sawReasoningEvent
+                  ? `runtime events received; no reasoning emitted yet (${invokeSeconds}s since invoke)`
+                  : activeToolCount > 0
+                    ? `${activeToolCount} tool ${activeToolCount === 1 ? 'step' : 'steps'} in flight`
+                    : normalizedActivity
+                      ? `activity: ${normalizedActivity}`
+                      : 'awaiting runtime output';
+              const prefix = first ? 'Runtime heartbeat' : 'Still active';
+              return `\n*${prefix} (${stallSeconds}s since last event; ${context}).*`;
+            };
 
-            // If the runtime produces no stdout/stderr (auth/network hangs), avoid leaving the
-            // placeholder `...` indefinitely by periodically updating the message.
+            // If runtime events go quiet, append periodic heartbeat lines so users can see
+            // the invocation is still alive and what context we currently have.
             const keepalive = setInterval(() => {
-              // Stall warning: append to deltaText when events stop arriving.
               if (params.streamStallWarningMs > 0) {
                 const stallElapsed = Date.now() - lastEventAt;
-                if (stallElapsed > params.streamStallWarningMs && activeToolCount === 0) {
+                if (stallElapsed > params.streamStallWarningMs) {
                   const stallSeconds = Math.round(stallElapsed / 1000);
                   if (!stallWarned) {
                     stallWarned = true;
                     lastStallProgressAt = Date.now();
-                    deltaText += (deltaText ? '\n' : '') + `\n*Stream may be stalled (${stallSeconds}s no activity)...*`;
+                    deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, true);
+                    params.log?.info(
+                      {
+                        flow: 'message',
+                        sessionKey,
+                        followUpDepth,
+                        stallSeconds,
+                        activeToolCount,
+                        sawRuntimeEvent,
+                        sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                        activityLabel: activityLabel || undefined,
+                      },
+                      'discord:stream heartbeat',
+                    );
                   } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
                     lastStallProgressAt = Date.now();
-                    deltaText += (deltaText ? '\n' : '') + `\n*Still running (${stallSeconds}s no activity)...*`;
+                    deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, false);
+                    params.log?.info(
+                      {
+                        flow: 'message',
+                        sessionKey,
+                        followUpDepth,
+                        stallSeconds,
+                        activeToolCount,
+                        sawRuntimeEvent,
+                        sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                        activityLabel: activityLabel || undefined,
+                      },
+                      'discord:stream heartbeat',
+                    );
                   }
                 }
               }
@@ -2982,6 +3120,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 }, { flushDelayMs: 800, postToolDelayMs: 500 })
               : null;
 
+            // Emit a connected line immediately so long cold starts are explicit.
+            previewOnlyDeltaText += '*Runtime connected; waiting for first runtime event.*\n';
+            // Render an initial streaming frame immediately so users always see
+            // explicit thinking/waiting feedback during the invoke. Non-blocking:
+            // avoid delaying runtime startup on Discord API latency.
+            // eslint-disable-next-line @typescript-eslint/no-floating-promises
+            maybeEdit(true, { consumeThrottle: false });
+
             try {
               for await (const evt of params.runtime.invoke({
                 prompt: currentPrompt,
@@ -2998,6 +3144,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 signal: abortSignal,
               })) {
                 // Track event flow for stall warning.
+                markRuntimeVisibility(evt);
                 lastEventAt = Date.now();
                 stallWarned = false;
                 lastStallProgressAt = 0;

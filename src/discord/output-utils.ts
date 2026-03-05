@@ -1,5 +1,19 @@
 import type { EngineEvent } from '../runtime/types.js';
 
+function envFlagEnabled(name: string): boolean {
+  const value = process.env[name];
+  if (!value) return false;
+  return /^(1|true|yes|on)$/i.test(value.trim());
+}
+
+/**
+ * Debug-only kill-switch for stream sanitization and action-tag stripping.
+ * Intended for live troubleshooting when we need to inspect raw stream output.
+ */
+export function isStreamingSanitizationDisabled(): boolean {
+  return envFlagEnabled('DISCOCLAW_DISABLE_STREAM_SANITIZATION');
+}
+
 /**
  * If the text ends inside an unclosed fenced code block, append the matching
  * closing fence so that any subsequently appended text lands outside the block.
@@ -207,6 +221,7 @@ function truncatePreviewSignal(text: string, maxChars: number): string {
 }
 
 function sanitizePreviewSignalText(text: string, maxChars: number): string {
+  if (isStreamingSanitizationDisabled()) return text;
   const singleLine = stripActionTags(text)
     .replace(/\r\n?/g, '\n')
     .replace(/\n+/g, ' \\n ')
@@ -297,6 +312,7 @@ function buildWaitingPreviewLine(elapsedMs?: number): string {
  * never leaks into streaming previews visible to users.
  */
 export function stripActionTags(text: string): string {
+  if (isStreamingSanitizationDisabled()) return text;
   return text
     .replace(/<discord-action>[\s\S]*?<\/discord-action>/g, '')  // complete tags
     .replace(/<discord-action>[\s\S]*$/g, '')                     // trailing incomplete tag (mid-stream)

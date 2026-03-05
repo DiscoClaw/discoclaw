@@ -16,6 +16,7 @@ export type EngineEvent =
       source: 'codex';
       phase: 'started' | 'completed';
       itemType: string;
+      itemId?: string;
       status?: string;
       label?: string;
     }
