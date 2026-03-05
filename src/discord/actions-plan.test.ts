@@ -415,31 +415,40 @@ describe('executePlanAction', () => {
     });
 
     it('adapts runtime events to concise Discord text without leaking raw JSON payloads', async () => {
-      const { runNextPhase } = await import('./plan-manager.js');
-      const rawStructuredPayload = '{"event":"engine_update","token_count":42}';
-      const runtimeEvent = { type: 'log_line', stream: 'stdout', line: rawStructuredPayload } as const;
+      // Ensure stream sanitization is enabled so structured payloads are redacted.
+      const prev = process.env.DISCOCLAW_DISABLE_STREAM_SANITIZATION;
+      delete process.env.DISCOCLAW_DISABLE_STREAM_SANITIZATION;
 
-      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
-        opts.onEvent?.(runtimeEvent);
-        return { result: 'nothing_to_run' };
-      });
+      try {
+        const { runNextPhase } = await import('./plan-manager.js');
+        const rawStructuredPayload = '{"event":"engine_update","token_count":42}';
+        const runtimeEvent = { type: 'log_line', stream: 'stdout', line: rawStructuredPayload } as const;
 
-      const setup = makeSendFn();
-      const ctx = makeCtx(setup);
+        (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+          opts.onEvent?.(runtimeEvent);
+          return { result: 'nothing_to_run' };
+        });
 
-      await executePlanAction(
-        { type: 'planRun', planId: 'plan-042' },
-        ctx,
-        makePlanCtx({ runtime: {} as any, model: 'opus' }),
-      );
+        const setup = makeSendFn();
+        const ctx = makeCtx(setup);
 
-      await new Promise(resolve => setTimeout(resolve, 50));
+        await executePlanAction(
+          { type: 'planRun', planId: 'plan-042' },
+          ctx,
+          makePlanCtx({ runtime: {} as any, model: 'opus' }),
+        );
 
-      const editContents = setup.msg.edit.mock.calls.map((call) => String(call[0]!.content));
-      expect(editContents.some((text) => text.includes('Runtime update (details omitted).'))).toBe(true);
-      expect(editContents.some((text) => text.includes(rawStructuredPayload))).toBe(false);
-      // The internal runtime event payload remains untouched.
-      expect(runtimeEvent.line).toBe(rawStructuredPayload);
+        // The streaming controller fires edits on a 1250ms interval; wait long enough for it to fire.
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        const editContents = setup.msg.edit.mock.calls.map((call) => String(call[0]!.content));
+        expect(editContents.some((text) => text.includes('Runtime update (details omitted).'))).toBe(true);
+        expect(editContents.some((text) => text.includes(rawStructuredPayload))).toBe(false);
+        // The internal runtime event payload remains untouched.
+        expect(runtimeEvent.line).toBe(rawStructuredPayload);
+      } finally {
+        if (prev !== undefined) process.env.DISCOCLAW_DISABLE_STREAM_SANITIZATION = prev;
+      }
     });
 
     it('can disable tool-aware runtime event streaming for plan actions', async () => {
