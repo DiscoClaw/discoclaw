@@ -109,15 +109,36 @@ describe('maybeDownscale', () => {
     expect(mock.toFormat).toHaveBeenCalledWith('webp');
   });
 
-  it('skips GIF even when oversized', async () => {
-    const buf = Buffer.from('big-gif');
+  it('returns unchanged when GIF fits within the limit', async () => {
+    const buf = Buffer.from('small-gif');
+    setupSharpMock({ width: 800, height: 600 });
 
     const result = await maybeDownscale(buf, 'image/gif');
 
     expect(result.buffer).toBe(buf);
     expect(result.mediaType).toBe('image/gif');
     expect(result.resized).toBe(false);
-    expect(sharp).not.toHaveBeenCalled();
+    expect(sharp).toHaveBeenCalledWith(buf, { animated: false });
+  });
+
+  it('downscales oversized GIF to PNG', async () => {
+    const original = Buffer.from('big-gif');
+    const resized = Buffer.from('resized-gif-as-png');
+    const mock = setupSharpMock({ width: 3200, height: 2400, resizedBuffer: resized });
+
+    const result = await maybeDownscale(original, 'image/gif');
+
+    expect(result.buffer).toBe(resized);
+    expect(result.mediaType).toBe('image/png');
+    expect(result.resized).toBe(true);
+    expect(sharp).toHaveBeenCalledWith(original, { animated: false });
+    expect(mock.resize).toHaveBeenCalledWith({
+      width: MAX_IMAGE_DIMENSION,
+      height: MAX_IMAGE_DIMENSION,
+      fit: 'inside',
+      withoutEnlargement: true,
+    });
+    expect(mock.toFormat).toHaveBeenCalledWith('png');
   });
 
   it('returns unchanged on sharp metadata error', async () => {

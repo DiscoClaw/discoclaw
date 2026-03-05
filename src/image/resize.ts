@@ -17,7 +17,8 @@ const MEDIA_TO_SHARP: Record<string, keyof sharp.FormatEnum> = {
 
 /**
  * Downscale an image if its longest side exceeds {@link MAX_IMAGE_DIMENSION}.
- * GIFs are returned unchanged (sharp would strip animation frames).
+ * Oversized GIFs are converted to PNG (sharp strips animation frames, but a
+ * static thumbnail is better than bricking the channel with API errors).
  * On any sharp error the original buffer is returned so callers degrade
  * gracefully rather than failing.
  */
@@ -25,12 +26,9 @@ export async function maybeDownscale(
   buffer: Buffer,
   mediaType: string,
 ): Promise<DownscaleResult> {
-  if (mediaType === 'image/gif') {
-    return { buffer, mediaType, resized: false };
-  }
-
   try {
-    const image = sharp(buffer);
+    const isGif = mediaType === 'image/gif';
+    const image = sharp(buffer, isGif ? { animated: false } : undefined);
     const { width, height } = await image.metadata();
 
     if (!width || !height) {
@@ -41,8 +39,9 @@ export async function maybeDownscale(
       return { buffer, mediaType, resized: false };
     }
 
-    const format = MEDIA_TO_SHARP[mediaType];
-    if (!format) {
+    // GIFs get converted to PNG; other formats keep their own format.
+    const outFormat: keyof sharp.FormatEnum = isGif ? 'png' : (MEDIA_TO_SHARP[mediaType] as keyof sharp.FormatEnum);
+    if (!outFormat) {
       return { buffer, mediaType, resized: false };
     }
 
@@ -53,10 +52,11 @@ export async function maybeDownscale(
         fit: 'inside',
         withoutEnlargement: true,
       })
-      .toFormat(format)
+      .toFormat(outFormat)
       .toBuffer();
 
-    return { buffer: resizedBuffer, mediaType, resized: true };
+    const outMediaType = isGif ? 'image/png' : mediaType;
+    return { buffer: resizedBuffer, mediaType: outMediaType, resized: true };
   } catch {
     return { buffer, mediaType, resized: false };
   }
