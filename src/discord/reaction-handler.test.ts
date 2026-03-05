@@ -7,6 +7,7 @@ import { inFlightReplyCount, _resetForTest as resetInFlight } from './inflight-r
 import * as reactionPrompts from './reaction-prompts.js';
 import * as abortRegistry from './abort-registry.js';
 import * as forgePlanRegistry from './forge-plan-registry.js';
+import { RUNTIME_SIGNAL_SUPPRESSED_LINE } from './runtime-signal-budget.js';
 
 function makeMockRuntime(response: string): RuntimeAdapter {
   return {
@@ -1546,10 +1547,10 @@ describe('streaming behavior', () => {
 
     const replyObj = reaction.message._replyObj;
     const allEditContents = replyObj.edit.mock.calls.map((c: any) => c[0].content);
-    expect(allEditContents.some((c: string) => c.includes('Reasoning started...'))).toBe(true);
-    expect(allEditContents.some((c: string) => c.includes('Using readFile...'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('Hypothesis: reasoning in progress.'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('Next check: readFile.'))).toBe(true);
     expect(allEditContents.some((c: string) => c.includes('Usage: in 11, out 7, total 18, cost $0.0012.'))).toBe(true);
-    expect(allEditContents.some((c: string) => c.includes('readFile finished.'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('Finding: readFile finished.'))).toBe(true);
   });
 
   it('redacts structured runtime payload fragments from streaming preview text', async () => {
@@ -1578,6 +1579,54 @@ describe('streaming behavior', () => {
     expect(allEdits).not.toContain('"ok":false');
   });
 
+  it('caps extra runtime signal lines and suppresses overflow', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        for (let i = 1; i <= 14; i++) {
+          yield { type: 'log_line', stream: 'stdout', line: `signal-${i.toString().padStart(2, '0')}` };
+        }
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+    expect(allEdits).toContain(RUNTIME_SIGNAL_SUPPRESSED_LINE);
+    expect(allEdits).not.toContain('signal-14');
+  });
+
+  it('preserves lifecycle visibility under log spam for reactions', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        for (let i = 1; i <= 30; i++) {
+          yield { type: 'log_line', stream: 'stdout', line: `log-spam-${i.toString().padStart(2, '0')}` };
+        }
+        yield { type: 'tool_start', name: 'readFile', input: { path: 'README.md' } };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+    expect(allEdits).toContain('Next check: readFile.');
+  });
+
   it('keeps runtime event payloads unchanged while adapting streaming preview text', async () => {
     const toolStartEvt: EngineEvent = {
       type: 'tool_start',
@@ -1604,7 +1653,7 @@ describe('streaming behavior', () => {
     expect(toolStartEvt).toEqual(original);
     const replyObj = reaction.message._replyObj;
     const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
-    expect(allEdits).toContain('Using Read...');
+    expect(allEdits).toContain('Next check: Read.');
     expect(allEdits).not.toContain('/tmp/file.ts');
     expect(allEdits).not.toContain('flags');
   });

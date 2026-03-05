@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineEvent } from '../runtime/types.js';
 import { createStreamingProgress } from './streaming-progress.js';
+import {
+  RUNTIME_SIGNAL_FALLBACK_IDLE_MS,
+  RUNTIME_SIGNAL_SUPPRESSED_LINE,
+} from './runtime-signal-budget.js';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -152,11 +156,11 @@ describe('createStreamingProgress', () => {
     await vi.advanceTimersByTimeAsync(1300);
 
     const allEdits = message.edits.join('\n');
-    expect(allEdits).toContain('Using Read...');
+    expect(allEdits).toContain('Next check: Read.');
     expect(allEdits).toContain('Update: reading file');
     expect(allEdits).toContain('Usage: in 11, out 7, total 18, cost $0.0012.');
     expect(allEdits).toContain('Command Execution completed.');
-    expect(allEdits).toContain('Read finished.');
+    expect(allEdits).toContain('Finding: Read finished.');
     expect(allEdits).not.toContain('<discord-action>');
     ctrl.dispose();
   });
@@ -194,9 +198,9 @@ describe('createStreamingProgress', () => {
     await vi.advanceTimersByTimeAsync(1300);
 
     const allEdits = message.edits.join('\n');
-    expect(allEdits).toContain('Using Bash...');
+    expect(allEdits).toContain('Next check: Bash.');
     expect(allEdits).toContain('Usage: in 11, out 7, total 18, cost $0.001200.');
-    expect(allEdits).toContain('Bash finished.');
+    expect(allEdits).toContain('Finding: Bash finished.');
     expect(allEdits).toContain('Update: runtime');
     expect(allEdits).not.toContain('input=');
     expect(allEdits).not.toContain('output=');
@@ -230,7 +234,7 @@ describe('createStreamingProgress', () => {
 
     const lastEdit = message.edits[message.edits.length - 1]!;
     expect(lastEdit).toContain('Update: warmup complete');
-    expect(lastEdit).toContain('Using Bash...');
+    expect(lastEdit).toContain('Next check: Bash.');
     ctrl.dispose();
   });
 
@@ -255,7 +259,7 @@ describe('createStreamingProgress', () => {
 
     const lastEdit = message.edits[message.edits.length - 1]!;
     expect(lastEdit).not.toContain('phase-1 stale signal');
-    expect(lastEdit).toContain('Using Read...');
+    expect(lastEdit).toContain('Next check: Read.');
     ctrl.dispose();
   });
 
@@ -294,6 +298,116 @@ describe('createStreamingProgress', () => {
     ctrl.dispose();
   });
 
+  it('caps runtime signal lines and appends one suppression marker', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase start', { force: true });
+    for (let i = 1; i <= 14; i++) {
+      ctrl.onEvent({
+        type: 'log_line',
+        stream: 'stdout',
+        line: `signal-${i.toString().padStart(2, '0')}`,
+      } as EngineEvent);
+    }
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const allEdits = message.edits.join('\n');
+    expect(allEdits).toContain(RUNTIME_SIGNAL_SUPPRESSED_LINE);
+    expect(allEdits).not.toContain('signal-14');
+    ctrl.dispose();
+  });
+
+  it('resets runtime signal suppression budget at phase boundaries', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase 1 start', { force: true });
+    for (let i = 1; i <= 20; i++) {
+      ctrl.onEvent({
+        type: 'log_line',
+        stream: 'stdout',
+        line: `phase1-signal-${i.toString().padStart(2, '0')}`,
+      } as EngineEvent);
+    }
+    await vi.advanceTimersByTimeAsync(1300);
+    const phaseOneEdits = message.edits.join('\n');
+    expect(phaseOneEdits).toContain(RUNTIME_SIGNAL_SUPPRESSED_LINE);
+
+    await ctrl.onProgress('Phase 2 start', { force: true });
+    ctrl.onEvent({
+      type: 'tool_start',
+      name: 'Read',
+      input: '',
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const phaseTwoLastEdit = message.edits[message.edits.length - 1] ?? '';
+    expect(phaseTwoLastEdit).toContain('Next check: Read.');
+    ctrl.dispose();
+  });
+
+  it('reserves signal budget so log spam does not starve lifecycle updates', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase start', { force: true });
+    for (let i = 1; i <= 30; i++) {
+      ctrl.onEvent({
+        type: 'log_line',
+        stream: 'stdout',
+        line: `log-spam-${i.toString().padStart(2, '0')}`,
+      } as EngineEvent);
+    }
+    ctrl.onEvent({ type: 'tool_start', name: 'Read', input: '' } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const allEdits = message.edits.join('\n');
+    expect(allEdits).toContain('Next check: Read.');
+    ctrl.dispose();
+  });
+
+  it('uses synthetic runtime signal lines only as fallback while text deltas are active', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0, { useNativeTextFallback: true });
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({ type: 'text_delta', text: 'thinking stream tick\n' } as EngineEvent);
+    ctrl.onEvent({ type: 'log_line', stream: 'stderr', line: 'warning-hidden-while-streaming' } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    let latest = message.edits[message.edits.length - 1] ?? '';
+    expect(latest).toContain('thinking stream tick');
+    expect(latest).not.toContain('warning-hidden-while-streaming');
+
+    await vi.advanceTimersByTimeAsync(RUNTIME_SIGNAL_FALLBACK_IDLE_MS + 10);
+    ctrl.onEvent({ type: 'log_line', stream: 'stderr', line: 'warning-visible-after-idle' } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    latest = message.edits[message.edits.length - 1] ?? '';
+    expect(latest).toContain('Warning: warning-visible-after-idle');
+    ctrl.dispose();
+  });
+
+  it('keeps failed tool_end visible even when fallback gating is active', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0, { useNativeTextFallback: true });
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({ type: 'text_delta', text: 'reasoning stream\n' } as EngineEvent);
+    ctrl.onEvent({
+      type: 'tool_end',
+      name: 'Read',
+      ok: false,
+      output: 'permission denied',
+    } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const latest = message.edits[message.edits.length - 1] ?? '';
+    expect(latest).toContain('Finding: Read failed.');
+    ctrl.dispose();
+  });
+
   it('dispose clears the keepalive interval', async () => {
     const message = makeMessage();
     const ctrl = createStreamingProgress(message, 0);
@@ -317,6 +431,19 @@ describe('createStreamingProgress', () => {
     await ctrl.onProgress('Next step...', { force: true });
 
     expect(message.edit).toHaveBeenCalledTimes(1);
+    ctrl.dispose();
+  });
+
+  it('surfaces archived-thread (50083) as fatal when throwOnFatal is enabled', async () => {
+    const message = makeMessage();
+    const err50083 = Object.assign(new Error('Thread is archived'), { code: 50083 });
+    message.edit.mockRejectedValue(err50083);
+    const onFatalError = vi.fn();
+    const ctrl = createStreamingProgress(message, 0, { throwOnFatal: true, onFatalError });
+
+    await expect(ctrl.onProgress('Starting...', { force: true })).rejects.toMatchObject({ code: 50083 });
+    expect(onFatalError).toHaveBeenCalledTimes(1);
+    await expect(ctrl.onProgress('Retry', { force: true })).rejects.toMatchObject({ code: 50083 });
     ctrl.dispose();
   });
 });

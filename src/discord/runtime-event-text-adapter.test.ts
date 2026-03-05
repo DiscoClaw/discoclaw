@@ -6,11 +6,11 @@ import { adaptPlanRunEventText, adaptRuntimeEventText } from './runtime-event-te
 describe('adaptRuntimeEventText', () => {
   it('renders concise tool lifecycle updates', () => {
     expect(adaptRuntimeEventText({ type: 'tool_start', name: 'Read', input: { file: '/tmp/a.ts' } }))
-      .toBe('Using Read...');
+      .toBe('Next check: Read.');
     expect(adaptRuntimeEventText({ type: 'tool_end', name: 'Read', output: { ok: true }, ok: true }))
-      .toBe('Read finished.');
+      .toBe('Finding: Read finished.');
     expect(adaptRuntimeEventText({ type: 'tool_end', name: 'Read', output: { ok: false }, ok: false }))
-      .toBe('Read failed.');
+      .toBe('Finding: Read failed.');
   });
 
   it('renders sanitized log lines without leaking action tags', () => {
@@ -64,7 +64,7 @@ describe('adaptRuntimeEventText', () => {
       phase: 'started',
       itemType: 'reasoning',
       status: 'in_progress',
-    })).toBe('Reasoning started...');
+    })).toBe('Hypothesis: reasoning in progress.');
 
     expect(adaptRuntimeEventText({
       type: 'preview_debug',

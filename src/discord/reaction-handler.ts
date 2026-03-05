@@ -23,6 +23,11 @@ import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { adaptRuntimeEventText } from './runtime-event-text-adapter.js';
+import {
+  RUNTIME_SIGNAL_SUPPRESSED_LINE,
+  RuntimeSignalBudgetTracker,
+  runtimeSupportsNativeThinkingStream,
+} from './runtime-signal-budget.js';
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 const STREAM_STALL_PROGRESS_UPDATE_MS = 20_000;
@@ -524,6 +529,9 @@ function createReactionHandler(
           let invokeError: string | null = null;
           let lastEditAt = 0;
           const minEditIntervalMs = 1250;
+          const runtimeSignalBudget = new RuntimeSignalBudgetTracker({
+            useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
+          });
           let streamEditQueue: Promise<void> = Promise.resolve();
 
           const maybeEdit = async (force = false) => {
@@ -555,6 +563,14 @@ function createReactionHandler(
           const appendRuntimeSignal = async (evt: EngineEvent) => {
             const line = adaptRuntimeEventText(evt, { mode: previewMode });
             if (!line) return;
+            const budgetResult = runtimeSignalBudget.consume(evt);
+            if (!budgetResult.allow) {
+              if (budgetResult.appendSuppression) {
+                deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + RUNTIME_SIGNAL_SUPPRESSED_LINE + '\n';
+                await maybeEdit(false);
+              }
+              return;
+            }
             deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
             await maybeEdit(false);
           };
@@ -609,6 +625,7 @@ function createReactionHandler(
                 finalText = evt.text;
                 await maybeEdit(true);
               } else if (evt.type === 'text_delta') {
+                runtimeSignalBudget.noteNativeTextDelta();
                 deltaText += evt.text;
                 await maybeEdit(false);
               } else if (

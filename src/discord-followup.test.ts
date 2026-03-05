@@ -6,6 +6,7 @@ import { hasQueryAction, QUERY_ACTION_TYPES, shouldTriggerFollowUp } from './dis
 import { inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
 import * as abortRegistry from './discord/abort-registry.js';
 import { _resetDestructiveConfirmationForTest as resetDestructiveConfirm } from './discord/destructive-confirmation.js';
+import { RUNTIME_SIGNAL_SUPPRESSED_LINE } from './discord/runtime-signal-budget.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -884,8 +885,8 @@ describe('auto-follow-up for query actions', () => {
     await pending;
 
     const finalContent = replyEditContents(replyObj).at(-1) ?? '';
-    expect(finalContent).toContain('Using readFile...');
-    expect(finalContent).toContain('readFile finished.');
+    expect(finalContent).toContain('Next check: readFile.');
+    expect(finalContent).toContain('Finding: readFile finished.');
     expect(finalContent).not.toContain('[tool:start]');
     expect(finalContent).not.toContain('[tool:end]');
   });
@@ -942,10 +943,38 @@ describe('auto-follow-up for query actions', () => {
       expect(latest).toContain('Usage: in 21, out 8, total 29, cost $0.0123.');
 
       await pending;
-      expect(replyEditContents(replyObj).join('\n')).toContain('Reasoning started...');
+      expect(replyEditContents(replyObj).join('\n')).toContain('Hypothesis: reasoning in progress.');
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('enables native-text fallback gating only for codex runtime streams', async () => {
+    const runtimeStarted = deferred<void>();
+    const runtime = {
+      id: 'codex',
+      invoke: vi.fn(async function* () {
+        runtimeStarted.resolve();
+        yield { type: 'text_delta', text: 'reasoning stream tick\n' } as any;
+        yield { type: 'log_line', stream: 'stderr', line: 'hidden while native stream active' } as any;
+        yield { type: 'done' } as any;
+      }),
+    } as any;
+
+    const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
+    const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    const pending = handler(msg);
+
+    await runtimeStarted.promise;
+    for (let i = 0; i < 20 && replyObj.edit.mock.calls.length === 0; i++) {
+      await Promise.resolve();
+    }
+    await pending;
+
+    const latest = replyEditContents(replyObj).at(-1) ?? '';
+    expect(latest).toContain('reasoning stream tick');
+    expect(latest).not.toContain('hidden while native stream active');
   });
 
   it('redacts structured runtime payloads from Discord preview text', async () => {
@@ -978,6 +1007,70 @@ describe('auto-follow-up for query actions', () => {
     expect(latest).not.toContain('plan-123');
     expect(latest).not.toContain('phase_start');
     expect(latest).not.toContain('{"type"');
+  });
+
+  it('caps runtime signal preview lines and suppresses overflow', async () => {
+    const runtimeStarted = deferred<void>();
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        runtimeStarted.resolve();
+        for (let i = 1; i <= 14; i++) {
+          yield {
+            type: 'log_line',
+            stream: 'stdout',
+            line: `signal-${i.toString().padStart(2, '0')}`,
+          } as any;
+        }
+        yield { type: 'done' } as any;
+      }),
+    } as any;
+
+    const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
+    const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    const pending = handler(msg);
+
+    await runtimeStarted.promise;
+    for (let i = 0; i < 20 && replyObj.edit.mock.calls.length === 0; i++) {
+      await Promise.resolve();
+    }
+    await pending;
+
+    const latest = replyEditContents(replyObj).at(-1) ?? '';
+    expect(latest).toContain(RUNTIME_SIGNAL_SUPPRESSED_LINE);
+    expect(latest).not.toContain('signal-14');
+  });
+
+  it('preserves lifecycle visibility under log spam in message streams', async () => {
+    const runtimeStarted = deferred<void>();
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        runtimeStarted.resolve();
+        for (let i = 1; i <= 30; i++) {
+          yield {
+            type: 'log_line',
+            stream: 'stdout',
+            line: `log-spam-${i.toString().padStart(2, '0')}`,
+          } as any;
+        }
+        yield { type: 'tool_start', name: 'readFile', input: { path: 'README.md' } } as any;
+        yield { type: 'done' } as any;
+      }),
+    } as any;
+
+    const replyObj = { edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
+    const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    const pending = handler(msg);
+
+    await runtimeStarted.promise;
+    for (let i = 0; i < 20 && replyObj.edit.mock.calls.length === 0; i++) {
+      await Promise.resolve();
+    }
+    await pending;
+
+    const latest = replyEditContents(replyObj).at(-1) ?? '';
+    expect(latest).toContain('Next check: readFile.');
   });
 
   it('shows preview early during active runs without a delayed blank period', async () => {

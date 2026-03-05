@@ -4,6 +4,7 @@ import { selectStreamingOutput } from './output-utils.js';
 import type { StreamingPreviewMode } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { adaptRuntimeEventText } from './runtime-event-text-adapter.js';
+import { RUNTIME_SIGNAL_SUPPRESSED_LINE, RuntimeSignalBudgetTracker } from './runtime-signal-budget.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +32,13 @@ export type StreamingProgressOpts = {
   previewMode?: StreamingProgressPreviewMode;
   previewDelayMs?: number;
   streamPreviewMode?: StreamingPreviewMode;
+  useNativeTextFallback?: boolean;
+  throwOnFatal?: boolean;
+  onFatalError?: (err: StreamingProgressFatalError) => void;
+};
+
+export type StreamingProgressFatalError = Error & {
+  code: 50083;
 };
 
 /** The faster edit interval used for streaming preview edits (matches normal message handler). */
@@ -41,6 +49,13 @@ function errorCode(err: unknown): number | null {
   if (typeof err !== 'object' || err === null || !('code' in err)) return null;
   const code = (err as { code?: unknown }).code;
   return typeof code === 'number' ? code : null;
+}
+
+function asArchivedThreadError(err: unknown): StreamingProgressFatalError {
+  const archivedErr = new Error('Thread is archived (50083)') as StreamingProgressFatalError;
+  archivedErr.code = 50083;
+  if (err instanceof Error && err.stack) archivedErr.stack = err.stack;
+  return archivedErr;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +91,11 @@ export function createStreamingProgress(
   const previewMode = opts?.previewMode ?? 'always';
   const previewDelayMs = Math.max(0, opts?.previewDelayMs ?? DEFAULT_PREVIEW_DELAY_MS);
   const streamPreviewMode = opts?.streamPreviewMode ?? 'compact';
+  const throwOnFatal = opts?.throwOnFatal ?? false;
+  let fatalError: StreamingProgressFatalError | null = null;
+  const runtimeSignalBudget = new RuntimeSignalBudgetTracker({
+    useNativeTextFallback: opts?.useNativeTextFallback ?? false,
+  });
 
   // Static-progress throttle state (mirrors the existing onProgress pattern)
   let lastStaticEditAt = 0;
@@ -111,6 +131,13 @@ export function createStreamingProgress(
     });
   }
 
+  function markFatal(err: unknown): void {
+    if (fatalError) return;
+    fatalError = asArchivedThreadError(err);
+    progressMessageGone = true;
+    opts?.onFatalError?.(fatalError);
+  }
+
   async function maybeStreamEdit(force: boolean): Promise<void> {
     if (progressMessageGone) return;
     const now = Date.now();
@@ -131,7 +158,10 @@ export function createStreamingProgress(
     });
     try {
       await progressReply.edit({ content, allowedMentions: NO_MENTIONS });
-    } catch {
+    } catch (editErr) {
+      if (errorCode(editErr) === 50083) {
+        markFatal(editErr);
+      }
       // ignore Discord edit errors during streaming
     }
   }
@@ -141,13 +171,24 @@ export function createStreamingProgress(
   }
 
   const onEvent: StreamingProgressController['onEvent'] = (evt) => {
+    if (evt.type === 'text_delta') {
+      runtimeSignalBudget.noteNativeTextDelta();
+    }
     const signalLine = adaptRuntimeEventText(evt, { mode: streamPreviewMode });
-    if (signalLine) appendSignalLine(signalLine);
+    if (signalLine) {
+      const budgetResult = runtimeSignalBudget.consume(evt);
+      if (budgetResult.allow) {
+        appendSignalLine(signalLine);
+      } else if (budgetResult.appendSuppression) {
+        appendSignalLine(RUNTIME_SIGNAL_SUPPRESSED_LINE);
+      }
+    }
     queue.handleEvent(evt);
     void maybeStreamEdit(false);
   };
 
   const onProgress: StreamingProgressController['onProgress'] = async (msg, opts) => {
+    if (throwOnFatal && fatalError) throw fatalError;
     if (progressMessageGone) return;
     const now = Date.now();
     if (!opts?.force && now - lastStaticEditAt < progressThrottleMs) return;
@@ -159,12 +200,19 @@ export function createStreamingProgress(
     deltaText = '';
     finalText = '';
     toolPreviewSnapshot = '';
+    runtimeSignalBudget.reset();
     queue = createQueue();
 
     try {
       await progressReply.edit({ content: msg, allowedMentions: NO_MENTIONS });
     } catch (editErr) {
-      if (errorCode(editErr) === 10008) progressMessageGone = true;
+      const code = errorCode(editErr);
+      if (code === 10008) {
+        progressMessageGone = true;
+      } else if (code === 50083) {
+        markFatal(editErr);
+        if (throwOnFatal && fatalError) throw fatalError;
+      }
     }
   };
 

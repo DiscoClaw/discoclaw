@@ -95,6 +95,11 @@ import { DiscordTransportClient } from './transport-client.js';
 import type { LongRunWatchdog } from './long-run-watchdog.js';
 import { adaptPlanRunEventText, adaptRuntimeEventText } from './runtime-event-text-adapter.js';
 import { createPhaseStatusHeartbeatController, resolvePlanHeaderHeartbeatPolicy } from './phase-status-heartbeat.js';
+import {
+  RUNTIME_SIGNAL_SUPPRESSED_LINE,
+  RuntimeSignalBudgetTracker,
+  runtimeSupportsNativeThinkingStream,
+} from './runtime-signal-budget.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
@@ -1554,7 +1559,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   const planRunStreaming = createStreamingProgress(
                     progressReply,
                     params.forgeProgressThrottleMs ?? 3000,
-                    { streamPreviewMode: params.streamPreviewMode ?? 'compact' },
+                    {
+                      streamPreviewMode: params.streamPreviewMode ?? 'compact',
+                      useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
+                    },
                   );
                   const postedPhaseStarts = new Set<string>();
                   const phaseStartMessages = new Map<string, MessageEditTarget>();
@@ -2186,7 +2194,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const forgeResumeStreaming = createStreamingProgress(
                   progressReply,
                   params.forgeProgressThrottleMs ?? 3000,
-                  { streamPreviewMode: params.streamPreviewMode ?? 'compact' },
+                  {
+                    streamPreviewMode: params.streamPreviewMode ?? 'compact',
+                    useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
+                  },
                 );
 
                 const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
@@ -2327,7 +2338,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const forgeCreateStreaming = createStreamingProgress(
                 progressReply,
                 params.forgeProgressThrottleMs ?? 3000,
-                { streamPreviewMode: params.streamPreviewMode ?? 'compact' },
+                {
+                  streamPreviewMode: params.streamPreviewMode ?? 'compact',
+                  useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
+                },
               );
 
               const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
@@ -2845,6 +2859,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let lastEditAt = 0;
             const minEditIntervalMs = 1250;
             const previewMode = params.streamPreviewMode ?? 'compact';
+            const runtimeSignalBudget = new RuntimeSignalBudgetTracker({
+              useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
+            });
             hadTextFinal = false;
 
             // On follow-up iterations, send a new placeholder message.
@@ -2891,6 +2908,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             ) => {
               const line = adaptRuntimeEventText(evt, { mode: previewMode });
               if (!line) return;
+              const budgetResult = runtimeSignalBudget.consume(evt);
+              if (!budgetResult.allow) {
+                if (budgetResult.appendSuppression) {
+                  deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + RUNTIME_SIGNAL_SUPPRESSED_LINE + '\n';
+                  if (opts?.edit ?? true) await maybeEdit(false);
+                }
+                return;
+              }
               deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
               if (opts?.edit ?? true) await maybeEdit(false);
             };
@@ -2983,6 +3008,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   // Tool-aware mode: route relevant events through the queue.
                   if (evt.type === 'text_delta' || evt.type === 'text_final' ||
                       evt.type === 'tool_start' || evt.type === 'tool_end') {
+                    if (evt.type === 'text_delta') {
+                      runtimeSignalBudget.noteNativeTextDelta();
+                    }
                     if (evt.type === 'tool_start') {
                       await appendRuntimeSignal(evt, { edit: false });
                     } else if (evt.type === 'tool_end') {
@@ -3027,6 +3055,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
                     }
                   } else if (evt.type === 'text_delta') {
+                    runtimeSignalBudget.noteNativeTextDelta();
                     deltaText += evt.text;
                     await maybeEdit(false);
                   } else if (
