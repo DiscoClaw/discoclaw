@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { initTierOverrides, isModelTier, resolveModel } from './model-tiers.js';
-import type { ModelTier } from './model-tiers.js';
+import { initTierOverrides, isModelTier, resolveModel, resolveThinkingEffort } from './model-tiers.js';
+import type { ModelTier, ThinkingEffort } from './model-tiers.js';
 import type { RuntimeId } from './types.js';
 
 describe('isModelTier', () => {
@@ -79,6 +79,30 @@ describe('resolveModel', () => {
     it('passes through empty string', () => {
       expect(resolveModel('', 'claude_code')).toBe('');
     });
+  });
+});
+
+describe('resolveThinkingEffort', () => {
+  it('maps fast → low', () => {
+    expect(resolveThinkingEffort('fast')).toBe('low');
+  });
+
+  it('maps capable → medium', () => {
+    expect(resolveThinkingEffort('capable')).toBe('medium');
+  });
+
+  it('maps deep → high', () => {
+    expect(resolveThinkingEffort('deep')).toBe('high');
+  });
+
+  it('defaults to medium for literal model strings', () => {
+    expect(resolveThinkingEffort('sonnet')).toBe('medium');
+    expect(resolveThinkingEffort('claude-opus-4-6')).toBe('medium');
+    expect(resolveThinkingEffort('gpt-4o')).toBe('medium');
+  });
+
+  it('defaults to medium for empty string (adapter-default sentinel)', () => {
+    expect(resolveThinkingEffort('')).toBe('medium');
   });
 });
 

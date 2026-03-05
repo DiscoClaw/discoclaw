@@ -3,6 +3,9 @@ import type { RuntimeId } from './types.js';
 /** Provider-agnostic model tier. */
 export type ModelTier = 'fast' | 'capable' | 'deep';
 
+/** Thinking effort level threaded through runtime invocations. */
+export type ThinkingEffort = 'low' | 'medium' | 'high';
+
 const tiers = new Set<string>(['fast', 'capable', 'deep']);
 
 /** Type guard for ModelTier. */
@@ -79,6 +82,30 @@ export function resolveModel(tierOrModel: string, runtimeId: RuntimeId): string 
   const runtimeTiers = tierMap[runtimeId];
   if (!runtimeTiers) return '';
   return runtimeTiers[tierOrModel];
+}
+
+/** Maps model tier to thinking effort level. */
+const tierToEffort: Record<ModelTier, ThinkingEffort> = {
+  fast: 'low',
+  capable: 'medium',
+  deep: 'high',
+};
+
+/**
+ * Resolve a tier string to a thinking effort level.
+ *
+ * Accepts the **original config tier string** (e.g. `'fast'`, `'capable'`,
+ * `'deep'`) — the same value passed to `resolveModel()` — not the
+ * already-resolved concrete model string.
+ *
+ * - Known tier name → mapped effort (`fast` → `low`, `capable` → `medium`,
+ *   `deep` → `high`).
+ * - Anything else (literal model string, empty string) → `'medium'` as a
+ *   sensible default.
+ */
+export function resolveThinkingEffort(tierOrModel: string): ThinkingEffort {
+  if (isModelTier(tierOrModel)) return tierToEffort[tierOrModel];
+  return 'medium';
 }
 
 /**

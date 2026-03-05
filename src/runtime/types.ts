@@ -86,6 +86,8 @@ export type RuntimeInvokeParams = {
   addDirs?: string[];
   timeoutMs?: number;
   maxTokens?: number;
+  /** Thinking effort level resolved from the config tier. */
+  thinkingEffort?: import('./model-tiers.js').ThinkingEffort;
   images?: ImageData[];
   signal?: AbortSignal;
   supervisor?: RuntimeSupervisorPolicy;
