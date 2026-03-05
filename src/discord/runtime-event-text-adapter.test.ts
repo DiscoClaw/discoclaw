@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EngineEvent } from '../runtime/types.js';
 import type { PlanRunEvent } from './plan-manager.js';
 import { adaptPlanRunEventText, adaptRuntimeEventText } from './runtime-event-text-adapter.js';
 
 const STREAM_SANITIZE_FLAG = 'DISCOCLAW_DISABLE_STREAM_SANITIZATION';
 const priorStreamSanitizeFlag = process.env[STREAM_SANITIZE_FLAG];
+
+beforeEach(() => {
+  delete process.env[STREAM_SANITIZE_FLAG];
+});
 
 afterEach(() => {
   if (priorStreamSanitizeFlag === undefined) {

@@ -6,11 +6,20 @@ import {
   RUNTIME_SIGNAL_SUPPRESSED_LINE,
 } from './runtime-signal-budget.js';
 
+const STREAM_SANITIZE_FLAG = 'DISCOCLAW_DISABLE_STREAM_SANITIZATION';
+const priorStreamSanitizeFlag = process.env[STREAM_SANITIZE_FLAG];
+
 beforeEach(() => {
+  delete process.env[STREAM_SANITIZE_FLAG];
   vi.useFakeTimers();
 });
 
 afterEach(() => {
+  if (priorStreamSanitizeFlag === undefined) {
+    delete process.env[STREAM_SANITIZE_FLAG];
+  } else {
+    process.env[STREAM_SANITIZE_FLAG] = priorStreamSanitizeFlag;
+  }
   vi.useRealTimers();
 });
 

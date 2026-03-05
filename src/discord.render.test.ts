@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   renderDiscordTail,
   renderActivityTail,
@@ -14,6 +14,10 @@ import {
 const ZWS = '\u200b';
 const STREAM_SANITIZE_FLAG = 'DISCOCLAW_DISABLE_STREAM_SANITIZATION';
 const priorStreamSanitizeFlag = process.env[STREAM_SANITIZE_FLAG];
+
+beforeEach(() => {
+  delete process.env[STREAM_SANITIZE_FLAG];
+});
 
 afterEach(() => {
   if (priorStreamSanitizeFlag === undefined) {
