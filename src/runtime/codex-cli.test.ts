@@ -363,6 +363,8 @@ describe('Codex CLI runtime adapter', () => {
     expect(rt.capabilities.has('tools_exec')).toBe(true);
     expect(rt.capabilities.has('tools_web')).toBe(true);
     expect(rt.capabilities.has('sessions')).toBe(true);
+    expect(rt.capabilities.has('workspace_instructions')).toBe(true);
+    expect(rt.capabilities.has('mcp')).toBe(true);
   });
 
   it('disableSessions removes sessions capability and forces ephemeral mode', async () => {
@@ -861,6 +863,77 @@ describe('Codex CLI runtime adapter', () => {
     expect(mockExeca).toHaveBeenCalledTimes(1);
     const callArgs = mockExeca.mock.calls[0][1] as string[];
     expect(callArgs).not.toContain('--add-dir');
+  });
+
+  it('passes appendSystemPrompt as -c developer_instructions', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      appendSystemPrompt: 'You are Weston.',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    const idx = callArgs.indexOf('developer_instructions="You are Weston."');
+    expect(idx).toBeGreaterThan(-1);
+    expect(callArgs[idx - 1]).toBe('-c');
+  });
+
+  it('omits developer_instructions when appendSystemPrompt is unset', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    expect(callArgs.join(' ')).not.toContain('developer_instructions');
+  });
+
+  it('escapes quotes in appendSystemPrompt value', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      appendSystemPrompt: 'Say "hello" to the user.',
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    const devInstr = callArgs.find((a) => a.startsWith('developer_instructions='));
+    expect(devInstr).toBe('developer_instructions="Say \\"hello\\" to the user."');
   });
 
   // --- Session persistence tests ---

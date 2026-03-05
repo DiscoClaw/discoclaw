@@ -170,6 +170,8 @@ export function createCodexStrategy(
       'tools_exec',
       'tools_web',
       'sessions',
+      'workspace_instructions',
+      'mcp',
     ] satisfies readonly RuntimeCapability[],
 
     multiTurnMode: 'session-resume',
@@ -208,6 +210,12 @@ export function createCodexStrategy(
       // This overrides the global ~/.codex/config.toml setting per-invocation.
       if (ctx.params.reasoningEffort) {
         args.push('-c', `model_reasoning_effort="${ctx.params.reasoningEffort}"`);
+      }
+
+      // Map appendSystemPrompt → developer_instructions config override.
+      // Equivalent to Claude's --append-system-prompt flag.
+      if (opts.appendSystemPrompt) {
+        args.push('-c', `developer_instructions="${opts.appendSystemPrompt.replace(/"/g, '\\"')}"`);
       }
 
       // When session tracking is active, use --json so we can capture the thread_id
