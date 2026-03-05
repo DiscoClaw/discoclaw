@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Client, Guild, TextBasedChannel } from 'discord.js';
-import type { RuntimeAdapter, ImageData } from '../runtime/types.js';
+import type { RuntimeAdapter, ImageData, EngineEvent } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import type { SessionManager } from '../sessions.js';
 import { isAllowlisted, isTrustedBot } from './allowlist.js';
