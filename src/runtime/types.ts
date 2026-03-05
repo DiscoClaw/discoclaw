@@ -87,6 +87,7 @@ export type RuntimeInvokeParams = {
   timeoutMs?: number;
   maxTokens?: number;
   images?: ImageData[];
+  reasoningEffort?: string;
   signal?: AbortSignal;
   supervisor?: RuntimeSupervisorPolicy;
 };

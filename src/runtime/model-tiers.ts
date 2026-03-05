@@ -82,6 +82,27 @@ export function resolveModel(tierOrModel: string, runtimeId: RuntimeId): string 
 }
 
 /**
+ * Maps tier × runtime to a reasoning-effort level.
+ * Only runtimes / tiers that need an explicit effort are listed.
+ */
+const reasoningEffortDefaults: Record<string, Partial<Record<ModelTier, string>>> = {
+  codex: { capable: 'high', deep: 'xhigh' },
+};
+
+/**
+ * Resolve the reasoning-effort level for a given tier and runtime.
+ *
+ * Returns `undefined` when the input is not a recognised tier, the runtime
+ * has no effort mapping, or the tier has no configured effort.
+ */
+export function resolveReasoningEffort(tier: string, runtimeId: RuntimeId): string | undefined {
+  if (!isModelTier(tier)) return undefined;
+  const runtimeEfforts = reasoningEffortDefaults[runtimeId];
+  if (!runtimeEfforts) return undefined;
+  return runtimeEfforts[tier];
+}
+
+/**
  * Reverse-lookup: find which runtime owns a concrete model string.
  *
  * Iterates the live tier map and returns the first runtime ID whose tier
