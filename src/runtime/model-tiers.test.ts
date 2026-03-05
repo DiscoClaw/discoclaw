@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { initTierOverrides, isModelTier, resolveModel } from './model-tiers.js';
+import { initTierOverrides, isModelTier, resolveModel, resolveReasoningEffort } from './model-tiers.js';
 import type { ModelTier } from './model-tiers.js';
 import type { RuntimeId } from './types.js';
 
@@ -122,5 +122,29 @@ describe('initTierOverrides', () => {
   it('ignores env vars with unrecognised tier suffixes', () => {
     initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_UNKNOWN: 'sonnet' });
     expect(resolveModel('fast', 'claude_code')).toBe('haiku');
+  });
+});
+
+describe('resolveReasoningEffort', () => {
+  it('returns high for codex capable tier', () => {
+    expect(resolveReasoningEffort('capable', 'codex')).toBe('high');
+  });
+
+  it('returns xhigh for codex deep tier', () => {
+    expect(resolveReasoningEffort('deep', 'codex')).toBe('xhigh');
+  });
+
+  it('returns undefined for codex fast tier (no mapping)', () => {
+    expect(resolveReasoningEffort('fast', 'codex')).toBeUndefined();
+  });
+
+  it('returns undefined for runtimes without effort mappings', () => {
+    expect(resolveReasoningEffort('capable', 'claude_code')).toBeUndefined();
+    expect(resolveReasoningEffort('deep', 'openai')).toBeUndefined();
+  });
+
+  it('returns undefined for non-tier strings', () => {
+    expect(resolveReasoningEffort('o3', 'codex')).toBeUndefined();
+    expect(resolveReasoningEffort('', 'codex')).toBeUndefined();
   });
 });

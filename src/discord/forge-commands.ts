@@ -6,7 +6,7 @@ import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { runPipeline } from '../pipeline/engine.js';
 import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
-import { resolveModel } from '../runtime/model-tiers.js';
+import { resolveModel, resolveReasoningEffort } from '../runtime/model-tiers.js';
 import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { getSection, parsePlan } from './plan-parser.js';
@@ -840,6 +840,7 @@ export class ForgeOrchestrator {
     const drafterModel = isClaudeDrafter
       ? resolveModel(rawDrafterModel, drafterRt.id)
       : (hasExplicitDrafterModel ? resolveModel(rawDrafterModel, drafterRt.id) : '');
+    const drafterReasoningEffort = resolveReasoningEffort(rawDrafterModel, drafterRt.id);
     const readOnlyTools = ['Read', 'Glob', 'Grep'];
     const addDirs = [this.opts.cwd];
 
@@ -932,6 +933,7 @@ export class ForgeOrchestrator {
               addDirs,
               timeoutMs: this.opts.timeoutMs,
               sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+              reasoningEffort: drafterReasoningEffort,
             }],
             runtime: this.opts.runtime,
             cwd: this.opts.cwd,
@@ -1006,6 +1008,7 @@ export class ForgeOrchestrator {
         const effectiveAuditorModel = isClaudeAuditor
           ? resolveModel(rawAuditorModel, auditorRt.id)
           : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditorRt.id) : '');
+        const auditorReasoningEffort = resolveReasoningEffort(rawAuditorModel, auditorRt.id);
 
         const auditorPrompt = buildAuditorPrompt(
           planContent,
@@ -1024,6 +1027,7 @@ export class ForgeOrchestrator {
             ...(auditorHasFileTools ? { addDirs } : {}),
             timeoutMs: this.opts.timeoutMs,
             sessionKey: auditorRt.capabilities.has('sessions') ? auditorSessionKey : undefined,
+            reasoningEffort: auditorReasoningEffort,
           }],
           runtime: this.opts.runtime,
           cwd: this.opts.cwd,
@@ -1132,6 +1136,7 @@ export class ForgeOrchestrator {
             addDirs,
             timeoutMs: this.opts.timeoutMs,
             sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+            reasoningEffort: drafterReasoningEffort,
           }],
           runtime: this.opts.runtime,
           cwd: this.opts.cwd,

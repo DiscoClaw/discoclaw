@@ -32,6 +32,7 @@ export type PromptStep = {
   timeoutMs?: number;
   sessionId?: string | null;
   sessionKey?: string | null;
+  reasoningEffort?: string;
 };
 
 export type ShellStep = {
@@ -381,6 +382,7 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
       ...(step.timeoutMs !== undefined && { timeoutMs: step.timeoutMs }),
       ...(step.sessionId !== undefined && { sessionId: step.sessionId }),
       ...(step.sessionKey !== undefined && { sessionKey: step.sessionKey }),
+      ...(step.reasoningEffort !== undefined && { reasoningEffort: step.reasoningEffort }),
     };
 
     let text: string;

@@ -634,6 +634,50 @@ describe('runPipeline', () => {
     expect(capturedParams[0].addDirs).toEqual(['/workspace']);
   });
 
+  it('passes step-level reasoningEffort to runtime', async () => {
+    let capturedEffort: string | undefined;
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        capturedEffort = params.reasoningEffort;
+        yield { type: 'text_final', text: 'done' };
+        yield { type: 'done' };
+      },
+    };
+
+    await runPipeline(
+      baseParams({
+        steps: [step('go', { reasoningEffort: 'high' })],
+        runtime,
+      }),
+    );
+
+    expect(capturedEffort).toBe('high');
+  });
+
+  it('omits reasoningEffort from invoke params when not set on step', async () => {
+    let capturedParams: Record<string, unknown> = {};
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(params): AsyncIterable<EngineEvent> {
+        capturedParams = { ...params };
+        yield { type: 'text_final', text: 'done' };
+        yield { type: 'done' };
+      },
+    };
+
+    await runPipeline(
+      baseParams({
+        steps: [step('go')],
+        runtime,
+      }),
+    );
+
+    expect('reasoningEffort' in capturedParams).toBe(false);
+  });
+
   // ---------------------------------------------------------------------------
   // Shell step tests
   // ---------------------------------------------------------------------------
