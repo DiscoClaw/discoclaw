@@ -1167,6 +1167,44 @@ describe('Codex CLI runtime adapter', () => {
     expect(usageEvt).toMatchObject({ inputTokens: 123, outputTokens: 45, totalTokens: 168 });
   });
 
+  it('verbosePreview emits richer item lifecycle log lines for Codex reasoning/commands', async () => {
+    const jsonlOutput = [
+      '{"type":"thread.started","thread_id":"verbose-thread-1"}',
+      '{"type":"item.started","item":{"type":"reasoning","status":"in_progress"}}',
+      '{"type":"item.completed","item":{"type":"reasoning","summary":"Planning the approach carefully."}}',
+      '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"ls -la","status":"in_progress"}}',
+      '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"ls -la","aggregated_output":"total 8\\n-rw-r--r-- file","exit_code":0,"status":"completed"}}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonlOutput,
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      verbosePreview: true,
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Show verbose preview',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'verbose-session',
+    }));
+
+    const logLines = events
+      .filter((e): e is Extract<EngineEvent, { type: 'log_line' }> => e.type === 'log_line')
+      .map((e) => e.line);
+    expect(logLines.some((line) => line.includes('Reasoning started'))).toBe(true);
+    expect(logLines.some((line) => line.includes('Reasoning completed:'))).toBe(true);
+    expect(logLines.some((line) => line.includes('Command started:'))).toBe(true);
+    expect(logLines.some((line) => line.includes('Command output:'))).toBe(true);
+  });
+
   it('different sessionKeys get independent sessions', async () => {
     const jsonlA = [
       '{"type":"thread.started","thread_id":"thread-aaa"}',

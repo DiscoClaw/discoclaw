@@ -759,6 +759,16 @@ describe('parseConfig', () => {
     expect(config.codexDisableSessions).toBe(true);
   });
 
+  it('defaults codexVerbosePreview to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.codexVerbosePreview).toBe(false);
+  });
+
+  it('parses DISCOCLAW_CODEX_VERBOSE_PREVIEW=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_CODEX_VERBOSE_PREVIEW: '1' }));
+    expect(config.codexVerbosePreview).toBe(true);
+  });
+
   // --- Forum ID validation (auto-create when missing, warn on invalid) ---
   it('allows missing cronForum when cronEnabled (bootstrap will auto-create)', () => {
     const { config } = parseConfig(env({ DISCOCLAW_CRON_ENABLED: '1', DISCOCLAW_CRON_FORUM: undefined }));

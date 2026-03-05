@@ -36,12 +36,22 @@ export const PHASE_SAFETY_REMINDER =
   'Do not write to .env, root-policy.ts, ~/.ssh/, or ~/.claude/ paths. ' +
   'If a task requires any of these, report it instead of executing.';
 
+const THINKING_HEARTBEAT_INTERVAL_MS = 15_000;
+const THINKING_HEARTBEAT_LINE = 'Model reasoning in progress...';
+
 // Per-invocation tool tracking state (keyed by ctx to avoid cross-invocation leaks).
-type ToolTrackState = { activeTools: Map<number, string>; inputBufs: Map<number, string> };
+type ToolTrackState = {
+  activeTools: Map<number, string>;
+  inputBufs: Map<number, string>;
+  lastThinkingHeartbeatAtMs: number;
+};
 const toolState = new WeakMap<CliInvokeContext, ToolTrackState>();
 function getToolState(ctx: CliInvokeContext): ToolTrackState {
   let s = toolState.get(ctx);
-  if (!s) { s = { activeTools: new Map(), inputBufs: new Map() }; toolState.set(ctx, s); }
+  if (!s) {
+    s = { activeTools: new Map(), inputBufs: new Map(), lastThinkingHeartbeatAtMs: 0 };
+    toolState.set(ctx, s);
+  }
   return s;
 }
 
@@ -200,9 +210,22 @@ export const claudeStrategy: CliAdapterStrategy = {
           // generation is real work, not a thinking spiral.
           return { activity: true };
         }
-        // thinking_delta, signature_delta, etc. — consumed, no text, no activity signal.
-        // thinking_delta intentionally does NOT set activity: the spiral detector
-        // is specifically designed to catch long thinking spans with no output.
+        // thinking_delta, signature_delta, etc. — consumed, no text.
+        // Emit a throttled synthetic heartbeat so Discord preview stays alive
+        // without exposing private reasoning text. Intentionally do NOT set
+        // activity for thinking_delta so the spiral detector still works.
+        if (delta.type === 'thinking_delta') {
+          const ts = getToolState(ctx);
+          const now = Date.now();
+          if (now - ts.lastThinkingHeartbeatAtMs >= THINKING_HEARTBEAT_INTERVAL_MS) {
+            ts.lastThinkingHeartbeatAtMs = now;
+            return {
+              extraEvents: [
+                { type: 'log_line', stream: 'stdout', line: THINKING_HEARTBEAT_LINE },
+              ],
+            };
+          }
+        }
         return {};
       }
 

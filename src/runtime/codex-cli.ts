@@ -15,11 +15,12 @@ export type CodexCliRuntimeOpts = {
   defaultModel: string;
   dangerouslyBypassApprovalsAndSandbox?: boolean;
   disableSessions?: boolean;
+  verbosePreview?: boolean;
   log?: { debug(...args: unknown[]): void; info?(...args: unknown[]): void };
 };
 
 export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter {
-  return createCliRuntime(createCodexStrategy(opts.defaultModel), {
+  return createCliRuntime(createCodexStrategy(opts.defaultModel, { verbosePreview: opts.verbosePreview }), {
     binary: opts.codexBin,
     dangerouslySkipPermissions: opts.dangerouslyBypassApprovalsAndSandbox,
     disableSessions: opts.disableSessions,

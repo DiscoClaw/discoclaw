@@ -926,6 +926,9 @@ describe('Claude strategy parseLine (stream_event format)', () => {
     const deltas = events.filter((e) => e.type === 'text_delta');
     expect(deltas).toHaveLength(1);
     expect(deltas[0].text).toBe('The answer is 42.');
+    // Thinking content is never streamed verbatim, but a synthetic heartbeat can
+    // be emitted for Discord preview continuity.
+    expect(events.some((e) => e.type === 'log_line' && String(e.line).includes('Model reasoning in progress'))).toBe(true);
     expect(events.find((e) => e.type === 'text_final')?.text).toBe('The answer is 42.');
   });
 
@@ -1364,6 +1367,7 @@ describe('progress stall timer (thinking spiral guard)', () => {
     await vi.advanceTimersByTimeAsync(100);
     await drainPromise;
 
+    expect(events.some((e) => e.type === 'log_line' && String(e.line).includes('Model reasoning in progress'))).toBe(true);
     expect(events.some((e) => e.type === 'error' && e.message.includes('progress stall'))).toBe(true);
     expect(proc.kill).toHaveBeenCalled();
   });

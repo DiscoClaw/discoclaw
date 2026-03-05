@@ -69,7 +69,58 @@ function sanitizeCodexError(raw: string): string {
  * Create a Codex CLI adapter strategy.
  * Factory function because defaultModel varies per runtime instance.
  */
-export function createCodexStrategy(defaultModel: string): CliAdapterStrategy {
+type CodexStrategyOptions = {
+  verbosePreview?: boolean;
+};
+
+export function createCodexStrategy(
+  defaultModel: string,
+  strategyOpts: CodexStrategyOptions = {},
+): CliAdapterStrategy {
+  const verbosePreview = Boolean(strategyOpts.verbosePreview);
+
+  function itemPreviewLine(phase: 'started' | 'completed', item: Record<string, unknown>): string | null {
+    const itemType = typeof item.type === 'string' ? item.type : 'item';
+    const status = typeof item.status === 'string' ? item.status : undefined;
+    const suffix = status ? ` (${compactText(status, 80)})` : '';
+
+    if (itemType === 'agent_message') return null;
+
+    if (itemType === 'reasoning') {
+      const summary = typeof item.summary === 'string'
+        ? item.summary
+        : typeof item.text === 'string'
+          ? item.text
+          : '';
+      if (phase === 'completed' && summary) {
+        return `Reasoning ${phase}: ${compactText(summary, 260)}`;
+      }
+      return `Reasoning ${phase}${suffix}.`;
+    }
+
+    if (itemType === 'command_execution') {
+      const command = typeof item.command === 'string'
+        ? compactText(item.command, 260)
+        : '';
+      const exitCode = asFiniteNumber(item.exit_code ?? item.exitCode);
+      if (phase === 'started') {
+        return command
+          ? `Command started: ${command}`
+          : `Command started${suffix}.`;
+      }
+      const output = typeof item.aggregated_output === 'string'
+        ? compactText(item.aggregated_output, 260)
+        : '';
+      if (output) return `Command output: ${output}`;
+      if (exitCode !== undefined) return `Command completed (exit ${exitCode}).`;
+      return `Command completed${suffix}.`;
+    }
+
+    const note = typeof item.note === 'string' ? compactText(item.note, 180) : '';
+    if (note) return `${itemType} ${phase}: ${note}`;
+    return `${itemType} ${phase}${suffix}.`;
+  }
+
   return {
     id: 'codex',
     binaryDefault: 'codex',
@@ -170,10 +221,15 @@ export function createCodexStrategy(defaultModel: string): CliAdapterStrategy {
         };
       }
 
-      // Extract text from completed items.
+      // Extract text from item lifecycle events.
       if (anyEvt.type === 'item.started' || anyEvt.type === 'item.completed') {
         const item = asObject(anyEvt.item);
         if (!item) return { activity: true };
+        const phase: 'started' | 'completed' = anyEvt.type === 'item.started' ? 'started' : 'completed';
+        const previewLine = verbosePreview ? itemPreviewLine(phase, item) : null;
+        const previewEvents = previewLine
+          ? [{ type: 'log_line' as const, stream: 'stdout' as const, line: previewLine }]
+          : [];
 
         // Surface command execution progress as tool events so Discord
         // streaming doesn't look idle during long tool-heavy runs.
@@ -183,7 +239,7 @@ export function createCodexStrategy(defaultModel: string): CliAdapterStrategy {
           if (anyEvt.type === 'item.started') {
             return {
               activity: true,
-              extraEvents: [{ type: 'tool_start', name: 'command_execution', input: { command } }],
+              extraEvents: [{ type: 'tool_start', name: 'command_execution', input: { command } }, ...previewEvents],
             };
           }
           const exitCode = asFiniteNumber(item.exit_code ?? item.exitCode);
@@ -201,11 +257,15 @@ export function createCodexStrategy(defaultModel: string): CliAdapterStrategy {
                 ...(exitCode !== undefined ? { exitCode } : {}),
                 ...(outputRaw ? { output: outputRaw } : {}),
               },
-            }],
+            }, ...previewEvents],
           };
         }
 
-        if (anyEvt.type !== 'item.completed') return { activity: true };
+        if (anyEvt.type !== 'item.completed') {
+          return previewEvents.length > 0
+            ? { activity: true, extraEvents: previewEvents }
+            : { activity: true };
+        }
 
         // Reasoning items: stream as text_delta for the preview, but do not set
         // resultText so the final reply remains answer-only.
@@ -216,16 +276,24 @@ export function createCodexStrategy(defaultModel: string): CliAdapterStrategy {
             typeof summary === 'string' ? summary :
             typeof text === 'string' ? text :
             null;
-          if (reasoningText) return { text: reasoningText };
-          return {};
+          if (reasoningText) {
+            return previewEvents.length > 0
+              ? { text: reasoningText, extraEvents: previewEvents }
+              : { text: reasoningText };
+          }
+          return previewEvents.length > 0 ? { extraEvents: previewEvents } : {};
         }
 
         // Agent message: stream as text_delta and lock in resultText so that
         // text_final uses the answer only and never falls back to merged
         // (which now includes reasoning text).
         if (item.type === 'agent_message' && typeof item.text === 'string') {
-          return { text: item.text, resultText: item.text };
+          return previewEvents.length > 0
+            ? { text: item.text, resultText: item.text, extraEvents: previewEvents }
+            : { text: item.text, resultText: item.text };
         }
+
+        if (previewEvents.length > 0) return { extraEvents: previewEvents };
       }
 
       // Other JSONL events (turn.completed, etc.) — not handled by Codex strategy.
