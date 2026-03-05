@@ -180,6 +180,44 @@ describe('executeForgeAction', () => {
       expect(typeof runCall?.[3]).toBe('function');
     });
 
+    it('does not silently swallow archived-thread (50083) progress failures', async () => {
+      const err50083 = Object.assign(new Error('Thread is archived'), { code: 50083 });
+      const edit = vi.fn(async () => {
+        throw err50083;
+      });
+      const send = vi.fn(async () => ({ edit }));
+      const fetch = vi.fn(async () => ({ send }));
+
+      const orch = makeMockOrchestrator();
+      orch.run = vi.fn(async (_description: string, onProgress: (msg: string, opts?: { force?: boolean }) => Promise<void>) => {
+        await onProgress('phase update', { force: true });
+        return {
+          planId: 'plan-042',
+          filePath: '/tmp/plans/plan-042-test.md',
+          finalVerdict: 'minor',
+          rounds: 1,
+          reachedMaxRounds: false,
+        };
+      });
+      const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const forgeCtx = makeForgeCtx({
+        orchestratorFactory: vi.fn(() => orch) as any,
+        log,
+      });
+      const result = await executeForgeAction(
+        { type: 'forgeCreate', description: 'Add retry logic' },
+        makeCtx({ client: { channels: { fetch } } as any }),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.anything() }),
+        'forge:action:create failed',
+      );
+    });
+
     it('fails without description', async () => {
       const result = await executeForgeAction(
         { type: 'forgeCreate', description: '' },

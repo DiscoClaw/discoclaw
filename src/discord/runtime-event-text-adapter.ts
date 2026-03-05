@@ -86,8 +86,8 @@ function formatPreviewDebugLine(
 
   if (normalizedItemType === 'reasoning') {
     return phase === 'started'
-      ? `Reasoning started${statusSuffix}...`
-      : `Reasoning completed${statusSuffix}.`;
+      ? `Hypothesis: reasoning in progress${statusSuffix}.`
+      : `Finding: reasoning completed${statusSuffix}.`;
   }
 
   const item = humanizeItemType(normalizedItemType);
@@ -105,9 +105,9 @@ export function adaptRuntimeEventText(
 
   switch (evt.type) {
     case 'tool_start':
-      return `Using ${evt.name}...`;
+      return `Next check: ${evt.name}.`;
     case 'tool_end':
-      return evt.ok ? `${evt.name} finished.` : `${evt.name} failed.`;
+      return evt.ok ? `Finding: ${evt.name} finished.` : `Finding: ${evt.name} failed.`;
     case 'log_line': {
       const line = sanitizeRuntimeLine(evt.line, maxChars);
       if (!line || !hasMeaningfulRuntimeLine(line)) return null;

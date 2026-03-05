@@ -25,6 +25,7 @@ import {
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { adaptPlanRunEventText } from './runtime-event-text-adapter.js';
+import { runtimeSupportsNativeThinkingStream } from './runtime-signal-budget.js';
 
 const DEFAULT_PLAN_PHASE_TIMEOUT_MS = 1_800_000;
 
@@ -113,6 +114,18 @@ function extractPhaseStopMessage(phaseResult: { result: string } & Record<string
 
 function buildPlanRunWatchdogId(planId: string, ctx: ActionContext): string {
   return `plan-action:${ctx.channelId}:${ctx.messageId}:${planId}`;
+}
+
+const ARCHIVED_THREAD_STOP_MESSAGE = 'Thread is archived (50083)';
+
+function errorCode(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'number' ? code : null;
+}
+
+function isArchivedThreadError(err: unknown): boolean {
+  return errorCode(err) === 50083;
 }
 
 // ---------------------------------------------------------------------------
@@ -334,9 +347,17 @@ export async function executePlanAction(
       void (async () => {
         // Send initial status message and set up live edits (best-effort).
         let runChannel: MessageSendTarget | undefined;
+        let fallbackChannel: MessageSendTarget | undefined;
         let statusMsg: MessageEditTarget | undefined;
         let streamingController: ReturnType<typeof createStreamingProgress> | undefined;
         let lastStatusEditAt = 0;
+        let archivedThreadDetected = false;
+
+        const markArchivedThread = (err: unknown, source: string): void => {
+          if (archivedThreadDetected) return;
+          archivedThreadDetected = true;
+          planCtx.log?.warn({ err, planId: runPlanId, source }, 'plan:action:run thread archived');
+        };
 
         const phaseStartMessages = new Map<string, MessageEditTarget>();
         const onPlanEvent = async (event: PlanRunEvent): Promise<void> => {
@@ -374,6 +395,14 @@ export async function executePlanAction(
         } catch {
           // best-effort — phase-start posts and completion fall back gracefully
         }
+        if (ctx.threadParentId && ctx.threadParentId !== ctx.channelId) {
+          try {
+            const parent = await ctx.client.channels.fetch(ctx.threadParentId);
+            fallbackChannel = asMessageSendTarget(parent) ?? undefined;
+          } catch {
+            // best-effort
+          }
+        }
 
         if (!planCtx.skipCompletionNotify && runChannel) {
           try {
@@ -388,7 +417,11 @@ export async function executePlanAction(
         }
 
         if (statusMsg) {
-          streamingController = createStreamingProgress(statusMsg, PROGRESS_THROTTLE_MS);
+          streamingController = createStreamingProgress(statusMsg, PROGRESS_THROTTLE_MS, {
+            useNativeTextFallback: runtimeSupportsNativeThinkingStream(planCtx.runtime!.id),
+            throwOnFatal: true,
+            onFatalError: (err) => markArchivedThread(err, 'streaming-progress'),
+          });
         }
 
         const runtimeEventAdapter: ((evt: EngineEvent) => void) | undefined =
@@ -419,7 +452,11 @@ export async function executePlanAction(
           lastStatusEditAt = now;
           try {
             await statusMsg.edit({ content, allowedMentions: NO_MENTIONS });
-          } catch {
+          } catch (err) {
+            if (isArchivedThreadError(err)) {
+              markArchivedThread(err, 'status-edit');
+              throw err;
+            }
             // best-effort
           }
         }
@@ -435,39 +472,90 @@ export async function executePlanAction(
           let stopReason: string | undefined;
           let stopMessage: string | undefined;
           let hitMaxPhases = false;
-          for (let i = 0; i < maxPhases; i++) {
-            const release = await acquireWriterLock();
-            let phaseResult;
-            try {
-              phaseResult = await runNextPhase(prepResult.phasesFilePath, prepResult.planFilePath, phaseOpts, wrappedOnProgress);
-            } finally {
-              release();
+          try {
+            for (let i = 0; i < maxPhases; i++) {
+              if (archivedThreadDetected) {
+                stopReason = 'error';
+                stopMessage = ARCHIVED_THREAD_STOP_MESSAGE;
+                break;
+              }
+              const release = await acquireWriterLock();
+              let phaseResult;
+              try {
+                phaseResult = await runNextPhase(prepResult.phasesFilePath, prepResult.planFilePath, phaseOpts, wrappedOnProgress);
+              } finally {
+                release();
+              }
+              if (archivedThreadDetected) {
+                stopReason = 'error';
+                stopMessage = ARCHIVED_THREAD_STOP_MESSAGE;
+                break;
+              }
+              if (phaseResult.result === 'done') {
+                phasesRun++;
+                // Force-edit on phase completion boundary.
+                try {
+                  await editStatus(`**Plan run in progress:** \`${action.planId}\` — phase complete (${phasesRun} done so far)`, true);
+                } catch (err) {
+                  if (isArchivedThreadError(err)) {
+                    markArchivedThread(err, 'phase-complete-edit');
+                    stopReason = 'error';
+                    stopMessage = ARCHIVED_THREAD_STOP_MESSAGE;
+                    break;
+                  }
+                  throw err;
+                }
+              } else if (phaseResult.result === 'nothing_to_run') {
+                // Force-edit to reflect no more phases.
+                try {
+                  await editStatus(`**Plan run finishing:** \`${action.planId}\` — no more phases to run`, true);
+                } catch (err) {
+                  if (isArchivedThreadError(err)) {
+                    markArchivedThread(err, 'no-more-phases-edit');
+                    stopReason = 'error';
+                    stopMessage = ARCHIVED_THREAD_STOP_MESSAGE;
+                  } else {
+                    throw err;
+                  }
+                }
+                break;
+              } else {
+                // Any error/stale/corrupt/audit_failed/retry_blocked stops the loop.
+                stopReason = phaseResult.result;
+                stopMessage = extractPhaseStopMessage(phaseResult as { result: string } & Record<string, unknown>);
+                planCtx.log?.warn({ planId: runPlanId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
+                // Force-edit to reflect stop.
+                try {
+                  await editStatus(`**Plan run stopped:** \`${runPlanId}\` — ${stopMessage ?? stopReason}`, true);
+                } catch (err) {
+                  if (isArchivedThreadError(err)) {
+                    markArchivedThread(err, 'stop-edit');
+                    stopReason = 'error';
+                    stopMessage = ARCHIVED_THREAD_STOP_MESSAGE;
+                  } else {
+                    throw err;
+                  }
+                }
+                break;
+              }
+              if (i === maxPhases - 1) {
+                hitMaxPhases = true;
+              }
+              // Yield between phases.
+              await new Promise(resolve => setImmediate(resolve));
             }
-
-            if (phaseResult.result === 'done') {
-              phasesRun++;
-              // Force-edit on phase completion boundary.
-              await editStatus(`**Plan run in progress:** \`${action.planId}\` — phase complete (${phasesRun} done so far)`, true);
-            } else if (phaseResult.result === 'nothing_to_run') {
-              // Force-edit to reflect no more phases.
-              await editStatus(`**Plan run finishing:** \`${action.planId}\` — no more phases to run`, true);
-              break;
+          } catch (loopErr) {
+            if (isArchivedThreadError(loopErr)) {
+              markArchivedThread(loopErr, 'phase-loop');
+              stopReason = 'error';
+              stopMessage = ARCHIVED_THREAD_STOP_MESSAGE;
             } else {
-              // Any error/stale/corrupt/audit_failed/retry_blocked stops the loop.
-              stopReason = phaseResult.result;
-              stopMessage = extractPhaseStopMessage(phaseResult as { result: string } & Record<string, unknown>);
-              planCtx.log?.warn({ planId: runPlanId, result: phaseResult.result, phasesRun }, 'plan:action:run stopped');
-              // Force-edit to reflect stop.
-              await editStatus(`**Plan run stopped:** \`${runPlanId}\` — ${stopMessage ?? stopReason}`, true);
-              break;
+              throw loopErr;
             }
-
-            if (i === maxPhases - 1) {
-              hitMaxPhases = true;
-            }
-
-            // Yield between phases.
-            await new Promise(resolve => setImmediate(resolve));
+          }
+          if (archivedThreadDetected && !stopReason) {
+            stopReason = 'error';
+            stopMessage = ARCHIVED_THREAD_STOP_MESSAGE;
           }
           planCtx.log?.info({ planId: runPlanId, phasesRun }, 'plan:action:run complete');
 
@@ -520,36 +608,43 @@ export async function executePlanAction(
 
           // Edit status message to show final outcome (preserved for backwards compatibility).
           if (!planCtx.skipCompletionNotify) {
-            try {
-              if (statusMsg) {
-                // Edit the existing status message in place.
-                try {
-                  await statusMsg.edit({ content: finalContent, allowedMentions: NO_MENTIONS });
-                } catch {
-                  // best-effort
-                }
+            let posted = false;
+            if (statusMsg) {
+              // Edit the existing status message in place.
+              try {
+                await statusMsg.edit({ content: finalContent, allowedMentions: NO_MENTIONS });
+                posted = true;
+              } catch (err) {
+                if (isArchivedThreadError(err)) markArchivedThread(err, 'final-status-edit');
               }
-              // Post a standalone completion message as a new chat message.
-              if (runChannel) {
-                try {
-                  await runChannel.send({ content: finalContent, allowedMentions: NO_MENTIONS });
-                } catch {
-                  // best-effort
-                }
-              } else if (!statusMsg) {
-                // Fall back to sending a new message if we never got runChannel or statusMsg.
-                try {
-                  const channel = await ctx.client.channels.fetch(ctx.channelId);
-                  const sendTarget = asMessageSendTarget(channel);
-                  if (sendTarget) {
-                    await sendTarget.send({ content: finalContent, allowedMentions: NO_MENTIONS });
-                  }
-                } catch {
-                  // best-effort
-                }
+            }
+            // Post a standalone completion message as a new chat message.
+            if (runChannel) {
+              try {
+                await runChannel.send({ content: finalContent, allowedMentions: NO_MENTIONS });
+                posted = true;
+              } catch (err) {
+                if (isArchivedThreadError(err)) markArchivedThread(err, 'final-run-channel-send');
               }
-            } catch {
-              // best-effort — do not rethrow
+            } else if (!statusMsg) {
+              // Fall back to sending a new message if we never got runChannel or statusMsg.
+              try {
+                const channel = await ctx.client.channels.fetch(ctx.channelId);
+                const sendTarget = asMessageSendTarget(channel);
+                if (sendTarget) {
+                  await sendTarget.send({ content: finalContent, allowedMentions: NO_MENTIONS });
+                  posted = true;
+                }
+              } catch {
+                // best-effort
+              }
+            }
+            if (!posted && fallbackChannel) {
+              try {
+                await fallbackChannel.send({ content: finalContent, allowedMentions: NO_MENTIONS });
+              } catch {
+                // best-effort
+              }
             }
           }
 
@@ -559,7 +654,7 @@ export async function executePlanAction(
           } catch {
             // best-effort
           }
-          const runHadFailure = Boolean(stopReason || runError || hitMaxPhases);
+          const runHadFailure = Boolean(stopReason || runError || hitMaxPhases || archivedThreadDetected);
           watchdogOutcome = runHadFailure ? 'failed' : 'succeeded';
         } finally {
           streamingController?.dispose();

@@ -68,6 +68,16 @@ function resolveSendFn(channel: unknown): SendFn | null {
   return maybeSend.bind(channel) as SendFn;
 }
 
+function errorCode(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'number' ? code : null;
+}
+
+function isArchivedThreadError(err: unknown): boolean {
+  return errorCode(err) === 50083;
+}
+
 async function resolveLinkedTaskForThread(
   ctx: ActionContext,
   forgeCtx: ForgeContext,
@@ -121,17 +131,33 @@ async function buildProgressCallbacks(
     const controller = createStreamingProgress(
       progressReply as { edit: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown> },
       forgeCtx.progressThrottleMs ?? 3000,
+      {
+        throwOnFatal: true,
+        onFatalError: (err) => {
+          forgeCtx.log?.warn({ err, channelId: ctx.channelId }, 'forge:action progress thread archived');
+        },
+      },
     );
     const enableToolAwareStreaming = forgeCtx.toolAwareStreaming ?? true;
     return {
-      onProgress: controller.onProgress,
+      onProgress: async (msg: string, opts?: { force?: boolean }) => {
+        await controller.onProgress(msg, opts);
+      },
       onEvent: enableToolAwareStreaming ? controller.onEvent : undefined,
       sendPlanSummary: async (summary?: string) => {
         if (!summary) return true;
         try {
           await send({ content: summary, allowedMentions: NO_MENTIONS });
           return true;
-        } catch {
+        } catch (err) {
+          if (isArchivedThreadError(err)) {
+            try {
+              await forgeCtx.onProgress(summary, { force: true });
+              return true;
+            } catch {
+              return false;
+            }
+          }
           return false;
         }
       },

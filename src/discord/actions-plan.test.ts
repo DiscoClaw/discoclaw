@@ -392,6 +392,28 @@ describe('executePlanAction', () => {
       }
     });
 
+    it('surfaces archived-thread (50083) as a stopped run reason', async () => {
+      const statusMsg = {
+        edit: vi.fn(async () => {
+          throw Object.assign(new Error('Thread is archived'), { code: 50083 });
+        }),
+      };
+      const setup = makeSendFn(statusMsg as ReturnType<typeof makeStatusMessage>);
+      const ctx = makeCtx(setup);
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(true);
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const sentContents = setup.fn.mock.calls.map((call) => String(call[0]!.content));
+      expect(sentContents.some((text) => text.includes('Stopped: Thread is archived (50083)'))).toBe(true);
+    });
+
     it('adapts runtime events to concise Discord text without leaking raw JSON payloads', async () => {
       const { runNextPhase } = await import('./plan-manager.js');
       const rawStructuredPayload = '{"event":"engine_update","token_count":42}';
