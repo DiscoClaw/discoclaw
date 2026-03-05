@@ -259,6 +259,12 @@ export function formatRuntimePreviewSignal(
     }
     case 'usage':
       return formatUsageSignal(evt, mode);
+    case 'preview_debug': {
+      const status = mode === 'raw' && evt.status
+        ? ` status=${sanitizePreviewSignalText(evt.status, 80)}`
+        : '';
+      return `[preview:${evt.source}] ${evt.itemType} ${evt.phase}${status}`;
+    }
     default:
       return null;
   }

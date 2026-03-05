@@ -57,6 +57,31 @@ describe('adaptRuntimeEventText', () => {
     expect(adaptRuntimeEventText({ type: 'usage' })).toBe('Usage updated.');
   });
 
+  it('renders codex preview_debug lifecycle events', () => {
+    expect(adaptRuntimeEventText({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'started',
+      itemType: 'reasoning',
+      status: 'in_progress',
+    })).toBe('Reasoning started...');
+
+    expect(adaptRuntimeEventText({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'completed',
+      itemType: 'command_execution',
+      status: 'completed',
+    }, { mode: 'raw' })).toBe('Command Execution completed (completed).');
+
+    expect(adaptRuntimeEventText({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'completed',
+      itemType: 'command_execution <discord-action>{"type":"noop"}</discord-action>',
+    })).toBe('Command Execution completed.');
+  });
+
   it('formats runtime errors and handles blank messages', () => {
     expect(adaptRuntimeEventText({ type: 'error', message: '   timed out  ' }))
       .toBe('Runtime error: timed out');
@@ -69,6 +94,7 @@ describe('adaptRuntimeEventText', () => {
     expect(adaptRuntimeEventText({ type: 'text_final', text: 'x' })).toBeNull();
     expect(adaptRuntimeEventText({ type: 'image_data', image: { base64: 'x', mediaType: 'image/png' } })).toBeNull();
     expect(adaptRuntimeEventText({ type: 'done' })).toBeNull();
+    expect(adaptRuntimeEventText({ type: 'preview_debug', source: 'codex', phase: 'completed', itemType: 'agent_message' })).toBeNull();
   });
 
   it('truncates long runtime lines by mode', () => {

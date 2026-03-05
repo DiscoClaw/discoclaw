@@ -142,6 +142,12 @@ describe('createStreamingProgress', () => {
       totalTokens: 18,
       costUsd: 0.0012,
     } as EngineEvent);
+    ctrl.onEvent({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'completed',
+      itemType: 'command_execution',
+    } as EngineEvent);
     ctrl.onEvent({ type: 'tool_end', name: 'Read', output: '', ok: true } as EngineEvent);
     await vi.advanceTimersByTimeAsync(1300);
 
@@ -149,6 +155,7 @@ describe('createStreamingProgress', () => {
     expect(allEdits).toContain('Using Read...');
     expect(allEdits).toContain('Update: reading file');
     expect(allEdits).toContain('Usage: in 11, out 7, total 18, cost $0.0012.');
+    expect(allEdits).toContain('Command Execution completed.');
     expect(allEdits).toContain('Read finished.');
     expect(allEdits).not.toContain('<discord-action>');
     ctrl.dispose();

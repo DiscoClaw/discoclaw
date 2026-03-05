@@ -898,6 +898,7 @@ describe('auto-follow-up for query actions', () => {
         invoke: vi.fn(async function* () {
           runtimeStarted.resolve();
           yield { type: 'log_line', stream: 'stdout', line: 'phase 1 started' } as any;
+          yield { type: 'preview_debug', source: 'codex', phase: 'started', itemType: 'reasoning' } as any;
           yield { type: 'text_delta', text: 'phase 1 tick\n' } as any;
           await new Promise((resolve) => setTimeout(resolve, 1300));
           yield { type: 'log_line', stream: 'stderr', line: 'phase 1 warning' } as any;
@@ -941,6 +942,7 @@ describe('auto-follow-up for query actions', () => {
       expect(latest).toContain('Usage: in 21, out 8, total 29, cost $0.0123.');
 
       await pending;
+      expect(replyEditContents(replyObj).join('\n')).toContain('Reasoning started...');
     } finally {
       vi.useRealTimers();
     }

@@ -71,6 +71,7 @@ function sanitizeCodexError(raw: string): string {
  */
 type CodexStrategyOptions = {
   verbosePreview?: boolean;
+  itemTypeDebug?: boolean;
 };
 
 export function createCodexStrategy(
@@ -78,6 +79,20 @@ export function createCodexStrategy(
   strategyOpts: CodexStrategyOptions = {},
 ): CliAdapterStrategy {
   const verbosePreview = Boolean(strategyOpts.verbosePreview);
+  const itemTypeDebug = Boolean(strategyOpts.itemTypeDebug);
+
+  function itemDebugEvent(phase: 'started' | 'completed', item: Record<string, unknown>) {
+    const itemType = typeof item.type === 'string' ? item.type : 'item';
+    if (itemType === 'agent_message') return null;
+    const status = typeof item.status === 'string' ? compactText(item.status, 80) : undefined;
+    return {
+      type: 'preview_debug' as const,
+      source: 'codex' as const,
+      phase,
+      itemType,
+      ...(status ? { status } : {}),
+    };
+  }
 
   function itemPreviewLine(phase: 'started' | 'completed', item: Record<string, unknown>): string | null {
     const itemType = typeof item.type === 'string' ? item.type : 'item';
@@ -226,10 +241,12 @@ export function createCodexStrategy(
         const item = asObject(anyEvt.item);
         if (!item) return { activity: true };
         const phase: 'started' | 'completed' = anyEvt.type === 'item.started' ? 'started' : 'completed';
+        const debugEvent = itemTypeDebug ? itemDebugEvent(phase, item) : null;
         const previewLine = verbosePreview ? itemPreviewLine(phase, item) : null;
-        const previewEvents = previewLine
-          ? [{ type: 'log_line' as const, stream: 'stdout' as const, line: previewLine }]
-          : [];
+        const previewEvents = [
+          ...(debugEvent ? [debugEvent] : []),
+          ...(previewLine ? [{ type: 'log_line' as const, stream: 'stdout' as const, line: previewLine }] : []),
+        ];
 
         // Surface command execution progress as tool events so Discord
         // streaming doesn't look idle during long tool-heavy runs.

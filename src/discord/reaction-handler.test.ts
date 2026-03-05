@@ -1529,6 +1529,7 @@ describe('streaming behavior', () => {
       id: 'claude_code',
       capabilities: new Set(['streaming_text']),
       async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'preview_debug', source: 'codex', phase: 'started', itemType: 'reasoning' };
         yield { type: 'tool_start', name: 'readFile', input: { path: 'README.md' } };
         yield { type: 'usage', inputTokens: 11, outputTokens: 7, totalTokens: 18, costUsd: 0.0012 };
         yield { type: 'tool_end', name: 'readFile', ok: true, output: 'ok' };
@@ -1545,6 +1546,7 @@ describe('streaming behavior', () => {
 
     const replyObj = reaction.message._replyObj;
     const allEditContents = replyObj.edit.mock.calls.map((c: any) => c[0].content);
+    expect(allEditContents.some((c: string) => c.includes('Reasoning started...'))).toBe(true);
     expect(allEditContents.some((c: string) => c.includes('Using readFile...'))).toBe(true);
     expect(allEditContents.some((c: string) => c.includes('Usage: in 11, out 7, total 18, cost $0.0012.'))).toBe(true);
     expect(allEditContents.some((c: string) => c.includes('readFile finished.'))).toBe(true);

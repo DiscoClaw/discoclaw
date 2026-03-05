@@ -615,7 +615,8 @@ function createReactionHandler(
                 evt.type === 'log_line' ||
                 evt.type === 'tool_start' ||
                 evt.type === 'tool_end' ||
-                evt.type === 'usage'
+                evt.type === 'usage' ||
+                evt.type === 'preview_debug'
               ) {
                 await appendRuntimeSignal(evt);
               } else if (evt.type === 'image_data') {
