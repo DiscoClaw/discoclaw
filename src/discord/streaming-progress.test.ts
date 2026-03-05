@@ -307,12 +307,33 @@ describe('createStreamingProgress', () => {
     ctrl.dispose();
   });
 
+  it('sequential tool_start events preserve previous activity label as signal line', async () => {
+    const message = makeMessage();
+    const ctrl = createStreamingProgress(message, 0);
+
+    await ctrl.onProgress('Phase start', { force: true });
+    ctrl.onEvent({ type: 'tool_start', name: 'Read', input: '' } as EngineEvent);
+    ctrl.onEvent({ type: 'tool_end', name: 'Read', output: '', ok: true } as EngineEvent);
+    ctrl.onEvent({ type: 'tool_start', name: 'Bash', input: { command: 'echo hi' } } as EngineEvent);
+    ctrl.onEvent({ type: 'tool_end', name: 'Bash', output: 'hi', ok: true } as EngineEvent);
+    ctrl.onEvent({ type: 'tool_start', name: 'Edit', input: '' } as EngineEvent);
+    await vi.advanceTimersByTimeAsync(1300);
+
+    const lastEdit = message.edits[message.edits.length - 1]!;
+    // Previous activity labels should appear as signal lines in the code block
+    expect(lastEdit).toContain('Reading file...');
+    expect(lastEdit).toContain('Running command...');
+    // Current tool visible via runtime event adapter signal line
+    expect(lastEdit).toContain('Next check: Edit.');
+    ctrl.dispose();
+  });
+
   it('caps runtime signal lines and appends one suppression marker', async () => {
     const message = makeMessage();
     const ctrl = createStreamingProgress(message, 0);
 
     await ctrl.onProgress('Phase start', { force: true });
-    for (let i = 1; i <= 14; i++) {
+    for (let i = 1; i <= 35; i++) {
       ctrl.onEvent({
         type: 'log_line',
         stream: 'stdout',
@@ -323,7 +344,7 @@ describe('createStreamingProgress', () => {
 
     const allEdits = message.edits.join('\n');
     expect(allEdits).toContain(RUNTIME_SIGNAL_SUPPRESSED_LINE);
-    expect(allEdits).not.toContain('signal-14');
+    expect(allEdits).not.toContain('signal-35');
     ctrl.dispose();
   });
 
