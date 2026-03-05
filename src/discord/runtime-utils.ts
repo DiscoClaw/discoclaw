@@ -36,6 +36,7 @@ export async function collectRuntimeText(
     onEvent?: (evt: EngineEvent) => void;
     loopDetect?: false | LoopDetectorOpts;
     supervisor?: RuntimeSupervisorPolicy;
+    reasoningEffort?: string;
   },
 ): Promise<string> {
   // --- Loop detection setup ---
@@ -76,6 +77,7 @@ export async function collectRuntimeText(
       ...(opts?.sessionKey ? { sessionKey: opts.sessionKey } : {}),
       ...(combinedSignal ? { signal: combinedSignal } : {}),
       ...(opts?.supervisor ? { supervisor: opts.supervisor } : {}),
+      ...(opts?.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
     })) {
       if (sawDone) {
         throw new Error(`Runtime stream emitted ${evt.type} event after done (done must be terminal)`);

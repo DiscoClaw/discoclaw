@@ -10,6 +10,7 @@ import type { AuditVerdict } from './forge-audit-verdict.js';
 import { collectRuntimeText } from './runtime-utils.js';
 import type { RuntimeAdapter, RuntimeSupervisorPolicy } from '../runtime/types.js';
 import { getSection, parsePlan } from './plan-parser.js';
+import { resolveReasoningEffort } from '../runtime/model-tiers.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +28,7 @@ export type PlanAuditOpts = {
   runtime: RuntimeAdapter;
   auditorRuntime?: RuntimeAdapter;
   auditorModel: string;
+  auditorReasoningEffort?: string;
   timeoutMs: number;
   acquireWriterLock: () => Promise<() => void>;
 };
@@ -252,6 +254,7 @@ export async function handlePlanAudit(opts: PlanAuditOpts): Promise<PlanAuditRes
         requireFinalEvent: true,
         requireDoneEvent: true,
         supervisor: PLAN_PHASE_SUPERVISOR_POLICY,
+        reasoningEffort: opts.auditorReasoningEffort,
       },
     );
   } catch (err) {

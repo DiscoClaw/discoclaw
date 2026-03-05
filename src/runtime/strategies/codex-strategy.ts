@@ -204,6 +204,12 @@ export function createCodexStrategy(
         args.push('-c', 'model_reasoning_summary="auto"');
       }
 
+      // Map discoclaw model tier reasoning effort to Codex CLI config.
+      // This overrides the global ~/.codex/config.toml setting per-invocation.
+      if (ctx.params.reasoningEffort) {
+        args.push('-c', `model_reasoning_effort="${ctx.params.reasoningEffort}"`);
+      }
+
       // When session tracking is active, use --json so we can capture the thread_id
       // from the `thread.started` event.
       if (wantSession) {

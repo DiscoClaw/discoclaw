@@ -88,7 +88,7 @@ import { OnboardingFlow } from '../onboarding/onboarding-flow.js';
 import { completeOnboarding } from './onboarding-completion.js';
 import type { SendTarget } from './onboarding-completion.js';
 import { isOnboardingComplete } from '../workspace-bootstrap.js';
-import { resolveModel } from '../runtime/model-tiers.js';
+import { resolveModel, resolveReasoningEffort } from '../runtime/model-tiers.js';
 import { getDefaultTimezone } from '../cron/default-timezone.js';
 import type { AttachmentLike } from './image-download.js';
 import { DiscordTransportClient } from './transport-client.js';
@@ -2011,6 +2011,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   runtime: params.runtime,
                   auditorRuntime: params.auditorRuntime,
                   auditorModel: effectiveAuditModel,
+                  auditorReasoningEffort: resolveReasoningEffort(rawAuditorModel, auditRt.id),
                   timeoutMs,
                   acquireWriterLock,
                 }).then(
