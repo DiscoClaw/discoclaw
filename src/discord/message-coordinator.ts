@@ -279,8 +279,6 @@ const turnCounters = new Map<string, number>();
 const summaryWorkQueue = new KeyedQueue();
 const latestSummarySequence = new Map<string, number>();
 
-/** Timestamp of the most recent allowlisted message; read by the !status dashboard. */
-let lastProcessedMessage: number | null = null;
 
 const acquireWriterLock = registryAcquireWriterLock;
 const MAX_PLAN_RUN_PHASES = 50;
@@ -732,7 +730,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       if (!isBotMessage && !isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
       // Track last allowlisted message timestamp for !status dashboard.
-      lastProcessedMessage = Date.now();
+      if (params.statusCommandContext) params.statusCommandContext.lastMessageAt.current = Date.now();
 
       const isDm = msg.guildId == null;
       const actionFlags: ActionCategoryFlags = {
@@ -825,7 +823,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const ctx = params.statusCommandContext;
         const snapshot = await collectStatusSnapshot({
           startedAt: ctx.startedAt,
-          lastMessageAt: lastProcessedMessage,
+          lastMessageAt: ctx.lastMessageAt.current,
           scheduler: params.cronCtx?.scheduler ?? null,
           taskStore: params.taskCtx?.store ?? null,
           durableDataDir: params.durableDataDir,
