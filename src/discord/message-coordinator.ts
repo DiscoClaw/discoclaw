@@ -2731,6 +2731,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             channelContextPath: channelCtx.contextPath,
             durableSection,
             summarySection,
+            shortTermSection,
             taskSection,
             openTasksSection,
             actionsReferenceSection,
