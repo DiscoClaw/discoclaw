@@ -1,6 +1,6 @@
 export type ImageData = {
   base64: string;
-  mediaType: string; // 'image/png', 'image/jpeg', 'image/webp'
+  mediaType: string; // 'image/png', 'image/jpeg', 'image/webp', 'image/gif'
 };
 
 /** Max images per invocation to prevent runaway accumulation. */

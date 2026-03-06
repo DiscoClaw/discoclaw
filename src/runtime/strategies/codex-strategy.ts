@@ -1,8 +1,11 @@
 // Codex CLI adapter strategy.
 // Provides model-specific logic for the universal CLI adapter factory.
 
-import type { RuntimeCapability } from '../types.js';
-import type { CliAdapterStrategy, CliInvokeContext, UniversalCliOpts, ParsedLineResult } from '../cli-strategy.js';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import type { ImageData, RuntimeCapability } from '../types.js';
+import type { CliAdapterLogger, CliAdapterStrategy, CliInvokeContext, UniversalCliOpts, ParsedLineResult } from '../cli-strategy.js';
 
 /** Max chars for error messages exposed outside the adapter. Prevents prompt/session leaks. */
 const MAX_ERROR_LENGTH = 200;
@@ -232,6 +235,13 @@ export function createCodexStrategy(
         }
       }
 
+      // Add --image flags for temp image files (not supported on resume).
+      if (!existingThreadId && ctx.tempImagePaths && ctx.tempImagePaths.length > 0) {
+        for (const imgPath of ctx.tempImagePaths) {
+          args.push('--image', imgPath);
+        }
+      }
+
       // `--` terminates option parsing so prompts like "--- SOUL.md ---" are
       // always treated as positional input rather than CLI flags.
       args.push('--');
@@ -249,6 +259,26 @@ export function createCodexStrategy(
       if (!ctx.useStdin) return null;
       // Codex uses raw text stdin (not JSON-wrapped like Claude).
       return ctx.params.prompt;
+    },
+
+    async prepareImages(images: ImageData[], log?: CliAdapterLogger): Promise<{ paths: string[]; cleanup: () => Promise<void> }> {
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-codex-img-'));
+      const paths: string[] = [];
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i]!;
+        const rawExt = img.mediaType.split('/')[1] || 'bin';
+        const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+        const filePath = path.join(tmpDir, `image-${i}.${ext}`);
+        await fs.writeFile(filePath, Buffer.from(img.base64, 'base64'));
+        paths.push(filePath);
+      }
+      log?.debug?.({ count: paths.length, tmpDir }, 'codex: wrote temp image files');
+      return {
+        paths,
+        cleanup: async () => {
+          await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+        },
+      };
     },
 
     parseLine(evt: unknown, ctx: CliInvokeContext): ParsedLineResult | null {

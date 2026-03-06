@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineEvent } from './types.js';
@@ -1363,6 +1364,159 @@ describe('Codex CLI runtime adapter', () => {
     expect(debugEvents.some((e) => e.itemType === 'reasoning' && e.phase === 'completed' && e.label === 'Reasoning: Planning.')).toBe(true);
     expect(debugEvents.some((e) => e.itemType === 'command_execution' && e.itemId === 'item_cmd_1')).toBe(true);
     expect(debugEvents.some((e) => e.itemType === 'agent_message')).toBe(false);
+  });
+
+  // --- One-shot with images tests ---
+
+  describe('one-shot with images', () => {
+    it('includes --image flags in args before -- when images are present', async () => {
+      mockExeca.mockImplementation(() => createMockSubprocess({
+        stdout: 'image received',
+        exitCode: 0,
+      }));
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+      });
+
+      await collectEvents(rt.invoke({
+        prompt: 'Describe this image',
+        model: '',
+        cwd: '/tmp',
+        images: [
+          { base64: 'aVZCT1JXMA==', mediaType: 'image/png' },
+          { base64: '/9j/4AAQ', mediaType: 'image/jpeg' },
+        ],
+      }));
+
+      expect(mockExeca).toHaveBeenCalledTimes(1);
+      const callArgs = mockExeca.mock.calls[0][1] as string[];
+
+      // --image flags should appear before --
+      const dashDashIdx = callArgs.indexOf('--');
+      expect(dashDashIdx).toBeGreaterThan(-1);
+
+      const imageIndices: number[] = [];
+      for (let i = 0; i < callArgs.length; i++) {
+        if (callArgs[i] === '--image') imageIndices.push(i);
+      }
+
+      expect(imageIndices).toHaveLength(2);
+      for (const idx of imageIndices) {
+        expect(idx).toBeLessThan(dashDashIdx);
+      }
+
+      // Values after --image should be file paths with correct extensions
+      expect(callArgs[imageIndices[0]! + 1]).toMatch(/\.png$/);
+      expect(callArgs[imageIndices[1]! + 1]).toMatch(/\.jpg$/);
+    });
+
+    it('creates temp files with correct extensions matching media types', async () => {
+      mockExeca.mockImplementation(() => createMockSubprocess({
+        stdout: 'ok',
+        exitCode: 0,
+      }));
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+      });
+
+      await collectEvents(rt.invoke({
+        prompt: 'Check extensions',
+        model: '',
+        cwd: '/tmp',
+        images: [
+          { base64: 'AAAA', mediaType: 'image/png' },
+          { base64: 'BBBB', mediaType: 'image/jpeg' },
+          { base64: 'CCCC', mediaType: 'image/webp' },
+        ],
+      }));
+
+      const callArgs = mockExeca.mock.calls[0][1] as string[];
+      const imagePaths: string[] = [];
+      for (let i = 0; i < callArgs.length; i++) {
+        if (callArgs[i] === '--image') imagePaths.push(callArgs[i + 1]!);
+      }
+
+      expect(imagePaths).toHaveLength(3);
+      expect(imagePaths[0]).toMatch(/image-0\.png$/);
+      expect(imagePaths[1]).toMatch(/image-1\.jpg$/);
+      expect(imagePaths[2]).toMatch(/image-2\.webp$/);
+    });
+
+    it('cleanup removes the temp directory after invocation completes', async () => {
+      mockExeca.mockImplementation(() => createMockSubprocess({
+        stdout: 'ok',
+        exitCode: 0,
+      }));
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+      });
+
+      await collectEvents(rt.invoke({
+        prompt: 'cleanup test',
+        model: '',
+        cwd: '/tmp',
+        images: [
+          { base64: 'AAAA', mediaType: 'image/png' },
+        ],
+      }));
+
+      const callArgs = mockExeca.mock.calls[0][1] as string[];
+      const imgIdx = callArgs.indexOf('--image');
+      const imgPath = callArgs[imgIdx + 1]!;
+      const tmpDir = path.dirname(imgPath);
+
+      // After collection completes, the temp directory should be cleaned up.
+      expect(fs.existsSync(tmpDir)).toBe(false);
+    });
+
+    it('resume invocations do NOT include --image flags', async () => {
+      const jsonlOutput1 = [
+        '{"type":"thread.started","thread_id":"img-thread-1"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"saw image"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ].join('\n') + '\n';
+      const jsonlOutput2 = [
+        '{"type":"thread.started","thread_id":"img-thread-1"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"resumed"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ].join('\n') + '\n';
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+      });
+
+      // First call with images — establishes session.
+      mockExeca.mockImplementation(() => createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Look at this',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session',
+        images: [{ base64: 'AAAA', mediaType: 'image/png' }],
+      }));
+
+      // Second call (resume) — should NOT include --image even with images in params.
+      mockExeca.mockImplementation(() => createMockSubprocess({ stdout: jsonlOutput2, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'What about now?',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session',
+        images: [{ base64: 'BBBB', mediaType: 'image/jpeg' }],
+      }));
+
+      const callArgs2 = mockExeca.mock.calls[1][1] as string[];
+      expect(callArgs2[0]).toBe('exec');
+      expect(callArgs2[1]).toBe('resume');
+      expect(callArgs2).not.toContain('--image');
+    });
   });
 
   it('different sessionKeys get independent sessions', async () => {

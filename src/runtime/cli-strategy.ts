@@ -42,6 +42,8 @@ export type CliInvokeContext = {
   hasImages: boolean;
   /** Session-resume map (sessionKey → external thread/session ID). Available for session-resume strategies. */
   sessionMap?: Map<string, string>;
+  /** Temp file paths for images written by prepareImages(). Strategies use these in buildArgs. */
+  tempImagePaths?: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,12 @@ export interface CliAdapterStrategy {
 
   /** Build stdin payload for one-shot invocation (null = no stdin). */
   buildStdinPayload?(ctx: CliInvokeContext): string | null;
+
+  /**
+   * Prepare images for file-based delivery (e.g. Codex `--image` flags).
+   * Writes base64 image data to temp files and returns paths + cleanup function.
+   */
+  prepareImages?(images: ImageData[], log?: CliAdapterLogger): Promise<{ paths: string[]; cleanup: () => Promise<void> }>;
 
   /**
    * Determine the output mode for this invocation.

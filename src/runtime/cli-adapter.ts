@@ -192,6 +192,16 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     }
 
     const hasImages = Boolean(params.images && params.images.length > 0);
+
+    // Write images to temp files if the strategy requires file-based delivery.
+    let tempImagePaths: string[] | undefined;
+    let imageCleanup: (() => Promise<void>) | undefined;
+    if (hasImages && params.images && strategy.prepareImages) {
+      const prepared = await strategy.prepareImages(params.images, opts.log);
+      tempImagePaths = prepared.paths;
+      imageCleanup = prepared.cleanup;
+    }
+
     const promptTooLarge = Buffer.byteLength(params.prompt, 'utf-8') > STDIN_THRESHOLD;
     const useStdin = hasImages || promptTooLarge;
     const launcherStateHardeningEnabled = parseBooleanEnv(
@@ -259,6 +269,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         useStdin,
         hasImages,
         sessionMap: sessionMap ?? undefined,
+        tempImagePaths,
       };
       const args = strategy.buildArgs(ctx, opts);
       const outputMode = strategy.getOutputMode(ctx, opts);
@@ -798,6 +809,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       if (!finished && activeSubprocess) {
         (activeSubprocess as unknown as { kill(signal: string): void }).kill('SIGKILL');
       }
+      await imageCleanup?.().catch(() => {});
     }
   }
 
