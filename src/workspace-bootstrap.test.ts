@@ -588,9 +588,9 @@ describe('template content — SYSTEM_DEFAULTS.md', () => {
     expect(systemDefaults).toContain('short commit hash');
   });
 
-  it('uses correct !memory remember syntax (not !memory add)', async () => {
+  it('does not contain memory commands (moved to pa.md)', async () => {
     systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
-    expect(systemDefaults).toContain('!memory remember');
+    expect(systemDefaults).not.toContain('!memory remember');
     expect(systemDefaults).not.toContain('!memory add');
   });
 });
@@ -651,10 +651,10 @@ describe('template content — TOOLS.md', () => {
     expect(tools).toContain('agent-browser');
   });
 
-  it('documents browser automation tiers (WebFetch, headless, CDP)', async () => {
+  it('documents browser automation tiers (WebFetch, Playwright, CDP)', async () => {
     tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
     expect(tools).toContain('WebFetch');
-    expect(tools).toContain('headless');
+    expect(tools).toContain('Playwright');
     expect(tools).toContain('CDP');
   });
 

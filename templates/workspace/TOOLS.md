@@ -121,4 +121,4 @@ After creating a task, always post a link to its Discord thread so the user can 
 
 ## Discord Action Types
 
-Discord action schemas are injected into your prompt at runtime. Use `<discord-action>` blocks as documented there.
+Discord action schemas are injected into your prompt at runtime. Use `<discord-action>` blocks as documented there. In DMs, action blocks are not available.
