@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const TRACKED_TOOLS_DIR = 'workspace';
+export const TRACKED_TOOLS_DIR = 'instructions';
 export const TRACKED_TOOLS_FILE_NAME = 'TOOLS.md';
 export const TRACKED_TOOLS_SECTION_LABEL = 'TOOLS.md (tracked tools)';
 

@@ -13,7 +13,7 @@ import {
 } from './tracked-tools.js';
 
 describe('resolveTrackedToolsPath', () => {
-  it('resolves to templates/workspace/TOOLS.md by default', async () => {
+  it('resolves to templates/instructions/TOOLS.md by default', async () => {
     const resolved = resolveTrackedToolsPath();
     expect(resolved.endsWith(path.join('templates', TRACKED_TOOLS_DIR, TRACKED_TOOLS_FILE_NAME))).toBe(true);
     await expect(fs.access(resolved)).resolves.toBeUndefined();
@@ -21,7 +21,7 @@ describe('resolveTrackedToolsPath', () => {
 
   it('resolves relative to a provided base directory', () => {
     const resolved = resolveTrackedToolsPath('/tmp/repo/src/instructions');
-    expect(resolved).toBe(path.resolve('/tmp/repo/templates/workspace/TOOLS.md'));
+    expect(resolved).toBe(path.resolve('/tmp/repo/templates/instructions/TOOLS.md'));
   });
 });
 
