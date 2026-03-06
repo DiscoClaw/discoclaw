@@ -12,7 +12,6 @@ const TEMPLATE_FILES = [
   'IDENTITY.md',
   'USER.md',
   'AGENTS.md',
-  'TOOLS.md',
   'MEMORY.md',
 ];
 
@@ -96,7 +95,7 @@ async function warnIfLegacyDiscoclawPresent(workspaceCwd: string, log?: Bootstra
  */
 async function migrateStaleToolsMd(
   workspaceCwd: string,
-  templatesDir: string,
+  instructionsTemplatesDir: string,
   log?: BootstrapLog,
 ): Promise<void> {
   const toolsPath = path.join(workspaceCwd, 'TOOLS.md');
@@ -117,7 +116,7 @@ async function migrateStaleToolsMd(
   log?.info({ workspaceCwd }, 'workspace:bootstrap backed up stale TOOLS.md to TOOLS.md.bak');
 
   // Overwrite with current template.
-  const templatePath = path.join(templatesDir, 'TOOLS.md');
+  const templatePath = path.join(instructionsTemplatesDir, 'TOOLS.md');
   await fs.copyFile(templatePath, toolsPath);
   log?.info({ workspaceCwd }, 'workspace:bootstrap replaced stale TOOLS.md with current template');
 }
@@ -162,6 +161,7 @@ export async function ensureWorkspaceBootstrapFiles(
   log?: BootstrapLog,
 ): Promise<string[]> {
   const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  const instructionsTemplatesDir = path.join(__dirname, '..', 'templates', 'instructions');
   await fs.mkdir(workspaceCwd, { recursive: true });
 
   const forceBootstrap = process.env.DISCOCLAW_FORCE_BOOTSTRAP === '1';
@@ -262,7 +262,7 @@ export async function ensureWorkspaceBootstrapFiles(
   await warnIfLegacyAgentsContainsSystemInstructions(workspaceCwd, log);
 
   // One-time TOOLS.md migration: replace stale system-generated content with current template.
-  await migrateStaleToolsMd(workspaceCwd, templatesDir, log);
+  await migrateStaleToolsMd(workspaceCwd, instructionsTemplatesDir, log);
 
   if (created.length > 0) {
     log?.info({ created, workspaceCwd }, 'workspace:bootstrap scaffolded PA files');

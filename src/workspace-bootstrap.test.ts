@@ -19,7 +19,6 @@ const ALL_TEMPLATE_FILES = [
   'IDENTITY.md',
   'USER.md',
   'AGENTS.md',
-  'TOOLS.md',
   'MEMORY.md',
 ];
 
@@ -121,6 +120,8 @@ describe('ensureWorkspaceBootstrapFiles', () => {
       const content = await fs.readFile(path.join(workspace, file), 'utf-8');
       expect(content.length).toBeGreaterThan(0);
     }
+    expect(created).not.toContain('TOOLS.md');
+    await expect(fs.access(path.join(workspace, 'TOOLS.md'))).rejects.toThrow();
   });
 
   it('does not overwrite existing user-owned files', async () => {
@@ -436,6 +437,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     for (const file of ALL_TEMPLATE_FILES) {
       await expect(fs.access(path.join(workspace, file))).resolves.toBeUndefined();
     }
+    await expect(fs.access(path.join(workspace, 'TOOLS.md'))).rejects.toThrow();
     // Force warning should fire even on brand-new workspace.
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceCwd: workspace }),
@@ -637,7 +639,7 @@ describe('template content — AGENTS.md', () => {
 });
 
 describe('template content — TOOLS.md', () => {
-  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  const templatesDir = path.join(__dirname, '..', 'templates', 'instructions');
   let tools: string;
 
   it('template file exists and is non-empty', async () => {
@@ -692,14 +694,19 @@ describe('template content — no personalization leak', () => {
   const instructionsTemplatesDir = path.join(__dirname, '..', 'templates', 'instructions');
   const FORBIDDEN_TOKENS = ['David', 'Escondido', 'Chelsea', 'marshmonkey'];
 
-  for (const file of ['AGENTS.md', 'TOOLS.md']) {
-    it(`${file} does not contain user-specific tokens`, async () => {
-      const content = await fs.readFile(path.join(workspaceTemplatesDir, file), 'utf-8');
-      for (const token of FORBIDDEN_TOKENS) {
-        expect(content).not.toContain(token);
-      }
-    });
-  }
+  it('AGENTS.md does not contain user-specific tokens', async () => {
+    const content = await fs.readFile(path.join(workspaceTemplatesDir, 'AGENTS.md'), 'utf-8');
+    for (const token of FORBIDDEN_TOKENS) {
+      expect(content).not.toContain(token);
+    }
+  });
+
+  it('TOOLS.md does not contain user-specific tokens', async () => {
+    const content = await fs.readFile(path.join(instructionsTemplatesDir, 'TOOLS.md'), 'utf-8');
+    for (const token of FORBIDDEN_TOKENS) {
+      expect(content).not.toContain(token);
+    }
+  });
 
   it('SYSTEM_DEFAULTS.md does not contain user-specific tokens', async () => {
     const content = await fs.readFile(path.join(instructionsTemplatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
@@ -725,26 +732,13 @@ describe('scaffolded workspace contains operational content', () => {
     await expect(fs.access(path.join(workspace, 'DISCOCLAW.md'))).rejects.toThrow();
   });
 
-  it('fresh scaffold produces TOOLS.md with discord action pointer stub', async () => {
+  it('fresh scaffold does not create managed TOOLS.md', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
     dirs.push(workspace);
 
     await ensureWorkspaceBootstrapFiles(workspace);
 
-    const tools = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
-    expect(tools).toContain('discord-action');
-  });
-
-  it('fresh scaffold produces TOOLS.md with browser automation and service ops', async () => {
-    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
-    dirs.push(workspace);
-
-    await ensureWorkspaceBootstrapFiles(workspace);
-
-    const tools = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
-    expect(tools).toContain('Browser Automation');
-    expect(tools).toContain('Service Operations');
-    expect(tools).toContain('Plan-Audit-Implement Workflow');
+    await expect(fs.access(path.join(workspace, 'TOOLS.md'))).rejects.toThrow();
   });
 });
 
@@ -794,6 +788,10 @@ describe('TOOLS.md migration', () => {
     // Write stale content with both markers present.
     await fs.writeFile(path.join(workspace, 'TOOLS.md'), STALE_TOOLS_CONTENT, 'utf-8');
 
+    const originalCopyFile = fs.copyFile.bind(fs);
+    const copyFileSpy = vi.spyOn(fs, 'copyFile').mockImplementation(async (src: any, dest: any, mode?: any) =>
+      originalCopyFile(src, dest, mode),
+    );
     const log = mockLog();
     await ensureWorkspaceBootstrapFiles(workspace, log as any);
 
@@ -803,11 +801,16 @@ describe('TOOLS.md migration', () => {
 
     // TOOLS.md should now match the current template.
     const templateContent = await fs.readFile(
-      path.join(__dirname, '..', 'templates', 'workspace', 'TOOLS.md'),
+      path.join(__dirname, '..', 'templates', 'instructions', 'TOOLS.md'),
       'utf-8',
     );
     const replaced = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
     expect(replaced).toBe(templateContent);
+    expect(copyFileSpy).toHaveBeenCalledWith(
+      path.join(__dirname, '..', 'templates', 'instructions', 'TOOLS.md'),
+      path.join(workspace, 'TOOLS.md'),
+    );
+    copyFileSpy.mockRestore();
 
     // Both log messages should have fired.
     expect(log.info).toHaveBeenCalledWith(
