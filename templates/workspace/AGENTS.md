@@ -1,6 +1,6 @@
 # AGENTS.md - Your Rules & Preferences
 
-This file is yours. Discoclaw will never overwrite it.
+This file is yours. Discoclaw always preserves it intact.
 
 Default system instructions are injected at runtime from a tracked
 repository layer, not from a workspace-managed file.

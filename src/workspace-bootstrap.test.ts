@@ -598,7 +598,7 @@ describe('template content — SYSTEM_DEFAULTS.md', () => {
   it('contains Discord formatting rules', async () => {
     systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
     expect(systemDefaults).toContain('Discord Formatting');
-    expect(systemDefaults).toContain('No markdown tables in Discord');
+    expect(systemDefaults).toContain('bullet lists in Discord');
   });
 
   it('contains task creation guidance', async () => {
@@ -628,9 +628,9 @@ describe('template content — AGENTS.md', () => {
     expect(agents.length).toBeGreaterThan(0);
   });
 
-  it('declares itself as user-owned (never overwritten)', async () => {
+  it('declares itself as user-owned (always preserved)', async () => {
     agents ??= await fs.readFile(path.join(templatesDir, 'AGENTS.md'), 'utf-8');
-    expect(agents).toContain('never overwrite');
+    expect(agents).toContain('always preserves');
   });
 
   it('references runtime-injected tracked defaults for system instructions', async () => {
