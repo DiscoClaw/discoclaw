@@ -98,7 +98,7 @@ import {
 } from './index.runtime.js';
 import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupChecks } from './index.post-connect.js';
 import { loadOverrides, saveOverrides, resolveOverridesPath, type RuntimeOverrides } from './runtime-overrides.js';
-import { loadModelConfig, saveModelConfig, loadLegacyOverrideModels, migrateFromLegacy, resolveModelsJsonPath, DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole } from './model-config.js';
+import { loadModelConfig, saveModelConfig, loadLegacyOverrideModels, migrateFromLegacy, resolveModelsJsonPath, type ModelConfig, type ModelRole } from './model-config.js';
 import { createColdStorage, type ColdStorageSubsystem } from './cold-storage/index.js';
 import { parseGlobalSupervisorBail, type GlobalSupervisorAuditPayload } from './runtime/global-supervisor.js';
 import type { StreamingPreviewMode } from './discord/output-utils.js';
@@ -138,9 +138,21 @@ const fastRuntimeName = cfg.fastRuntime;
 let runtimeModel = cfg.runtimeModel;
 const runtimeTools = cfg.runtimeTools;
 const runtimeTimeoutMs = cfg.runtimeTimeoutMs;
+const fastModelDefault = (process.env.DISCOCLAW_FAST_MODEL ?? '').trim() || 'fast';
 
 const dataDir = cfg.dataDir;
 const overridesPath = resolveOverridesPath(dataDir, projectRoot);
+
+const envModelDefaults: ModelConfig = {
+  chat: cfg.runtimeModel,
+  fast: fastModelDefault,
+  summary: cfg.summaryModel,
+  cron: cfg.cronAutoTagModel,
+  'cron-exec': cfg.cronExecModel,
+  voice: cfg.voiceModel,
+};
+if (cfg.forgeDrafterModel) envModelDefaults['forge-drafter'] = cfg.forgeDrafterModel;
+if (cfg.forgeAuditorModel) envModelDefaults['forge-auditor'] = cfg.forgeAuditorModel;
 
 // --- PID lock: prevent duplicate bot instances ---
 const pidLockDir = dataDir ?? path.join(__dirname, '..', 'data');
@@ -949,13 +961,12 @@ if (modelLoadResult.status === 'loaded') {
 } else if (modelLoadResult.status === 'missing') {
   // Migrate from legacy runtime-overrides.json + env defaults
   const legacyModels = await loadLegacyOverrideModels(overridesPath);
-  // Seed with canonical tier defaults, not env-resolved model names.
-  // Legacy overrides (if any) win over these defaults.
-  currentModelConfig = migrateFromLegacy({ ...MODEL_DEFAULTS }, legacyModels);
+  // Seed with env-derived defaults; legacy overrides (if any) win.
+  currentModelConfig = migrateFromLegacy({ ...envModelDefaults }, legacyModels);
   await saveModelConfig(modelsJsonPath, currentModelConfig);
   log.info(
     { path: modelsJsonPath, legacyKeys: Object.keys(legacyModels) },
-    'models: migrated from legacy overrides + tier defaults → models.json',
+    'models: migrated from legacy overrides + env defaults → models.json',
   );
 } else {
   // corrupt — backup was already created by loadModelConfig; proceed on defaults
@@ -1025,11 +1036,11 @@ if (overrides.ttsVoice) {
 }
 
 // Track which roles have active file-backed overrides (used by !models show).
-// Only mark as override if the stored value differs from MODEL_DEFAULTS.
+// Only mark as override if the stored value differs from env defaults.
 const overrideSources: Partial<Record<ModelRole, boolean>> = {};
 for (const role of Object.keys(currentModelConfig) as ModelRole[]) {
   const stored = currentModelConfig[role];
-  if (stored && stored !== MODEL_DEFAULTS[role]) overrideSources[role] = true;
+  if (stored && stored !== envModelDefaults[role]) overrideSources[role] = true;
 }
 
 // Persist callback: updates models.json for the given role.
@@ -1043,10 +1054,21 @@ const persistOverride = (role: ModelRole, model: string): void => {
 // Clear callback: on reset, write the envDefaults values into models.json for the affected
 // roles so the persisted state matches what modelReset applies to live state.
 const clearOverride = (role?: ModelRole): void => {
-  const envDefaults = { ...MODEL_DEFAULTS } as Record<ModelRole, string>;
+  const envDefaults = { ...envModelDefaults };
+  const allRoles: ModelRole[] = [
+    'chat',
+    'fast',
+    'forge-drafter',
+    'forge-auditor',
+    'summary',
+    'cron',
+    'cron-exec',
+    'voice',
+  ];
   if (!role) {
     // Reset all roles to env defaults
-    for (const [r, val] of Object.entries(envDefaults) as [ModelRole, string][]) {
+    for (const r of allRoles) {
+      const val = envDefaults[r];
       if (val) {
         currentModelConfig[r] = val;
       } else {
@@ -1574,8 +1596,8 @@ if (taskCtx) {
       runtimeName: primaryRuntimeName,
       voiceRuntimeName: voiceModelRef.runtimeName,
       fastRuntimeName: overrides.fastRuntime ?? fastRuntimeName,
-      // Tier-based defaults — used by !models reset to revert to portable tiers.
-      envDefaults: { ...MODEL_DEFAULTS } as Record<ModelRole, string>,
+      // Env-derived defaults — used by !models reset to revert to startup defaults.
+      envDefaults: { ...envModelDefaults },
       overrideSources,
       persistOverride,
       clearOverride,

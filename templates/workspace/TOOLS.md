@@ -36,6 +36,10 @@ Capture:       screenshot | screenshot --full
 
 Discoclaw runs as a user-level systemd service. Status checks and log reads are fine anytime, but **always ask before restarting or stopping** — a restart kills any active Claude Code sessions (including forge runs), and the user may have work in progress.
 
+### Environment (.env)
+
+The canonical `.env` file lives in the **discoclaw repo root** (the systemd `WorkingDirectory`). This is what the service loads via `EnvironmentFile` and `dotenv/config`. The data dir does NOT have a `.env`. If you need to change env vars, edit the repo's `.env`. The `!secret` command also targets this file.
+
 ### Authorized Commands
 
 | Action | Command |
