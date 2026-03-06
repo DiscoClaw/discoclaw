@@ -287,6 +287,11 @@ const turnCounters = new Map<string, number>();
 const summaryWorkQueue = new KeyedQueue();
 const latestSummarySequence = new Map<string, number>();
 
+export function _resetMessageCoordinatorStateForTests(): void {
+  turnCounters.clear();
+  latestSummarySequence.clear();
+}
+
 
 const acquireWriterLock = registryAcquireWriterLock;
 const MAX_PLAN_RUN_PHASES = 50;

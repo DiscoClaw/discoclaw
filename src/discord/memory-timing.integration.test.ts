@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createMessageCreateHandler } from '../discord.js';
+import { _resetMessageCoordinatorStateForTests, createMessageCreateHandler } from './message-coordinator.js';
 import { loadSummary, saveSummary } from './summarizer.js';
 
 function makeQueue() {
@@ -35,7 +35,13 @@ function makeMsg(content: string, replyId: string) {
     guildId: 'guild',
     guild: { roles: { everyone: {} } },
     channelId: 'chan',
-    channel: { send: vi.fn(async () => {}), isThread: () => false, name: 'general', id: 'chan' },
+    channel: {
+      send: vi.fn(async () => {}),
+      isThread: () => false,
+      name: 'general',
+      id: 'chan',
+      messages: { fetch: vi.fn(async () => makeHistoryCollection([])) },
+    },
     content,
     attachments: new Map(),
     stickers: new Map(),
@@ -45,6 +51,10 @@ function makeMsg(content: string, replyId: string) {
     reply: vi.fn(async () => replyObj),
   };
 }
+
+beforeEach(() => {
+  _resetMessageCoordinatorStateForTests();
+});
 
 function makeHistoryCollection(messages: any[]) {
   return {
