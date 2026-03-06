@@ -149,9 +149,10 @@ export const claudeStrategy: CliAdapterStrategy = {
   },
 
   buildEnv(ctx: CliInvokeContext): Record<string, string> | undefined {
-    if (!ctx.params.reasoningEffort) return undefined;
+    const effort = ctx.params.reasoningEffort;
+    if (typeof effort !== 'string' || effort.length === 0) return undefined;
     return {
-      CLAUDE_CODE_EFFORT_LEVEL: ctx.params.reasoningEffort,
+      CLAUDE_CODE_EFFORT_LEVEL: effort,
     };
   },
 
