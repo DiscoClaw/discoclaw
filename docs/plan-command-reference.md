@@ -441,7 +441,7 @@ All env vars that control plan/forge behavior, verified against `config.ts`:
 |----------|---------|--------|-------------|
 | `FORGE_AUDITOR_RUNTIME` | *(empty)* | `parseTrimmedString` | Runtime adapter name for the auditor (`codex` or `openai`). When empty, the auditor uses the default Claude runtime. |
 | `CODEX_BIN` | `codex` | `parseTrimmedString` | Path to the Codex CLI binary. |
-| `CODEX_MODEL` | `gpt-5.3-codex` | `parseTrimmedString` | Default model for the Codex CLI adapter. Used when `FORGE_AUDITOR_MODEL` is not set. |
+| `CODEX_MODEL` | `gpt-5.4` | `parseTrimmedString` | Default model for the Codex CLI adapter. Used when `FORGE_AUDITOR_MODEL` is not set. |
 | `OPENAI_API_KEY` | *(empty)* | `parseTrimmedString` | API key for the OpenAI-compatible adapter. Required when `FORGE_AUDITOR_RUNTIME=openai`. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | `parseTrimmedString` | Base URL for the OpenAI-compatible API. Override for proxies or alternative providers (e.g., Azure OpenAI, Ollama). |
 | `OPENAI_MODEL` | `gpt-4o` | `parseTrimmedString` | Default model for the OpenAI adapter. Used when `FORGE_AUDITOR_MODEL` is not set. |

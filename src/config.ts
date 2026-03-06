@@ -791,7 +791,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       geminiModel: parseTrimmedString(env, 'GEMINI_MODEL') ?? 'gemini-2.5-pro',
 
       codexBin: parseTrimmedString(env, 'CODEX_BIN') ?? 'codex',
-      codexModel: parseTrimmedString(env, 'CODEX_MODEL') ?? 'gpt-5.3-codex',
+      codexModel: parseTrimmedString(env, 'CODEX_MODEL') ?? 'gpt-5.4',
       codexDangerouslyBypassApprovalsAndSandbox: parseBoolean(env, 'CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX', false),
       codexDisableSessions: parseBoolean(env, 'CODEX_DISABLE_SESSIONS', false),
       codexVerbosePreview: parseBoolean(env, 'DISCOCLAW_CODEX_VERBOSE_PREVIEW', false),

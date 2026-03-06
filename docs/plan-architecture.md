@@ -81,7 +81,7 @@ The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTI
 
 **Multi-provider auditor:** The auditor can optionally use a non-Claude runtime via `FORGE_AUDITOR_RUNTIME`. Two adapters are available:
 
-- `FORGE_AUDITOR_RUNTIME=codex` — routes through the Codex CLI adapter (`src/runtime/codex-cli.ts`), which shells out to `codex exec`. Auth is handled natively by the Codex CLI (`~/.codex/auth.json`). This is the recommended path for OpenAI models like `gpt-5.3-codex` that aren't available on the public chat completions API.
+- `FORGE_AUDITOR_RUNTIME=codex` — routes through the Codex CLI adapter (`src/runtime/codex-cli.ts`), which shells out to `codex exec`. Auth is handled natively by the Codex CLI (`~/.codex/auth.json`). This is the recommended path for OpenAI models like `gpt-5.4` that aren't available on the public chat completions API.
 - `FORGE_AUDITOR_RUNTIME=openai` — routes through the OpenAI-compatible HTTP adapter (`src/runtime/openai-compat.ts`) using a static `OPENAI_API_KEY`. Works for models available on the `/v1/chat/completions` endpoint.
 
 This enables cross-model auditing — the plan is drafted by one model family and audited by another.
@@ -89,7 +89,7 @@ This enables cross-model auditing — the plan is drafted by one model family an
 When the auditor uses a non-Claude runtime:
 - Tool access depends on the adapter's capabilities. The Codex CLI adapter declares `tools_fs` and receives read-only tools (Read, Glob, Grep) just like Claude. The OpenAI HTTP adapter gets a text-only "no codebase access" prompt by default; when `OPENAI_COMPAT_TOOLS_ENABLED=1` it declares `tools_fs` + `tools_exec` and receives tools like the other adapters.
 - Session persistence depends on the adapter's capabilities. Adapters that declare the `sessions` capability (Claude and Codex CLI) maintain conversation context across audit rounds — the auditor remembers previous concerns and the drafter remembers previous revisions. The Codex CLI adapter maps session keys to Codex thread IDs in memory, using `codex exec resume <thread_id>` for subsequent calls. Session state is in-memory only and resets on service restart. Adapters without `sessions` (e.g., the OpenAI HTTP adapter) start fresh each round.
-- If `FORGE_AUDITOR_MODEL` is not set, the model defaults to the adapter's `defaultModel`: for codex, `CODEX_MODEL` (default `gpt-5.3-codex`); for openai, `OPENAI_MODEL` (default `gpt-4o`)
+- If `FORGE_AUDITOR_MODEL` is not set, the model defaults to the adapter's `defaultModel`: for codex, `CODEX_MODEL` (default `gpt-5.4`); for openai, `OPENAI_MODEL` (default `gpt-4o`)
 
 ---
 

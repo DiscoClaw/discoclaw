@@ -108,7 +108,7 @@ If any check fails consistently, treat the model as unsupported for DiscoClaw ru
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CODEX_BIN` | `codex` | Path to Codex CLI binary |
-| `CODEX_MODEL` | `gpt-5.3-codex` | Codex model ID |
+| `CODEX_MODEL` | `gpt-5.4` | Codex model ID |
 | `CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX` | `false` | Skip Codex safety checks |
 | `CODEX_DISABLE_SESSIONS` | `false` | Disable Codex session persistence |
 | `DISCOCLAW_CODEX_VERBOSE_PREVIEW` | `false` | Emit richer reasoning/command preview lines (also forces `model_reasoning_summary="auto"` for Codex runs) |
