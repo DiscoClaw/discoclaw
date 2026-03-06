@@ -559,6 +559,8 @@ describe('template content — SYSTEM_DEFAULTS.md', () => {
     expect(systemDefaults).toContain('tracked default instruction source');
     expect(systemDefaults).toContain('not a workspace-managed file');
     expect(systemDefaults).toContain('Runtime Instruction Precedence');
+    expect(systemDefaults).toContain('templates/instructions/TOOLS.md');
+    expect(systemDefaults).toContain('workspace/TOOLS.md');
   });
 
   it('contains Discord action batching rules', async () => {
@@ -651,6 +653,14 @@ describe('template content — TOOLS.md', () => {
     tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
     expect(tools).toContain('Browser Automation');
     expect(tools).toContain('agent-browser');
+  });
+
+  it('declares tracked runtime injection and workspace override behavior', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('canonical tracked tools instruction source');
+    expect(tools).toContain('runtime after `templates/instructions/SYSTEM_DEFAULTS.md`');
+    expect(tools).toContain('workspace/TOOLS.md');
+    expect(tools).toContain('Runtime Instruction Precedence');
   });
 
   it('documents browser automation tiers (WebFetch, Playwright, CDP)', async () => {

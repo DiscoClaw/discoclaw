@@ -22,7 +22,8 @@ The preamble is assembled by `buildPromptPreamble()` in `src/discord/prompt-comm
 |----------|---------|---------|
 | 1 | `ROOT_POLICY` | Immutable injection-defence rules (5 rules, ~133 tokens) |
 | 2 | `TRACKED_DEFAULTS` | System defaults from `templates/instructions/SYSTEM_DEFAULTS.md` |
-| 3 | Inlined context | SOUL + IDENTITY + USER + AGENTS + TOOLS + pa.md + channel context |
+| 3 | `TRACKED_TOOLS` | Tool and environment guidance from `templates/instructions/TOOLS.md` |
+| 4 | Inlined context | SOUL + IDENTITY + USER + AGENTS + optional workspace `TOOLS.md` + pa.md + channel context |
 
 This contract is **not** subject to reordering. It is preserved exactly as defined in `CLAUDE.md`.
 

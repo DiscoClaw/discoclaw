@@ -1,5 +1,20 @@
 # TOOLS.md - Local Tools & Environment
 
+> This file is the canonical tracked tools instruction source used by DiscoClaw.
+> It is injected at runtime after `templates/instructions/SYSTEM_DEFAULTS.md`.
+> If `workspace/TOOLS.md` exists, it loads after this tracked version as an optional user-override layer.
+
+## Runtime Instruction Precedence
+
+Discoclaw builds prompts with deterministic precedence:
+
+1. **Immutable security policy** (hard-coded runtime rules)
+2. **Tracked defaults** (`templates/instructions/SYSTEM_DEFAULTS.md`)
+3. **Tracked tools** (this file)
+4. **`workspace/AGENTS.md`** (user overrides)
+5. **`workspace/TOOLS.md`** (optional user override layer)
+6. **Memory and other runtime context** (SOUL/IDENTITY/USER, channel context, memory layers, etc.)
+
 ## Browser Automation (agent-browser)
 
 Optional tool for browsing, form filling, and scraping (`npm install -g @anthropic/agent-browser`).

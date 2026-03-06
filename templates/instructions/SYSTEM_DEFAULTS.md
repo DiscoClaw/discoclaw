@@ -1,8 +1,10 @@
 # SYSTEM_DEFAULTS.md - Tracked Default Instructions
 
-> This file is the canonical tracked default instruction source used by Discoclaw.
+> This file is the canonical tracked default instruction source used by DiscoClaw.
 > It is injected at runtime and is not a workspace-managed file.
 > User-specific overrides belong in `workspace/AGENTS.md`.
+> Tracked tool instructions are injected separately from `templates/instructions/TOOLS.md`.
+> User-specific tool overrides belong in `workspace/TOOLS.md`.
 
 ## Runtime Instruction Precedence
 
@@ -10,8 +12,10 @@ Discoclaw builds prompts with deterministic precedence:
 
 1. **Immutable security policy** (hard-coded runtime rules)
 2. **Tracked defaults** (this file)
-3. **`workspace/AGENTS.md`** (user overrides)
-4. **Memory and other runtime context** (SOUL/IDENTITY/USER, channel context, memory layers, etc.)
+3. **Tracked tools** (`templates/instructions/TOOLS.md`)
+4. **`workspace/AGENTS.md`** (user overrides)
+5. **`workspace/TOOLS.md`** (optional user override layer)
+6. **Memory and other runtime context** (SOUL/IDENTITY/USER, channel context, memory layers, etc.)
 
 ## First Run
 

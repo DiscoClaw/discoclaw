@@ -93,8 +93,10 @@ Prompt assembly has two layers, each with its own ordering contract.
 
 1. **Immutable security policy** (hard-coded root rules)
 2. **Tracked defaults** (runtime-injected from `templates/instructions/SYSTEM_DEFAULTS.md`)
-3. **User override** (`workspace/AGENTS.md`)
-4. **Memory/context layers** (workspace identity files, channel context, durable/rolling memory, etc.)
+3. **Tracked tools** (runtime-injected from `templates/instructions/TOOLS.md`)
+4. **User rules override** (`workspace/AGENTS.md`)
+5. **User tools override** (`workspace/TOOLS.md`, optional)
+6. **Memory/context layers** (workspace identity files, channel context, durable/rolling memory, etc.)
 
 **Post-preamble section ordering** — the sections between the preamble and the user message are arranged to exploit primacy bias (high-signal sections first) and recency bias (action schemas and constraints near the end, just before the user message). Low-signal data sections sit in the middle. See [`docs/prompt-ordering.md`](docs/prompt-ordering.md) for the canonical order and rationale.
 
