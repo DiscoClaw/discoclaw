@@ -66,6 +66,11 @@ export function createColdStorage(config: ColdStorageConfig): ColdStorageSubsyst
   try {
     const embeddings = createEmbeddingProvider(config);
     const store = new ColdStorageStore(config.dbPath, embeddings.dimensions, config.log);
+    const chunks = store.chunkCount();
+    config.log.info(
+      { chunks, dbPath: config.dbPath, provider: config.provider, dimensions: embeddings.dimensions },
+      'cold-storage: initialized',
+    );
 
     return {
       store,
