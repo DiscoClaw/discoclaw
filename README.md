@@ -26,6 +26,7 @@ Your assistant carries context across every conversation, channel, and restart.
 
 - **Durable facts** — `!memory remember prefers dark mode` persists across sessions and channels
 - **Rolling summaries** — Compresses earlier conversation so context carries forward, even across restarts
+- **Cold storage** — Semantic search over past conversations using vector embeddings + keyword search. Relevant history is automatically retrieved and injected into the prompt (see [docs/memory.md](docs/memory.md))
 - **Per-channel context** — Each channel gets a markdown file shaping behavior (formal in #work, casual in #random)
 - **Customizable identity** — Personality, name, and values defined in workspace files (`SOUL.md`, `IDENTITY.md`, etc.)
 - **Group chat aware** — Knows when to speak up and when to stay quiet in shared channels
