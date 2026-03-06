@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildPromptPreamble as buildRootPolicyPreamble } from '../root-policy.js';
 import { getTrackedDefaultsPreamble } from '../instructions/system-defaults.js';
+import { getTrackedToolsPreamble } from '../instructions/tracked-tools.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import {
   compactActiveItems,
@@ -36,14 +37,21 @@ export const ROOT_POLICY = buildRootPolicyPreamble();
 /** Tracked default instructions injected between ROOT_POLICY and workspace context. */
 export const TRACKED_DEFAULTS_PREAMBLE = getTrackedDefaultsPreamble();
 
+/** Tracked tools instructions injected after tracked defaults and before workspace context. */
+export const TRACKED_TOOLS_PREAMBLE = getTrackedToolsPreamble();
+
 /**
  * Deterministic preamble precedence:
  * 1) immutable ROOT_POLICY
  * 2) tracked defaults (runtime-injected from repository)
- * 3) user/workspace inlined context (e.g. AGENTS.md, memory, channel context)
+ * 3) tracked tools (runtime-injected from repository)
+ * 4) user/workspace inlined context (e.g. AGENTS.md, memory, channel context)
  */
-export function buildPromptPreamble(inlinedContext: string): string {
-  return [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, inlinedContext]
+export function buildPromptPreamble(
+  inlinedContext: string,
+  opts?: { skipTrackedTools?: boolean },
+): string {
+  return [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, opts?.skipTrackedTools ? '' : TRACKED_TOOLS_PREAMBLE, inlinedContext]
     .filter((section) => section.length > 0)
     .join('\n\n');
 }
@@ -56,6 +64,7 @@ export function estimateTokensFromChars(chars: number): number {
 export type PromptSectionKey =
   | 'rootPolicy'
   | 'trackedDefaults'
+  | 'trackedTools'
   | 'soul'
   | 'identity'
   | 'user'
@@ -88,6 +97,7 @@ export type InlinedContextSection = {
 const PROMPT_SECTION_KEYS: PromptSectionKey[] = [
   'rootPolicy',
   'trackedDefaults',
+  'trackedTools',
   'soul',
   'identity',
   'user',
@@ -248,6 +258,7 @@ export function buildPromptSectionEstimates(input: {
   const charsBySection: Record<PromptSectionKey, number> = {
     rootPolicy: ROOT_POLICY.length,
     trackedDefaults: TRACKED_DEFAULTS_PREAMBLE.length,
+    trackedTools: TRACKED_TOOLS_PREAMBLE.length,
     soul: 0,
     identity: 0,
     user: 0,

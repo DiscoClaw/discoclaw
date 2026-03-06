@@ -7,6 +7,7 @@ import type { TaskData } from '../tasks/types.js';
 import {
   ROOT_POLICY,
   TRACKED_DEFAULTS_PREAMBLE,
+  TRACKED_TOOLS_PREAMBLE,
   OPEN_TASKS_MAX_CHARS,
   _resetToolsAuditState,
   assemblePostPreambleSections,
@@ -63,22 +64,51 @@ describe('TRACKED_DEFAULTS_PREAMBLE', () => {
   });
 });
 
+describe('TRACKED_TOOLS_PREAMBLE', () => {
+  it('is a non-empty string', () => {
+    expect(typeof TRACKED_TOOLS_PREAMBLE).toBe('string');
+    expect(TRACKED_TOOLS_PREAMBLE.length).toBeGreaterThan(0);
+  });
+});
+
 describe('buildPromptPreamble', () => {
-  it('returns ROOT_POLICY followed by tracked defaults when inlinedContext is empty', () => {
+  it('returns ROOT_POLICY followed by tracked defaults and tracked tools when inlinedContext is empty', () => {
     expect(buildPromptPreamble('')).toBe(
-      [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE].filter((section) => section.length > 0).join('\n\n'),
+      [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, TRACKED_TOOLS_PREAMBLE]
+        .filter((section) => section.length > 0)
+        .join('\n\n'),
     );
   });
 
-  it('prepends ROOT_POLICY and tracked defaults before inlined context', () => {
+  it('prepends ROOT_POLICY, tracked defaults, and tracked tools before inlined context', () => {
     const ctx = 'Some workspace context';
     const result = buildPromptPreamble(ctx);
     expect(result).toBe(
-      [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, ctx].filter((section) => section.length > 0).join('\n\n'),
+      [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, TRACKED_TOOLS_PREAMBLE, ctx]
+        .filter((section) => section.length > 0)
+        .join('\n\n'),
     );
   });
 
-  it('enforces deterministic order: security policy > tracked defaults > AGENTS.md > later context', () => {
+  it('places tracked tools between tracked defaults and inlined context by default', () => {
+    const ctx = '--- AGENTS.md ---\nUser override rules';
+    const result = buildPromptPreamble(ctx);
+    expect(result.indexOf(TRACKED_DEFAULTS_PREAMBLE)).toBeLessThan(result.indexOf(TRACKED_TOOLS_PREAMBLE));
+    expect(result.indexOf(TRACKED_TOOLS_PREAMBLE)).toBeLessThan(result.indexOf(ctx));
+  });
+
+  it('omits tracked tools when skipTrackedTools is true', () => {
+    const ctx = 'Some workspace context';
+    const result = buildPromptPreamble(ctx, { skipTrackedTools: true });
+    expect(result).toBe(
+      [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, ctx]
+        .filter((section) => section.length > 0)
+        .join('\n\n'),
+    );
+    expect(result).not.toContain(TRACKED_TOOLS_PREAMBLE);
+  });
+
+  it('enforces deterministic order: security policy > tracked defaults > tracked tools > AGENTS.md > later context', () => {
     const ctx = [
       '--- AGENTS.md ---\nUser override rules',
       '--- MEMORY.md ---\nmemory details',
@@ -86,7 +116,8 @@ describe('buildPromptPreamble', () => {
     ].join('\n\n');
     const result = buildPromptPreamble(ctx);
     expect(result.indexOf(ROOT_POLICY)).toBeLessThan(result.indexOf(TRACKED_DEFAULTS_PREAMBLE));
-    expect(result.indexOf(TRACKED_DEFAULTS_PREAMBLE)).toBeLessThan(result.indexOf('--- AGENTS.md ---'));
+    expect(result.indexOf(TRACKED_DEFAULTS_PREAMBLE)).toBeLessThan(result.indexOf(TRACKED_TOOLS_PREAMBLE));
+    expect(result.indexOf(TRACKED_TOOLS_PREAMBLE)).toBeLessThan(result.indexOf('--- AGENTS.md ---'));
     expect(result.indexOf('--- AGENTS.md ---')).toBeLessThan(result.indexOf('--- MEMORY.md ---'));
     expect(result.indexOf('--- AGENTS.md ---')).toBeLessThan(result.indexOf('--- channel.md ---'));
   });
@@ -150,6 +181,7 @@ describe('buildPromptSectionEstimates', () => {
   const allKeys = [
     'rootPolicy',
     'trackedDefaults',
+    'trackedTools',
     'soul',
     'identity',
     'user',
@@ -168,7 +200,7 @@ describe('buildPromptSectionEstimates', () => {
   it('includes all section keys with zeroed estimates when content is absent (except preamble)', () => {
     const result = buildPromptSectionEstimates({ contextSections: [] });
 
-    // rootPolicy and trackedDefaults are always populated from module constants.
+    // rootPolicy, trackedDefaults, and trackedTools are always populated from module constants.
     expect(result.sections.rootPolicy).toEqual({
       chars: ROOT_POLICY.length,
       estTokens: Math.ceil(ROOT_POLICY.length / 4),
@@ -179,8 +211,15 @@ describe('buildPromptSectionEstimates', () => {
       estTokens: Math.ceil(TRACKED_DEFAULTS_PREAMBLE.length / 4),
       included: true,
     });
+    expect(result.sections.trackedTools).toEqual({
+      chars: TRACKED_TOOLS_PREAMBLE.length,
+      estTokens: Math.ceil(TRACKED_TOOLS_PREAMBLE.length / 4),
+      included: true,
+    });
 
-    const nonPreambleKeys = allKeys.filter((k) => k !== 'rootPolicy' && k !== 'trackedDefaults');
+    const nonPreambleKeys = allKeys.filter(
+      (k) => k !== 'rootPolicy' && k !== 'trackedDefaults' && k !== 'trackedTools',
+    );
     for (const key of nonPreambleKeys) {
       expect(result.sections[key]).toEqual({
         chars: 0,
@@ -188,8 +227,12 @@ describe('buildPromptSectionEstimates', () => {
         included: false,
       });
     }
-    expect(result.totalChars).toBe(ROOT_POLICY.length + TRACKED_DEFAULTS_PREAMBLE.length);
-    expect(result.totalEstTokens).toBe(Math.ceil((ROOT_POLICY.length + TRACKED_DEFAULTS_PREAMBLE.length) / 4));
+    expect(result.totalChars).toBe(
+      ROOT_POLICY.length + TRACKED_DEFAULTS_PREAMBLE.length + TRACKED_TOOLS_PREAMBLE.length,
+    );
+    expect(result.totalEstTokens).toBe(
+      Math.ceil((ROOT_POLICY.length + TRACKED_DEFAULTS_PREAMBLE.length + TRACKED_TOOLS_PREAMBLE.length) / 4),
+    );
   });
 
   it('classifies context sections, derives channelContext from path metadata, and totals estimates', () => {
@@ -215,6 +258,7 @@ describe('buildPromptSectionEstimates', () => {
 
     expect(result.sections.rootPolicy.chars).toBe(ROOT_POLICY.length);
     expect(result.sections.trackedDefaults.chars).toBe(TRACKED_DEFAULTS_PREAMBLE.length);
+    expect(result.sections.trackedTools.chars).toBe(TRACKED_TOOLS_PREAMBLE.length);
     expect(result.sections.soul.chars).toBe(4);
     expect(result.sections.identity.chars).toBe(5);
     expect(result.sections.user.chars).toBe(6);
@@ -228,7 +272,7 @@ describe('buildPromptSectionEstimates', () => {
     expect(result.sections.tasks.chars).toBe(5); // taskSection + openTasksSection
     expect(result.sections.actionsReference.chars).toBe(6);
     const contextChars = 73;
-    const preambleChars = ROOT_POLICY.length + TRACKED_DEFAULTS_PREAMBLE.length;
+    const preambleChars = ROOT_POLICY.length + TRACKED_DEFAULTS_PREAMBLE.length + TRACKED_TOOLS_PREAMBLE.length;
     expect(result.totalChars).toBe(contextChars + preambleChars);
     expect(result.totalEstTokens).toBe(Math.ceil((contextChars + preambleChars) / 4));
   });
