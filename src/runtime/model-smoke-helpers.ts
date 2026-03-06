@@ -228,11 +228,11 @@ export function buildOpenAISmokeRuntime(env: NodeJS.ProcessEnv = process.env) {
 
 /**
  * Build a Codex CLI RuntimeAdapter from env vars.
- * Reads `CODEX_BIN` (default: `codex`) and `CODEX_MODEL` (default: `gpt-5.3-codex`).
+ * Reads `CODEX_BIN` (default: `codex`) and `CODEX_MODEL` (default: `gpt-5.4`).
  */
 export function buildCodexSmokeRuntime(env: NodeJS.ProcessEnv = process.env) {
   const codexBin = env.CODEX_BIN?.trim() || 'codex';
-  const defaultModel = env.CODEX_MODEL?.trim() || 'gpt-5.3-codex';
+  const defaultModel = env.CODEX_MODEL?.trim() || 'gpt-5.4';
 
   const runtime = createCodexCliRuntime({ codexBin, defaultModel });
 
