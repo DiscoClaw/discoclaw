@@ -320,6 +320,25 @@ Completion notify behavior:
 - Persistence-first invariant: run completion is persisted before attempting the final post/edit, and `finalPosted` is set only after a successful post/edit.
 - Duplicate handling: startup recovery suppresses repeat finals when `finalPosted` is already true; crash boundaries may duplicate a follow-up/final update, but should not omit it.
 
+## Cold Storage
+
+Semantic search over conversation history using SQLite + sqlite-vec for vector storage, FTS5 for keyword search, and Reciprocal Rank Fusion for hybrid retrieval. Requires an embedding API (OpenAI or any OpenAI-compatible endpoint).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCOCLAW_COLD_STORAGE_ENABLED` | `false` | Enable cold-storage subsystem |
+| `COLD_STORAGE_PROVIDER` | `openai` | Embedding provider: `openai` or `openai-compat` |
+| `COLD_STORAGE_API_KEY` | — | API key for the embedding provider (falls back to `OPENAI_API_KEY`) |
+| `COLD_STORAGE_MODEL` | `text-embedding-3-small` | Embedding model name (required for `openai-compat`) |
+| `COLD_STORAGE_DIMENSIONS` | `1536` | Embedding dimensions (required for `openai-compat`) |
+| `COLD_STORAGE_BASE_URL` | `https://api.openai.com/v1` | Base URL for the embedding API (required for `openai-compat`) |
+| `COLD_STORAGE_DB_PATH` | — | Override SQLite database file path |
+| `DISCOCLAW_COLD_STORAGE_INJECT_MAX_CHARS` | `1500` | Max chars for cold-storage prompt section |
+| `DISCOCLAW_COLD_STORAGE_SEARCH_LIMIT` | `10` | Max results per search query |
+| `COLD_STORAGE_CHANNEL_FILTER` | — | Comma-separated channel IDs to restrict cold-storage ingestion/retrieval (empty = all) |
+
+When using `openai-compat`, the provider does not send a `dimensions` parameter in the request body (many third-party endpoints reject it). The `COLD_STORAGE_DIMENSIONS` value is used only to configure the sqlite-vec column width — the provider determines its own output dimensionality. Model namespace prefixes (e.g., `openai/text-embedding-3-small`) are automatically stripped.
+
 ## Reactions
 
 | Variable | Default | Description |

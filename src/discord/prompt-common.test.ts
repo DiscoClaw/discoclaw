@@ -10,6 +10,7 @@ import {
   OPEN_TASKS_MAX_CHARS,
   _resetToolsAuditState,
   assemblePostPreambleSections,
+  buildColdStoragePromptSection,
   buildDurableMemorySection,
   buildOpenTasksSection,
   buildPromptPreamble,
@@ -156,6 +157,7 @@ describe('buildPromptSectionEstimates', () => {
     'tools',
     'pa',
     'durableMemory',
+    'coldStorage',
     'rollingSummary',
     'shortTermMemory',
     'channelContext',
@@ -1221,5 +1223,129 @@ describe('assemblePostPreambleSections', () => {
       expect(idx).toBeGreaterThan(lastIdx);
       lastIdx = idx;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildColdStoragePromptSection
+// ---------------------------------------------------------------------------
+
+describe('buildColdStoragePromptSection', () => {
+  it('returns empty string when disabled', async () => {
+    const result = await buildColdStoragePromptSection({ enabled: false });
+    expect(result).toBe('');
+  });
+
+  it('returns empty string when subsystem is undefined', async () => {
+    const result = await buildColdStoragePromptSection({
+      enabled: true,
+      subsystem: undefined,
+      query: 'test',
+    });
+    expect(result).toBe('');
+  });
+
+  it('returns empty string when query is empty', async () => {
+    const fakeSubsystem = {
+      store: {} as any,
+      embeddings: { dimensions: 4, embed: vi.fn<() => Promise<Float32Array[]>>() },
+      close: vi.fn(),
+    };
+    const result = await buildColdStoragePromptSection({
+      enabled: true,
+      subsystem: fakeSubsystem,
+      query: undefined,
+    });
+    expect(result).toBe('');
+  });
+
+  it('returns empty string when channelFilter excludes current channel', async () => {
+    const fakeSubsystem = {
+      store: {} as any,
+      embeddings: { dimensions: 4, embed: vi.fn<() => Promise<Float32Array[]>>() },
+      close: vi.fn(),
+    };
+    const result = await buildColdStoragePromptSection({
+      enabled: true,
+      subsystem: fakeSubsystem,
+      query: 'test',
+      channelId: '111',
+      channelFilter: ['222', '333'],
+    });
+    expect(result).toBe('');
+    // embed should never have been called
+    expect(fakeSubsystem.embeddings.embed).not.toHaveBeenCalled();
+  });
+
+  it('returns formatted text with search results', async () => {
+    const fakeEmbedding = new Float32Array([1, 0, 0, 0]);
+    const fakeSubsystem = {
+      store: {
+        search: vi.fn(() => [{
+          chunk: {
+            id: 1, content: 'past conversation', guild_id: 'g1', channel_id: 'c1',
+            thread_id: null, message_id: 'm1', user_id: 'u1', parent_message_id: null,
+            created_at: '2025-01-01T00:00:00Z', chunk_type: 'message' as const, token_count: 4,
+          },
+          score: 0.9,
+          jump_url: 'https://discord.com/channels/g1/c1/m1',
+        }]),
+      } as any,
+      embeddings: {
+        dimensions: 4,
+        embed: vi.fn(async () => [fakeEmbedding]),
+      },
+      close: vi.fn(),
+    };
+
+    const result = await buildColdStoragePromptSection({
+      enabled: true,
+      subsystem: fakeSubsystem,
+      query: 'test query',
+      guildId: 'g1',
+    });
+
+    expect(result).toContain('Relevant context from conversation history');
+    expect(result).toContain('past conversation');
+    expect(result).toContain('https://discord.com/channels/g1/c1/m1');
+  });
+
+  it('returns empty string on embedding timeout', async () => {
+    const fakeSubsystem = {
+      store: { search: vi.fn() } as any,
+      embeddings: {
+        dimensions: 4,
+        embed: vi.fn((): Promise<Float32Array[]> => new Promise(() => {
+          // Never resolves — simulates a hung API
+        })),
+      },
+      close: vi.fn(),
+    };
+
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const result = await buildColdStoragePromptSection({
+      enabled: true,
+      subsystem: fakeSubsystem,
+      query: 'test',
+      log,
+    });
+
+    expect(result).toBe('');
+    expect(log.warn).toHaveBeenCalled();
+  }, 10_000);
+
+  it('includes coldStorage in buildPromptSectionEstimates', () => {
+    const result = buildPromptSectionEstimates({
+      contextSections: [],
+      coldStorageSection: 'some cold storage context here',
+    });
+    expect(result.sections.coldStorage.chars).toBe(30);
+    expect(result.sections.coldStorage.included).toBe(true);
+  });
+
+  it('SECTION_ZONE_MAP includes coldStorage in primacy zone', () => {
+    const map = getSectionZoneMap();
+    expect(map.coldStorage).toBeDefined();
+    expect(map.coldStorage.zone).toBe('primacy');
   });
 });

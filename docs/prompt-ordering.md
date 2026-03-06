@@ -34,6 +34,7 @@ After the preamble, sections are ordered by attention zone using the `SECTION_ZO
 |------|-------------|------:|---------|-------------|
 | **primacy** | `task` | 0 | Task thread context (ID, status, description) | High — thread-specific |
 | **primacy** | `durableMemory` | 1 | User-specific facts/preferences (Hebbian-scored) | High — personalization |
+| **primacy** | `coldStorage` | 2 | Semantic search results from conversation history | High — contextual recall |
 | **middle** | `shortTermMemory` | 0 | Cross-channel activity snippets | Low — ambient awareness |
 | **middle** | `openTasks` | 1 | Open tasks summary (max 600 chars) | Low — background reference |
 | **middle** | `startup` | 2 | One-shot startup injection (cleared after use) | Low — ephemeral |
@@ -68,6 +69,10 @@ Action schemas are the most compliance-sensitive section. Without them, the AI c
 ### Why durable memory is in the primacy zone
 
 Durable memory contains user-specific facts ("I prefer dark roast coffee", "my timezone is US/Pacific"). These facts should color the entire response, not just be recalled when explicitly relevant. Primacy placement ensures the AI's "world model" for the response includes these facts from the start.
+
+### Why cold storage is in the primacy zone
+
+Cold-storage search results are semantically retrieved context from past conversations — they represent the most relevant historical information for the current query. Like durable memory, these facts should inform the entire response. Primacy placement (order 2, after durable memory) ensures the AI incorporates retrieved context as foundational background rather than treating it as incidental detail.
 
 ### Why conversation state is in the recency zone
 
