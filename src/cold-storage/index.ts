@@ -32,6 +32,9 @@ export type { OpenAICompatEmbeddingOpts } from './openai-compat.js';
 export { chunkThread, splitLongText } from './chunker.js';
 export type { ThreadMessage, ChunkerOptions } from './chunker.js';
 
+export { buildColdStorageSection, formatResultLine } from './prompt-section.js';
+export type { PromptSectionOptions } from './prompt-section.js';
+
 // ── Factory types ───────────────────────────────────────────────────────
 
 export interface ColdStorageConfig {

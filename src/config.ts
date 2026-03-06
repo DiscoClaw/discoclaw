@@ -140,6 +140,18 @@ export type DiscoclawConfig = {
   codexDisableSessions: boolean;
   codexVerbosePreview: boolean;
   codexItemTypeDebug: boolean;
+
+  // Cold-storage config
+  coldStorageEnabled: boolean;
+  coldStorageProvider: 'openai' | 'openai-compat';
+  coldStorageApiKey?: string;
+  coldStorageModel?: string;
+  coldStorageDimensions?: number;
+  coldStorageBaseUrl?: string;
+  coldStorageDbPath?: string;
+  coldStorageInjectMaxChars: number;
+  coldStorageSearchLimit: number;
+
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermMaxEntries: number;
@@ -611,6 +623,24 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('DISCOCLAW_VOICE_ENABLED=1 but DISCOCLAW_VOICE_HOME_CHANNEL is not set; voice actions will be disabled (no target channel for action execution).');
   }
 
+  const coldStorageEnabled = parseBoolean(env, 'DISCOCLAW_COLD_STORAGE_ENABLED', false);
+  const coldStorageApiKey = parseTrimmedString(env, 'COLD_STORAGE_API_KEY');
+  const coldStorageProvider = parseEnum(env, 'COLD_STORAGE_PROVIDER', ['openai', 'openai-compat'] as const, 'openai')!;
+  if (coldStorageEnabled && !coldStorageApiKey) {
+    warnings.push('DISCOCLAW_COLD_STORAGE_ENABLED=1 but COLD_STORAGE_API_KEY is not set; cold storage will fail at runtime.');
+  }
+  if (coldStorageEnabled && coldStorageProvider === 'openai-compat') {
+    if (!parseTrimmedString(env, 'COLD_STORAGE_BASE_URL')) {
+      warnings.push('DISCOCLAW_COLD_STORAGE_ENABLED=1 with provider "openai-compat" but COLD_STORAGE_BASE_URL is not set; cold storage will fail at runtime.');
+    }
+    if (!parseTrimmedString(env, 'COLD_STORAGE_MODEL')) {
+      warnings.push('DISCOCLAW_COLD_STORAGE_ENABLED=1 with provider "openai-compat" but COLD_STORAGE_MODEL is not set; cold storage will fail at runtime.');
+    }
+    if (!parseTrimmedString(env, 'COLD_STORAGE_DIMENSIONS')) {
+      warnings.push('DISCOCLAW_COLD_STORAGE_ENABLED=1 with provider "openai-compat" but COLD_STORAGE_DIMENSIONS is not set; cold storage will fail at runtime.');
+    }
+  }
+
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
   const openrouterBaseUrl = parseTrimmedString(env, 'OPENROUTER_BASE_URL');
   const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'anthropic/claude-sonnet-4';
@@ -796,6 +826,24 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       codexDisableSessions: parseBoolean(env, 'CODEX_DISABLE_SESSIONS', false),
       codexVerbosePreview: parseBoolean(env, 'DISCOCLAW_CODEX_VERBOSE_PREVIEW', false),
       codexItemTypeDebug: parseBoolean(env, 'DISCOCLAW_CODEX_ITEM_TYPE_DEBUG', false),
+
+      coldStorageEnabled,
+      coldStorageProvider,
+      coldStorageApiKey,
+      coldStorageModel: parseTrimmedString(env, 'COLD_STORAGE_MODEL'),
+      coldStorageDimensions: (() => {
+        const raw = parseTrimmedString(env, 'COLD_STORAGE_DIMENSIONS');
+        if (raw == null) return undefined;
+        const n = Number(raw);
+        if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+          throw new Error(`COLD_STORAGE_DIMENSIONS must be a positive integer, got "${raw}"`);
+        }
+        return n;
+      })(),
+      coldStorageBaseUrl: parseTrimmedString(env, 'COLD_STORAGE_BASE_URL'),
+      coldStorageDbPath: parseTrimmedString(env, 'COLD_STORAGE_DB_PATH'),
+      coldStorageInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_COLD_STORAGE_INJECT_MAX_CHARS', 1500),
+      coldStorageSearchLimit: parsePositiveInt(env, 'DISCOCLAW_COLD_STORAGE_SEARCH_LIMIT', 10),
 
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', true),
       shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', true),
