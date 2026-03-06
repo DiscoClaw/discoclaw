@@ -2533,12 +2533,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let replyFinalized = false;
           let hadTextFinal = false;
           let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
-          const { signal, dispose: abortDispose } = registerAbort(reply.id);
-          abortSignal = signal;
+          let abortResult = registerAbort(reply.id);
+          abortSignal = abortResult.signal;
+          let abortDispose = abortResult.dispose;
           // Best-effort: add 🛑 so the user can tap it to kill the running stream.
           // Capture the MessageReaction so we can call .remove() directly in finally
           // instead of relying on reactions.resolve() which can miss the cache.
-          const reactPromise = reply.react?.('🛑')?.catch(() => null);
+          let reactPromise = reply.react?.('🛑')?.catch(() => null);
           if (reactPromise) setStopReaction(msg.channelId, reply.id, reactPromise);
           let stopReactionRemoved = false;
           // Declared before try so they remain accessible after the finally block closes.
@@ -2893,9 +2894,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             // On follow-up iterations, send a new placeholder message.
             if (followUpDepth > 0) {
               dispose();
+              abortDispose();
               const followUpPlaceholderContent = pendingFollowUpPlaceholder ?? formatBoldLabel('(following up...)');
               reply = await msg.channel.send({ content: followUpPlaceholderContent, allowedMentions: NO_MENTIONS });
               dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}:followup-${followUpDepth}`);
+              ({ signal: abortSignal, dispose: abortDispose } = registerAbort(reply.id));
+              reactPromise = reply.react?.('🛑')?.catch(() => null);
+              if (reactPromise) setStopReaction(msg.channelId, reply.id, reactPromise);
+              stopReactionRemoved = false;
               replyFinalized = false;
               params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
             }
