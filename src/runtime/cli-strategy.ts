@@ -122,6 +122,9 @@ export interface CliAdapterStrategy {
   /** Sanitize/truncate error messages before exposing to users. */
   sanitizeError?(raw: string, binary: string): string;
 
+  /** Build subprocess env var overrides for this invocation. */
+  buildEnv?(ctx: CliInvokeContext, opts: UniversalCliOpts): Record<string, string> | undefined;
+
   // --- Multi-turn (process pool or session resume) ---
 
   /** Multi-turn mode: 'process-pool' (Claude), 'session-resume' (Codex), or 'none'. */

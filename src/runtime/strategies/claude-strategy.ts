@@ -148,6 +148,13 @@ export const claudeStrategy: CliAdapterStrategy = {
     return args;
   },
 
+  buildEnv(ctx: CliInvokeContext): Record<string, string> | undefined {
+    if (!ctx.params.reasoningEffort) return undefined;
+    return {
+      CLAUDE_CODE_EFFORT_LEVEL: ctx.params.reasoningEffort,
+    };
+  },
+
   handleExitError(_exitCode: number, stderr: string, stdout: string): string | null {
     const combined = stderr + stdout;
     if (isToolUseNameLengthError(combined)) return TOOL_USE_NAME_LENGTH_GUIDANCE;

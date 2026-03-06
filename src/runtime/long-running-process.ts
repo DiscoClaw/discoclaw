@@ -18,6 +18,7 @@ export type LongRunningProcessOpts = {
   claudeBin: string;
   model: string;
   cwd: string;
+  envOverrides?: Record<string, string>;
   dangerouslySkipPermissions?: boolean;
   strictMcpConfig?: boolean;
   fallbackModel?: string;
@@ -143,7 +144,7 @@ export class LongRunningProcess {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
-        env: cliExecaEnv(),
+        env: cliExecaEnv(this.opts.envOverrides),
       });
     } catch (err) {
       this.opts.log?.info({ err }, 'long-running: spawn failed');

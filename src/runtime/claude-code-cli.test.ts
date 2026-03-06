@@ -176,6 +176,67 @@ describe('Claude CLI runtime adapter (smoke)', () => {
     expect(callArgs).toContain('--strict-mcp-config');
   });
 
+  it('sets CLAUDE_CODE_EFFORT_LEVEL in the subprocess env when reasoningEffort is provided', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+    const previousEffort = process.env.CLAUDE_CODE_EFFORT_LEVEL;
+    delete process.env.CLAUDE_CODE_EFFORT_LEVEL;
+
+    try {
+      const rt = createClaudeCliRuntime({
+        claudeBin: 'claude',
+        dangerouslySkipPermissions: false,
+        outputFormat: 'text',
+      });
+
+      for await (const _evt of rt.invoke({
+        prompt: 'p',
+        model: 'opus',
+        cwd: '/tmp',
+        reasoningEffort: 'medium',
+      })) {
+        // drain
+      }
+
+      const env = execaMock.mock.calls[0]?.[2]?.env;
+      expect(env).toMatchObject({ CLAUDE_CODE_EFFORT_LEVEL: 'medium' });
+    } finally {
+      if (previousEffort === undefined) {
+        delete process.env.CLAUDE_CODE_EFFORT_LEVEL;
+      } else {
+        process.env.CLAUDE_CODE_EFFORT_LEVEL = previousEffort;
+      }
+    }
+  });
+
+  it('omits CLAUDE_CODE_EFFORT_LEVEL from the subprocess env when reasoningEffort is absent', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+    const previousEffort = process.env.CLAUDE_CODE_EFFORT_LEVEL;
+    delete process.env.CLAUDE_CODE_EFFORT_LEVEL;
+
+    try {
+      const rt = createClaudeCliRuntime({
+        claudeBin: 'claude',
+        dangerouslySkipPermissions: false,
+        outputFormat: 'text',
+      });
+
+      for await (const _evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+        // drain
+      }
+
+      const env = execaMock.mock.calls[0]?.[2]?.env;
+      expect(env).not.toHaveProperty('CLAUDE_CODE_EFFORT_LEVEL');
+    } finally {
+      if (previousEffort === undefined) {
+        delete process.env.CLAUDE_CODE_EFFORT_LEVEL;
+      } else {
+        process.env.CLAUDE_CODE_EFFORT_LEVEL = previousEffort;
+      }
+    }
+  });
+
   it('stream-json prefers result event text over merged deltas', async () => {
     const execaMock = execa as any;
     execaMock.mockImplementation(() => makeProcessStreamJson({
