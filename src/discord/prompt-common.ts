@@ -13,6 +13,8 @@ import {
 } from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
 import { buildShortTermMemorySection } from './shortterm-memory.js';
+import type { ColdStorageSubsystem, SearchResult } from '../cold-storage/index.js';
+import { buildColdStorageSection } from '../cold-storage/prompt-section.js';
 import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
 import { isOnboardingComplete } from '../workspace-bootstrap.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -61,6 +63,7 @@ export type PromptSectionKey =
   | 'tools'
   | 'pa'
   | 'durableMemory'
+  | 'coldStorage'
   | 'rollingSummary'
   | 'shortTermMemory'
   | 'channelContext'
@@ -92,6 +95,7 @@ const PROMPT_SECTION_KEYS: PromptSectionKey[] = [
   'tools',
   'pa',
   'durableMemory',
+  'coldStorage',
   'rollingSummary',
   'shortTermMemory',
   'channelContext',
@@ -234,6 +238,7 @@ export function buildPromptSectionEstimates(input: {
   contextSections: InlinedContextSection[];
   channelContextPath?: string | null;
   durableSection?: string;
+  coldStorageSection?: string;
   summarySection?: string;
   shortTermSection?: string;
   taskSection?: string;
@@ -250,6 +255,7 @@ export function buildPromptSectionEstimates(input: {
     tools: 0,
     pa: 0,
     durableMemory: 0,
+    coldStorage: 0,
     rollingSummary: 0,
     shortTermMemory: 0,
     channelContext: 0,
@@ -270,6 +276,7 @@ export function buildPromptSectionEstimates(input: {
   }
 
   charsBySection.durableMemory = input.durableSection?.length ?? 0;
+  charsBySection.coldStorage = input.coldStorageSection?.length ?? 0;
   charsBySection.rollingSummary = input.summarySection?.length ?? 0;
   charsBySection.shortTermMemory = input.shortTermSection?.length ?? 0;
   charsBySection.tasks = (input.taskSection?.length ?? 0) + (input.openTasksSection?.length ?? 0);
@@ -331,6 +338,53 @@ export async function buildDurableMemorySection(opts: {
     return formatDurableSection(items);
   } catch (err) {
     opts.log?.warn({ err, userId: opts.userId }, 'durable memory load failed');
+    return '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cold-storage prompt section
+// ---------------------------------------------------------------------------
+
+/**
+ * Search cold storage and build a prompt section from the results.
+ *
+ * Returns an empty string when cold storage is disabled, unavailable,
+ * or no results match the query. Never throws.
+ */
+export async function buildColdStoragePromptSection(opts: {
+  enabled: boolean;
+  subsystem?: ColdStorageSubsystem;
+  query?: string;
+  guildId?: string;
+  channelId?: string;
+  maxChars?: number;
+  searchLimit?: number;
+  log?: LoggerLike;
+}): Promise<string> {
+  if (!opts.enabled || !opts.subsystem || !opts.query) return '';
+
+  try {
+    // Generate embedding for the query
+    const embeddings = await opts.subsystem.embeddings.embed([opts.query]);
+    if (embeddings.length === 0) return '';
+
+    // Search with both vector and FTS
+    const results: SearchResult[] = opts.subsystem.store.search({
+      embedding: embeddings[0],
+      query: opts.query,
+      filters: {
+        guild_id: opts.guildId,
+        channel_id: opts.channelId,
+      },
+      limit: opts.searchLimit,
+    });
+
+    if (results.length === 0) return '';
+
+    return buildColdStorageSection(results, { maxChars: opts.maxChars });
+  } catch (err) {
+    opts.log?.warn({ err }, 'cold-storage prompt section build failed');
     return '';
   }
 }
@@ -564,6 +618,7 @@ export interface OrderedPromptSection {
 const SECTION_ZONE_MAP: Record<string, { zone: PromptZone; order: number }> = {
   task:             { zone: 'primacy', order: 0 },
   durableMemory:    { zone: 'primacy', order: 1 },
+  coldStorage:      { zone: 'primacy', order: 2 },
   shortTermMemory:  { zone: 'middle',  order: 0 },
   openTasks:        { zone: 'middle',  order: 1 },
   startup:          { zone: 'middle',  order: 2 },
