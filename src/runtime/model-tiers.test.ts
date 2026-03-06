@@ -27,8 +27,8 @@ describe('resolveModel', () => {
       expect(resolveModel('fast', 'claude_code')).toBe('haiku');
     });
 
-    it('resolves capable → sonnet', () => {
-      expect(resolveModel('capable', 'claude_code')).toBe('sonnet');
+    it('resolves capable → claude-opus-4-6', () => {
+      expect(resolveModel('capable', 'claude_code')).toBe('claude-opus-4-6');
     });
   });
 
@@ -108,7 +108,7 @@ describe('initTierOverrides', () => {
 
   it('leaves unrelated tiers and runtimes at their defaults', () => {
     initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_FAST: 'sonnet' });
-    expect(resolveModel('capable', 'claude_code')).toBe('sonnet');
+    expect(resolveModel('capable', 'claude_code')).toBe('claude-opus-4-6');
     expect(resolveModel('fast', 'gemini')).toBe('gemini-2.5-flash');
     expect(resolveModel('capable', 'gemini')).toBe('gemini-2.5-pro');
   });
@@ -123,14 +123,14 @@ describe('initTierOverrides', () => {
     initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_CAPABLE: 'sonnet' });
     // First override must be gone; default restored for fast
     expect(resolveModel('fast', 'claude_code')).toBe('haiku');
-    expect(resolveModel('capable', 'claude_code')).toBe('sonnet');
+    expect(resolveModel('capable', 'claude_code')).toBe('sonnet'); // overridden to sonnet
   });
 
   it('restores defaults when called with no matching env vars', () => {
     initTierOverrides({ DISCOCLAW_TIER_CLAUDE_CODE_FAST: 'sonnet' });
     initTierOverrides({});
     expect(resolveModel('fast', 'claude_code')).toBe('haiku');
-    expect(resolveModel('capable', 'claude_code')).toBe('sonnet');
+    expect(resolveModel('capable', 'claude_code')).toBe('claude-opus-4-6');
   });
 
   it('ignores env vars with unrecognised tier suffixes', () => {
@@ -156,8 +156,8 @@ describe('resolveReasoningEffort', () => {
     expect(resolveReasoningEffort('fast', 'claude_code')).toBeUndefined();
   });
 
-  it('returns medium for claude_code capable tier', () => {
-    expect(resolveReasoningEffort('capable', 'claude_code')).toBe('medium');
+  it('returns high for claude_code capable tier', () => {
+    expect(resolveReasoningEffort('capable', 'claude_code')).toBe('high');
   });
 
   it('returns high for claude_code deep tier', () => {
