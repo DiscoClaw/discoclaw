@@ -11,6 +11,8 @@ import {
 } from './durable-memory.js';
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
+import { loadSummary } from './summarizer.js';
+import { loadShortTermMemory, selectEntriesForInjection, formatShortTermSection } from './shortterm-memory.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +35,11 @@ export type MemoryContext = {
   durableDataDir: string;
   durableMaxItems: number;
   durableInjectMaxChars: number;
+  sessionKey?: string;
+  summaryDataDir?: string;
+  shortTermDataDir?: string;
+  shortTermInjectMaxChars?: number;
+  shortTermMaxAgeMs?: number;
   channelId?: string;
   messageId?: string;
   guildId?: string;
@@ -100,10 +107,42 @@ export async function executeMemoryAction(
       const items = store
         ? selectItemsForInjection(store, memCtx.durableInjectMaxChars)
         : [];
-      if (items.length === 0) {
-        return { ok: true, summary: 'No durable memory items.' };
+      const durableText = items.length > 0
+        ? formatDurableSection(items)
+        : '(none)';
+
+      let summaryText = '(none)';
+      if (memCtx.sessionKey && memCtx.summaryDataDir) {
+        try {
+          const summary = await loadSummary(memCtx.summaryDataDir, memCtx.sessionKey);
+          if (summary) summaryText = summary.summary;
+        } catch {
+          // best-effort
+        }
       }
-      return { ok: true, summary: formatDurableSection(items) };
+
+      let shortTermText = '(none)';
+      if (memCtx.shortTermDataDir && memCtx.guildId) {
+        try {
+          const guildUserId = `${memCtx.guildId}-${memCtx.userId}`;
+          const stStore = await loadShortTermMemory(memCtx.shortTermDataDir, guildUserId);
+          if (stStore) {
+            const maxChars = memCtx.shortTermInjectMaxChars ?? 1000;
+            const maxAgeMs = memCtx.shortTermMaxAgeMs ?? 6 * 60 * 60 * 1000;
+            const entries = selectEntriesForInjection(stStore, maxChars, maxAgeMs);
+            if (entries.length > 0) {
+              shortTermText = formatShortTermSection(entries);
+            }
+          }
+        } catch {
+          // best-effort
+        }
+      }
+
+      return {
+        ok: true,
+        summary: `**Durable memory:**\n${durableText}\n\n**Rolling summary:**\n${summaryText}\n\n**Short-term memory:**\n${shortTermText}`,
+      };
     }
   }
 }
@@ -138,7 +177,7 @@ export function memoryActionsPromptSection(): string {
 \`\`\`
 - \`substring\` (required): Text to match against. Items where this covers >= 60% of the item's text length are deprecated.
 
-**memoryShow** — Show the user's current durable memory items:
+**memoryShow** — Show the user's current memory (durable items, rolling summary, and short-term):
 \`\`\`
 <discord-action>{"type":"memoryShow"}</discord-action>
 \`\`\`

@@ -1419,6 +1419,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 messageId: msg.id,
                 guildId: msg.guildId ?? undefined,
                 channelName: channelName || undefined,
+                shortTermDataDir: params.shortTermDataDir,
+                shortTermInjectMaxChars: params.shortTermInjectMaxChars,
+                shortTermMaxAgeMs: params.shortTermMaxAgeMs,
               });
               if (cmd.action === 'reset-rolling') {
                 turnCounters.delete(sessionKey);
@@ -2467,6 +2470,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             };
             const perMessageMemoryCtx = params.memoryCtx ? {
               ...params.memoryCtx,
+              sessionKey,
               userId: msg.author.id,
               channelId: msg.channelId,
               messageId: msg.id,
@@ -2731,6 +2735,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             channelContextPath: channelCtx.contextPath,
             durableSection,
             summarySection,
+            shortTermSection,
             taskSection,
             openTasksSection,
             actionsReferenceSection,
@@ -3293,6 +3298,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // Null out memoryCtx for bot messages unless memory write is explicitly enabled.
                 const perMessageMemoryCtx = (params.memoryCtx && (!isBotMessage || params.botMessageMemoryWriteEnabled)) ? {
                   ...params.memoryCtx,
+                  sessionKey,
                   userId: msg.author.id,
                   channelId: msg.channelId,
                   messageId: msg.id,

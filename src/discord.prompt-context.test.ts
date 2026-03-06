@@ -538,6 +538,7 @@ describe('discord action flags are not frozen at handler creation', () => {
       'pa',
       'durableMemory',
       'rollingSummary',
+      'shortTermMemory',
       'channelContext',
       'tasks',
       'actionsReference',
@@ -548,7 +549,10 @@ describe('discord action flags are not frozen at handler creation', () => {
         estTokens: expect.any(Number),
         included: expect.any(Boolean),
       }));
-      expect(payload.sections[key].included).toBe(true);
+      // shortTermMemory is disabled in this test config, so it won't be included.
+      if (key !== 'shortTermMemory') {
+        expect(payload.sections[key].included).toBe(true);
+      }
     }
   });
 });

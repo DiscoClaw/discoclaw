@@ -1500,6 +1500,10 @@ if (taskCtx) {
       durableDataDir,
       durableMaxItems,
       durableInjectMaxChars,
+      summaryDataDir,
+      shortTermDataDir,
+      shortTermInjectMaxChars,
+      shortTermMaxAgeMs,
       log,
     };
     log.info('memory:action context initialized');
