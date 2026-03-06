@@ -72,6 +72,12 @@ vi.mock('./durable-memory.js', () => ({
   }),
 }));
 
+vi.mock('./summarizer.js', () => ({
+  loadSummary: vi.fn(async (_dir: string, _sessionKey: string) => {
+    return { summary: 'User is working on memory observability.', updatedAt: 1700000000000 };
+  }),
+}));
+
 vi.mock('./durable-write-queue.js', () => ({
   durableWriteQueue: {
     run: vi.fn(async (_key: string, fn: () => Promise<any>) => fn()),
@@ -97,6 +103,8 @@ function makeMemCtx(overrides?: Partial<MemoryContext>): MemoryContext {
     durableDataDir: '/tmp/durable',
     durableMaxItems: 200,
     durableInjectMaxChars: 2000,
+    sessionKey: 'guild-001:ch-456',
+    summaryDataDir: '/tmp/summaries',
     channelId: 'ch-456',
     messageId: 'msg-789',
     guildId: 'guild-001',
@@ -208,6 +216,19 @@ describe('executeMemoryAction', () => {
       );
     });
 
+    it('fails with invalid kind', async () => {
+      const result = await executeMemoryAction(
+        { type: 'memoryRemember', text: 'Some note', kind: 'bogus' as any },
+        makeCtx(),
+        makeMemCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toContain('Invalid memory kind');
+        expect(result.error).toContain('"bogus"');
+      }
+    });
+
     it('fails without text', async () => {
       const result = await executeMemoryAction(
         { type: 'memoryRemember', text: '' },
@@ -285,7 +306,7 @@ describe('executeMemoryAction', () => {
   });
 
   describe('memoryShow', () => {
-    it('shows durable memory items', async () => {
+    it('shows durable memory items and rolling summary', async () => {
       const result = await executeMemoryAction(
         { type: 'memoryShow' },
         makeCtx(),
@@ -293,14 +314,48 @@ describe('executeMemoryAction', () => {
       );
       expect(result.ok).toBe(true);
       if (result.ok) {
+        expect(result.summary).toContain('**Durable memory:**');
         expect(result.summary).toContain('[fact]');
         expect(result.summary).toContain('Works at Acme Corp');
         expect(result.summary).toContain('[preference]');
         expect(result.summary).toContain('Prefers Rust over Go');
+        expect(result.summary).toContain('**Rolling summary:**');
+        expect(result.summary).toContain('User is working on memory observability.');
       }
     });
 
-    it('returns message when no items exist', async () => {
+    it('includes rolling summary text when available', async () => {
+      const { loadSummary } = await import('./summarizer.js');
+      (loadSummary as any).mockResolvedValueOnce({
+        summary: 'Currently debugging a race condition in the scheduler.',
+        updatedAt: 1700000000000,
+      });
+
+      const result = await executeMemoryAction(
+        { type: 'memoryShow' },
+        makeCtx(),
+        makeMemCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('**Rolling summary:**');
+        expect(result.summary).toContain('Currently debugging a race condition in the scheduler.');
+      }
+    });
+
+    it('shows (none) for rolling summary when no session context', async () => {
+      const result = await executeMemoryAction(
+        { type: 'memoryShow' },
+        makeCtx(),
+        makeMemCtx({ sessionKey: undefined, summaryDataDir: undefined }),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('**Rolling summary:**\n(none)');
+      }
+    });
+
+    it('returns (none) for durable when no items exist', async () => {
       const { loadDurableMemory } = await import('./durable-memory.js');
       (loadDurableMemory as any).mockResolvedValueOnce(null);
 
@@ -311,11 +366,12 @@ describe('executeMemoryAction', () => {
       );
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.summary).toContain('No durable memory items');
+        expect(result.summary).toContain('**Durable memory:**\n(none)');
+        expect(result.summary).toContain('**Rolling summary:**');
       }
     });
 
-    it('returns message when all items are deprecated', async () => {
+    it('returns (none) for durable when all items are deprecated', async () => {
       const { selectItemsForInjection } = await import('./durable-memory.js');
       (selectItemsForInjection as any).mockReturnValueOnce([]);
 
@@ -326,7 +382,22 @@ describe('executeMemoryAction', () => {
       );
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.summary).toContain('No durable memory items');
+        expect(result.summary).toContain('**Durable memory:**\n(none)');
+      }
+    });
+
+    it('shows (none) for rolling summary when loadSummary returns null', async () => {
+      const { loadSummary } = await import('./summarizer.js');
+      (loadSummary as any).mockResolvedValueOnce(null);
+
+      const result = await executeMemoryAction(
+        { type: 'memoryShow' },
+        makeCtx(),
+        makeMemCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('**Rolling summary:**\n(none)');
       }
     });
   });

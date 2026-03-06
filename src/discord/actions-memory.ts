@@ -11,6 +11,7 @@ import {
 } from './durable-memory.js';
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
+import { loadSummary } from './summarizer.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +34,8 @@ export type MemoryContext = {
   durableDataDir: string;
   durableMaxItems: number;
   durableInjectMaxChars: number;
+  sessionKey?: string;
+  summaryDataDir?: string;
   channelId?: string;
   messageId?: string;
   guildId?: string;
@@ -100,10 +103,24 @@ export async function executeMemoryAction(
       const items = store
         ? selectItemsForInjection(store, memCtx.durableInjectMaxChars)
         : [];
-      if (items.length === 0) {
-        return { ok: true, summary: 'No durable memory items.' };
+      const durableText = items.length > 0
+        ? formatDurableSection(items)
+        : '(none)';
+
+      let summaryText = '(none)';
+      if (memCtx.sessionKey && memCtx.summaryDataDir) {
+        try {
+          const summary = await loadSummary(memCtx.summaryDataDir, memCtx.sessionKey);
+          if (summary) summaryText = summary.summary;
+        } catch {
+          // best-effort
+        }
       }
-      return { ok: true, summary: formatDurableSection(items) };
+
+      return {
+        ok: true,
+        summary: `**Durable memory:**\n${durableText}\n\n**Rolling summary:**\n${summaryText}`,
+      };
     }
   }
 }
