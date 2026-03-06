@@ -282,6 +282,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 |-----------|---------|--------|
 | Config parser (`DiscoclawConfig` type, env-var parsing, validation) | `src/config.ts` | **done** |
 | Config parser tests | `src/config.test.ts` | **done** |
+| Model configuration (`models.json` loader, env-var fallback, slot resolution) | `src/model-config.ts` | **done** |
 
 ## 21. Bang Commands
 

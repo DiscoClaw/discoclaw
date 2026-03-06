@@ -9,7 +9,8 @@ import { resolveDefaultModel, resolveProvider } from './actions-imagegen.js';
 // Types
 // ---------------------------------------------------------------------------
 
-export type ModelRole = 'chat' | 'fast' | 'forge-drafter' | 'forge-auditor' | 'summary' | 'cron' | 'cron-exec' | 'voice';
+export type { ModelRole } from '../model-config.js';
+import type { ModelRole } from '../model-config.js';
 
 export type ConfigActionRequest =
   | { type: 'modelSet'; role: ModelRole; model: string }
@@ -462,9 +463,9 @@ export function configActionsPromptSection(): string {
 | \`cron-exec\` | Default model for cron job execution; per-job overrides (via \`cronUpdate\`) take priority |
 | \`voice\` | Voice channel AI responses |
 
-Changes are **persisted** to \`runtime-overrides.json\` and survive restart. Use \`!models reset\` to clear overrides and revert to env-var defaults.
+Changes are **persisted** to \`models.json\` and survive restart. Use \`!models reset\` to clear overrides and revert to defaults.
 
-**modelReset** — Revert model(s) to env-var defaults and clear the override file entry:
+**modelReset** — Revert model(s) to defaults and clear the override file entry:
 \`\`\`
 <discord-action>{\"type\":\"modelReset\"}</discord-action>
 <discord-action>{\"type\":\"modelReset\",\"role\":\"chat\"}</discord-action>

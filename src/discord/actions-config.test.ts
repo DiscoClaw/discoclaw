@@ -356,6 +356,17 @@ describe('modelSet', () => {
     expect(result.summary).toContain('resolves to sonnet');
   });
 
+  it('persistOverride receives the tier string, not the resolved model', () => {
+    const persisted: { role: string; model: string }[] = [];
+    const ctx = makeCtx();
+    ctx.persistOverride = (role, model) => { persisted.push({ role, model }); };
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'capable' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].role).toBe('chat');
+    expect(persisted[0].model).toBe('capable'); // tier string, not 'sonnet'
+  });
+
   it('fast role succeeds when cronCtx and taskCtx are missing', () => {
     const ctx = makeCtx({ cronCtx: undefined, taskCtx: undefined });
     const result = executeConfigAction({ type: 'modelSet', role: 'fast', model: 'haiku' }, ctx);

@@ -125,7 +125,7 @@ Configurable via `AnthropicRestOpts`: `baseUrl` (default `https://api.anthropic.
 
 ### Voice auto-wiring
 
-When both `ANTHROPIC_API_KEY` and `DISCOCLAW_VOICE_ENABLED=1` are set, the startup path in `src/index.ts` auto-wires the Anthropic REST adapter as the voice runtime. `resolveVoiceRuntime()` checks `voiceModelRef.runtime` first, then falls back to the `'anthropic'` registry entry, then the primary CLI runtime. This can be overridden at runtime via `runtime-overrides.json` (`voiceRuntime` key) or the `!models` command.
+When both `ANTHROPIC_API_KEY` and `DISCOCLAW_VOICE_ENABLED=1` are set, the startup path in `src/index.ts` auto-wires the Anthropic REST adapter as the voice runtime. `resolveVoiceRuntime()` checks `voiceModelRef.runtime` first, then falls back to the `'anthropic'` registry entry, then the primary CLI runtime. Model overrides are now configured in `models.json`; the voice runtime override is still in `runtime-overrides.json` (`voiceRuntime` key). The model can also be changed via the `!models` command.
 
 ### Key files
 
