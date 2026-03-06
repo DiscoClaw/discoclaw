@@ -31,7 +31,7 @@ Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as fal
 |----------|---------|-------------|
 | `PRIMARY_RUNTIME` | `claude` | Runtime adapter: `claude`, `openai`, `openrouter`, `gemini`, `codex` |
 | `RUNTIME_MODEL` | `capable` | **Deprecated** — use `models.json`. Fallback model tier for chat invocations |
-| `DISCOCLAW_FAST_RUNTIME` | — | Optional runtime override for fast-tier workloads (summary, cron auto-tag/model classify, task auto-tag) |
+| `DISCOCLAW_FAST_RUNTIME` | — | **Deprecated** — use `!models set fast <model>` instead, which auto-detects and switches the fast-tier runtime. Legacy runtime override for fast-tier workloads (summary, cron auto-tag/model classify, task auto-tag) |
 | `RUNTIME_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` | Comma-separated tools available to the runtime |
 | `RUNTIME_TIMEOUT_MS` | `1800000` (30 min) | Per-invocation timeout |
 | `RUNTIME_FALLBACK_MODEL` | — | Fallback model if primary fails |
