@@ -266,7 +266,7 @@ export function createCodexStrategy(
       const paths: string[] = [];
       for (let i = 0; i < images.length; i++) {
         const img = images[i]!;
-        const ext = img.mediaType.split('/')[1] || 'png';
+        const ext = img.mediaType.split('/')[1] || 'bin';
         const filePath = path.join(tmpDir, `image-${i}.${ext}`);
         await fs.writeFile(filePath, Buffer.from(img.base64, 'base64'));
         paths.push(filePath);
