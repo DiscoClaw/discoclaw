@@ -89,14 +89,11 @@ async function warnIfLegacyDiscoclawPresent(workspaceCwd: string, log?: Bootstra
 }
 
 /**
- * One-time migration: when workspace TOOLS.md contains the stale full
- * action-type reference (system-generated, not user prose), back it up
- * and replace it with the lightweight workspace override template so
- * tracked instructions keep flowing from the repository copy at runtime.
+ * Detect a legacy workspace TOOLS.md that still contains old system-owned
+ * sections. The file is user-owned, so we warn but never rewrite it.
  */
-async function migrateStaleToolsMd(
+async function warnIfLegacyToolsContainsSystemInstructions(
   workspaceCwd: string,
-  instructionsTemplatesDir: string,
   log?: BootstrapLog,
 ): Promise<void> {
   const toolsPath = path.join(workspaceCwd, 'TOOLS.md');
@@ -108,20 +105,15 @@ async function migrateStaleToolsMd(
     throw err;
   }
 
-  // Only migrate when both markers are present — highly specific to system-generated content.
+  // Warn only when both markers are present — specific enough to catch legacy
+  // scaffold copies without rewriting a user-owned override file.
   if (!content.includes(STALE_TOOLS_MARKER_HEADING) || !content.includes(STALE_TOOLS_MARKER_SUBHEADING)) return;
 
-  // Back up existing file.
-  const backupPath = path.join(workspaceCwd, 'TOOLS.md.bak');
-  await fs.writeFile(backupPath, content, 'utf-8');
-  log?.info({ workspaceCwd }, 'workspace:bootstrap backed up stale TOOLS.md to TOOLS.md.bak');
-
-  // Overwrite with the workspace override template rather than the tracked
-  // instructions file; otherwise stale repo-owned content would remain in the
-  // higher-precedence workspace override slot.
-  const templatePath = path.join(instructionsTemplatesDir, '..', 'workspace', 'TOOLS.md');
-  await fs.copyFile(templatePath, toolsPath);
-  log?.info({ workspaceCwd }, 'workspace:bootstrap replaced stale TOOLS.md with workspace override template');
+  log?.warn(
+    { workspaceCwd, file: 'TOOLS.md' },
+    'workspace:bootstrap legacy TOOLS.md system sections detected — file is user-owned and was left untouched. ' +
+      'If this is an unmodified scaffold copy, delete or replace it manually so tracked TOOLS.md can be the primary source.',
+  );
 }
 
 /**
@@ -164,7 +156,6 @@ export async function ensureWorkspaceBootstrapFiles(
   log?: BootstrapLog,
 ): Promise<string[]> {
   const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
-  const instructionsTemplatesDir = path.join(__dirname, '..', 'templates', 'instructions');
   await fs.mkdir(workspaceCwd, { recursive: true });
 
   const forceBootstrap = process.env.DISCOCLAW_FORCE_BOOTSTRAP === '1';
@@ -264,8 +255,8 @@ export async function ensureWorkspaceBootstrapFiles(
   await warnIfLegacyDiscoclawPresent(workspaceCwd, log);
   await warnIfLegacyAgentsContainsSystemInstructions(workspaceCwd, log);
 
-  // One-time TOOLS.md migration: replace stale system-generated content with current template.
-  await migrateStaleToolsMd(workspaceCwd, instructionsTemplatesDir, log);
+  // One-time TOOLS.md compatibility check: warn about legacy system-owned content.
+  await warnIfLegacyToolsContainsSystemInstructions(workspaceCwd, log);
 
   if (created.length > 0) {
     log?.info({ created, workspaceCwd }, 'workspace:bootstrap scaffolded PA files');

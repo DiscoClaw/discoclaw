@@ -6,8 +6,9 @@ Default system instructions are injected at runtime from a tracked
 repository layer, not from a workspace-managed file.
 
 Use this file for your personal rules, preferences, and customizations.
-When rules conflict, this file overrides tracked defaults, but immutable
-security policy always has highest precedence.
+When rules conflict, this file overrides tracked repo instructions
+(`SYSTEM_DEFAULTS.md` and `TOOLS.md`), but immutable security policy
+always has highest precedence.
 
 ## Memory vs Instructions
 

@@ -1293,15 +1293,6 @@ export class ForgeOrchestrator {
       sections.push(`--- project.md (repo) ---\n${projectContext.trimEnd()}`);
     }
 
-    // Append tools context from repo .context/ directory
-    try {
-      const toolsContextPath = path.join(this.opts.cwd, '.context', 'tools.md');
-      const toolsContent = await fs.readFile(toolsContextPath, 'utf-8');
-      sections.push(`--- tools.md (repo) ---\n${toolsContent.trimEnd()}`);
-    } catch {
-      // skip if missing
-    }
-
     const taskDescription = opts?.taskDescription;
     if (taskDescription) {
       sections.push(`--- task-description (thread) ---\n${taskDescription.trim()}`);
