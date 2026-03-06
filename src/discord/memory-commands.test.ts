@@ -7,6 +7,8 @@ import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
 import { saveDurableMemory, addItem } from './durable-memory.js';
 import type { DurableMemoryStore } from './durable-memory.js';
 import { saveSummary } from './summarizer.js';
+import { saveShortTermMemory } from './shortterm-memory.js';
+import type { ShortTermStore } from './shortterm-memory.js';
 
 async function makeTmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'memory-commands-test-'));
@@ -68,10 +70,20 @@ describe('parseMemoryCommand', () => {
       args: 'foo bar',
     });
   });
+
+  it('returns null for !memory remember with no args', () => {
+    expect(parseMemoryCommand('!memory remember')).toBeNull();
+    expect(parseMemoryCommand('!memory remember   ')).toBeNull();
+  });
+
+  it('returns null for !memory forget with no args', () => {
+    expect(parseMemoryCommand('!memory forget')).toBeNull();
+    expect(parseMemoryCommand('!memory forget   ')).toBeNull();
+  });
 });
 
 describe('handleMemoryCommand', () => {
-  it('show — returns formatted durable + rolling', async () => {
+  it('show — returns formatted durable + rolling + short-term', async () => {
     const durableDir = await makeTmpDir();
     const summaryDir = await makeTmpDir();
 
@@ -91,6 +103,8 @@ describe('handleMemoryCommand', () => {
     expect(result).toContain('User prefers TypeScript');
     expect(result).toContain('**Rolling summary:**');
     expect(result).toContain('User is working on memory system.');
+    expect(result).toContain('**Short-term memory:**');
+    expect(result).toContain('**Total prompt memory:**');
   });
 
   it('show — returns "(none)" when empty', async () => {
@@ -102,6 +116,94 @@ describe('handleMemoryCommand', () => {
       baseOpts({ durableDataDir: durableDir, summaryDataDir: summaryDir }),
     );
     expect(result).toContain('(none)');
+    // All three sections should show (none)
+    const noneMatches = result.match(/\(none\)/g);
+    expect(noneMatches).toHaveLength(3);
+  });
+
+  it('show — includes token estimates', async () => {
+    const durableDir = await makeTmpDir();
+    const summaryDir = await makeTmpDir();
+
+    const store: DurableMemoryStore = { version: 1, updatedAt: 0, items: [] };
+    addItem(store, 'User prefers TypeScript', { type: 'manual' }, 200);
+    await saveDurableMemory(durableDir, '12345', store);
+
+    const result = await handleMemoryCommand(
+      { action: 'show', args: '' },
+      baseOpts({ durableDataDir: durableDir, summaryDataDir: summaryDir }),
+    );
+    expect(result).toMatch(/\d+ chars, ~\d+ tokens/);
+  });
+
+  it('show — includes short-term entries when available', async () => {
+    const durableDir = await makeTmpDir();
+    const summaryDir = await makeTmpDir();
+    const shortTermDir = await makeTmpDir();
+
+    const stStore: ShortTermStore = {
+      version: 1,
+      entries: [
+        {
+          timestamp: Date.now() - 60_000, // 1 min ago
+          sessionKey: 'discord:guild:g1:ch1:12345',
+          channelName: 'dev',
+          summary: 'User asked about CI pipeline',
+        },
+      ],
+    };
+    await saveShortTermMemory(shortTermDir, 'g1-12345', stStore);
+
+    const result = await handleMemoryCommand(
+      { action: 'show', args: '' },
+      baseOpts({
+        durableDataDir: durableDir,
+        summaryDataDir: summaryDir,
+        shortTermDataDir: shortTermDir,
+        guildId: 'g1',
+        shortTermMaxAgeMs: 6 * 60 * 60 * 1000,
+      }),
+    );
+    expect(result).toContain('**Short-term memory:**');
+    expect(result).toContain('CI pipeline');
+    expect(result).toContain('#dev');
+    // Short-term chars should be non-zero
+    expect(result).not.toMatch(/\*\*Short-term memory:\*\* \(0 chars/);
+  });
+
+  it('show — short-term shows (none) without guildId (DMs)', async () => {
+    const durableDir = await makeTmpDir();
+    const summaryDir = await makeTmpDir();
+    const shortTermDir = await makeTmpDir();
+
+    const result = await handleMemoryCommand(
+      { action: 'show', args: '' },
+      baseOpts({
+        durableDataDir: durableDir,
+        summaryDataDir: summaryDir,
+        shortTermDataDir: shortTermDir,
+        // no guildId — DM context
+      }),
+    );
+    expect(result).toContain('**Short-term memory:**');
+    expect(result).toMatch(/\*\*Short-term memory:\*\* \(0 chars/);
+  });
+
+  it('show — short-term shows (none) without shortTermDataDir', async () => {
+    const durableDir = await makeTmpDir();
+    const summaryDir = await makeTmpDir();
+
+    const result = await handleMemoryCommand(
+      { action: 'show', args: '' },
+      baseOpts({
+        durableDataDir: durableDir,
+        summaryDataDir: summaryDir,
+        guildId: 'g1',
+        // no shortTermDataDir
+      }),
+    );
+    expect(result).toContain('**Short-term memory:**');
+    expect(result).toMatch(/\*\*Short-term memory:\*\* \(0 chars/);
   });
 
   it('remember — adds item and saves', async () => {
@@ -228,5 +330,16 @@ describe('handleMemoryCommand', () => {
     // Verify file is gone.
     const files = await fs.readdir(summaryDir);
     expect(files).toHaveLength(0);
+  });
+
+  it('show — zero-char estimates when all layers empty', async () => {
+    const durableDir = await makeTmpDir();
+    const summaryDir = await makeTmpDir();
+
+    const result = await handleMemoryCommand(
+      { action: 'show', args: '' },
+      baseOpts({ durableDataDir: durableDir, summaryDataDir: summaryDir }),
+    );
+    expect(result).toContain('**Total prompt memory:** 0 chars, ~0 tokens');
   });
 });

@@ -11,6 +11,12 @@ import {
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
 import { loadSummary } from './summarizer.js';
 import { durableWriteQueue } from './durable-write-queue.js';
+import {
+  loadShortTermMemory,
+  selectEntriesForInjection,
+  formatShortTermSection,
+} from './shortterm-memory.js';
+import { estimateTokensFromChars } from './prompt-common.js';
 
 export type MemoryCommand = {
   action: 'show' | 'remember' | 'forget' | 'reset-rolling';
@@ -23,8 +29,16 @@ export function parseMemoryCommand(content: string): MemoryCommand | null {
 
   const rest = trimmed.slice('!memory'.length).trim();
   if (!rest || rest === 'show') return { action: 'show', args: '' };
-  if (rest.startsWith('remember ')) return { action: 'remember', args: rest.slice('remember '.length).trim() };
-  if (rest.startsWith('forget ')) return { action: 'forget', args: rest.slice('forget '.length).trim() };
+  if (rest.startsWith('remember ')) {
+    const args = rest.slice('remember '.length).trim();
+    if (!args) return null;
+    return { action: 'remember', args };
+  }
+  if (rest.startsWith('forget ')) {
+    const args = rest.slice('forget '.length).trim();
+    if (!args) return null;
+    return { action: 'forget', args };
+  }
   if (rest === 'reset rolling') return { action: 'reset-rolling', args: '' };
 
   return null;
@@ -41,6 +55,12 @@ export type HandleMemoryCommandOpts = {
   messageId?: string;
   guildId?: string;
   channelName?: string;
+  /** Short-term memory data directory. Omit to skip short-term display. */
+  shortTermDataDir?: string;
+  /** Short-term memory injection budget in chars (default 1000). */
+  shortTermInjectMaxChars?: number;
+  /** Short-term memory max age in ms (default 6h). */
+  shortTermMaxAgeMs?: number;
 };
 
 export async function handleMemoryCommand(
@@ -56,16 +76,51 @@ export async function handleMemoryCommand(
       const durableText = items.length > 0
         ? formatDurableSection(items)
         : '(none)';
+      const durableChars = items.length > 0 ? durableText.length : 0;
 
       let summaryText = '(none)';
+      let summaryChars = 0;
       try {
         const summary = await loadSummary(opts.summaryDataDir, opts.sessionKey);
-        if (summary) summaryText = summary.summary;
+        if (summary) {
+          summaryText = summary.summary;
+          summaryChars = summaryText.length;
+        }
       } catch {
         // best-effort
       }
 
-      return `**Durable memory:**\n${durableText}\n\n**Rolling summary:**\n${summaryText}`;
+      let shortTermText = '(none)';
+      let shortTermChars = 0;
+      if (opts.shortTermDataDir && opts.guildId) {
+        try {
+          const guildUserId = `${opts.guildId}-${opts.userId}`;
+          const stStore = await loadShortTermMemory(opts.shortTermDataDir, guildUserId);
+          if (stStore) {
+            const maxChars = opts.shortTermInjectMaxChars ?? 1000;
+            const maxAgeMs = opts.shortTermMaxAgeMs ?? 6 * 60 * 60 * 1000;
+            const entries = selectEntriesForInjection(stStore, maxChars, maxAgeMs);
+            if (entries.length > 0) {
+              shortTermText = formatShortTermSection(entries);
+              shortTermChars = shortTermText.length;
+            }
+          }
+        } catch {
+          // best-effort
+        }
+      }
+
+      const totalChars = durableChars + summaryChars + shortTermChars;
+      const totalTokens = estimateTokensFromChars(totalChars);
+
+      const sections = [
+        `**Durable memory:** (${durableChars} chars, ~${estimateTokensFromChars(durableChars)} tokens)\n${durableText}`,
+        `**Rolling summary:** (${summaryChars} chars, ~${estimateTokensFromChars(summaryChars)} tokens)\n${summaryText}`,
+        `**Short-term memory:** (${shortTermChars} chars, ~${estimateTokensFromChars(shortTermChars)} tokens)\n${shortTermText}`,
+        `**Total prompt memory:** ${totalChars} chars, ~${totalTokens} tokens`,
+      ];
+
+      return sections.join('\n\n');
     }
 
     if (cmd.action === 'remember') {
