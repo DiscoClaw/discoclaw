@@ -16,6 +16,7 @@ import {
   isTemplateEchoed,
   resolveForgeDescription,
   ForgeOrchestrator,
+  AUDIT_CRITERIA_LINES,
 } from './forge-commands.js';
 import type { ForgeOrchestratorOpts } from './forge-commands.js';
 import type { RuntimeAdapter, EngineEvent, RuntimeInvokeParams } from '../runtime/types.js';
@@ -747,6 +748,71 @@ describe('buildAuditorPrompt', () => {
     expect(prompt).toContain('Read, Glob, and Grep tools');
     expect(prompt).toContain('Use them before raising concerns');
     expect(prompt).toContain('concern evaporates after checking the code');
+  });
+
+  it('includes criteria near the start of the prompt before ## Plan to Audit', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    const planToAuditIdx = prompt.indexOf('## Plan to Audit');
+    const keyCriteriaIdx = prompt.indexOf('## Key Audit Criteria');
+    expect(keyCriteriaIdx).toBeGreaterThan(-1);
+    expect(keyCriteriaIdx).toBeLessThan(planToAuditIdx);
+    // Verify a sample criterion appears before ## Plan to Audit
+    const earlySection = prompt.slice(0, planToAuditIdx);
+    expect(earlySection).toContain('Missing or underspecified details');
+    expect(earlySection).toContain('Structural integrity');
+  });
+
+  it('includes criteria after the final output format instructions', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    const outputOnlyIdx = prompt.indexOf('Output only the JSON block');
+    const reminderIdx = prompt.indexOf('## Reminder: Audit Criteria');
+    expect(reminderIdx).toBeGreaterThan(outputOnlyIdx);
+    expect(prompt).toContain('Every concern you raise must map to one of these criteria.');
+    // Verify criteria items appear after the reminder heading
+    const tailSection = prompt.slice(reminderIdx);
+    expect(tailSection).toContain('Missing or underspecified details');
+    expect(tailSection).toContain('Structural integrity');
+  });
+
+  it('has all three occurrences of each criterion', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    // Each criterion appears 3 times: Key Audit Criteria, Instructions, Reminder
+    for (const line of AUDIT_CRITERIA_LINES) {
+      const count = prompt.split(line).length - 1;
+      expect(count).toBe(3);
+    }
+  });
+
+  it('criteria repetition works for hasTools: false', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1, undefined, { hasTools: false });
+    const keyCriteriaIdx = prompt.indexOf('## Key Audit Criteria');
+    const planToAuditIdx = prompt.indexOf('## Plan to Audit');
+    const reminderIdx = prompt.indexOf('## Reminder: Audit Criteria');
+    const outputOnlyIdx = prompt.indexOf('Output only the JSON block');
+
+    expect(keyCriteriaIdx).toBeGreaterThan(-1);
+    expect(keyCriteriaIdx).toBeLessThan(planToAuditIdx);
+    expect(reminderIdx).toBeGreaterThan(outputOnlyIdx);
+    expect(prompt).toContain('Every concern you raise must map to one of these criteria.');
+
+    for (const line of AUDIT_CRITERIA_LINES) {
+      const count = prompt.split(line).length - 1;
+      expect(count).toBe(3);
+    }
+  });
+
+  it('criteria repetition works for hasTools: true', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1, undefined, { hasTools: true });
+    const keyCriteriaIdx = prompt.indexOf('## Key Audit Criteria');
+    const reminderIdx = prompt.indexOf('## Reminder: Audit Criteria');
+
+    expect(keyCriteriaIdx).toBeGreaterThan(-1);
+    expect(reminderIdx).toBeGreaterThan(-1);
+
+    for (const line of AUDIT_CRITERIA_LINES) {
+      const count = prompt.split(line).length - 1;
+      expect(count).toBe(3);
+    }
   });
 });
 

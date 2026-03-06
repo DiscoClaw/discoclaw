@@ -17,6 +17,21 @@ export { parseAuditVerdict };
 export type { AuditVerdict };
 
 // ---------------------------------------------------------------------------
+// Audit criteria — single source of truth, referenced at top/middle/bottom of
+// the auditor prompt to counteract primacy bias and "lost in the middle" effects.
+// ---------------------------------------------------------------------------
+
+export const AUDIT_CRITERIA_LINES: string[] = [
+  '1. Missing or underspecified details (vague scope, unclear file changes)',
+  '2. Structural integrity — the plan MUST have a `## Changes` section with concrete file paths. If file changes are described only inside a `## Phases` section (or any section other than `## Changes`), flag it as **blocking**.',
+  '3. Architectural issues (wrong abstraction, missing error handling, wrong patterns)',
+  '4. Risk gaps (unidentified failure modes, missing rollback plans)',
+  '5. Test coverage gaps (missing edge cases, untested error paths)',
+  '6. Dependency issues (circular deps, version conflicts, missing imports)',
+  '7. Documentation gaps (does the plan update relevant docs, README, .env.example, INVENTORY.md, or inline comments for new/changed features, config options, or public APIs? Missing doc updates are medium severity.)',
+];
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -268,6 +283,10 @@ export function buildAuditorPrompt(
     '',
     'You are an adversarial senior engineer auditing a technical plan. Your job is to find flaws, gaps, and risks.',
     '',
+    '## Key Audit Criteria',
+    '',
+    ...AUDIT_CRITERIA_LINES,
+    '',
   ];
 
   if (projectContext) {
@@ -315,13 +334,7 @@ export function buildAuditorPrompt(
 
   instructions.push(
     'Review the plan for:',
-    '1. Missing or underspecified details (vague scope, unclear file changes)',
-    '2. Structural integrity — the plan MUST have a `## Changes` section with concrete file paths. If file changes are described only inside a `## Phases` section (or any section other than `## Changes`), flag it as **blocking**.',
-    '3. Architectural issues (wrong abstraction, missing error handling, wrong patterns)',
-    '4. Risk gaps (unidentified failure modes, missing rollback plans)',
-    '5. Test coverage gaps (missing edge cases, untested error paths)',
-    '6. Dependency issues (circular deps, version conflicts, missing imports)',
-    '7. Documentation gaps (does the plan update relevant docs, README, .env.example, INVENTORY.md, or inline comments for new/changed features, config options, or public APIs? Missing doc updates are medium severity.)',
+    ...AUDIT_CRITERIA_LINES,
     '',
   );
 
@@ -383,6 +396,12 @@ export function buildAuditorPrompt(
     '',
     'Be thorough but fair. Don\'t nitpick style — focus on correctness, safety, and completeness.',
     'Output only the JSON block plus audit notes and verdict. No preamble.',
+    '',
+    '## Reminder: Audit Criteria',
+    '',
+    ...AUDIT_CRITERIA_LINES,
+    '',
+    'Every concern you raise must map to one of these criteria.',
   );
 
   return instructions.join('\n');
