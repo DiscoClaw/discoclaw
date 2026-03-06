@@ -186,13 +186,12 @@ export function configureDeferredScheduler(
         keywordHits: string[];
       }
       | null = null;
+    // Section order: preamble (primacy) → open tasks (middle) → actions/notes (recency) → user message (last).
     let prompt =
       buildPromptPreamble(inlinedContext.text) + '\n\n' +
       (openTasksSection
         ? `---\n${openTasksSection}\n\n`
-        : '') +
-      `---\nDeferred follow-up scheduled for <#${channel.id}> (runs at ${fmtTime(run.runsAt)}).\n---\n` +
-      `User message:\n${action.prompt}`;
+        : '');
 
     if (opts.state.discordActionsEnabled) {
       const actionSelection = buildTieredDiscordActionsPromptSection(
@@ -252,6 +251,11 @@ export function configureDeferredScheduler(
     if (noteLines.length > 0) {
       prompt += `\n\n---\n${noteLines.join('\n')}\n`;
     }
+
+    // User message — absolute last in prompt to maximize recency bias.
+    prompt +=
+      `---\nDeferred follow-up scheduled for <#${channel.id}> (runs at ${fmtTime(run.runsAt)}).\n---\n` +
+      `User message:\n${action.prompt}`;
 
     const addDirs: string[] = [];
     if (opts.useGroupDirCwd) addDirs.push(opts.workspaceCwd);

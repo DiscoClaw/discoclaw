@@ -86,12 +86,16 @@ DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by 
 
 ### Instruction precedence
 
-Prompt instruction layering is deterministic and enforced in this order:
+Prompt assembly has two layers, each with its own ordering contract.
+
+**Preamble precedence** — the front of every prompt, in strict priority order:
 
 1. **Immutable security policy** (hard-coded root rules)
 2. **Tracked defaults** (runtime-injected from `templates/instructions/SYSTEM_DEFAULTS.md`)
 3. **User override** (`workspace/AGENTS.md`)
 4. **Memory/context layers** (workspace identity files, channel context, durable/rolling memory, etc.)
+
+**Post-preamble section ordering** — the sections between the preamble and the user message are arranged to exploit primacy bias (high-signal sections first) and recency bias (action schemas and constraints near the end, just before the user message). Low-signal data sections sit in the middle. See [`docs/prompt-ordering.md`](docs/prompt-ordering.md) for the canonical order and rationale.
 
 `workspace/DISCOCLAW.md` is no longer a managed or authoritative instruction source.
 If you still have a legacy copy, treat it as historical reference only.
