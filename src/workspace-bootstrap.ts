@@ -91,7 +91,8 @@ async function warnIfLegacyDiscoclawPresent(workspaceCwd: string, log?: Bootstra
 /**
  * One-time migration: when workspace TOOLS.md contains the stale full
  * action-type reference (system-generated, not user prose), back it up
- * and replace with the current template.
+ * and replace it with the lightweight workspace override template so
+ * tracked instructions keep flowing from the repository copy at runtime.
  */
 async function migrateStaleToolsMd(
   workspaceCwd: string,
@@ -115,10 +116,12 @@ async function migrateStaleToolsMd(
   await fs.writeFile(backupPath, content, 'utf-8');
   log?.info({ workspaceCwd }, 'workspace:bootstrap backed up stale TOOLS.md to TOOLS.md.bak');
 
-  // Overwrite with current template.
-  const templatePath = path.join(instructionsTemplatesDir, 'TOOLS.md');
+  // Overwrite with the workspace override template rather than the tracked
+  // instructions file; otherwise stale repo-owned content would remain in the
+  // higher-precedence workspace override slot.
+  const templatePath = path.join(instructionsTemplatesDir, '..', 'workspace', 'TOOLS.md');
   await fs.copyFile(templatePath, toolsPath);
-  log?.info({ workspaceCwd }, 'workspace:bootstrap replaced stale TOOLS.md with current template');
+  log?.info({ workspaceCwd }, 'workspace:bootstrap replaced stale TOOLS.md with workspace override template');
 }
 
 /**

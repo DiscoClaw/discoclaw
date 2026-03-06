@@ -699,6 +699,23 @@ describe('template content — TOOLS.md', () => {
   });
 });
 
+describe('template content — workspace TOOLS.md override', () => {
+  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  let tools: string;
+
+  it('template file exists and is non-empty', async () => {
+    tools = await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools.length).toBeGreaterThan(0);
+  });
+
+  it('describes workspace TOOLS.md as an optional override layer', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('tracked tool and environment instructions');
+    expect(tools).toContain('workspace-specific overrides');
+    expect(tools).toContain('If you do not have any local overrides, you can delete this file');
+  });
+});
+
 describe('template content — no personalization leak', () => {
   const workspaceTemplatesDir = path.join(__dirname, '..', 'templates', 'workspace');
   const instructionsTemplatesDir = path.join(__dirname, '..', 'templates', 'instructions');
@@ -713,6 +730,13 @@ describe('template content — no personalization leak', () => {
 
   it('TOOLS.md does not contain user-specific tokens', async () => {
     const content = await fs.readFile(path.join(instructionsTemplatesDir, 'TOOLS.md'), 'utf-8');
+    for (const token of FORBIDDEN_TOKENS) {
+      expect(content).not.toContain(token);
+    }
+  });
+
+  it('workspace TOOLS.md template does not contain user-specific tokens', async () => {
+    const content = await fs.readFile(path.join(workspaceTemplatesDir, 'TOOLS.md'), 'utf-8');
     for (const token of FORBIDDEN_TOKENS) {
       expect(content).not.toContain(token);
     }
@@ -791,7 +815,7 @@ describe('TOOLS.md migration', () => {
     'This file has been customized by the user.',
   ].join('\n');
 
-  it('migrates stale TOOLS.md: backs up and replaces with current template', async () => {
+  it('migrates stale TOOLS.md: backs up and replaces with workspace override template', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-tools-migrate-'));
     dirs.push(workspace);
 
@@ -809,15 +833,15 @@ describe('TOOLS.md migration', () => {
     const backup = await fs.readFile(path.join(workspace, 'TOOLS.md.bak'), 'utf-8');
     expect(backup).toBe(STALE_TOOLS_CONTENT);
 
-    // TOOLS.md should now match the current template.
+    // TOOLS.md should now match the workspace override template.
     const templateContent = await fs.readFile(
-      path.join(__dirname, '..', 'templates', 'instructions', 'TOOLS.md'),
+      path.join(__dirname, '..', 'templates', 'workspace', 'TOOLS.md'),
       'utf-8',
     );
     const replaced = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
     expect(replaced).toBe(templateContent);
     expect(copyFileSpy).toHaveBeenCalledWith(
-      path.join(__dirname, '..', 'templates', 'instructions', 'TOOLS.md'),
+      path.join(__dirname, '..', 'templates', 'workspace', 'TOOLS.md'),
       path.join(workspace, 'TOOLS.md'),
     );
     copyFileSpy.mockRestore();
@@ -829,7 +853,7 @@ describe('TOOLS.md migration', () => {
     );
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceCwd: workspace }),
-      expect.stringContaining('replaced stale TOOLS.md with current template'),
+      expect.stringContaining('replaced stale TOOLS.md with workspace override template'),
     );
   });
 
