@@ -1,7 +1,7 @@
 import type { DiscordActionResult } from './actions.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { RuntimeRegistry } from '../runtime/registry.js';
-import { resolveModel, findRuntimeForModel } from '../runtime/model-tiers.js';
+import { resolveModel, findRuntimeForModel, resolveReasoningEffort } from '../runtime/model-tiers.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import { resolveDefaultModel, resolveProvider } from './actions-imagegen.js';
 
@@ -69,7 +69,7 @@ export type ConfigMutableParams = {
     syncCoordinator?: { setAutoTagModel(model: string): void; setRuntime?(runtime: RuntimeAdapter): void };
     executorCtx?: { model: string; cronExecModel?: string; runtime?: RuntimeAdapter };
   };
-  taskCtx?: { autoTagModel: string };
+  taskCtx?: { autoTagModel: string; runtime?: { id: string } };
   planCtx?: { model?: string; runtime?: RuntimeAdapter };
   deferOpts?: { runtime: RuntimeAdapter };
   imagegenCtx?: ImagegenContext;
@@ -169,6 +169,37 @@ export function executeConfigAction(
           if (bp.taskCtx) {
             bp.taskCtx.autoTagModel = model;
             changes.push(`tasks-auto-tag → ${model}`);
+          }
+
+          // Auto-switch fast runtime if the model belongs to a different provider.
+          if (configCtx.runtimeRegistry) {
+            const owningRuntimeId = findRuntimeForModel(model);
+            const currentFastRuntimeId = bp.fastRuntime?.id ?? configCtx.runtime.id;
+            if (owningRuntimeId && owningRuntimeId !== currentFastRuntimeId) {
+              let matchedKey: string | undefined;
+              let matchedAdapter: RuntimeAdapter | undefined;
+              for (const registryKey of configCtx.runtimeRegistry.list()) {
+                const adapter = configCtx.runtimeRegistry.get(registryKey);
+                if (adapter && adapter.id === owningRuntimeId) {
+                  matchedKey = registryKey;
+                  matchedAdapter = adapter;
+                  break;
+                }
+              }
+              if (matchedAdapter && matchedKey) {
+                bp.fastRuntime = matchedAdapter;
+                configCtx.fastRuntimeName = matchedKey;
+                if (bp.cronCtx) {
+                  bp.cronCtx.runtime = matchedAdapter;
+                  bp.cronCtx.syncCoordinator?.setRuntime?.(matchedAdapter);
+                }
+                if (bp.taskCtx) bp.taskCtx.runtime = matchedAdapter;
+                configCtx.persistFastRuntime?.(matchedKey);
+                changes.push(`fast runtime → ${matchedKey} (auto-switched)`);
+              } else {
+                return { ok: false, error: `Model "${model}" belongs to runtime "${owningRuntimeId}" which is not configured in the registry` };
+              }
+            }
           }
           break;
         case 'forge-drafter':
@@ -307,8 +338,16 @@ export function executeConfigAction(
               if (bp.cronCtx) {
                 bp.cronCtx.autoTagModel = defaultModel;
                 bp.cronCtx.syncCoordinator?.setAutoTagModel(defaultModel);
+                bp.cronCtx.runtime = configCtx.runtime;
+                bp.cronCtx.syncCoordinator?.setRuntime?.(configCtx.runtime);
               }
-              if (bp.taskCtx) bp.taskCtx.autoTagModel = defaultModel;
+              if (bp.taskCtx) {
+                bp.taskCtx.autoTagModel = defaultModel;
+                bp.taskCtx.runtime = configCtx.runtime;
+              }
+              bp.fastRuntime = configCtx.runtime;
+              configCtx.fastRuntimeName = undefined;
+              configCtx.clearFastRuntime?.();
               resetChanges.push(`fast → ${defaultModel}`);
               break;
             case 'forge-drafter':
@@ -405,13 +444,15 @@ export function executeConfigAction(
         const roleRid = useFastRuntime ? fastRid : rid;
         const resolved = resolveModel(model, roleRid);
         const runtimeNote = useFastRuntime && fastRid !== rid ? ` [runtime: ${fastRid}]` : '';
+        const effort = resolveReasoningEffort(model, roleRid);
+        const effortNote = effort ? ` [effort: ${effort}]` : '';
         let display: string;
         if (model) {
           display = resolved && resolved !== model ? `${model} → ${resolved}` : model;
         } else {
           display = adapterDefault || '(adapter default)';
         }
-        return `**${role}**: \`${display}\`${overrideMarker}${runtimeNote} — ${desc}`;
+        return `**${role}**: \`${display}\`${overrideMarker}${runtimeNote}${effortNote} — ${desc}`;
       });
 
       if (bp.voiceModelCtx) {
@@ -429,7 +470,9 @@ export function executeConfigAction(
           const voiceAdapterDefault = bp.voiceModelCtx.runtime?.defaultModel ?? adapterDefault;
           voiceDisplay = voiceAdapterDefault || '(adapter default)';
         }
-        lines.push(`**voice**: \`${voiceDisplay}\`${ovr('voice')}${voiceRtLabel} — ${ROLE_DESCRIPTIONS.voice}`);
+        const voiceEffort = resolveReasoningEffort(voiceModel, voiceRid);
+        const voiceEffortNote = voiceEffort ? ` [effort: ${voiceEffort}]` : '';
+        lines.push(`**voice**: \`${voiceDisplay}\`${ovr('voice')}${voiceRtLabel}${voiceEffortNote} — ${ROLE_DESCRIPTIONS.voice}`);
       }
 
       return { ok: true, summary: lines.join('\n') };
