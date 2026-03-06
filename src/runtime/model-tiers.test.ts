@@ -148,12 +148,12 @@ describe('resolveReasoningEffort', () => {
     expect(resolveReasoningEffort('deep', 'codex')).toBe('xhigh');
   });
 
-  it('returns low for codex fast tier', () => {
-    expect(resolveReasoningEffort('fast', 'codex')).toBe('low');
+  it('returns undefined for codex fast tier (no effort on fast models)', () => {
+    expect(resolveReasoningEffort('fast', 'codex')).toBeUndefined();
   });
 
-  it('returns low for claude_code fast tier', () => {
-    expect(resolveReasoningEffort('fast', 'claude_code')).toBe('low');
+  it('returns undefined for claude_code fast tier (no effort on fast models)', () => {
+    expect(resolveReasoningEffort('fast', 'claude_code')).toBeUndefined();
   });
 
   it('returns medium for claude_code capable tier', () => {

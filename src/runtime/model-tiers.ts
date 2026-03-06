@@ -86,8 +86,8 @@ export function resolveModel(tierOrModel: string, runtimeId: RuntimeId): string 
  * Only runtimes / tiers that need an explicit effort are listed.
  */
 const reasoningEffortDefaults: Record<string, Partial<Record<ModelTier, string>>> = {
-  claude_code: { fast: 'low', capable: 'medium', deep: 'high' },
-  codex: { fast: 'low', capable: 'high', deep: 'xhigh' },
+  claude_code: { capable: 'medium', deep: 'high' },
+  codex: { capable: 'high', deep: 'xhigh' },
 };
 
 /**
