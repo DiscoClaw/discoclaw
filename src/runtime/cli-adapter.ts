@@ -113,10 +113,17 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     // ---------------------------------------------------------------
     if (pool && params.sessionKey) {
       try {
+        const poolCtx: CliInvokeContext = {
+          params: { ...params, model },
+          useStdin: true,
+          hasImages: Boolean(params.images && params.images.length > 0),
+        };
+        const strategyEnvOverrides = strategy.buildEnv?.(poolCtx, opts);
         const proc = pool.getOrSpawn(params.sessionKey, {
           claudeBin: binary,
           model,
           cwd: params.cwd,
+          envOverrides: strategyEnvOverrides,
           dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
           strictMcpConfig: opts.strictMcpConfig,
           fallbackModel: opts.fallbackModel,
@@ -273,6 +280,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       };
       const args = strategy.buildArgs(ctx, opts);
       const outputMode = strategy.getOutputMode(ctx, opts);
+      const strategyEnvOverrides = strategy.buildEnv?.(ctx, opts);
       if (opts.log) {
         opts.log.debug({ args: args.slice(0, -1), hasImages, promptTooLarge, useStdin }, `${strategy.id}: constructed args`);
       }
@@ -283,7 +291,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         reject: false,
         forceKillAfterDelay: 5000,
         stdin: useStdin ? 'pipe' : 'ignore',
-        env: cliExecaEnv(envOverrides),
+        env: cliExecaEnv({
+          ...(strategyEnvOverrides ?? {}),
+          ...(envOverrides ?? {}),
+        }),
         stdout: 'pipe',
         stderr: 'pipe',
       });

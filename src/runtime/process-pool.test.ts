@@ -67,6 +67,25 @@ describe('ProcessPool', () => {
     expect((execa as any).mock.calls).toHaveLength(1);
   });
 
+  it('respawns when envOverrides change for the same session key', () => {
+    const pool = new ProcessPool({ maxProcesses: 3 });
+    const proc1 = pool.getOrSpawn('session-1', {
+      ...baseProcessOpts,
+      envOverrides: { CLAUDE_CODE_EFFORT_LEVEL: 'medium' },
+    });
+    const proc2 = pool.getOrSpawn('session-1', {
+      ...baseProcessOpts,
+      envOverrides: { CLAUDE_CODE_EFFORT_LEVEL: 'high' },
+    });
+
+    expect(proc1).not.toBeNull();
+    expect(proc2).not.toBeNull();
+    expect(proc2).not.toBe(proc1);
+    expect(proc1!.state).toBe('dead');
+    expect(proc2!.isAlive).toBe(true);
+    expect((execa as any).mock.calls).toHaveLength(2);
+  });
+
   it('getOrSpawn creates separate processes for different session keys', () => {
     const pool = new ProcessPool({ maxProcesses: 3 });
     const proc1 = pool.getOrSpawn('session-1', baseProcessOpts);

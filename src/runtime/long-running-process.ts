@@ -18,6 +18,7 @@ export type LongRunningProcessOpts = {
   claudeBin: string;
   model: string;
   cwd: string;
+  envOverrides?: Record<string, string | undefined>;
   dangerouslySkipPermissions?: boolean;
   strictMcpConfig?: boolean;
   fallbackModel?: string;
@@ -89,6 +90,10 @@ export class LongRunningProcess {
     return this._state === 'idle' || this._state === 'busy';
   }
 
+  get envOverrides(): Record<string, string | undefined> | undefined {
+    return this.opts.envOverrides;
+  }
+
   /**
    * Spawn the Claude Code subprocess. Must be called once after construction.
    * Returns false if spawn fails.
@@ -143,7 +148,7 @@ export class LongRunningProcess {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
-        env: cliExecaEnv(),
+        env: cliExecaEnv(this.opts.envOverrides),
       });
     } catch (err) {
       this.opts.log?.info({ err }, 'long-running: spawn failed');

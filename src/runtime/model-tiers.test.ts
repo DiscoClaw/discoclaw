@@ -142,8 +142,19 @@ describe('resolveReasoningEffort', () => {
     expect(resolveReasoningEffort('fast', 'codex')).toBe('low');
   });
 
+  it('returns low for claude_code fast tier', () => {
+    expect(resolveReasoningEffort('fast', 'claude_code')).toBe('low');
+  });
+
+  it('returns medium for claude_code capable tier', () => {
+    expect(resolveReasoningEffort('capable', 'claude_code')).toBe('medium');
+  });
+
+  it('returns high for claude_code deep tier', () => {
+    expect(resolveReasoningEffort('deep', 'claude_code')).toBe('high');
+  });
+
   it('returns undefined for runtimes without effort mappings', () => {
-    expect(resolveReasoningEffort('capable', 'claude_code')).toBeUndefined();
     expect(resolveReasoningEffort('deep', 'openai')).toBeUndefined();
   });
 
