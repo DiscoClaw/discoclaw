@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createMessageCreateHandler } from '../discord.js';
+import { saveSummary } from './summarizer.js';
 
 function makeQueue() {
   return {
@@ -42,6 +43,15 @@ function makeMsg(content: string, replyId: string) {
     mentions: { has: () => false },
     client: { user: { id: 'bot-1' }, channels: { cache: new Map() } },
     reply: vi.fn(async () => replyObj),
+  };
+}
+
+function makeHistoryCollection(messages: any[]) {
+  return {
+    size: messages.length,
+    values: function* values() {
+      yield* messages;
+    },
   };
 }
 
@@ -173,6 +183,52 @@ describe('memory timing integration', () => {
 
     const summaryFile = path.join(summaryDir, 'discord:channel:chan.json');
     await expect(fs.access(summaryFile)).rejects.toThrow();
+  });
+
+  it('injects a recency warning so lagging rolling summaries do not outrank recent conversation', async () => {
+    let seenPrompt = '';
+    const runtime = {
+      id: 'test-runtime',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (p: any) {
+        const prompt = String(p.prompt ?? '');
+        if (!prompt.includes('Updated summary:')) seenPrompt = prompt;
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-recency-'));
+    await saveSummary(summaryDir, 'discord:channel:chan', {
+      summary: '!models reset is pending and forge-auditor default is unset.',
+      updatedAt: Date.now(),
+      turnsSinceUpdate: 2,
+    });
+
+    const handler = createMessageCreateHandler(
+      makeParams(runtime, summaryDir, {
+        summaryEveryNTurns: 99,
+        messageHistoryBudget: 200,
+      }),
+      makeQueue(),
+    );
+
+    const msg = makeMsg('What is the current status?', 'r-recency');
+    msg.channel.messages = {
+      fetch: vi.fn(async () => makeHistoryCollection([
+        {
+          author: { bot: false, username: 'tester', displayName: 'Tester' },
+          content: 'The fix is merged, deployed, and already working.',
+        },
+      ])),
+    };
+
+    await handler(msg);
+
+    expect(seenPrompt).toContain('Conversation memory:');
+    expect(seenPrompt).toContain('It may lag behind the latest 2 turns.');
+    expect(seenPrompt).toContain('trust the fresher evidence');
+    expect(seenPrompt).toContain('Recent conversation:\n[Tester]: The fix is merged, deployed, and already working.');
+    expect(seenPrompt.indexOf('Conversation memory:')).toBeLessThan(seenPrompt.indexOf('Recent conversation:'));
   });
 
   it('runs one-pass summary recompression when generated summary exceeds token threshold', async () => {

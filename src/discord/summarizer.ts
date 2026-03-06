@@ -8,6 +8,11 @@ export type ConversationSummary = {
   turnsSinceUpdate?: number;
 };
 
+function formatTurnLag(turnsSinceUpdate?: number): string {
+  if (typeof turnsSinceUpdate !== 'number' || turnsSinceUpdate <= 0) return '';
+  return ` It may lag behind the latest ${turnsSinceUpdate} turn${turnsSinceUpdate === 1 ? '' : 's'}.`;
+}
+
 function asConversationSummary(value: unknown): ConversationSummary | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const candidate = value as {
@@ -75,6 +80,14 @@ export async function archiveSummary(
   }
 }
 
+export function buildConversationMemorySection(summary: string, turnsSinceUpdate?: number): string {
+  return [
+    'Conversation memory:',
+    `Rolling summary only; treat this as background context.${formatTurnLag(turnsSinceUpdate)} If it conflicts with recent conversation, reply context, tool output, or the current user message, trust the fresher evidence.`,
+    summary,
+  ].join('\n');
+}
+
 export type GenerateSummaryOpts = {
   previousSummary: string | null;
   recentExchange: string;
@@ -105,6 +118,8 @@ const SUMMARIZE_PROMPT_TEMPLATE = `You are a conversation summarizer. Update the
 Rules:
 - Keep the summary under {maxChars} characters.
 - Drop filler; keep decisions, preferences, current focus, and key facts.
+- Treat the new exchange as fresher than the current summary. When they conflict, replace stale details with the newer state instead of carrying both forward.
+- If the new exchange shows something was fixed, merged, deployed, reset, completed, or otherwise resolved, remove stale "pending" wording from the summary.
 - Write in third person, present tense.
 - Output ONLY the updated summary text, nothing else.
 {taskStatusRule}
