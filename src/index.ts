@@ -98,7 +98,17 @@ import {
 } from './index.runtime.js';
 import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupChecks } from './index.post-connect.js';
 import { loadOverrides, saveOverrides, resolveOverridesPath, type RuntimeOverrides } from './runtime-overrides.js';
-import { loadModelConfig, saveModelConfig, loadLegacyOverrideModels, migrateFromLegacy, detectOverrideSources, resolveModelsJsonPath, type ModelConfig, type ModelRole } from './model-config.js';
+import {
+  DEFAULTS as MODEL_DEFAULTS,
+  loadModelConfig,
+  saveModelConfig,
+  loadLegacyOverrideModels,
+  migrateFromLegacy,
+  detectOverrideSources,
+  resolveModelsJsonPath,
+  type ModelConfig,
+  type ModelRole,
+} from './model-config.js';
 import { createColdStorage, type ColdStorageSubsystem } from './cold-storage/index.js';
 import { parseGlobalSupervisorBail, type GlobalSupervisorAuditPayload } from './runtime/global-supervisor.js';
 import type { StreamingPreviewMode } from './discord/output-utils.js';
@@ -144,6 +154,7 @@ const dataDir = cfg.dataDir;
 const overridesPath = resolveOverridesPath(dataDir, projectRoot);
 
 const envModelDefaults: ModelConfig = {
+  ...MODEL_DEFAULTS,
   chat: cfg.runtimeModel,
   fast: fastModelDefault,
   summary: cfg.summaryModel,

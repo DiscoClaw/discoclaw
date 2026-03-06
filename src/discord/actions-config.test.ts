@@ -572,6 +572,29 @@ describe('modelReset', () => {
     expect(ctx.overrideSources['cron-exec']).toBeUndefined();
     expect(clearedRole).toBe('cron-exec');
   });
+
+  it('forge-auditor modelReset sets the configured default instead of following chat', () => {
+    const ctx = makeCtx({ forgeAuditorModel: 'sonnet' });
+    ctx.envDefaults = { 'forge-auditor': 'deep' };
+    const result = executeConfigAction({ type: 'modelReset', role: 'forge-auditor' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.forgeAuditorModel).toBe('deep');
+    if (!result.ok) return;
+    expect(result.summary).toContain('forge-auditor → deep');
+    expect(result.summary).not.toContain('follows chat');
+  });
+
+  it('forge-auditor modelReset clears override source', () => {
+    const ctx = makeCtx({ forgeAuditorModel: 'sonnet' });
+    ctx.envDefaults = { 'forge-auditor': 'deep' };
+    ctx.overrideSources = { 'forge-auditor': true };
+    let clearedRole: string | undefined;
+    ctx.clearOverride = (role) => { clearedRole = role; };
+    const result = executeConfigAction({ type: 'modelReset', role: 'forge-auditor' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.overrideSources['forge-auditor']).toBeUndefined();
+    expect(clearedRole).toBe('forge-auditor');
+  });
 });
 
 // ---------------------------------------------------------------------------
