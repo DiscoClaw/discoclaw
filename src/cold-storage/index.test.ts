@@ -133,6 +133,24 @@ describe('createColdStorage', () => {
     expect(tables).toContain('chunks_vec');
   });
 
+  // ── Boot log ────────────────────────────────────────────────────────
+
+  it('logs info with chunk count on successful initialization', () => {
+    const log = createLogger();
+    subsystem = createColdStorage(defaultConfig({ log }));
+
+    expect(subsystem).not.toBeNull();
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chunks: 0,
+        dbPath: ':memory:',
+        provider: 'openai',
+        dimensions: 1536,
+      }),
+      'cold-storage: initialized',
+    );
+  });
+
   // ── close() ─────────────────────────────────────────────────────────
 
   it('close() closes the underlying store', () => {

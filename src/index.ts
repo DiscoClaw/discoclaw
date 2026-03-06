@@ -98,6 +98,7 @@ import {
 } from './index.runtime.js';
 import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupChecks } from './index.post-connect.js';
 import { loadOverrides, saveOverrides, clearOverrides, resolveOverridesPath, type RuntimeOverrides } from './runtime-overrides.js';
+import { createColdStorage, type ColdStorageSubsystem } from './cold-storage/index.js';
 import type { ModelRole } from './discord/actions-config.js';
 import { parseGlobalSupervisorBail, type GlobalSupervisorAuditPayload } from './runtime/global-supervisor.js';
 import type { StreamingPreviewMode } from './discord/output-utils.js';
@@ -281,6 +282,7 @@ const shutdown = async () => {
   if (webhookServer) {
     await webhookServer.close().catch((err) => log.warn({ err }, 'webhook:close error'));
   }
+  coldStorageSubsystem?.close();
   await botStatus?.offline();
   await releasePidLock(pidLockPath);
   process.exit(0);
@@ -362,6 +364,21 @@ const shortTermDataDir = cfg.shortTermDataDirOverride
 const shortTermMaxEntries = cfg.shortTermMaxEntries;
 const shortTermMaxAgeMs = cfg.shortTermMaxAgeHours * 60 * 60 * 1000;
 const shortTermInjectMaxChars = cfg.shortTermInjectMaxChars;
+// --- Cold storage subsystem ---
+let coldStorageSubsystem: ColdStorageSubsystem | null = null;
+if (cfg.coldStorageEnabled && cfg.coldStorageApiKey) {
+  const coldDbPath = cfg.coldStorageDbPath ?? path.join(pidLockDir, 'cold-storage.db');
+  coldStorageSubsystem = createColdStorage({
+    dbPath: coldDbPath,
+    provider: cfg.coldStorageProvider,
+    apiKey: cfg.coldStorageApiKey,
+    model: cfg.coldStorageModel,
+    dimensions: cfg.coldStorageDimensions,
+    baseUrl: cfg.coldStorageBaseUrl,
+    log,
+  });
+}
+
 const actionFollowupDepth = cfg.actionFollowupDepth;
 const reactionHandlerEnabled = cfg.reactionHandlerEnabled;
 const reactionRemoveHandlerEnabled = cfg.reactionRemoveHandlerEnabled;
@@ -2248,6 +2265,8 @@ publishBootReport({
   memoryEpisodicOn: summaryEnabled,
   memorySemanticOn: durableMemoryEnabled,
   memoryWorkingOn: shortTermMemoryEnabled,
+  memoryColdOn: coldStorageSubsystem !== null,
+  memoryColdChunks: coldStorageSubsystem?.store.chunkCount(),
   actionCategoriesEnabled,
   configWarnings: parsedConfig.warnings.length,
   permProbe,
