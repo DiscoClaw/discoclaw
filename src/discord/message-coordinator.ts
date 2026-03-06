@@ -2911,7 +2911,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               if (consumeThrottle) lastEditAt = now;
               const out = selectStreamingOutput({
-                deltaText: deltaText + previewOnlyDeltaText,
+                deltaText: deltaText + heartbeatLine + previewOnlyDeltaText,
                 activityLabel,
                 finalText,
                 statusTick: statusTick++,
@@ -3015,11 +3015,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let activeToolCount = 0;
             let stallWarned = false;
             let lastStallProgressAt = 0;
+            let heartbeatLine = '';
             let sawRuntimeEvent = false;
             let sawReasoningEvent = false;
             const trackReasoningGap = params.runtime.id === 'codex';
             const markRuntimeVisibility = (evt: EngineEvent): void => {
               previewOnlyDeltaText = '';
+              heartbeatLine = '';
               sawRuntimeEvent = true;
               if (trackReasoningGap && !sawReasoningEvent) {
                 if (evt.type === 'preview_debug' && evt.itemType === 'reasoning') {
@@ -3055,7 +3057,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   if (!stallWarned) {
                     stallWarned = true;
                     lastStallProgressAt = Date.now();
-                    deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, true);
+                    heartbeatLine = formatRuntimeHeartbeatLine(stallSeconds, true);
+                    previewOnlyDeltaText = '';
                     params.log?.info(
                       {
                         flow: 'message',
@@ -3071,7 +3074,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     );
                   } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
                     lastStallProgressAt = Date.now();
-                    deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, false);
+                    heartbeatLine = formatRuntimeHeartbeatLine(stallSeconds, false);
                     params.log?.info(
                       {
                         flow: 'message',

@@ -537,6 +537,7 @@ function createReactionHandler(
           let finalText = '';
           let deltaText = '';
           let previewOnlyDeltaText = '';
+          let heartbeatLine = '';
           const collectedImages: ImageData[] = [];
           let statusTick = 1;
           const t0 = Date.now();
@@ -563,7 +564,7 @@ function createReactionHandler(
             if (!force && now - lastEditAt < minEditIntervalMs) return;
             lastEditAt = now;
             const out = selectStreamingOutput({
-              deltaText: deltaText + previewOnlyDeltaText, activityLabel: '', finalText,
+              deltaText: deltaText + heartbeatLine + previewOnlyDeltaText, activityLabel: '', finalText,
               statusTick: statusTick++,
               previewMode,
               showPreview: Date.now() - t0 >= 7000,
@@ -659,6 +660,7 @@ function createReactionHandler(
           const trackReasoningGap = params.runtime.id === 'codex';
           const markRuntimeVisibility = (evt: EngineEvent): void => {
             previewOnlyDeltaText = '';
+            heartbeatLine = '';
             sawRuntimeEvent = true;
             if (trackReasoningGap && !sawReasoningEvent) {
               if (evt.type === 'preview_debug' && evt.itemType === 'reasoning') {
@@ -689,7 +691,8 @@ function createReactionHandler(
                 if (!stallWarned) {
                   stallWarned = true;
                   lastStallProgressAt = Date.now();
-                  deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, true);
+                  heartbeatLine = formatRuntimeHeartbeatLine(stallSeconds, true);
+                  previewOnlyDeltaText = '';
                   params.log?.info(
                     {
                       flow: 'reaction',
@@ -703,7 +706,7 @@ function createReactionHandler(
                   );
                 } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
                   lastStallProgressAt = Date.now();
-                  deltaText += (deltaText ? '\n' : '') + formatRuntimeHeartbeatLine(stallSeconds, false);
+                  heartbeatLine = formatRuntimeHeartbeatLine(stallSeconds, false);
                   params.log?.info(
                     {
                       flow: 'reaction',
