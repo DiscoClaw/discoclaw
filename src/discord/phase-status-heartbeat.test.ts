@@ -78,7 +78,7 @@ describe('formatPhaseStatusHeartbeatEvent', () => {
         runElapsedMs: 20_000,
         atMs: 123,
       }),
-    ).toBe('Forge plan-123: Drafting complete (20s). Starting Audit round 1/5...');
+    ).toBe('🔄 Forge plan-123: Drafting complete (20s). Starting Audit round 1/5...');
   });
 });
 
