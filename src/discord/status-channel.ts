@@ -77,6 +77,8 @@ export type BootReportData = {
   memoryEpisodicOn: boolean;
   memorySemanticOn: boolean;
   memoryWorkingOn: boolean;
+  memoryColdOn: boolean;
+  memoryColdChunks?: number;
   // Action categories
   actionCategoriesEnabled: string[];
   // Config / permissions
@@ -246,6 +248,10 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       if (data.memoryEpisodicOn) memoryParts.push('episodic');
       if (data.memorySemanticOn) memoryParts.push('semantic');
       if (data.memoryWorkingOn) memoryParts.push('working');
+      if (data.memoryColdOn) {
+        const coldLabel = data.memoryColdChunks !== undefined ? `cold (${data.memoryColdChunks} chunks)` : 'cold';
+        memoryParts.push(coldLabel);
+      }
       lines.push(`Memory · ${memoryParts.length > 0 ? memoryParts.join(', ') : 'off'}`);
 
       lines.push(`Actions · ${data.actionCategoriesEnabled.length > 0 ? data.actionCategoriesEnabled.join(', ') : '(none)'}`);

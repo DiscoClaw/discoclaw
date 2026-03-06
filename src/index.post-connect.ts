@@ -136,6 +136,8 @@ export function publishBootReport(opts: {
   memoryEpisodicOn: boolean;
   memorySemanticOn: boolean;
   memoryWorkingOn: boolean;
+  memoryColdOn: boolean;
+  memoryColdChunks?: number;
   actionCategoriesEnabled: string[];
   configWarnings: number;
   permProbe: PermissionProbeResult;
@@ -162,6 +164,8 @@ export function publishBootReport(opts: {
     memoryEpisodicOn: opts.memoryEpisodicOn,
     memorySemanticOn: opts.memorySemanticOn,
     memoryWorkingOn: opts.memoryWorkingOn,
+    memoryColdOn: opts.memoryColdOn,
+    memoryColdChunks: opts.memoryColdChunks,
     actionCategoriesEnabled: opts.actionCategoriesEnabled,
     configWarnings: opts.configWarnings,
     permissionsStatus: opts.permProbe.status === 'valid' ? 'ok' : opts.permProbe.status,

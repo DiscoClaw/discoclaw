@@ -164,6 +164,7 @@ describe('bootReport', () => {
     memoryEpisodicOn: false,
     memorySemanticOn: false,
     memoryWorkingOn: false,
+    memoryColdOn: false,
     actionCategoriesEnabled: [] as string[],
   };
 
@@ -275,6 +276,40 @@ describe('bootReport', () => {
     await poster.bootReport!({ ...baseData });
     const msg = sentContent(ch);
     expect(msg).toContain('Version · DiscoClaw (unknown)');
+  });
+
+  it('includes cold in Memory line when memoryColdOn is true with chunk count', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, memoryColdOn: true, memoryColdChunks: 42 });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Memory · cold (42 chunks)');
+  });
+
+  it('includes cold in Memory line without chunk count when memoryColdChunks is omitted', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, memoryColdOn: true });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Memory · cold');
+    expect(msg).not.toContain('chunks');
+  });
+
+  it('lists cold alongside other memory layers', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, memoryEpisodicOn: true, memorySemanticOn: true, memoryColdOn: true, memoryColdChunks: 100 });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Memory · episodic, semantic, cold (100 chunks)');
+  });
+
+  it('omits cold from Memory line when memoryColdOn is false', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, memoryColdOn: false });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Memory · off');
+    expect(msg).not.toContain('cold');
   });
 });
 

@@ -2248,6 +2248,7 @@ publishBootReport({
   memoryEpisodicOn: summaryEnabled,
   memorySemanticOn: durableMemoryEnabled,
   memoryWorkingOn: shortTermMemoryEnabled,
+  memoryColdOn: false, // TODO: wire to cold storage init result
   actionCategoriesEnabled,
   configWarnings: parsedConfig.warnings.length,
   permProbe,
