@@ -35,6 +35,8 @@ export type ConfigContext = {
   runtimeName?: string;
   /** Human-readable name of the voice runtime when it differs from chat (read-only display). */
   voiceRuntimeName?: string;
+  /** Human-readable name of the fast-tier runtime (read-only display). */
+  fastRuntimeName?: string;
   /** Callback to persist a model override to the overrides file. Wired in index.ts. */
   persistOverride?: (role: ModelRole, model: string) => void;
   /** Callback to clear model overrides from the overrides file. Pass undefined role to clear all. Wired in index.ts. */
@@ -43,6 +45,10 @@ export type ConfigContext = {
   persistVoiceRuntime?: (runtimeName: string) => void;
   /** Callback to clear the voice runtime override. */
   clearVoiceRuntime?: () => void;
+  /** Callback to persist the fast-tier runtime name to overrides. */
+  persistFastRuntime?: (runtimeName: string) => void;
+  /** Callback to clear the fast-tier runtime override. */
+  clearFastRuntime?: () => void;
   /** Env-default model string for each role, used by modelReset to revert live state. */
   envDefaults?: Partial<Record<ModelRole, string>>;
   /** Tracks which roles have active overrides (loaded from the overrides file). */
