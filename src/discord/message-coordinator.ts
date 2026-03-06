@@ -838,6 +838,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           paFilePaths: ctx.paFilePaths,
           apiCheckTimeoutMs: ctx.apiCheckTimeoutMs,
           activeProviders: ctx.activeProviders,
+          coldStorageChunkCount: ctx.coldStorageChunkCount ?? null,
         });
         const report = renderStatusReport(snapshot, params.botDisplayName);
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });

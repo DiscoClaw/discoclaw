@@ -67,6 +67,8 @@ export type StatusCommandContext = {
   sharedTaskStore: TaskStore | null;
   /** Set of runtime provider IDs that are actively configured (e.g. 'claude', 'openai'). */
   activeProviders?: Set<string>;
+  /** Precomputed cold storage chunk count; undefined when cold storage is disabled. */
+  coldStorageChunkCount?: number;
 };
 
 export type StatusCronEntry = {
@@ -87,6 +89,7 @@ export type StatusSnapshot = {
   openTaskCount: number;
   durableItemCount: number;
   rollingSummaryCharCount: number;
+  coldStorageChunkCount: number | null;
   apiChecks: CredentialCheckResult[];
   paFiles: StatusPaFile[];
 };
@@ -122,6 +125,8 @@ export type CollectStatusOpts = {
   apiCheckTimeoutMs?: number;
   /** Set of runtime provider IDs that are actively configured. */
   activeProviders?: Set<string>;
+  /** Cold storage chunk count; null when cold storage is disabled. */
+  coldStorageChunkCount: number | null;
 };
 
 /**
@@ -240,6 +245,7 @@ export async function collectStatusSnapshot(opts: CollectStatusOpts): Promise<St
     openTaskCount: opts.taskStore?.list().length ?? 0,
     durableItemCount,
     rollingSummaryCharCount,
+    coldStorageChunkCount: opts.coldStorageChunkCount,
     apiChecks,
     paFiles,
   };
@@ -315,6 +321,13 @@ export function renderStatusReport(snapshot: StatusSnapshot, botDisplayName = 'D
   lines.push(
     `Memory: durable=${snapshot.durableItemCount} items, summaries=${snapshot.rollingSummaryCharCount} chars`,
   );
+
+  // Cold storage
+  if (snapshot.coldStorageChunkCount !== null) {
+    lines.push(`Cold storage: ${snapshot.coldStorageChunkCount} chunks`);
+  } else {
+    lines.push('Cold storage: off');
+  }
 
   // API connectivity
   const apiParts = snapshot.apiChecks.map((r) => {

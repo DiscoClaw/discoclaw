@@ -19,6 +19,7 @@ function makeSnapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     openTaskCount: 0,
     durableItemCount: 0,
     rollingSummaryCharCount: 0,
+    coldStorageChunkCount: null,
     apiChecks: [],
     paFiles: [],
     ...overrides,
@@ -123,6 +124,16 @@ describe('renderStatusReport', () => {
       makeSnapshot({ durableItemCount: 42, rollingSummaryCharCount: 1234 }),
     );
     expect(out).toContain('Memory: durable=42 items, summaries=1234 chars');
+  });
+
+  it('renders cold storage chunk count when present', () => {
+    const out = renderStatusReport(makeSnapshot({ coldStorageChunkCount: 500 }));
+    expect(out).toContain('Cold storage: 500 chunks');
+  });
+
+  it('renders cold storage off when null', () => {
+    const out = renderStatusReport(makeSnapshot({ coldStorageChunkCount: null }));
+    expect(out).toContain('Cold storage: off');
   });
 
   it('renders API check results', () => {
@@ -243,6 +254,7 @@ describe('collectStatusSnapshot', () => {
       summaryDataDir: null,
       discordToken: 'test-token',
       paFilePaths: [],
+      coldStorageChunkCount: null,
       ...overrides,
     };
   }
@@ -416,5 +428,15 @@ describe('collectStatusSnapshot', () => {
     expect(credentialCheck.checkOpenAiKey).toHaveBeenCalled();
     expect(credentialCheck.checkOpenRouterKey).toHaveBeenCalled();
     expect(snap.apiChecks).toHaveLength(3);
+  });
+
+  it('passes coldStorageChunkCount through to snapshot', async () => {
+    const snap = await collectStatusSnapshot(baseOpts({ coldStorageChunkCount: 42 }));
+    expect(snap.coldStorageChunkCount).toBe(42);
+  });
+
+  it('passes coldStorageChunkCount null through as null', async () => {
+    const snap = await collectStatusSnapshot(baseOpts({ coldStorageChunkCount: null }));
+    expect(snap.coldStorageChunkCount).toBeNull();
   });
 });
