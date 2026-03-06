@@ -1,6 +1,6 @@
 # AGENTS.md - Your Rules & Preferences
 
-This file is yours. Discoclaw will never overwrite it.
+This file is yours. Discoclaw always preserves it intact.
 
 Default system instructions are injected at runtime from a tracked
 repository layer, not from a workspace-managed file.
@@ -14,7 +14,7 @@ security policy always has highest precedence.
 When the user tells you to always/never do something, put it in the right place:
 
 - **Durable memory** = facts about the world. "User prefers X", "the project uses Y", "Person Z is their brother." Things that are *true*.
-- **Agent instructions (AGENTS.md)** = rules for how you behave. "Always use tool X", "never do Y without asking", "follow this workflow." Things you should *do*.
+- **Agent instructions (AGENTS.md)** = rules for how you behave. "Always use tool X", "always confirm before doing Y", "follow this workflow." Things you should *do*.
 
 The test: "Is this about what *is*, or what I should *do*?" Facts go in memory. Rules go in instructions.
 
