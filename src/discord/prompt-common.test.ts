@@ -1248,7 +1248,7 @@ describe('buildColdStoragePromptSection', () => {
   it('returns empty string when query is empty', async () => {
     const fakeSubsystem = {
       store: {} as any,
-      embeddings: { dimensions: 4, embed: vi.fn() },
+      embeddings: { dimensions: 4, embed: vi.fn<() => Promise<Float32Array[]>>() },
       close: vi.fn(),
     };
     const result = await buildColdStoragePromptSection({
@@ -1262,7 +1262,7 @@ describe('buildColdStoragePromptSection', () => {
   it('returns empty string when channelFilter excludes current channel', async () => {
     const fakeSubsystem = {
       store: {} as any,
-      embeddings: { dimensions: 4, embed: vi.fn() },
+      embeddings: { dimensions: 4, embed: vi.fn<() => Promise<Float32Array[]>>() },
       close: vi.fn(),
     };
     const result = await buildColdStoragePromptSection({
@@ -1315,7 +1315,7 @@ describe('buildColdStoragePromptSection', () => {
       store: { search: vi.fn() } as any,
       embeddings: {
         dimensions: 4,
-        embed: vi.fn(() => new Promise(() => {
+        embed: vi.fn((): Promise<Float32Array[]> => new Promise(() => {
           // Never resolves — simulates a hung API
         })),
       },
