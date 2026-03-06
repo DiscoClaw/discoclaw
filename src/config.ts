@@ -533,6 +533,12 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const primaryRuntime = parseRuntimeName(env, 'PRIMARY_RUNTIME') ?? 'claude';
   const fastRuntime = parseRuntimeName(env, 'DISCOCLAW_FAST_RUNTIME');
+  if (fastRuntime) {
+    warnings.push(
+      "DISCOCLAW_FAST_RUNTIME is deprecated — use '!models set fast <model>' instead. " +
+      'The env var still works for initial startup but is ignored by !models reset.',
+    );
+  }
   const forgeDrafterRuntime = parseRuntimeName(env, 'FORGE_DRAFTER_RUNTIME');
   const forgeAuditorRuntime = parseRuntimeName(env, 'FORGE_AUDITOR_RUNTIME');
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');

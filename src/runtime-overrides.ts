@@ -4,6 +4,7 @@ import path from 'node:path';
 export type RuntimeOverrides = {
   ttsVoice?: string;
   voiceRuntime?: string;
+  fastRuntime?: string;
 };
 
 const OVERRIDES_FILENAME = 'runtime-overrides.json';
@@ -54,6 +55,7 @@ export async function loadOverrides(
 
   if (typeof obj['ttsVoice'] === 'string') overrides.ttsVoice = obj['ttsVoice'];
   if (typeof obj['voiceRuntime'] === 'string') overrides.voiceRuntime = obj['voiceRuntime'];
+  if (typeof obj['fastRuntime'] === 'string') overrides.fastRuntime = obj['fastRuntime'];
   return overrides;
 }
 

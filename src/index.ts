@@ -872,7 +872,7 @@ if (!runtime) {
   process.exit(1);
 }
 const limitedRuntime = runtime;
-const fastRuntime = resolveFastRuntime({
+let fastRuntime = resolveFastRuntime({
   primaryRuntimeName,
   primaryRuntime: limitedRuntime,
   fastRuntime: fastRuntimeName,
@@ -1005,6 +1005,18 @@ if (overrides.voiceRuntime) {
     log.warn(
       { voiceRuntime: overrides.voiceRuntime, availableRuntimes: runtimeRegistry.list() },
       'runtime-overrides: voiceRuntime is not a registered runtime; ignoring',
+    );
+  }
+}
+if (overrides.fastRuntime) {
+  const fastRt = runtimeRegistry.get(overrides.fastRuntime);
+  if (fastRt) {
+    fastRuntime = fastRt;
+    log.info({ fastRuntime: overrides.fastRuntime }, 'runtime-overrides: fast runtime override applied');
+  } else {
+    log.warn(
+      { fastRuntime: overrides.fastRuntime, availableRuntimes: runtimeRegistry.list() },
+      'runtime-overrides: fastRuntime is not a registered runtime; ignoring',
     );
   }
 }
@@ -1561,6 +1573,7 @@ if (taskCtx) {
       runtimeRegistry,
       runtimeName: primaryRuntimeName,
       voiceRuntimeName: voiceModelRef.runtimeName,
+      fastRuntimeName: overrides.fastRuntime ?? fastRuntimeName,
       // Tier-based defaults — used by !models reset to revert to portable tiers.
       envDefaults: { ...MODEL_DEFAULTS } as Record<ModelRole, string>,
       overrideSources,
@@ -1576,6 +1589,18 @@ if (taskCtx) {
         delete currentOverridesState.voiceRuntime;
         saveOverrides(overridesPath, currentOverridesState).catch((err) =>
           log.warn({ err }, 'runtime-overrides: voice runtime clear failed'),
+        );
+      },
+      persistFastRuntime: (runtimeName: string): void => {
+        currentOverridesState.fastRuntime = runtimeName;
+        saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+          log.warn({ err, runtimeName }, 'runtime-overrides: fast runtime save failed'),
+        );
+      },
+      clearFastRuntime: (): void => {
+        delete currentOverridesState.fastRuntime;
+        saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+          log.warn({ err }, 'runtime-overrides: fast runtime clear failed'),
         );
       },
     };
