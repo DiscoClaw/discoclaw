@@ -127,8 +127,8 @@ describe('modelShow', () => {
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // 'capable' resolves to 'sonnet' for claude_code
-    expect(result.summary).toContain('sonnet');
+    // 'capable' resolves to 'claude-opus-4-6' for claude_code
+    expect(result.summary).toContain('claude-opus-4-6');
     // 'fast' resolves to 'haiku' for claude_code
     expect(result.summary).toContain('haiku');
   });
@@ -353,7 +353,7 @@ describe('modelSet', () => {
     const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'capable' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.summary).toContain('resolves to sonnet');
+    expect(result.summary).toContain('resolves to claude-opus-4-6');
   });
 
   it('persistOverride receives the tier string, not the resolved model', () => {
@@ -364,7 +364,7 @@ describe('modelSet', () => {
     expect(result.ok).toBe(true);
     expect(persisted).toHaveLength(1);
     expect(persisted[0].role).toBe('chat');
-    expect(persisted[0].model).toBe('capable'); // tier string, not 'sonnet'
+    expect(persisted[0].model).toBe('capable'); // tier string, not resolved model
   });
 
   it('fast role succeeds when cronCtx and taskCtx are missing', () => {
@@ -713,7 +713,7 @@ describe('modelShow voice runtime display', () => {
   });
 
   it('resolves tier names against voice runtime ID, not chat runtime', () => {
-    // Voice on gemini with tier 'capable' should resolve to gemini-2.5-pro, not sonnet
+    // Voice on gemini with tier 'capable' should resolve to gemini-2.5-pro, not claude_code's capable
     const ctx = makeCtx({ voiceModelCtx: { model: 'capable', runtime: geminiRuntime, runtimeName: 'gemini' } });
     ctx.voiceRuntimeName = 'gemini';
     const result = executeConfigAction({ type: 'modelShow' }, ctx);

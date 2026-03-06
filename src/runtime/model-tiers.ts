@@ -15,7 +15,7 @@ export function isModelTier(s: string): s is ModelTier {
  * Empty string = adapter-default sentinel (adapter uses its own defaultModel).
  */
 const defaults: Record<string, Record<ModelTier, string>> = {
-  claude_code: { fast: 'haiku', capable: 'sonnet', deep: 'claude-opus-4-6' },
+  claude_code: { fast: 'haiku', capable: 'claude-opus-4-6', deep: 'claude-opus-4-6' },
   gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro', deep: 'gemini-2.5-pro' },
   openai: { fast: 'gpt-5-mini', capable: 'gpt-5.4', deep: 'gpt-5.4-pro' },
   codex: { fast: 'gpt-5.1-codex-mini', capable: 'gpt-5.4', deep: 'gpt-5.4' },
@@ -86,7 +86,7 @@ export function resolveModel(tierOrModel: string, runtimeId: RuntimeId): string 
  * Only runtimes / tiers that need an explicit effort are listed.
  */
 const reasoningEffortDefaults: Record<string, Partial<Record<ModelTier, string>>> = {
-  claude_code: { capable: 'medium', deep: 'high' },
+  claude_code: { capable: 'high', deep: 'high' },
   codex: { capable: 'high', deep: 'xhigh' },
 };
 
