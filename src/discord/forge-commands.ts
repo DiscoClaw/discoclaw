@@ -256,7 +256,7 @@ export function buildDrafterPrompt(
     '- Set the status to DRAFT.',
     '- DO NOT echo the template verbatim — every section must contain substantive analysis of the actual codebase.',
     '- The plan header (ID, Task, Created, Status, Project) is managed by the system — do not include it. Start your output with `# Plan:` followed by the plan title.',
-    '- Output the complete plan markdown and nothing else.',
+    '- Output the complete plan markdown and nothing else — no preamble, no commentary, no thinking-out-loud. The very first line of your response must be `# Plan:`. Any text before or outside the plan structure will corrupt the plan file.',
     '',
     '## Expected Output Structure',
     '',

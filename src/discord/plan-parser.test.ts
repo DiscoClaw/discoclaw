@@ -41,6 +41,32 @@ none`;
     expect(getSection(parsed, 'Not a section')).toBe('');
   });
 
+  it('stops parsing metadata at --- separator (duplicate Status lines)', () => {
+    const content = `# Plan: Duplicate status test
+
+**ID:** plan-426
+**Task:** ws-1161
+**Status:** APPROVED
+**Project:** discoclaw
+
+---
+
+Leaked drafter reasoning here.
+
+# Plan: Duplicate status test
+
+**Status:** DRAFT
+
+## Objective
+
+Do the thing.
+`;
+    const parsed = parsePlan(content);
+    expect(parsed.metadata.get('Status')).toBe('APPROVED');
+    expect(parsed.metadata.get('ID')).toBe('plan-426');
+    expect(parsed.title).toBe('Duplicate status test');
+  });
+
   it('extracts latest verdict from modern verdict lines', () => {
     const verdict = getLatestAuditVerdictFromSection(`
 ### Review 1
