@@ -206,6 +206,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Releasing / npm publish guide | `docs/releasing.md` | **done** |
 | Voice setup guide | `docs/voice.md` | **done** |
 | Cron patterns cookbook | `docs/cron-patterns.md` | **done** |
+| Prompt ordering (primacy/recency zone optimization) | `docs/prompt-ordering.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | **done** |
 
