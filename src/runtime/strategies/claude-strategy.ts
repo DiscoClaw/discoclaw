@@ -148,11 +148,11 @@ export const claudeStrategy: CliAdapterStrategy = {
     return args;
   },
 
-  buildEnv(ctx: CliInvokeContext): Record<string, string> | undefined {
+  buildEnv(ctx: CliInvokeContext): Record<string, string | undefined> {
     const effort = ctx.params.reasoningEffort;
-    if (typeof effort !== 'string' || effort.length === 0) return undefined;
     return {
-      CLAUDE_CODE_EFFORT_LEVEL: effort,
+      // Clear any inherited parent setting when this turn does not specify effort.
+      CLAUDE_CODE_EFFORT_LEVEL: typeof effort === 'string' && effort.length > 0 ? effort : undefined,
     };
   },
 

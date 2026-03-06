@@ -123,7 +123,7 @@ export interface CliAdapterStrategy {
   sanitizeError?(raw: string, binary: string): string;
 
   /** Build subprocess env var overrides for this invocation. */
-  buildEnv?(ctx: CliInvokeContext, opts: UniversalCliOpts): Record<string, string> | undefined;
+  buildEnv?(ctx: CliInvokeContext, opts: UniversalCliOpts): Record<string, string | undefined> | undefined;
 
   // --- Multi-turn (process pool or session resume) ---
 

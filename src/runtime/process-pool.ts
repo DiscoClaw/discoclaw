@@ -31,11 +31,17 @@ export class ProcessPool {
 
     const existing = this.pool.get(sessionKey);
     if (existing?.state === 'idle') {
+      if (!sameEnvOverrides(existing.envOverrides, processOpts.envOverrides)) {
+        this.log?.debug({ sessionKey }, 'process-pool: env overrides changed, respawning process');
+        this.pool.delete(sessionKey);
+        existing.kill();
+      } else {
       this.log?.debug({ sessionKey }, 'process-pool: reusing existing process');
       // True LRU: touch on access (Map preserves insertion order).
       this.pool.delete(sessionKey);
       this.pool.set(sessionKey, existing);
       return existing;
+      }
     }
 
     // Remove dead process if present.
@@ -114,4 +120,17 @@ export class ProcessPool {
     }
     return false;
   }
+}
+
+function sameEnvOverrides(
+  left?: Record<string, string | undefined>,
+  right?: Record<string, string | undefined>,
+): boolean {
+  const leftKeys = Object.keys(left ?? {});
+  const rightKeys = Object.keys(right ?? {});
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (const key of leftKeys) {
+    if ((left ?? {})[key] !== (right ?? {})[key]) return false;
+  }
+  return true;
 }

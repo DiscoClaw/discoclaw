@@ -18,7 +18,7 @@ export type LongRunningProcessOpts = {
   claudeBin: string;
   model: string;
   cwd: string;
-  envOverrides?: Record<string, string>;
+  envOverrides?: Record<string, string | undefined>;
   dangerouslySkipPermissions?: boolean;
   strictMcpConfig?: boolean;
   fallbackModel?: string;
@@ -88,6 +88,10 @@ export class LongRunningProcess {
 
   get isAlive(): boolean {
     return this._state === 'idle' || this._state === 'busy';
+  }
+
+  get envOverrides(): Record<string, string | undefined> | undefined {
+    return this.opts.envOverrides;
   }
 
   /**

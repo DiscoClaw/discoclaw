@@ -209,7 +209,7 @@ describe('Claude CLI runtime adapter (smoke)', () => {
     }
   });
 
-  it('omits CLAUDE_CODE_EFFORT_LEVEL from the subprocess env when reasoningEffort is absent', async () => {
+  it('clears CLAUDE_CODE_EFFORT_LEVEL from the subprocess env when reasoningEffort is absent', async () => {
     const execaMock = execa as any;
     execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
     const previousEffort = process.env.CLAUDE_CODE_EFFORT_LEVEL;
@@ -227,7 +227,35 @@ describe('Claude CLI runtime adapter (smoke)', () => {
       }
 
       const env = execaMock.mock.calls[0]?.[2]?.env;
-      expect(env).not.toHaveProperty('CLAUDE_CODE_EFFORT_LEVEL');
+      expect(env).toHaveProperty('CLAUDE_CODE_EFFORT_LEVEL', undefined);
+    } finally {
+      if (previousEffort === undefined) {
+        delete process.env.CLAUDE_CODE_EFFORT_LEVEL;
+      } else {
+        process.env.CLAUDE_CODE_EFFORT_LEVEL = previousEffort;
+      }
+    }
+  });
+
+  it('clears inherited CLAUDE_CODE_EFFORT_LEVEL when reasoningEffort is absent', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+    const previousEffort = process.env.CLAUDE_CODE_EFFORT_LEVEL;
+    process.env.CLAUDE_CODE_EFFORT_LEVEL = 'high';
+
+    try {
+      const rt = createClaudeCliRuntime({
+        claudeBin: 'claude',
+        dangerouslySkipPermissions: false,
+        outputFormat: 'text',
+      });
+
+      for await (const _evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+        // drain
+      }
+
+      const env = execaMock.mock.calls[0]?.[2]?.env;
+      expect(env).toHaveProperty('CLAUDE_CODE_EFFORT_LEVEL', undefined);
     } finally {
       if (previousEffort === undefined) {
         delete process.env.CLAUDE_CODE_EFFORT_LEVEL;
