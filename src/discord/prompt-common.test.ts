@@ -142,6 +142,8 @@ describe('inlineContextFilesWithMeta', () => {
 
 describe('buildPromptSectionEstimates', () => {
   const allKeys = [
+    'rootPolicy',
+    'trackedDefaults',
     'soul',
     'identity',
     'user',
@@ -156,18 +158,31 @@ describe('buildPromptSectionEstimates', () => {
     'actionsReference',
   ] as const;
 
-  it('includes all section keys with zeroed estimates when content is absent', () => {
+  it('includes all section keys with zeroed estimates when content is absent (except preamble)', () => {
     const result = buildPromptSectionEstimates({ contextSections: [] });
 
-    for (const key of allKeys) {
+    // rootPolicy and trackedDefaults are always populated from module constants.
+    expect(result.sections.rootPolicy).toEqual({
+      chars: ROOT_POLICY.length,
+      estTokens: Math.ceil(ROOT_POLICY.length / 4),
+      included: true,
+    });
+    expect(result.sections.trackedDefaults).toEqual({
+      chars: TRACKED_DEFAULTS_PREAMBLE.length,
+      estTokens: Math.ceil(TRACKED_DEFAULTS_PREAMBLE.length / 4),
+      included: true,
+    });
+
+    const nonPreambleKeys = allKeys.filter((k) => k !== 'rootPolicy' && k !== 'trackedDefaults');
+    for (const key of nonPreambleKeys) {
       expect(result.sections[key]).toEqual({
         chars: 0,
         estTokens: 0,
         included: false,
       });
     }
-    expect(result.totalChars).toBe(0);
-    expect(result.totalEstTokens).toBe(0);
+    expect(result.totalChars).toBe(ROOT_POLICY.length + TRACKED_DEFAULTS_PREAMBLE.length);
+    expect(result.totalEstTokens).toBe(Math.ceil((ROOT_POLICY.length + TRACKED_DEFAULTS_PREAMBLE.length) / 4));
   });
 
   it('classifies context sections, derives channelContext from path metadata, and totals estimates', () => {
@@ -191,6 +206,8 @@ describe('buildPromptSectionEstimates', () => {
       actionsReferenceSection: 'aaaaaa',
     });
 
+    expect(result.sections.rootPolicy.chars).toBe(ROOT_POLICY.length);
+    expect(result.sections.trackedDefaults.chars).toBe(TRACKED_DEFAULTS_PREAMBLE.length);
     expect(result.sections.soul.chars).toBe(4);
     expect(result.sections.identity.chars).toBe(5);
     expect(result.sections.user.chars).toBe(6);
@@ -203,8 +220,10 @@ describe('buildPromptSectionEstimates', () => {
     expect(result.sections.shortTermMemory.chars).toBe(5);
     expect(result.sections.tasks.chars).toBe(5); // taskSection + openTasksSection
     expect(result.sections.actionsReference.chars).toBe(6);
-    expect(result.totalChars).toBe(73);
-    expect(result.totalEstTokens).toBe(19);
+    const contextChars = 73;
+    const preambleChars = ROOT_POLICY.length + TRACKED_DEFAULTS_PREAMBLE.length;
+    expect(result.totalChars).toBe(contextChars + preambleChars);
+    expect(result.totalEstTokens).toBe(Math.ceil((contextChars + preambleChars) / 4));
   });
 
   it('reflects shortTermSection in the shortTermMemory estimate', () => {

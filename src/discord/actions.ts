@@ -859,28 +859,20 @@ function renderActionSchemaCategorySection(category: ActionSchemaCategory): stri
 
 function discordActionsIntroSection(): string {
   return `## Discord Actions
-
-Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance (even if only a subset of sub-categories are available). You can perform Discord server actions by including structured action blocks in your response.`;
+Perform Discord server actions by including \`<discord-action>\` JSON blocks in your response.`;
 }
 
 function discordActionsRulesSection(displayName: string): string {
   return `### Rules
-- Only the action types listed above are supported.
-- Never emit an action with empty, placeholder, or missing values for required parameters. If you don't have the value (e.g., no messageId for react), skip the action entirely.
-- Confirm with the user before performing destructive actions (delete, kick, ban, timeout).
-- Action blocks are removed from the displayed message; results are appended automatically.
-- Results from information-gathering actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow, voiceStatus, deferList) are automatically sent back to you for further analysis. You can emit a query action and continue reasoning in the follow-up.
-- Include all needed actions in a single response when possible (e.g., a channelList and multiple channelDelete blocks together).
-- Multiple actions of the same type are fully supported — all will be executed sequentially. Include as many same-type actions as needed.
+- Only action types listed above are supported. Never emit actions with empty/placeholder/missing required parameters — skip instead.
+- Confirm with the user before destructive actions (delete, kick, ban, timeout).
+- Action blocks are stripped from displayed output; results appended automatically.
+- Actions ending in List, Show, Info, Status, or prefixed with fetch/read/search are query actions — results are sent back for follow-up analysis.
+- Include all needed actions in one response. Multiple same-type actions are supported and executed sequentially.
 
 ### Permissions
-These actions require the bot to have appropriate permissions in this Discord server (e.g. Manage Channels, Manage Roles, Moderate Members). These are server-level role permissions, not Discord Developer Portal settings.
-
-If an action fails with a "Missing Permissions" or "Missing Access" error, tell the user:
-1. Open **Server Settings → Roles**.
-2. Find the ${displayName} bot's role (usually named after the bot).
-3. Enable the required permission under the role's permissions.
-4. The bot may need to be re-invited with the "moderator" permission profile if the role wasn't granted at invite time.`;
+Bot requires appropriate server-level role permissions (e.g. Manage Channels, Manage Roles, Moderate Members).
+If "Missing Permissions" errors occur, tell the user to check **Server Settings → Roles** and enable the required permission on the ${displayName} bot's role.`;
 }
 
 function deferredSelfInvocationSection(): string {

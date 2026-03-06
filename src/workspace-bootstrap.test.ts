@@ -582,39 +582,15 @@ describe('template content — SYSTEM_DEFAULTS.md', () => {
     expect(systemDefaults).toContain('git push');
   });
 
-  it('contains plan-audit-implement workflow', async () => {
-    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
-    expect(systemDefaults).toContain('Plan-Audit-Implement Workflow');
-    expect(systemDefaults).toContain('DRAFT');
-    expect(systemDefaults).toContain('APPROVED');
-  });
-
-  it('references TOOLS.md for forge/plan/memory action types', async () => {
-    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
-    expect(systemDefaults).toContain('See TOOLS.md');
-    expect(systemDefaults).toContain('discord-action');
-  });
-
-  it('contains Discord formatting rules', async () => {
-    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
-    expect(systemDefaults).toContain('Discord Formatting');
-    expect(systemDefaults).toContain('bullet lists in Discord');
-  });
-
-  it('contains task creation guidance', async () => {
-    systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
-    expect(systemDefaults).toContain('Task Management');
-  });
-
   it('contains git commit hash guidance', async () => {
     systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
     expect(systemDefaults).toContain('Git Commits');
     expect(systemDefaults).toContain('short commit hash');
   });
 
-  it('uses correct !memory remember syntax (not !memory add)', async () => {
+  it('does not contain memory commands (moved to pa.md)', async () => {
     systemDefaults ??= await fs.readFile(path.join(templatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
-    expect(systemDefaults).toContain('!memory remember');
+    expect(systemDefaults).not.toContain('!memory remember');
     expect(systemDefaults).not.toContain('!memory add');
   });
 });
@@ -675,13 +651,11 @@ describe('template content — TOOLS.md', () => {
     expect(tools).toContain('agent-browser');
   });
 
-  it('documents all 5 browser modes (WebFetch, Playwright headless/headed, CDP headless/headed)', async () => {
+  it('documents browser automation tiers (WebFetch, Playwright, CDP)', async () => {
     tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
     expect(tools).toContain('WebFetch');
-    expect(tools).toContain('Playwright headless');
-    expect(tools).toContain('Playwright headed');
-    expect(tools).toContain('CDP headless');
-    expect(tools).toContain('CDP headed');
+    expect(tools).toContain('Playwright');
+    expect(tools).toContain('CDP');
   });
 
   it('contains service operations section', async () => {
@@ -695,38 +669,9 @@ describe('template content — TOOLS.md', () => {
     expect(tools).toContain('Plan-Audit-Implement Workflow');
   });
 
-  // --- All 13 Discord action types ---
-
-  it('documents all 4 forge action types', async () => {
+  it('contains discord action pointer stub referencing actions reference', async () => {
     tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
-    for (const action of ['forgeCreate', 'forgeResume', 'forgeStatus', 'forgeCancel']) {
-      expect(tools).toContain(action);
-    }
-  });
-
-  it('documents all 6 plan action types', async () => {
-    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
-    for (const action of ['planList', 'planShow', 'planApprove', 'planClose', 'planCreate', 'planRun']) {
-      expect(tools).toContain(action);
-    }
-  });
-
-  it('documents all 3 memory action types', async () => {
-    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
-    for (const action of ['memoryRemember', 'memoryForget', 'memoryShow']) {
-      expect(tools).toContain(action);
-    }
-  });
-
-  it('contains discord-action block syntax examples', async () => {
-    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
-    expect(tools).toContain('<discord-action>');
-    expect(tools).toContain('"type"');
-  });
-
-  it('warns against sending commands as text messages', async () => {
-    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
-    expect(tools).toContain("bot-sent messages don't trigger command handlers");
+    expect(tools).toContain('discord-action');
   });
 
   it('documents restart convenience commands', async () => {
@@ -780,23 +725,14 @@ describe('scaffolded workspace contains operational content', () => {
     await expect(fs.access(path.join(workspace, 'DISCOCLAW.md'))).rejects.toThrow();
   });
 
-  it('fresh scaffold produces TOOLS.md with all 30 action types', async () => {
+  it('fresh scaffold produces TOOLS.md with discord action pointer stub', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
     dirs.push(workspace);
 
     await ensureWorkspaceBootstrapFiles(workspace);
 
     const tools = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
-    const allActionTypes = [
-      'forgeCreate', 'forgeResume', 'forgeStatus', 'forgeCancel',
-      'planList', 'planShow', 'planApprove', 'planClose', 'planCreate', 'planRun',
-      'memoryRemember', 'memoryForget', 'memoryShow',
-      'taskCreate', 'taskUpdate', 'taskClose', 'taskShow', 'taskList', 'taskSync', 'tagMapReload',
-      'cronCreate', 'cronUpdate', 'cronList', 'cronShow', 'cronPause', 'cronResume', 'cronDelete', 'cronTrigger', 'cronSync', 'cronTagMapReload',
-    ];
-    for (const action of allActionTypes) {
-      expect(tools).toContain(action);
-    }
+    expect(tools).toContain('discord-action');
   });
 
   it('fresh scaffold produces TOOLS.md with browser automation and service ops', async () => {
@@ -809,5 +745,115 @@ describe('scaffolded workspace contains operational content', () => {
     expect(tools).toContain('Browser Automation');
     expect(tools).toContain('Service Operations');
     expect(tools).toContain('Plan-Audit-Implement Workflow');
+  });
+});
+
+// --- TOOLS.md stale-content migration tests ---
+
+describe('TOOLS.md migration', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const d of dirs) await fs.rm(d, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  /** Content that contains the stale markers (old system-generated action reference). */
+  const STALE_TOOLS_CONTENT = [
+    '# TOOLS.md - Local Tools & Environment',
+    '',
+    '## Browser Automation (agent-browser)',
+    '',
+    'Some browser docs here.',
+    '',
+    '## Discord Action Types',
+    '',
+    'Use these as `<discord-action>` blocks.',
+    '',
+    '### Forge Actions',
+    '',
+    '**forgeCreate** — Start a new forge run.',
+    '',
+    '### Plan Actions',
+    '',
+    '**planList** — List all plans.',
+  ].join('\n');
+
+  /** Custom TOOLS.md without the stale markers — should not be touched. */
+  const CUSTOM_TOOLS_CONTENT = [
+    '# TOOLS.md - My Custom Tools',
+    '',
+    '## My Custom Section',
+    '',
+    'This file has been customized by the user.',
+  ].join('\n');
+
+  it('migrates stale TOOLS.md: backs up and replaces with current template', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-tools-migrate-'));
+    dirs.push(workspace);
+
+    // Write stale content with both markers present.
+    await fs.writeFile(path.join(workspace, 'TOOLS.md'), STALE_TOOLS_CONTENT, 'utf-8');
+
+    const log = mockLog();
+    await ensureWorkspaceBootstrapFiles(workspace, log as any);
+
+    // Backup should exist with original stale content.
+    const backup = await fs.readFile(path.join(workspace, 'TOOLS.md.bak'), 'utf-8');
+    expect(backup).toBe(STALE_TOOLS_CONTENT);
+
+    // TOOLS.md should now match the current template.
+    const templateContent = await fs.readFile(
+      path.join(__dirname, '..', 'templates', 'workspace', 'TOOLS.md'),
+      'utf-8',
+    );
+    const replaced = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
+    expect(replaced).toBe(templateContent);
+
+    // Both log messages should have fired.
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceCwd: workspace }),
+      expect.stringContaining('backed up stale TOOLS.md'),
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceCwd: workspace }),
+      expect.stringContaining('replaced stale TOOLS.md with current template'),
+    );
+  });
+
+  it('leaves customized TOOLS.md without stale marker untouched', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-tools-migrate-'));
+    dirs.push(workspace);
+
+    await fs.writeFile(path.join(workspace, 'TOOLS.md'), CUSTOM_TOOLS_CONTENT, 'utf-8');
+
+    const log = mockLog();
+    await ensureWorkspaceBootstrapFiles(workspace, log as any);
+
+    // TOOLS.md should be unchanged.
+    const content = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
+    expect(content).toBe(CUSTOM_TOOLS_CONTENT);
+
+    // No backup should exist.
+    await expect(fs.access(path.join(workspace, 'TOOLS.md.bak'))).rejects.toThrow();
+
+    // No migration log messages.
+    expect(
+      log.info.mock.calls.some(([, msg]) => String(msg).includes('backed up stale TOOLS.md')),
+    ).toBe(false);
+  });
+
+  it('does not migrate when only one marker is present', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-tools-migrate-'));
+    dirs.push(workspace);
+
+    // Has the heading but NOT the subheading.
+    const partialContent = '# TOOLS.md\n\n## Discord Action Types\n\nCustom action docs.';
+    await fs.writeFile(path.join(workspace, 'TOOLS.md'), partialContent, 'utf-8');
+
+    await ensureWorkspaceBootstrapFiles(workspace);
+
+    const content = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
+    expect(content).toBe(partialContent);
+    await expect(fs.access(path.join(workspace, 'TOOLS.md.bak'))).rejects.toThrow();
   });
 });

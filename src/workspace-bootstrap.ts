@@ -34,6 +34,13 @@ const LEGACY_AGENTS_MIN_MARKER_HITS = 2;
 /** Marker text present in the template IDENTITY.md but removed during onboarding. */
 const IDENTITY_TEMPLATE_MARKER = '*(pick something you like)*';
 
+/**
+ * Stale TOOLS.md markers: the old full action-type reference that has been
+ * replaced by a pointer stub. Both markers must be present to trigger migration.
+ */
+const STALE_TOOLS_MARKER_HEADING = '## Discord Action Types';
+const STALE_TOOLS_MARKER_SUBHEADING = '### Forge Actions';
+
 type BootstrapLog = {
   info: (obj: Record<string, unknown>, msg: string) => void;
   warn: (obj: Record<string, unknown>, msg: string) => void;
@@ -80,6 +87,39 @@ async function warnIfLegacyDiscoclawPresent(workspaceCwd: string, log?: Bootstra
     'workspace:bootstrap legacy DISCOCLAW.md detected — file is no longer managed and was left untouched. ' +
       'Default instructions are injected at runtime; keep user overrides in AGENTS.md.',
   );
+}
+
+/**
+ * One-time migration: when workspace TOOLS.md contains the stale full
+ * action-type reference (system-generated, not user prose), back it up
+ * and replace with the current template.
+ */
+async function migrateStaleToolsMd(
+  workspaceCwd: string,
+  templatesDir: string,
+  log?: BootstrapLog,
+): Promise<void> {
+  const toolsPath = path.join(workspaceCwd, 'TOOLS.md');
+  let content = '';
+  try {
+    content = await fs.readFile(toolsPath, 'utf-8');
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+
+  // Only migrate when both markers are present — highly specific to system-generated content.
+  if (!content.includes(STALE_TOOLS_MARKER_HEADING) || !content.includes(STALE_TOOLS_MARKER_SUBHEADING)) return;
+
+  // Back up existing file.
+  const backupPath = path.join(workspaceCwd, 'TOOLS.md.bak');
+  await fs.writeFile(backupPath, content, 'utf-8');
+  log?.info({ workspaceCwd }, 'workspace:bootstrap backed up stale TOOLS.md to TOOLS.md.bak');
+
+  // Overwrite with current template.
+  const templatePath = path.join(templatesDir, 'TOOLS.md');
+  await fs.copyFile(templatePath, toolsPath);
+  log?.info({ workspaceCwd }, 'workspace:bootstrap replaced stale TOOLS.md with current template');
 }
 
 /**
@@ -220,6 +260,9 @@ export async function ensureWorkspaceBootstrapFiles(
 
   await warnIfLegacyDiscoclawPresent(workspaceCwd, log);
   await warnIfLegacyAgentsContainsSystemInstructions(workspaceCwd, log);
+
+  // One-time TOOLS.md migration: replace stale system-generated content with current template.
+  await migrateStaleToolsMd(workspaceCwd, templatesDir, log);
 
   if (created.length > 0) {
     log?.info({ created, workspaceCwd }, 'workspace:bootstrap scaffolded PA files');

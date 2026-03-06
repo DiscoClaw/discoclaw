@@ -2014,6 +2014,7 @@ if (cronEnabled && effectiveCronForum) {
     allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
     discordActionsEnabled,
     actionFlags: cronActionFlags,
+    botDisplayName,
     deferScheduler: botParams.deferScheduler,
     taskCtx,
     cronCtx,

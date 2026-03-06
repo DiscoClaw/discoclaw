@@ -52,6 +52,8 @@ export function estimateTokensFromChars(chars: number): number {
 }
 
 export type PromptSectionKey =
+  | 'rootPolicy'
+  | 'trackedDefaults'
   | 'soul'
   | 'identity'
   | 'user'
@@ -81,6 +83,8 @@ export type InlinedContextSection = {
 };
 
 const PROMPT_SECTION_KEYS: PromptSectionKey[] = [
+  'rootPolicy',
+  'trackedDefaults',
   'soul',
   'identity',
   'user',
@@ -237,6 +241,8 @@ export function buildPromptSectionEstimates(input: {
   actionsReferenceSection?: string;
 }): { sections: PromptSectionEstimateMap; totalChars: number; totalEstTokens: number } {
   const charsBySection: Record<PromptSectionKey, number> = {
+    rootPolicy: ROOT_POLICY.length,
+    trackedDefaults: TRACKED_DEFAULTS_PREAMBLE.length,
     soul: 0,
     identity: 0,
     user: 0,

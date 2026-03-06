@@ -1378,3 +1378,56 @@ describe('executeCronJob cron-state extraction', () => {
     expect(capturedPrompt).toContain('"lastItem": "xyz"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Action schema injection into cron prompts
+// ---------------------------------------------------------------------------
+
+describe('executeCronJob action schema injection', () => {
+  it('injects action schema into prompt when discordActionsEnabled is true', async () => {
+    let capturedPrompt = '';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(opts: any): AsyncIterable<EngineEvent> {
+        capturedPrompt = opts.prompt;
+        yield { type: 'text_final', text: 'Done.' };
+        yield { type: 'done' };
+      },
+    };
+
+    const ctx = makeCtx({
+      runtime,
+      discordActionsEnabled: true,
+      actionFlags: makeCronActionFlags({ messaging: true }),
+    });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    expect(capturedPrompt).toContain('## Discord Actions');
+    expect(capturedPrompt).toContain('<discord-action>');
+  });
+
+  it('does not inject action schema when discordActionsEnabled is false', async () => {
+    let capturedPrompt = '';
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(opts: any): AsyncIterable<EngineEvent> {
+        capturedPrompt = opts.prompt;
+        yield { type: 'text_final', text: 'Done.' };
+        yield { type: 'done' };
+      },
+    };
+
+    const ctx = makeCtx({
+      runtime,
+      discordActionsEnabled: false,
+      actionFlags: makeCronActionFlags({ messaging: true }),
+    });
+    const job = makeJob();
+    await executeCronJob(job, ctx);
+
+    expect(capturedPrompt).not.toContain('## Discord Actions');
+  });
+});
