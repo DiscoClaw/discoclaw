@@ -51,12 +51,12 @@ describe('resolveModel', () => {
       expect(resolveModel('fast', 'codex')).toBe('gpt-5.1-codex-mini');
     });
 
-    it('resolves capable → gpt-5.3-codex', () => {
-      expect(resolveModel('capable', 'codex')).toBe('gpt-5.3-codex');
+    it('resolves capable → gpt-5.4', () => {
+      expect(resolveModel('capable', 'codex')).toBe('gpt-5.4');
     });
 
-    it('resolves deep → gpt-5.4', () => {
-      expect(resolveModel('deep', 'codex')).toBe('gpt-5.4');
+    it('resolves deep → gpt-5.4-pro', () => {
+      expect(resolveModel('deep', 'codex')).toBe('gpt-5.4-pro');
     });
   });
 
