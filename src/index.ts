@@ -442,8 +442,8 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
     const watchdog = new LongRunWatchdog({
       dataFilePath: longRunWatchdogDataPath,
       stillRunningDelayMs: longRunStillRunningDelayMs,
-      postStillRunning: async (run) => {
-        await postLongRunWatchdogNotice(run, 'Still running. I will post another update when this finishes.');
+      postStillRunning: async () => {
+        // No-op: streaming preview heartbeats make a separate "Still running" message redundant.
       },
       postFinal: async (run, meta) => {
         await postLongRunWatchdogNotice(run, buildLongRunFinalNotice(run, meta.source));
