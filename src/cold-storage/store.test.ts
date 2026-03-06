@@ -281,6 +281,26 @@ describe('ColdStorageStore', () => {
       });
       expect(results.length).toBe(2);
     });
+
+    it('filters by thread_id', () => {
+      store.insertChunk(makeInput({
+        content: 'in thread',
+        embedding: makeEmbedding(0, 0, 1, 0),
+        metadata: {
+          guild_id: 'G1',
+          channel_id: 'C1',
+          thread_id: 'T1',
+          chunk_type: 'message',
+        },
+      }));
+
+      const results = store.search({
+        embedding: makeEmbedding(1, 0, 0, 0),
+        filters: { thread_id: 'T1' },
+      });
+      expect(results.length).toBe(1);
+      expect(results[0].chunk.thread_id).toBe('T1');
+    });
   });
 
   // ── Deletion ─────────────────────────────────────────────────────
@@ -332,11 +352,13 @@ describe('ColdStorageStore', () => {
     });
   });
 
-  // ── Jump URL Construction ────────────────────────────────────────
+  // ── Jump URL in Search Results ───────────────────────────────────
 
-  describe('jump URL construction', () => {
-    it('provides sufficient metadata to build Discord jump URLs', () => {
-      const chunk = store.insertChunk(makeInput({
+  describe('jump URL in search results', () => {
+    it('includes jump_url derived from chunk metadata', () => {
+      store.insertChunk(makeInput({
+        content: 'jump url test',
+        embedding: makeEmbedding(1, 0, 0, 0),
         metadata: {
           guild_id: '100000000000000001',
           channel_id: '200000000000000001',
@@ -344,10 +366,25 @@ describe('ColdStorageStore', () => {
         },
       }));
 
-      const jumpUrl = `https://discord.com/channels/${chunk.guild_id}/${chunk.channel_id}/${chunk.message_id}`;
-      expect(jumpUrl).toBe(
+      const results = store.search({ embedding: makeEmbedding(1, 0, 0, 0), limit: 1 });
+      expect(results[0].jump_url).toBe(
         'https://discord.com/channels/100000000000000001/200000000000000001/300000000000000001',
       );
+    });
+
+    it('returns null jump_url when message_id is missing', () => {
+      store.insertChunk(makeInput({
+        content: 'no message id',
+        embedding: makeEmbedding(1, 0, 0, 0),
+        metadata: {
+          guild_id: '100000000000000001',
+          channel_id: '200000000000000001',
+          message_id: null,
+        },
+      }));
+
+      const results = store.search({ embedding: makeEmbedding(1, 0, 0, 0), limit: 1 });
+      expect(results[0].jump_url).toBeNull();
     });
   });
 
@@ -367,6 +404,24 @@ describe('ColdStorageStore', () => {
       store.insertChunk(makeInput());
       const results = store.search({});
       expect(results).toEqual([]);
+    });
+  });
+
+  // ── Extension load failure ──────────────────────────────────────────
+
+  describe('extension load failure', () => {
+    it('throws when sqlite-vec fails to load', async () => {
+      const sqliteVec = await import('sqlite-vec');
+      const loadSpy = vi.spyOn(sqliteVec, 'load').mockImplementation(() => {
+        throw new Error('Failed to load sqlite-vec extension');
+      });
+
+      try {
+        expect(() => new ColdStorageStore(':memory:', DIMS, createLogger()))
+          .toThrow('Failed to load sqlite-vec extension');
+      } finally {
+        loadSpy.mockRestore();
+      }
     });
   });
 });

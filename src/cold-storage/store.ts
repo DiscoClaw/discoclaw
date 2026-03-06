@@ -1,54 +1,25 @@
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 import type { LoggerLike } from '../logging/logger-like.js';
+import {
+  type ChunkType,
+  type ChunkMetadata,
+  type Chunk,
+  type SearchFilters,
+  type SearchResult,
+  deriveJumpUrl,
+} from './types.js';
 
-// ── Types ──────────────────────────────────────────────────────────────
+// Re-export shared types for consumers that import from store
+export type { ChunkType, ChunkMetadata, Chunk, SearchFilters, SearchResult };
 
-export type ChunkType = 'message' | 'file' | 'summary' | 'note';
-
-export interface ChunkMetadata {
-  guild_id: string;
-  channel_id: string;
-  thread_id?: string | null;
-  message_id?: string | null;
-  user_id?: string | null;
-  parent_message_id?: string | null;
-  chunk_type: ChunkType;
-}
+// ── Store-specific Types ───────────────────────────────────────────────
 
 export interface InsertChunkInput {
   content: string;
   embedding: Float32Array;
   token_count: number;
   metadata: ChunkMetadata;
-}
-
-export interface StoredChunk {
-  id: number;
-  content: string;
-  guild_id: string;
-  channel_id: string;
-  thread_id: string | null;
-  message_id: string | null;
-  user_id: string | null;
-  parent_message_id: string | null;
-  created_at: string;
-  chunk_type: ChunkType;
-  token_count: number;
-}
-
-export interface SearchResult {
-  chunk: StoredChunk;
-  score: number;
-}
-
-export interface SearchFilters {
-  guild_id?: string;
-  channel_id?: string;
-  user_id?: string;
-  chunk_type?: ChunkType;
-  after?: string;   // ISO 8601
-  before?: string;  // ISO 8601
 }
 
 export interface SearchOptions {
@@ -110,7 +81,7 @@ export class ColdStorageStore {
 
   // ── Public API ─────────────────────────────────────────────────────
 
-  insertChunk(input: InsertChunkInput): StoredChunk {
+  insertChunk(input: InsertChunkInput): Chunk {
     const { content, embedding, token_count, metadata } = input;
 
     const insertChunkStmt = this.db.prepare(`
@@ -179,7 +150,7 @@ export class ColdStorageStore {
     }
   }
 
-  getById(id: number): StoredChunk | null {
+  getById(id: number): Chunk | null {
     const row = this.db.prepare('SELECT * FROM chunks WHERE id = ?').get(id) as StoredChunkRow | undefined;
     return row ? rowToChunk(row) : null;
   }
@@ -188,10 +159,12 @@ export class ColdStorageStore {
     const rows = this.db.prepare('SELECT id FROM chunks WHERE message_id = ?').all(messageId) as { id: number }[];
     if (rows.length === 0) return 0;
 
+    const deleteFtsStmt = this.db.prepare('DELETE FROM chunks_fts WHERE rowid = ?');
+    const deleteVecStmt = this.db.prepare('DELETE FROM chunks_vec WHERE rowid = ?');
     const txn = this.db.transaction(() => {
       for (const row of rows) {
-        this.db.prepare('DELETE FROM chunks_fts WHERE rowid = ?').run(row.id);
-        this.db.prepare('DELETE FROM chunks_vec WHERE rowid = ?').run(row.id);
+        deleteFtsStmt.run(row.id);
+        deleteVecStmt.run(row.id);
       }
       const result = this.db.prepare('DELETE FROM chunks WHERE message_id = ?').run(messageId);
       return result.changes;
@@ -236,7 +209,7 @@ export class ColdStorageStore {
       if (!chunk) continue;
       if (filters && !matchesFilters(chunk, filters)) continue;
       // Convert distance to similarity score (lower distance = higher score)
-      results.push({ chunk, score: 1 / (1 + row.distance) });
+      results.push({ chunk, score: 1 / (1 + row.distance), jump_url: deriveJumpUrl(chunk) });
       if (results.length >= limit) break;
     }
 
@@ -262,7 +235,7 @@ export class ColdStorageStore {
       if (!chunk) continue;
       if (filters && !matchesFilters(chunk, filters)) continue;
       // FTS5 rank is negative (more negative = more relevant), normalize
-      results.push({ chunk, score: 1 / (1 + Math.abs(row.rank)) });
+      results.push({ chunk, score: 1 / (1 + Math.abs(row.rank)), jump_url: deriveJumpUrl(chunk) });
       if (results.length >= limit) break;
     }
 
@@ -270,7 +243,7 @@ export class ColdStorageStore {
   }
 
   private rrfMerge(vectorResults: SearchResult[], ftsResults: SearchResult[], limit: number): SearchResult[] {
-    const scores = new Map<number, { chunk: StoredChunk; score: number }>();
+    const scores = new Map<number, { chunk: Chunk; score: number }>();
 
     for (let i = 0; i < vectorResults.length; i++) {
       const { chunk } = vectorResults[i];
@@ -292,7 +265,7 @@ export class ColdStorageStore {
     return [...scores.values()]
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
-      .map(({ chunk, score }) => ({ chunk, score }));
+      .map(({ chunk, score }) => ({ chunk, score, jump_url: deriveJumpUrl(chunk) }));
   }
 }
 
@@ -312,7 +285,7 @@ interface StoredChunkRow {
   token_count: number;
 }
 
-function rowToChunk(row: StoredChunkRow): StoredChunk {
+function rowToChunk(row: StoredChunkRow): Chunk {
   return {
     id: row.id,
     content: row.content,
@@ -332,9 +305,10 @@ function embeddingToBuffer(embedding: Float32Array): Buffer {
   return Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
 }
 
-function matchesFilters(chunk: StoredChunk, filters: SearchFilters): boolean {
+function matchesFilters(chunk: Chunk, filters: SearchFilters): boolean {
   if (filters.guild_id && chunk.guild_id !== filters.guild_id) return false;
   if (filters.channel_id && chunk.channel_id !== filters.channel_id) return false;
+  if (filters.thread_id && chunk.thread_id !== filters.thread_id) return false;
   if (filters.user_id && chunk.user_id !== filters.user_id) return false;
   if (filters.chunk_type && chunk.chunk_type !== filters.chunk_type) return false;
   if (filters.after && chunk.created_at < filters.after) return false;
