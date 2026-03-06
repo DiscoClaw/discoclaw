@@ -60,6 +60,7 @@ export type PromptSectionKey =
   | 'pa'
   | 'durableMemory'
   | 'rollingSummary'
+  | 'shortTermMemory'
   | 'channelContext'
   | 'tasks'
   | 'actionsReference';
@@ -88,6 +89,7 @@ const PROMPT_SECTION_KEYS: PromptSectionKey[] = [
   'pa',
   'durableMemory',
   'rollingSummary',
+  'shortTermMemory',
   'channelContext',
   'tasks',
   'actionsReference',
@@ -229,6 +231,7 @@ export function buildPromptSectionEstimates(input: {
   channelContextPath?: string | null;
   durableSection?: string;
   summarySection?: string;
+  shortTermSection?: string;
   taskSection?: string;
   openTasksSection?: string;
   actionsReferenceSection?: string;
@@ -242,6 +245,7 @@ export function buildPromptSectionEstimates(input: {
     pa: 0,
     durableMemory: 0,
     rollingSummary: 0,
+    shortTermMemory: 0,
     channelContext: 0,
     tasks: 0,
     actionsReference: 0,
@@ -261,6 +265,7 @@ export function buildPromptSectionEstimates(input: {
 
   charsBySection.durableMemory = input.durableSection?.length ?? 0;
   charsBySection.rollingSummary = input.summarySection?.length ?? 0;
+  charsBySection.shortTermMemory = input.shortTermSection?.length ?? 0;
   charsBySection.tasks = (input.taskSection?.length ?? 0) + (input.openTasksSection?.length ?? 0);
   charsBySection.actionsReference = input.actionsReferenceSection?.length ?? 0;
 

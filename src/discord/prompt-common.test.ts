@@ -150,6 +150,7 @@ describe('buildPromptSectionEstimates', () => {
     'pa',
     'durableMemory',
     'rollingSummary',
+    'shortTermMemory',
     'channelContext',
     'tasks',
     'actionsReference',
@@ -184,6 +185,7 @@ describe('buildPromptSectionEstimates', () => {
       channelContextPath: channelPath,
       durableSection: 'ddd',
       summarySection: 'ssss',
+      shortTermSection: 'stm12',
       taskSection: 'tt',
       openTasksSection: 'ooo',
       actionsReferenceSection: 'aaaaaa',
@@ -198,10 +200,24 @@ describe('buildPromptSectionEstimates', () => {
     expect(result.sections.channelContext.chars).toBe(11);
     expect(result.sections.durableMemory.chars).toBe(3);
     expect(result.sections.rollingSummary.chars).toBe(4);
+    expect(result.sections.shortTermMemory.chars).toBe(5);
     expect(result.sections.tasks.chars).toBe(5); // taskSection + openTasksSection
     expect(result.sections.actionsReference.chars).toBe(6);
-    expect(result.totalChars).toBe(68);
-    expect(result.totalEstTokens).toBe(17);
+    expect(result.totalChars).toBe(73);
+    expect(result.totalEstTokens).toBe(19);
+  });
+
+  it('reflects shortTermSection in the shortTermMemory estimate', () => {
+    const result = buildPromptSectionEstimates({
+      contextSections: [],
+      shortTermSection: 'recent conversation context here',
+    });
+
+    expect(result.sections.shortTermMemory).toEqual({
+      chars: 32,
+      estTokens: 8,
+      included: true,
+    });
   });
 
   it('combines task thread and open tasks text into the tasks section', () => {
