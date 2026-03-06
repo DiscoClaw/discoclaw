@@ -26,6 +26,7 @@ import { globalMetrics } from '../observability/metrics.js';
 import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { buildCronPromptBody } from './cron-prompt.js';
+import { buildTieredDiscordActionsPromptSection } from '../discord/actions.js';
 import { handleJsonRouteOutput } from './json-router.js';
 
 export type CronExecutorContext = {
@@ -50,6 +51,7 @@ export type CronExecutorContext = {
   memoryCtx?: MemoryContext;
   imagegenCtx?: ImagegenContext;
   voiceCtx?: VoiceContext;
+  botDisplayName?: string;
   statsStore?: CronRunStats;
   lockDir?: string;
   runControl?: CronRunControl;
@@ -237,6 +239,18 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         routingMode: preRunRecord?.routingMode === 'json' ? 'json' : undefined,
         state: preRunRecord?.state,
       });
+
+    // Inject tiered action schema documentation when discord actions are enabled.
+    if (ctx.discordActionsEnabled) {
+      const actionSelection = buildTieredDiscordActionsPromptSection(
+        ctx.actionFlags,
+        ctx.botDisplayName,
+        { userText: job.def.prompt },
+      );
+      if (actionSelection.prompt) {
+        prompt += '\n\n---\n' + actionSelection.prompt;
+      }
+    }
 
     const tools = await resolveEffectiveTools({
       workspaceCwd: ctx.cwd,
