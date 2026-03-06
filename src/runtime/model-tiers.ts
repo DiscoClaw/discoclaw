@@ -18,7 +18,7 @@ const defaults: Record<string, Record<ModelTier, string>> = {
   claude_code: { fast: 'haiku', capable: 'sonnet', deep: 'claude-opus-4-6' },
   gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro', deep: 'gemini-2.5-pro' },
   openai: { fast: 'gpt-5-mini', capable: 'gpt-5.4', deep: 'gpt-5.4-pro' },
-  codex: { fast: 'gpt-5.1-codex-mini', capable: 'gpt-5.4', deep: 'gpt-5.4-pro' },
+  codex: { fast: 'gpt-5.1-codex-mini', capable: 'gpt-5.4', deep: 'gpt-5.4' },
 };
 
 function buildDefault(): Record<string, Record<ModelTier, string>> {

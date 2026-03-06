@@ -55,8 +55,8 @@ describe('resolveModel', () => {
       expect(resolveModel('capable', 'codex')).toBe('gpt-5.4');
     });
 
-    it('resolves deep → gpt-5.4-pro', () => {
-      expect(resolveModel('deep', 'codex')).toBe('gpt-5.4-pro');
+    it('resolves deep → gpt-5.4', () => {
+      expect(resolveModel('deep', 'codex')).toBe('gpt-5.4');
     });
   });
 
