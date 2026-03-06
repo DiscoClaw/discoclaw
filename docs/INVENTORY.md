@@ -207,10 +207,27 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Voice setup guide | `docs/voice.md` | **done** |
 | Cron patterns cookbook | `docs/cron-patterns.md` | **done** |
 | Prompt ordering (primacy/recency zone optimization) | `docs/prompt-ordering.md` | **done** |
+| Configuration reference (all env vars) | `docs/configuration.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | **done** |
 
-## 16. Pipeline Engine (`src/pipeline/`)
+## 16. Cold Storage (`src/cold-storage/`)
+
+Semantic search over conversation history. SQLite + sqlite-vec for vector storage, FTS5 for keyword search, Reciprocal Rank Fusion for hybrid retrieval. Standalone, fully testable modules — not yet wired into the live message path.
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| Shared types (`Chunk`, `ChunkMetadata`, `SearchResult`, `SearchFilters`, `deriveJumpUrl`) | `src/cold-storage/types.ts` | **done** |
+| Chunker (thread message grouping, sliding-window overlap, code-block-safe splitting) | `src/cold-storage/chunker.ts`, `src/cold-storage/chunker.test.ts` | **done** |
+| OpenAI embedding provider (batched `text-embedding-3-small` via native fetch) | `src/cold-storage/embeddings.ts`, `src/cold-storage/embeddings.test.ts` | **done** |
+| OpenAI-compatible embedding provider (Ollama, vLLM, LM Studio, Together — no `dimensions` in request body, model prefix stripping) | `src/cold-storage/openai-compat.ts`, `src/cold-storage/openai-compat.test.ts` | **done** |
+| Store (SQLite + sqlite-vec + FTS5, hybrid vector/keyword search, RRF merge, insert/search/delete) | `src/cold-storage/store.ts`, `src/cold-storage/store.test.ts` | **done** |
+| Prompt section builder (formats search results into budget-capped prompt text) | `src/cold-storage/prompt-section.ts`, `src/cold-storage/prompt-section.test.ts` | **done** |
+| Barrel + factory (`createColdStorage()`, re-exports) | `src/cold-storage/index.ts`, `src/cold-storage/index.test.ts` | **done** |
+
+Config: `DISCOCLAW_COLD_STORAGE_ENABLED`, `COLD_STORAGE_PROVIDER`, `COLD_STORAGE_API_KEY`, `COLD_STORAGE_MODEL`, `COLD_STORAGE_DIMENSIONS`, `COLD_STORAGE_BASE_URL`, `COLD_STORAGE_DB_PATH`, `DISCOCLAW_COLD_STORAGE_INJECT_MAX_CHARS`, `DISCOCLAW_COLD_STORAGE_SEARCH_LIMIT`.
+
+## 17. Pipeline Engine (`src/pipeline/`)
 
 General-purpose step-chaining primitive. Each step sends a prompt to a runtime adapter; its text output is injected as context for the next step. Foundational building block for composable action chaining.
 
@@ -233,7 +250,7 @@ General-purpose step-chaining primitive. Each step sends a prompt to a runtime a
 | `confirmAllowed` gate (blocks destructive commands without explicit opt-in) | `src/pipeline/engine.ts` | **done** |
 | Discord-action step kind | `src/pipeline/engine.ts` | **done** |
 
-## 17. Transport Abstraction
+## 18. Transport Abstraction
 
 Platform-agnostic message normalization layer (Phase 1 of transport portability). Downstream consumers can be migrated off discord.js types incrementally.
 
@@ -246,7 +263,7 @@ Platform-agnostic message normalization layer (Phase 1 of transport portability)
 | `DiscordTransportClient` (discord.js `Guild` + `Client` implementation) | `src/discord/transport-client.ts` | **done** |
 | TransportClient unit tests | `src/discord/transport-client.test.ts` | **done** |
 
-## 18. Webhook Server
+## 19. Webhook Server
 
 HTTP server that receives external webhook POSTs, verifies HMAC-SHA256 signatures, and dispatches through the cron executor pipeline. See `docs/webhook-exposure.md` for setup.
 
@@ -257,7 +274,7 @@ HTTP server that receives external webhook POSTs, verifies HMAC-SHA256 signature
 
 Config: `DISCOCLAW_WEBHOOK_ENABLED`, `DISCOCLAW_WEBHOOK_PORT`, `DISCOCLAW_WEBHOOK_CONFIG`.
 
-## 19. Configuration
+## 20. Configuration
 
 Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boolean, number, enum, and string fields with validation, warnings, and info messages emitted at startup.
 
@@ -266,7 +283,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | Config parser (`DiscoclawConfig` type, env-var parsing, validation) | `src/config.ts` | **done** |
 | Config parser tests | `src/config.test.ts` | **done** |
 
-## 20. Bang Commands
+## 21. Bang Commands
 
 `!`-prefixed commands handled directly by the message coordinator without AI invocation.
 
@@ -285,7 +302,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | `!voice` | Voice subsystem commands: `status` (connection + config), `set <name>` (switch Deepgram TTS voice at runtime, ephemeral), `help` | `src/discord/voice-command.ts` (primary), `src/discord/voice-status-command.ts` (status renderer) | **done** |
 | `!secret` | DM-only command to securely set/unset `.env` secrets (e.g. API keys); bypasses AI runtime, no echo | `src/discord/secret-commands.ts` | **done** |
 
-## 21. npm Publishing
+## 22. npm Publishing
 
 CI/CD pipeline for publishing DiscoClaw to npm on versioned releases.
 
@@ -294,7 +311,7 @@ CI/CD pipeline for publishing DiscoClaw to npm on versioned releases.
 | GitHub Actions publish workflow (triggered on `v*` tags, OIDC Trusted Publishing) | `.github/workflows/publish.yml` | **done** |
 | Releasing guide | `docs/releasing.md` | **done** |
 
-## 22. Voice System (`src/voice/`)
+## 23. Voice System (`src/voice/`)
 
 Real-time voice chat: STT transcription, AI response generation, TTS synthesis, and Discord voice playback. See `docs/voice.md` for setup.
 
