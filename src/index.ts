@@ -1256,6 +1256,7 @@ const botParams = {
     cronScheduler: null as CronScheduler | null,
     sharedTaskStore,
     activeProviders,
+    coldStorageChunkCount: coldStorageSubsystem?.store.chunkCount(),
   },
 };
 
