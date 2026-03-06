@@ -79,12 +79,12 @@ Two setup paths:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PRIMARY_RUNTIME` | `claude` | Runtime engine (`claude`, `openai`, `openrouter`, `gemini`, `codex`) |
-| `RUNTIME_MODEL` | `capable` | Model tier (`fast`, `capable`) or concrete model name passed to the CLI |
+| `RUNTIME_MODEL` | `capable` | **Deprecated — use `models.json` instead.** Model tier (`fast`, `capable`) or concrete model name passed to the CLI |
 | `RUNTIME_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` | Comma-separated tool list |
 | `RUNTIME_TIMEOUT_MS` | `1800000` | Per-invocation timeout in milliseconds |
 | `RUNTIME_FALLBACK_MODEL` | *(unset)* | Auto-fallback model when primary is overloaded (e.g. `sonnet`) |
 | `RUNTIME_MAX_BUDGET_USD` | *(unset)* | Max USD per CLI process; one-shot = per invocation, multi-turn = per session lifetime |
-| `DISCOCLAW_FAST_MODEL` | `fast` | Default "fast" model tier alias used for summarization, auto-tag, and cron parsing |
+| `DISCOCLAW_FAST_MODEL` | `fast` | **Deprecated — use `models.json` instead.** Default "fast" model tier alias used for summarization, auto-tag, and cron parsing |
 | `DISCOCLAW_RUNTIME_SESSIONS` | `1` | Persist Claude session IDs across messages |
 | `DISCOCLAW_SESSION_SCANNING` | `1` | Enable session ID scanning for resume detection |
 | `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` | `3` | Max depth for chained action follow-ups |

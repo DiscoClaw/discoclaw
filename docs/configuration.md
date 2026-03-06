@@ -17,12 +17,20 @@ Boolean values accept `0`/`1` or `true`/`false`.
 | `DISCORD_AUTO_INDEX_CHANNEL_CONTEXT` | `true` | Auto-create context files for new channels |
 | `DISCORD_AUTO_JOIN_THREADS` | `true` | Auto-join public threads the bot encounters |
 
+## Model Configuration
+
+Model assignments are configured in `workspace/models.json`. Each slot (`capable`, `fast`, `voice`, forge roles, cron roles, etc.) maps to a concrete model ID and optional runtime override. See `src/model-config.ts` for the schema and loading logic.
+
+On first run, `models.json` is scaffolded from defaults. To customize, edit `workspace/models.json` directly or use `!models preset <name>` (Phase 2).
+
+Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
+
 ## Runtime
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PRIMARY_RUNTIME` | `claude` | Runtime adapter: `claude`, `openai`, `openrouter`, `gemini`, `codex` |
-| `RUNTIME_MODEL` | `capable` | Model tier for chat invocations |
+| `RUNTIME_MODEL` | `capable` | **Deprecated** — use `models.json`. Fallback model tier for chat invocations |
 | `DISCOCLAW_FAST_RUNTIME` | — | Optional runtime override for fast-tier workloads (summary, cron auto-tag/model classify, task auto-tag) |
 | `RUNTIME_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` | Comma-separated tools available to the runtime |
 | `RUNTIME_TIMEOUT_MS` | `1800000` (30 min) | Per-invocation timeout |

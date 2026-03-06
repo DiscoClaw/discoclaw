@@ -2,8 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export type RuntimeOverrides = {
-  /** Model overrides keyed by ModelRole (chat, fast, forge-drafter, etc.). */
-  models?: Record<string, string>;
   ttsVoice?: string;
   voiceRuntime?: string;
 };
@@ -53,15 +51,6 @@ export async function loadOverrides(
 
   const obj = parsed as Record<string, unknown>;
   const overrides: RuntimeOverrides = {};
-
-  if (typeof obj['models'] === 'object' && obj['models'] !== null && !Array.isArray(obj['models'])) {
-    const rawModels = obj['models'] as Record<string, unknown>;
-    const models: Record<string, string> = {};
-    for (const [key, val] of Object.entries(rawModels)) {
-      if (typeof val === 'string') models[key] = val;
-    }
-    if (Object.keys(models).length > 0) overrides.models = models;
-  }
 
   if (typeof obj['ttsVoice'] === 'string') overrides.ttsVoice = obj['ttsVoice'];
   if (typeof obj['voiceRuntime'] === 'string') overrides.voiceRuntime = obj['voiceRuntime'];

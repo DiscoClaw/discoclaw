@@ -4,7 +4,6 @@ import os from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-  clearOverrides,
   loadOverrides,
   resolveOverridesPath,
   saveOverrides,
@@ -47,13 +46,13 @@ describe('loadOverrides', () => {
     expect(result).toEqual({});
   });
 
-  it('loads models map and ttsVoice from a valid file', async () => {
+  it('loads ttsVoice from a valid file', async () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ models: { chat: 'opus', voice: 'haiku' }, ttsVoice: 'aura-2-luna-en' }), 'utf-8');
+    await fs.writeFile(filePath, JSON.stringify({ ttsVoice: 'aura-2-luna-en' }), 'utf-8');
     const result = await loadOverrides(filePath);
-    expect(result).toEqual({ models: { chat: 'opus', voice: 'haiku' }, ttsVoice: 'aura-2-luna-en' });
+    expect(result).toEqual({ ttsVoice: 'aura-2-luna-en' });
   });
 
   it('returns empty object for corrupt JSON and calls onWarn', async () => {
@@ -92,40 +91,13 @@ describe('loadOverrides', () => {
     expect(warnings[0]).toMatch(/not an object/);
   });
 
-  it('silently drops unknown top-level fields', async () => {
+  it('silently drops unknown top-level fields (including legacy models key)', async () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
     await fs.writeFile(filePath, JSON.stringify({ models: { chat: 'sonnet' }, unknownField: 'x' }), 'utf-8');
     const result = await loadOverrides(filePath);
-    expect(result).toEqual({ models: { chat: 'sonnet' } });
-  });
-
-  it('silently drops model entries with non-string values', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ models: { chat: 99, voice: true, fast: 'haiku' } }), 'utf-8');
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({ models: { fast: 'haiku' } });
-  });
-
-  it('silently drops models field when it is not an object', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ models: 'bad' }), 'utf-8');
-    const result = await loadOverrides(filePath);
     expect(result).toEqual({});
-  });
-
-  it('loads only some models when others are absent', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ models: { chat: 'sonnet' } }), 'utf-8');
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({ models: { chat: 'sonnet' } });
   });
 
   it('loads ttsVoice field correctly', async () => {
@@ -163,16 +135,6 @@ describe('loadOverrides', () => {
     const result = await loadOverrides(filePath);
     expect(result).toEqual({});
   });
-
-  it('loads all roles from models map', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    const models = { chat: 'opus', fast: 'haiku', 'forge-drafter': 'sonnet', 'forge-auditor': 'sonnet', summary: 'haiku', cron: 'haiku', 'cron-exec': 'sonnet', voice: 'opus' };
-    await fs.writeFile(filePath, JSON.stringify({ models }), 'utf-8');
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({ models });
-  });
 });
 
 describe('saveOverrides', () => {
@@ -188,9 +150,9 @@ describe('saveOverrides', () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, { models: { chat: 'sonnet', voice: 'haiku' } });
+    await saveOverrides(filePath, { ttsVoice: 'aura-2-asteria-en', voiceRuntime: 'anthropic' });
     const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({ models: { chat: 'sonnet', voice: 'haiku' } });
+    expect(JSON.parse(raw)).toEqual({ ttsVoice: 'aura-2-asteria-en', voiceRuntime: 'anthropic' });
   });
 
   it('writes ttsVoice and reads it back correctly', async () => {
@@ -202,13 +164,13 @@ describe('saveOverrides', () => {
     expect(result).toEqual({ ttsVoice: 'aura-2-asteria-en' });
   });
 
-  it('round-trips models + ttsVoice through save and load', async () => {
+  it('round-trips ttsVoice + voiceRuntime through save and load', async () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
     const original: import('./runtime-overrides.js').RuntimeOverrides = {
-      models: { chat: 'opus', fast: 'haiku', 'cron-exec': 'sonnet' },
       ttsVoice: 'aura-2-luna-en',
+      voiceRuntime: 'gemini',
     };
     await saveOverrides(filePath, original);
     const result = await loadOverrides(filePath);
@@ -219,16 +181,16 @@ describe('saveOverrides', () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'subdir', 'runtime-overrides.json');
-    await saveOverrides(filePath, { models: { voice: 'opus' } });
+    await saveOverrides(filePath, { voiceRuntime: 'anthropic' });
     const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({ models: { voice: 'opus' } });
+    expect(JSON.parse(raw)).toEqual({ voiceRuntime: 'anthropic' });
   });
 
   it('leaves no tmp file behind after a successful write', async () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, { models: { chat: 'opus' } });
+    await saveOverrides(filePath, { ttsVoice: 'aura-2-asteria-en' });
     const files = await fs.readdir(dir);
     const tmpFiles = files.filter((f) => f.includes('.tmp.'));
     expect(tmpFiles).toHaveLength(0);
@@ -238,10 +200,10 @@ describe('saveOverrides', () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, { models: { chat: 'sonnet' } });
-    await saveOverrides(filePath, { models: { chat: 'opus' } });
+    await saveOverrides(filePath, { ttsVoice: 'voice-a' });
+    await saveOverrides(filePath, { ttsVoice: 'voice-b' });
     const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({ models: { chat: 'opus' } });
+    expect(JSON.parse(raw)).toEqual({ ttsVoice: 'voice-b' });
   });
 
   it('writes an empty overrides object', async () => {
@@ -251,42 +213,5 @@ describe('saveOverrides', () => {
     await saveOverrides(filePath, {});
     const raw = await fs.readFile(filePath, 'utf-8');
     expect(JSON.parse(raw)).toEqual({});
-  });
-});
-
-describe('clearOverrides', () => {
-  const dirs: string[] = [];
-  afterEach(async () => {
-    for (const d of dirs) {
-      await fs.rm(d, { recursive: true, force: true });
-    }
-    dirs.length = 0;
-  });
-
-  it('deletes the overrides file', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ runtimeModel: 'sonnet' }), 'utf-8');
-    await clearOverrides(filePath);
-    await expect(fs.access(filePath)).rejects.toThrow();
-  });
-
-  it('does nothing when the file does not exist', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    // Should not throw.
-    await clearOverrides(filePath);
-  });
-
-  it('after clear, loadOverrides returns empty object', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, { models: { chat: 'opus' } });
-    await clearOverrides(filePath);
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({});
   });
 });
