@@ -330,7 +330,7 @@ describe('parseDiscordActions', () => {
 
   it('prompt Rules section confirms multiple same-type actions are supported', () => {
     const prompt = discordActionsPromptSection(ALL_FLAGS, 'ClawBot');
-    expect(prompt).toContain('Multiple actions of the same type are fully supported');
+    expect(prompt).toContain('Multiple same-type actions are supported');
   });
 });
 
@@ -742,7 +742,7 @@ describe('discordActionsPromptSection', () => {
     };
 
     const prompt = discordActionsPromptSection(flags, 'ClawBot');
-    expect(prompt).toContain('Setting DISCOCLAW_DISCORD_ACTIONS=1 publishes this standard guidance');
+    expect(prompt).toContain('Perform Discord server actions by including');
     expect(prompt).toContain('### Rules');
   });
 
