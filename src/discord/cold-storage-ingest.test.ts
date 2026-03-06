@@ -53,7 +53,7 @@ describe('ingestMessage', () => {
       apiKey: 'test-key',
       dimensions: DIMS,
       log: createLogger(),
-    });
+    })!;
     // Replace embedding provider with a deterministic fake
     (subsystem as { embeddings: unknown }).embeddings = makeFakeEmbeddings(DIMS);
   });
@@ -143,6 +143,34 @@ describe('ingestMessage', () => {
     expect(result.chunks).toHaveLength(0);
   });
 
+  it('skips messages when channelFilter is set and channel is not in the list', async () => {
+    const msg = makeMessage({ channelId: '200000000000000001' });
+    const result = await ingestMessage(subsystem, msg, log, {
+      channelFilter: ['999999999999999999'],
+    });
+
+    expect(result.chunksInserted).toBe(0);
+    expect(result.chunks).toHaveLength(0);
+  });
+
+  it('ingests messages when channelFilter includes the channel', async () => {
+    const msg = makeMessage({ channelId: '200000000000000001' });
+    const result = await ingestMessage(subsystem, msg, log, {
+      channelFilter: ['200000000000000001'],
+    });
+
+    expect(result.chunksInserted).toBe(1);
+  });
+
+  it('ingests messages when channelFilter is empty (no filtering)', async () => {
+    const msg = makeMessage();
+    const result = await ingestMessage(subsystem, msg, log, {
+      channelFilter: [],
+    });
+
+    expect(result.chunksInserted).toBe(1);
+  });
+
   // ── Embedding failure ───────────────────────────────────────────────
 
   it('returns empty when embedding provider returns no results', async () => {
@@ -194,7 +222,7 @@ describe('deleteMessageChunks', () => {
       apiKey: 'test-key',
       dimensions: DIMS,
       log: createLogger(),
-    });
+    })!;
     (subsystem as { embeddings: unknown }).embeddings = makeFakeEmbeddings(DIMS);
   });
 

@@ -23,7 +23,7 @@ function defaultConfig(overrides: Partial<ColdStorageConfig> = {}): ColdStorageC
 }
 
 describe('createColdStorage', () => {
-  let subsystem: ColdStorageSubsystem | undefined;
+  let subsystem: ColdStorageSubsystem | null | undefined;
 
   afterEach(() => {
     subsystem?.close();
@@ -35,9 +35,10 @@ describe('createColdStorage', () => {
   it('creates subsystem with OpenAI provider by default', () => {
     subsystem = createColdStorage(defaultConfig());
 
-    expect(subsystem.store).toBeDefined();
-    expect(subsystem.embeddings).toBeInstanceOf(OpenAIEmbeddingProvider);
-    expect(subsystem.embeddings.dimensions).toBe(1536); // OpenAI default
+    expect(subsystem).not.toBeNull();
+    expect(subsystem!.store).toBeDefined();
+    expect(subsystem!.embeddings).toBeInstanceOf(OpenAIEmbeddingProvider);
+    expect(subsystem!.embeddings.dimensions).toBe(1536); // OpenAI default
   });
 
   it('passes custom model and dimensions to OpenAI provider', () => {
@@ -46,8 +47,9 @@ describe('createColdStorage', () => {
       dimensions: 3072,
     }));
 
-    expect(subsystem.embeddings).toBeInstanceOf(OpenAIEmbeddingProvider);
-    expect(subsystem.embeddings.dimensions).toBe(3072);
+    expect(subsystem).not.toBeNull();
+    expect(subsystem!.embeddings).toBeInstanceOf(OpenAIEmbeddingProvider);
+    expect(subsystem!.embeddings.dimensions).toBe(3072);
   });
 
   it('passes custom baseUrl to OpenAI provider', () => {
@@ -55,7 +57,8 @@ describe('createColdStorage', () => {
       baseUrl: 'https://custom.openai.com/v1',
     }));
 
-    expect(subsystem.embeddings).toBeInstanceOf(OpenAIEmbeddingProvider);
+    expect(subsystem).not.toBeNull();
+    expect(subsystem!.embeddings).toBeInstanceOf(OpenAIEmbeddingProvider);
   });
 
   // ── OpenAI-compat provider ──────────────────────────────────────────
@@ -68,33 +71,49 @@ describe('createColdStorage', () => {
       dimensions: 768,
     }));
 
-    expect(subsystem.store).toBeDefined();
-    expect(subsystem.embeddings).toBeInstanceOf(OpenAICompatEmbeddingProvider);
-    expect(subsystem.embeddings.dimensions).toBe(768);
+    expect(subsystem).not.toBeNull();
+    expect(subsystem!.store).toBeDefined();
+    expect(subsystem!.embeddings).toBeInstanceOf(OpenAICompatEmbeddingProvider);
+    expect(subsystem!.embeddings.dimensions).toBe(768);
   });
 
-  it('throws when openai-compat is missing baseUrl', () => {
-    expect(() => createColdStorage(defaultConfig({
+  it('returns null when openai-compat is missing baseUrl', () => {
+    const log = createLogger();
+    subsystem = createColdStorage(defaultConfig({
       provider: 'openai-compat',
       model: 'nomic-embed-text',
       dimensions: 768,
-    }))).toThrow('openai-compat provider requires baseUrl');
+      log,
+    }));
+
+    expect(subsystem).toBeNull();
+    expect(log.warn).toHaveBeenCalled();
   });
 
-  it('throws when openai-compat is missing model', () => {
-    expect(() => createColdStorage(defaultConfig({
+  it('returns null when openai-compat is missing model', () => {
+    const log = createLogger();
+    subsystem = createColdStorage(defaultConfig({
       provider: 'openai-compat',
       baseUrl: 'http://localhost:11434/v1',
       dimensions: 768,
-    }))).toThrow('openai-compat provider requires model');
+      log,
+    }));
+
+    expect(subsystem).toBeNull();
+    expect(log.warn).toHaveBeenCalled();
   });
 
-  it('throws when openai-compat is missing dimensions', () => {
-    expect(() => createColdStorage(defaultConfig({
+  it('returns null when openai-compat is missing dimensions', () => {
+    const log = createLogger();
+    subsystem = createColdStorage(defaultConfig({
       provider: 'openai-compat',
       baseUrl: 'http://localhost:11434/v1',
       model: 'nomic-embed-text',
-    }))).toThrow('openai-compat provider requires dimensions');
+      log,
+    }));
+
+    expect(subsystem).toBeNull();
+    expect(log.warn).toHaveBeenCalled();
   });
 
   // ── Store initialization ────────────────────────────────────────────
@@ -102,8 +121,9 @@ describe('createColdStorage', () => {
   it('initializes store with provider dimensions', () => {
     subsystem = createColdStorage(defaultConfig({ dimensions: 384 }));
 
+    expect(subsystem).not.toBeNull();
     // Verify store is functional by checking schema was created
-    const tables = subsystem.store.db
+    const tables = subsystem!.store.db
       .prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual table') ORDER BY name")
       .pluck()
       .all() as string[];
@@ -118,7 +138,8 @@ describe('createColdStorage', () => {
   it('close() closes the underlying store', () => {
     subsystem = createColdStorage(defaultConfig());
 
-    subsystem.close();
+    expect(subsystem).not.toBeNull();
+    subsystem!.close();
     // After close, accessing db should throw
     expect(() => subsystem!.store.db.prepare('SELECT 1')).toThrow();
     subsystem = undefined; // prevent double-close in afterEach

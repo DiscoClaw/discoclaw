@@ -358,15 +358,27 @@ export async function buildColdStoragePromptSection(opts: {
   query?: string;
   guildId?: string;
   channelId?: string;
+  channelFilter?: string[];
   maxChars?: number;
   searchLimit?: number;
   log?: LoggerLike;
 }): Promise<string> {
   if (!opts.enabled || !opts.subsystem || !opts.query) return '';
 
+  // Channel filter: skip if the current channel is not in the allowed list
+  if (opts.channelFilter && opts.channelFilter.length > 0 && opts.channelId) {
+    if (!opts.channelFilter.includes(opts.channelId)) return '';
+  }
+
   try {
-    // Generate embedding for the query
-    const embeddings = await opts.subsystem.embeddings.embed([opts.query]);
+    // Generate embedding for the query (3-second timeout — fail open on slow APIs)
+    const EMBED_TIMEOUT_MS = 3_000;
+    const embeddings = await Promise.race([
+      opts.subsystem.embeddings.embed([opts.query]),
+      new Promise<Float32Array[]>((_, reject) =>
+        setTimeout(() => reject(new Error('cold-storage embedding timeout')), EMBED_TIMEOUT_MS),
+      ),
+    ]);
     if (embeddings.length === 0) return '';
 
     // Search with both vector and FTS

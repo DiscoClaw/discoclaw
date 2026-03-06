@@ -146,9 +146,10 @@ export type DiscoclawConfig = {
   coldStorageProvider: 'openai' | 'openai-compat';
   coldStorageApiKey?: string;
   coldStorageModel?: string;
-  coldStorageDimensions?: number;
+  coldStorageDimensions: number;
   coldStorageBaseUrl?: string;
   coldStorageDbPath?: string;
+  coldStorageChannelFilter: string[];
   coldStorageInjectMaxChars: number;
   coldStorageSearchLimit: number;
 
@@ -624,10 +625,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
 
   const coldStorageEnabled = parseBoolean(env, 'DISCOCLAW_COLD_STORAGE_ENABLED', false);
-  const coldStorageApiKey = parseTrimmedString(env, 'COLD_STORAGE_API_KEY');
+  const coldStorageApiKey = parseTrimmedString(env, 'COLD_STORAGE_API_KEY') ?? openaiApiKey;
   const coldStorageProvider = parseEnum(env, 'COLD_STORAGE_PROVIDER', ['openai', 'openai-compat'] as const, 'openai')!;
   if (coldStorageEnabled && !coldStorageApiKey) {
-    warnings.push('DISCOCLAW_COLD_STORAGE_ENABLED=1 but COLD_STORAGE_API_KEY is not set; cold storage will fail at runtime.');
+    warnings.push('DISCOCLAW_COLD_STORAGE_ENABLED=1 but neither COLD_STORAGE_API_KEY nor OPENAI_API_KEY is set; cold storage will fail at runtime.');
   }
   if (coldStorageEnabled && coldStorageProvider === 'openai-compat') {
     if (!parseTrimmedString(env, 'COLD_STORAGE_BASE_URL')) {
@@ -833,7 +834,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       coldStorageModel: parseTrimmedString(env, 'COLD_STORAGE_MODEL'),
       coldStorageDimensions: (() => {
         const raw = parseTrimmedString(env, 'COLD_STORAGE_DIMENSIONS');
-        if (raw == null) return undefined;
+        if (raw == null) return 1536;
         const n = Number(raw);
         if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
           throw new Error(`COLD_STORAGE_DIMENSIONS must be a positive integer, got "${raw}"`);
@@ -842,6 +843,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       })(),
       coldStorageBaseUrl: parseTrimmedString(env, 'COLD_STORAGE_BASE_URL'),
       coldStorageDbPath: parseTrimmedString(env, 'COLD_STORAGE_DB_PATH'),
+      coldStorageChannelFilter: (() => {
+        const raw = parseTrimmedString(env, 'COLD_STORAGE_CHANNEL_FILTER');
+        if (!raw) return [];
+        return raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+      })(),
       coldStorageInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_COLD_STORAGE_INJECT_MAX_CHARS', 1500),
       coldStorageSearchLimit: parsePositiveInt(env, 'DISCOCLAW_COLD_STORAGE_SEARCH_LIMIT', 10),
 

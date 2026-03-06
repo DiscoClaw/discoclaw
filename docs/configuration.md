@@ -328,13 +328,14 @@ Semantic search over conversation history using SQLite + sqlite-vec for vector s
 |----------|---------|-------------|
 | `DISCOCLAW_COLD_STORAGE_ENABLED` | `false` | Enable cold-storage subsystem |
 | `COLD_STORAGE_PROVIDER` | `openai` | Embedding provider: `openai` or `openai-compat` |
-| `COLD_STORAGE_API_KEY` | — | API key for the embedding provider (required when enabled) |
+| `COLD_STORAGE_API_KEY` | — | API key for the embedding provider (falls back to `OPENAI_API_KEY`) |
 | `COLD_STORAGE_MODEL` | `text-embedding-3-small` | Embedding model name (required for `openai-compat`) |
 | `COLD_STORAGE_DIMENSIONS` | `1536` | Embedding dimensions (required for `openai-compat`) |
 | `COLD_STORAGE_BASE_URL` | `https://api.openai.com/v1` | Base URL for the embedding API (required for `openai-compat`) |
 | `COLD_STORAGE_DB_PATH` | — | Override SQLite database file path |
 | `DISCOCLAW_COLD_STORAGE_INJECT_MAX_CHARS` | `1500` | Max chars for cold-storage prompt section |
 | `DISCOCLAW_COLD_STORAGE_SEARCH_LIMIT` | `10` | Max results per search query |
+| `COLD_STORAGE_CHANNEL_FILTER` | — | Comma-separated channel IDs to restrict cold-storage ingestion/retrieval (empty = all) |
 
 When using `openai-compat`, the provider does not send a `dimensions` parameter in the request body (many third-party endpoints reject it). The `COLD_STORAGE_DIMENSIONS` value is used only to configure the sqlite-vec column width — the provider determines its own output dimensionality. Model namespace prefixes (e.g., `openai/text-embedding-3-small`) are automatically stripped.
 

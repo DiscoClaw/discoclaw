@@ -37,6 +37,8 @@ export interface IngestOptions {
   chunkType?: ChunkMetadata['chunk_type'];
   /** Max characters per chunk (passed to chunker). */
   maxChunkSize?: number;
+  /** When set, only ingest messages from these channel IDs. */
+  channelFilter?: string[];
 }
 
 // ── Ingestion ──────────────────────────────────────────────────────────
@@ -64,6 +66,11 @@ export async function ingestMessage(
   const content = message.content.trim();
   if (!content) return empty;
   if (!message.guildId) return empty;
+
+  // Channel filter: skip if the message's channel is not in the allowed list
+  if (options.channelFilter && options.channelFilter.length > 0) {
+    if (!options.channelFilter.includes(message.channelId)) return empty;
+  }
 
   try {
     // 1. Chunk the message content

@@ -62,17 +62,22 @@ export interface ColdStorageSubsystem {
 
 // ── Factory ─────────────────────────────────────────────────────────────
 
-export function createColdStorage(config: ColdStorageConfig): ColdStorageSubsystem {
-  const embeddings = createEmbeddingProvider(config);
-  const store = new ColdStorageStore(config.dbPath, embeddings.dimensions, config.log);
+export function createColdStorage(config: ColdStorageConfig): ColdStorageSubsystem | null {
+  try {
+    const embeddings = createEmbeddingProvider(config);
+    const store = new ColdStorageStore(config.dbPath, embeddings.dimensions, config.log);
 
-  return {
-    store,
-    embeddings,
-    close() {
-      store.close();
-    },
-  };
+    return {
+      store,
+      embeddings,
+      close() {
+        store.close();
+      },
+    };
+  } catch (err) {
+    config.log.warn({ err }, 'cold-storage: failed to initialize subsystem');
+    return null;
+  }
 }
 
 function createEmbeddingProvider(config: ColdStorageConfig): EmbeddingProvider {

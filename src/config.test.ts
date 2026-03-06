@@ -1201,4 +1201,57 @@ describe('parseConfig', () => {
     const { warnings } = parseConfig(env({ DISCOCLAW_VOICE_ENABLED: '1', DISCOCLAW_VOICE_HOME_CHANNEL: '1000000000000000003', DEEPGRAM_API_KEY: 'dg-key', CARTESIA_API_KEY: 'ca-key' }));
     expect(warnings.some((w) => w.includes('DISCOCLAW_VOICE_HOME_CHANNEL'))).toBe(false);
   });
+
+  // --- cold storage ---
+
+  it('defaults coldStorageEnabled to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.coldStorageEnabled).toBe(false);
+  });
+
+  it('parses DISCOCLAW_COLD_STORAGE_ENABLED=1 correctly', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_COLD_STORAGE_ENABLED: '1', COLD_STORAGE_API_KEY: 'cs-key' }));
+    expect(config.coldStorageEnabled).toBe(true);
+  });
+
+  it('warns when cold storage enabled without API key', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_COLD_STORAGE_ENABLED: '1' }));
+    expect(warnings.some((w) => w.includes('COLD_STORAGE_API_KEY') || w.includes('OPENAI_API_KEY'))).toBe(true);
+  });
+
+  it('does not warn when cold storage enabled with OPENAI_API_KEY fallback', () => {
+    const { warnings } = parseConfig(env({ DISCOCLAW_COLD_STORAGE_ENABLED: '1', OPENAI_API_KEY: 'oai-key' }));
+    expect(warnings.some((w) => w.includes('COLD_STORAGE_API_KEY') && w.includes('cold storage will fail'))).toBe(false);
+  });
+
+  it('coldStorageApiKey falls back to OPENAI_API_KEY', () => {
+    const { config } = parseConfig(env({ OPENAI_API_KEY: 'oai-key' }));
+    expect(config.coldStorageApiKey).toBe('oai-key');
+  });
+
+  it('COLD_STORAGE_API_KEY takes precedence over OPENAI_API_KEY', () => {
+    const { config } = parseConfig(env({ OPENAI_API_KEY: 'oai-key', COLD_STORAGE_API_KEY: 'cs-key' }));
+    expect(config.coldStorageApiKey).toBe('cs-key');
+  });
+
+  it('COLD_STORAGE_DIMENSIONS rejects non-positive values', () => {
+    expect(() => parseConfig(env({ COLD_STORAGE_DIMENSIONS: '0' }))).toThrow('positive integer');
+    expect(() => parseConfig(env({ COLD_STORAGE_DIMENSIONS: '-5' }))).toThrow('positive integer');
+    expect(() => parseConfig(env({ COLD_STORAGE_DIMENSIONS: 'abc' }))).toThrow('positive integer');
+  });
+
+  it('coldStorageDimensions defaults to 1536', () => {
+    const { config } = parseConfig(env());
+    expect(config.coldStorageDimensions).toBe(1536);
+  });
+
+  it('parses COLD_STORAGE_CHANNEL_FILTER into string array', () => {
+    const { config } = parseConfig(env({ COLD_STORAGE_CHANNEL_FILTER: '111,222,333' }));
+    expect(config.coldStorageChannelFilter).toEqual(['111', '222', '333']);
+  });
+
+  it('coldStorageChannelFilter defaults to empty array', () => {
+    const { config } = parseConfig(env());
+    expect(config.coldStorageChannelFilter).toEqual([]);
+  });
 });
