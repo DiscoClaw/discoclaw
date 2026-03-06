@@ -33,7 +33,7 @@ export const DEFAULTS: Readonly<ModelConfig> = {
   fast: 'fast',
   summary: 'fast',
   'forge-drafter': 'capable',
-  'forge-auditor': 'capable',
+  'forge-auditor': 'deep',
   cron: 'fast',
   'cron-exec': 'capable',
   voice: 'capable',

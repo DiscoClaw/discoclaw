@@ -352,7 +352,7 @@ describe('DEFAULTS', () => {
     expect(DEFAULTS.fast).toBe('fast');
     expect(DEFAULTS.summary).toBe('fast');
     expect(DEFAULTS['forge-drafter']).toBe('capable');
-    expect(DEFAULTS['forge-auditor']).toBe('capable');
+    expect(DEFAULTS['forge-auditor']).toBe('deep');
     expect(DEFAULTS.cron).toBe('fast');
     expect(DEFAULTS['cron-exec']).toBe('capable');
     expect(DEFAULTS.voice).toBe('capable');
