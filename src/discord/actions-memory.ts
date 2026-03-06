@@ -12,6 +12,7 @@ import {
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
 import { loadSummary } from './summarizer.js';
+import { loadShortTermMemory, selectEntriesForInjection, formatShortTermSection } from './shortterm-memory.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +37,9 @@ export type MemoryContext = {
   durableInjectMaxChars: number;
   sessionKey?: string;
   summaryDataDir?: string;
+  shortTermDataDir?: string;
+  shortTermInjectMaxChars?: number;
+  shortTermMaxAgeMs?: number;
   channelId?: string;
   messageId?: string;
   guildId?: string;
@@ -117,9 +121,27 @@ export async function executeMemoryAction(
         }
       }
 
+      let shortTermText = '(none)';
+      if (memCtx.shortTermDataDir && memCtx.guildId) {
+        try {
+          const guildUserId = `${memCtx.guildId}-${memCtx.userId}`;
+          const stStore = await loadShortTermMemory(memCtx.shortTermDataDir, guildUserId);
+          if (stStore) {
+            const maxChars = memCtx.shortTermInjectMaxChars ?? 1000;
+            const maxAgeMs = memCtx.shortTermMaxAgeMs ?? 6 * 60 * 60 * 1000;
+            const entries = selectEntriesForInjection(stStore, maxChars, maxAgeMs);
+            if (entries.length > 0) {
+              shortTermText = formatShortTermSection(entries);
+            }
+          }
+        } catch {
+          // best-effort
+        }
+      }
+
       return {
         ok: true,
-        summary: `**Durable memory:**\n${durableText}\n\n**Rolling summary:**\n${summaryText}`,
+        summary: `**Durable memory:**\n${durableText}\n\n**Rolling summary:**\n${summaryText}\n\n**Short-term memory:**\n${shortTermText}`,
       };
     }
   }
@@ -155,7 +177,7 @@ export function memoryActionsPromptSection(): string {
 \`\`\`
 - \`substring\` (required): Text to match against. Items where this covers >= 60% of the item's text length are deprecated.
 
-**memoryShow** — Show the user's current durable memory items:
+**memoryShow** — Show the user's current memory (durable items, rolling summary, and short-term):
 \`\`\`
 <discord-action>{"type":"memoryShow"}</discord-action>
 \`\`\`

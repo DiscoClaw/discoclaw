@@ -220,6 +220,32 @@ describe('buildPromptSectionEstimates', () => {
     });
   });
 
+  it('produces included: false for empty string shortTermSection', () => {
+    const result = buildPromptSectionEstimates({
+      contextSections: [],
+      shortTermSection: '',
+    });
+
+    expect(result.sections.shortTermMemory).toEqual({
+      chars: 0,
+      estTokens: 0,
+      included: false,
+    });
+  });
+
+  it('produces included: false for undefined shortTermSection', () => {
+    const result = buildPromptSectionEstimates({
+      contextSections: [],
+      shortTermSection: undefined,
+    });
+
+    expect(result.sections.shortTermMemory).toEqual({
+      chars: 0,
+      estTokens: 0,
+      included: false,
+    });
+  });
+
   it('combines task thread and open tasks text into the tasks section', () => {
     const result = buildPromptSectionEstimates({
       contextSections: [],

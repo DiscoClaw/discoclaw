@@ -2470,6 +2470,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             };
             const perMessageMemoryCtx = params.memoryCtx ? {
               ...params.memoryCtx,
+              sessionKey,
               userId: msg.author.id,
               channelId: msg.channelId,
               messageId: msg.id,
@@ -3297,6 +3298,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // Null out memoryCtx for bot messages unless memory write is explicitly enabled.
                 const perMessageMemoryCtx = (params.memoryCtx && (!isBotMessage || params.botMessageMemoryWriteEnabled)) ? {
                   ...params.memoryCtx,
+                  sessionKey,
                   userId: msg.author.id,
                   channelId: msg.channelId,
                   messageId: msg.id,

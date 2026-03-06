@@ -826,6 +826,7 @@ function createReactionHandler(
               // Construct per-event memoryCtx with the reacting user's ID and Discord metadata.
               const perEventMemoryCtx = params.memoryCtx ? {
                 ...params.memoryCtx,
+                sessionKey,
                 userId: user.id,
                 channelId: msg.channelId,
                 messageId: msg.id,

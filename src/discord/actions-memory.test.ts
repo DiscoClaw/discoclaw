@@ -78,6 +78,12 @@ vi.mock('./summarizer.js', () => ({
   }),
 }));
 
+vi.mock('./shortterm-memory.js', () => ({
+  loadShortTermMemory: vi.fn(async () => null),
+  selectEntriesForInjection: vi.fn(() => []),
+  formatShortTermSection: vi.fn(() => ''),
+}));
+
 vi.mock('./durable-write-queue.js', () => ({
   durableWriteQueue: {
     run: vi.fn(async (_key: string, fn: () => Promise<any>) => fn()),
@@ -105,6 +111,9 @@ function makeMemCtx(overrides?: Partial<MemoryContext>): MemoryContext {
     durableInjectMaxChars: 2000,
     sessionKey: 'guild-001:ch-456',
     summaryDataDir: '/tmp/summaries',
+    shortTermDataDir: '/tmp/shortterm',
+    shortTermInjectMaxChars: 1000,
+    shortTermMaxAgeMs: 21600000,
     channelId: 'ch-456',
     messageId: 'msg-789',
     guildId: 'guild-001',
@@ -306,7 +315,7 @@ describe('executeMemoryAction', () => {
   });
 
   describe('memoryShow', () => {
-    it('shows durable memory items and rolling summary', async () => {
+    it('shows durable memory items, rolling summary, and short-term memory', async () => {
       const result = await executeMemoryAction(
         { type: 'memoryShow' },
         makeCtx(),
@@ -321,6 +330,7 @@ describe('executeMemoryAction', () => {
         expect(result.summary).toContain('Prefers Rust over Go');
         expect(result.summary).toContain('**Rolling summary:**');
         expect(result.summary).toContain('User is working on memory observability.');
+        expect(result.summary).toContain('**Short-term memory:**');
       }
     });
 
@@ -398,6 +408,48 @@ describe('executeMemoryAction', () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.summary).toContain('**Rolling summary:**\n(none)');
+      }
+    });
+
+    it('includes short-term memory text when available', async () => {
+      const { loadShortTermMemory, selectEntriesForInjection, formatShortTermSection } = await import('./shortterm-memory.js');
+      (loadShortTermMemory as any).mockResolvedValueOnce({ entries: [] });
+      (selectEntriesForInjection as any).mockReturnValueOnce([{ text: 'recent chat' }]);
+      (formatShortTermSection as any).mockReturnValueOnce('Recent: recent chat');
+
+      const result = await executeMemoryAction(
+        { type: 'memoryShow' },
+        makeCtx(),
+        makeMemCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('**Short-term memory:**');
+        expect(result.summary).toContain('Recent: recent chat');
+      }
+    });
+
+    it('shows (none) for short-term memory when no guildId', async () => {
+      const result = await executeMemoryAction(
+        { type: 'memoryShow' },
+        makeCtx(),
+        makeMemCtx({ guildId: undefined }),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('**Short-term memory:**\n(none)');
+      }
+    });
+
+    it('shows (none) for short-term memory when no shortTermDataDir', async () => {
+      const result = await executeMemoryAction(
+        { type: 'memoryShow' },
+        makeCtx(),
+        makeMemCtx({ shortTermDataDir: undefined }),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('**Short-term memory:**\n(none)');
       }
     });
   });
