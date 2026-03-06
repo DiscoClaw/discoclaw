@@ -28,7 +28,15 @@ import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { fetchMessageHistory } from './message-history.js';
-import { loadSummary, saveSummary, generateSummary, archiveSummary, recompressSummary, estimateSummaryTokens } from './summarizer.js';
+import {
+  loadSummary,
+  saveSummary,
+  generateSummary,
+  archiveSummary,
+  recompressSummary,
+  estimateSummaryTokens,
+  buildConversationMemorySection,
+} from './summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
 import { parseSecretCommand, handleSecretCommand } from './secret-commands.js';
 import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './plan-commands.js';
@@ -278,6 +286,11 @@ export type StatusRef = { current: StatusPoster | null };
 const turnCounters = new Map<string, number>();
 const summaryWorkQueue = new KeyedQueue();
 const latestSummarySequence = new Map<string, number>();
+
+export function _resetMessageCoordinatorStateForTests(): void {
+  turnCounters.clear();
+  latestSummarySequence.clear();
+}
 
 
 const acquireWriterLock = registryAcquireWriterLock;
@@ -2544,6 +2557,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           // Declared before try so they remain accessible after the finally block closes.
           let historySection = '';
           let summarySection = '';
+          let existingSummaryText: string | null = null;
+          let existingSummaryRegeneratedAt: number | undefined;
           let processedText = '';
           try {
 
@@ -2614,7 +2629,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             try {
               const existing = await loadSummary(params.summaryDataDir, sessionKey);
               if (existing) {
-                summarySection = existing.summary.slice(0, params.summaryMaxChars);
+                existingSummaryText = existing.summary.slice(0, params.summaryMaxChars);
+                existingSummaryRegeneratedAt = existing.regeneratedAt;
+                summarySection = buildConversationMemorySection(existingSummaryText, {
+                  turnsSinceUpdate: existing.turnsSinceUpdate,
+                  regeneratedAt: existing.regeneratedAt,
+                });
                 if (!turnCounters.has(sessionKey)) {
                   const raw = existing.turnsSinceUpdate;
                   turnCounters.set(sessionKey, typeof raw === 'number' && raw >= 0 ? raw : 0);
@@ -2699,7 +2719,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               ? `---\nStartup context:\n${startupLine}\n\n`
               : '') +
             (summarySection
-              ? `---\nConversation memory:\n${summarySection}\n\n`
+              ? `---\n${summarySection}\n\n`
               : '') +
             (historySection
               ? `---\nRecent conversation:\n${historySection}\n\n`
@@ -3543,7 +3563,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 : String(msg.content ?? '');
               pendingSummaryWork = {
                 summarySeq,
-                existingSummary: summarySection || null,
+                existingSummary: existingSummaryText,
                 exchange:
                   (historySection ? historySection + '\n' : '') +
                   `[${activeMsg.author.displayName || activeMsg.author.username}]: ${_batchedUserContent}\n` +
@@ -3555,8 +3575,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               // Persist counter progress so restarts resume from last known count.
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
               saveSummary(params.summaryDataDir, sessionKey, {
-                summary: summarySection.slice(0, params.summaryMaxChars),
+                summary: (existingSummaryText ?? '').slice(0, params.summaryMaxChars),
                 updatedAt: Date.now(),
+                regeneratedAt: existingSummaryRegeneratedAt,
                 turnsSinceUpdate: count,
               });
             }
@@ -3672,9 +3693,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
 
+          const savedAt = Date.now();
           await saveSummary(params.summaryDataDir, sessionKey, {
             summary: newSummary.slice(0, params.summaryMaxChars),
-            updatedAt: Date.now(),
+            updatedAt: savedAt,
+            regeneratedAt: savedAt,
             turnsSinceUpdate: 0,
           });
 

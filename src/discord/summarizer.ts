@@ -5,17 +5,45 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 export type ConversationSummary = {
   summary: string;
   updatedAt: number;
+  regeneratedAt?: number;
   turnsSinceUpdate?: number;
 };
+
+function formatSummaryAge(elapsedMs: number): string {
+  const clampedMs = Math.max(0, elapsedMs);
+  const totalMinutes = Math.floor(clampedMs / 60_000);
+  if (totalMinutes < 1) return '<1m';
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours < 24) return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours === 0 ? `${days}d` : `${days}d ${remainingHours}h`;
+}
+
+function formatRecencyAnnotation(
+  regeneratedAt?: number,
+  turnsSinceUpdate?: number,
+  now = Date.now(),
+): string {
+  if (typeof regeneratedAt !== 'number') return '';
+  const newerTurns = typeof turnsSinceUpdate === 'number' && turnsSinceUpdate >= 0 ? turnsSinceUpdate : 0;
+  return ` Last regenerated ${formatSummaryAge(now - regeneratedAt)} ago; ${newerTurns} newer turn${newerTurns === 1 ? '' : 's'} since then.`;
+}
 
 function asConversationSummary(value: unknown): ConversationSummary | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const candidate = value as {
     summary?: unknown;
     updatedAt?: unknown;
+    regeneratedAt?: unknown;
     turnsSinceUpdate?: unknown;
   };
   if (typeof candidate.summary !== 'string' || typeof candidate.updatedAt !== 'number') return null;
+  if (candidate.regeneratedAt !== undefined && typeof candidate.regeneratedAt !== 'number') return null;
   if (candidate.turnsSinceUpdate !== undefined && typeof candidate.turnsSinceUpdate !== 'number') return null;
   return candidate as ConversationSummary;
 }
@@ -75,6 +103,17 @@ export async function archiveSummary(
   }
 }
 
+export function buildConversationMemorySection(
+  summary: string,
+  metadata?: { turnsSinceUpdate?: number; regeneratedAt?: number; now?: number },
+): string {
+  return [
+    'Conversation memory:',
+    `Rolling summary only; treat this as background context.${formatRecencyAnnotation(metadata?.regeneratedAt, metadata?.turnsSinceUpdate, metadata?.now)} If it conflicts with recent conversation, reply context, tool output, or the current user message, trust the fresher evidence.`,
+    summary,
+  ].join('\n');
+}
+
 export type GenerateSummaryOpts = {
   previousSummary: string | null;
   recentExchange: string;
@@ -105,6 +144,8 @@ const SUMMARIZE_PROMPT_TEMPLATE = `You are a conversation summarizer. Update the
 Rules:
 - Keep the summary under {maxChars} characters.
 - Drop filler; keep decisions, preferences, current focus, and key facts.
+- Treat the new exchange as fresher than the current summary. When they conflict, replace stale details with the newer state instead of carrying both forward.
+- If the new exchange shows something was fixed, merged, deployed, reset, completed, or otherwise resolved, remove stale "pending" wording from the summary.
 - Write in third person, present tense.
 - Output ONLY the updated summary text, nothing else.
 {taskStatusRule}

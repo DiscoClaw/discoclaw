@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createMessageCreateHandler } from '../discord.js';
+import { _resetMessageCoordinatorStateForTests, createMessageCreateHandler } from './message-coordinator.js';
+import { loadSummary, saveSummary } from './summarizer.js';
 
 function makeQueue() {
   return {
@@ -34,7 +35,13 @@ function makeMsg(content: string, replyId: string) {
     guildId: 'guild',
     guild: { roles: { everyone: {} } },
     channelId: 'chan',
-    channel: { send: vi.fn(async () => {}), isThread: () => false, name: 'general', id: 'chan' },
+    channel: {
+      send: vi.fn(async () => {}),
+      isThread: () => false,
+      name: 'general',
+      id: 'chan',
+      messages: { fetch: vi.fn(async () => makeHistoryCollection([])) },
+    },
     content,
     attachments: new Map(),
     stickers: new Map(),
@@ -42,6 +49,19 @@ function makeMsg(content: string, replyId: string) {
     mentions: { has: () => false },
     client: { user: { id: 'bot-1' }, channels: { cache: new Map() } },
     reply: vi.fn(async () => replyObj),
+  };
+}
+
+beforeEach(() => {
+  _resetMessageCoordinatorStateForTests();
+});
+
+function makeHistoryCollection(messages: any[]) {
+  return {
+    size: messages.length,
+    values: function* values() {
+      yield* messages;
+    },
   };
 }
 
@@ -99,9 +119,8 @@ function makeParams(runtime: any, summaryDataDir: string, overrides: Partial<any
 }
 
 async function waitForFileSummary(filePath: string, expected: string): Promise<void> {
-  const deadline = Date.now() + 4000;
   let last = '';
-  while (Date.now() < deadline) {
+  for (let i = 0; i < 200; i += 1) {
     try {
       const raw = await fs.readFile(filePath, 'utf8');
       last = JSON.parse(raw).summary;
@@ -112,6 +131,19 @@ async function waitForFileSummary(filePath: string, expected: string): Promise<v
     await sleep(20);
   }
   throw new Error(`Timed out waiting for summary "${expected}". Last seen: "${last}"`);
+}
+
+async function waitForStoredSummary(
+  summaryDir: string,
+  sessionKey: string,
+  predicate: (summary: NonNullable<Awaited<ReturnType<typeof loadSummary>>>) => boolean,
+): Promise<NonNullable<Awaited<ReturnType<typeof loadSummary>>>> {
+  for (let i = 0; i < 200; i += 1) {
+    const summary = await loadSummary(summaryDir, sessionKey);
+    if (summary && predicate(summary)) return summary;
+    await sleep(20);
+  }
+  throw new Error(`Timed out waiting for summary state for ${sessionKey}`);
 }
 
 describe('memory timing integration', () => {
@@ -173,6 +205,138 @@ describe('memory timing integration', () => {
 
     const summaryFile = path.join(summaryDir, 'discord:channel:chan.json');
     await expect(fs.access(summaryFile)).rejects.toThrow();
+  });
+
+  it('shows summary age and newer-turn count when regeneratedAt is available', async () => {
+    const now = Date.parse('2026-03-06T20:00:00.000Z');
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    let seenPrompt = '';
+    const runtime = {
+      id: 'test-runtime',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (p: any) {
+        const prompt = String(p.prompt ?? '');
+        if (!prompt.includes('Updated summary:')) seenPrompt = prompt;
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-recency-'));
+    try {
+      await saveSummary(summaryDir, 'discord:channel:chan', {
+        summary: '!models reset is pending and forge-auditor default is unset.',
+        updatedAt: now - 5_000,
+        regeneratedAt: now - 7_500_000,
+        turnsSinceUpdate: 2,
+      });
+
+      const handler = createMessageCreateHandler(
+        makeParams(runtime, summaryDir, {
+          summaryEveryNTurns: 99,
+          messageHistoryBudget: 200,
+        }),
+        makeQueue(),
+      );
+
+      const msg = makeMsg('What is the current status?', 'r-recency');
+      msg.channel.messages = {
+        fetch: vi.fn(async () => makeHistoryCollection([
+          {
+            author: { bot: false, username: 'tester', displayName: 'Tester' },
+            content: 'The fix is merged, deployed, and already working.',
+          },
+        ])),
+      };
+
+      await handler(msg);
+
+      expect(seenPrompt).toContain('Conversation memory:');
+      expect(seenPrompt).toContain('Last regenerated 2h 5m ago; 2 newer turns since then.');
+      expect(seenPrompt).toContain('trust the fresher evidence');
+      expect(seenPrompt).toContain('Recent conversation:\n[Tester]: The fix is merged, deployed, and already working.');
+      expect(seenPrompt.indexOf('Conversation memory:')).toBeLessThan(seenPrompt.indexOf('Recent conversation:'));
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('omits the recency annotation for legacy summary files without regeneratedAt', async () => {
+    const now = Date.parse('2026-03-06T20:00:00.000Z');
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    let seenPrompt = '';
+    const runtime = {
+      id: 'test-runtime',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (p: any) {
+        const prompt = String(p.prompt ?? '');
+        if (!prompt.includes('Updated summary:')) seenPrompt = prompt;
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-recency-legacy-'));
+    try {
+      await saveSummary(summaryDir, 'discord:channel:chan', {
+        summary: 'Legacy rolling summary text.',
+        updatedAt: now - 5_000,
+        turnsSinceUpdate: 2,
+      });
+
+      const handler = createMessageCreateHandler(
+        makeParams(runtime, summaryDir, { summaryEveryNTurns: 99 }),
+        makeQueue(),
+      );
+
+      await handler(makeMsg('Status?', 'r-recency-legacy'));
+
+      expect(seenPrompt).toContain('Conversation memory:');
+      expect(seenPrompt).not.toContain('Last regenerated');
+      expect(seenPrompt).not.toContain('newer turns since then');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('preserves regeneratedAt during counter-progress saves', async () => {
+    const now = Date.parse('2026-03-06T20:00:00.000Z');
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const runtime = {
+      id: 'test-runtime',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-regenerated-at-'));
+    const regeneratedAt = now - 7_500_000;
+    try {
+      await saveSummary(summaryDir, 'discord:channel:chan', {
+        summary: 'Existing summary',
+        updatedAt: now - 1_000,
+        regeneratedAt,
+        turnsSinceUpdate: 2,
+      });
+
+      const handler = createMessageCreateHandler(
+        makeParams(runtime, summaryDir, { summaryEveryNTurns: 99 }),
+        makeQueue(),
+      );
+
+      await handler(makeMsg('Another turn', 'r-counter-progress'));
+
+      const stored = await waitForStoredSummary(
+        summaryDir,
+        'discord:channel:chan',
+        (summary) => summary.turnsSinceUpdate === 3,
+      );
+
+      expect(stored.updatedAt).toBe(now);
+      expect(stored.regeneratedAt).toBe(regeneratedAt);
+      expect(stored.turnsSinceUpdate).toBe(3);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('runs one-pass summary recompression when generated summary exceeds token threshold', async () => {
