@@ -1409,7 +1409,7 @@ describe('Codex CLI runtime adapter', () => {
 
       // Values after --image should be file paths with correct extensions
       expect(callArgs[imageIndices[0]! + 1]).toMatch(/\.png$/);
-      expect(callArgs[imageIndices[1]! + 1]).toMatch(/\.jpeg$/);
+      expect(callArgs[imageIndices[1]! + 1]).toMatch(/\.jpg$/);
     });
 
     it('creates temp files with correct extensions matching media types', async () => {
@@ -1442,7 +1442,7 @@ describe('Codex CLI runtime adapter', () => {
 
       expect(imagePaths).toHaveLength(3);
       expect(imagePaths[0]).toMatch(/image-0\.png$/);
-      expect(imagePaths[1]).toMatch(/image-1\.jpeg$/);
+      expect(imagePaths[1]).toMatch(/image-1\.jpg$/);
       expect(imagePaths[2]).toMatch(/image-2\.webp$/);
     });
 
