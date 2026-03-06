@@ -262,11 +262,12 @@ export function createCodexStrategy(
     },
 
     async prepareImages(images: ImageData[], log?: CliAdapterLogger): Promise<{ paths: string[]; cleanup: () => Promise<void> }> {
-      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-codex-images-'));
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-codex-img-'));
       const paths: string[] = [];
       for (let i = 0; i < images.length; i++) {
         const img = images[i]!;
-        const ext = img.mediaType.split('/')[1] || 'bin';
+        const rawExt = img.mediaType.split('/')[1] || 'bin';
+        const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
         const filePath = path.join(tmpDir, `image-${i}.${ext}`);
         await fs.writeFile(filePath, Buffer.from(img.base64, 'base64'));
         paths.push(filePath);
