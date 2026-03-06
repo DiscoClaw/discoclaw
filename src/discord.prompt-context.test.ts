@@ -15,7 +15,7 @@ import { taskThreadCache } from './tasks/thread-cache.js';
 import { TaskStore } from './tasks/store.js';
 import { createMessageCreateHandler } from './discord.js';
 import { loadDurableMemory, saveDurableMemory, addItem } from './discord/durable-memory.js';
-import { inlineContextFiles } from './discord/prompt-common.js';
+import { TRACKED_TOOLS_PREAMBLE, inlineContextFiles } from './discord/prompt-common.js';
 import type { DurableMemoryStore } from './discord/durable-memory.js';
 import { saveSummary, loadSummary } from './discord/summarizer.js';
 
@@ -793,7 +793,7 @@ describe('workspace PA files in prompt', () => {
     expect(runtime.invoke).not.toHaveBeenCalled();
   });
 
-  it('includes TOOLS.md when present', async () => {
+  it('includes tracked TOOLS.md by default and overlays workspace TOOLS.md when present', async () => {
     const queue = makeQueue();
     let seenPrompt = '';
     const runtime = {
@@ -805,7 +805,6 @@ describe('workspace PA files in prompt', () => {
 
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pa-prompt-'));
     await fs.writeFile(path.join(workspace, 'SOUL.md'), '# Soul', 'utf-8');
-    await fs.writeFile(path.join(workspace, 'TOOLS.md'), '# Tools', 'utf-8');
 
     const handler = createMessageCreateHandler({
       allowUserIds: new Set(['123']),
@@ -860,7 +859,18 @@ describe('workspace PA files in prompt', () => {
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    expect(seenPrompt).toContain('TOOLS.md');
+    expect(seenPrompt).toContain(TRACKED_TOOLS_PREAMBLE);
+    expect(seenPrompt).not.toContain('--- TOOLS.md ---');
+
+    const workspaceTools = '--- TOOLS.md ---\n# Workspace Tools Override';
+    await fs.writeFile(path.join(workspace, 'TOOLS.md'), '# Workspace Tools Override', 'utf-8');
+
+    await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
+    expect(seenPrompt).toContain(TRACKED_TOOLS_PREAMBLE);
+    expect(seenPrompt).toContain(workspaceTools);
+    expect(seenPrompt.indexOf(TRACKED_TOOLS_PREAMBLE)).toBeLessThan(seenPrompt.indexOf(workspaceTools));
   });
 });
 
