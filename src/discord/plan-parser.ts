@@ -21,6 +21,7 @@ export function parsePlan(content: string): ParsedPlanDoc {
   const sections = new Map<string, string>();
   let title = '';
   let inFence = false;
+  let metadataDone = false;
 
   let currentSection: string | null = null;
   let currentBody: string[] = [];
@@ -42,7 +43,14 @@ export function parsePlan(content: string): ParsedPlanDoc {
       title = line.slice('# Plan:'.length).trim();
     }
 
-    if (!inFence && currentSection === null) {
+    // Stop parsing metadata after the `---` frontmatter separator.
+    // This prevents duplicate **Status:** lines later in the document
+    // from overwriting the canonical header value.
+    if (!inFence && !metadataDone && currentSection === null && line.trim() === '---') {
+      metadataDone = true;
+    }
+
+    if (!inFence && !metadataDone && currentSection === null) {
       const meta = parseBoldMetadataLine(line);
       if (meta) metadata.set(meta.key, meta.value);
     }
