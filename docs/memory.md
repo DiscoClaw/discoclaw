@@ -1,6 +1,6 @@
 # DiscoClaw Memory System
 
-DiscoClaw's memory system gives your assistant persistent context across conversations, channels, and restarts. It combines five runtime layers so the bot remembers what you told it, what you were discussing, and what's happening across your server.
+DiscoClaw's memory system gives your assistant persistent context across conversations, channels, and restarts. It combines seven runtime layers so the bot remembers what you told it, what you were discussing, and what's happening across your server.
 
 ## Memory Layers
 
@@ -129,7 +129,32 @@ Bot:   Sure — is this related to the auth middleware test you were debugging
        in #dev? The token format issue might be connected to expiry handling.
 ```
 
-### 6. Workspace Files — human-curated memory
+### 6. Cold Storage — semantic recall
+
+Searchable archive of past conversations, powered by SQLite + sqlite-vec for vector search, FTS5 for keyword search, and Reciprocal Rank Fusion (RRF) to merge both ranking signals. When a message arrives, cold storage generates an embedding for the user's query and retrieves the most relevant historical chunks. Results are injected into the prompt's primacy zone — high-attention placement so the AI treats retrieved context as foundational background.
+
+Messages are automatically chunked and embedded on ingestion. Retrieval is fail-open: if the embedding API is slow (>3s timeout), the DB is unavailable, or no results match, the prompt simply omits the cold storage section with no error visible to the user.
+
+**What you see:**
+- The bot recalls specific details from conversations that happened days or weeks ago.
+- No manual bookmarking — all guild messages are indexed automatically.
+- Works across channels (optional channel filter via `COLD_STORAGE_CHANNEL_FILTER`).
+
+```
+(two weeks ago, in #dev)
+User:  We decided to use RRF for merging vector and keyword scores —
+       it's rank-based so it doesn't need score normalization.
+
+(today, in #general)
+User:  What approach did we pick for combining search results?
+Bot:   You went with Reciprocal Rank Fusion (RRF) — it merges vector
+       and keyword rankings without needing score normalization. That
+       decision was made in #dev about two weeks ago.
+```
+
+Requires an embedding API (OpenAI or any OpenAI-compatible endpoint). Enable with `DISCOCLAW_COLD_STORAGE_ENABLED=true`. See [docs/configuration.md](configuration.md) for all cold storage env vars.
+
+### 7. Workspace Files — human-curated memory
 
 Curated long-term notes (`workspace/MEMORY.md`) and daily scratch logs (`workspace/memory/YYYY-MM-DD.md`). Loaded in DMs only. These hold things too nuanced for structured durable items — decisions, lessons, project context.
 
@@ -155,11 +180,12 @@ Each layer has its own character budget. Empty layers are omitted entirely (no h
 | Rolling summary | 2000 chars | on |
 | Message history | 3000 chars | on |
 | Short-term memory | 1000 chars | on |
+| Cold storage | 1500 chars | off (requires `DISCOCLAW_COLD_STORAGE_ENABLED`) |
 | Open tasks | 600 chars | on |
 | Auto-extraction | n/a (write-side only) | on |
 | Workspace files | no budget | on (DMs only) |
 
-With all layers at default settings, worst-case memory overhead is ~8600 chars (~2150 tokens). In practice most prompts use far less — a user with 5 durable items and a short summary might add ~500 chars total.
+With all layers at default settings (cold storage disabled), worst-case memory overhead is ~8600 chars (~2150 tokens). With cold storage enabled, add up to 1500 chars (~375 tokens). In practice most prompts use far less — a user with 5 durable items and a short summary might add ~500 chars total.
 
 ## How to Tune Memory
 
@@ -173,11 +199,17 @@ With all layers at default settings, worst-case memory overhead is ~8600 chars (
 - `DISCOCLAW_SUMMARY_MAX_TOKENS` — estimated-token threshold that triggers one-pass recompression
 - `DISCOCLAW_SUMMARY_TARGET_RATIO` — recompression target ratio relative to that threshold
 
+**Tune cold storage retrieval:**
+- `DISCOCLAW_COLD_STORAGE_INJECT_MAX_CHARS` — max chars injected per prompt (default 1500)
+- `DISCOCLAW_COLD_STORAGE_SEARCH_LIMIT` — max chunks searched (default 10)
+- `COLD_STORAGE_CHANNEL_FILTER` — comma-separated channel IDs to restrict ingestion/retrieval
+
 **Want less memory overhead?** Disable layers you don't need:
 - `DISCOCLAW_DURABLE_MEMORY_ENABLED=false` — no long-term facts
 - `DISCOCLAW_SUMMARY_ENABLED=false` — no rolling summaries
 - `DISCOCLAW_SHORTTERM_MEMORY_ENABLED=false` — no cross-channel awareness
 - `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED=false` — no auto-extraction
+- `DISCOCLAW_COLD_STORAGE_ENABLED=false` — no semantic recall (default)
 
 **Control auto-extraction aggressiveness:**
 - `DISCOCLAW_SUMMARY_EVERY_N_TURNS` — how often extraction runs (default 5)
@@ -211,6 +243,9 @@ With all layers at default settings, worst-case memory overhead is ~8600 chars (
 | `DISCOCLAW_SHORTTERM_MAX_ENTRIES` | `20` | Max short-term entries |
 | `DISCOCLAW_SHORTTERM_MAX_AGE_HOURS` | `6` | Expiry for short-term entries |
 | `DISCOCLAW_SHORTTERM_INJECT_MAX_CHARS` | `1000` | Max chars for short-term injection |
+| `DISCOCLAW_COLD_STORAGE_ENABLED` | `false` | Enable cold-storage subsystem |
+| `DISCOCLAW_COLD_STORAGE_INJECT_MAX_CHARS` | `1500` | Max chars for cold-storage prompt section |
+| `DISCOCLAW_COLD_STORAGE_SEARCH_LIMIT` | `10` | Max chunks returned per search |
 
 ## Troubleshooting
 
