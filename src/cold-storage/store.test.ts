@@ -388,6 +388,31 @@ describe('ColdStorageStore', () => {
     });
   });
 
+  // ── Chunk Count ─────────────────────────────────────────────────
+
+  describe('chunkCount', () => {
+    it('returns 0 on empty store', () => {
+      expect(store.chunkCount()).toBe(0);
+    });
+
+    it('returns correct count after inserts', () => {
+      store.insertChunk(makeInput({ content: 'one', embedding: makeEmbedding(1, 0, 0, 0) }));
+      store.insertChunk(makeInput({ content: 'two', embedding: makeEmbedding(0, 1, 0, 0) }));
+      store.insertChunk(makeInput({ content: 'three', embedding: makeEmbedding(0, 0, 1, 0) }));
+      expect(store.chunkCount()).toBe(3);
+    });
+
+    it('returns correct count after deletes', () => {
+      const msgId = '111111111111111111';
+      store.insertChunk(makeInput({ content: 'keep', embedding: makeEmbedding(1, 0, 0, 0), metadata: { message_id: '222222222222222222' } }));
+      store.insertChunk(makeInput({ content: 'remove', embedding: makeEmbedding(0, 1, 0, 0), metadata: { message_id: msgId } }));
+      expect(store.chunkCount()).toBe(2);
+
+      store.deleteByMessageId(msgId);
+      expect(store.chunkCount()).toBe(1);
+    });
+  });
+
   // ── Fail-open ────────────────────────────────────────────────────
 
   describe('fail-open behavior', () => {

@@ -173,6 +173,10 @@ export class ColdStorageStore {
     return txn();
   }
 
+  chunkCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS cnt FROM chunks').get() as { cnt: number }).cnt;
+  }
+
   close(): void {
     this.db.close();
   }
