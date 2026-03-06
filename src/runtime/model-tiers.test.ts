@@ -33,9 +33,16 @@ describe('resolveModel', () => {
   });
 
   describe('openai runtime', () => {
-    it('resolves tiers to empty string (adapter-default)', () => {
-      expect(resolveModel('fast', 'openai')).toBe('');
-      expect(resolveModel('capable', 'openai')).toBe('');
+    it('resolves fast → gpt-5-mini', () => {
+      expect(resolveModel('fast', 'openai')).toBe('gpt-5-mini');
+    });
+
+    it('resolves capable → gpt-5.4', () => {
+      expect(resolveModel('capable', 'openai')).toBe('gpt-5.4');
+    });
+
+    it('resolves deep → gpt-5.4-pro', () => {
+      expect(resolveModel('deep', 'openai')).toBe('gpt-5.4-pro');
     });
   });
 
@@ -44,9 +51,12 @@ describe('resolveModel', () => {
       expect(resolveModel('fast', 'codex')).toBe('gpt-5.1-codex-mini');
     });
 
-    it('resolves capable/deep to empty string (adapter-default)', () => {
-      expect(resolveModel('capable', 'codex')).toBe('');
-      expect(resolveModel('deep', 'codex')).toBe('');
+    it('resolves capable → gpt-5.3-codex', () => {
+      expect(resolveModel('capable', 'codex')).toBe('gpt-5.3-codex');
+    });
+
+    it('resolves deep → gpt-5.4', () => {
+      expect(resolveModel('deep', 'codex')).toBe('gpt-5.4');
     });
   });
 
