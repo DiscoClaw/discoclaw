@@ -38,7 +38,7 @@ Discoclaw runs as a user-level systemd service. Status checks and log reads are 
 
 ### Environment (.env)
 
-The canonical `.env` file lives in the **discoclaw repo root** (the systemd `WorkingDirectory`). This is what the service loads via `EnvironmentFile` and `dotenv/config`. The data dir does NOT have a `.env`. If you need to change env vars, edit the repo's `.env`. The `!secret` command also targets this file.
+Discoclaw loads `.env` from the service **working directory** via `EnvironmentFile` and `dotenv/config`. In a source checkout that is usually the repo root; in npm-managed installs it is the package/install directory. If you need to change env vars, edit that instance's `.env`. The `!secret` command also targets this file.
 
 ### Authorized Commands
 

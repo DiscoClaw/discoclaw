@@ -98,7 +98,7 @@ import {
 } from './index.runtime.js';
 import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupChecks } from './index.post-connect.js';
 import { loadOverrides, saveOverrides, resolveOverridesPath, type RuntimeOverrides } from './runtime-overrides.js';
-import { loadModelConfig, saveModelConfig, loadLegacyOverrideModels, migrateFromLegacy, resolveModelsJsonPath, type ModelConfig, type ModelRole } from './model-config.js';
+import { loadModelConfig, saveModelConfig, loadLegacyOverrideModels, migrateFromLegacy, detectOverrideSources, resolveModelsJsonPath, type ModelConfig, type ModelRole } from './model-config.js';
 import { createColdStorage, type ColdStorageSubsystem } from './cold-storage/index.js';
 import { parseGlobalSupervisorBail, type GlobalSupervisorAuditPayload } from './runtime/global-supervisor.js';
 import type { StreamingPreviewMode } from './discord/output-utils.js';
@@ -1037,11 +1037,7 @@ if (overrides.ttsVoice) {
 
 // Track which roles have active file-backed overrides (used by !models show).
 // Only mark as override if the stored value differs from env defaults.
-const overrideSources: Partial<Record<ModelRole, boolean>> = {};
-for (const role of Object.keys(currentModelConfig) as ModelRole[]) {
-  const stored = currentModelConfig[role];
-  if (stored && stored !== envModelDefaults[role]) overrideSources[role] = true;
-}
+const overrideSources = detectOverrideSources(currentModelConfig, envModelDefaults);
 
 // Persist callback: updates models.json for the given role.
 const persistOverride = (role: ModelRole, model: string): void => {

@@ -190,3 +190,20 @@ export function migrateFromLegacy(
   }
   return config;
 }
+
+/**
+ * Identify which stored roles are true overrides relative to the env-derived
+ * startup defaults. Roles that match env defaults are treated as baseline, not
+ * overrides.
+ */
+export function detectOverrideSources(
+  currentConfig: ModelConfig,
+  envDefaults: Partial<Record<ModelRole, string>>,
+): Partial<Record<ModelRole, boolean>> {
+  const overrideSources: Partial<Record<ModelRole, boolean>> = {};
+  for (const role of Object.keys(currentConfig) as ModelRole[]) {
+    const stored = currentConfig[role];
+    if (stored && stored !== envDefaults[role]) overrideSources[role] = true;
+  }
+  return overrideSources;
+}
