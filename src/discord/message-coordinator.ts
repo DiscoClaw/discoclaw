@@ -2553,6 +2553,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let historySection = '';
           let summarySection = '';
           let existingSummaryText: string | null = null;
+          let existingSummaryRegeneratedAt: number | undefined;
           let processedText = '';
           try {
 
@@ -2624,7 +2625,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const existing = await loadSummary(params.summaryDataDir, sessionKey);
               if (existing) {
                 existingSummaryText = existing.summary.slice(0, params.summaryMaxChars);
-                summarySection = buildConversationMemorySection(existingSummaryText, existing.turnsSinceUpdate);
+                existingSummaryRegeneratedAt = existing.regeneratedAt;
+                summarySection = buildConversationMemorySection(existingSummaryText, {
+                  turnsSinceUpdate: existing.turnsSinceUpdate,
+                  regeneratedAt: existing.regeneratedAt,
+                });
                 if (!turnCounters.has(sessionKey)) {
                   const raw = existing.turnsSinceUpdate;
                   turnCounters.set(sessionKey, typeof raw === 'number' && raw >= 0 ? raw : 0);
@@ -3567,6 +3572,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               saveSummary(params.summaryDataDir, sessionKey, {
                 summary: (existingSummaryText ?? '').slice(0, params.summaryMaxChars),
                 updatedAt: Date.now(),
+                regeneratedAt: existingSummaryRegeneratedAt,
                 turnsSinceUpdate: count,
               });
             }
@@ -3682,9 +3688,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           if (latestSummarySequence.get(sessionKey) !== work.summarySeq) return;
 
+          const savedAt = Date.now();
           await saveSummary(params.summaryDataDir, sessionKey, {
             summary: newSummary.slice(0, params.summaryMaxChars),
-            updatedAt: Date.now(),
+            updatedAt: savedAt,
+            regeneratedAt: savedAt,
             turnsSinceUpdate: 0,
           });
 
