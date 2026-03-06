@@ -30,7 +30,9 @@ export function renderTrackedToolsSection(content: string): string {
 /**
  * Load tracked tools from disk with memoization.
  * Missing/unreadable files return an explicit warning section so the
- * tracked-tools prompt tier is never silently dropped.
+ * tracked-tools prompt tier is never silently dropped. This loader only
+ * handles the repository-tracked base layer; workspace/TOOLS.md, when
+ * present, is loaded later as the user override layer in prompt assembly.
  */
 export function loadTrackedToolsPreamble(opts?: {
   trackedToolsPath?: string;

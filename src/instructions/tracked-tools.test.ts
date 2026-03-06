@@ -66,6 +66,22 @@ describe('loadTrackedToolsPreamble', () => {
     warnSpy.mockRestore();
   });
 
+  it('returns only the tracked tools section', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tracked-tools-'));
+    dirs.push(dir);
+    const trackedToolsPath = path.join(dir, 'TOOLS.md');
+
+    await fs.writeFile(trackedToolsPath, '# Tools\nUse browser automation wisely\n', 'utf-8');
+
+    const preamble = loadTrackedToolsPreamble({
+      trackedToolsPath,
+      forceReload: true,
+    });
+
+    expect(preamble.startsWith(`--- ${TRACKED_TOOLS_SECTION_LABEL} ---`)).toBe(true);
+    expect(preamble).toContain('# Tools\nUse browser automation wisely');
+  });
+
   it('caches by path and only reloads when forced', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tracked-tools-'));
     dirs.push(dir);
