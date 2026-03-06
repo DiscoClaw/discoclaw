@@ -9,6 +9,7 @@ import {
   TRACKED_DEFAULTS_PREAMBLE,
   OPEN_TASKS_MAX_CHARS,
   _resetToolsAuditState,
+  assemblePostPreambleSections,
   buildDurableMemorySection,
   buildOpenTasksSection,
   buildPromptPreamble,
@@ -16,13 +17,17 @@ import {
   buildTaskContextSection,
   buildTaskThreadSection,
   estimateTokensFromChars,
+  formatOrderedSection,
+  getSectionZoneMap,
   inlineContextFiles,
   inlineContextFilesWithMeta,
   loadDailyLogFiles,
   loadWorkspaceMemoryFile,
   loadWorkspacePaFiles,
+  orderPostPreambleSections,
   resolveEffectiveTools,
 } from './prompt-common.js';
+import type { OrderedPromptSection } from './prompt-common.js';
 import { TaskStore } from '../tasks/store.js';
 import { loadDurableMemory, saveDurableMemory } from './durable-memory.js';
 import { durableWriteQueue } from './durable-write-queue.js';
@@ -1013,5 +1018,208 @@ describe('resolveEffectiveTools audit logging', () => {
     expect(result.runtimeCapabilityNote).toContain('Step');
     expect(result.runtimeCapabilityNote).not.toContain('pipeline.resume');
     expect(result.runtimeCapabilityNote).not.toContain('step.run');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Post-preamble section ordering (primacy/recency bias)
+// ---------------------------------------------------------------------------
+
+describe('getSectionZoneMap', () => {
+  it('places task and durableMemory in the primacy zone', () => {
+    const map = getSectionZoneMap();
+    expect(map.task.zone).toBe('primacy');
+    expect(map.durableMemory.zone).toBe('primacy');
+  });
+
+  it('places shortTermMemory and openTasks in the middle zone', () => {
+    const map = getSectionZoneMap();
+    expect(map.shortTermMemory.zone).toBe('middle');
+    expect(map.openTasks.zone).toBe('middle');
+  });
+
+  it('places actionsReference in the recency zone', () => {
+    const map = getSectionZoneMap();
+    expect(map.actionsReference.zone).toBe('recency');
+  });
+
+  it('places actionsReference last within the recency zone', () => {
+    const map = getSectionZoneMap();
+    const recencySections = Object.entries(map)
+      .filter(([, v]) => v.zone === 'recency')
+      .sort(([, a], [, b]) => a.order - b.order);
+    const last = recencySections[recencySections.length - 1];
+    expect(last[0]).toBe('actionsReference');
+  });
+
+  it('returns a copy (mutations do not affect internal state)', () => {
+    const map1 = getSectionZoneMap();
+    map1.task.order = 999;
+    const map2 = getSectionZoneMap();
+    expect(map2.task.order).toBe(0);
+  });
+});
+
+describe('orderPostPreambleSections', () => {
+  it('filters out empty-content sections', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'task', zone: 'primacy', content: 'task info' },
+      { key: 'openTasks', zone: 'middle', content: '' },
+      { key: 'history', zone: 'recency', content: 'recent chat' },
+    ];
+    const result = orderPostPreambleSections(sections);
+    expect(result).toHaveLength(2);
+    expect(result.map((s) => s.key)).toEqual(['task', 'history']);
+  });
+
+  it('orders sections by zone: primacy → middle → recency', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'history', zone: 'recency', content: 'chat' },
+      { key: 'openTasks', zone: 'middle', content: 'tasks' },
+      { key: 'task', zone: 'primacy', content: 'thread task' },
+    ];
+    const result = orderPostPreambleSections(sections);
+    expect(result.map((s) => s.zone)).toEqual(['primacy', 'middle', 'recency']);
+  });
+
+  it('orders within the same zone by SECTION_ZONE_MAP order', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'actionsReference', zone: 'recency', content: 'actions' },
+      { key: 'replyRef', zone: 'recency', content: 'reply' },
+      { key: 'rollingSummary', zone: 'recency', content: 'summary' },
+      { key: 'history', zone: 'recency', content: 'chat' },
+    ];
+    const result = orderPostPreambleSections(sections);
+    expect(result.map((s) => s.key)).toEqual([
+      'rollingSummary', 'history', 'replyRef', 'actionsReference',
+    ]);
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(orderPostPreambleSections([])).toEqual([]);
+  });
+
+  it('returns empty array when all sections have empty content', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'task', zone: 'primacy', content: '' },
+      { key: 'history', zone: 'recency', content: '' },
+    ];
+    expect(orderPostPreambleSections(sections)).toEqual([]);
+  });
+
+  it('sorts unknown keys after known keys within the same zone', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'unknown', zone: 'primacy', content: 'mystery' },
+      { key: 'task', zone: 'primacy', content: 'task' },
+    ];
+    const result = orderPostPreambleSections(sections);
+    expect(result.map((s) => s.key)).toEqual(['task', 'unknown']);
+  });
+});
+
+describe('formatOrderedSection', () => {
+  it('renders with label when provided', () => {
+    const section: OrderedPromptSection = {
+      key: 'durableMemory',
+      zone: 'primacy',
+      label: 'Durable memory (user-specific notes)',
+      content: 'fact 1',
+    };
+    expect(formatOrderedSection(section)).toBe(
+      '---\nDurable memory (user-specific notes):\nfact 1',
+    );
+  });
+
+  it('renders without label prefix when label is omitted', () => {
+    const section: OrderedPromptSection = {
+      key: 'task',
+      zone: 'primacy',
+      content: 'Task context for this thread...',
+    };
+    expect(formatOrderedSection(section)).toBe(
+      '---\nTask context for this thread...',
+    );
+  });
+});
+
+describe('assemblePostPreambleSections', () => {
+  it('assembles sections in zone order with --- separators', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'actionsReference', zone: 'recency', content: 'tool schemas' },
+      { key: 'openTasks', zone: 'middle', content: 'Open tasks:\ntask-1' },
+      { key: 'task', zone: 'primacy', content: 'task context' },
+    ];
+    const result = assemblePostPreambleSections(sections);
+    const taskIdx = result.indexOf('task context');
+    const openIdx = result.indexOf('Open tasks:');
+    const actionsIdx = result.indexOf('tool schemas');
+    expect(taskIdx).toBeLessThan(openIdx);
+    expect(openIdx).toBeLessThan(actionsIdx);
+  });
+
+  it('returns empty string for empty input', () => {
+    expect(assemblePostPreambleSections([])).toBe('');
+  });
+
+  it('returns empty string when all sections are empty', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'task', zone: 'primacy', content: '' },
+    ];
+    expect(assemblePostPreambleSections(sections)).toBe('');
+  });
+
+  it('places actionsReference as the last section in the assembled output', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'task', zone: 'primacy', content: 'task' },
+      { key: 'rollingSummary', zone: 'recency', label: 'Conversation memory', content: 'summary' },
+      { key: 'actionsReference', zone: 'recency', content: 'actions and tools' },
+    ];
+    const result = assemblePostPreambleSections(sections);
+    expect(result.endsWith('actions and tools')).toBe(true);
+  });
+
+  it('includes labels in the formatted output', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'durableMemory', zone: 'primacy', label: 'Durable memory', content: 'facts' },
+      { key: 'history', zone: 'recency', label: 'Recent conversation', content: 'chat' },
+    ];
+    const result = assemblePostPreambleSections(sections);
+    expect(result).toContain('---\nDurable memory:\nfacts');
+    expect(result).toContain('---\nRecent conversation:\nchat');
+  });
+
+  it('separates sections with double newlines', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'task', zone: 'primacy', content: 'task' },
+      { key: 'openTasks', zone: 'middle', content: 'tasks' },
+    ];
+    const result = assemblePostPreambleSections(sections);
+    expect(result).toBe('---\ntask\n\n---\ntasks');
+  });
+
+  it('full integration: all zones represented in correct order', () => {
+    const sections: OrderedPromptSection[] = [
+      { key: 'actionsReference', zone: 'recency', content: 'tool schemas' },
+      { key: 'startup', zone: 'middle', label: 'Startup context', content: 'boot info' },
+      { key: 'durableMemory', zone: 'primacy', label: 'Durable memory', content: 'facts' },
+      { key: 'history', zone: 'recency', label: 'Recent conversation', content: 'chat' },
+      { key: 'task', zone: 'primacy', content: 'thread task' },
+      { key: 'shortTermMemory', zone: 'middle', label: 'Recent activity', content: 'cross-channel' },
+      { key: 'rollingSummary', zone: 'recency', label: 'Conversation memory', content: 'summary' },
+      { key: 'replyRef', zone: 'recency', label: 'Replied-to message', content: 'quoted msg' },
+      { key: 'openTasks', zone: 'middle', content: 'Open tasks:\ntask list' },
+    ];
+    const result = assemblePostPreambleSections(sections);
+    const keys = [
+      'thread task', 'facts',                    // primacy
+      'cross-channel', 'Open tasks:', 'boot info', // middle
+      'summary', 'chat', 'quoted msg', 'tool schemas', // recency
+    ];
+    let lastIdx = -1;
+    for (const key of keys) {
+      const idx = result.indexOf(key);
+      expect(idx).toBeGreaterThan(lastIdx);
+      lastIdx = idx;
+    }
   });
 });

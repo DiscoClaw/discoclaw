@@ -530,6 +530,106 @@ export function buildTaskContextSection(task: TaskData): string {
 }
 
 /** Build the task context section if the message is from a tasks forum thread. */
+// ---------------------------------------------------------------------------
+// Post-preamble section ordering (primacy/recency bias optimization)
+// ---------------------------------------------------------------------------
+
+/**
+ * Prompt zone placement, optimized for attention distribution:
+ * - **primacy**: front of post-preamble — exploits primacy bias (high attention)
+ * - **middle**: center of post-preamble — "dumb zone" (lower model compliance)
+ * - **recency**: near end, just before user message — exploits recency bias
+ */
+export type PromptZone = 'primacy' | 'middle' | 'recency';
+
+export interface OrderedPromptSection {
+  /** Identifies the section for ordering and diagnostics. */
+  key: string;
+  /** Which attention zone this section belongs to. */
+  zone: PromptZone;
+  /** Optional label rendered after the `---` separator (e.g. "Durable memory"). */
+  label?: string;
+  /** Section body text. Empty strings are filtered out. */
+  content: string;
+}
+
+/**
+ * Canonical zone assignments and intra-zone ordering for known section keys.
+ * Lower `order` values sort first within the same zone.
+ *
+ * Primacy zone (front): high-signal thread/user context.
+ * Middle zone: low-signal ambient data (deprioritized — "dumb zone").
+ * Recency zone (near user message): conversation state + tool schemas.
+ */
+const SECTION_ZONE_MAP: Record<string, { zone: PromptZone; order: number }> = {
+  task:             { zone: 'primacy', order: 0 },
+  durableMemory:    { zone: 'primacy', order: 1 },
+  shortTermMemory:  { zone: 'middle',  order: 0 },
+  openTasks:        { zone: 'middle',  order: 1 },
+  startup:          { zone: 'middle',  order: 2 },
+  rollingSummary:   { zone: 'recency', order: 0 },
+  history:          { zone: 'recency', order: 1 },
+  replyRef:         { zone: 'recency', order: 2 },
+  actionsReference: { zone: 'recency', order: 3 },
+};
+
+const ZONE_PRIORITY: Record<PromptZone, number> = {
+  primacy: 0,
+  middle: 1,
+  recency: 2,
+};
+
+/** Expose zone map for testing and diagnostics (deep copy). */
+export function getSectionZoneMap(): Record<string, { zone: PromptZone; order: number }> {
+  const copy: Record<string, { zone: PromptZone; order: number }> = {};
+  for (const [key, value] of Object.entries(SECTION_ZONE_MAP)) {
+    copy[key] = { ...value };
+  }
+  return copy;
+}
+
+/**
+ * Sort post-preamble sections by zone (primacy → middle → recency),
+ * then by intra-zone order. Empty-content sections are filtered out.
+ */
+export function orderPostPreambleSections(
+  sections: OrderedPromptSection[],
+): OrderedPromptSection[] {
+  return sections
+    .filter((s) => s.content.length > 0)
+    .sort((a, b) => {
+      const zoneDiff = ZONE_PRIORITY[a.zone] - ZONE_PRIORITY[b.zone];
+      if (zoneDiff !== 0) return zoneDiff;
+      const aOrder = SECTION_ZONE_MAP[a.key]?.order ?? 99;
+      const bOrder = SECTION_ZONE_MAP[b.key]?.order ?? 99;
+      return aOrder - bOrder;
+    });
+}
+
+/** Format a single section with its `---` separator and optional label. */
+export function formatOrderedSection(section: OrderedPromptSection): string {
+  if (section.label) {
+    return `---\n${section.label}:\n${section.content}`;
+  }
+  return `---\n${section.content}`;
+}
+
+/**
+ * Assemble post-preamble sections into a single string, ordered by
+ * attention zone. Empty sections are excluded.
+ */
+export function assemblePostPreambleSections(
+  sections: OrderedPromptSection[],
+): string {
+  const ordered = orderPostPreambleSections(sections);
+  if (ordered.length === 0) return '';
+  return ordered.map(formatOrderedSection).join('\n\n');
+}
+
+// ---------------------------------------------------------------------------
+// Task thread context
+// ---------------------------------------------------------------------------
+
 export async function buildTaskThreadSection(opts: {
   isThread: boolean;
   threadId: string | null;
