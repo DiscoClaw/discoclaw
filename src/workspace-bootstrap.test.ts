@@ -19,7 +19,6 @@ const ALL_TEMPLATE_FILES = [
   'IDENTITY.md',
   'USER.md',
   'AGENTS.md',
-  'TOOLS.md',
   'MEMORY.md',
 ];
 
@@ -121,6 +120,8 @@ describe('ensureWorkspaceBootstrapFiles', () => {
       const content = await fs.readFile(path.join(workspace, file), 'utf-8');
       expect(content.length).toBeGreaterThan(0);
     }
+    expect(created).not.toContain('TOOLS.md');
+    await expect(fs.access(path.join(workspace, 'TOOLS.md'))).rejects.toThrow();
   });
 
   it('does not overwrite existing user-owned files', async () => {
@@ -436,6 +437,7 @@ describe('ensureWorkspaceBootstrapFiles', () => {
     for (const file of ALL_TEMPLATE_FILES) {
       await expect(fs.access(path.join(workspace, file))).resolves.toBeUndefined();
     }
+    await expect(fs.access(path.join(workspace, 'TOOLS.md'))).rejects.toThrow();
     // Force warning should fire even on brand-new workspace.
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceCwd: workspace }),
@@ -557,6 +559,8 @@ describe('template content — SYSTEM_DEFAULTS.md', () => {
     expect(systemDefaults).toContain('tracked default instruction source');
     expect(systemDefaults).toContain('not a workspace-managed file');
     expect(systemDefaults).toContain('Runtime Instruction Precedence');
+    expect(systemDefaults).toContain('templates/instructions/TOOLS.md');
+    expect(systemDefaults).toContain('workspace/TOOLS.md');
   });
 
   it('contains Discord action batching rules', async () => {
@@ -637,7 +641,7 @@ describe('template content — AGENTS.md', () => {
 });
 
 describe('template content — TOOLS.md', () => {
-  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  const templatesDir = path.join(__dirname, '..', 'templates', 'instructions');
   let tools: string;
 
   it('template file exists and is non-empty', async () => {
@@ -649,6 +653,14 @@ describe('template content — TOOLS.md', () => {
     tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
     expect(tools).toContain('Browser Automation');
     expect(tools).toContain('agent-browser');
+  });
+
+  it('declares tracked runtime injection and workspace override behavior', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('canonical tracked tools instruction source');
+    expect(tools).toContain('runtime after `templates/instructions/SYSTEM_DEFAULTS.md`');
+    expect(tools).toContain('workspace/TOOLS.md');
+    expect(tools).toContain('Runtime Instruction Precedence');
   });
 
   it('documents browser automation tiers (WebFetch, Playwright, CDP)', async () => {
@@ -687,19 +699,48 @@ describe('template content — TOOLS.md', () => {
   });
 });
 
+describe('template content — workspace TOOLS.md override', () => {
+  const templatesDir = path.join(__dirname, '..', 'templates', 'workspace');
+  let tools: string;
+
+  it('template file exists and is non-empty', async () => {
+    tools = await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools.length).toBeGreaterThan(0);
+  });
+
+  it('describes workspace TOOLS.md as an optional override layer', async () => {
+    tools ??= await fs.readFile(path.join(templatesDir, 'TOOLS.md'), 'utf-8');
+    expect(tools).toContain('tracked tool and environment instructions');
+    expect(tools).toContain('workspace-specific overrides');
+    expect(tools).toContain('If you do not have any local overrides, you can delete this file');
+  });
+});
+
 describe('template content — no personalization leak', () => {
   const workspaceTemplatesDir = path.join(__dirname, '..', 'templates', 'workspace');
   const instructionsTemplatesDir = path.join(__dirname, '..', 'templates', 'instructions');
   const FORBIDDEN_TOKENS = ['David', 'Escondido', 'Chelsea', 'marshmonkey'];
 
-  for (const file of ['AGENTS.md', 'TOOLS.md']) {
-    it(`${file} does not contain user-specific tokens`, async () => {
-      const content = await fs.readFile(path.join(workspaceTemplatesDir, file), 'utf-8');
-      for (const token of FORBIDDEN_TOKENS) {
-        expect(content).not.toContain(token);
-      }
-    });
-  }
+  it('AGENTS.md does not contain user-specific tokens', async () => {
+    const content = await fs.readFile(path.join(workspaceTemplatesDir, 'AGENTS.md'), 'utf-8');
+    for (const token of FORBIDDEN_TOKENS) {
+      expect(content).not.toContain(token);
+    }
+  });
+
+  it('TOOLS.md does not contain user-specific tokens', async () => {
+    const content = await fs.readFile(path.join(instructionsTemplatesDir, 'TOOLS.md'), 'utf-8');
+    for (const token of FORBIDDEN_TOKENS) {
+      expect(content).not.toContain(token);
+    }
+  });
+
+  it('workspace TOOLS.md template does not contain user-specific tokens', async () => {
+    const content = await fs.readFile(path.join(workspaceTemplatesDir, 'TOOLS.md'), 'utf-8');
+    for (const token of FORBIDDEN_TOKENS) {
+      expect(content).not.toContain(token);
+    }
+  });
 
   it('SYSTEM_DEFAULTS.md does not contain user-specific tokens', async () => {
     const content = await fs.readFile(path.join(instructionsTemplatesDir, 'SYSTEM_DEFAULTS.md'), 'utf-8');
@@ -725,32 +766,19 @@ describe('scaffolded workspace contains operational content', () => {
     await expect(fs.access(path.join(workspace, 'DISCOCLAW.md'))).rejects.toThrow();
   });
 
-  it('fresh scaffold produces TOOLS.md with discord action pointer stub', async () => {
+  it('fresh scaffold does not create managed TOOLS.md', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
     dirs.push(workspace);
 
     await ensureWorkspaceBootstrapFiles(workspace);
 
-    const tools = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
-    expect(tools).toContain('discord-action');
-  });
-
-  it('fresh scaffold produces TOOLS.md with browser automation and service ops', async () => {
-    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-content-'));
-    dirs.push(workspace);
-
-    await ensureWorkspaceBootstrapFiles(workspace);
-
-    const tools = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
-    expect(tools).toContain('Browser Automation');
-    expect(tools).toContain('Service Operations');
-    expect(tools).toContain('Plan-Audit-Implement Workflow');
+    await expect(fs.access(path.join(workspace, 'TOOLS.md'))).rejects.toThrow();
   });
 });
 
 // --- TOOLS.md stale-content migration tests ---
 
-describe('TOOLS.md migration', () => {
+describe('TOOLS.md legacy-content detection', () => {
   const dirs: string[] = [];
   afterEach(async () => {
     for (const d of dirs) await fs.rm(d, { recursive: true, force: true });
@@ -787,7 +815,7 @@ describe('TOOLS.md migration', () => {
     'This file has been customized by the user.',
   ].join('\n');
 
-  it('migrates stale TOOLS.md: backs up and replaces with current template', async () => {
+  it('warns on stale TOOLS.md but leaves the user-owned file untouched', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-tools-migrate-'));
     dirs.push(workspace);
 
@@ -797,26 +825,13 @@ describe('TOOLS.md migration', () => {
     const log = mockLog();
     await ensureWorkspaceBootstrapFiles(workspace, log as any);
 
-    // Backup should exist with original stale content.
-    const backup = await fs.readFile(path.join(workspace, 'TOOLS.md.bak'), 'utf-8');
-    expect(backup).toBe(STALE_TOOLS_CONTENT);
+    const content = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
+    expect(content).toBe(STALE_TOOLS_CONTENT);
+    await expect(fs.access(path.join(workspace, 'TOOLS.md.bak'))).rejects.toThrow();
 
-    // TOOLS.md should now match the current template.
-    const templateContent = await fs.readFile(
-      path.join(__dirname, '..', 'templates', 'workspace', 'TOOLS.md'),
-      'utf-8',
-    );
-    const replaced = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
-    expect(replaced).toBe(templateContent);
-
-    // Both log messages should have fired.
-    expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ workspaceCwd: workspace }),
-      expect.stringContaining('backed up stale TOOLS.md'),
-    );
-    expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ workspaceCwd: workspace }),
-      expect.stringContaining('replaced stale TOOLS.md with current template'),
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceCwd: workspace, file: 'TOOLS.md' }),
+      expect.stringContaining('legacy TOOLS.md system sections detected'),
     );
   });
 
@@ -836,9 +851,9 @@ describe('TOOLS.md migration', () => {
     // No backup should exist.
     await expect(fs.access(path.join(workspace, 'TOOLS.md.bak'))).rejects.toThrow();
 
-    // No migration log messages.
+    // No warning log messages.
     expect(
-      log.info.mock.calls.some(([, msg]) => String(msg).includes('backed up stale TOOLS.md')),
+      log.warn.mock.calls.some(([, msg]) => String(msg).includes('legacy TOOLS.md system sections detected')),
     ).toBe(false);
   });
 
@@ -855,5 +870,38 @@ describe('TOOLS.md migration', () => {
     const content = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
     expect(content).toBe(partialContent);
     await expect(fs.access(path.join(workspace, 'TOOLS.md.bak'))).rejects.toThrow();
+  });
+
+  it('does not rewrite customized TOOLS.md even when legacy markers are present', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-tools-migrate-'));
+    dirs.push(workspace);
+
+    const mixedContent = [
+      '# TOOLS.md - My Custom Tools',
+      '',
+      '## Discord Action Types',
+      '',
+      'These notes are mine.',
+      '',
+      '### Forge Actions',
+      '',
+      'Keep this custom section.',
+      '',
+      '## Local Overrides',
+      '',
+      'Use the dev instance.',
+    ].join('\n');
+    await fs.writeFile(path.join(workspace, 'TOOLS.md'), mixedContent, 'utf-8');
+
+    const log = mockLog();
+    await ensureWorkspaceBootstrapFiles(workspace, log as any);
+
+    const content = await fs.readFile(path.join(workspace, 'TOOLS.md'), 'utf-8');
+    expect(content).toBe(mixedContent);
+    await expect(fs.access(path.join(workspace, 'TOOLS.md.bak'))).rejects.toThrow();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceCwd: workspace, file: 'TOOLS.md' }),
+      expect.stringContaining('legacy TOOLS.md system sections detected'),
+    );
   });
 });

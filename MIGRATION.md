@@ -47,11 +47,43 @@ Prompt precedence is now deterministic:
 
 1. immutable security policy
 2. tracked defaults
-3. `workspace/AGENTS.md` (user overrides)
-4. memory/context sections
+3. tracked tools
+4. `workspace/AGENTS.md` (user overrides)
+5. `workspace/TOOLS.md` (optional user override layer)
+6. memory/context sections
 
 ### What you need to do
 
 - Keep personal rules and behavior overrides in `workspace/AGENTS.md`.
 - If you previously edited `workspace/DISCOCLAW.md`, move those custom rules to `workspace/AGENTS.md`.
 - Treat any existing `workspace/DISCOCLAW.md` as legacy reference only; it is not authoritative.
+
+---
+
+## tracked `TOOLS.md` runtime injection (tracked tools + workspace override)
+
+**Affects:** Existing deployments with `workspace/TOOLS.md`.
+
+### What changed
+
+Default tool and environment guidance is no longer expected to live only in a workspace-scaffolded `workspace/TOOLS.md`.
+
+DiscoClaw now injects a tracked tools layer from the repository at runtime:
+
+- `templates/instructions/TOOLS.md` is the canonical tracked tools source.
+- `workspace/TOOLS.md`, when present, is treated as an optional user-override layer loaded after the tracked version.
+
+Prompt precedence is now:
+
+1. immutable security policy
+2. tracked defaults
+3. tracked tools
+4. `workspace/AGENTS.md`
+5. `workspace/TOOLS.md` (optional)
+6. memory/context sections
+
+### What you need to do
+
+- If your `workspace/TOOLS.md` is just the old scaffolded copy and you have not customized it, delete `workspace/TOOLS.md`.
+- If you have custom tool or environment guidance, keep only your local deltas in `workspace/TOOLS.md`.
+- Treat `templates/instructions/TOOLS.md` as the tracked base that will now receive product updates automatically.

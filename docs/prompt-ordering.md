@@ -14,7 +14,7 @@ DiscoClaw's prompt assembly exploits this by placing critical sections in primac
 
 ## Prompt Structure
 
-### Preamble (immutable precedence contract)
+### Preamble (immutable precedence contract for text prompts)
 
 The preamble is assembled by `buildPromptPreamble()` in `src/discord/prompt-common.ts`. Its ordering is fixed and governs security layering:
 
@@ -22,7 +22,8 @@ The preamble is assembled by `buildPromptPreamble()` in `src/discord/prompt-comm
 |----------|---------|---------|
 | 1 | `ROOT_POLICY` | Immutable injection-defence rules (5 rules, ~133 tokens) |
 | 2 | `TRACKED_DEFAULTS` | System defaults from `templates/instructions/SYSTEM_DEFAULTS.md` |
-| 3 | Inlined context | SOUL + IDENTITY + USER + AGENTS + TOOLS + pa.md + channel context |
+| 3 | `TRACKED_TOOLS` | Tool and environment guidance from `templates/instructions/TOOLS.md` |
+| 4 | Inlined context | SOUL + IDENTITY + USER + AGENTS + optional workspace `TOOLS.md` overlay + pa.md + channel context |
 
 This contract is **not** subject to reordering. It is preserved exactly as defined in `CLAUDE.md`.
 
@@ -99,7 +100,9 @@ The message handler builds sections with zone assignments from `SECTION_ZONE_MAP
 
 ### Other prompt flows
 
-The reaction handler (`src/discord/reaction-handler.ts`), deferred runner (`src/discord/deferred-runner.ts`), and voice prompt builder (`src/voice/voice-prompt-builder.ts`) use simplified prompt assembly. They follow the same preamble contract but may not use the full zone-based ordering (fewer sections to order).
+The reaction handler (`src/discord/reaction-handler.ts`) and deferred runner (`src/discord/deferred-runner.ts`) use simplified prompt assembly but keep the same text-prompt preamble contract.
+
+The voice prompt builder (`src/voice/voice-prompt-builder.ts`) is an explicit exception: it keeps `ROOT_POLICY` and tracked defaults, but intentionally skips tracked `TOOLS.md` and workspace `TOOLS.md` because browser/service/tool workflow docs are irrelevant to spoken replies and would blow the voice token budget.
 
 ## Diagnostics
 

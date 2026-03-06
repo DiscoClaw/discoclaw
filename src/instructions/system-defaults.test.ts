@@ -66,7 +66,23 @@ describe('loadTrackedDefaultsPreamble', () => {
     warnSpy.mockRestore();
   });
 
-  it('caches by path and only reloads when forced', async () => {
+  it('returns only the tracked defaults section', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tracked-defaults-'));
+    dirs.push(dir);
+    const trackedDefaultsPath = path.join(dir, 'SYSTEM_DEFAULTS.md');
+
+    await fs.writeFile(trackedDefaultsPath, '# Defaults\nAlways do X\n', 'utf-8');
+
+    const preamble = loadTrackedDefaultsPreamble({
+      trackedDefaultsPath,
+      forceReload: true,
+    });
+
+    expect(preamble.startsWith(`--- ${TRACKED_DEFAULTS_SECTION_LABEL} ---`)).toBe(true);
+    expect(preamble).toContain('# Defaults\nAlways do X');
+  });
+
+  it('caches by tracked defaults path and only reloads when forced', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tracked-defaults-'));
     dirs.push(dir);
     const trackedDefaultsPath = path.join(dir, 'SYSTEM_DEFAULTS.md');
@@ -85,17 +101,23 @@ describe('loadTrackedDefaultsPreamble', () => {
     expect(reloaded).not.toBe(first);
   });
 
-  it('invalidates cache when path changes', async () => {
+  it('invalidates cache when the tracked defaults path changes', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tracked-defaults-'));
     dirs.push(dir);
-    const aPath = path.join(dir, 'a.md');
-    const bPath = path.join(dir, 'b.md');
-    await fs.writeFile(aPath, 'A', 'utf-8');
-    await fs.writeFile(bPath, 'B', 'utf-8');
+    const defaultsAPath = path.join(dir, 'defaults-a.md');
+    const defaultsBPath = path.join(dir, 'defaults-b.md');
+    await fs.writeFile(defaultsAPath, 'defaults A', 'utf-8');
+    await fs.writeFile(defaultsBPath, 'defaults B', 'utf-8');
 
-    const a = loadTrackedDefaultsPreamble({ trackedDefaultsPath: aPath, forceReload: true });
-    const b = loadTrackedDefaultsPreamble({ trackedDefaultsPath: bPath });
-    expect(a).toContain('A');
-    expect(b).toContain('B');
+    const first = loadTrackedDefaultsPreamble({
+      trackedDefaultsPath: defaultsAPath,
+      forceReload: true,
+    });
+    const second = loadTrackedDefaultsPreamble({
+      trackedDefaultsPath: defaultsBPath,
+    });
+
+    expect(first).toContain('defaults A');
+    expect(second).toContain('defaults B');
   });
 });

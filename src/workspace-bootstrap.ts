@@ -12,7 +12,6 @@ const TEMPLATE_FILES = [
   'IDENTITY.md',
   'USER.md',
   'AGENTS.md',
-  'TOOLS.md',
   'MEMORY.md',
 ];
 
@@ -90,13 +89,11 @@ async function warnIfLegacyDiscoclawPresent(workspaceCwd: string, log?: Bootstra
 }
 
 /**
- * One-time migration: when workspace TOOLS.md contains the stale full
- * action-type reference (system-generated, not user prose), back it up
- * and replace with the current template.
+ * Detect a legacy workspace TOOLS.md that still contains old system-owned
+ * sections. The file is user-owned, so we warn but never rewrite it.
  */
-async function migrateStaleToolsMd(
+async function warnIfLegacyToolsContainsSystemInstructions(
   workspaceCwd: string,
-  templatesDir: string,
   log?: BootstrapLog,
 ): Promise<void> {
   const toolsPath = path.join(workspaceCwd, 'TOOLS.md');
@@ -108,18 +105,15 @@ async function migrateStaleToolsMd(
     throw err;
   }
 
-  // Only migrate when both markers are present — highly specific to system-generated content.
+  // Warn only when both markers are present — specific enough to catch legacy
+  // scaffold copies without rewriting a user-owned override file.
   if (!content.includes(STALE_TOOLS_MARKER_HEADING) || !content.includes(STALE_TOOLS_MARKER_SUBHEADING)) return;
 
-  // Back up existing file.
-  const backupPath = path.join(workspaceCwd, 'TOOLS.md.bak');
-  await fs.writeFile(backupPath, content, 'utf-8');
-  log?.info({ workspaceCwd }, 'workspace:bootstrap backed up stale TOOLS.md to TOOLS.md.bak');
-
-  // Overwrite with current template.
-  const templatePath = path.join(templatesDir, 'TOOLS.md');
-  await fs.copyFile(templatePath, toolsPath);
-  log?.info({ workspaceCwd }, 'workspace:bootstrap replaced stale TOOLS.md with current template');
+  log?.warn(
+    { workspaceCwd, file: 'TOOLS.md' },
+    'workspace:bootstrap legacy TOOLS.md system sections detected — file is user-owned and was left untouched. ' +
+      'If this is an unmodified scaffold copy, delete or replace it manually so tracked TOOLS.md can be the primary source.',
+  );
 }
 
 /**
@@ -261,8 +255,8 @@ export async function ensureWorkspaceBootstrapFiles(
   await warnIfLegacyDiscoclawPresent(workspaceCwd, log);
   await warnIfLegacyAgentsContainsSystemInstructions(workspaceCwd, log);
 
-  // One-time TOOLS.md migration: replace stale system-generated content with current template.
-  await migrateStaleToolsMd(workspaceCwd, templatesDir, log);
+  // One-time TOOLS.md compatibility check: warn about legacy system-owned content.
+  await warnIfLegacyToolsContainsSystemInstructions(workspaceCwd, log);
 
   if (created.length > 0) {
     log?.info({ created, workspaceCwd }, 'workspace:bootstrap scaffolded PA files');

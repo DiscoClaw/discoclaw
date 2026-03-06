@@ -1406,7 +1406,7 @@ describe('ForgeOrchestrator', () => {
     expect(prompts[1]).toContain('Project Context');
   });
 
-  it('includes .context/tools.md in drafter prompt but not auditor prompt', async () => {
+  it('does not append repo .context/tools.md to forge prompts', async () => {
     const tmpDir = await makeTmpDir();
 
     // Create a .context/tools.md in the cwd
@@ -1440,10 +1440,10 @@ describe('ForgeOrchestrator', () => {
     const orchestrator = new ForgeOrchestrator(opts);
     await orchestrator.run('Test', async () => {});
 
-    // Drafter prompt (first call) should include tools context
-    expect(prompts[0]).toContain('Browser escalation: WebFetch');
-    expect(prompts[0]).toContain('tools.md (repo)');
-    // Auditor prompt (second call) should NOT include tools context
+    // Forge prompts should rely on tracked TOOLS.md + optional workspace overrides,
+    // not a second repo-owned tools layer from .context/tools.md.
+    expect(prompts[0]).not.toContain('Browser escalation: WebFetch');
+    expect(prompts[0]).not.toContain('tools.md (repo)');
     expect(prompts[1]).not.toContain('Browser escalation: WebFetch');
     expect(prompts[1]).not.toContain('tools.md (repo)');
   });

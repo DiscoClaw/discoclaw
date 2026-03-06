@@ -28,9 +28,9 @@ export function renderTrackedDefaultsSection(content: string): string {
 }
 
 /**
- * Load tracked defaults from disk with memoization.
- * Missing/unreadable files return an explicit warning section so the
- * tracked-defaults prompt tier is never silently dropped.
+ * Load the tracked defaults preamble with memoization.
+ * Missing/unreadable files return an explicit warning section so this prompt
+ * tier is never silently dropped.
  */
 export function loadTrackedDefaultsPreamble(opts?: {
   trackedDefaultsPath?: string;
@@ -42,13 +42,13 @@ export function loadTrackedDefaultsPreamble(opts?: {
     return cachedPreamble;
   }
 
-  let preamble = '';
+  let defaultsPreamble = '';
   try {
     const content = fsSync.readFileSync(trackedDefaultsPath, 'utf-8');
-    preamble = renderTrackedDefaultsSection(content);
+    defaultsPreamble = renderTrackedDefaultsSection(content);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    preamble = renderTrackedDefaultsSection(
+    defaultsPreamble = renderTrackedDefaultsSection(
       `[tracked defaults unavailable: failed to read ${trackedDefaultsPath}: ${message}]`,
     );
     console.warn(
@@ -57,8 +57,8 @@ export function loadTrackedDefaultsPreamble(opts?: {
   }
 
   cachedPath = trackedDefaultsPath;
-  cachedPreamble = preamble;
-  return preamble;
+  cachedPreamble = defaultsPreamble;
+  return defaultsPreamble;
 }
 
 /** Cached tracked defaults preamble used by prompt assembly and forge context summary. */
