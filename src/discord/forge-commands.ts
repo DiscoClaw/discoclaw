@@ -63,6 +63,21 @@ export type ForgeOrchestratorOpts = {
 type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
 type EventFn = (evt: EngineEvent) => void;
 
+const FORGE_PROGRESS_ICON = {
+  draft: '📝',
+  audit: '🔍',
+  revise: '✏️',
+  retry: '🔄',
+  success: '✅',
+  cancelled: '🛑',
+  failed: '❌',
+  warning: '⚠️',
+} as const;
+
+function withForgeIcon(icon: string, message: string): string {
+  return `${icon} ${message}`;
+}
+
 // ---------------------------------------------------------------------------
 // Parsing
 // ---------------------------------------------------------------------------
@@ -713,7 +728,10 @@ export class ForgeOrchestrator {
       }
 
       await onProgress(
-        `Forge failed${planId ? ` during ${planId}` : ''}: ${errorMsg}${filePath ? `. Partial plan saved: \`!plan show ${planId}\`` : ''}`,
+        withForgeIcon(
+          FORGE_PROGRESS_ICON.failed,
+          `Forge failed${planId ? ` during ${planId}` : ''}: ${errorMsg}${filePath ? `. Partial plan saved: \`!plan show ${planId}\`` : ''}`,
+        ),
         { force: true },
       );
 
@@ -801,7 +819,7 @@ export class ForgeOrchestrator {
       }
 
       await onProgress(
-        `Forge resume failed for ${planId}: ${errorMsg}`,
+        withForgeIcon(FORGE_PROGRESS_ICON.failed, `Forge resume failed for ${planId}: ${errorMsg}`),
         { force: true },
       );
 
@@ -919,7 +937,7 @@ export class ForgeOrchestrator {
         if (this.cancelRequested) {
           this.opts.log?.info({ planId, round, phase: 'loop-entry' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
-          await onProgress(`Forge ${planId} cancelled.`, { force: true });
+          await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
           await completeHeartbeat('cancelled', `Cancelled before round ${round + 1}/${maxRound}.`);
           return {
             planId,
@@ -935,7 +953,7 @@ export class ForgeOrchestrator {
         // Draft phase (only on first round of a fresh forge, not resume)
         if (round === 1 && startRound === 1 && templateContent && contextSummary) {
           await setHeartbeatPhase(`Draft round ${round}/${maxRound}`);
-          await onProgress(`Forging ${planId}... Drafting (reading codebase)`);
+          await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.draft, `Forging ${planId}... Drafting (reading codebase)`));
 
           const drafterPrompt = buildDrafterPrompt(
             description,
@@ -978,7 +996,7 @@ export class ForgeOrchestrator {
           if (!draftPipelineResult) {
             this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
             await this.updatePlanStatus(filePath, 'CANCELLED');
-            await onProgress(`Forge ${planId} cancelled.`, { force: true });
+            await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
             await completeHeartbeat('cancelled', `Cancelled during draft in round ${round}/${maxRound}.`);
             return {
               planId,
@@ -1008,16 +1026,19 @@ export class ForgeOrchestrator {
           }
         } else if (round > startRound) {
           await onProgress(
-            `Forging ${planId}... Revision complete. Audit round ${round}/${maxRound}...`,
+            withForgeIcon(FORGE_PROGRESS_ICON.audit, `Forging ${planId}... Revision complete. Audit round ${round}/${maxRound}...`),
           );
         }
 
         // Audit phase
         await setHeartbeatPhase(`Audit round ${round}/${maxRound}`);
         await onProgress(
-          round === startRound && startRound === 1
-            ? `Forging ${planId}... Draft complete. Audit round ${round}/${maxRound}...`
-            : `Forging ${planId}... Audit round ${round}/${maxRound}...`,
+          withForgeIcon(
+            FORGE_PROGRESS_ICON.audit,
+            round === startRound && startRound === 1
+              ? `Forging ${planId}... Draft complete. Audit round ${round}/${maxRound}...`
+              : `Forging ${planId}... Audit round ${round}/${maxRound}...`,
+          ),
         );
 
         const auditorRt = this.opts.auditorRuntime ?? this.opts.runtime;
@@ -1058,7 +1079,7 @@ export class ForgeOrchestrator {
         if (!auditPipelineResult) {
           this.opts.log?.info({ planId, round, phase: 'audit' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
-          await onProgress(`Forge ${planId} cancelled.`, { force: true });
+          await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
           await completeHeartbeat('cancelled', `Cancelled during audit round ${round}/${maxRound}.`);
           return {
             planId,
@@ -1108,10 +1129,13 @@ export class ForgeOrchestrator {
           const elapsed = Math.round((Date.now() - t0) / 1000);
           const roundLabel = `${round - startRound + 1} round${round - startRound + 1 > 1 ? 's' : ''}`;
           const warningSuffix = structuralWarning
-            ? ` ⚠️ Structural warning: ${structuralWarning}`
+            ? ` ${FORGE_PROGRESS_ICON.warning} Structural warning: ${structuralWarning}`
             : '';
           await onProgress(
-            `Forge complete. Plan ${planId} ready for review (${roundLabel}, ${elapsed}s)${warningSuffix}`,
+            withForgeIcon(
+              FORGE_PROGRESS_ICON.success,
+              `Forge complete. Plan ${planId} ready for review (${roundLabel}, ${elapsed}s)${warningSuffix}`,
+            ),
             { force: true },
           );
           await completeHeartbeat(
@@ -1137,7 +1161,10 @@ export class ForgeOrchestrator {
         // Revision phase
         await setHeartbeatPhase(`Revision after round ${round}/${maxRound}`);
         await onProgress(
-          `Forging ${planId}... Audit round ${round} found ${lastVerdict.maxSeverity} concerns. Revising...`,
+          withForgeIcon(
+            FORGE_PROGRESS_ICON.revise,
+            `Forging ${planId}... Audit round ${round} found ${lastVerdict.maxSeverity} concerns. Revising...`,
+          ),
         );
 
         const revisionPrompt = buildRevisionPrompt(
@@ -1166,7 +1193,7 @@ export class ForgeOrchestrator {
         if (!revisionPipelineResult) {
           this.opts.log?.info({ planId, round, phase: 'revision' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
-          await onProgress(`Forge ${planId} cancelled.`, { force: true });
+          await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
           await completeHeartbeat('cancelled', `Cancelled during revision after round ${round}/${maxRound}.`);
           return {
             planId,
@@ -1194,7 +1221,10 @@ export class ForgeOrchestrator {
       const summary = buildPlanSummary(planContent);
 
       await onProgress(
-        `Forge stopped after ${this.opts.maxAuditRounds} audit rounds — concerns remain. Review manually: \`!plan show ${planId}\``,
+        withForgeIcon(
+          FORGE_PROGRESS_ICON.warning,
+          `Forge stopped after ${this.opts.maxAuditRounds} audit rounds — concerns remain. Review manually: \`!plan show ${planId}\``,
+        ),
         { force: true },
       );
       await completeHeartbeat('failed', `Reached audit round cap at ${round}/${maxRound}.`);
@@ -1357,7 +1387,7 @@ export class ForgeOrchestrator {
         throw new Error(`${phase} failed: ${firstMsg}`);
       }
       this.opts.log?.warn({ err: firstErr, phase }, 'forge:retry');
-      await onProgress(`Forge ${phase} stalled — retrying...`, { force: true });
+      await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.retry, `Forge ${phase} stalled — retrying...`), { force: true });
       const retryDef = retryTransform ? retryTransform(def) : def;
       try {
         const result = await this.runCancellable(retryDef);

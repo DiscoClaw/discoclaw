@@ -180,6 +180,24 @@ describe('executeForgeAction', () => {
       expect(typeof runCall?.[3]).toBe('function');
     });
 
+    it('posts an emoji-prefixed starting progress message', async () => {
+      const edit = vi.fn(async () => ({}));
+      const send = vi.fn(async () => ({ edit }));
+      const fetch = vi.fn(async () => ({ send }));
+
+      const forgeCtx = makeForgeCtx();
+      const result = await executeForgeAction(
+        { type: 'forgeCreate', description: 'Add retry logic' },
+        makeCtx({ client: { channels: { fetch } } as any }),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({
+        content: '🛠️ Starting forge: Add retry logic',
+      }));
+    });
+
     it('does not silently swallow archived-thread (50083) progress failures', async () => {
       const err50083 = Object.assign(new Error('Thread is archived'), { code: 50083 });
       const edit = vi.fn(async () => {

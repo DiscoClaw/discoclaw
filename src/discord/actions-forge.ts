@@ -202,7 +202,7 @@ export async function executeForgeAction(
       }
 
       const threadTask = await resolveLinkedTaskForThread(ctx, forgeCtx);
-      const progress = await buildProgressCallbacks(ctx, forgeCtx, `Starting forge: ${action.description}`);
+      const progress = await buildProgressCallbacks(ctx, forgeCtx, `🛠️ Starting forge: ${action.description}`);
       const orchestrator = forgeCtx.orchestratorFactory({
         existingTaskId: threadTask.existingTaskId,
         taskDescription: threadTask.taskDescription,

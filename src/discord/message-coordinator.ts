@@ -2334,7 +2334,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
               // Send initial progress message
               const progressReply = await msg.reply({
-                content: `Starting forge: ${forgeCmd.args}`,
+                content: `🛠️ Starting forge: ${forgeCmd.args}`,
                 allowedMentions: NO_MENTIONS,
               });
               const forgeCreateWatchdogId = buildWatchdogRunId(

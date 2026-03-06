@@ -65,6 +65,15 @@ export const DEFAULT_PHASE_STATUS_HEARTBEAT_POLICY: PhaseStatusHeartbeatPolicy =
   intervalMs: 45_000,
 };
 
+const HEARTBEAT_ICON = {
+  start: '🛠️',
+  running: '⏳',
+  transition: '🔄',
+  success: '✅',
+  cancelled: '🛑',
+  failed: '❌',
+} as const;
+
 const MIN_HEARTBEAT_INTERVAL_MS = 1_000;
 const DISABLED_POLICY_WORDS = new Set(['off', 'none', 'disable', 'disabled', 'false']);
 
@@ -164,23 +173,23 @@ export function formatHeartbeatDuration(ms: number): string {
 
 export function formatPhaseStatusHeartbeatEvent(event: PhaseStatusHeartbeatEvent): string {
   if (event.type === 'phase_start') {
-    return `${event.flowLabel}: starting ${event.phaseLabel}...`;
+    return `${HEARTBEAT_ICON.start} ${event.flowLabel}: starting ${event.phaseLabel}...`;
   }
   if (event.type === 'heartbeat') {
-    return `${event.flowLabel}: ${event.phaseLabel} still running (${formatHeartbeatDuration(event.phaseElapsedMs)} elapsed)`;
+    return `${HEARTBEAT_ICON.running} ${event.flowLabel}: ${event.phaseLabel} still running (${formatHeartbeatDuration(event.phaseElapsedMs)} elapsed)`;
   }
   if (event.type === 'phase_transition') {
-    return `${event.flowLabel}: ${event.fromPhaseLabel} complete (${formatHeartbeatDuration(event.fromPhaseElapsedMs)}). Starting ${event.toPhaseLabel}...`;
+    return `${HEARTBEAT_ICON.transition} ${event.flowLabel}: ${event.fromPhaseLabel} complete (${formatHeartbeatDuration(event.fromPhaseElapsedMs)}). Starting ${event.toPhaseLabel}...`;
   }
   const phaseLabel = event.phaseLabel ? ` during ${event.phaseLabel}` : '';
   const detail = event.detail ? ` ${event.detail}` : '';
   if (event.outcome === 'succeeded') {
-    return `${event.flowLabel}: complete${phaseLabel} (${formatHeartbeatDuration(event.runElapsedMs)} total).${detail}`;
+    return `${HEARTBEAT_ICON.success} ${event.flowLabel}: complete${phaseLabel} (${formatHeartbeatDuration(event.runElapsedMs)} total).${detail}`;
   }
   if (event.outcome === 'cancelled') {
-    return `${event.flowLabel}: cancelled${phaseLabel} after ${formatHeartbeatDuration(event.runElapsedMs)}.${detail}`;
+    return `${HEARTBEAT_ICON.cancelled} ${event.flowLabel}: cancelled${phaseLabel} after ${formatHeartbeatDuration(event.runElapsedMs)}.${detail}`;
   }
-  return `${event.flowLabel}: failed${phaseLabel} after ${formatHeartbeatDuration(event.runElapsedMs)}.${detail}`;
+  return `${HEARTBEAT_ICON.failed} ${event.flowLabel}: failed${phaseLabel} after ${formatHeartbeatDuration(event.runElapsedMs)}.${detail}`;
 }
 
 export function createPhaseStatusHeartbeatController(
