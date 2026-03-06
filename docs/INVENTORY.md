@@ -152,7 +152,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | First-run scaffolding | `src/workspace-bootstrap.ts` | **done** |
 | Workspace templates scaffolded on first run (BOOTSTRAP, SOUL, IDENTITY, USER, AGENTS, TOOLS, MEMORY) | `templates/workspace/`, `src/workspace-bootstrap.ts` | **done** |
 | Tracked default instructions (runtime-injected `SYSTEM_DEFAULTS.md`, not workspace-managed) | `templates/instructions/SYSTEM_DEFAULTS.md`, `src/discord/prompt-common.ts` | **done** |
-| Deterministic prompt precedence (`ROOT_POLICY` > tracked defaults > `workspace/AGENTS.md` > memory/context) | `src/discord/prompt-common.ts`, `CLAUDE.md` | **done** |
+| Deterministic prompt precedence — preamble contract (`ROOT_POLICY` > tracked defaults > `workspace/AGENTS.md` > memory/context) and post-preamble section ordering (primacy/recency optimized; see `docs/prompt-ordering.md`) | `src/discord/prompt-common.ts`, `CLAUDE.md`, `docs/prompt-ordering.md` | **done** |
 | MCP config template | `templates/mcp.json` | **done** |
 | Dropbox-backed symlinks (content, workspace, exports) | filesystem | **done** |
 
