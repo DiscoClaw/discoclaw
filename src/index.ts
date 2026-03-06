@@ -1031,16 +1031,7 @@ const persistOverride = (role: ModelRole, model: string): void => {
 // Clear callback: on reset, write the envDefaults values into models.json for the affected
 // roles so the persisted state matches what modelReset applies to live state.
 const clearOverride = (role?: ModelRole): void => {
-  const envDefaults: Record<ModelRole, string> = {
-    chat: MODEL_DEFAULTS.chat ?? 'capable',
-    fast: MODEL_DEFAULTS.fast ?? 'fast',
-    summary: MODEL_DEFAULTS.summary ?? 'fast',
-    'forge-drafter': MODEL_DEFAULTS['forge-drafter'] ?? 'capable',
-    'forge-auditor': MODEL_DEFAULTS['forge-auditor'] ?? 'capable',
-    cron: MODEL_DEFAULTS.cron ?? 'fast',
-    'cron-exec': MODEL_DEFAULTS['cron-exec'] ?? 'capable',
-    voice: MODEL_DEFAULTS.voice ?? 'capable',
-  };
+  const envDefaults = { ...MODEL_DEFAULTS } as Record<ModelRole, string>;
   if (!role) {
     // Reset all roles to env defaults
     for (const [r, val] of Object.entries(envDefaults) as [ModelRole, string][]) {
@@ -1571,16 +1562,7 @@ if (taskCtx) {
       runtimeName: primaryRuntimeName,
       voiceRuntimeName: voiceModelRef.runtimeName,
       // Tier-based defaults — used by !models reset to revert to portable tiers.
-      envDefaults: {
-        chat: MODEL_DEFAULTS.chat ?? 'capable',
-        fast: MODEL_DEFAULTS.fast ?? 'fast',
-        summary: MODEL_DEFAULTS.summary ?? 'fast',
-        'forge-drafter': MODEL_DEFAULTS['forge-drafter'] ?? 'capable',
-        'forge-auditor': MODEL_DEFAULTS['forge-auditor'] ?? 'capable',
-        cron: MODEL_DEFAULTS.cron ?? 'fast',
-        'cron-exec': MODEL_DEFAULTS['cron-exec'] ?? 'capable',
-        voice: MODEL_DEFAULTS.voice ?? 'capable',
-      },
+      envDefaults: { ...MODEL_DEFAULTS } as Record<ModelRole, string>,
       overrideSources,
       persistOverride,
       clearOverride,
