@@ -13,7 +13,12 @@ import {
   VOICE_IDENTITY_MAX_CHARS,
 } from './voice-prompt-builder.js';
 import { VOICE_STYLE_INSTRUCTION } from './voice-style-prompt.js';
-import { ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, buildPromptPreamble } from '../discord/prompt-common.js';
+import {
+  ROOT_POLICY,
+  TRACKED_DEFAULTS_PREAMBLE,
+  TRACKED_TOOLS_PREAMBLE,
+  buildPromptPreamble,
+} from '../discord/prompt-common.js';
 
 // ---------------------------------------------------------------------------
 // extractSections
@@ -240,10 +245,11 @@ describe('buildVoicePrompt', () => {
     userText: 'What time is it?',
   };
 
-  it('starts with shared preamble (root policy + tracked defaults + identity)', () => {
+  it('starts with shared preamble without tracked tools content', () => {
     const result = buildVoicePrompt(baseParts);
-    const expectedPreamble = buildPromptPreamble(baseParts.identity);
+    const expectedPreamble = buildPromptPreamble(baseParts.identity, { skipTrackedTools: true });
     expect(result.startsWith(expectedPreamble)).toBe(true);
+    expect(result).not.toContain(TRACKED_TOOLS_PREAMBLE);
   });
 
   it('includes identity section', () => {
@@ -311,7 +317,7 @@ describe('buildVoicePrompt', () => {
     expect(result).not.toContain('---\nDurable memory (user-specific notes):\n');
   });
 
-  it('orders sections correctly: policy > tracked defaults > identity > actions > style > memory > separator > user', () => {
+  it('orders sections correctly: policy > tracked defaults > identity > actions > style > memory > separator > user, without tracked tools', () => {
     const result = buildVoicePrompt({
       ...baseParts,
       actionsSection: '## Discord Actions\nactions-here',
@@ -321,6 +327,7 @@ describe('buildVoicePrompt', () => {
 
     const policyIdx = result.indexOf(ROOT_POLICY);
     const trackedDefaultsIdx = result.indexOf(TRACKED_DEFAULTS_PREAMBLE);
+    const trackedToolsIdx = result.indexOf(TRACKED_TOOLS_PREAMBLE);
     const identityIdx = result.indexOf('TestBot');
     const actionsIdx = result.indexOf('actions-here');
     const systemPromptIdx = result.indexOf('custom-system-prompt');
@@ -330,6 +337,7 @@ describe('buildVoicePrompt', () => {
     const userIdx = result.indexOf('What time is it?');
 
     expect(policyIdx).toBeLessThan(trackedDefaultsIdx);
+    expect(trackedToolsIdx).toBe(-1);
     expect(trackedDefaultsIdx).toBeLessThan(identityIdx);
     expect(identityIdx).toBeLessThan(actionsIdx);
     expect(actionsIdx).toBeLessThan(systemPromptIdx);
@@ -376,6 +384,22 @@ describe('buildVoicePromptSectionEstimates', () => {
     expect(result.sections.durableMemory.included).toBe(false);
     expect(result.sections.separator.chars).toBe(VOICE_INTERNAL_CONTEXT_SEPARATOR.length);
     expect(result.sections.userText.included).toBe(true);
+  });
+
+  it('excludes tracked tools from root policy estimate', () => {
+    const result = buildVoicePromptSectionEstimates({
+      identity: '',
+      durableMemory: '',
+      actionsSection: '',
+      userText: 'hi',
+    });
+
+    const rootPolicyWithoutTrackedTools = buildPromptPreamble('', { skipTrackedTools: true }).length;
+    const rootPolicyWithTrackedTools = buildPromptPreamble('').length;
+
+    expect(result.sections.rootPolicy.chars).toBe(rootPolicyWithoutTrackedTools);
+    expect(result.sections.rootPolicy.estTokens).toBe(Math.ceil(rootPolicyWithoutTrackedTools / 4));
+    expect(rootPolicyWithoutTrackedTools).toBeLessThan(rootPolicyWithTrackedTools);
   });
 });
 
