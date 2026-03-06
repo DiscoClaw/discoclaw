@@ -323,69 +323,77 @@ export function executeConfigAction(
 
       for (const role of rolesToReset) {
         const defaultModel = defaults[role];
-
-        if (defaultModel !== undefined) {
-          // Apply the env-default model to live botParams.
-          switch (role) {
-            case 'chat':
-              bp.runtimeModel = defaultModel;
-              if (bp.planCtx) bp.planCtx.model = defaultModel;
-              if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = defaultModel;
-              resetChanges.push(`chat → ${defaultModel}`);
-              break;
-            case 'fast':
-              bp.summaryModel = defaultModel;
-              if (bp.cronCtx) {
-                bp.cronCtx.autoTagModel = defaultModel;
-                bp.cronCtx.syncCoordinator?.setAutoTagModel(defaultModel);
-                bp.cronCtx.runtime = configCtx.runtime;
-                bp.cronCtx.syncCoordinator?.setRuntime?.(configCtx.runtime);
-              }
-              if (bp.taskCtx) {
-                bp.taskCtx.autoTagModel = defaultModel;
-                bp.taskCtx.runtime = configCtx.runtime;
-              }
-              bp.fastRuntime = configCtx.runtime;
-              configCtx.fastRuntimeName = undefined;
-              configCtx.clearFastRuntime?.();
-              resetChanges.push(`fast → ${defaultModel}`);
-              break;
-            case 'forge-drafter':
-              bp.forgeDrafterModel = defaultModel || undefined;
-              resetChanges.push(`forge-drafter → ${defaultModel || '(follows chat)'}`);
-              break;
-            case 'forge-auditor':
-              bp.forgeAuditorModel = defaultModel || undefined;
-              resetChanges.push(`forge-auditor → ${defaultModel || '(follows chat)'}`);
-              break;
-            case 'summary':
-              bp.summaryModel = defaultModel;
-              resetChanges.push(`summary → ${defaultModel}`);
-              break;
-            case 'cron':
-              if (bp.cronCtx) {
-                bp.cronCtx.autoTagModel = defaultModel;
-                bp.cronCtx.syncCoordinator?.setAutoTagModel(defaultModel);
-                resetChanges.push(`cron → ${defaultModel}`);
-              }
-              break;
-            case 'cron-exec':
-              if (bp.cronCtx?.executorCtx) {
-                bp.cronCtx.executorCtx.cronExecModel = defaultModel || undefined;
-                resetChanges.push(`cron-exec → ${defaultModel || '(follows chat)'}`);
-              }
-              break;
-            case 'voice':
-              if (bp.voiceModelCtx) {
+        // Apply env-default model to live botParams. Some roles intentionally
+        // allow an undefined default, meaning "follow chat".
+        switch (role) {
+          case 'chat':
+            if (defaultModel === undefined) break;
+            bp.runtimeModel = defaultModel;
+            if (bp.planCtx) bp.planCtx.model = defaultModel;
+            if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = defaultModel;
+            resetChanges.push(`chat → ${defaultModel}`);
+            break;
+          case 'fast':
+            if (defaultModel === undefined) break;
+            bp.summaryModel = defaultModel;
+            if (bp.cronCtx) {
+              bp.cronCtx.autoTagModel = defaultModel;
+              bp.cronCtx.syncCoordinator?.setAutoTagModel(defaultModel);
+              bp.cronCtx.runtime = configCtx.runtime;
+              bp.cronCtx.syncCoordinator?.setRuntime?.(configCtx.runtime);
+            }
+            if (bp.taskCtx) {
+              bp.taskCtx.autoTagModel = defaultModel;
+              bp.taskCtx.runtime = configCtx.runtime;
+            }
+            bp.fastRuntime = configCtx.runtime;
+            configCtx.fastRuntimeName = undefined;
+            configCtx.clearFastRuntime?.();
+            resetChanges.push(`fast → ${defaultModel}`);
+            break;
+          case 'forge-drafter':
+            bp.forgeDrafterModel = defaultModel || undefined;
+            resetChanges.push(`forge-drafter → ${defaultModel || '(follows chat)'}`);
+            break;
+          case 'forge-auditor':
+            bp.forgeAuditorModel = defaultModel || undefined;
+            resetChanges.push(`forge-auditor → ${defaultModel || '(follows chat)'}`);
+            break;
+          case 'summary':
+            if (defaultModel === undefined) break;
+            bp.summaryModel = defaultModel;
+            resetChanges.push(`summary → ${defaultModel}`);
+            break;
+          case 'cron':
+            if (defaultModel === undefined) break;
+            if (bp.cronCtx) {
+              bp.cronCtx.autoTagModel = defaultModel;
+              bp.cronCtx.syncCoordinator?.setAutoTagModel(defaultModel);
+              resetChanges.push(`cron → ${defaultModel}`);
+            }
+            break;
+          case 'cron-exec':
+            if (bp.cronCtx?.executorCtx) {
+              bp.cronCtx.executorCtx.cronExecModel = defaultModel || undefined;
+              resetChanges.push(`cron-exec → ${defaultModel || '(follows chat)'}`);
+            }
+            break;
+          case 'voice':
+            if (bp.voiceModelCtx) {
+              if (defaultModel !== undefined) {
                 bp.voiceModelCtx.model = defaultModel;
-                bp.voiceModelCtx.runtime = undefined;
-                bp.voiceModelCtx.runtimeName = undefined;
-                configCtx.voiceRuntimeName = undefined;
-                configCtx.clearVoiceRuntime?.();
-                resetChanges.push(`voice → ${defaultModel}`);
               }
-              break;
-          }
+              bp.voiceModelCtx.runtime = undefined;
+              bp.voiceModelCtx.runtimeName = undefined;
+              configCtx.voiceRuntimeName = undefined;
+              configCtx.clearVoiceRuntime?.();
+              if (defaultModel !== undefined) {
+                resetChanges.push(`voice → ${defaultModel}`);
+              } else {
+                resetChanges.push('voice → (follows chat)');
+              }
+            }
+            break;
         }
 
         // Clear the override marker regardless of whether we had a default.

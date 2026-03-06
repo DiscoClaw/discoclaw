@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULTS,
+  detectOverrideSources,
   loadModelConfig,
   saveModelConfig,
   resolveModelsJsonPath,
@@ -206,6 +207,58 @@ describe('migrateFromLegacy', () => {
   it('override wins for same role', () => {
     const result = migrateFromLegacy({ chat: 'capable' }, { chat: 'opus' });
     expect(result.chat).toBe('opus');
+  });
+
+  it('preserves sparse env defaults instead of injecting canonical role defaults', () => {
+    const envConfig: Partial<Record<ModelRole, string>> = {
+      chat: 'gpt-5.4',
+      fast: 'gpt-5-mini',
+      summary: 'gpt-5-mini',
+      cron: 'gpt-5-mini',
+      voice: 'gpt-5.4',
+    };
+
+    const result = migrateFromLegacy(envConfig, {});
+
+    expect(result).toEqual(envConfig);
+    expect(result['forge-drafter']).toBeUndefined();
+    expect(result['forge-auditor']).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectOverrideSources
+// ---------------------------------------------------------------------------
+
+describe('detectOverrideSources', () => {
+  it('treats env-seeded config as baseline rather than overrides', () => {
+    const envDefaults: Partial<Record<ModelRole, string>> = {
+      chat: 'gpt-5.4',
+      fast: 'gpt-5-mini',
+      summary: 'gpt-5-mini',
+      cron: 'gpt-5-mini',
+      voice: 'gpt-5.4',
+    };
+    const currentConfig: ModelConfig = { ...envDefaults };
+
+    expect(detectOverrideSources(currentConfig, envDefaults)).toEqual({});
+  });
+
+  it('flags stored roles that differ from env defaults, including stale follow-chat roles', () => {
+    const envDefaults: Partial<Record<ModelRole, string>> = {
+      chat: 'gpt-5.4',
+      fast: 'gpt-5-mini',
+    };
+    const currentConfig: ModelConfig = {
+      chat: 'gpt-5.4',
+      fast: 'haiku',
+      'forge-auditor': 'capable',
+    };
+
+    expect(detectOverrideSources(currentConfig, envDefaults)).toEqual({
+      fast: true,
+      'forge-auditor': true,
+    });
   });
 });
 

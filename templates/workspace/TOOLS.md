@@ -36,6 +36,10 @@ Capture:       screenshot | screenshot --full
 
 Discoclaw runs as a user-level systemd service. Status checks and log reads are fine anytime, but **always ask before restarting or stopping** — a restart kills any active Claude Code sessions (including forge runs), and the user may have work in progress.
 
+### Environment (.env)
+
+Discoclaw loads `.env` from the service **working directory** via `EnvironmentFile` and `dotenv/config`. In a source checkout that is usually the repo root; in npm-managed installs it is the package/install directory. If you need to change env vars, edit that instance's `.env`. The `!secret` command also targets this file.
+
 ### Authorized Commands
 
 | Action | Command |
