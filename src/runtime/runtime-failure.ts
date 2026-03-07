@@ -1,95 +1,32 @@
+import {
+  RUNTIME_FAILURE_ENVELOPE,
+  RUNTIME_FAILURE_VERSION,
+  type GlobalSupervisorBailReason,
+  type GlobalSupervisorFailureKind,
+  type GlobalSupervisorLimits,
+  type PipelineFailureCode,
+  type RuntimeFailure,
+  type RuntimeFailureCode,
+  type RuntimeFailureEvent,
+  type RuntimeFailureInputEvent,
+  type RuntimeFailureMetadata,
+} from './types.js';
+
 export const RUNTIME_FAILURE_PREFIX = 'RUNTIME_FAILURE';
-export const RUNTIME_FAILURE_ENVELOPE = 'runtime_failure';
-export const RUNTIME_FAILURE_VERSION = 'v1' as const;
 export const GLOBAL_SUPERVISOR_BAIL_PREFIX = 'GLOBAL_SUPERVISOR_BAIL';
 
-export type PipelineFailureCode =
-  | 'E_TOOL_UNAVAILABLE'
-  | 'E_POLICY_BLOCKED'
-  | 'E_RETRY_EXHAUSTED'
-  | 'E_IDEMPOTENCY_CONFLICT'
-  | 'E_RUN_NOT_FOUND';
-
-export type GlobalSupervisorFailureKind =
-  | 'transient_error'
-  | 'hard_error'
-  | 'runtime_error'
-  | 'aborted'
-  | 'missing_done'
-  | 'exception'
-  | 'event_limit';
-
-export type GlobalSupervisorBailReason =
-  | 'non_retryable_failure'
-  | 'deterministic_retry_blocked'
-  | 'max_cycles_exceeded'
-  | 'max_retries_exceeded'
-  | 'max_wall_time_exceeded'
-  | 'max_events_exceeded';
-
-export type GlobalSupervisorLimits = {
-  maxCycles: number;
-  maxRetries: number;
-  maxEscalationLevel: number;
-  maxTotalEvents: number;
-  maxWallTimeMs: number;
+export { RUNTIME_FAILURE_ENVELOPE, RUNTIME_FAILURE_VERSION };
+export type {
+  GlobalSupervisorBailReason,
+  GlobalSupervisorFailureKind,
+  GlobalSupervisorLimits,
+  PipelineFailureCode,
+  RuntimeFailure,
+  RuntimeFailureCode,
+  RuntimeFailureEvent,
+  RuntimeFailureInputEvent,
+  RuntimeFailureMetadata,
 };
-
-export type RuntimeFailureCode =
-  | PipelineFailureCode
-  | 'RUNTIME_TIMEOUT'
-  | 'DISCORD_MISSING_PERMISSIONS'
-  | 'CLAUDE_CLI_NOT_FOUND'
-  | 'GEMINI_CLI_NOT_FOUND'
-  | 'GEMINI_AUTH_MISSING'
-  | 'CLAUDE_AUTH_MISSING'
-  | 'STREAM_STALL'
-  | 'CHANNEL_CONTEXT_MISSING'
-  | 'CONTEXT_LIMIT_EXCEEDED'
-  | 'MCP_TOOL_NAME_TOO_LONG'
-  | 'GLOBAL_SUPERVISOR_BAIL'
-  | 'UNKNOWN';
-
-export type RuntimeFailureMetadata = {
-  operation?: string;
-  ok?: false;
-  failureCodeVersion?: string | null;
-  failureCode?: PipelineFailureCode | null;
-  details?: Record<string, unknown>;
-  reason?: GlobalSupervisorBailReason;
-  cycle?: number;
-  retriesUsed?: number;
-  escalationLevel?: number;
-  failureKind?: GlobalSupervisorFailureKind;
-  signature?: string;
-  lastError?: string | null;
-  limits?: GlobalSupervisorLimits;
-};
-
-export type RuntimeFailure = {
-  envelope: typeof RUNTIME_FAILURE_ENVELOPE;
-  envelopeVersion: typeof RUNTIME_FAILURE_VERSION;
-  source: 'runtime' | 'pipeline_tool' | 'global_supervisor';
-  code: RuntimeFailureCode;
-  message: string;
-  rawMessage: string;
-  userMessage: string;
-  retryable: boolean | null;
-  metadata: RuntimeFailureMetadata;
-};
-
-export type RuntimeFailureEvent = {
-  type: 'runtime_failure';
-  failure: RuntimeFailure;
-};
-
-export type RuntimeFailureInputEvent =
-  | RuntimeFailureEvent
-  | {
-      type: 'error';
-      message: string;
-      failure?: RuntimeFailure;
-    };
 
 type LegacyPipelineFailurePayload = {
   ok: false;
