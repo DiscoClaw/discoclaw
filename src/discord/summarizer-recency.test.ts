@@ -221,7 +221,7 @@ describe('loadSummary regeneratedAt compatibility', () => {
     });
   });
 
-  it('silently drops malformed continuation capsules without rejecting the summary', async () => {
+  it('silently drops malformed optional capsule fields without rejecting the summary', async () => {
     const dir = await makeTmpDir();
     await fs.writeFile(
       path.join(dir, 'with-bad-capsule.json'),
@@ -242,8 +242,11 @@ describe('loadSummary regeneratedAt compatibility', () => {
     expect(result).toEqual({
       summary: 'summary with malformed capsule',
       updatedAt: 200,
+      continuationCapsule: {
+        currentFocus: 'Missing next step',
+        nextStep: 'Still load the summary',
+      },
     });
-    expect(result?.continuationCapsule).toBeUndefined();
   });
 
   it('normalizes and truncates oversized continuation capsules on save and load', async () => {
