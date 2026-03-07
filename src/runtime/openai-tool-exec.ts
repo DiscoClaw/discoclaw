@@ -12,7 +12,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { sanitizeExternalContent } from '../sanitize-external.js';
-import { stripAnsi } from './cli-shared.js';
+import { cliExecaEnv, stripAnsi } from './cli-shared.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -498,6 +498,7 @@ async function handleBash(
   try {
     const { stdout, stderr } = await execFileAsync('/bin/bash', ['-c', command], {
       cwd: allowedRoots[0],
+      env: cliExecaEnv(),
       timeout: BASH_TIMEOUT_MS,
       maxBuffer: BASH_MAX_OUTPUT,
     });

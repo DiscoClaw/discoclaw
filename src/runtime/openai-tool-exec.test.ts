@@ -322,6 +322,34 @@ describe('bash', () => {
     expect(r.result).toContain('hello');
   });
 
+  it('strips ANSI sequences from bash stdout and stderr', async () => {
+    const r = await executeToolCall(
+      'bash',
+      {
+        command: "printf '\\033[31mred\\033[0m\\n'; printf '\\033[33mwarn\\033[0m\\n' 1>&2",
+      },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(true);
+    expect(r.result).toContain('red');
+    expect(r.result).toContain('[stderr]\nwarn');
+    expect(r.result).not.toContain('\u001B[');
+  });
+
+  it('sets no-color env for bash subprocesses', async () => {
+    const r = await executeToolCall(
+      'bash',
+      {
+        command: 'printf "%s,%s,%s" "$NO_COLOR" "$FORCE_COLOR" "$TERM"',
+      },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(true);
+    expect(r.result.trim()).toBe(
+      `${process.env.NO_COLOR ?? '1'},${process.env.FORCE_COLOR ?? '0'},${process.env.TERM ?? 'dumb'}`,
+    );
+  });
+
   it('returns error on nonzero exit', async () => {
     const r = await executeToolCall('bash', { command: 'exit 1' }, [tmpDir]);
     expect(r.ok).toBe(false);
