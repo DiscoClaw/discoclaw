@@ -3058,8 +3058,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let heartbeatLine = '';
             let sawRuntimeEvent = false;
             let sawReasoningEvent = false;
+            let firstByteAtMs: number | undefined;
+            let firstEventAtMs: number | undefined;
             const trackReasoningGap = params.runtime.id === 'codex' || params.runtime.id === 'claude_code';
+            const markRuntimeByte = (evt: EngineEvent): void => {
+              if (firstByteAtMs != null) return;
+              if (evt.type === 'text_delta' || evt.type === 'log_line' || evt.type === 'thinking_delta') {
+                firstByteAtMs = Date.now();
+              }
+            };
             const markRuntimeVisibility = (evt: EngineEvent): void => {
+              if (firstEventAtMs == null) {
+                firstEventAtMs = Date.now();
+              }
               previewOnlyDeltaText = '';
               heartbeatLine = '';
               sawRuntimeEvent = true;
@@ -3088,6 +3099,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const prefix = first ? 'Runtime heartbeat' : 'Still active';
               return `\n*${prefix} (${stallSeconds}s since last event; ${context}).*`;
             };
+            const heartbeatLatencyFields = (): {
+              spawnToFirstByteMs?: number;
+              spawnToFirstEventMs?: number;
+            } => ({
+              ...(firstByteAtMs != null ? { spawnToFirstByteMs: Math.max(0, firstByteAtMs - invokeStartedAt) } : {}),
+              ...(firstEventAtMs != null ? { spawnToFirstEventMs: Math.max(0, firstEventAtMs - invokeStartedAt) } : {}),
+            });
 
             // If runtime events go quiet, append periodic heartbeat lines so users can see
             // the invocation is still alive and what context we currently have.
@@ -3111,6 +3129,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         sawRuntimeEvent,
                         sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
                         activityLabel: activityLabel || undefined,
+                        ...heartbeatLatencyFields(),
                       },
                       'discord:stream heartbeat',
                     );
@@ -3127,6 +3146,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         sawRuntimeEvent,
                         sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
                         activityLabel: activityLabel || undefined,
+                        ...heartbeatLatencyFields(),
                       },
                       'discord:stream heartbeat',
                     );
@@ -3195,6 +3215,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 signal: abortSignal,
               })) {
                 // Track event flow for stall warning.
+                markRuntimeByte(evt);
                 markRuntimeVisibility(evt);
                 lastEventAt = Date.now();
                 stallWarned = false;
