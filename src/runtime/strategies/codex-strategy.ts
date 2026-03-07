@@ -191,9 +191,8 @@ export function createCodexStrategy(
       const wantSession = ctx.sessionMap != null && Boolean(params.sessionKey);
       let existingThreadId = params.sessionKey ? ctx.sessionMap?.get(params.sessionKey) : undefined;
       if (existingThreadId && ctx.tempImagePaths && ctx.tempImagePaths.length > 0) {
-        ctx.sessionMap?.delete(params.sessionKey!);
         existingThreadId = undefined;
-        ctx.sessionResetReason = 'Session reset - image attachments require a fresh Codex session because `codex exec resume` does not support `--image`. Starting fresh.';
+        ctx.sessionResetReason = 'image attachments require a fresh Codex session because `codex exec resume` does not support `--image`. Starting fresh.';
       }
       const dangerousBypass = Boolean(opts.dangerouslySkipPermissions);
 

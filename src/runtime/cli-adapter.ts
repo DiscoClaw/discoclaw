@@ -284,7 +284,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       const outputMode = strategy.getOutputMode(ctx, opts);
       const strategyEnvOverrides = strategy.buildEnv?.(ctx, opts);
       if (ctx.sessionResetReason && !sessionResetNoticeEmitted) {
-        push({ type: 'text_delta', text: `*(${ctx.sessionResetReason})*\n\n` });
+        push({ type: 'text_delta', text: `*(Session reset — ${ctx.sessionResetReason})*\n\n` });
         sessionResetNoticeEmitted = true;
       }
       if (opts.log) {
@@ -734,7 +734,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const raw = String(procResult.shortMessage || procResult.originalMessage || procResult.message || '').trim();
           const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
           if (retryEnv) {
-            if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
+            if (!ctx.sessionResetReason && sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
             settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'spawn_retry');
             return;
           }
@@ -859,7 +859,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const raw = (stderrForError || stderr || stdout || `${strategy.id} exit ${exitCode}`).trim();
           const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
           if (retryEnv) {
-            if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
+            if (!ctx.sessionResetReason && sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
             settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'exit_retry');
             return;
           }
@@ -934,7 +934,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         ).trim();
         const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
         if (retryEnv) {
-          if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
+          if (!ctx.sessionResetReason && sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
           settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'reject_retry');
           return;
         }
