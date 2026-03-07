@@ -3058,13 +3058,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let heartbeatLine = '';
             let sawRuntimeEvent = false;
             let sawReasoningEvent = false;
-            const trackReasoningGap = params.runtime.id === 'codex';
+            const trackReasoningGap = params.runtime.id === 'codex' || params.runtime.id === 'claude_code';
             const markRuntimeVisibility = (evt: EngineEvent): void => {
               previewOnlyDeltaText = '';
               heartbeatLine = '';
               sawRuntimeEvent = true;
               if (trackReasoningGap && !sawReasoningEvent) {
                 if (evt.type === 'preview_debug' && evt.itemType === 'reasoning') {
+                  sawReasoningEvent = true;
+                } else if (evt.type === 'thinking_delta') {
                   sawReasoningEvent = true;
                 } else if (evt.type === 'log_line' && /\breasoning\b/i.test(evt.line)) {
                   sawReasoningEvent = true;

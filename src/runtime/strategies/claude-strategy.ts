@@ -45,15 +45,35 @@ type ToolTrackState = {
   inputBufs: Map<number, string>;
   lastThinkingPreviewAtMs: number;
   thinkingBuf: string;
+  emittedReasoningStart: boolean;
 };
 const toolState = new WeakMap<CliInvokeContext, ToolTrackState>();
 function getToolState(ctx: CliInvokeContext): ToolTrackState {
   let s = toolState.get(ctx);
   if (!s) {
-    s = { activeTools: new Map(), inputBufs: new Map(), lastThinkingPreviewAtMs: 0, thinkingBuf: '' };
+    s = {
+      activeTools: new Map(),
+      inputBufs: new Map(),
+      lastThinkingPreviewAtMs: 0,
+      thinkingBuf: '',
+      emittedReasoningStart: false,
+    };
     toolState.set(ctx, s);
   }
   return s;
+}
+
+function emitReasoningStartPreview(ctx: CliInvokeContext): EngineEvent[] {
+  const ts = getToolState(ctx);
+  if (ts.emittedReasoningStart) return [];
+  ts.emittedReasoningStart = true;
+  return [{
+    type: 'preview_debug',
+    source: 'claude',
+    phase: 'started',
+    itemType: 'reasoning',
+    label: 'Hypothesis: reasoning in progress.',
+  }];
 }
 
 export const claudeStrategy: CliAdapterStrategy = {
@@ -196,12 +216,16 @@ export const claudeStrategy: CliAdapterStrategy = {
       // content_block_start — detect tool_use blocks for activity labels.
       if (inner.type === 'content_block_start' && inner.content_block && typeof inner.content_block === 'object') {
         const cb = inner.content_block as Record<string, unknown>;
+        const extraEvents: EngineEvent[] = [];
         if (cb.type === 'tool_use' && typeof cb.name === 'string') {
           const ts = getToolState(ctx);
           ts.activeTools.set(idx, cb.name);
           ts.inputBufs.set(idx, '');
         }
-        return {};
+        if (cb.type === 'thinking') {
+          extraEvents.push(...emitReasoningStartPreview(ctx));
+        }
+        return extraEvents.length > 0 ? { extraEvents } : {};
       }
 
       // content_block_delta — text, thinking, tool input, etc.
@@ -223,6 +247,7 @@ export const claudeStrategy: CliAdapterStrategy = {
         // so Discord shows what the model is thinking about. Intentionally do
         // NOT set activity so the spiral/progress-stall detector still works.
         if (delta.type === 'thinking_delta') {
+          const extraEvents = emitReasoningStartPreview(ctx);
           const ts = getToolState(ctx);
           if (typeof delta.thinking === 'string') ts.thinkingBuf += delta.thinking;
           const now = Date.now();
@@ -234,10 +259,12 @@ export const claudeStrategy: CliAdapterStrategy = {
               : buf;
             return {
               extraEvents: [
+                ...extraEvents,
                 { type: 'thinking_delta', text: preview || 'reasoning...' },
               ],
             };
           }
+          if (extraEvents.length > 0) return { extraEvents };
         }
         return {};
       }
@@ -298,6 +325,7 @@ export const claudeStrategy: CliAdapterStrategy = {
         }
       }
       if (thinkingText) {
+        const extraEvents = emitReasoningStartPreview(ctx);
         const ts = getToolState(ctx);
         const now = Date.now();
         if (ts.lastThinkingPreviewAtMs === 0 || now - ts.lastThinkingPreviewAtMs >= THINKING_PREVIEW_INTERVAL_MS) {
@@ -307,10 +335,12 @@ export const claudeStrategy: CliAdapterStrategy = {
             : thinkingText;
           return {
             extraEvents: [
+              ...extraEvents,
               { type: 'thinking_delta', text: preview },
             ],
           };
         }
+        if (extraEvents.length > 0) return { extraEvents };
       }
       return {};
     }

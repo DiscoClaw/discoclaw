@@ -70,9 +70,10 @@ function isGuaranteedRuntimeSignal(evt: EngineEvent): boolean {
   // Always surface thinking previews — already throttled at the source.
   if (evt.type === 'thinking_delta') return true;
 
-  // Always surface codex lifecycle markers for reasoning + command execution.
+  // Always surface reasoning lifecycle markers, plus Codex command execution.
   if (evt.type === 'preview_debug') {
-    return evt.source === 'codex' && (evt.itemType === 'reasoning' || evt.itemType === 'command_execution');
+    return evt.itemType === 'reasoning'
+      || (evt.source === 'codex' && evt.itemType === 'command_execution');
   }
 
   return false;

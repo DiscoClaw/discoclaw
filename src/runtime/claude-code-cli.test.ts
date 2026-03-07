@@ -1020,6 +1020,38 @@ describe('Claude strategy parseLine (stream_event format)', () => {
     expect(events.find((e) => e.type === 'text_final')?.text).toBe('The answer is 42.');
   });
 
+  it('emits a generic reasoning-start preview_debug before streaming thinking text', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Let me think about this...' } } }),
+        JSON.stringify({ type: 'result', result: 'Done.' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'claude',
+      phase: 'started',
+      itemType: 'reasoning',
+      label: 'Hypothesis: reasoning in progress.',
+    });
+    expect(events.findIndex((e) => e.type === 'preview_debug')).toBeLessThan(events.findIndex((e) => e.type === 'thinking_delta'));
+  });
+
   it('does NOT extract text from input_json_delta (tool use)', async () => {
     const execaMock = execa as any;
     execaMock.mockImplementation(() => makeProcessStreamJson({

@@ -95,7 +95,6 @@ function formatPreviewDebugLine(
     return label || null;
   }
 
-  if (evt.source !== 'codex') return null;
   if (evt.itemType === 'agent_message') return null;
 
   const normalizedItemType = sanitizeRuntimeLine(evt.itemType, 80);

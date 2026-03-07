@@ -62,4 +62,17 @@ describe('RuntimeSignalBudgetTracker preview_debug dedupe', () => {
     expect(completed).toEqual({ allow: true, appendSuppression: false, reason: 'guaranteed_signal' });
     expect(duplicateCompleted).toEqual({ allow: false, appendSuppression: false, reason: 'duplicate_preview_debug' });
   });
+
+  it('treats claude reasoning preview_debug as a guaranteed signal', () => {
+    const tracker = new RuntimeSignalBudgetTracker();
+
+    const result = tracker.consume({
+      type: 'preview_debug',
+      source: 'claude',
+      phase: 'started',
+      itemType: 'reasoning',
+    } as EngineEvent);
+
+    expect(result).toEqual({ allow: true, appendSuppression: false, reason: 'guaranteed_signal' });
+  });
 });
