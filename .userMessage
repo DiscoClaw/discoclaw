@@ -1,0 +1,13 @@
+RuntimeFailure.userMessage contract
+
+`RuntimeFailure.userMessage` is the canonical user-facing error string for runtime
+and tool failures.
+
+Rules:
+- Classification ownership lives in `src/runtime/runtime-failure.ts`.
+- `src/discord/user-errors.ts` delegates to the runtime-failure mapper instead of
+  maintaining separate pattern-matching logic.
+- Legacy raw strings, pipeline failure payloads, and global supervisor bailouts
+  should normalize into a `RuntimeFailure` envelope before presentation.
+- Presentation layers should use `.userMessage` for Discord/user output and keep
+  `message`/`rawMessage` for operator or debug detail.
