@@ -1557,6 +1557,58 @@ describe('Codex CLI runtime adapter', () => {
         text: '*(Session reset - image attachments require a fresh Codex session because `codex exec resume` does not support `--image`. Starting fresh.)*\n\n',
       });
     });
+
+    it('clears stale session mapping before fresh image retry so later calls do not resume the old thread', async () => {
+      const jsonlOutput1 = [
+        '{"type":"thread.started","thread_id":"img-thread-stale"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ].join('\n') + '\n';
+      const jsonlOutput2 = [
+        '{"type":"item.completed","item":{"type":"agent_message","text":"second"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ].join('\n') + '\n';
+      const jsonlOutput3 = [
+        '{"type":"thread.started","thread_id":"img-thread-fresh"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"third"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ].join('\n') + '\n';
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+      });
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 1',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-stale',
+      }));
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput2, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 2 with image',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-stale',
+        images: [{ base64: 'BBBB', mediaType: 'image/jpeg' }],
+      }));
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput3, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 3',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-stale',
+      }));
+
+      const callArgs3 = mockExeca.mock.calls[2][1] as string[];
+      expect(callArgs3[0]).toBe('exec');
+      expect(callArgs3[1]).toBe('-m');
+      expect(callArgs3).not.toContain('resume');
+    });
   });
 
   it('different sessionKeys get independent sessions', async () => {
