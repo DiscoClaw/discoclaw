@@ -100,14 +100,18 @@ export function createCodexStrategy(
     let label: string | undefined;
 
     // Preserve concise reasoning context in the guaranteed preview_debug lane.
-    if (phase === 'completed' && itemType === 'reasoning') {
-      const summary = typeof item.summary === 'string'
-        ? item.summary
-        : typeof item.text === 'string'
-          ? item.text
-          : '';
-      const compactSummary = compactText(summary, 260);
-      if (compactSummary) label = `Reasoning: ${compactSummary}`;
+    if (itemType === 'reasoning') {
+      if (phase === 'started') {
+        label = 'Hypothesis: reasoning in progress.';
+      } else {
+        const summary = typeof item.summary === 'string'
+          ? item.summary
+          : typeof item.text === 'string'
+            ? item.text
+            : '';
+        const compactSummary = compactText(summary, 260);
+        if (compactSummary) label = `Reasoning: ${compactSummary}`;
+      }
     }
 
     return {
@@ -315,7 +319,10 @@ export function createCodexStrategy(
         const item = asObject(anyEvt.item);
         if (!item) return { activity: true };
         const phase: 'started' | 'completed' = anyEvt.type === 'item.started' ? 'started' : 'completed';
-        const debugEvent = itemTypeDebug ? itemDebugEvent(phase, item) : null;
+        const alwaysEmitReasoningStartDebug = phase === 'started' && item.type === 'reasoning';
+        const debugEvent = alwaysEmitReasoningStartDebug || itemTypeDebug
+          ? itemDebugEvent(phase, item)
+          : null;
         const previewLine = verbosePreview ? itemPreviewLine(phase, item) : null;
         const previewEvents = [
           ...(debugEvent ? [debugEvent] : []),
