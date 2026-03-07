@@ -19,11 +19,13 @@ Boolean values accept `0`/`1` or `true`/`false`.
 
 ## Model Configuration
 
-Model assignments are configured in `models.json` under the data dir (`$DISCOCLAW_DATA_DIR/models.json`; default `./data/models.json` in a source checkout). Each slot (`capable`, `fast`, `voice`, forge roles, cron roles, etc.) maps to a concrete model ID and optional runtime override. See `src/model-config.ts` for the schema and loading logic.
+Model assignments are configured in `models.json` under the data dir (`$DISCOCLAW_DATA_DIR/models.json`; default `./data/models.json` in a source checkout). Each role (`chat`, `fast`, `voice`, forge roles, cron roles, etc.) stores a model string only. Runtime-only overlays such as `voiceRuntime` and `fastRuntime` persist separately in `runtime-overrides.json`. See `src/model-config.ts` and `src/runtime-overrides.ts` for the loading logic.
 
-On first run, `models.json` is scaffolded from built-in defaults. `!models set ...` updates it at runtime, and `!models reset` clears overrides by writing the startup defaults back into the file.
+On first run, `models.json` is scaffolded from the instance startup defaults. `!models set ...` updates it at runtime. `!models reset` writes the startup-default model strings back into `models.json` and clears matching fast/voice runtime overlays from `runtime-overrides.json`.
 
 Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as startup fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
+
+For the operator workflow that explains startup defaults vs. overrides, install-mode detection, `!models reset` semantics, live main-runtime swaps, and safe adapter/model switching, see [docs/runtime-switching.md](runtime-switching.md). If you want OpenRouter to participate in tier-based switching, define the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you need there as well.
 
 ## Runtime
 
@@ -90,7 +92,7 @@ Requirement: choose models that reliably support structured JSON output and func
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter base URL |
 | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4` | Default model via OpenRouter |
 
-Same requirement applies when routing through OpenRouter: model reliability for JSON/tool-call output is required.
+Same requirement applies when routing through OpenRouter: model reliability for JSON/tool-call output is required. OpenRouter has no built-in `fast`/`capable`/`deep` tier map in DiscoClaw; define the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you need if you want tier names and fast/voice auto-switching to resolve through OpenRouter. A single unique tier entry is enough for exact-string fast/voice reverse-mapping on that model.
 
 ### Model validation smoke test (recommended)
 
@@ -121,6 +123,18 @@ If any check fails consistently, treat the model as unsupported for DiscoClaw ru
 | `CODEX_DISABLE_SESSIONS` | `false` | Disable Codex session persistence |
 | `DISCOCLAW_CODEX_VERBOSE_PREVIEW` | `false` | Emit richer reasoning/command preview lines (also forces `model_reasoning_summary="auto"` for Codex runs) |
 | `DISCOCLAW_CODEX_ITEM_TYPE_DEBUG` | `false` | Emit structured `item.started`/`item.completed` item-type debug events in preview (also forces `model_reasoning_summary="auto"` for Codex runs) |
+
+### Tier Overrides
+
+Use `DISCOCLAW_TIER_<RUNTIME>_<TIER>` env vars to replace the built-in tier-to-model map for a runtime.
+
+| Topic | Value | Notes |
+|-------|-------|-------|
+| Pattern | `DISCOCLAW_TIER_<RUNTIME>_<TIER>` | `<RUNTIME>` is the runtime ID in uppercase (for example `OPENAI`, `OPENROUTER`, `GEMINI`, `CODEX`, `CLAUDE_CODE`); `<TIER>` is `FAST`, `CAPABLE`, or `DEEP` |
+| Example | `DISCOCLAW_TIER_OPENAI_CAPABLE=gpt-5.4` | Maps the `capable` tier for that runtime to a concrete model string |
+| OpenRouter note | `DISCOCLAW_TIER_OPENROUTER_FAST/CAPABLE/DEEP` | Set whichever tiers you need; even one unique entry is enough for exact-string reverse-mapping for fast/voice runtime auto-switching |
+| Default behavior | Built-in tier map from `src/runtime/model-tiers.ts` | If no override is set, DiscoClaw uses the repo's shipped defaults; runtimes without a built-in map, such as `openrouter`, need explicit tier vars if you want tier-based switching |
+| Full workflow | [docs/runtime-switching.md](runtime-switching.md) | See the canonical operator guide for install-mode detection, switch verification, platform-appropriate log checks, OpenRouter tier setup, restart behavior, rollback, and safe switching steps |
 
 ## Memory
 

@@ -106,16 +106,22 @@ export function resolveReasoningEffort(tier: string, runtimeId: RuntimeId): stri
 /**
  * Reverse-lookup: find which runtime owns a concrete model string.
  *
- * Iterates the live tier map and returns the first runtime ID whose tier
- * values include `model`. Skips empty-string sentinel values so that
- * adapter-default entries never match. Returns `undefined` when no runtime
- * claims the model.
+ * Iterates the live tier map and returns a runtime ID only when ownership is
+ * unambiguous. Skips empty-string sentinel values so that adapter-default
+ * entries never match. Returns `undefined` when no runtime claims the model or
+ * when multiple runtimes claim the same concrete model string.
  */
 export function findRuntimeForModel(model: string): string | undefined {
+  let owningRuntimeId: string | undefined;
   for (const [runtimeId, tiers] of Object.entries(tierMap)) {
     for (const value of Object.values(tiers)) {
-      if (value !== '' && value === model) return runtimeId;
+      if (value === '' || value !== model) continue;
+      if (owningRuntimeId === undefined) {
+        owningRuntimeId = runtimeId;
+        continue;
+      }
+      if (owningRuntimeId !== runtimeId) return undefined;
     }
   }
-  return undefined;
+  return owningRuntimeId;
 }

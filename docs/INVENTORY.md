@@ -209,6 +209,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Cron patterns cookbook | `docs/cron-patterns.md` | **done** |
 | Prompt ordering (primacy/recency zone optimization) | `docs/prompt-ordering.md` | **done** |
 | Configuration reference (all env vars) | `docs/configuration.md` | **done** |
+| Canonical runtime/model switching operator guide (startup defaults, live overrides, OpenRouter tier override workflow) | `docs/runtime-switching.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | **done** |
 

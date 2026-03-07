@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { initTierOverrides, isModelTier, resolveModel, resolveReasoningEffort } from './model-tiers.js';
-import type { ModelTier } from './model-tiers.js';
+import {
+  findRuntimeForModel,
+  initTierOverrides,
+  isModelTier,
+  resolveModel,
+  resolveReasoningEffort,
+} from './model-tiers.js';
 import type { RuntimeId } from './types.js';
 
 describe('isModelTier', () => {
@@ -171,5 +176,34 @@ describe('resolveReasoningEffort', () => {
   it('returns undefined for non-tier strings', () => {
     expect(resolveReasoningEffort('o3', 'codex')).toBeUndefined();
     expect(resolveReasoningEffort('', 'codex')).toBeUndefined();
+  });
+});
+
+describe('findRuntimeForModel', () => {
+  afterEach(() => {
+    initTierOverrides({});
+  });
+
+  it('returns the owning runtime when a model is unique to one tier map', () => {
+    expect(findRuntimeForModel('haiku')).toBe('claude_code');
+    expect(findRuntimeForModel('gemini-2.5-pro')).toBe('gemini');
+  });
+
+  it('returns undefined when no runtime claims the model', () => {
+    expect(findRuntimeForModel('some-custom-model')).toBeUndefined();
+  });
+
+  it('returns undefined when multiple runtimes claim the same model', () => {
+    expect(findRuntimeForModel('gpt-5.4')).toBeUndefined();
+  });
+
+  it('supports env-defined runtime maps when ownership is unique', () => {
+    initTierOverrides({ DISCOCLAW_TIER_OPENROUTER_FAST: 'openai/gpt-5-mini' });
+    expect(findRuntimeForModel('openai/gpt-5-mini')).toBe('openrouter');
+  });
+
+  it('returns undefined when an env override makes ownership ambiguous', () => {
+    initTierOverrides({ DISCOCLAW_TIER_OPENROUTER_FAST: 'gpt-5-mini' });
+    expect(findRuntimeForModel('gpt-5-mini')).toBeUndefined();
   });
 });
