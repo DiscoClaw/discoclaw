@@ -1366,6 +1366,42 @@ describe('Codex CLI runtime adapter', () => {
     expect(debugEvents.some((e) => e.itemType === 'agent_message')).toBe(false);
   });
 
+  it('surfaces reasoning item.started summaries immediately in preview_debug labels', async () => {
+    const jsonlOutput = [
+      '{"type":"thread.started","thread_id":"reasoning-start-thread-1"}',
+      '{"type":"item.started","item":{"id":"item_reason_start_1","type":"reasoning","summary":"Planning the filesystem scan.","status":"in_progress"}}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n') + '\n';
+
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonlOutput,
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Preview reasoning start',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'reasoning-start-session',
+    }));
+
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'started',
+      itemType: 'reasoning',
+      itemId: 'item_reason_start_1',
+      status: 'in_progress',
+      label: 'Hypothesis: Planning the filesystem scan.',
+    });
+  });
+
   // --- One-shot with images tests ---
 
   describe('one-shot with images', () => {

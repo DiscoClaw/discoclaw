@@ -27,9 +27,24 @@ export const RUNTIME_SIGNAL_FALLBACK_IDLE_MS = 2500;
  */
 export const RUNTIME_SIGNAL_SUPPRESSED_LINE = 'Some runtime preview updates suppressed.';
 
+/**
+ * After repeated Discord edit timeouts, keep the retry cooldown short enough
+ * that already-buffered high-value preview updates can still surface promptly.
+ */
+export const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 5_000;
+
 export function runtimeSupportsNativeThinkingStream(runtimeId: RuntimeId): boolean {
   // Codex can emit reasoning content as text deltas.
   return runtimeId === 'codex';
+}
+
+export function shouldBypassStreamingEditCooldown(evt: EngineEvent): boolean {
+  if (evt.type === 'preview_debug') {
+    return evt.source === 'codex' && (evt.itemType === 'reasoning' || evt.itemType === 'command_execution');
+  }
+  if (evt.type === 'tool_end') return evt.ok === false;
+  if (evt.type === 'error') return true;
+  return false;
 }
 
 type RuntimeSignalClass = 'log' | 'usage' | 'status';

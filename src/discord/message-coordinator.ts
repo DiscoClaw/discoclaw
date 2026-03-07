@@ -107,6 +107,8 @@ import {
   RUNTIME_SIGNAL_SUPPRESSED_LINE,
   RuntimeSignalBudgetTracker,
   runtimeSupportsNativeThinkingStream,
+  shouldBypassStreamingEditCooldown,
+  STREAMING_EDIT_TIMEOUT_COOLDOWN_MS,
 } from './runtime-signal-budget.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
@@ -115,7 +117,6 @@ export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail
 const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
 const STREAMING_EDIT_TIMEOUT_MS = 4_000;
 const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
-const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 30_000;
 
 async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -2936,12 +2937,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
 
             let streamEditQueue: Promise<void> = Promise.resolve();
-            const maybeEdit = async (force = false, opts?: { consumeThrottle?: boolean }) => {
+            const maybeEdit = async (
+              forceOrOpts?: boolean | { force?: boolean; bypassCooldown?: boolean },
+              opts?: { consumeThrottle?: boolean },
+            ) => {
+              const force = typeof forceOrOpts === 'boolean' ? forceOrOpts : forceOrOpts?.force ?? false;
+              const bypassCooldown = typeof forceOrOpts === 'object' && forceOrOpts?.bypassCooldown === true;
               const currentReply = reply;
               if (!currentReply) return;
               if (isShuttingDown()) return;
               const now = Date.now();
-              if (!force && now < streamEditCooldownUntil) return;
+              if (!force && !bypassCooldown && now < streamEditCooldownUntil) return;
               const consumeThrottle = opts?.consumeThrottle ?? true;
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               if (consumeThrottle) lastEditAt = now;
@@ -3041,7 +3047,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
               deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
-              if (opts?.edit ?? true) await maybeEdit(false);
+              if (opts?.edit ?? true) {
+                await maybeEdit({ bypassCooldown: shouldBypassStreamingEditCooldown(evt) });
+              }
             };
 
             // Stream heartbeat state for long quiet periods.

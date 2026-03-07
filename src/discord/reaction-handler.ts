@@ -27,13 +27,14 @@ import {
   RUNTIME_SIGNAL_SUPPRESSED_LINE,
   RuntimeSignalBudgetTracker,
   runtimeSupportsNativeThinkingStream,
+  shouldBypassStreamingEditCooldown,
+  STREAMING_EDIT_TIMEOUT_COOLDOWN_MS,
 } from './runtime-signal-budget.js';
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
 const STREAMING_EDIT_TIMEOUT_MS = 4_000;
 const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
-const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 30_000;
 
 async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -567,12 +568,14 @@ function createReactionHandler(
           });
           let streamEditQueue: Promise<void> = Promise.resolve();
 
-          const maybeEdit = async (force = false) => {
+          const maybeEdit = async (opts?: boolean | { force?: boolean; bypassCooldown?: boolean }) => {
+            const force = typeof opts === 'boolean' ? opts : opts?.force ?? false;
+            const bypassCooldown = typeof opts === 'object' && opts?.bypassCooldown === true;
             if (!reply) return;
             if (isShuttingDown()) return;
             const currentReply = reply;
             const now = Date.now();
-            if (!force && now < streamEditCooldownUntil) return;
+            if (!force && !bypassCooldown && now < streamEditCooldownUntil) return;
             if (!force && now - lastEditAt < minEditIntervalMs) return;
             lastEditAt = now;
             const out = selectStreamingOutput({
@@ -658,7 +661,7 @@ function createReactionHandler(
               return;
             }
             deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
-            await maybeEdit(false);
+            await maybeEdit({ bypassCooldown: shouldBypassStreamingEditCooldown(evt) });
           };
 
           // Stream heartbeat state for long quiet periods.
