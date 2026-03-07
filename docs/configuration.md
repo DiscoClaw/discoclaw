@@ -19,11 +19,11 @@ Boolean values accept `0`/`1` or `true`/`false`.
 
 ## Model Configuration
 
-Model assignments are configured in `workspace/models.json`. Each slot (`capable`, `fast`, `voice`, forge roles, cron roles, etc.) maps to a concrete model ID and optional runtime override. See `src/model-config.ts` for the schema and loading logic.
+Model assignments are configured in `models.json` under the data dir (`$DISCOCLAW_DATA_DIR/models.json`; default `./data/models.json` in a source checkout). Each slot (`capable`, `fast`, `voice`, forge roles, cron roles, etc.) maps to a concrete model ID and optional runtime override. See `src/model-config.ts` for the schema and loading logic.
 
-On first run, `models.json` is scaffolded from defaults. To customize, edit `workspace/models.json` directly or use `!models preset <name>` (Phase 2).
+On first run, `models.json` is scaffolded from built-in defaults. `!models set ...` updates it at runtime, and `!models reset` clears overrides by writing the startup defaults back into the file.
 
-Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
+Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as startup fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
 
 ## Runtime
 
@@ -31,7 +31,7 @@ Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as fal
 |----------|---------|-------------|
 | `PRIMARY_RUNTIME` | `claude` | Runtime adapter: `claude`, `openai`, `openrouter`, `gemini`, `codex` |
 | `RUNTIME_MODEL` | `capable` | **Deprecated** — use `models.json`. Fallback model tier for chat invocations |
-| `DISCOCLAW_FAST_RUNTIME` | — | **Deprecated** — use `!models set fast <model>` instead, which auto-detects and switches the fast-tier runtime. Legacy runtime override for fast-tier workloads (summary, cron auto-tag/model classify, task auto-tag) |
+| `DISCOCLAW_FAST_RUNTIME` | — | **Deprecated** — use `!models set fast <model>` instead, which auto-detects and switches the fast-tier runtime. Legacy startup-only runtime override for fast-tier workloads (summary, cron auto-tag/model classify, task auto-tag); ignored by `!models reset` |
 | `RUNTIME_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` | Comma-separated tools available to the runtime |
 | `RUNTIME_TIMEOUT_MS` | `1800000` (30 min) | Per-invocation timeout |
 | `RUNTIME_FALLBACK_MODEL` | — | Fallback model if primary fails |
@@ -218,7 +218,7 @@ See [docs/voice.md](voice.md) for the full setup guide and provider details.
 | `DISCOCLAW_VOICE_ENABLED` | `false` | Master switch for voice subsystem |
 | `DISCOCLAW_VOICE_AUTO_JOIN` | `false` | Auto-join voice channels when users enter |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (required for direct Messages API voice responses) |
-| `DISCOCLAW_VOICE_MODEL` | — | Model override for voice responses |
+| `DISCOCLAW_VOICE_MODEL` | follows startup chat model | Model override for voice responses |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | — | System prompt override for voice (max 4000 chars) |
 | `DISCOCLAW_STT_PROVIDER` | `deepgram` | Speech-to-text provider: `deepgram`, `whisper`, `openai` |
 | `DISCOCLAW_TTS_PROVIDER` | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, `kokoro`, `openai` |

@@ -35,7 +35,7 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
-Or trigger `release.yml` manually from the Actions tab (workflow_dispatch) to re-run the tag check and publish.
+Do **not** rely on `release.yml` `workflow_dispatch` to publish. It still creates/pushes tags via `GITHUB_TOKEN`, so `publish.yml` will not auto-fire from that path either.
 
 ## Authentication
 
@@ -59,8 +59,9 @@ or pass it into the publish workflow. Reasons:
 If you ever see an npm auth failure in CI, the fix is **not** to create a new token. Check:
 1. Is `id-token: write` set on the publish job? (It is — don't remove it.)
 2. Is `registry-url: "https://registry.npmjs.org/"` present in the `actions/setup-node` step? (It must be — see below.)
-3. Is the Trusted Publisher config on npmjs.com still pointing at `publish.yml`? (If the workflow was renamed, update it there.)
-4. Is `NODE_AUTH_TOKEN` being passed somewhere? Remove it.
+3. Is `npm install -g npm@11` still running before `npm publish`? (It must be — see below.)
+4. Is the Trusted Publisher config on npmjs.com still pointing at `publish.yml`? (If the workflow was renamed, update it there.)
+5. Is `NODE_AUTH_TOKEN` being passed somewhere? Remove it.
 
 ### `registry-url` is required — do not remove it
 
@@ -69,6 +70,12 @@ The `actions/setup-node` step in `publish.yml` **must** include `registry-url: "
 This is what triggers `setup-node` to write an `.npmrc` file that configures the npm registry. Without it, npm has no registry configuration at all and throws `ENEEDAUTH` — even though the OIDC token is valid.
 
 With `registry-url` present and no `NODE_AUTH_TOKEN`, npm correctly performs the OIDC exchange to obtain a temporary publish token. This is the working configuration.
+
+### `npm@11` is required — do not remove it
+
+The `publish.yml` workflow must run `npm install -g npm@11` before `npm publish`.
+
+Node 22 currently ships with npm 10.x, and that version does not reliably complete the OIDC exchange when `setup-node` prepares the publish environment. npm 11 does. Keep the explicit npm 11 upgrade in the workflow.
 
 **Root cause of v0.1.3 failure (for future reference):**
 `v0.1.3` added `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` to the publish step. `NPM_TOKEN` was not set as a GitHub secret, so it expanded to an empty string. `setup-node` wrote `.npmrc` with an empty token, which npm sent to the registry, getting a 404/expired-token error. Fix: remove `NODE_AUTH_TOKEN` entirely. Do not remove `registry-url`.

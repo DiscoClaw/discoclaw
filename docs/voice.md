@@ -22,7 +22,7 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | `DISCOCLAW_TTS_PROVIDER` | No | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, `openai`, or `kokoro` |
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Voice audio channel name or ID used for action execution context and transcript mirroring |
 | `DISCOCLAW_VOICE_LOG_CHANNEL` | No | `voice-log` | Text channel name or ID where the transcript mirror posts conversation records |
-| `DISCOCLAW_VOICE_MODEL` | No | — | AI model override for voice response invocations |
+| `DISCOCLAW_VOICE_MODEL` | No | follows startup chat model | AI model override for voice response invocations |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations |
 | `DEEPGRAM_STT_MODEL` | No | `nova-3-conversationalai` | Deepgram STT model to use (see [STT Models](#deepgram-stt-models)) |
 | `DEEPGRAM_TTS_VOICE` | No | `aura-2-asteria-en` | Deepgram TTS voice to use (see [TTS Voices](#deepgram-tts-voices-aura-2)) |

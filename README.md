@@ -115,7 +115,7 @@ Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (defau
 
 ## Model Overrides
 
-The `!models` command lets you view and swap AI models per role at runtime — no restart needed, and changes persist across restarts.
+The `!models` command lets you view and swap AI models per role at runtime — no restart needed. Changes are persisted to `models.json` under the data dir and survive restarts.
 
 **Roles:** `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`
 
@@ -123,17 +123,18 @@ The `!models` command lets you view and swap AI models per role at runtime — n
 |---------|-------------|
 | `!models` | Show current model assignments |
 | `!models set <role> <model>` | Change the model for a role |
-| `!models reset` | Revert all roles to env-var defaults |
-| `!models reset <role>` | Revert a specific role |
+| `!models reset` | Revert all roles to startup defaults and clear overrides |
+| `!models reset <role>` | Revert a specific role to its startup default |
 
 **Examples:**
 - `!models set chat claude-sonnet-4` — use Sonnet for chat
 - `!models set chat openrouter` — switch chat to the OpenRouter runtime
 - `!models set cron-exec haiku` — run crons on a cheaper model
+- `!models set cron-exec default` — clear the cron-exec override and use the startup default again
 - `!models set voice sonnet` — use a specific model for voice
-- `!models reset` — clear all overrides
+- `!models reset` — clear all overrides and revert to startup defaults
 
-Setting the `chat` role to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) switches the active runtime adapter for that role.
+Setting the `chat` or `voice` role to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) switches the active runtime adapter for that role.
 
 ## Secret Management
 
