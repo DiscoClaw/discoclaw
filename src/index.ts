@@ -1669,7 +1669,7 @@ if (taskCtx) {
       ? await TranscriptMirror.resolve(client, voiceLogChannelRef, log)
       : undefined;
 
-    // Pick a representative userId for durable memory (personal bot — typically one user).
+    // Pick a representative allowlisted user ID for voice-scoped memory and action permissions.
     const voiceDurableUserId = [...allowUserIds][0] as string | undefined;
 
     // Resolve voice home channel ID for action context.
@@ -1824,6 +1824,7 @@ if (taskCtx) {
             const actCtx: ActionContext = {
               guild: voiceGuild,
               client,
+              requesterId: voiceDurableUserId,
               channelId: resolvedVoiceChannelId,
               messageId: '', // Empty — mirrors cron executor pattern; prevents sendMessage same-channel suppression.
               transport: new DiscordTransportClient(voiceGuild, client),
