@@ -1,3 +1,7 @@
+import type { CronRunRecord } from '../cron/run-stats.js';
+import type { CronJob } from '../cron/types.js';
+import type { CronContext } from './actions-crons.js';
+
 export type CronPrefetchRecord = {
   cronId: string;
   name: string;
@@ -299,6 +303,96 @@ export function findCronPrefetchMatch(
 ): CronPrefetchMatch | null {
   const detection = detectCronPrefetchContext(userText, records);
   return detection.kind === 'match' ? detection.match : null;
+}
+
+function buildCronPrefetchRecord(
+  record: CronRunRecord,
+  job: CronJob | undefined,
+  nameFallback: string,
+  recordsByCronId: ReadonlyMap<string, CronRunRecord>,
+  jobsByThreadId: ReadonlyMap<string, CronJob>,
+): CronPrefetchRecord {
+  return {
+    cronId: record.cronId,
+    name: job?.name?.trim() || nameFallback,
+    threadId: record.threadId,
+    status: record.disabled ? 'paused' : 'active',
+    disabled: record.disabled,
+    running: Boolean(job?.running),
+    schedule: record.schedule ?? job?.def.schedule ?? null,
+    timezone: record.timezone ?? job?.def.timezone ?? null,
+    channel: record.channel ?? job?.def.channel ?? null,
+    prompt: record.prompt ?? job?.def.prompt ?? null,
+    nextRunAt: job?.cron?.nextRun() ?? null,
+    model: record.model ?? null,
+    modelOverride: record.modelOverride,
+    silent: Boolean(record.silent),
+    routingMode: record.routingMode ?? null,
+    cadence: record.cadence ?? null,
+    purposeTags: record.purposeTags,
+    runCount: record.runCount,
+    lastRunStatus: record.lastRunStatus ?? null,
+    lastRunAt: record.lastRunAt,
+    allowedActions: record.allowedActions,
+    chain: record.chain?.map((cronId) => {
+      const downstreamRecord = recordsByCronId.get(cronId);
+      const downstreamJob = downstreamRecord
+        ? jobsByThreadId.get(downstreamRecord.threadId)
+        : undefined;
+      return downstreamJob?.name
+        ? { cronId, name: downstreamJob.name }
+        : cronId;
+    }),
+    state: record.state,
+  };
+}
+
+export async function buildCronPrefetchSection(input: {
+  userText: string;
+  cronCtx?: CronContext;
+  threadParentId?: string | null;
+  threadId?: string | null;
+}): Promise<string> {
+  const { userText, cronCtx, threadParentId, threadId } = input;
+  if (!cronCtx) return '';
+
+  const store = cronCtx.statsStore.getStore();
+  const recordsByCronId = new Map(Object.entries(store.jobs));
+  const jobs = cronCtx.scheduler.listJobs()
+    .map((entry) => cronCtx.scheduler.getJob(entry.id))
+    .filter((job): job is CronJob => Boolean(job));
+  const jobsByThreadId = new Map(jobs.map((job) => [job.threadId, job]));
+  const records = [...recordsByCronId.values()].map((record) => buildCronPrefetchRecord(
+    record,
+    jobsByThreadId.get(record.threadId),
+    record.cronId,
+    recordsByCronId,
+    jobsByThreadId,
+  ));
+
+  const directMatch = findCronPrefetchMatch(userText, records);
+  if (directMatch) {
+    return buildCronPrefetchPromptSection(directMatch);
+  }
+
+  const inCronThread = Boolean(
+    threadId
+    && threadParentId
+    && threadParentId === cronCtx.forumId,
+  );
+  if (!inCronThread || !looksLikeCronContextRequest(userText)) {
+    return '';
+  }
+
+  const threadRecord = records.find((record) => record.threadId === threadId);
+  if (!threadRecord) return '';
+
+  return buildCronPrefetchPromptSection({
+    record: threadRecord,
+    reason: 'name',
+    matchedText: 'this cron thread',
+    score: Number.MAX_SAFE_INTEGER - 1,
+  });
 }
 
 export function buildCronPrefetchPromptSection(input: CronPrefetchRecord | CronPrefetchMatch): string {
