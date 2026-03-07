@@ -1,8 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { ReactionPromptStore } from './reaction-prompt-store.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,114 +38,7 @@ function isSendableChannel(channel: unknown): channel is SendableChannel {
     typeof (channel as { send?: unknown }).send === 'function';
 }
 
-// ---------------------------------------------------------------------------
-// Prompt store
-// ---------------------------------------------------------------------------
-
-type PendingPrompt = {
-  question: string;
-  choices: Set<string>;
-};
-
-type PersistedPendingPrompt = {
-  messageId: string;
-  question: string;
-  choices: string[];
-};
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DEFAULT_DATA_DIR = path.join(__dirname, '..', '..', 'data');
-const STORE_FILE_NAME = 'reaction-prompts.json';
-
-/**
- * In-memory store for pending reaction prompts.
- * Keyed by the bot's prompt message ID so the reaction handler can look up
- * and match the correct record.
- */
-const pendingPrompts = new Map<string, PendingPrompt>();
-let storeFilePath = resolveStoreFilePath();
-
-function resolveStoreFilePath(): string {
-  const configuredDataDir = (process.env.DISCOCLAW_DATA_DIR ?? '').trim();
-  const dataDir = configuredDataDir || DEFAULT_DATA_DIR;
-  return path.join(dataDir, 'discord', STORE_FILE_NAME);
-}
-
-function asPersistedPendingPrompt(value: unknown): PersistedPendingPrompt | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const candidate = value as { messageId?: unknown; question?: unknown; choices?: unknown };
-  if (typeof candidate.messageId !== 'string' || !candidate.messageId.trim()) return null;
-  if (typeof candidate.question !== 'string' || !candidate.question.trim()) return null;
-  if (!Array.isArray(candidate.choices) || candidate.choices.length === 0) return null;
-  if (!candidate.choices.every((choice) => typeof choice === 'string' && choice.trim())) return null;
-
-  return {
-    messageId: candidate.messageId,
-    question: candidate.question,
-    choices: candidate.choices,
-  };
-}
-
-function loadPendingPromptsFromDisk(filePath: string): Map<string, PendingPrompt> {
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Map();
-
-    const next = new Map<string, PendingPrompt>();
-    for (const entry of parsed) {
-      const prompt = asPersistedPendingPrompt(entry);
-      if (!prompt) continue;
-      next.set(prompt.messageId, {
-        question: prompt.question,
-        choices: new Set(prompt.choices),
-      });
-    }
-    return next;
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return new Map();
-    return new Map();
-  }
-}
-
-function hydratePendingPromptsFromDisk(filePath: string = storeFilePath): void {
-  const hydrated = loadPendingPromptsFromDisk(filePath);
-  pendingPrompts.clear();
-  for (const [messageId, prompt] of hydrated.entries()) {
-    pendingPrompts.set(messageId, prompt);
-  }
-}
-
-function persistPendingPromptsToDisk(filePath: string = storeFilePath): void {
-  const serialized: PersistedPendingPrompt[] = Array.from(pendingPrompts.entries()).map(([messageId, prompt]) => ({
-    messageId,
-    question: prompt.question,
-    choices: Array.from(prompt.choices),
-  }));
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp.${process.pid}`;
-  try {
-    fs.writeFileSync(tmpPath, JSON.stringify(serialized, null, 2) + '\n', 'utf8');
-    fs.renameSync(tmpPath, filePath);
-  } catch (err) {
-    try {
-      fs.unlinkSync(tmpPath);
-    } catch {
-      // Best-effort cleanup only.
-    }
-    throw err;
-  }
-}
-
-/**
- * Register a pending prompt in the store.
- */
-function registerPrompt(messageId: string, question: string, choices: string[]): void {
-  pendingPrompts.set(messageId, { question, choices: new Set(choices) });
-  persistPendingPromptsToDisk();
-}
+let reactionPromptStore = new ReactionPromptStore();
 
 /**
  * Called by the reaction handler when a user reacts to any message.
@@ -162,40 +53,30 @@ export function tryResolveReactionPrompt(
   messageId: string,
   emoji: string,
 ): { question: string; chosenEmoji: string } | null {
-  const pending = pendingPrompts.get(messageId);
-  if (!pending) return null;
-
-  if (!pending.choices.has(emoji)) return null;
-
-  pendingPrompts.delete(messageId);
-  persistPendingPromptsToDisk();
-  return { question: pending.question, chosenEmoji: emoji };
+  return reactionPromptStore.tryResolvePrompt(messageId, emoji);
 }
 
 /**
  * Returns the number of currently pending prompts (useful for tests).
  */
 export function pendingPromptCount(): number {
-  return pendingPrompts.size;
+  return reactionPromptStore.pendingCount();
 }
 
 /**
  * Clear all pending prompts — for use in tests only.
  */
 export function _resetForTest(): void {
-  pendingPrompts.clear();
+  reactionPromptStore.resetMemory();
 }
 
 export function _setStoreFilePathForTest(filePath: string): void {
-  storeFilePath = filePath;
-  hydratePendingPromptsFromDisk(storeFilePath);
+  reactionPromptStore = new ReactionPromptStore(filePath);
 }
 
 export function _hydrateFromDiskForTest(): void {
-  hydratePendingPromptsFromDisk(storeFilePath);
+  reactionPromptStore.hydrateFromDisk();
 }
-
-hydratePendingPromptsFromDisk();
 
 // ---------------------------------------------------------------------------
 // Executor
@@ -245,9 +126,8 @@ export async function executeReactionPromptAction(
   // Register the prompt *before* adding reactions so the reaction handler
   // can match it as soon as the first reaction arrives.
   try {
-    registerPrompt(promptMessage.id, action.question, action.choices);
+    reactionPromptStore.registerPrompt(promptMessage.id, action.question, action.choices);
   } catch (err) {
-    pendingPrompts.delete(promptMessage.id);
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: `reactionPrompt: failed to persist prompt: ${msg}` };
   }
@@ -258,9 +138,8 @@ export async function executeReactionPromptAction(
       await promptMessage.react(emoji);
     } catch (err) {
       // Clean up the pending record so it doesn't leak on react failure.
-      pendingPrompts.delete(promptMessage.id);
       try {
-        persistPendingPromptsToDisk();
+        reactionPromptStore.removePrompt(promptMessage.id);
       } catch {
         // Best-effort cleanup only — preserve the original react failure.
       }
