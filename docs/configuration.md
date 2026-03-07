@@ -55,11 +55,37 @@ Runtime-wide wrapper for every invocation (`plan -> execute -> evaluate -> decid
 | `DISCOCLAW_GLOBAL_SUPERVISOR_MAX_TOTAL_EVENTS` | `5000` | Max total streamed runtime events across all cycles before bail. Must be `>= 1`. |
 | `DISCOCLAW_GLOBAL_SUPERVISOR_MAX_WALL_TIME_MS` | `0` | Wall-time cap for the full supervisor loop. `0` disables the cap. Must be `>= 0`. |
 
-If the supervisor bails, it emits a structured error handoff:
+If the supervisor bails, it now emits a serialized `RuntimeFailure` envelope on the runtime error path. The embedded `rawMessage` preserves the legacy handoff format for compatibility:
 
-- Error prefix: `GLOBAL_SUPERVISOR_BAIL `
-- Payload: JSON with `source: "global_supervisor"` plus `reason`, `cycle`, `retriesUsed`, `escalationLevel`, `failureKind`, `retryable`, `signature`, `lastError`, and `limits`.
+- Runtime error prefix: `RUNTIME_FAILURE `
+- Envelope fields: `envelope`, `envelopeVersion`, `source`, `code`, `message`, `rawMessage`, `userMessage`, `retryable`, and `metadata`.
+- Legacy compatibility prefix inside `rawMessage`: `GLOBAL_SUPERVISOR_BAIL `
+- Supervisor metadata: `reason`, `cycle`, `retriesUsed`, `escalationLevel`, `failureKind`, `signature`, `lastError`, and `limits`.
 - Bail reasons: `non_retryable_failure`, `deterministic_retry_blocked`, `max_cycles_exceeded`, `max_retries_exceeded`, `max_wall_time_exceeded`, `max_events_exceeded`.
+
+### Runtime Failure Envelope
+
+`RuntimeFailure` is the single runtime/tool failure contract for DiscoClaw. There are no environment variables to enable it; normalization is always on in `src/runtime/runtime-failure.ts`.
+
+| Field | Values | Notes |
+|-------|--------|-------|
+| `envelope` | `runtime_failure` | Stable envelope marker |
+| `envelopeVersion` | `v1` | Schema version for the envelope |
+| `source` | `runtime`, `pipeline_tool`, `global_supervisor` | Identifies where the failure originated |
+| `code` | Runtime/tool failure code | Includes pipeline codes such as `E_TOOL_UNAVAILABLE` and runtime codes such as `STREAM_STALL`, `CONTEXT_LIMIT_EXCEEDED`, and `GLOBAL_SUPERVISOR_BAIL` |
+| `message` | string | Canonical machine-facing failure text |
+| `rawMessage` | string | Original upstream text; preserves legacy prefixes/payloads when applicable |
+| `userMessage` | string | User-facing explanation derived from the normalized failure |
+| `retryable` | `true`, `false`, `null` | Retry hint after classification |
+| `metadata` | object | Source-specific structured data (pipeline operation/details or supervisor bail metadata) |
+
+Normalization accepts all current runtime failure inputs:
+
+- Pipeline tool failures from `src/runtime/openai-tool-exec.ts` (`ok: false` JSON payloads with `failure_code` and `failure_code_version`)
+- Legacy global supervisor bail strings prefixed with `GLOBAL_SUPERVISOR_BAIL `
+- Raw runtime error strings that previously relied on Discord-side pattern matching
+
+This changes failure shape, not runtime configuration: operators do not need new env vars or migration steps to adopt the unified envelope.
 
 ### Claude CLI
 
