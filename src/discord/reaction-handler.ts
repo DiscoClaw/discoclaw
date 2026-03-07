@@ -103,6 +103,16 @@ function errorCode(err: unknown): number | null {
   return typeof code === 'number' ? code : null;
 }
 
+function reactionPromptEmojiKey(
+  reaction: Pick<MessageReaction | PartialMessageReaction, 'emoji'>,
+): string | null {
+  if (reaction.emoji.id) {
+    const name = reaction.emoji.name ?? '';
+    return name ? `<:${name}:${reaction.emoji.id}>` : null;
+  }
+  return reaction.emoji.name ?? null;
+}
+
 function createReactionHandler(
   mode: ReactionMode,
   params: Omit<BotParams, 'token'>,
@@ -149,13 +159,11 @@ function createReactionHandler(
       // IMPORTANT: This check intentionally precedes the staleness guard (step 6) so that
       // reactionPrompt resolution works even when reactionMaxAgeMs is configured short.
       // The allowlist check above ensures only authorized users can resolve pending prompts.
+      // Pending prompts are durably persisted by reaction-prompts.ts and rehydrated on boot,
+      // so this lookup must continue to work after a service restart.
       let resolvedPrompt: { question: string; chosenEmoji: string } | null = null;
       if (mode === 'add') {
-        // For custom emojis, build the full <:name:id> identifier so it matches the choice
-        // strings stored in the pending prompt. Unicode emojis use name directly.
-        const emojiForPrompt = reaction.emoji.id
-          ? `<:${reaction.emoji.name ?? ''}:${reaction.emoji.id}>`
-          : (reaction.emoji.name ?? '');
+        const emojiForPrompt = reactionPromptEmojiKey(reaction);
         if (emojiForPrompt) {
           resolvedPrompt = tryResolveReactionPrompt(reaction.message.id, emojiForPrompt);
         }

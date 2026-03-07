@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { ChannelType } from 'discord.js';
 import { createReactionAddHandler, createReactionRemoveHandler } from './reaction-handler.js';
@@ -2166,6 +2169,98 @@ describe('reaction prompt interception', () => {
 
     // The prompt was registered — the reaction handler will intercept the user's reaction.
     expect(reactionPrompts.pendingPromptCount()).toBe(1);
+  });
+
+  it('rehydrates a persisted pending prompt after restart and resolves it through the handler', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'reaction-handler-restart-'));
+    const priorDataDir = process.env.DISCOCLAW_DATA_DIR;
+
+    try {
+      process.env.DISCOCLAW_DATA_DIR = dataDir;
+      vi.resetModules();
+
+      const promptModule = await import('./reaction-prompts.js');
+      const promptMessageId = 'prompt-after-restart';
+      promptModule._resetForTest();
+
+      const sendFn = vi.fn().mockResolvedValue({
+        id: promptMessageId,
+        react: vi.fn().mockResolvedValue(undefined),
+      });
+      const promptResult = await promptModule.executeReactionPromptAction(
+        {
+          type: 'reactionPrompt',
+          question: 'Deploy the staged build?',
+          choices: ['✅', '❌'],
+        },
+        {
+          guild: {
+            channels: {
+              cache: {
+                get: vi.fn().mockReturnValue({ send: sendFn }),
+              },
+            },
+          } as any,
+          client: {} as any,
+          channelId: 'ch-1',
+          messageId: 'msg-origin',
+        },
+      );
+      expect(promptResult).toEqual({ ok: true, summary: 'Prompt sent — awaiting user reaction' });
+      expect(promptModule.pendingPromptCount()).toBe(1);
+
+      vi.resetModules();
+
+      const [{ createReactionAddHandler: createRestartedReactionAddHandler }, restartedPromptModule] = await Promise.all([
+        import('./reaction-handler.js'),
+        import('./reaction-prompts.js'),
+      ]);
+
+      const invokeSpy = vi.fn();
+      const runtime: RuntimeAdapter = {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(p): AsyncIterable<EngineEvent> {
+          invokeSpy(p);
+          yield { type: 'text_final', text: 'resolved after restart' };
+          yield { type: 'done' };
+        },
+      };
+
+      const params = makeParams({ runtime });
+      const queue = mockQueue();
+      const handler = createRestartedReactionAddHandler(params, queue);
+      const reaction = mockReaction({
+        emoji: { name: '✅' },
+        message: mockMessage({
+          id: promptMessageId,
+          content: 'Deploy the staged build?',
+          createdTimestamp: Date.now() - (7 * 24 * 60 * 60 * 1000),
+        }),
+      });
+
+      await handler(reaction as any, mockUser() as any);
+
+      expect(queue.run).toHaveBeenCalledOnce();
+      expect(invokeSpy).toHaveBeenCalledOnce();
+      const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+      expect(prompt).toContain('User chose ✅ in response to: Deploy the staged build?');
+      expect(prompt).toContain('Act on the user\'s choice. Do not re-ask the question.');
+      expect(restartedPromptModule.pendingPromptCount()).toBe(0);
+
+      const storePath = path.join(dataDir, 'discord', 'reaction-prompts.json');
+      const raw = await fs.readFile(storePath, 'utf8');
+      expect(JSON.parse(raw)).toEqual([]);
+    } finally {
+      if (priorDataDir === undefined) {
+        delete process.env.DISCOCLAW_DATA_DIR;
+      } else {
+        process.env.DISCOCLAW_DATA_DIR = priorDataDir;
+      }
+      reactionPrompts._resetForTest();
+      vi.resetModules();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
   });
 
   it('non-query action failure triggers follow-up so bot can explain the error', async () => {
