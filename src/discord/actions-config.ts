@@ -506,7 +506,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
 - \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` and \`voice\` roles, swaps the active runtime adapter independently), or \`default\` (for cron-exec only, to revert to the env-configured default (Sonnet by default)). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
+- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` and \`voice\` roles, swaps the active runtime adapter independently), or \`default\` (for cron-exec only, to revert to the startup default for that role). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
 
 **Roles:**
 | Role | What it controls |
@@ -530,5 +530,5 @@ Changes are **persisted** to \`models.json\` and survive restart. Use \`!models 
 - Omit \`role\` to reset all roles.
 
 **Cron model priority:** per-job override (cronUpdate) > AI-classified model > cron-exec default > chat fallback.
-Set \`cron-exec\` to \`default\` to clear the override and revert to the env-configured default (Sonnet by default).`;
+Set \`cron-exec\` to \`default\` to clear the override and revert to the startup default for that role.`;
 }
