@@ -277,4 +277,119 @@ describe('createCliRuntime', () => {
     expect(events).toContainEqual({ type: 'error', message: 'exit=17; stderr=bad flag' });
     expect(events[events.length - 1]).toEqual({ type: 'done' });
   });
+
+  it('logs spawn, first stdio bytes, and first parsed event telemetry for one-shot invocations', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdoutChunks: [
+        '{"type":"delta","text":"A"}\n',
+        '{"type":"result","text":"Final text"}\n',
+      ],
+      stderrChunks: ['warming up\n'],
+      exitCode: 0,
+    }));
+
+    const info = vi.fn();
+    const rt = createCliRuntime(baseStrategy({
+      getOutputMode: () => 'jsonl',
+      parseLine: (evt) => {
+        if (!evt || typeof evt !== 'object') return null;
+        const value = evt as { type?: unknown; text?: unknown };
+        if (value.type === 'delta' && typeof value.text === 'string') {
+          return { text: value.text };
+        }
+        if (value.type === 'result' && typeof value.text === 'string') {
+          return { resultText: value.text };
+        }
+        return null;
+      },
+    }), {
+      log: {
+        info,
+        debug: vi.fn(),
+      } as any,
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      strategyId: 'other',
+      attempt: 1,
+      pid: 4242,
+      spawnedAtMs: expect.any(Number),
+      outputMode: 'jsonl',
+      useStdin: false,
+    }), 'one-shot: subprocess spawned');
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      strategyId: 'other',
+      attempt: 1,
+      stream: 'stdout',
+      firstByteAtMs: expect.any(Number),
+      spawnToFirstByteMs: expect.any(Number),
+    }), 'one-shot: first stdout byte');
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      strategyId: 'other',
+      attempt: 1,
+      stream: 'stderr',
+      firstByteAtMs: expect.any(Number),
+      spawnToFirstByteMs: expect.any(Number),
+    }), 'one-shot: first stderr byte');
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      strategyId: 'other',
+      attempt: 1,
+      eventSource: 'strategy_parser',
+      eventType: 'text_delta',
+      firstParsedEventAtMs: expect.any(Number),
+      spawnToFirstParsedEventMs: expect.any(Number),
+    }), 'one-shot: first parsed runtime event');
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      strategyId: 'other',
+      attempt: 1,
+      firstStdoutByteAtMs: expect.any(Number),
+      firstStderrByteAtMs: expect.any(Number),
+      firstParsedEventAtMs: expect.any(Number),
+      firstParsedEventType: 'text_delta',
+      firstParsedEventSource: 'strategy_parser',
+      spawnToFirstStdoutMs: expect.any(Number),
+      spawnToFirstStderrMs: expect.any(Number),
+      spawnToFirstEventMs: expect.any(Number),
+      totalMs: expect.any(Number),
+    }), 'one-shot: timing summary');
+  });
+
+  it('records first parsed telemetry for default JSONL parsing', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdoutChunks: ['{"text":"fallback text"}\n'],
+      exitCode: 0,
+    }));
+
+    const info = vi.fn();
+    const rt = createCliRuntime(baseStrategy({
+      getOutputMode: () => 'jsonl',
+    }), {
+      log: {
+        info,
+        debug: vi.fn(),
+      } as any,
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(events).toContainEqual({ type: 'text_delta', text: 'fallback text' });
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      strategyId: 'other',
+      attempt: 1,
+      eventSource: 'default_parser',
+      eventType: 'text_delta',
+      firstParsedEventAtMs: expect.any(Number),
+      spawnToFirstParsedEventMs: expect.any(Number),
+    }), 'one-shot: first parsed runtime event');
+  });
 });
