@@ -5,6 +5,7 @@ import { createMessageCreateHandler } from './discord.js';
 import { hasQueryAction, QUERY_ACTION_TYPES, shouldTriggerFollowUp } from './discord/action-categories.js';
 import { inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
 import * as abortRegistry from './discord/abort-registry.js';
+import * as discordActions from './discord/actions.js';
 import { _resetDestructiveConfirmationForTest as resetDestructiveConfirm } from './discord/destructive-confirmation.js';
 import { RUNTIME_SIGNAL_SUPPRESSED_LINE } from './discord/runtime-signal-budget.js';
 
@@ -72,6 +73,15 @@ function makeMsg(overrides: Partial<any> = {}) {
 }
 
 function makeMockGuild(channels: Array<{ id: string; name: string; type: ChannelType; parentName?: string }>) {
+  const requester = {
+    id: '123',
+    permissions: {
+      has: vi.fn(() => true),
+    },
+    roles: {
+      highest: { position: 100 },
+    },
+  };
   const cache = new Map<string, any>();
   for (const ch of channels) {
     cache.set(ch.id, {
@@ -79,11 +89,15 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
       name: ch.name,
       type: ch.type,
       parent: ch.parentName ? { name: ch.parentName } : null,
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
     });
   }
   return {
     channels: {
       cache: {
+        get: (id: string) => cache.get(id),
         find: (fn: (ch: any) => boolean) => {
           for (const ch of cache.values()) if (fn(ch)) return ch;
           return undefined;
@@ -92,6 +106,17 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
         get size() { return cache.size; },
       },
       create: vi.fn(async (opts: any) => ({ name: opts.name, id: 'new-id' })),
+    },
+    members: {
+      fetch: vi.fn(async (userId: string) => ({
+        ...(userId === '123'
+          ? requester
+          : {
+            id: userId,
+            displayName: `user-${userId}`,
+            roles: { highest: { position: 1 } },
+          }),
+      })),
     },
   } as any;
 }
@@ -451,6 +476,9 @@ describe('auto-follow-up for query actions', () => {
       name: 'general',
       type: ChannelType.GuildText,
       parent: { name: 'Dev' },
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
       send: vi.fn(async () => ({})),
     };
     const catCh = {
@@ -464,6 +492,17 @@ describe('auto-follow-up for query actions', () => {
       ['cat1', catCh],
     ]);
     const guild = {
+      members: {
+        fetch: vi.fn(async (userId: string) => ({
+          id: userId,
+          permissions: {
+            has: vi.fn(() => true),
+          },
+          roles: {
+            highest: { position: userId === '123' ? 100 : 1 },
+          },
+        })),
+      },
       channels: {
         cache: {
           get: (id: string) => channelsMap.get(id),
@@ -519,6 +558,9 @@ describe('auto-follow-up for query actions', () => {
       name: 'beads',
       type: ChannelType.GuildForum,
       parent: null,
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
       send: vi.fn(async () => ({})),
     };
     const threadCh = {
@@ -527,6 +569,9 @@ describe('auto-follow-up for query actions', () => {
       type: ChannelType.PublicThread,
       parentId: 'forum1',
       parent: { name: 'beads' },
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
       isThread: () => true,
       joinable: false,
       joined: true,
@@ -537,6 +582,17 @@ describe('auto-follow-up for query actions', () => {
       ['thread1', threadCh],
     ]);
     const guild = {
+      members: {
+        fetch: vi.fn(async (userId: string) => ({
+          id: userId,
+          permissions: {
+            has: vi.fn(() => true),
+          },
+          roles: {
+            highest: { position: userId === '123' ? 100 : 1 },
+          },
+        })),
+      },
       channels: {
         cache: {
           get: (id: string) => channelsMap.get(id),
@@ -1140,30 +1196,35 @@ describe('destructive action confirmation flow', () => {
   });
 
   it('executes destructive actions immediately in interactive mode without !confirm', async () => {
-    const ban = vi.fn(async () => {});
-    const guild = {
-      members: {
-        fetch: vi.fn(async () => ({ displayName: 'BadUser', ban })),
-      },
-      channels: { cache: { find: vi.fn(), values: vi.fn() } },
-    } as any;
-
     const runtime = {
       invoke: vi.fn(async function* () {
         yield { type: 'text_final', text: '<discord-action>{"type":"ban","userId":"42"}</discord-action>' } as any;
       }),
     } as any;
+    const executeSpy = vi.spyOn(discordActions, 'executeDiscordActions').mockResolvedValue([
+      { ok: true, summary: 'Banned BadUser' },
+    ]);
 
     const handler = createMessageCreateHandler(
-      baseParams(runtime, { discordActionsModeration: true }),
+      baseParams(runtime, { discordActionsModeration: true, actionFollowupDepth: 0 }),
       makeQueue(),
     );
 
-    const msg1 = makeMsg({ guild, content: 'ban that user' });
+    const msg1 = makeMsg({ content: 'ban that user' });
     await handler(msg1);
 
     expect(runtime.invoke).toHaveBeenCalledTimes(1);
-    expect(ban).toHaveBeenCalledOnce();
+    expect(executeSpy).toHaveBeenCalledOnce();
+    expect(executeSpy.mock.calls[0]?.[0]).toEqual([{ type: 'ban', userId: '42' }]);
+    expect(executeSpy.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      confirmation: expect.objectContaining({
+        mode: 'interactive',
+        bypassDestructive: true,
+        userId: '123',
+      }),
+      requesterId: '123',
+    }));
+    executeSpy.mockRestore();
   });
 });
 

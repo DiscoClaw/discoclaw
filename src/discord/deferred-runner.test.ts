@@ -42,7 +42,13 @@ vi.mock('./actions.js', () => ({
 }));
 
 vi.mock('./action-utils.js', () => ({
-  resolveChannel: vi.fn(() => ({ id: 'ch-1', send: vi.fn(async () => ({})) })),
+  resolveChannel: vi.fn(() => ({
+    id: 'ch-1',
+    send: vi.fn(async () => ({})),
+    permissionsFor: vi.fn(() => ({
+      has: vi.fn(() => true),
+    })),
+  })),
   fmtTime: vi.fn(() => '12:00'),
 }));
 
@@ -114,10 +120,21 @@ function makeOpts(overrides: Record<string, unknown> = {}) {
 
 function makeContext() {
   return {
-    guild: { id: 'guild-1' },
+    guild: {
+      id: 'guild-1',
+      members: {
+        fetch: vi.fn(async () => ({
+          id: 'user-1',
+          permissions: {
+            has: vi.fn(() => true),
+          },
+        })),
+      },
+    },
     client: { channels: { cache: new Map() } },
     channelId: 'ch-1',
     messageId: 'm-1',
+    requesterId: 'user-1',
     threadParentId: null,
     confirmation: { mode: 'automated' as const },
   };

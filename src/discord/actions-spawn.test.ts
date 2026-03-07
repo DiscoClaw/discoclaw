@@ -128,8 +128,28 @@ function makeMockChannel(overrides?: { permissionsBitfield?: bigint }) {
 
 function makeCtx(channel?: ReturnType<typeof makeMockChannel>): ActionContext {
   const ch = channel ?? makeMockChannel();
+  const requester = {
+    id: 'user-1',
+    permissions: {
+      has: vi.fn(() => true),
+    },
+    roles: {
+      highest: { position: 100 },
+    },
+  };
   return {
     guild: {
+      members: {
+        fetch: vi.fn(async (userId: string) => ({
+          ...(userId === 'user-1'
+            ? requester
+            : {
+              id: userId,
+              displayName: `user-${userId}`,
+              roles: { highest: { position: 1 } },
+            }),
+        })),
+      },
       channels: {
         cache: {
           get: (id: string) => id === ch.id ? ch : undefined,
@@ -140,6 +160,7 @@ function makeCtx(channel?: ReturnType<typeof makeMockChannel>): ActionContext {
     client: {} as any,
     channelId: 'test-channel',
     messageId: 'test-message',
+    requesterId: 'user-1',
   };
 }
 

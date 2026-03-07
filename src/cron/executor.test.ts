@@ -75,7 +75,15 @@ function mockLog() {
 }
 
 function mockChannel() {
-  return { id: 'ch-1', name: 'general', type: ChannelType.GuildText, send: vi.fn().mockResolvedValue(undefined) };
+  return {
+    id: 'ch-1',
+    name: 'general',
+    type: ChannelType.GuildText,
+    permissionsFor: vi.fn(() => ({
+      has: vi.fn(() => true),
+    })),
+    send: vi.fn().mockResolvedValue(undefined),
+  };
 }
 
 const BASE_CRON_ACTION_FLAGS: ActionCategoryFlags = {
@@ -102,6 +110,17 @@ function makeCronActionFlags(overrides?: Partial<ActionCategoryFlags>): ActionCa
 function makeCtx(overrides?: Partial<CronExecutorContext>): CronExecutorContext {
   const channel = mockChannel();
   const guild = {
+    members: {
+      fetch: vi.fn(async (userId: string) => ({
+        id: userId,
+        permissions: {
+          has: vi.fn(() => true),
+        },
+        roles: {
+          highest: { position: userId === 'user-1' ? 100 : 1 },
+        },
+      })),
+    },
     channels: {
       cache: {
         get: vi.fn().mockReturnValue(channel),
@@ -110,6 +129,7 @@ function makeCtx(overrides?: Partial<CronExecutorContext>): CronExecutorContext 
     },
   };
   const client = {
+    user: { id: 'bot-1' },
     guilds: {
       cache: {
         get: vi.fn().mockReturnValue(guild),
@@ -274,6 +294,9 @@ describe('executeCronJob', () => {
       runtime,
       discordActionsEnabled: true,
       actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, tasks: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
+      statsStore: {
+        getRecord: vi.fn(() => ({ authorId: 'user-1' })),
+      } as any,
     });
     const job = makeJob();
     await executeCronJob(job, ctx);
@@ -302,6 +325,9 @@ describe('executeCronJob', () => {
       runtime,
       discordActionsEnabled: true,
       actionFlags: { channels: false, messaging: true, guild: false, moderation: false, polls: false, tasks: false, crons: false, botProfile: false, forge: false, plan: false, memory: false, config: false, defer: false },
+      statsStore: {
+        getRecord: vi.fn(() => ({ authorId: 'user-1' })),
+      } as any,
     });
     const job = makeJob();
     await executeCronJob(job, ctx);
