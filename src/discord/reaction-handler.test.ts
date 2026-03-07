@@ -1798,14 +1798,19 @@ describe('streaming behavior', () => {
       const runtime: RuntimeAdapter = {
         id: 'claude_code',
         capabilities: new Set(['streaming_text']),
-        async *invoke(): AsyncIterable<EngineEvent> {
+        async *invoke(invokeParams): AsyncIterable<EngineEvent> {
+          invokeParams.onTelemetry?.({ type: 'first_byte', stream: 'stdout', atMs: Date.now() });
           runtimeStarted.resolve();
           await unblockRuntime.promise;
           yield { type: 'done' };
         },
       };
 
-      const params = makeParams({ runtime, streamStallWarningMs: 1 });
+      const params = makeParams({
+        runtime,
+        streamStallWarningMs: 1,
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      });
       const queue = mockQueue();
       const handler = createReactionAddHandler(params, queue);
       const reaction = mockReaction();
@@ -1820,6 +1825,12 @@ describe('streaming behavior', () => {
       expect(combined).toContain('Runtime heartbeat');
       expect(combined).toContain('Still active');
       expect(combined).toContain('waiting for first runtime event');
+      expect(params.log?.info).toHaveBeenCalledWith(expect.objectContaining({
+        flow: 'reaction',
+        stallSeconds: expect.any(Number),
+        sawRuntimeEvent: false,
+        spawnToFirstByteMs: expect.any(Number),
+      }), 'discord:stream heartbeat');
 
       unblockRuntime.resolve();
       await pending;

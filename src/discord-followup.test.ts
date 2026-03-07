@@ -841,8 +841,10 @@ describe('auto-follow-up for query actions', () => {
     try {
       const unblockRuntime = deferred<void>();
       const runtimeStarted = deferred<void>();
+      const info = vi.fn();
       const runtime = {
-        invoke: vi.fn(async function* () {
+        invoke: vi.fn(async function* (invokeParams: { onTelemetry?: (evt: { type: 'first_byte'; stream: 'stdout' | 'stderr'; atMs: number }) => void }) {
+          invokeParams.onTelemetry?.({ type: 'first_byte', stream: 'stdout', atMs: Date.now() });
           runtimeStarted.resolve();
           await unblockRuntime.promise;
           yield { type: 'done' } as any;
@@ -855,7 +857,10 @@ describe('auto-follow-up for query actions', () => {
       };
       const msg = makeMsg({ reply: vi.fn(async () => replyObj) });
       const handler = createMessageCreateHandler(
-        baseParams(runtime, { streamStallWarningMs: 1 }),
+        baseParams(runtime, {
+          streamStallWarningMs: 1,
+          log: { info, warn: vi.fn(), error: vi.fn() },
+        }),
         makeQueue(),
       );
 
@@ -867,6 +872,12 @@ describe('auto-follow-up for query actions', () => {
       const edits = replyEditContents(replyObj).join('\n');
       expect(edits).toContain('Runtime heartbeat');
       expect(edits).toContain('Still active');
+      expect(info).toHaveBeenCalledWith(expect.objectContaining({
+        flow: 'message',
+        stallSeconds: expect.any(Number),
+        sawRuntimeEvent: false,
+        spawnToFirstByteMs: expect.any(Number),
+      }), 'discord:stream heartbeat');
 
       unblockRuntime.resolve();
       await pending;

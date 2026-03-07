@@ -514,4 +514,74 @@ describe('LongRunningProcess', () => {
     const parsed = JSON.parse(written.trim());
     expect(parsed.message.content).toBe('Hello');
   });
+
+  it('logs spawn and per-turn timing telemetry', async () => {
+    const mock = createMockSubprocess();
+    (execa as any).mockReturnValue(mock.proc);
+    const info = vi.fn();
+    const debug = vi.fn();
+
+    const proc = new LongRunningProcess({
+      ...baseOpts,
+      log: { info, debug },
+    });
+    proc.spawn();
+
+    queueMicrotask(() => {
+      mock.stderr.emit('data', 'warming\n');
+      mock.stdout.emit('data', JSON.stringify({ type: 'result', result: 'ok' }) + '\n');
+    });
+
+    const events: any[] = [];
+    for await (const evt of proc.sendTurn('Hello')) {
+      events.push(evt);
+    }
+
+    expect(events).toContainEqual({ type: 'text_final', text: 'ok' });
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: expect.any(String),
+      pid: 12345,
+      spawnedAtMs: expect.any(Number),
+    }), 'long-running: subprocess spawned');
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: expect.any(String),
+      pid: 12345,
+      processSpawnedAtMs: expect.any(Number),
+      turnStartedAtMs: expect.any(Number),
+    }), 'long-running: turn started');
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: expect.any(String),
+      stream: 'stderr',
+      firstByteAtMs: expect.any(Number),
+      turnToFirstByteMs: expect.any(Number),
+    }), 'long-running: first stderr byte for turn');
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: expect.any(String),
+      stream: 'stdout',
+      firstByteAtMs: expect.any(Number),
+      turnToFirstByteMs: expect.any(Number),
+    }), 'long-running: first stdout byte for turn');
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: expect.any(String),
+      eventSource: 'stdout_parser',
+      eventType: 'text_final',
+      firstParsedEventAtMs: expect.any(Number),
+      turnToFirstParsedEventMs: expect.any(Number),
+    }), 'long-running: first parsed runtime event for turn');
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: expect.any(String),
+      processSpawnedAtMs: expect.any(Number),
+      turnStartedAtMs: expect.any(Number),
+      firstTurnStdoutByteAtMs: expect.any(Number),
+      firstTurnStderrByteAtMs: expect.any(Number),
+      firstTurnEventAtMs: expect.any(Number),
+      firstTurnEventType: 'text_final',
+      firstTurnEventSource: 'stdout_parser',
+      turnToFirstByteMs: expect.any(Number),
+      turnToFirstStdoutByteMs: expect.any(Number),
+      turnToFirstStderrByteMs: expect.any(Number),
+      turnToFirstEventMs: expect.any(Number),
+      totalMs: expect.any(Number),
+    }), 'long-running: turn timing summary');
+  });
 });

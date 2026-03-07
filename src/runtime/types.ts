@@ -47,6 +47,13 @@ export type RuntimeSupervisorLimitsOverride = {
   maxWallTimeMs?: number;
 };
 
+export type RuntimeTelemetryEvent =
+  | {
+      type: 'first_byte';
+      stream: 'stdout' | 'stderr';
+      atMs: number;
+    };
+
 export type RuntimeSupervisorPolicy = {
   /**
    * Optional per-invocation policy profile used by runtime wrappers.
@@ -89,6 +96,7 @@ export type RuntimeInvokeParams = {
   images?: ImageData[];
   reasoningEffort?: string;
   signal?: AbortSignal;
+  onTelemetry?: (evt: RuntimeTelemetryEvent) => void;
   supervisor?: RuntimeSupervisorPolicy;
 };
 

@@ -157,7 +157,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           let fallback = false;
           let contextOverflow = false;
           try {
-            for await (const evt of proc.sendTurn(params.prompt, params.images)) {
+            for await (const evt of proc.sendTurn(params.prompt, params.images, params.onTelemetry)) {
               if (evt.type === 'error' && (evt.message.startsWith('long-running:') || evt.message.includes('hang detected'))) {
                 if (evt.message.includes('context overflow')) contextOverflow = true;
                 pool.remove(params.sessionKey, contextOverflow ? 'context-overflow' : undefined);
@@ -269,6 +269,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     };
 
     const runOneShotAttempt = async (
+      attempt: number,
       envOverrides?: Record<string, string | undefined>,
     ): Promise<AttemptResult> => new Promise<AttemptResult>((resolveAttempt) => {
       const ctx: CliInvokeContext = {
@@ -298,7 +299,22 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         stdout: 'pipe',
         stderr: 'pipe',
       });
+      const spawnedAtMs = Date.now();
       activeSubprocess = subprocess;
+      const attemptLogBase = {
+        strategyId: strategy.id,
+        attempt,
+        pid: subprocess.pid ?? null,
+      };
+      opts.log?.info?.(
+        {
+          ...attemptLogBase,
+          spawnedAtMs,
+          outputMode,
+          useStdin,
+        },
+        'one-shot: subprocess spawned',
+      );
 
       // Write stdin payload if needed.
       if (useStdin && subprocess.stdin) {
@@ -331,12 +347,39 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       let emittedUserOutput = false;
       let stallTimer: ReturnType<typeof setTimeout> | null = null;
       let progressTimer: ReturnType<typeof setTimeout> | null = null;
+      let firstStdoutByteAtMs: number | null = null;
+      let firstStderrByteAtMs: number | null = null;
+      let firstParsedEventAtMs: number | null = null;
+      let firstParsedEventType: EngineEvent['type'] | null = null;
+      let firstParsedEventSource: 'session_scanner' | 'strategy_parser' | 'default_parser' | null = null;
+      let timingSummaryLogged = false;
+      const toSpawnDelta = (ts: number | null): number | null => (ts == null ? null : ts - spawnedAtMs);
+      const emitTimingSummary = (completionReason: string): void => {
+        if (timingSummaryLogged) return;
+        timingSummaryLogged = true;
+        const finalizeAtMs = Date.now();
+        opts.log?.info?.({
+          ...attemptLogBase,
+          completionReason,
+          spawnedAtMs,
+          firstStdoutByteAtMs,
+          firstStderrByteAtMs,
+          firstParsedEventAtMs,
+          firstParsedEventType,
+          firstParsedEventSource,
+          spawnToFirstStdoutMs: toSpawnDelta(firstStdoutByteAtMs),
+          spawnToFirstStderrMs: toSpawnDelta(firstStderrByteAtMs),
+          spawnToFirstEventMs: toSpawnDelta(firstParsedEventAtMs),
+          totalMs: finalizeAtMs - spawnedAtMs,
+        }, 'one-shot: timing summary');
+      };
       const clearStallTimer = () => { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } };
       const clearProgressTimer = () => { if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; } };
 
-      const settleAttempt = (result: AttemptResult): void => {
+      const settleAttempt = (result: AttemptResult, completionReason: string): void => {
         if (attemptSettled) return;
         attemptSettled = true;
+        emitTimingSummary(completionReason);
         clearStallTimer();
         clearProgressTimer();
         scanner?.stop();
@@ -344,10 +387,18 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         resolveAttempt(result);
       };
 
-      const pushUserText = (text: string): void => {
+      const pushUserText = (
+        text: string,
+        source?: 'session_scanner' | 'strategy_parser' | 'default_parser',
+      ): void => {
         if (!text) return;
         emittedUserOutput = true;
-        push({ type: 'text_delta', text });
+        const evt: EngineEvent = { type: 'text_delta', text };
+        if (source) {
+          pushParsedEvent(evt, source);
+          return;
+        }
+        push(evt);
       };
 
       const resetStallTimer = () => {
@@ -362,7 +413,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           finished = true;
           subprocess.kill('SIGTERM');
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'stream_stall');
         }, opts.streamStallTimeoutMs);
       };
 
@@ -383,7 +434,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           finished = true;
           subprocess.kill('SIGTERM');
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'progress_stall');
         }, opts.progressStallTimeoutMs);
       };
 
@@ -394,7 +445,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         push({ type: 'done' });
         finished = true;
         wake();
-        settleAttempt({ kind: 'complete' });
+        settleAttempt({ kind: 'complete' }, 'aborted');
       };
       params.signal?.addEventListener('abort', onAbort, { once: true });
 
@@ -405,7 +456,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       if (opts.sessionScanning && params.sessionId) {
         scanner = new SessionFileScanner(
           { sessionId: params.sessionId, cwd: params.cwd, log: opts.log },
-          { onEvent: push },
+          { onEvent: (evt) => pushParsedEvent(evt, 'session_scanner') },
         );
         scanner.start().catch((err) => opts.log?.debug({ err }, 'session-scanner: start failed'));
       }
@@ -423,15 +474,65 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       let procResult: Awaited<typeof subprocess> | null = null;
       const seenImages = new Set<string>();
       let imageCount = 0;
+      const recordFirstByte = (stream: 'stdout' | 'stderr'): void => {
+        const now = Date.now();
+        if (stream === 'stdout') {
+          if (firstStdoutByteAtMs != null) return;
+          firstStdoutByteAtMs = now;
+        } else {
+          if (firstStderrByteAtMs != null) return;
+          firstStderrByteAtMs = now;
+        }
+        params.onTelemetry?.({ type: 'first_byte', stream, atMs: now });
+        opts.log?.info?.(
+          {
+            ...attemptLogBase,
+            stream,
+            firstByteAtMs: now,
+            spawnToFirstByteMs: now - spawnedAtMs,
+          },
+          `one-shot: first ${stream} byte`,
+        );
+      };
+
+      const recordFirstParsedRuntimeEvent = (
+        source: 'session_scanner' | 'strategy_parser' | 'default_parser',
+        eventType: EngineEvent['type'],
+      ): void => {
+        if (firstParsedEventAtMs != null) return;
+        const now = Date.now();
+        firstParsedEventAtMs = now;
+        firstParsedEventType = eventType;
+        firstParsedEventSource = source;
+        opts.log?.info?.(
+          {
+            ...attemptLogBase,
+            eventSource: source,
+            eventType,
+            firstParsedEventAtMs: now,
+            spawnToFirstParsedEventMs: now - spawnedAtMs,
+          },
+          'one-shot: first parsed runtime event',
+        );
+      };
+
+      const pushParsedEvent = (
+        evt: EngineEvent,
+        source: 'session_scanner' | 'strategy_parser' | 'default_parser',
+      ): void => {
+        recordFirstParsedRuntimeEvent(source, evt.type);
+        push(evt);
+      };
 
       // --- Stdout handler ---
       subprocess.stdout.on('data', (chunk) => {
         resetStallTimer();
+        recordFirstByte('stdout');
         const s = String(chunk);
         mergedStdout += s;
 
         if (outputMode === 'text') {
-          pushUserText(s);
+          pushUserText(s, 'default_parser');
           resetProgressTimer();
           return;
         }
@@ -454,17 +555,18 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
             if (parsed) {
               // Emit extra events (e.g. session mapping).
               if (parsed.extraEvents) {
-                for (const e of parsed.extraEvents) push(e);
+                for (const e of parsed.extraEvents) pushParsedEvent(e, 'strategy_parser');
               }
 
               // Handle text.
               if (parsed.text) {
+                recordFirstParsedRuntimeEvent('strategy_parser', 'text_delta');
                 merged += parsed.text;
                 if (parsed.inToolUse !== undefined) {
                   if (parsed.inToolUse) inToolUse = true;
                 }
                 if (!inToolUse) {
-                  pushUserText(parsed.text);
+                  pushUserText(parsed.text, 'strategy_parser');
                   resetProgressTimer();
                 }
                 if (parsed.inToolUse === false) inToolUse = false;
@@ -476,26 +578,33 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
               // Handle result text.
               if ('resultText' in parsed) {
+                if (typeof parsed.resultText === 'string') {
+                  recordFirstParsedRuntimeEvent('strategy_parser', 'text_final');
+                }
                 resultText = typeof parsed.resultText === 'string' ? parsed.resultText : '';
               }
 
               // Handle images.
               if (parsed.image && imageCount < MAX_IMAGES_PER_INVOCATION) {
+                recordFirstParsedRuntimeEvent('strategy_parser', 'image_data');
                 const key = imageDedupeKey(parsed.image);
                 if (!seenImages.has(key)) {
                   seenImages.add(key);
                   imageCount++;
-                  push({ type: 'image_data', image: parsed.image });
+                  pushParsedEvent({ type: 'image_data', image: parsed.image }, 'strategy_parser');
                 }
               }
               if (parsed.resultImages) {
+                if (parsed.resultImages.length > 0) {
+                  recordFirstParsedRuntimeEvent('strategy_parser', 'image_data');
+                }
                 for (const img of parsed.resultImages) {
                   if (imageCount >= MAX_IMAGES_PER_INVOCATION) break;
                   const key = imageDedupeKey(img);
                   if (!seenImages.has(key)) {
                     seenImages.add(key);
                     imageCount++;
-                    push({ type: 'image_data', image: img });
+                    pushParsedEvent({ type: 'image_data', image: img }, 'strategy_parser');
                   }
                 }
               }
@@ -507,21 +616,30 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           // Default JSONL parsing (Claude-compatible fallback).
           const text = extractTextFromUnknownEvent(evt ?? trimmed);
           if (text) {
+            recordFirstParsedRuntimeEvent('default_parser', 'text_delta');
             merged += text;
             const hasToolOpen = text.includes('<tool_use>') || text.includes('<tool_calls>') || text.includes('<tool_call>') || text.includes('<tool_results>') || text.includes('<tool_result>');
             const hasToolClose = text.includes('</tool_use>') || text.includes('</tool_calls>') || text.includes('</tool_call>') || text.includes('</tool_results>') || text.includes('</tool_result>');
             if (hasToolOpen) inToolUse = true;
             if (!inToolUse) {
-              pushUserText(text);
+              pushUserText(text, 'default_parser');
               resetProgressTimer();
             }
             if (hasToolClose) inToolUse = false;
           } else if (evt) {
             const rt = extractResultText(evt);
-            if (rt !== null) resultText = rt;
+            if (rt !== null) {
+              recordFirstParsedRuntimeEvent('default_parser', 'text_final');
+              resultText = rt;
+            }
 
             const blocks = extractResultContentBlocks(evt);
             if (blocks) {
+              if (blocks.text) {
+                recordFirstParsedRuntimeEvent('default_parser', 'text_final');
+              } else if (blocks.images.length > 0) {
+                recordFirstParsedRuntimeEvent('default_parser', 'image_data');
+              }
               resultText = blocks.text;
               for (const img of blocks.images) {
                 if (imageCount >= MAX_IMAGES_PER_INVOCATION) break;
@@ -529,18 +647,19 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
                 if (!seenImages.has(key)) {
                   seenImages.add(key);
                   imageCount++;
-                  push({ type: 'image_data', image: img });
+                  pushParsedEvent({ type: 'image_data', image: img }, 'default_parser');
                 }
               }
             }
 
             const img = extractImageFromUnknownEvent(evt);
             if (img && imageCount < MAX_IMAGES_PER_INVOCATION) {
+              recordFirstParsedRuntimeEvent('default_parser', 'image_data');
               const key = imageDedupeKey(img);
               if (!seenImages.has(key)) {
                 seenImages.add(key);
                 imageCount++;
-                push({ type: 'image_data', image: img });
+                pushParsedEvent({ type: 'image_data', image: img }, 'default_parser');
               }
             }
           }
@@ -550,6 +669,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       // --- Stderr handler ---
       subprocess.stderr?.on('data', (chunk) => {
         resetStallTimer();
+        recordFirstByte('stderr');
         const s = String(chunk);
         stderrForError += s;
         if (!opts.echoStdio) return;
@@ -576,8 +696,6 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         if (!procResult) return;
         if (!stdoutEnded) return;
         if (!stderrEnded) return;
-        clearStallTimer();
-        clearProgressTimer();
 
         const exitCode = procResult.exitCode;
         const stdout = procResult.stdout ?? '';
@@ -588,7 +706,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'aborted');
           return;
         }
 
@@ -602,7 +720,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'timed_out');
           return;
         }
 
@@ -612,7 +730,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
           if (retryEnv) {
             if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
-            settleAttempt({ kind: 'retry', envOverrides: retryEnv });
+            settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'spawn_retry');
             return;
           }
 
@@ -626,7 +744,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'spawn_failed');
           return;
         }
 
@@ -646,19 +764,41 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
             if (strategy.parseLine && evt) {
               const parsed = strategy.parseLine(evt, ctx);
               if (parsed) {
+                if (parsed.extraEvents) {
+                  for (const e of parsed.extraEvents) pushParsedEvent(e, 'strategy_parser');
+                }
                 if (parsed.text) {
+                  recordFirstParsedRuntimeEvent('strategy_parser', 'text_delta');
                   merged += parsed.text;
-                  pushUserText(parsed.text);
+                  pushUserText(parsed.text, 'strategy_parser');
                 }
                 if ('resultText' in parsed) {
+                  if (typeof parsed.resultText === 'string') {
+                    recordFirstParsedRuntimeEvent('strategy_parser', 'text_final');
+                  }
                   resultText = typeof parsed.resultText === 'string' ? parsed.resultText : '';
                 }
                 if (parsed.image && imageCount < MAX_IMAGES_PER_INVOCATION) {
+                  recordFirstParsedRuntimeEvent('strategy_parser', 'image_data');
                   const key = imageDedupeKey(parsed.image);
                   if (!seenImages.has(key)) {
                     seenImages.add(key);
                     imageCount++;
-                    push({ type: 'image_data', image: parsed.image });
+                    pushParsedEvent({ type: 'image_data', image: parsed.image }, 'strategy_parser');
+                  }
+                }
+                if (parsed.resultImages) {
+                  if (parsed.resultImages.length > 0) {
+                    recordFirstParsedRuntimeEvent('strategy_parser', 'image_data');
+                  }
+                  for (const img of parsed.resultImages) {
+                    if (imageCount >= MAX_IMAGES_PER_INVOCATION) break;
+                    const key = imageDedupeKey(img);
+                    if (!seenImages.has(key)) {
+                      seenImages.add(key);
+                      imageCount++;
+                      pushParsedEvent({ type: 'image_data', image: img }, 'strategy_parser');
+                    }
                   }
                 }
               }
@@ -666,17 +806,42 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
               // Default trailing buffer parsing.
               const text = extractTextFromUnknownEvent(evt ?? tail);
               if (text) {
+                recordFirstParsedRuntimeEvent('default_parser', 'text_delta');
                 merged += text;
-                pushUserText(text);
+                pushUserText(text, 'default_parser');
               }
               if (evt) {
+                const rt = extractResultText(evt);
+                if (rt !== null) {
+                  recordFirstParsedRuntimeEvent('default_parser', 'text_final');
+                  resultText = rt;
+                }
+                const blocks = extractResultContentBlocks(evt);
+                if (blocks) {
+                  if (blocks.text) {
+                    recordFirstParsedRuntimeEvent('default_parser', 'text_final');
+                  } else if (blocks.images.length > 0) {
+                    recordFirstParsedRuntimeEvent('default_parser', 'image_data');
+                  }
+                  resultText = blocks.text;
+                  for (const blockImg of blocks.images) {
+                    if (imageCount >= MAX_IMAGES_PER_INVOCATION) break;
+                    const key = imageDedupeKey(blockImg);
+                    if (!seenImages.has(key)) {
+                      seenImages.add(key);
+                      imageCount++;
+                      pushParsedEvent({ type: 'image_data', image: blockImg }, 'default_parser');
+                    }
+                  }
+                }
                 const img = extractImageFromUnknownEvent(evt);
                 if (img && imageCount < MAX_IMAGES_PER_INVOCATION) {
+                  recordFirstParsedRuntimeEvent('default_parser', 'image_data');
                   const key = imageDedupeKey(img);
                   if (!seenImages.has(key)) {
                     seenImages.add(key);
                     imageCount++;
-                    push({ type: 'image_data', image: img });
+                    pushParsedEvent({ type: 'image_data', image: img }, 'default_parser');
                   }
                 }
               }
@@ -690,7 +855,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
           if (retryEnv) {
             if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
-            settleAttempt({ kind: 'retry', envOverrides: retryEnv });
+            settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'exit_retry');
             return;
           }
 
@@ -710,7 +875,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'nonzero_exit');
           return;
         }
 
@@ -732,7 +897,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         push({ type: 'done' });
         finished = true;
         wake();
-        settleAttempt({ kind: 'complete' });
+        settleAttempt({ kind: 'complete' }, 'success');
       }
 
       // --- Process completion ---
@@ -740,8 +905,6 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         procResult = result;
         tryFinalize();
       }).catch((err: unknown) => {
-        clearStallTimer();
-        clearProgressTimer();
         if (attemptSettled || finished) return;
 
         // Check timeout first — use fixed message to avoid leaking prompt/command line.
@@ -753,7 +916,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'timed_out');
           return;
         }
 
@@ -767,7 +930,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
         if (retryEnv) {
           if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
-          settleAttempt({ kind: 'retry', envOverrides: retryEnv });
+          settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'reject_retry');
           return;
         }
 
@@ -784,14 +947,16 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         push({ type: 'done' });
         finished = true;
         wake();
-        settleAttempt({ kind: 'complete' });
+        settleAttempt({ kind: 'complete' }, 'process_rejected');
       });
     });
 
     void (async () => {
       let envOverrides: Record<string, string | undefined> | undefined;
+      let attempt = 0;
       while (!finished) {
-        const result = await runOneShotAttempt(envOverrides);
+        attempt += 1;
+        const result = await runOneShotAttempt(attempt, envOverrides);
         if (result.kind === 'retry') {
           envOverrides = result.envOverrides;
           continue;

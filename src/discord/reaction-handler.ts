@@ -670,8 +670,19 @@ function createReactionHandler(
           let lastStallProgressAt = 0;
           let sawRuntimeEvent = false;
           let sawReasoningEvent = false;
+          let firstByteAtMs: number | undefined;
+          let firstEventAtMs: number | undefined;
           const trackReasoningGap = params.runtime.id === 'codex' || params.runtime.id === 'claude_code';
+          const markRuntimeByte = (evt: EngineEvent): void => {
+            if (firstByteAtMs != null) return;
+            if (evt.type === 'text_delta' || evt.type === 'log_line' || evt.type === 'thinking_delta') {
+              firstByteAtMs = Date.now();
+            }
+          };
           const markRuntimeVisibility = (evt: EngineEvent): void => {
+            if (firstEventAtMs == null) {
+              firstEventAtMs = Date.now();
+            }
             previewOnlyDeltaText = '';
             heartbeatLine = '';
             sawRuntimeEvent = true;
@@ -697,6 +708,13 @@ function createReactionHandler(
             const prefix = first ? 'Runtime heartbeat' : 'Still active';
             return `\n*${prefix} (${stallSeconds}s since last event; ${context}).*`;
           };
+          const heartbeatLatencyFields = (): {
+            spawnToFirstByteMs?: number;
+            spawnToFirstEventMs?: number;
+          } => ({
+            ...(firstByteAtMs != null ? { spawnToFirstByteMs: Math.max(0, firstByteAtMs - invokeStartedAt) } : {}),
+            ...(firstEventAtMs != null ? { spawnToFirstEventMs: Math.max(0, firstEventAtMs - invokeStartedAt) } : {}),
+          });
 
           const keepalive = setInterval(() => {
             if (params.streamStallWarningMs > 0) {
@@ -716,6 +734,7 @@ function createReactionHandler(
                       activeToolCount,
                       sawRuntimeEvent,
                       sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                      ...heartbeatLatencyFields(),
                     },
                     'discord:stream heartbeat',
                   );
@@ -730,6 +749,7 @@ function createReactionHandler(
                       activeToolCount,
                       sawRuntimeEvent,
                       sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                      ...heartbeatLatencyFields(),
                     },
                     'discord:stream heartbeat',
                   );
@@ -756,8 +776,14 @@ function createReactionHandler(
               tools: effectiveTools,
               timeoutMs: params.runtimeTimeoutMs,
               images: inputImages,
+              onTelemetry: (telemetry) => {
+                if (telemetry.type === 'first_byte' && firstByteAtMs == null) {
+                  firstByteAtMs = telemetry.atMs;
+                }
+              },
             })) {
               // Track event flow for stall warning.
+              markRuntimeByte(evt);
               markRuntimeVisibility(evt);
               lastEventAt = Date.now();
               stallWarned = false;
