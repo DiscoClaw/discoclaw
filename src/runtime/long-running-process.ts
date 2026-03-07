@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { execa, type ResultPromise } from 'execa';
-import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData } from './types.js';
+import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData, type RuntimeTelemetryEvent } from './types.js';
 import { tryParseJsonLine, cliExecaEnv } from './cli-shared.js';
 import {
   extractTextFromUnknownEvent,
@@ -79,6 +79,7 @@ export class LongRunningProcess {
   private firstTurnEventAtMs: number | null = null;
   private firstTurnEventType: EngineEvent['type'] | null = null;
   private firstTurnEventSource: 'stdout_parser' | 'session_scanner' | null = null;
+  private turnTelemetrySink?: (evt: RuntimeTelemetryEvent) => void;
 
   /** Called when this process is added to / removed from an external tracking set. */
   onCleanup?: () => void;
@@ -189,7 +190,11 @@ export class LongRunningProcess {
    * Send a user turn to the long-running process and yield EngineEvents.
    * Caller must ensure state is `idle` before calling.
    */
-  async *sendTurn(prompt: string, images?: ImageData[]): AsyncGenerator<EngineEvent> {
+  async *sendTurn(
+    prompt: string,
+    images?: ImageData[],
+    onTelemetry?: (evt: RuntimeTelemetryEvent) => void,
+  ): AsyncGenerator<EngineEvent> {
     if (this._state !== 'idle') {
       yield { type: 'error', message: `long-running: cannot send turn in state ${this._state}` };
       yield { type: 'done' };
@@ -221,6 +226,7 @@ export class LongRunningProcess {
     this.firstTurnEventAtMs = null;
     this.firstTurnEventType = null;
     this.firstTurnEventSource = null;
+    this.turnTelemetrySink = onTelemetry;
     this.stdoutBuffer = '';
     this.opts.log?.info?.({
       sessionId: this.sessionId,
@@ -316,6 +322,7 @@ export class LongRunningProcess {
       }
       this.turnScanner?.stop();
       this.turnScanner = null;
+      this.turnTelemetrySink = undefined;
       this.clearHangTimer();
       this.turnActive = false;
       if (this._state === 'busy') {
@@ -374,6 +381,7 @@ export class LongRunningProcess {
       if (this.firstTurnStderrByteAtMs != null) return;
       this.firstTurnStderrByteAtMs = now;
     }
+    this.turnTelemetrySink?.({ type: 'first_byte', stream, atMs: now });
     this.opts.log?.info?.({
       sessionId: this.sessionId,
       turnStartedAtMs: this.turnStartedAtMs,

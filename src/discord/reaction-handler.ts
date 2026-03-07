@@ -776,6 +776,11 @@ function createReactionHandler(
               tools: effectiveTools,
               timeoutMs: params.runtimeTimeoutMs,
               images: inputImages,
+              onTelemetry: (telemetry) => {
+                if (telemetry.type === 'first_byte' && firstByteAtMs == null) {
+                  firstByteAtMs = telemetry.atMs;
+                }
+              },
             })) {
               // Track event flow for stall warning.
               markRuntimeByte(evt);

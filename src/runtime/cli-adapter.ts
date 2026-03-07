@@ -157,7 +157,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           let fallback = false;
           let contextOverflow = false;
           try {
-            for await (const evt of proc.sendTurn(params.prompt, params.images)) {
+            for await (const evt of proc.sendTurn(params.prompt, params.images, params.onTelemetry)) {
               if (evt.type === 'error' && (evt.message.startsWith('long-running:') || evt.message.includes('hang detected'))) {
                 if (evt.message.includes('context overflow')) contextOverflow = true;
                 pool.remove(params.sessionKey, contextOverflow ? 'context-overflow' : undefined);
@@ -347,12 +347,39 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       let emittedUserOutput = false;
       let stallTimer: ReturnType<typeof setTimeout> | null = null;
       let progressTimer: ReturnType<typeof setTimeout> | null = null;
+      let firstStdoutByteAtMs: number | null = null;
+      let firstStderrByteAtMs: number | null = null;
+      let firstParsedEventAtMs: number | null = null;
+      let firstParsedEventType: EngineEvent['type'] | null = null;
+      let firstParsedEventSource: 'session_scanner' | 'strategy_parser' | 'default_parser' | null = null;
+      let timingSummaryLogged = false;
+      const toSpawnDelta = (ts: number | null): number | null => (ts == null ? null : ts - spawnedAtMs);
+      const emitTimingSummary = (completionReason: string): void => {
+        if (timingSummaryLogged) return;
+        timingSummaryLogged = true;
+        const finalizeAtMs = Date.now();
+        opts.log?.info?.({
+          ...attemptLogBase,
+          completionReason,
+          spawnedAtMs,
+          firstStdoutByteAtMs,
+          firstStderrByteAtMs,
+          firstParsedEventAtMs,
+          firstParsedEventType,
+          firstParsedEventSource,
+          spawnToFirstStdoutMs: toSpawnDelta(firstStdoutByteAtMs),
+          spawnToFirstStderrMs: toSpawnDelta(firstStderrByteAtMs),
+          spawnToFirstEventMs: toSpawnDelta(firstParsedEventAtMs),
+          totalMs: finalizeAtMs - spawnedAtMs,
+        }, 'one-shot: timing summary');
+      };
       const clearStallTimer = () => { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } };
       const clearProgressTimer = () => { if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; } };
 
-      const settleAttempt = (result: AttemptResult): void => {
+      const settleAttempt = (result: AttemptResult, completionReason: string): void => {
         if (attemptSettled) return;
         attemptSettled = true;
+        emitTimingSummary(completionReason);
         clearStallTimer();
         clearProgressTimer();
         scanner?.stop();
@@ -386,7 +413,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           finished = true;
           subprocess.kill('SIGTERM');
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'stream_stall');
         }, opts.streamStallTimeoutMs);
       };
 
@@ -407,7 +434,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           finished = true;
           subprocess.kill('SIGTERM');
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'progress_stall');
         }, opts.progressStallTimeoutMs);
       };
 
@@ -418,7 +445,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         push({ type: 'done' });
         finished = true;
         wake();
-        settleAttempt({ kind: 'complete' });
+        settleAttempt({ kind: 'complete' }, 'aborted');
       };
       params.signal?.addEventListener('abort', onAbort, { once: true });
 
@@ -447,12 +474,6 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       let procResult: Awaited<typeof subprocess> | null = null;
       const seenImages = new Set<string>();
       let imageCount = 0;
-      let firstStdoutByteAtMs: number | null = null;
-      let firstStderrByteAtMs: number | null = null;
-      let firstParsedEventAtMs: number | null = null;
-      let firstParsedEventType: EngineEvent['type'] | null = null;
-      let firstParsedEventSource: 'session_scanner' | 'strategy_parser' | 'default_parser' | null = null;
-
       const recordFirstByte = (stream: 'stdout' | 'stderr'): void => {
         const now = Date.now();
         if (stream === 'stdout') {
@@ -462,6 +483,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           if (firstStderrByteAtMs != null) return;
           firstStderrByteAtMs = now;
         }
+        params.onTelemetry?.({ type: 'first_byte', stream, atMs: now });
         opts.log?.info?.(
           {
             ...attemptLogBase,
@@ -510,7 +532,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         mergedStdout += s;
 
         if (outputMode === 'text') {
-          pushUserText(s);
+          pushUserText(s, 'default_parser');
           resetProgressTimer();
           return;
         }
@@ -674,23 +696,6 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         if (!procResult) return;
         if (!stdoutEnded) return;
         if (!stderrEnded) return;
-        clearStallTimer();
-        clearProgressTimer();
-        const finalizeAtMs = Date.now();
-        const toSpawnDelta = (ts: number | null): number | null => (ts == null ? null : ts - spawnedAtMs);
-        opts.log?.info?.({
-          ...attemptLogBase,
-          spawnedAtMs,
-          firstStdoutByteAtMs,
-          firstStderrByteAtMs,
-          firstParsedEventAtMs,
-          firstParsedEventType,
-          firstParsedEventSource,
-          spawnToFirstStdoutMs: toSpawnDelta(firstStdoutByteAtMs),
-          spawnToFirstStderrMs: toSpawnDelta(firstStderrByteAtMs),
-          spawnToFirstEventMs: toSpawnDelta(firstParsedEventAtMs),
-          totalMs: finalizeAtMs - spawnedAtMs,
-        }, 'one-shot: timing summary');
 
         const exitCode = procResult.exitCode;
         const stdout = procResult.stdout ?? '';
@@ -701,7 +706,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'aborted');
           return;
         }
 
@@ -715,7 +720,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'timed_out');
           return;
         }
 
@@ -725,7 +730,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
           if (retryEnv) {
             if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
-            settleAttempt({ kind: 'retry', envOverrides: retryEnv });
+            settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'spawn_retry');
             return;
           }
 
@@ -739,7 +744,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'spawn_failed');
           return;
         }
 
@@ -850,7 +855,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
           if (retryEnv) {
             if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
-            settleAttempt({ kind: 'retry', envOverrides: retryEnv });
+            settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'exit_retry');
             return;
           }
 
@@ -870,7 +875,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'nonzero_exit');
           return;
         }
 
@@ -892,7 +897,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         push({ type: 'done' });
         finished = true;
         wake();
-        settleAttempt({ kind: 'complete' });
+        settleAttempt({ kind: 'complete' }, 'success');
       }
 
       // --- Process completion ---
@@ -900,8 +905,6 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         procResult = result;
         tryFinalize();
       }).catch((err: unknown) => {
-        clearStallTimer();
-        clearProgressTimer();
         if (attemptSettled || finished) return;
 
         // Check timeout first — use fixed message to avoid leaking prompt/command line.
@@ -913,7 +916,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'done' });
           finished = true;
           wake();
-          settleAttempt({ kind: 'complete' });
+          settleAttempt({ kind: 'complete' }, 'timed_out');
           return;
         }
 
@@ -927,7 +930,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
         if (retryEnv) {
           if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
-          settleAttempt({ kind: 'retry', envOverrides: retryEnv });
+          settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'reject_retry');
           return;
         }
 
@@ -944,7 +947,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         push({ type: 'done' });
         finished = true;
         wake();
-        settleAttempt({ kind: 'complete' });
+        settleAttempt({ kind: 'complete' }, 'process_rejected');
       });
     });
 

@@ -3213,6 +3213,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // with action results; re-downloading would waste time and bandwidth.
                 images: followUpDepth === 0 ? inputImages : undefined,
                 signal: abortSignal,
+                onTelemetry: (telemetry) => {
+                  if (telemetry.type === 'first_byte' && firstByteAtMs == null) {
+                    firstByteAtMs = telemetry.atMs;
+                  }
+                },
               })) {
                 // Track event flow for stall warning.
                 markRuntimeByte(evt);
