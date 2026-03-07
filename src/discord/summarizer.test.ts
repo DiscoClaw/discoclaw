@@ -321,6 +321,7 @@ describe('recompressSummary', () => {
     expect(seenPrompt).toContain('Drop stale details');
     expect(seenPrompt).toContain('Collapse repeated references');
     expect(seenPrompt).toContain('Preserve active project state and unresolved threads');
+    expect(seenPrompt).toContain('Do not duplicate continuation capsule content into the summary body');
     expect(seenPrompt).toContain('Current task statuses:');
     expect(seenPrompt).toContain('t-001: in_progress, "Ship summary recompression"');
   });

@@ -37,6 +37,8 @@ import {
   estimateSummaryTokens,
   buildConversationMemorySection,
 } from './summarizer.js';
+import { parseCapsuleBlock } from './capsule.js';
+import type { ContinuationCapsule } from './capsule.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
 import { parseSecretCommand, handleSecretCommand } from './secret-commands.js';
 import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './plan-commands.js';
@@ -1370,7 +1372,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         threadId: threadId || null,
       });
 
-      type SummaryWork = { existingSummary: string | null; exchange: string; summarySeq: number; taskStatusContext?: string; userMessageText?: string };
+      type SummaryWork = {
+        existingSummary: string | null;
+        exchange: string;
+        summarySeq: number;
+        taskStatusContext?: string;
+        userMessageText?: string;
+        continuationCapsule?: ContinuationCapsule;
+      };
       let pendingSummaryWork: SummaryWork | null = null as SummaryWork | null;
       type ShortTermAppend = { userContent: string; botResponse: string; channelName: string; channelId: string };
       let pendingShortTermAppend: ShortTermAppend | null = null as ShortTermAppend | null;
@@ -2559,7 +2568,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let summarySection = '';
           let existingSummaryText: string | null = null;
           let existingSummaryRegeneratedAt: number | undefined;
+          let existingContinuationCapsule: ContinuationCapsule | undefined;
           let processedText = '';
+          let effectiveContinuationCapsule: ContinuationCapsule | undefined;
           try {
 
           const cwd = params.useGroupDirCwd
@@ -2631,10 +2642,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (existing) {
                 existingSummaryText = existing.summary.slice(0, params.summaryMaxChars);
                 existingSummaryRegeneratedAt = existing.regeneratedAt;
+                existingContinuationCapsule = existing.continuationCapsule;
                 summarySection = buildConversationMemorySection(existingSummaryText, {
                   turnsSinceUpdate: existing.turnsSinceUpdate,
                   regeneratedAt: existing.regeneratedAt,
-                });
+                }, existingContinuationCapsule);
                 if (!turnCounters.has(sessionKey)) {
                   const raw = existing.turnsSinceUpdate;
                   turnCounters.set(sessionKey, typeof raw === 'number' && raw >= 0 ? raw : 0);
@@ -2891,6 +2903,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let followUpDepth = 0;
           let pendingFollowUpPlaceholder: string | null = null;
           let isFailureFollowUp = false;
+          effectiveContinuationCapsule = existingContinuationCapsule;
 
           // -- auto-follow-up loop --
           // When query actions (channelList, readMessages, etc.) succeed, re-invoke
@@ -3340,6 +3353,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (params.discordActionsEnabled && msg.guild && canParseActions) {
               const parsed = parseDiscordActions(processedText, actionFlags);
               parseFailuresCount = parsed.parseFailures;
+              const parsedCapsule = parseCapsuleBlock(parsed.cleanText);
+              if (parsedCapsule.capsule) {
+                effectiveContinuationCapsule = parsedCapsule.capsule;
+              }
+              const cleanProcessedText = parsedCapsule.cleanText;
               if (parsed.parseFailures > 0) {
                 params.log?.warn(`parseDiscordActions: ${parsed.parseFailures} action block(s) failed to parse (sessionKey=${sessionKey})`);
               }
@@ -3382,7 +3400,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // streaming preview would remain visible with raw <discord-action>
                 // JSON.  This pre-edit ensures the visible state is clean regardless.
                 try {
-                  const preEditRaw = parsed.cleanText.trimEnd() || '...';
+                  const preEditRaw = cleanProcessedText.trimEnd() || '...';
                   const preEditText = closeFenceIfOpen(preEditRaw.slice(0, 2000));
                   await reply.edit({ content: preEditText, allowedMentions: NO_MENTIONS });
                 } catch {
@@ -3408,7 +3426,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   );
                 }
                 const anyActionSucceeded = actionResults.some((r) => r.ok);
-                processedText = appendActionResults(parsed.cleanText.trimEnd(), actions, actionResults);
+                processedText = appendActionResults(cleanProcessedText.trimEnd(), actions, actionResults);
                 // When all display lines were suppressed (e.g. sendMessage-only) and there's
                 // no prose, delete the placeholder instead of posting "(no output)".
                 if (
@@ -3433,10 +3451,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   }
                 }
               } else {
-                processedText = parsed.cleanText;
+                processedText = cleanProcessedText;
                 strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
               }
             }
+            const parsedCapsule = parseCapsuleBlock(processedText);
+            if (parsedCapsule.capsule) {
+              effectiveContinuationCapsule = parsedCapsule.capsule;
+            }
+            processedText = parsedCapsule.cleanText;
             processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
             processedText = appendParseFailureNotice(processedText, parseFailuresCount);
 
@@ -3602,6 +3625,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   `[${activeMsg.author.displayName || activeMsg.author.username}]: ${_batchedUserContent}\n` +
                   `[${params.botDisplayName}]: ${(processedText || '').slice(0, 500)}`,
                 userMessageText: _batchedUserContent,
+                continuationCapsule: effectiveContinuationCapsule,
                 ...(taskStatusContext !== undefined ? { taskStatusContext } : {}),
               };
             } else if (summarySection) {
@@ -3612,6 +3636,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 updatedAt: Date.now(),
                 regeneratedAt: existingSummaryRegeneratedAt,
                 turnsSinceUpdate: count,
+                ...(effectiveContinuationCapsule ? { continuationCapsule: effectiveContinuationCapsule } : {}),
               });
             }
           }
@@ -3732,6 +3757,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             updatedAt: savedAt,
             regeneratedAt: savedAt,
             turnsSinceUpdate: 0,
+            ...(work.continuationCapsule ? { continuationCapsule: work.continuationCapsule } : {}),
           });
 
           if (params.summaryToDurableEnabled && (!isBotMessage || params.botMessageMemoryWriteEnabled)) {

@@ -1,3 +1,5 @@
+import { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
+
 export type ContinuationCapsule = {
   currentTask: string;
   nextStep: string;
@@ -165,141 +167,6 @@ function mergeRanges(ranges: TextRange[]): TextRange[] {
   return merged;
 }
 
-function collectIndentedCodeRanges(text: string, start: number, end: number, out: TextRange[]): void {
-  let lineStart = start;
-  let blockStart = -1;
-  let blockEnd = -1;
-
-  while (lineStart <= end) {
-    const nl = text.indexOf('\n', lineStart);
-    const hasNl = nl !== -1 && nl < end;
-    const lineEnd = hasNl ? nl : end;
-    const lineEndWithNl = hasNl ? nl + 1 : end;
-    const line = text.slice(lineStart, lineEnd);
-    const isBlank = /^[ \t]*$/.test(line);
-    const isIndented = /^(?: {4,}|\t)/.test(line);
-
-    if (blockStart === -1) {
-      if (isIndented && !isBlank) {
-        blockStart = lineStart;
-        blockEnd = lineEndWithNl;
-      }
-    } else if (isIndented || isBlank) {
-      if (isIndented) blockEnd = lineEndWithNl;
-    } else {
-      out.push({ start: blockStart, end: blockEnd });
-      blockStart = -1;
-      blockEnd = -1;
-    }
-
-    if (!hasNl) break;
-    lineStart = lineEndWithNl;
-  }
-
-  if (blockStart !== -1) {
-    out.push({ start: blockStart, end: blockEnd });
-  }
-}
-
-function collectInlineCodeRanges(text: string, start: number, end: number, out: TextRange[]): void {
-  let i = start;
-  let inInline = false;
-  let inlineTicks = 0;
-  let inlineStart = -1;
-
-  while (i < end) {
-    if (text[i] !== '`') {
-      i++;
-      continue;
-    }
-
-    let ticks = 1;
-    while (i + ticks < end && text[i + ticks] === '`') ticks++;
-
-    if (!inInline) {
-      inInline = true;
-      inlineTicks = ticks;
-      inlineStart = i;
-    } else if (ticks === inlineTicks) {
-      out.push({ start: inlineStart, end: i + ticks });
-      inInline = false;
-      inlineTicks = 0;
-      inlineStart = -1;
-    }
-
-    i += ticks;
-  }
-}
-
-function computeMarkdownCodeRanges(text: string): TextRange[] {
-  const ranges: TextRange[] = [];
-
-  let inFence = false;
-  let fenceChar = '';
-  let fenceLen = 0;
-  let fenceStart = 0;
-  let lineStart = 0;
-
-  while (lineStart <= text.length) {
-    const nl = text.indexOf('\n', lineStart);
-    const hasNl = nl !== -1;
-    const lineEnd = hasNl ? nl : text.length;
-    const lineEndWithNl = hasNl ? nl + 1 : text.length;
-    const line = text.slice(lineStart, lineEnd);
-
-    if (!inFence) {
-      const open = line.match(/^[ \t]*(`{3,}|~{3,})/);
-      if (open) {
-        inFence = true;
-        fenceChar = open[1]![0]!;
-        fenceLen = open[1]!.length;
-        fenceStart = lineStart;
-      }
-    } else {
-      const closeRe = new RegExp(`^[ \\t]*\\${fenceChar}{${fenceLen},}[ \\t]*$`);
-      if (closeRe.test(line)) {
-        ranges.push({ start: fenceStart, end: lineEndWithNl });
-        inFence = false;
-        fenceChar = '';
-        fenceLen = 0;
-      }
-    }
-
-    if (!hasNl) break;
-    lineStart = lineEndWithNl;
-  }
-
-  if (inFence) {
-    ranges.push({ start: fenceStart, end: text.length });
-  }
-
-  const mergedFenceRanges = mergeRanges(ranges);
-  let segmentStart = 0;
-  for (const range of mergedFenceRanges) {
-    if (segmentStart < range.start) {
-      collectIndentedCodeRanges(text, segmentStart, range.start, ranges);
-    }
-    segmentStart = range.end;
-  }
-  if (segmentStart < text.length) {
-    collectIndentedCodeRanges(text, segmentStart, text.length, ranges);
-  }
-
-  const mergedBlockRanges = mergeRanges(ranges);
-  segmentStart = 0;
-  for (const range of mergedBlockRanges) {
-    if (segmentStart < range.start) {
-      collectInlineCodeRanges(text, segmentStart, range.start, ranges);
-    }
-    segmentStart = range.end;
-  }
-  if (segmentStart < text.length) {
-    collectInlineCodeRanges(text, segmentStart, text.length, ranges);
-  }
-
-  return mergeRanges(ranges);
-}
-
 function isIndexInRanges(index: number, ranges: TextRange[]): boolean {
   for (const range of ranges) {
     if (index < range.start) return false;
@@ -377,6 +244,7 @@ export function parseContinuationCapsule(text: string): ContinuationCapsuleParse
 }
 
 export const parseCapsule = parseContinuationCapsule;
+export const parseCapsuleBlock = parseContinuationCapsule;
 
 export function renderContinuationCapsule(capsule: ContinuationCapsule): string {
   const normalized = normalizeCapsuleObject(capsule);
