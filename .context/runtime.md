@@ -45,7 +45,7 @@ The factory provides: subprocess tracking, process pool, stall detection, sessio
 | Strategy | File | Multi-turn | Notes |
 |----------|------|------------|-------|
 | Claude Code | `strategies/claude-strategy.ts` | process-pool | Default JSONL parsing, image support |
-| Codex CLI | `strategies/codex-strategy.ts` | session-resume | Custom JSONL (thread.started, item.completed), error sanitization; reasoning items surface in the Discord preview during streaming but are excluded from the final reply; image support via `--image` temp files |
+| Codex CLI | `strategies/codex-strategy.ts` | session-resume | Custom JSONL (thread.started, item.completed), error sanitization; reasoning items surface in the Discord preview during streaming but are excluded from the final reply; image support via `--image` temp files; if a resumed turn includes images, the adapter resets to a fresh session because `codex exec resume` cannot accept `--image`, notifies the user, and loses prior conversation context |
 | Gemini CLI | `strategies/gemini-strategy.ts` | none (Phase 1) | Text-only output mode; no sessions; stdin fallback for large prompts |
 | Template | `strategies/template-strategy.ts` | — | Commented starting point for new models |
 
@@ -312,7 +312,7 @@ When a Discord message or reaction target has image attachments (PNG, JPEG, WebP
 3. **Download** — `downloadAttachment()` fetches the image with a 10 s timeout, post-checks actual size, and returns base64.
 4. **Delivery** — The runtime adapter writes a `stream-json` stdin message containing `[{ type: 'text', text: prompt }, { type: 'image', source: { type: 'base64', ... } }, ...]`. When images are present, `--output-format` is forced to `stream-json` regardless of the configured format.
 
-**Codex delivery:** Codex CLI does not accept base64 image data via stdin — it requires file paths on disk via `--image <path>` flags. The Codex strategy writes each `ImageData` (base64) to a temp file before invocation and cleans up after. The full pipeline is: Discord attachment → base64 `ImageData` → temp file → `--image <path>` → cleanup.
+**Codex delivery:** Codex CLI does not accept base64 image data via stdin — it requires file paths on disk via `--image <path>` flags. The Codex strategy writes each `ImageData` (base64) to a temp file before invocation and cleans up after. If images arrive on a resumed Codex turn, the adapter automatically falls back to a fresh session because `codex exec resume` does not support `--image`; the user sees a notification, and prior conversation context is lost. The full pipeline is: Discord attachment → base64 `ImageData` → temp file → `--image <path>` → cleanup.
 
 ### Security controls
 

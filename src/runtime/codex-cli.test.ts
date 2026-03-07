@@ -20,6 +20,10 @@ async function collectEvents(iter: AsyncIterable<EngineEvent>): Promise<EngineEv
   return events;
 }
 
+function jsonl(lines: string[]): string {
+  return `${lines.join('\n')}\n`;
+}
+
 /** Create a mock subprocess that mimics execa's ResultPromise shape. */
 function createMockSubprocess(opts: {
   stdout?: string;
@@ -979,17 +983,17 @@ describe('Codex CLI runtime adapter', () => {
     expect((final as { text: string }).text).toBe('hello');
   });
 
-  it('second call with same sessionKey uses codex exec resume', async () => {
-    const jsonlOutput1 = [
+  it('resume without images still uses codex exec resume', async () => {
+    const jsonlOutput1 = jsonl([
       '{"type":"thread.started","thread_id":"thread-uuid-456"}',
       '{"type":"item.completed","item":{"type":"agent_message","text":"first response"}}',
       '{"type":"turn.completed","usage":{}}',
-    ].join('\n') + '\n';
-    const jsonlOutput2 = [
+    ]);
+    const jsonlOutput2 = jsonl([
       '{"type":"thread.started","thread_id":"thread-uuid-456"}',
       '{"type":"item.completed","item":{"type":"agent_message","text":"second response"}}',
       '{"type":"turn.completed","usage":{}}',
-    ].join('\n') + '\n';
+    ]);
 
     const rt = createCodexCliRuntime({
       codexBin: 'codex',
@@ -1511,34 +1515,33 @@ describe('Codex CLI runtime adapter', () => {
       expect(fs.existsSync(tmpDir)).toBe(false);
     });
 
-    it('resume invocations do NOT include --image flags', async () => {
-      const jsonlOutput1 = [
-        '{"type":"thread.started","thread_id":"img-thread-1"}',
-        '{"type":"item.completed","item":{"type":"agent_message","text":"saw image"}}',
+    it('resume with images builds fresh exec args with --image flags instead of resume args', async () => {
+      const jsonlOutput1 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-old"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}',
         '{"type":"turn.completed","usage":{}}',
-      ].join('\n') + '\n';
-      const jsonlOutput2 = [
-        '{"type":"thread.started","thread_id":"img-thread-1"}',
-        '{"type":"item.completed","item":{"type":"agent_message","text":"resumed"}}',
+      ]);
+      const jsonlOutput2 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-new"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"fresh"}}',
         '{"type":"turn.completed","usage":{}}',
-      ].join('\n') + '\n';
+      ]);
 
       const rt = createCodexCliRuntime({
         codexBin: 'codex',
         defaultModel: 'gpt-5.3-codex',
       });
 
-      // First call with images — establishes session.
+      // First call establishes the resumable session.
       mockExeca.mockImplementation(() => createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
       await collectEvents(rt.invoke({
-        prompt: 'Look at this',
+        prompt: 'Round 1',
         model: '',
         cwd: '/tmp',
         sessionKey: 'img-session',
-        images: [{ base64: 'AAAA', mediaType: 'image/png' }],
       }));
 
-      // Second call (resume) — should NOT include --image even with images in params.
+      // Second call has images, so it should start a fresh session instead of resuming.
       mockExeca.mockImplementation(() => createMockSubprocess({ stdout: jsonlOutput2, exitCode: 0 }));
       await collectEvents(rt.invoke({
         prompt: 'What about now?',
@@ -1549,9 +1552,233 @@ describe('Codex CLI runtime adapter', () => {
       }));
 
       const callArgs2 = mockExeca.mock.calls[1][1] as string[];
-      expect(callArgs2[0]).toBe('exec');
-      expect(callArgs2[1]).toBe('resume');
-      expect(callArgs2).not.toContain('--image');
+      expect(callArgs2.slice(0, 2)).toEqual(['exec', '-m']);
+      expect(callArgs2).not.toContain('resume');
+      expect(callArgs2).not.toContain('img-thread-old');
+      expect(callArgs2).toContain('--json');
+      expect(callArgs2).toContain('--image');
+    });
+
+    it('emits a reset notification when a resumed image turn starts fresh', async () => {
+      const jsonlOutput1 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-old"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]);
+      const jsonlOutput2 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-new"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"fresh"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]);
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+      });
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 1',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-notice',
+      }));
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput2, exitCode: 0 }));
+      const events = await collectEvents(rt.invoke({
+        prompt: 'Round 2',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-notice',
+        images: [{ base64: 'BBBB', mediaType: 'image/jpeg' }],
+      }));
+
+      expect(events).toContainEqual({
+        type: 'text_delta',
+        text: '*(Session reset — image attachments require a fresh Codex session because `codex exec resume` does not support `--image`. Starting fresh.)*\n\n',
+      });
+    });
+
+    it('spawn failure on a fresh image attempt preserves the old thread mapping for later resume', async () => {
+      const jsonlOutput1 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-old"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]);
+      const jsonlOutput3 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-old"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"third"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]);
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+      });
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 1',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-spawn-fail',
+      }));
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({
+        stdout: '',
+        exitCode: undefined as any,
+        failed: true,
+        resultExtra: {
+          exitCode: null,
+          failed: true,
+          code: 'ENOENT',
+          originalMessage: 'spawn codex ENOENT',
+          shortMessage: 'Command failed: codex exec ENOENT',
+        },
+      }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 2 with image',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-spawn-fail',
+        images: [{ base64: 'BBBB', mediaType: 'image/jpeg' }],
+      }));
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput3, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 3',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-spawn-fail',
+      }));
+
+      const callArgs3 = mockExeca.mock.calls[2][1] as string[];
+      expect(callArgs3[0]).toBe('exec');
+      expect(callArgs3[1]).toBe('resume');
+      expect(callArgs3[2]).toBe('img-thread-old');
+    });
+
+    it('post-reset success replaces the stored thread and later turns resume the new thread', async () => {
+      const jsonlOutput1 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-old"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]);
+      const jsonlOutput2 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-new"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"second"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]);
+      const jsonlOutput3 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-new"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"third"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]);
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+      });
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 1',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-replaced',
+      }));
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput2, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 2 with image',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-replaced',
+        images: [{ base64: 'BBBB', mediaType: 'image/jpeg' }],
+      }));
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput3, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 3',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-replaced',
+      }));
+
+      const callArgs3 = mockExeca.mock.calls[2][1] as string[];
+      expect(callArgs3[0]).toBe('exec');
+      expect(callArgs3[1]).toBe('resume');
+      expect(callArgs3[2]).toBe('img-thread-new');
+    });
+
+    it('launcher-state retry on an image-reset turn preserves the old thread when the retry ends in spawn failure', async () => {
+      process.env.DISCOCLAW_CODEX_STABLE_HOME = '/tmp/discoclaw-codex-reset-retry-home';
+
+      const jsonlOutput1 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-old"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]);
+      const jsonlOutput4 = jsonl([
+        '{"type":"thread.started","thread_id":"img-thread-old"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"third"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]);
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+      });
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 1',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-reset-retry',
+      }));
+
+      mockExeca
+        .mockImplementationOnce(() => createMockSubprocess({
+          stdout: '',
+          stderr: 'ERROR codex_core::rollout::list: state db missing rollout path for thread img-thread-old',
+          exitCode: 1,
+        }))
+        .mockImplementationOnce(() => createMockSubprocess({
+          stdout: '',
+          exitCode: undefined as any,
+          failed: true,
+          resultExtra: {
+            exitCode: null,
+            failed: true,
+            code: 'ENOENT',
+            originalMessage: 'spawn codex ENOENT',
+            shortMessage: 'Command failed: codex exec ENOENT',
+          },
+        }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 2 with image',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-reset-retry',
+        images: [{ base64: 'BBBB', mediaType: 'image/jpeg' }],
+      }));
+
+      const retryEnv = mockExeca.mock.calls[2][2] as { env?: Record<string, string | undefined> };
+      expect(retryEnv.env?.CODEX_HOME).toBe('/tmp/discoclaw-codex-reset-retry-home');
+
+      mockExeca.mockImplementationOnce(() => createMockSubprocess({ stdout: jsonlOutput4, exitCode: 0 }));
+      await collectEvents(rt.invoke({
+        prompt: 'Round 3',
+        model: '',
+        cwd: '/tmp',
+        sessionKey: 'img-session-reset-retry',
+      }));
+
+      const callArgs4 = mockExeca.mock.calls[3][1] as string[];
+      expect(callArgs4[0]).toBe('exec');
+      expect(callArgs4[1]).toBe('resume');
+      expect(callArgs4[2]).toBe('img-thread-old');
     });
   });
 

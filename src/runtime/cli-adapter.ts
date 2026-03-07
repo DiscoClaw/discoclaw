@@ -217,6 +217,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     );
     const codexStableHome = (process.env.DISCOCLAW_CODEX_STABLE_HOME ?? '').trim();
     let launcherStateRetryUsed = false;
+    let sessionResetNoticeEmitted = false;
 
     const { q, push, wait, wake } = createEventQueue();
     let finished = false;
@@ -282,6 +283,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       const args = strategy.buildArgs(ctx, opts);
       const outputMode = strategy.getOutputMode(ctx, opts);
       const strategyEnvOverrides = strategy.buildEnv?.(ctx, opts);
+      if (ctx.sessionResetReason && !sessionResetNoticeEmitted) {
+        push({ type: 'text_delta', text: `*(Session reset — ${ctx.sessionResetReason})*\n\n` });
+        sessionResetNoticeEmitted = true;
+      }
       if (opts.log) {
         opts.log.debug({ args: args.slice(0, -1), hasImages, promptTooLarge, useStdin }, `${strategy.id}: constructed args`);
       }
@@ -729,7 +734,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const raw = String(procResult.shortMessage || procResult.originalMessage || procResult.message || '').trim();
           const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
           if (retryEnv) {
-            if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
+            if (!ctx.sessionResetReason && sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
             settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'spawn_retry');
             return;
           }
@@ -854,7 +859,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           const raw = (stderrForError || stderr || stdout || `${strategy.id} exit ${exitCode}`).trim();
           const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
           if (retryEnv) {
-            if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
+            if (!ctx.sessionResetReason && sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
             settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'exit_retry');
             return;
           }
@@ -929,7 +934,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         ).trim();
         const retryEnv = maybeBuildLauncherStateRetryEnv(raw, emittedUserOutput);
         if (retryEnv) {
-          if (sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
+          if (!ctx.sessionResetReason && sessionMap && params.sessionKey) sessionMap.delete(params.sessionKey);
           settleAttempt({ kind: 'retry', envOverrides: retryEnv }, 'reject_retry');
           return;
         }

@@ -189,7 +189,11 @@ export function createCodexStrategy(
     buildArgs(ctx: CliInvokeContext, opts: UniversalCliOpts): string[] {
       const { params, useStdin } = ctx;
       const wantSession = ctx.sessionMap != null && Boolean(params.sessionKey);
-      const existingThreadId = params.sessionKey ? ctx.sessionMap?.get(params.sessionKey) : undefined;
+      let existingThreadId = params.sessionKey ? ctx.sessionMap?.get(params.sessionKey) : undefined;
+      if (existingThreadId && ctx.tempImagePaths && ctx.tempImagePaths.length > 0) {
+        existingThreadId = undefined;
+        ctx.sessionResetReason = 'image attachments require a fresh Codex session because `codex exec resume` does not support `--image`. Starting fresh.';
+      }
       const dangerousBypass = Boolean(opts.dangerouslySkipPermissions);
 
       // When resuming, use `codex exec resume <thread_id>`.
