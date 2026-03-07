@@ -11,6 +11,15 @@ This is the canonical reference for:
 
 Linux `systemd --user` is the primary path described below.
 
+## Before you touch anything
+
+Resolve the actual service/unit name first.
+
+- If `.env` contains `DISCOCLAW_SERVICE_NAME=<name>`, the Linux unit is `<name>.service`.
+- If that variable is unset, the default unit is `discoclaw.service`.
+
+Examples below use `discoclaw.service`. Substitute your real unit name everywhere if you run a named multi-instance install.
+
 ## macOS launchd caveat
 
 On macOS, `discoclaw install-daemon` writes a launchd plist with the current `.env` values baked into it. launchd does not re-read `.env` on `!restart` or `launchctl kickstart`, so editing `.env` alone is not enough.
@@ -29,12 +38,18 @@ There are three different sources of truth involved in runtime/model selection:
 | Layer | What it controls | Where it lives | How it changes |
 | --- | --- | --- | --- |
 | Built-in defaults | Baseline role defaults and tier maps shipped by the repo | Code (`src/model-config.ts`, `src/runtime/model-tiers.ts`) | Changes only when the software version changes |
-| Startup defaults for *this instance* | What the service boots with before live overrides | Usually the service working directory `.env` | Edit `.env`, then restart |
-| Persistent live overrides | Role/model/runtime changes made after startup | `models.json` and `runtime-overrides.json` under the data dir | `!models ...` and voice/TTS runtime commands |
+| Startup defaults for *this instance* | What the service boots with before live overrides | Usually the service working directory `.env`, plus built-in fallbacks when env vars are absent | Edit `.env`, then restart |
+| Persistent live overrides | Role/model/runtime changes made after startup | `models.json` and `runtime-overrides.json` under the data dir | `!models ...` and runtime auto-switches |
 
 The most important rule:
 
-`!models reset` resets back to this instance's startup defaults from `.env`, not back to repo defaults and not back to whatever the docs happen to show.
+`!models reset` resets back to this instance's startup defaults as resolved at boot from `.env` plus built-in fallbacks, not back to repo defaults and not back to whatever the docs happen to show.
+
+Also keep the files separate in your head:
+
+- `models.json` stores per-role model strings only.
+- `runtime-overrides.json` stores runtime-only overlays such as `voiceRuntime`, `fastRuntime`, and `ttsVoice`.
+- A missing `runtime-overrides.json` file is normal on a fresh or fully reset instance.
 
 ## What the project ships by default
 
@@ -107,8 +122,8 @@ For Linux systemd installs, the service reads `.env` from its working directory 
 1. Find the service working directory.
    Linux:
    ```bash
-   systemctl --user show -p WorkingDirectory discoclaw
-   systemctl --user cat discoclaw
+   systemctl --user show -p WorkingDirectory discoclaw.service
+   systemctl --user cat discoclaw.service
    ```
 2. Go to that directory and inspect it.
    - If it contains `.git`, treat it as a source checkout.
@@ -117,6 +132,26 @@ For Linux systemd installs, the service reads `.env` from its working directory 
 
 If you edit a different clone's `.env`, nothing changes.
 
+### Minimum inspection set
+
+For a safe operator handoff, always inspect these four things together:
+
+```bash
+sed -n '1,200p' .env
+sed -n '1,200p' "${DISCOCLAW_DATA_DIR:-./data}/models.json"
+sed -n '1,200p' "${DISCOCLAW_DATA_DIR:-./data}/runtime-overrides.json"
+journalctl --user -u discoclaw.service -n 100 --no-pager
+```
+
+If `DISCOCLAW_DATA_DIR` is only set inside `.env` and not exported in your current shell, read it from `.env` first and substitute that absolute path manually. A missing `runtime-overrides.json` file is still a valid state.
+
+Interpret them like this:
+
+- `.env` defines startup defaults and credentials.
+- `models.json` shows persistent per-role model choices.
+- `runtime-overrides.json` shows persistent fast/voice/TTS runtime overlays.
+- `journalctl` shows whether the target adapter actually registered at startup.
+
 ## Which setting lives where
 
 | Change you want | Persistent home | Notes |
@@ -124,9 +159,10 @@ If you edit a different clone's `.env`, nothing changes.
 | Default chat adapter at startup | `.env` `PRIMARY_RUNTIME` | Restart required |
 | Adapter default model | `.env` `CODEX_MODEL`, `GEMINI_MODEL`, `OPENAI_MODEL`, `OPENROUTER_MODEL` | Used when a role is set to the adapter default |
 | Tier mapping for a runtime | `.env` `DISCOCLAW_TIER_<RUNTIME>_<TIER>` | Controls how `fast/capable/deep` resolve |
-| Per-role persistent model override | `models.json` | Written by `!models set ...` |
+| Per-role persistent model override | `models.json` | Written by `!models set <role> <tier-or-model>` |
 | Persistent voice runtime override | `runtime-overrides.json` | Written by `!models set voice <runtime>` or voice auto-switch |
 | Persistent fast-tier runtime override | `runtime-overrides.json` | Written when fast auto-switches to another runtime |
+| TTS voice override | `runtime-overrides.json` | Separate from model/runtime switching, but often present when auditing overrides |
 
 ## Adapter prerequisites
 
@@ -154,7 +190,7 @@ Do this before trusting a runtime name like `openrouter`, `openai`, `gemini`, `c
 5. Check startup logs:
 
 ```bash
-journalctl --user -u discoclaw.service -n 100
+journalctl --user -u discoclaw.service -n 100 --no-pager
 ```
 
 Look for missing credential or missing binary warnings at startup. For stale overrides, the most useful warnings are:
@@ -171,7 +207,7 @@ Not every role behaves the same way.
 
 | Role | What `!models set` changes | Runtime switch behavior |
 | --- | --- | --- |
-| `chat` | Chat model in `models.json` | `!models set chat <runtime>` swaps runtime live, but does **not** persist the runtime name |
+| `chat` | Chat model in `models.json` when you set a tier/model; runtime name is live-only | `!models set chat <runtime>` swaps runtime live, but does **not** persist the runtime name |
 | `fast` | Fast-tier model in `models.json` | Runtime auto-switches only when the concrete model belongs to another runtime's tier map; that runtime override persists |
 | `summary` | Summary model in `models.json` | No separate runtime; uses fast runtime |
 | `cron` | Cron auto-tag/model-classification model in `models.json` | No separate runtime; uses fast runtime |
@@ -219,7 +255,12 @@ Use this when the startup/runtime default should permanently move.
 4. Remove or reset any role overrides that should stop fighting the new default:
    - `!models reset chat`
    - `!models reset fast`
+   - `!models reset summary`
+   - `!models reset cron`
+   - `!models reset cron-exec`
    - `!models reset voice`
+   - `!models reset forge-drafter`
+   - `!models reset forge-auditor`
 5. If you rotated credentials through Discord DMs, `!secret set KEY=value` can update the authoritative `.env` in place, for example:
 
 ```text
@@ -382,11 +423,13 @@ Then restart after the build succeeds.
 
 ### `!models reset` did not return the model I expected
 
-`!models reset` goes back to startup defaults from `.env`, not to repo defaults. Check:
+`!models reset` goes back to startup defaults from `.env` plus built-in fallbacks, not to repo defaults. Check:
 
 - `RUNTIME_MODEL`
 - `DISCOCLAW_FAST_MODEL`
 - `DISCOCLAW_SUMMARY_MODEL`
+- `DISCOCLAW_TASKS_AUTO_TAG_MODEL`
+- `DISCOCLAW_CRON_MODEL`
 - `DISCOCLAW_CRON_AUTO_TAG_MODEL`
 - `DISCOCLAW_CRON_EXEC_MODEL`
 - `DISCOCLAW_VOICE_MODEL`
@@ -395,6 +438,8 @@ Then restart after the build succeeds.
 - any `DISCOCLAW_TIER_*` overrides
 
 Also check `DISCOCLAW_FAST_RUNTIME` if fast-path roles keep coming back to the wrong runtime after a restart. `!models reset` does not remove that legacy env var.
+
+If voice seems to reset to the wrong adapter, inspect `runtime-overrides.json` for `voiceRuntime` and check whether `ANTHROPIC_API_KEY` is auto-wiring voice to `anthropic` at boot.
 
 ### Adapter not actually registered
 
@@ -407,7 +452,7 @@ Symptoms:
 Checks:
 
 ```bash
-journalctl --user -u discoclaw.service -n 100
+journalctl --user -u discoclaw.service -n 100 --no-pager
 ```
 
 Look for warnings like:
@@ -453,7 +498,7 @@ You likely edited a different clone's `.env` or data dir.
 
 Checks:
 
-- compare `systemctl --user show -p WorkingDirectory discoclaw`
+- compare `systemctl --user show -p WorkingDirectory discoclaw.service`
 - compare the `.env` path you edited
 - compare `DISCOCLAW_DATA_DIR` in that same working directory
 
@@ -470,13 +515,13 @@ Use this when guiding someone through an adapter/model switch:
 ```text
 Help me switch this DiscoClaw instance to a different runtime adapter or model safely.
 
-First determine whether this is a source checkout or an npm-managed install, and identify the service working directory plus the authoritative `.env`, `models.json`, and `runtime-overrides.json`.
+First determine whether this is a source checkout or an npm-managed install, and identify the service/unit name plus the authoritative `.env`, `models.json`, and `runtime-overrides.json`.
 
 Then:
 1. Show the current effective state with `!models`.
 2. Verify the target adapter is actually registered before switching to it. Use `!models` to confirm the current runtime/role output is sane, and if the adapter is missing or looks unregistered, inspect startup logs instead of guessing.
 3. Inspect `.env`, `models.json`, and `runtime-overrides.json`, and call out any stale fast/voice runtime overrides before changing anything.
-4. Explain which parts are startup defaults from `.env` versus persistent overrides.
+4. Explain which parts are startup defaults from `.env` plus built-in fallbacks versus persistent overrides.
 5. If the goal is a persistent adapter switch, update `.env` and clear conflicting overrides.
 6. If the goal is a live experiment, use `!models set ...` instead of editing `.env`.
 7. After changes, verify with `!models` and service status/logs if needed.

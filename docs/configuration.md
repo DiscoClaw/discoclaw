@@ -19,9 +19,9 @@ Boolean values accept `0`/`1` or `true`/`false`.
 
 ## Model Configuration
 
-Model assignments are configured in `models.json` under the data dir (`$DISCOCLAW_DATA_DIR/models.json`; default `./data/models.json` in a source checkout). Each slot (`capable`, `fast`, `voice`, forge roles, cron roles, etc.) maps to a concrete model ID and optional runtime override. See `src/model-config.ts` for the schema and loading logic.
+Model assignments are configured in `models.json` under the data dir (`$DISCOCLAW_DATA_DIR/models.json`; default `./data/models.json` in a source checkout). Each role (`chat`, `fast`, `voice`, forge roles, cron roles, etc.) stores a model string only. Runtime-only overlays such as `voiceRuntime` and `fastRuntime` persist separately in `runtime-overrides.json`. See `src/model-config.ts` and `src/runtime-overrides.ts` for the loading logic.
 
-On first run, `models.json` is scaffolded from built-in defaults. `!models set ...` updates it at runtime, and `!models reset` clears overrides by writing the startup defaults back into the file.
+On first run, `models.json` is scaffolded from the instance startup defaults. `!models set ...` updates it at runtime. `!models reset` writes the startup-default model strings back into `models.json` and clears matching fast/voice runtime overlays from `runtime-overrides.json`.
 
 Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as startup fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
 
