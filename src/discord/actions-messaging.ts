@@ -703,6 +703,7 @@ export function messagingActionsPromptSection(): string {
 \`\`\`
 <discord-action>{"type":"fetchMessage","channelId":"123","messageId":"456","full":true}</discord-action>
 \`\`\`
+- Use \`fetchMessage\` to retrieve the full content of any Discord message by channel and message ID. This works for pinned prompts, status messages, and any other message you have the IDs for.
 - \`full\` (optional): When true, returns the complete message content without truncation. Default: false (content truncated to 2000 chars).
 
 **editMessage** — Edit a bot message:

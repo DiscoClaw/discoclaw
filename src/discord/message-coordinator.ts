@@ -79,6 +79,7 @@ import { resolveThreadContext } from './thread-context.js';
 import type { ThreadLikeChannel } from './thread-context.js';
 import { downloadTextAttachments } from './file-download.js';
 import { fetchYouTubeTranscripts } from './youtube-transcript.js';
+import { buildCronPrefetchSection } from './cron-prefetch.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { parseHelpCommand, handleHelpCommand } from './help-command.js';
 import { parseVoiceStatusCommand, renderVoiceStatusReport } from './voice-status-command.js';
@@ -2671,13 +2672,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          const [durableSection, shortTermSection, taskSection, replyRef, openTasksSection] = await Promise.all([
+          const userText = String(msg.content ?? '');
+          const [durableSection, shortTermSection, taskSection, cronPrefetchSection, replyRef, openTasksSection] = await Promise.all([
             buildDurableMemorySection({
               enabled: params.durableMemoryEnabled,
               durableDataDir: params.durableDataDir,
               userId: msg.author.id,
               durableInjectMaxChars: params.durableInjectMaxChars,
-              query: String(msg.content ?? ''),
+              query: userText,
               log: params.log,
             }),
             buildShortTermMemorySection({
@@ -2695,6 +2697,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               threadParentId,
               taskCtx: params.taskCtx,
               log: params.log,
+            }),
+            buildCronPrefetchSection({
+              userText,
+              cronCtx: params.cronCtx,
+              threadParentId,
+              threadId,
             }),
             resolveReplyReference(msg as MessageWithReference, params.botDisplayName, params.log),
             buildOpenTasksSection(params.taskCtx?.store),
@@ -2731,6 +2739,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             buildPromptPreamble(inlinedContext.text) + '\n\n' +
             (taskSection
               ? `---\n${taskSection}\n\n`
+              : '') +
+            (cronPrefetchSection
+              ? `---\n${cronPrefetchSection}\n\n`
               : '') +
             (durableSection
               ? `---\nDurable memory (user-specific notes):\n${durableSection}\n\n`

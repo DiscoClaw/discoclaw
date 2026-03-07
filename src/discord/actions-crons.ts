@@ -943,10 +943,11 @@ export function cronActionsPromptSection(): string {
 <discord-action>{"type":"cronList"}</discord-action>
 \`\`\`
 
-**cronShow** — Show full details for a cron:
+**cronShow** — Show the full prompt text, schedule, status, and all configuration for a cron:
 \`\`\`
 <discord-action>{"type":"cronShow","cronId":"cron-a1b2c3d4"}</discord-action>
 \`\`\`
+Use \`cronShow\` to inspect or verify a cron's full prompt before editing. The full prompt text is always included in the response.
 
 **cronPause** / **cronResume** — Pause or resume a cron:
 \`\`\`
