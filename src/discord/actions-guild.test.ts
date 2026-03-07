@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ChannelType } from 'discord.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import { executeGuildAction, isoToSnowflake } from './actions-guild.js';
+import { REQUESTER_MEMBER_DENY_ALL } from './actions.js';
 import type { ActionContext } from './actions.js';
 
 // ---------------------------------------------------------------------------
@@ -8,10 +9,15 @@ import type { ActionContext } from './actions.js';
 // ---------------------------------------------------------------------------
 
 function makeMockMember(overrides: Partial<any> = {}) {
+  const roleList = overrides.roles ?? [];
   const roles = new Map<string, any>();
-  for (const r of (overrides.roles ?? [])) {
+  for (const r of roleList) {
     roles.set(r.id, r);
   }
+  const highestPosition = roleList.reduce((max: number, role: { position?: number }) => (
+    typeof role.position === 'number' && role.position > max ? role.position : max
+  ), 0);
+  const granted = overrides.permissionsBitfield ?? 0n;
 
   return {
     id: overrides.id ?? 'user1',
@@ -22,6 +28,7 @@ function makeMockMember(overrides: Partial<any> = {}) {
     },
     joinedAt: overrides.joinedAt ?? new Date('2024-01-01T00:00:00Z'),
     roles: {
+      highest: { position: overrides.highestRolePosition ?? highestPosition },
       cache: {
         filter: (fn: any) => {
           const filtered = [...roles.values()].filter(fn);
@@ -31,6 +38,9 @@ function makeMockMember(overrides: Partial<any> = {}) {
       },
       add: vi.fn(async () => {}),
       remove: vi.fn(async () => {}),
+    },
+    permissions: {
+      has: (perm: bigint) => (granted & perm) === perm,
     },
     timeout: vi.fn(async () => {}),
     kick: vi.fn(async () => {}),
@@ -202,6 +212,45 @@ describe('roleAdd / roleRemove', () => {
 
     expect(result).toEqual({ ok: false, error: 'Role "Nonexistent" not found' });
   });
+
+  it('denies gated role changes when requester resolution failed', async () => {
+    const member = makeMockMember({ id: 'u1', displayName: 'Alice' });
+    const role = { id: 'r1', name: 'Moderator', position: 1 };
+    const ctx = makeCtx({ members: [member], roles: [role] });
+
+    const result = await executeGuildAction(
+      { type: 'roleAdd', userId: 'u1', role: 'Moderator' },
+      ctx,
+      REQUESTER_MEMBER_DENY_ALL,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Permission denied for roleAdd' });
+    expect(member.roles.add).not.toHaveBeenCalled();
+  });
+
+  it('denies roleAdd when requester is below the target role hierarchy', async () => {
+    const target = makeMockMember({
+      id: 'u1',
+      displayName: 'Alice',
+      roles: [{ id: 'member-role', name: 'Member', position: 1 }],
+    });
+    const role = { id: 'r1', name: 'Moderator', position: 5 };
+    const requester = makeMockMember({
+      id: 'requester',
+      permissionsBitfield: PermissionFlagsBits.ManageRoles,
+      roles: [{ id: 'req-role', name: 'Helper', position: 4 }],
+    });
+    const ctx = makeCtx({ members: [target], roles: [role] });
+
+    const result = await executeGuildAction(
+      { type: 'roleAdd', userId: 'u1', role: 'Moderator' },
+      ctx,
+      requester as any,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Permission denied for roleAdd' });
+    expect(target.roles.add).not.toHaveBeenCalled();
+  });
 });
 
 describe('isoToSnowflake', () => {
@@ -235,6 +284,11 @@ describe('searchMessages', () => {
       id: 'ch1',
       name: 'general',
       type: ChannelType.GuildText,
+      permissionsFor: vi.fn(() => ({
+        has: (perm: bigint) => (
+          (PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory) & perm
+        ) === perm,
+      })),
       messages: {
         fetch: vi.fn(async () => {
           const page = pages[callIdx] ?? [];
@@ -346,6 +400,24 @@ describe('searchMessages', () => {
     expect((result as any).summary).toContain('No messages matching');
     expect((result as any).summary).toContain('scanned 1');
   });
+
+  it('denies search when requester lacks channel history permissions', async () => {
+    const ch = makeChannel([[{ id: '1', content: 'hello', author: { username: 'bob' } }]]);
+    ch.permissionsFor = vi.fn(() => ({
+      has: (perm: bigint) => (PermissionFlagsBits.ViewChannel & perm) === perm,
+    }));
+    const requester = makeMockMember({ id: 'requester' });
+    const ctx = makeCtx({ channels: [ch] });
+
+    const result = await executeGuildAction(
+      { type: 'searchMessages', query: 'hello', channel: 'ch1' },
+      ctx,
+      requester as any,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Permission denied for searchMessages' });
+    expect(ch.messages.fetch).not.toHaveBeenCalled();
+  });
 });
 
 describe('searchMessages — empty channel', () => {
@@ -391,6 +463,31 @@ describe('eventList', () => {
 
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain('Team Meeting (id:e1)');
+  });
+
+  it('filters channel-scoped events the requester cannot view', async () => {
+    const visibleChannel = {
+      id: 'ch-visible',
+      permissionsFor: vi.fn(() => ({ has: () => true })),
+    };
+    const hiddenChannel = {
+      id: 'ch-hidden',
+      permissionsFor: vi.fn(() => ({ has: () => false })),
+    };
+    const events = new Map([
+      ['e-visible', { id: 'e-visible', name: 'Visible Voice', channelId: 'ch-visible', scheduledStartAt: new Date('2025-02-01T15:00:00Z') }],
+      ['e-hidden', { id: 'e-hidden', name: 'Hidden Voice', channelId: 'ch-hidden', scheduledStartAt: new Date('2025-02-01T16:00:00Z') }],
+      ['e-external', { id: 'e-external', name: 'External Event', scheduledStartAt: new Date('2025-02-01T17:00:00Z') }],
+    ]);
+    const requester = makeMockMember({ id: 'requester' });
+    const ctx = makeCtx({ channels: [visibleChannel, hiddenChannel], events });
+
+    const result = await executeGuildAction({ type: 'eventList' }, ctx, requester as any);
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('Visible Voice (id:e-visible)');
+    expect((result as any).summary).toContain('External Event (id:e-external)');
+    expect((result as any).summary).not.toContain('Hidden Voice (id:e-hidden)');
   });
 
   it('shows empty message when no events', async () => {

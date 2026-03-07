@@ -71,6 +71,36 @@ async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string):
 }
 
 const MAX_CHAIN_DEPTH = 10;
+const CRON_REQUESTER_DENY_ALL_PREFIX = '__cron_requester_deny_all__';
+
+type CronActionRequester = {
+  requesterId: string;
+  trusted: boolean;
+  reason?: 'missing-author' | 'bot-author';
+};
+
+function resolveCronActionRequester(job: CronJob, authorId: string | undefined, botUserId: string | undefined): CronActionRequester {
+  const normalizedAuthorId = authorId?.trim() ?? '';
+  const normalizedBotUserId = botUserId?.trim() ?? '';
+  if (!normalizedAuthorId) {
+    return {
+      requesterId: `${CRON_REQUESTER_DENY_ALL_PREFIX}:${job.cronId || job.id}`,
+      trusted: false,
+      reason: 'missing-author',
+    };
+  }
+  if (normalizedBotUserId && normalizedAuthorId === normalizedBotUserId) {
+    return {
+      requesterId: `${CRON_REQUESTER_DENY_ALL_PREFIX}:${job.cronId || job.id}`,
+      trusted: false,
+      reason: 'bot-author',
+    };
+  }
+  return {
+    requesterId: normalizedAuthorId,
+    trusted: true,
+  };
+}
 
 export async function fireChainedJobs(cronId: string, ctx: CronExecutorContext): Promise<void> {
   const chainDepth = ctx.chainDepth ?? 0;
@@ -226,6 +256,18 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     // Fetch run record early — needed for prompt flags (silent, routingMode) and model selection.
     const preRunRecord = ctx.statsStore && job.cronId ? ctx.statsStore.getRecord(job.cronId) : undefined;
+    const actionRequester = resolveCronActionRequester(job, preRunRecord?.authorId, ctx.client.user?.id);
+    if (!actionRequester.trusted) {
+      ctx.log?.warn(
+        {
+          jobId: job.id,
+          cronId: job.cronId,
+          authorId: preRunRecord?.authorId ?? null,
+          reason: actionRequester.reason,
+        },
+        'cron:exec requester context unavailable; requester-gated guild-scoped discord actions will fail closed',
+      );
+    }
 
     let prompt =
       buildPromptPreamble(inlinedContext) +
@@ -424,6 +466,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           client: ctx.client,
           channelId: targetChannel.id,
           messageId: '',
+          requesterId: actionRequester.requesterId,
           deferScheduler: ctx.deferScheduler,
           transport: new DiscordTransportClient(guild, ctx.client),
           confirmation: {

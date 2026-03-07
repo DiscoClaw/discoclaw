@@ -223,6 +223,9 @@ describe('🛑 removal happens before action execution (taskClose regression)', 
     expect(removeStopReaction).toHaveBeenCalledTimes(1);
     expect(parseDiscordActionsMock).toHaveBeenCalledTimes(1);
     expect(executeDiscordActionsMock).toHaveBeenCalledTimes(1);
+    expect((executeDiscordActionsMock.mock.calls[0] as any)?.[1]).toEqual(
+      expect.objectContaining({ requesterId: 'user-1' }),
+    );
 
     const removeIdx = order.indexOf('stop-reaction-removed');
     const actionsIdx = order.indexOf('actions-executed');

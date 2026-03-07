@@ -1,6 +1,6 @@
-import { ChannelType } from 'discord.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import type { ForumChannel, GuildChannel, ThreadChannel } from 'discord.js';
-import type { DiscordActionResult, ActionContext } from './actions.js';
+import type { DiscordActionResult, ActionContext, RequesterDenyAll, RequesterMemberContext } from './actions.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,6 +41,36 @@ const CHANNEL_TYPE_ENUM: Record<string, GuildChannelType> = {
   stage: ChannelType.GuildStageVoice,
 };
 
+function isRequesterDenyAll(
+  requesterMember: RequesterMemberContext,
+): requesterMember is RequesterDenyAll {
+  return Boolean(requesterMember && typeof requesterMember === 'object' && '__requesterDenyAll' in requesterMember);
+}
+
+function permissionDenied(action: ChannelActionRequest['type']): DiscordActionResult {
+  return { ok: false, error: `Permission denied for ${action}` };
+}
+
+function requesterHasGuildPermission(
+  requesterMember: Exclude<RequesterMemberContext, RequesterDenyAll | undefined>,
+  permission: bigint,
+): boolean {
+  return Boolean(
+    (requesterMember as { permissions?: { has?: (perm: bigint) => boolean } }).permissions?.has?.(permission),
+  );
+}
+
+function requesterHasChannelPermissions(
+  channel: unknown,
+  requesterMember: Exclude<RequesterMemberContext, RequesterDenyAll | undefined>,
+  permissions: bigint,
+): boolean {
+  if (!channel || typeof channel !== 'object') return false;
+  if (!('permissionsFor' in channel) || typeof channel.permissionsFor !== 'function') return false;
+  const resolved = channel.permissionsFor(requesterMember);
+  return Boolean(resolved?.has?.(permissions));
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -48,12 +78,20 @@ const CHANNEL_TYPE_ENUM: Record<string, GuildChannelType> = {
 export async function executeChannelAction(
   action: ChannelActionRequest,
   ctx: ActionContext,
+  requesterMember?: RequesterMemberContext,
 ): Promise<DiscordActionResult> {
   const { guild } = ctx;
+  if (isRequesterDenyAll(requesterMember)) {
+    return permissionDenied(action.type);
+  }
+  const enforcingRequester = requesterMember && !isRequesterDenyAll(requesterMember)
+    ? requesterMember
+    : undefined;
 
   switch (action.type) {
     case 'channelCreate': {
       let parent: string | undefined;
+      let parentCategory: GuildChannel | undefined;
       if (action.parent) {
         const cat = guild.channels.cache.find(
           (ch) =>
@@ -62,8 +100,17 @@ export async function executeChannelAction(
         );
         if (cat) {
           parent = cat.id;
+          parentCategory = cat as GuildChannel;
         } else {
           return { ok: false, error: `Category "${action.parent}" not found` };
+        }
+      }
+      if (enforcingRequester) {
+        const canManage = parentCategory
+          ? requesterHasChannelPermissions(parentCategory, enforcingRequester, PermissionFlagsBits.ManageChannels)
+          : requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.ManageChannels);
+        if (!canManage) {
+          return permissionDenied(action.type);
         }
       }
 
@@ -89,6 +136,9 @@ export async function executeChannelAction(
       }
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !requesterHasChannelPermissions(channel, enforcingRequester, PermissionFlagsBits.ManageChannels)) {
+        return permissionDenied(action.type);
+      }
 
       const edits: { name?: string; topic?: string } = {};
       if (action.name != null) edits.name = action.name;
@@ -104,16 +154,22 @@ export async function executeChannelAction(
     case 'channelDelete': {
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !requesterHasChannelPermissions(channel, enforcingRequester, PermissionFlagsBits.ManageChannels)) {
+        return permissionDenied(action.type);
+      }
       const name = channel.name;
       await (channel as GuildChannel).delete();
       return { ok: true, summary: `Deleted #${name}` };
     }
 
     case 'channelList': {
+      const visibleChannels = enforcingRequester
+        ? [...guild.channels.cache.values()].filter((ch) => requesterHasChannelPermissions(ch, enforcingRequester, PermissionFlagsBits.ViewChannel))
+        : [...guild.channels.cache.values()];
       const grouped = new Map<string, string[]>();
       const uncategorized: string[] = [];
 
-      for (const ch of guild.channels.cache.values()) {
+      for (const ch of visibleChannels) {
         if (ch.type === ChannelType.GuildCategory) continue;
         const parentName = ch.parent?.name;
         if (parentName) {
@@ -132,12 +188,15 @@ export async function executeChannelAction(
       for (const [cat, chs] of grouped) {
         lines.push(`${cat}: ${chs.join(', ')}`);
       }
-      return { ok: true, summary: lines.length > 0 ? lines.join('\n') : '(no channels)' };
+      return { ok: true, summary: lines.length > 0 ? lines.join('\n') : '(no visible channels)' };
     }
 
     case 'channelInfo': {
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !requesterHasChannelPermissions(channel, enforcingRequester, PermissionFlagsBits.ViewChannel)) {
+        return permissionDenied(action.type);
+      }
 
       const info: string[] = [
         `Name: #${channel.name}`,
@@ -152,6 +211,9 @@ export async function executeChannelAction(
     }
 
     case 'categoryCreate': {
+      if (enforcingRequester && !requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.ManageChannels)) {
+        return permissionDenied(action.type);
+      }
       const created = await guild.channels.create({
         name: action.name,
         type: ChannelType.GuildCategory,
@@ -166,6 +228,9 @@ export async function executeChannelAction(
       }
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !requesterHasChannelPermissions(channel, enforcingRequester, PermissionFlagsBits.ManageChannels)) {
+        return permissionDenied(action.type);
+      }
 
       const parts: string[] = [];
 
@@ -184,6 +249,9 @@ export async function executeChannelAction(
             );
           }
           if (!cat) return { ok: false, error: `Category "${action.parent}" not found` };
+          if (enforcingRequester && !requesterHasChannelPermissions(cat, enforcingRequester, PermissionFlagsBits.ManageChannels)) {
+            return permissionDenied(action.type);
+          }
           await (channel as GuildChannel).setParent(cat.id);
           parts.push(`moved to ${cat.name}`);
         }
@@ -200,6 +268,9 @@ export async function executeChannelAction(
     case 'threadListArchived': {
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !requesterHasChannelPermissions(channel, enforcingRequester, PermissionFlagsBits.ViewChannel)) {
+        return permissionDenied(action.type);
+      }
 
       if (channel.type !== ChannelType.GuildForum && channel.type !== ChannelType.GuildText) {
         return { ok: false, error: `Channel #${channel.name} is not a forum or text channel` };
@@ -223,6 +294,9 @@ export async function executeChannelAction(
     case 'forumTagCreate': {
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !requesterHasChannelPermissions(channel, enforcingRequester, PermissionFlagsBits.ManageChannels)) {
+        return permissionDenied(action.type);
+      }
       if (channel.type !== ChannelType.GuildForum) {
         return { ok: false, error: `Channel #${channel.name} is not a forum channel` };
       }
@@ -253,6 +327,9 @@ export async function executeChannelAction(
     case 'forumTagDelete': {
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !requesterHasChannelPermissions(channel, enforcingRequester, PermissionFlagsBits.ManageChannels)) {
+        return permissionDenied(action.type);
+      }
       if (channel.type !== ChannelType.GuildForum) {
         return { ok: false, error: `Channel #${channel.name} is not a forum channel` };
       }
@@ -272,6 +349,9 @@ export async function executeChannelAction(
     case 'forumTagList': {
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !requesterHasChannelPermissions(channel, enforcingRequester, PermissionFlagsBits.ViewChannel)) {
+        return permissionDenied(action.type);
+      }
       if (channel.type !== ChannelType.GuildForum) {
         return { ok: false, error: `Channel #${channel.name} is not a forum channel` };
       }
@@ -330,6 +410,13 @@ export async function executeChannelAction(
 
       if (thread.guildId !== guild.id) {
         return { ok: false, error: `Thread "${action.threadId}" does not belong to this guild` };
+      }
+      if (enforcingRequester && !requesterHasChannelPermissions(
+        thread,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ManageThreads,
+      )) {
+        return permissionDenied(action.type);
       }
 
       if (action.appliedTags != null) {

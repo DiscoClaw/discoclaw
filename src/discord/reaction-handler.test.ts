@@ -5,6 +5,7 @@ import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
 import { inFlightReplyCount, _resetForTest as resetInFlight } from './inflight-replies.js';
 import * as reactionPrompts from './reaction-prompts.js';
+import * as discordActions from './actions.js';
 import * as abortRegistry from './abort-registry.js';
 import * as forgePlanRegistry from './forge-plan-registry.js';
 import { RUNTIME_SIGNAL_SUPPRESSED_LINE } from './runtime-signal-budget.js';
@@ -56,6 +57,25 @@ function mockReplyObject() {
 
 function mockMessage(overrides?: Record<string, any>) {
   const replyObj = mockReplyObject();
+  const requester = {
+    id: 'user-1',
+    permissions: {
+      has: vi.fn(() => true),
+    },
+    roles: {
+      highest: { position: 100 },
+    },
+  };
+  const defaultChannel = {
+    id: 'ch-1',
+    name: 'general',
+    type: ChannelType.GuildText,
+    permissionsFor: vi.fn(() => ({
+      has: vi.fn(() => true),
+    })),
+    isThread: () => false,
+    send: vi.fn().mockResolvedValue(undefined),
+  };
   return {
     id: 'msg-1',
     content: 'Hello world',
@@ -72,16 +92,26 @@ function mockMessage(overrides?: Record<string, any>) {
       user: { id: 'bot-1' },
     },
     guild: {
+      members: {
+        fetch: vi.fn(async (userId: string) => ({
+          ...(userId === 'user-1'
+            ? requester
+            : {
+              id: userId,
+              displayName: `user-${userId}`,
+              roles: { highest: { position: 1 } },
+            }),
+        })),
+      },
       channels: {
-        cache: { get: vi.fn(), find: vi.fn() },
+        cache: {
+          get: vi.fn((id: string) => (id === defaultChannel.id ? defaultChannel : undefined)),
+          find: vi.fn((pred: (ch: any) => boolean) => (pred(defaultChannel) ? defaultChannel : undefined)),
+          values: vi.fn(() => [defaultChannel].values()),
+        },
       },
     },
-    channel: {
-      id: 'ch-1',
-      name: 'general',
-      isThread: () => false,
-      send: vi.fn().mockResolvedValue(undefined),
-    },
+    channel: defaultChannel,
     attachments: { size: 0, values: () => [] },
     embeds: [],
     reply: vi.fn().mockResolvedValue(replyObj),
@@ -248,6 +278,29 @@ describe('createReactionAddHandler', () => {
     const replyObj = reaction.message._replyObj;
     const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
     expect(lastEditCall[0].content).toContain('Reaction response!');
+  });
+
+  it('passes requesterId into reaction action context', async () => {
+    const executeSpy = vi.spyOn(discordActions, 'executeDiscordActions').mockResolvedValue([
+      { ok: true, summary: 'Listed channels' },
+    ]);
+    const params = makeParams({
+      runtime: makeMockRuntime('<discord-action>{"type":"channelList"}</discord-action>'),
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    try {
+      await handler(mockReaction() as any, mockUser() as any);
+      expect(executeSpy).toHaveBeenCalledTimes(1);
+      expect(executeSpy.mock.calls[0]?.[1]).toEqual(
+        expect.objectContaining({ requesterId: 'user-1' }),
+      );
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 
   it('prompt includes emoji name, original message content, reacting user, and channel label', async () => {
@@ -582,12 +635,19 @@ describe('createReactionAddHandler', () => {
       id: 'forum-parent-1',
       name: 'beads',
       type: ChannelType.GuildForum,
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
       send: vi.fn().mockResolvedValue(undefined),
     };
     const threadChannel = {
       id: 'thread-1',
       name: 'my-thread',
+      type: ChannelType.PublicThread,
       parentId: 'forum-parent-1',
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
       isThread: () => true,
       joinable: false,
       joined: true,
@@ -599,6 +659,14 @@ describe('createReactionAddHandler', () => {
       ['thread-1', threadChannel],
     ]);
     const guild = {
+      members: {
+        fetch: vi.fn(async () => ({
+          id: 'user-1',
+          permissions: {
+            has: vi.fn(() => true),
+          },
+        })),
+      },
       channels: {
         cache: {
           get: (id: string) => channelsMap.get(id),
@@ -650,6 +718,14 @@ describe('createReactionAddHandler', () => {
     const reaction = mockReaction({
       message: mockMessage({
         guild: {
+          members: {
+            fetch: vi.fn(async () => ({
+              id: 'user-1',
+              permissions: {
+                has: vi.fn(() => true),
+              },
+            })),
+          },
           channels: {
             cache: {
               get: vi.fn(),
@@ -687,11 +763,27 @@ describe('createReactionAddHandler', () => {
     const queue = mockQueue();
     const handler = createReactionAddHandler(params, queue);
 
-    const targetChannel = { id: 'ch-target', name: 'general', type: ChannelType.GuildText, send: vi.fn().mockResolvedValue({ id: 'sent-1' }) };
+    const targetChannel = {
+      id: 'ch-target',
+      name: 'general',
+      type: ChannelType.GuildText,
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
+      send: vi.fn().mockResolvedValue({ id: 'sent-1' }),
+    };
     const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
     const reaction = mockReaction({
       message: mockMessage({
         guild: {
+          members: {
+            fetch: vi.fn(async () => ({
+              id: 'user-1',
+              permissions: {
+                has: vi.fn(() => true),
+              },
+            })),
+          },
           channels: {
             cache: {
               get: vi.fn(),

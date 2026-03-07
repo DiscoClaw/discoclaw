@@ -344,7 +344,7 @@ export async function executeCronAction(
         timezone,
         channel: action.channel,
         prompt: action.prompt,
-        authorId: cronCtx.client.user?.id,
+        authorId: ctx.requesterId,
         ...(action.routingMode ? { routingMode: action.routingMode } : {}),
         ...(parsedAllowedActions !== undefined && { allowedActions: parsedAllowedActions }),
         ...(parsedChain !== undefined && { chain: parsedChain }),

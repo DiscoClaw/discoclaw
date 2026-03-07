@@ -1,4 +1,5 @@
-import type { DiscordActionResult, ActionContext } from './actions.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
+import type { DiscordActionResult, ActionContext, RequesterDenyAll, RequesterMemberContext } from './actions.js';
 import { resolveChannel } from './action-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,37 @@ type PollSendTarget = {
   }): Promise<unknown>;
 };
 
+function isRequesterDenyAll(
+  requesterMember: RequesterMemberContext,
+): requesterMember is RequesterDenyAll {
+  return Boolean(requesterMember && typeof requesterMember === 'object' && '__requesterDenyAll' in requesterMember);
+}
+
+function permissionDenied(): DiscordActionResult {
+  return { ok: false, error: 'Permission denied for poll' };
+}
+
+function threadSendPermissionFor(channelType: ChannelType | undefined): bigint {
+  return (
+    channelType === ChannelType.PublicThread
+    || channelType === ChannelType.PrivateThread
+    || channelType === ChannelType.AnnouncementThread
+  )
+    ? PermissionFlagsBits.SendMessagesInThreads
+    : PermissionFlagsBits.SendMessages;
+}
+
+function requesterHasChannelPermissions(
+  channel: unknown,
+  requesterMember: Exclude<RequesterMemberContext, RequesterDenyAll | undefined>,
+  permissions: bigint,
+): boolean {
+  if (!channel || typeof channel !== 'object') return false;
+  if (!('permissionsFor' in channel) || typeof channel.permissionsFor !== 'function') return false;
+  const resolved = channel.permissionsFor(requesterMember);
+  return Boolean(resolved?.has?.(permissions));
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -35,11 +67,25 @@ type PollSendTarget = {
 export async function executePollAction(
   action: PollActionRequest,
   ctx: ActionContext,
+  requesterMember?: RequesterMemberContext,
 ): Promise<DiscordActionResult> {
   const { guild } = ctx;
+  if (isRequesterDenyAll(requesterMember)) {
+    return permissionDenied();
+  }
+  const enforcingRequester = requesterMember && !isRequesterDenyAll(requesterMember)
+    ? requesterMember
+    : undefined;
 
   const channel = resolveChannel(guild, action.channel);
   if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
+  if (enforcingRequester && !requesterHasChannelPermissions(
+    channel,
+    enforcingRequester,
+    PermissionFlagsBits.ViewChannel | threadSendPermissionFor(channel.type),
+  )) {
+    return permissionDenied();
+  }
   const pollTarget = channel as unknown as PollSendTarget;
 
   const pollAnswers = action.answers.map((text) => ({ text }));

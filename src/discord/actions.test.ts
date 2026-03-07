@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChannelType } from 'discord.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import {
   parseDiscordActions,
   executeDiscordActions,
@@ -360,6 +360,12 @@ describe('parseDiscordActions', () => {
 // ---------------------------------------------------------------------------
 
 function makeMockGuild(channels: Array<{ id: string; name: string; type: ChannelType; parentName?: string }>) {
+  const requester = {
+    id: 'user-1',
+    permissions: {
+      has: vi.fn(() => true),
+    },
+  };
   const cache = new Map<string, any>();
   for (const ch of channels) {
     cache.set(ch.id, {
@@ -367,12 +373,16 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
       name: ch.name,
       type: ch.type,
       parent: ch.parentName ? { name: ch.parentName } : null,
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
     });
   }
 
   return {
     channels: {
       cache: {
+        get: (id: string) => cache.get(id),
         find: (fn: (ch: any) => boolean) => {
           for (const ch of cache.values()) {
             if (fn(ch)) return ch;
@@ -387,6 +397,9 @@ function makeMockGuild(channels: Array<{ id: string; name: string; type: Channel
         id: 'new-id',
       })),
     },
+    members: {
+      fetch: vi.fn(async () => requester),
+    },
   } as any;
 }
 
@@ -396,6 +409,7 @@ function makeCtx(guild: any) {
     client: {} as any,
     channelId: 'test-channel',
     messageId: 'test-message',
+    requesterId: 'user-1',
   };
 }
 
@@ -603,9 +617,26 @@ describe('executeDiscordActions', () => {
 
   it('allows destructive actions with bypassDestructive confirmation context', async () => {
     const ban = vi.fn(async () => {});
+    const requester = {
+      id: '123',
+      permissions: {
+        has: vi.fn((perm: bigint) => perm === PermissionFlagsBits.BanMembers),
+      },
+      roles: {
+        highest: { position: 100 },
+      },
+    };
+    const target = {
+      id: '42',
+      displayName: 'User42',
+      roles: {
+        highest: { position: 1 },
+      },
+      ban,
+    };
     const guild = {
       members: {
-        fetch: vi.fn(async () => ({ displayName: 'User42', ban })),
+        fetch: vi.fn(async (userId: string) => (userId === '123' ? requester : target)),
       },
     } as any;
     const results = await executeDiscordActions(
@@ -615,6 +646,7 @@ describe('executeDiscordActions', () => {
         client: {} as any,
         channelId: 'chan',
         messageId: 'msg',
+        requesterId: '123',
         confirmation: {
           mode: 'interactive',
           sessionKey: 'discord:channel:chan',
@@ -642,6 +674,83 @@ describe('executeDiscordActions', () => {
     expect(results[0]).toEqual({ ok: true, summary: 'Created #alpha' });
     expect(results[1]).toEqual({ ok: true, summary: 'Created #beta' });
     expect(results[2]).toEqual({ ok: true, summary: 'Created #gamma' });
+  });
+
+  it('fetches requester member once per batch for gated actions', async () => {
+    const channel = {
+      id: 'ch1',
+      name: 'general',
+      type: ChannelType.GuildText,
+      permissionsFor: vi.fn(() => ({
+        has: (perm: bigint) => (
+          (PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory) & perm
+        ) === perm,
+      })),
+      messages: {
+        fetch: vi.fn(async () => new Map()),
+      },
+    };
+    const requester = { id: 'user-1' };
+    const guild = {
+      channels: {
+        cache: {
+          get: (id: string) => (id === 'ch1' ? channel : undefined),
+          find: (fn: (ch: any) => boolean) => (fn(channel) ? channel : undefined),
+          values: () => [channel].values(),
+        },
+      },
+      members: {
+        fetch: vi.fn(async () => requester),
+      },
+    } as any;
+
+    const results = await executeDiscordActions(
+      [
+        { type: 'searchMessages', query: 'needle', channel: 'general' } as any,
+        { type: 'searchMessages', query: 'needle', channel: 'general' } as any,
+      ],
+      { ...makeCtx(guild), requesterId: 'user-1' },
+    );
+
+    expect(guild.members.fetch).toHaveBeenCalledTimes(1);
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.ok)).toBe(true);
+  });
+
+  it('fails closed for gated actions when requester member cannot be resolved', async () => {
+    const channel = {
+      id: 'ch1',
+      name: 'general',
+      type: ChannelType.GuildText,
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
+      messages: {
+        fetch: vi.fn(async () => new Map()),
+      },
+    };
+    const guild = {
+      channels: {
+        cache: {
+          get: (id: string) => (id === 'ch1' ? channel : undefined),
+          find: (fn: (ch: any) => boolean) => (fn(channel) ? channel : undefined),
+          values: () => [channel].values(),
+        },
+      },
+      members: {
+        fetch: vi.fn(async () => {
+          throw new Error('missing');
+        }),
+      },
+    } as any;
+
+    const results = await executeDiscordActions(
+      [{ type: 'searchMessages', query: 'needle', channel: 'general' } as any],
+      { ...makeCtx(guild), requesterId: 'user-1' },
+    );
+
+    expect(guild.members.fetch).toHaveBeenCalledWith('user-1');
+    expect(results).toEqual([{ ok: false, error: 'Permission denied for searchMessages' }]);
   });
 });
 

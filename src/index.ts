@@ -1669,9 +1669,6 @@ if (taskCtx) {
       ? await TranscriptMirror.resolve(client, voiceLogChannelRef, log)
       : undefined;
 
-    // Pick a representative userId for durable memory (personal bot — typically one user).
-    const voiceDurableUserId = [...allowUserIds][0] as string | undefined;
-
     // Resolve voice home channel ID for action context.
     // If it's already a snowflake, use directly; otherwise resolve by name from guild cache.
     const voiceGuild = cfg.guildId ? client.guilds.cache.get(cfg.guildId) : undefined;
@@ -1709,23 +1706,85 @@ if (taskCtx) {
       && Object.values(voiceActionFlags).some(v => v);
 
     const voiceActionFollowupDepth = 1;
+    const resolveVoiceRequester = (): {
+      requesterId?: string;
+      activeVoiceChannelId?: string;
+      candidateIds: string[];
+      reason:
+        | 'guild-unavailable'
+        | 'voice-manager-unavailable'
+        | 'no-active-voice-channel'
+        | 'speaker-identity-unavailable';
+    } => {
+      if (!voiceGuild) {
+        return {
+          reason: 'guild-unavailable',
+          candidateIds: [],
+        };
+      }
+      if (!voiceManager) {
+        return {
+          reason: 'voice-manager-unavailable',
+          candidateIds: [],
+        };
+      }
+
+      const activeVoiceChannelId = voiceManager.getStatus(voiceGuild.id)?.channelId;
+      if (!activeVoiceChannelId) {
+        return {
+          reason: 'no-active-voice-channel',
+          candidateIds: [],
+        };
+      }
+
+      const candidateIds = [...new Set(
+        [...voiceGuild.voiceStates.cache.values()]
+          .filter((state) => state.channelId === activeVoiceChannelId)
+          .map((state) => state.member)
+          .filter((member): member is NonNullable<typeof member> => Boolean(member))
+          .filter((member) => !member.user.bot && allowUserIds.has(member.id))
+          .map((member) => member.id),
+      )];
+
+      return {
+        // Voice transcripts are not bound to a specific speaker yet, so
+        // requester-scoped Discord actions must fail closed here.
+        reason: 'speaker-identity-unavailable',
+        activeVoiceChannelId,
+        candidateIds,
+      };
+    };
 
     const voiceInvokeAi = async (text: string, signal: AbortSignal, history?: string): Promise<string> => {
       // Resolve model and runtime at invoke time so tier names (fast/capable) always resolve
       // correctly even after runtime mutation via !models set voice.
       const voiceRuntime = resolveVoiceRuntime(voiceModelRef, runtimeRegistry, limitedRuntime);
       const resolvedVoiceModel = resolveModel(voiceModelRef.model, voiceRuntime.id);
+      const voiceRequester = resolveVoiceRequester();
+      const voiceRequesterId = voiceRequester.requesterId;
+      const voiceActionsAllowedForInvocation = voiceActionsEnabled && voiceRequesterId != null;
 
       // Build a lean voice prompt using identity extraction (~1KB) instead of
       // the full PA file set (~50KB). AGENTS.md, TOOLS.md, and .context/pa.md
       // are irrelevant to spoken-word interactions.
       const identity = await loadVoiceIdentity(workspaceCwd);
 
-      const durableSection = voiceDurableUserId
+      if (voiceActionsEnabled && !voiceActionsAllowedForInvocation) {
+        log.warn(
+          {
+            reason: voiceRequester.reason,
+            activeVoiceChannelId: voiceRequester.activeVoiceChannelId,
+            candidateIds: voiceRequester.candidateIds,
+          },
+          'voice: requester identity unavailable; omitting action execution for this turn',
+        );
+      }
+
+      const durableSection = voiceRequesterId
         ? await buildDurableMemorySection({
             enabled: durableMemoryEnabled,
             durableDataDir,
-            userId: voiceDurableUserId,
+            userId: voiceRequesterId,
             durableInjectMaxChars,
             query: text,
             log,
@@ -1740,7 +1799,7 @@ if (taskCtx) {
         }
         | null = null;
       const actionsSection = (() => {
-        if (!voiceActionsEnabled) return '';
+        if (!voiceActionsAllowedForInvocation) return '';
         const actionSelection = buildTieredDiscordActionsPromptSection(
           voiceActionFlags,
           botDisplayName,
@@ -1814,7 +1873,7 @@ if (taskCtx) {
         }
 
         // Action parsing and execution.
-        if (voiceActionsEnabled && !invokeHadError && voiceGuild && resolvedVoiceChannelId) {
+        if (voiceActionsAllowedForInvocation && !invokeHadError && voiceGuild && resolvedVoiceChannelId && voiceRequesterId) {
           const parsed = parseDiscordActions(result, voiceActionFlags);
 
           // sendFile deny-filter: voice is bot-originated (no user-attached file context).
@@ -1824,6 +1883,7 @@ if (taskCtx) {
             const actCtx: ActionContext = {
               guild: voiceGuild,
               client,
+              requesterId: voiceRequesterId,
               channelId: resolvedVoiceChannelId,
               messageId: '', // Empty — mirrors cron executor pattern; prevents sendMessage same-channel suppression.
               transport: new DiscordTransportClient(voiceGuild, client),
@@ -1833,9 +1893,9 @@ if (taskCtx) {
             };
 
             // Build memory context with real user ID for voice.
-            const voiceMemoryCtx = botParams.memoryCtx && voiceDurableUserId ? {
+            const voiceMemoryCtx = botParams.memoryCtx && voiceRequesterId ? {
               ...botParams.memoryCtx,
-              userId: voiceDurableUserId,
+              userId: voiceRequesterId,
               channelId: resolvedVoiceChannelId,
               guildId: cfg.guildId,
             } : undefined;

@@ -1,4 +1,4 @@
-import type { Client, Guild } from 'discord.js';
+import type { Client, Guild, GuildMember } from 'discord.js';
 import type { TransportClient } from './transport-client.js';
 import { CHANNEL_ACTION_TYPES, executeChannelAction, channelActionsPromptSection } from './actions-channels.js';
 import type { ChannelActionRequest } from './actions-channels.js';
@@ -56,6 +56,7 @@ export type ActionContext = {
   client: Client;
   channelId: string;
   messageId: string;
+  requesterId?: string;
   threadParentId?: string | null;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
   deferDepth?: number;
@@ -110,6 +111,11 @@ export type DiscordActionRequest =
 export type DiscordActionResult =
   | { ok: true; summary: string }
   | { ok: false; error: string };
+
+export type RequesterDenyAll = { readonly __requesterDenyAll: true };
+export type RequesterMemberContext = GuildMember | RequesterDenyAll | undefined;
+
+export const REQUESTER_MEMBER_DENY_ALL: RequesterDenyAll = { __requesterDenyAll: true };
 
 import { appendOutsideFence } from './output-utils.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -402,6 +408,13 @@ export async function executeDiscordActions(
   subs?: SubsystemContexts,
 ): Promise<DiscordActionResult[]> {
   const effectiveSubs = subs ?? {};
+  let requesterMember: RequesterMemberContext = REQUESTER_MEMBER_DENY_ALL;
+  if (ctx.requesterId) {
+    const fetchRequester = (ctx.guild.members as { fetch?: (userId: string) => Promise<GuildMember> })?.fetch;
+    requesterMember = typeof fetchRequester === 'function'
+      ? await fetchRequester.call(ctx.guild.members, ctx.requesterId).catch(() => REQUESTER_MEMBER_DENY_ALL)
+      : REQUESTER_MEMBER_DENY_ALL;
+  }
 
   // --- Spawn pre-pass: collect all spawnAgent actions and run in parallel ---
   const spawnResultByIndex = new Map<number, DiscordActionResult>();
@@ -447,17 +460,17 @@ export async function executeDiscordActions(
       }
 
       if (CHANNEL_ACTION_TYPES.has(action.type)) {
-        result = await executeChannelAction(action as ChannelActionRequest, ctx);
+        result = await executeChannelAction(action as ChannelActionRequest, ctx, requesterMember);
       } else if (MESSAGING_ACTION_TYPES.has(action.type)) {
-        result = await executeMessagingAction(action as MessagingActionRequest, ctx);
+        result = await executeMessagingAction(action as MessagingActionRequest, ctx, requesterMember);
       } else if (REACTION_PROMPT_ACTION_TYPES.has(action.type)) {
         result = await executeReactionPrompt(action as ReactionPromptRequest, ctx);
       } else if (GUILD_ACTION_TYPES.has(action.type)) {
-        result = await executeGuildAction(action as GuildActionRequest, ctx);
+        result = await executeGuildAction(action as GuildActionRequest, ctx, requesterMember);
       } else if (MODERATION_ACTION_TYPES.has(action.type)) {
-        result = await executeModerationAction(action as ModerationActionRequest, ctx);
+        result = await executeModerationAction(action as ModerationActionRequest, ctx, requesterMember);
       } else if (POLL_ACTION_TYPES.has(action.type)) {
-        result = await executePollAction(action as PollActionRequest, ctx);
+        result = await executePollAction(action as PollActionRequest, ctx, requesterMember);
       } else if (isTaskActionRequest(action)) {
         const taskCtx = effectiveSubs.taskCtx;
         if (!taskCtx) {

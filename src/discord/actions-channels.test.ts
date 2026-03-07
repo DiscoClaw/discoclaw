@@ -106,7 +106,7 @@ describe('channelList', () => {
 
     const result = await executeChannelAction({ type: 'channelList' }, ctx);
 
-    expect(result).toEqual({ ok: true, summary: '(no channels)' });
+    expect(result).toEqual({ ok: true, summary: '(no visible channels)' });
   });
 });
 
