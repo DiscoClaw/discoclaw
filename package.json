@@ -1,6 +1,6 @@
 {
   "name": "discoclaw",
-  "version": "0.5.8",
+  "version": "0.6.0",
   "description": "Personal AI orchestrator that turns Discord into a persistent workspace",
   "license": "MIT",
   "repository": {
