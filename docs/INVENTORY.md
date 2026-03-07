@@ -98,6 +98,7 @@ All actions are gated by category env flags (off by default except channels).
 | Forge (autonomous plan drafting) | create, resume, status, cancel | `actions-forge.ts` | **done** |
 | Plan management (autonomous) | list, show, approve, close, create, run (full-loop execution; shares phase runner with targeted resume + convergence guard paths) | `actions-plan.ts` | **done** |
 | Memory (durable memory mutation) | remember, forget, show | `actions-memory.ts` | **done** |
+| Reaction prompts (durable pending wait persistence across restarts) | `reactionPrompt` | `reaction-prompts.ts`, `reaction-prompt-store.ts`, `reaction-handler.ts`, `index.ts` | **done** |
 | Defer scheduler (in-process timers with concurrency limits) | — | `src/discord/defer-scheduler.ts` | **done** |
 | Deferred runner (wires defer action type into action/runtime pipeline) | — | `src/discord/deferred-runner.ts` | **done** |
 | Voice (session control) | join, leave, status, mute, deafen | `actions-voice.ts` | **done** |
