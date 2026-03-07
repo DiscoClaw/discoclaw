@@ -3,7 +3,7 @@ import type { RuntimeId } from './types.js';
 /** Provider-agnostic model tier. */
 export type ModelTier = 'fast' | 'capable' | 'deep';
 
-const tiers = new Set<ModelTier>(['fast', 'capable', 'deep']);
+const tiers = new Set<string>(['fast', 'capable', 'deep']);
 
 /** Type guard for ModelTier. */
 export function isModelTier(s: string): s is ModelTier {
