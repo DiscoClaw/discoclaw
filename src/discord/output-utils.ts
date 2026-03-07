@@ -312,14 +312,16 @@ function buildWaitingPreviewLine(elapsedMs?: number): string {
 }
 
 /**
- * Strip `<discord-action>...</discord-action>` blocks from text so raw JSON
- * never leaks into streaming previews visible to users.
+ * Strip hidden machine-readable blocks from text so raw payloads never leak
+ * into streaming previews visible to users.
  */
 export function stripActionTags(text: string): string {
   if (isStreamingSanitizationDisabled()) return text;
   return text
     .replace(/<discord-action>[\s\S]*?<\/discord-action>/g, '')  // complete tags
     .replace(/<discord-action>[\s\S]*$/g, '')                     // trailing incomplete tag (mid-stream)
+    .replace(/<continuation-capsule>[\s\S]*?<\/continuation-capsule>/g, '')
+    .replace(/<continuation-capsule>[\s\S]*$/g, '')
     .replace(/\n{3,}/g, '\n\n');
 }
 

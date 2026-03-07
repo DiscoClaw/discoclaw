@@ -7,7 +7,9 @@ import {
   buildConversationMemorySection,
   generateSummary,
   loadSummary,
+  saveSummary,
 } from './summarizer.js';
+import type { ContinuationCapsule } from './capsule.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 
 async function makeTmpDir(): Promise<string> {
@@ -39,6 +41,31 @@ describe('buildConversationMemorySection', () => {
     expect(section).not.toContain('Last regenerated');
     expect(section).not.toContain('newer turns since then');
     expect(section).toContain('recent conversation, reply context, tool output, or the current user message');
+  });
+
+  it('renders a bootstrap note when no rolling summary exists yet', () => {
+    const section = buildConversationMemorySection('', undefined);
+
+    expect(section).toContain('Conversation memory:');
+    expect(section).toContain('No rolling summary yet.');
+    expect(section).toContain('emit an updated <continuation-capsule> block');
+  });
+
+  it('always includes the capsule emission instruction and renders the capsule when present', () => {
+    const capsule: ContinuationCapsule = {
+      activeTaskId: 'ws-1170',
+      currentFocus: 'Keep the current task pinned across summary recompression',
+      nextStep: 'Persist the capsule beside the rolling summary',
+      blockedOn: 'Need coordinator save wiring',
+    };
+
+    const section = buildConversationMemorySection('background notes', undefined, capsule);
+
+    expect(section).toContain('emit an updated <continuation-capsule> block');
+    expect(section).toContain('Continuation capsule (verbatim, persisted outside the rolling summary):');
+    expect(section).toContain('"activeTaskId":"ws-1170"');
+    expect(section).toContain('"currentFocus":"Keep the current task pinned across summary recompression"');
+    expect(section).toContain('"nextStep":"Persist the capsule beside the rolling summary"');
   });
 });
 
@@ -113,6 +140,7 @@ describe('generateSummary recency guidance', () => {
     expect(seenPrompt).toContain('Treat the new exchange as fresher than the current summary.');
     expect(seenPrompt).toContain('replace stale details with the newer state');
     expect(seenPrompt).toContain('remove stale "pending" wording');
+    expect(seenPrompt).toContain('Do not duplicate continuation capsule content into the summary body');
   });
 });
 
@@ -160,5 +188,89 @@ describe('loadSummary regeneratedAt compatibility', () => {
       turnsSinceUpdate: 3,
     });
     expect(result?.regeneratedAt).toBeUndefined();
+  });
+
+  it('loads a valid continuation capsule when present', async () => {
+    const dir = await makeTmpDir();
+    await fs.writeFile(
+      path.join(dir, 'with-capsule.json'),
+      JSON.stringify({
+        summary: 'summary with capsule',
+        updatedAt: 100,
+        continuationCapsule: {
+          activeTaskId: 'ws-1170',
+          currentFocus: 'Keep task focus intact',
+          nextStep: 'Inject the capsule into the next prompt',
+          blockedOn: 'Need storage support',
+        },
+      }),
+      'utf8',
+    );
+
+    const result = await loadSummary(dir, 'with-capsule');
+
+    expect(result).toEqual({
+      summary: 'summary with capsule',
+      updatedAt: 100,
+      continuationCapsule: {
+        activeTaskId: 'ws-1170',
+        currentFocus: 'Keep task focus intact',
+        nextStep: 'Inject the capsule into the next prompt',
+        blockedOn: 'Need storage support',
+      },
+    });
+  });
+
+  it('silently drops malformed optional capsule fields without rejecting the summary', async () => {
+    const dir = await makeTmpDir();
+    await fs.writeFile(
+      path.join(dir, 'with-bad-capsule.json'),
+      JSON.stringify({
+        summary: 'summary with malformed capsule',
+        updatedAt: 200,
+        continuationCapsule: {
+          currentFocus: 'Missing next step',
+          nextStep: 'Still load the summary',
+          blockedOn: { reason: 'not-a-string' },
+        },
+      }),
+      'utf8',
+    );
+
+    const result = await loadSummary(dir, 'with-bad-capsule');
+
+    expect(result).toEqual({
+      summary: 'summary with malformed capsule',
+      updatedAt: 200,
+      continuationCapsule: {
+        currentFocus: 'Missing next step',
+        nextStep: 'Still load the summary',
+      },
+    });
+  });
+
+  it('normalizes and truncates oversized continuation capsules on save and load', async () => {
+    const dir = await makeTmpDir();
+    const tooLong = 'x'.repeat(240);
+
+    await saveSummary(dir, 'with-long-capsule', {
+      summary: 'summary with oversized capsule',
+      updatedAt: 300,
+      continuationCapsule: {
+        activeTaskId: tooLong,
+        currentFocus: tooLong,
+        nextStep: tooLong,
+        blockedOn: tooLong,
+      },
+    });
+
+    const result = await loadSummary(dir, 'with-long-capsule');
+
+    expect(result?.continuationCapsule).toEqual({
+      activeTaskId: 'x'.repeat(200),
+      currentFocus: 'x'.repeat(200),
+      nextStep: 'x'.repeat(200),
+      blockedOn: 'x'.repeat(200),
+    });
   });
 });

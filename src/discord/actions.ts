@@ -42,6 +42,10 @@ import type { VoiceActionRequest, VoiceContext } from './actions-voice.js';
 import { SPAWN_ACTION_TYPES, executeSpawnActions, spawnActionsPromptSection } from './actions-spawn.js';
 import type { SpawnActionRequest, SpawnContext } from './actions-spawn.js';
 import { describeDestructiveConfirmationRequirement } from './destructive-confirmation.js';
+import { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
+import { parseCapsuleBlock } from './capsule.js';
+import type { ContinuationCapsule } from './capsule.js';
+export { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -176,23 +180,7 @@ const ACTION_CLOSE = '</discord-action>';
 // Trailing XML closing tags left by garbled AI output (e.g. </parameter>\n</invoke>).
 const TRAILING_XML_RE = /^(?:\s*<\/[a-z-]+>)+/;
 
-type TextRange = { start: number; end: number };
-
-function mergeRanges(ranges: TextRange[]): TextRange[] {
-  if (ranges.length <= 1) return ranges;
-  const sorted = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end);
-  const merged: TextRange[] = [sorted[0]];
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = merged[merged.length - 1];
-    const cur = sorted[i];
-    if (cur.start <= prev.end) {
-      prev.end = Math.max(prev.end, cur.end);
-    } else {
-      merged.push({ start: cur.start, end: cur.end });
-    }
-  }
-  return merged;
-}
+type TextRange = ReturnType<typeof computeMarkdownCodeRanges>[number];
 
 function isIndexInRanges(index: number, ranges: TextRange[]): boolean {
   for (const range of ranges) {
@@ -200,136 +188,6 @@ function isIndexInRanges(index: number, ranges: TextRange[]): boolean {
     if (index < range.end) return true;
   }
   return false;
-}
-
-function computeMarkdownCodeRanges(text: string): TextRange[] {
-  const ranges: TextRange[] = [];
-
-  // 1) Fenced code blocks (``` and ~~~)
-  let inFence = false;
-  let fenceChar = '';
-  let fenceLen = 0;
-  let fenceStart = 0;
-  let lineStart = 0;
-  while (lineStart <= text.length) {
-    const nl = text.indexOf('\n', lineStart);
-    const hasNl = nl !== -1;
-    const lineEnd = hasNl ? nl : text.length;
-    const lineEndWithNl = hasNl ? nl + 1 : text.length;
-    const line = text.slice(lineStart, lineEnd);
-    if (!inFence) {
-      const open = line.match(/^[ \t]*(`{3,}|~{3,})/);
-      if (open) {
-        inFence = true;
-        fenceChar = open[1][0]!;
-        fenceLen = open[1].length;
-        fenceStart = lineStart;
-      }
-    } else {
-      const closeRe = new RegExp(`^[ \\t]*\\${fenceChar}{${fenceLen},}[ \\t]*$`);
-      if (closeRe.test(line)) {
-        ranges.push({ start: fenceStart, end: lineEndWithNl });
-        inFence = false;
-        fenceChar = '';
-        fenceLen = 0;
-      }
-    }
-    if (!hasNl) break;
-    lineStart = lineEndWithNl;
-  }
-  if (inFence) {
-    ranges.push({ start: fenceStart, end: text.length });
-  }
-
-  // 2) Indented code blocks outside fenced blocks.
-  const mergedFence = mergeRanges(ranges);
-  let segStart = 0;
-  for (const fence of mergedFence) {
-    if (segStart < fence.start) {
-      collectIndentedCodeRanges(text, segStart, fence.start, ranges);
-    }
-    segStart = fence.end;
-  }
-  if (segStart < text.length) {
-    collectIndentedCodeRanges(text, segStart, text.length, ranges);
-  }
-
-  // 3) Inline code spans (`...`) outside fenced/indented code blocks.
-  const mergedBlock = mergeRanges(ranges);
-  segStart = 0;
-  for (const block of mergedBlock) {
-    if (segStart < block.start) {
-      collectInlineCodeRanges(text, segStart, block.start, ranges);
-    }
-    segStart = block.end;
-  }
-  if (segStart < text.length) {
-    collectInlineCodeRanges(text, segStart, text.length, ranges);
-  }
-
-  return mergeRanges(ranges);
-}
-
-function collectIndentedCodeRanges(text: string, start: number, end: number, out: TextRange[]): void {
-  let lineStart = start;
-  let blockStart = -1;
-  let blockEnd = -1;
-
-  while (lineStart <= end) {
-    const nl = text.indexOf('\n', lineStart);
-    const hasNl = nl !== -1 && nl < end;
-    const lineEnd = hasNl ? nl : end;
-    const lineEndWithNl = hasNl ? nl + 1 : end;
-    const line = text.slice(lineStart, lineEnd);
-    const isBlank = /^[ \t]*$/.test(line);
-    const isIndented = /^(?: {4,}|\t)/.test(line);
-
-    if (blockStart === -1) {
-      if (isIndented && !isBlank) {
-        blockStart = lineStart;
-        blockEnd = lineEndWithNl;
-      }
-    } else if (isIndented || isBlank) {
-      if (isIndented) blockEnd = lineEndWithNl;
-    } else {
-      out.push({ start: blockStart, end: blockEnd });
-      blockStart = -1;
-      blockEnd = -1;
-    }
-
-    if (!hasNl) break;
-    lineStart = lineEndWithNl;
-  }
-
-  if (blockStart !== -1) {
-    out.push({ start: blockStart, end: blockEnd });
-  }
-}
-
-function collectInlineCodeRanges(text: string, start: number, end: number, out: TextRange[]): void {
-  let i = start;
-  let inInline = false;
-  let inlineTicks = 0;
-  let inlineStart = -1;
-  while (i < end) {
-    if (text[i] !== '`') {
-      i++;
-      continue;
-    }
-    let ticks = 1;
-    while (i + ticks < end && text[i + ticks] === '`') ticks++;
-    if (!inInline) {
-      inInline = true;
-      inlineTicks = ticks;
-      inlineStart = i;
-    } else if (ticks === inlineTicks) {
-      out.push({ start: inlineStart, end: i + ticks });
-      inInline = false;
-      inlineTicks = 0;
-      inlineStart = -1;
-    }
-    i += ticks;
-  }
 }
 
 function findNextActionOpenOutsideCode(text: string, from: number, codeRanges: TextRange[]): number {
@@ -469,7 +327,7 @@ function parseWithRegexFallback(
   flags: ActionCategoryFlags,
   validTypes: Set<string>,
   codeRanges: TextRange[],
-): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[]; parseFailures: number } {
+): ParsedDiscordActionsResult {
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
   const parseFailuresRef = { count: 0 };
@@ -478,18 +336,28 @@ function parseWithRegexFallback(
     parseActionJson(json.trim(), flags, validTypes, actions, strippedUnrecognizedTypes, parseFailuresRef);
     return '';
   });
+  const parsedCapsule = parseCapsuleBlock(cleaned.replace(/\n{3,}/g, '\n\n').trim());
   return {
-    cleanText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+    cleanText: parsedCapsule.cleanText,
     actions,
     strippedUnrecognizedTypes,
     parseFailures: parseFailuresRef.count,
+    continuationCapsule: parsedCapsule.capsule,
   };
 }
+
+export type ParsedDiscordActionsResult = {
+  cleanText: string;
+  actions: DiscordActionRequest[];
+  strippedUnrecognizedTypes: string[];
+  parseFailures: number;
+  continuationCapsule?: ContinuationCapsule | null;
+};
 
 export function parseDiscordActions(
   text: string,
   flags: ActionCategoryFlags,
-): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[]; parseFailures: number } {
+): ParsedDiscordActionsResult {
   const validTypes = buildValidTypes(flags);
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
@@ -497,11 +365,13 @@ export function parseDiscordActions(
   const parseFailuresRef = { count: 0 };
 
   const cleaned = stripActionsWithScanner(text, flags, validTypes, actions, strippedUnrecognizedTypes, codeRanges, parseFailuresRef);
-  const scanned = {
-    cleanText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+  const parsedCapsule = parseCapsuleBlock(cleaned.replace(/\n{3,}/g, '\n\n').trim());
+  const scanned: ParsedDiscordActionsResult = {
+    cleanText: parsedCapsule.cleanText,
     actions,
     strippedUnrecognizedTypes,
     parseFailures: parseFailuresRef.count,
+    continuationCapsule: parsedCapsule.capsule,
   };
 
   // Compatibility fallback: if scanner leaves markers behind or extracts nothing,
@@ -869,6 +739,8 @@ function discordActionsRulesSection(displayName: string): string {
 - Action blocks are stripped from displayed output; results appended automatically.
 - Actions ending in List, Show, Info, Status, or prefixed with fetch/read/search are query actions — results are sent back for follow-up analysis.
 - Include all needed actions in one response. Multiple same-type actions are supported and executed sequentially.
+- Keep the continuation capsule current with a single \`<continuation-capsule>{"activeTaskId":"...","currentFocus":"...","nextStep":"...","blockedOn":"..."}</continuation-capsule>\` block whenever the active task, current focus, next step, or blocker changes.
+- Keep continuation capsules machine-readable only; do not mention them in user-facing prose.
 
 ### Permissions
 Bot requires appropriate server-level role permissions (e.g. Manage Channels, Manage Roles, Moderate Members).

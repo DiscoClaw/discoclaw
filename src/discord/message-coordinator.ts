@@ -37,6 +37,8 @@ import {
   estimateSummaryTokens,
   buildConversationMemorySection,
 } from './summarizer.js';
+import { parseCapsuleBlock } from './capsule.js';
+import type { ContinuationCapsule } from './capsule.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
 import { parseSecretCommand, handleSecretCommand } from './secret-commands.js';
 import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './plan-commands.js';
@@ -1370,7 +1372,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         threadId: threadId || null,
       });
 
-      type SummaryWork = { existingSummary: string | null; exchange: string; summarySeq: number; taskStatusContext?: string; userMessageText?: string };
+      type SummaryWork = {
+        existingSummary: string | null;
+        exchange: string;
+        summarySeq: number;
+        taskStatusContext?: string;
+        userMessageText?: string;
+        continuationCapsule?: ContinuationCapsule;
+      };
       let pendingSummaryWork: SummaryWork | null = null as SummaryWork | null;
       type ShortTermAppend = { userContent: string; botResponse: string; channelName: string; channelId: string };
       let pendingShortTermAppend: ShortTermAppend | null = null as ShortTermAppend | null;
@@ -2558,8 +2567,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let historySection = '';
           let summarySection = '';
           let existingSummaryText: string | null = null;
+          let existingSummaryUpdatedAt: number | undefined;
           let existingSummaryRegeneratedAt: number | undefined;
+          let existingContinuationCapsule: ContinuationCapsule | undefined;
           let processedText = '';
+          let effectiveContinuationCapsule: ContinuationCapsule | undefined;
+          let emittedContinuationCapsule = false;
           try {
 
           const cwd = params.useGroupDirCwd
@@ -2630,11 +2643,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const existing = await loadSummary(params.summaryDataDir, sessionKey);
               if (existing) {
                 existingSummaryText = existing.summary.slice(0, params.summaryMaxChars);
+                existingSummaryUpdatedAt = existing.updatedAt;
                 existingSummaryRegeneratedAt = existing.regeneratedAt;
+                existingContinuationCapsule = existing.continuationCapsule;
                 summarySection = buildConversationMemorySection(existingSummaryText, {
                   turnsSinceUpdate: existing.turnsSinceUpdate,
                   regeneratedAt: existing.regeneratedAt,
-                });
+                }, existingContinuationCapsule);
                 if (!turnCounters.has(sessionKey)) {
                   const raw = existing.turnsSinceUpdate;
                   turnCounters.set(sessionKey, typeof raw === 'number' && raw >= 0 ? raw : 0);
@@ -2642,6 +2657,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
             } catch (err) {
               params.log?.warn({ err, sessionKey }, 'discord:summary load failed');
+            }
+
+            if (!summarySection) {
+              summarySection = buildConversationMemorySection('', undefined, existingContinuationCapsule);
             }
           }
 
@@ -2891,6 +2910,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let followUpDepth = 0;
           let pendingFollowUpPlaceholder: string | null = null;
           let isFailureFollowUp = false;
+          effectiveContinuationCapsule = existingContinuationCapsule;
 
           // -- auto-follow-up loop --
           // When query actions (channelList, readMessages, etc.) succeed, re-invoke
@@ -3340,6 +3360,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (params.discordActionsEnabled && msg.guild && canParseActions) {
               const parsed = parseDiscordActions(processedText, actionFlags);
               parseFailuresCount = parsed.parseFailures;
+              if (parsed.continuationCapsule) {
+                effectiveContinuationCapsule = parsed.continuationCapsule;
+                emittedContinuationCapsule = true;
+              }
+              const cleanProcessedText = parsed.cleanText;
               if (parsed.parseFailures > 0) {
                 params.log?.warn(`parseDiscordActions: ${parsed.parseFailures} action block(s) failed to parse (sessionKey=${sessionKey})`);
               }
@@ -3382,7 +3407,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 // streaming preview would remain visible with raw <discord-action>
                 // JSON.  This pre-edit ensures the visible state is clean regardless.
                 try {
-                  const preEditRaw = parsed.cleanText.trimEnd() || '...';
+                  const preEditRaw = cleanProcessedText.trimEnd() || '...';
                   const preEditText = closeFenceIfOpen(preEditRaw.slice(0, 2000));
                   await reply.edit({ content: preEditText, allowedMentions: NO_MENTIONS });
                 } catch {
@@ -3408,7 +3433,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   );
                 }
                 const anyActionSucceeded = actionResults.some((r) => r.ok);
-                processedText = appendActionResults(parsed.cleanText.trimEnd(), actions, actionResults);
+                processedText = appendActionResults(cleanProcessedText.trimEnd(), actions, actionResults);
                 // When all display lines were suppressed (e.g. sendMessage-only) and there's
                 // no prose, delete the placeholder instead of posting "(no output)".
                 if (
@@ -3433,10 +3458,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   }
                 }
               } else {
-                processedText = parsed.cleanText;
+                processedText = cleanProcessedText;
                 strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
               }
             }
+            const parsedCapsule = parseCapsuleBlock(processedText);
+            if (parsedCapsule.capsule) {
+              effectiveContinuationCapsule = parsedCapsule.capsule;
+              emittedContinuationCapsule = true;
+            }
+            processedText = parsedCapsule.cleanText;
             processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
             processedText = appendParseFailureNotice(processedText, parseFailuresCount);
 
@@ -3602,17 +3633,41 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   `[${activeMsg.author.displayName || activeMsg.author.username}]: ${_batchedUserContent}\n` +
                   `[${params.botDisplayName}]: ${(processedText || '').slice(0, 500)}`,
                 userMessageText: _batchedUserContent,
+                continuationCapsule: effectiveContinuationCapsule,
                 ...(taskStatusContext !== undefined ? { taskStatusContext } : {}),
               };
-            } else if (summarySection) {
+            } else if (existingSummaryText !== null || emittedContinuationCapsule) {
               // Persist counter progress so restarts resume from last known count.
+              // Re-read first so this save does not overwrite a newer async summary
+              // write with stale summary text or carry-forward capsule state.
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              saveSummary(params.summaryDataDir, sessionKey, {
-                summary: (existingSummaryText ?? '').slice(0, params.summaryMaxChars),
-                updatedAt: Date.now(),
-                regeneratedAt: existingSummaryRegeneratedAt,
-                turnsSinceUpdate: count,
-              });
+              (async () => {
+                try {
+                  const latest = await loadSummary(params.summaryDataDir, sessionKey);
+                  const sawNewerSummary = Boolean(
+                    latest
+                    && typeof latest.updatedAt === 'number'
+                    && typeof existingSummaryUpdatedAt === 'number'
+                    && latest.updatedAt > existingSummaryUpdatedAt,
+                  );
+                  const latestTurnsSinceUpdate = typeof latest?.turnsSinceUpdate === 'number' && latest.turnsSinceUpdate >= 0
+                    ? latest.turnsSinceUpdate
+                    : 0;
+                  const continuationCapsuleToSave = emittedContinuationCapsule
+                    ? effectiveContinuationCapsule
+                    : latest?.continuationCapsule ?? effectiveContinuationCapsule;
+
+                  await saveSummary(params.summaryDataDir, sessionKey, {
+                    summary: ((sawNewerSummary ? latest?.summary : existingSummaryText) ?? '').slice(0, params.summaryMaxChars),
+                    updatedAt: Date.now(),
+                    regeneratedAt: sawNewerSummary ? latest?.regeneratedAt : existingSummaryRegeneratedAt,
+                    turnsSinceUpdate: sawNewerSummary ? Math.max(1, latestTurnsSinceUpdate + 1) : count,
+                    ...(continuationCapsuleToSave ? { continuationCapsule: continuationCapsuleToSave } : {}),
+                  });
+                } catch (err) {
+                  params.log?.warn({ err, sessionKey }, 'discord:summary counter-progress save failed');
+                }
+              })();
             }
           }
 
@@ -3732,6 +3787,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             updatedAt: savedAt,
             regeneratedAt: savedAt,
             turnsSinceUpdate: 0,
+            ...(work.continuationCapsule ? { continuationCapsule: work.continuationCapsule } : {}),
           });
 
           if (params.summaryToDurableEnabled && (!isBotMessage || params.botMessageMemoryWriteEnabled)) {
