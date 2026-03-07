@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { ChannelType } from 'discord.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import {
   SPAWN_ACTION_TYPES,
   executeSpawnAction,
@@ -112,11 +112,16 @@ vi.mock('./transport-client.js', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeMockChannel() {
+function makeMockChannel(overrides?: { permissionsBitfield?: bigint }) {
+  const permissionsBitfield = overrides?.permissionsBitfield
+    ?? (PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages | PermissionFlagsBits.SendMessagesInThreads);
   return {
     id: 'ch-general',
     name: 'general',
     type: ChannelType.GuildText,
+    permissionsFor: vi.fn(() => ({
+      has: (perm: bigint) => (permissionsBitfield & perm) === perm,
+    })),
     send: vi.fn(async () => ({ id: 'sent-1' })),
   };
 }
@@ -284,6 +289,28 @@ describe('executeSpawnAction', () => {
       if (!result.ok) {
         expect(result.error).toContain('forum');
       }
+    });
+
+    it('denies spawnAgent when requester cannot access the target channel', async () => {
+      const runtime = makeRuntime([{ type: 'text_delta', text: 'Agent output' }, { type: 'done' }]);
+      const channel = makeMockChannel({
+        permissionsBitfield: PermissionFlagsBits.ViewChannel,
+      });
+      const ctx = makeCtx(channel);
+      ctx.requesterId = 'user-1';
+      (ctx.guild as any).members = {
+        fetch: vi.fn(async () => ({ id: 'user-1' })),
+      };
+
+      const result = await executeSpawnAction(
+        { type: 'spawnAgent', channel: 'general', prompt: 'Do something' },
+        ctx,
+        makeSpawnCtx({ runtime }),
+      );
+
+      expect(result).toEqual({ ok: false, error: 'Permission denied for spawnAgent' });
+      expect(runtime.invoke).not.toHaveBeenCalled();
+      expect(channel.send).not.toHaveBeenCalled();
     });
 
     it('blocks at recursion depth >= 1', async () => {
@@ -923,6 +950,40 @@ describe('executeSpawnAction — action parsing', () => {
     expect(channel.send).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining('Failed: Missing permissions') }),
     );
+  });
+
+  it('forwards requesterId into spawned action execution context', async () => {
+    const runtime = makeRuntime([
+      { type: 'text_delta', text: 'Agent text' },
+      { type: 'done' },
+    ]);
+
+    mockParseDiscordActions.mockReturnValueOnce({
+      cleanText: 'Agent text',
+      actions: [{ type: 'sendMessage', channel: 'general', content: 'hello' } as any],
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecuteDiscordActions.mockResolvedValueOnce([{ ok: true, summary: 'sent' }]);
+
+    const channel = makeMockChannel();
+    const ctx = makeCtx(channel);
+    ctx.requesterId = 'user-1';
+    (ctx.guild as any).members = {
+      fetch: vi.fn(async () => ({ id: 'user-1' })),
+    };
+
+    await executeSpawnAction(
+      { type: 'spawnAgent', channel: 'general', prompt: 'Create message' },
+      ctx,
+      makeSpawnCtx({ runtime, actionFlags: makeActionFlags() }),
+    );
+
+    const actCtx = mockExecuteDiscordActions.mock.calls[0]?.[1];
+    expect(actCtx).toEqual(expect.objectContaining({
+      requesterId: 'user-1',
+      channelId: 'ch-general',
+    }));
   });
 
   it('does not parse action blocks inside code fences', async () => {

@@ -1,4 +1,6 @@
-import type { ActionContext, ActionCategoryFlags, DiscordActionResult } from './actions.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
+import type { GuildMember } from 'discord.js';
+import type { ActionContext, ActionCategoryFlags, DiscordActionResult, RequesterMemberContext } from './actions.js';
 import { appendActionResults, buildTieredDiscordActionsPromptSection, executeDiscordActions, parseDiscordActions } from './actions.js';
 import { DiscordTransportClient } from './transport-client.js';
 import { fmtTime, resolveChannel } from './action-utils.js';
@@ -39,6 +41,8 @@ type ThreadChannelShape = {
   isThread?: () => boolean;
   parentId?: unknown;
 };
+
+const REQUESTER_DENY_ALL = { __requesterDenyAll: true } as const;
 
 type DeferredRunnerState = {
   allowChannelIds?: Set<string>;
@@ -93,6 +97,42 @@ function getThreadParentId(candidate: unknown): string | null {
   if (!isThread) return null;
   if (channel.parentId === null || channel.parentId === undefined) return null;
   return String(channel.parentId);
+}
+
+function isRequesterDenyAll(
+  requesterMember: RequesterMemberContext,
+): requesterMember is typeof REQUESTER_DENY_ALL {
+  return Boolean(requesterMember && typeof requesterMember === 'object' && '__requesterDenyAll' in requesterMember);
+}
+
+async function resolveRequesterMember(context: ActionContext): Promise<RequesterMemberContext> {
+  if (!context.requesterId) return undefined;
+  const fetchRequester = (context.guild.members as { fetch?: (userId: string) => Promise<GuildMember> })?.fetch;
+  if (typeof fetchRequester !== 'function') return undefined;
+  return fetchRequester.call(context.guild.members, context.requesterId).catch(() => REQUESTER_DENY_ALL);
+}
+
+function threadSendPermissionFor(channelType: ChannelType | undefined): bigint {
+  return (
+    channelType === ChannelType.PublicThread
+    || channelType === ChannelType.PrivateThread
+    || channelType === ChannelType.AnnouncementThread
+  )
+    ? PermissionFlagsBits.SendMessagesInThreads
+    : PermissionFlagsBits.SendMessages;
+}
+
+function requesterCanAccessTargetChannel(
+  channel: unknown,
+  requesterMember: Exclude<RequesterMemberContext, typeof REQUESTER_DENY_ALL | undefined>,
+): boolean {
+  if (!channel || typeof channel !== 'object') return false;
+  if (!('permissionsFor' in channel) || typeof channel.permissionsFor !== 'function') return false;
+  const resolved = channel.permissionsFor(requesterMember);
+  const channelType = 'type' in channel ? channel.type as ChannelType | undefined : undefined;
+  return Boolean(
+    resolved?.has?.(PermissionFlagsBits.ViewChannel | threadSendPermissionFor(channelType)),
+  );
 }
 
 function buildDeferredActionFlags(state: DeferredRunnerState, depth: number, maxDepth: number): ActionCategoryFlags {
@@ -152,6 +192,19 @@ export function configureDeferredScheduler(
     }
 
     const threadParentId = getThreadParentId(channel);
+    const requesterMember = await resolveRequesterMember(context);
+    if (
+      isRequesterDenyAll(requesterMember)
+      || (requesterMember && !requesterCanAccessTargetChannel(channel, requesterMember))
+    ) {
+      opts.log?.warn({ flow: 'defer', channelId: channel.id, requesterId: context.requesterId }, 'defer:target channel permission denied');
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      opts.status?.handlerError(
+        { sessionKey: `defer:${channel.id}` },
+        `deferred run skipped: requester lacks permission for channel ${channel.id}`,
+      );
+      return;
+    }
     const channelCtx = resolveDiscordChannelContext({
       ctx: opts.discordChannelContext,
       isDm: false,
@@ -317,6 +370,7 @@ export function configureDeferredScheduler(
       client: context.client,
       channelId: channel.id,
       messageId: `defer-${Date.now()}`,
+      requesterId: context.requesterId,
       threadParentId,
       deferScheduler: context.deferScheduler,
       deferDepth,

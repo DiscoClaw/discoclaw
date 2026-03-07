@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import { globalMetrics } from '../observability/metrics.js';
 import type { EngineEvent } from '../runtime/types.js';
 import { configureDeferredScheduler } from './deferred-runner.js';
@@ -484,6 +485,49 @@ describe('deferred-runner observability', () => {
     expect(actCtx.deferDepth).toBe(3);
   });
 
+  it('actCtx carries requesterId from incoming context', async () => {
+    const { parseDiscordActions, executeDiscordActions } = await import('./actions.js');
+    const { resolveChannel } = await import('./action-utils.js');
+    const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
+    const mockExecute = executeDiscordActions as ReturnType<typeof vi.fn>;
+    mockParse.mockClear();
+    mockExecute.mockClear();
+    (resolveChannel as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      id: 'ch-1',
+      name: 'general',
+      type: ChannelType.GuildText,
+      permissionsFor: vi.fn(() => ({
+        has: (perm: bigint) => (
+          (PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages) & perm
+        ) === perm,
+      })),
+      send: vi.fn(async () => ({})),
+    });
+
+    mockParse.mockReturnValue({
+      actions: [{ type: 'searchMessages', query: 'secret' }],
+      cleanText: '',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    mockExecute.mockResolvedValue([{ ok: true, summary: 'searched' }]);
+
+    const opts = makeOpts({
+      state: { ...makeState(), discordActionsEnabled: true, discordActionsGuild: true },
+    });
+    const scheduler = configureDeferredScheduler(opts);
+    const ctx = { ...makeContext(), requesterId: 'user-1' };
+    (ctx.guild as any).members = {
+      fetch: vi.fn(async () => ({ id: 'user-1' })),
+    };
+
+    scheduler.schedule({ action: makeAction(), context: ctx as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const actCtx = mockExecute.mock.calls[0][1];
+    expect(actCtx.requesterId).toBe('user-1');
+  });
+
   it('missing guild posts status notice via handlerError', async () => {
     const status = makeStatusPoster();
     const opts = makeOpts({ status });
@@ -531,6 +575,48 @@ describe('deferred-runner observability', () => {
       { sessionKey: 'defer:ch-1' },
       'deferred run skipped: channel ch-1 not in allowlist',
     );
+  });
+
+  it('skips deferred run when requester lacks permission for the target channel', async () => {
+    const { resolveChannel } = await import('./action-utils.js');
+    const channel = {
+      id: 'ch-1',
+      name: 'general',
+      type: ChannelType.GuildText,
+      permissionsFor: vi.fn(() => ({
+        has: (perm: bigint) => (PermissionFlagsBits.ViewChannel & perm) === perm,
+      })),
+      send: vi.fn(async () => ({})),
+    };
+    (resolveChannel as ReturnType<typeof vi.fn>).mockReturnValueOnce(channel);
+
+    const invokeSpy = vi.fn();
+    const runtime = {
+      id: 'test',
+      capabilities: new Set() as ReadonlySet<never>,
+      invoke: vi.fn(async function* () {
+        invokeSpy();
+        yield { type: 'text_final', text: 'ok' } as EngineEvent;
+        yield { type: 'done' } as EngineEvent;
+      }),
+    };
+    const status = makeStatusPoster();
+    const opts = makeOpts({ runtime, status });
+    const scheduler = configureDeferredScheduler(opts);
+    const ctx = { ...makeContext(), requesterId: 'user-1' };
+    (ctx.guild as any).members = {
+      fetch: vi.fn(async () => ({ id: 'user-1' })),
+    };
+
+    scheduler.schedule({ action: makeAction(), context: ctx as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(status.handlerError).toHaveBeenCalledWith(
+      { sessionKey: 'defer:ch-1' },
+      'deferred run skipped: requester lacks permission for channel ch-1',
+    );
+    expect(invokeSpy).not.toHaveBeenCalled();
+    expect(channel.send).not.toHaveBeenCalled();
   });
 
   it('empty output logs a warning', async () => {

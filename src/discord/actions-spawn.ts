@@ -1,4 +1,6 @@
-import type { DiscordActionResult, ActionContext, ActionCategoryFlags, SubsystemContexts } from './actions.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
+import type { GuildMember } from 'discord.js';
+import type { DiscordActionResult, ActionContext, ActionCategoryFlags, RequesterMemberContext, SubsystemContexts } from './actions.js';
 import { parseDiscordActions, executeDiscordActions, appendActionResults } from './actions.js';
 import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
 import { DiscordTransportClient } from './transport-client.js';
@@ -26,6 +28,7 @@ import {
 // ---------------------------------------------------------------------------
 
 let spawnCounter = 0;
+const REQUESTER_DENY_ALL = { __requesterDenyAll: true } as const;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,6 +67,42 @@ export type SpawnContext = {
   limiter?: ConcurrencyLimiter;
 };
 
+function isRequesterDenyAll(
+  requesterMember: RequesterMemberContext,
+): requesterMember is typeof REQUESTER_DENY_ALL {
+  return Boolean(requesterMember && typeof requesterMember === 'object' && '__requesterDenyAll' in requesterMember);
+}
+
+async function resolveRequesterMember(ctx: ActionContext): Promise<RequesterMemberContext> {
+  if (!ctx.requesterId) return undefined;
+  const fetchRequester = (ctx.guild.members as { fetch?: (userId: string) => Promise<GuildMember> })?.fetch;
+  if (typeof fetchRequester !== 'function') return undefined;
+  return fetchRequester.call(ctx.guild.members, ctx.requesterId).catch(() => REQUESTER_DENY_ALL);
+}
+
+function threadSendPermissionFor(channelType: ChannelType | undefined): bigint {
+  return (
+    channelType === ChannelType.PublicThread
+    || channelType === ChannelType.PrivateThread
+    || channelType === ChannelType.AnnouncementThread
+  )
+    ? PermissionFlagsBits.SendMessagesInThreads
+    : PermissionFlagsBits.SendMessages;
+}
+
+function requesterCanAccessTargetChannel(
+  channel: unknown,
+  requesterMember: Exclude<RequesterMemberContext, typeof REQUESTER_DENY_ALL | undefined>,
+): boolean {
+  if (!channel || typeof channel !== 'object') return false;
+  if (!('permissionsFor' in channel) || typeof channel.permissionsFor !== 'function') return false;
+  const resolved = channel.permissionsFor(requesterMember);
+  const channelType = 'type' in channel ? channel.type as ChannelType | undefined : undefined;
+  return Boolean(
+    resolved?.has?.(PermissionFlagsBits.ViewChannel | threadSendPermissionFor(channelType)),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Single executor
 // ---------------------------------------------------------------------------
@@ -96,6 +135,13 @@ export async function executeSpawnAction(
           return { ok: false, error: `spawnAgent: "${action.channel}" is a ${kind} channel (use a text channel)` };
         }
         return { ok: false, error: `spawnAgent: channel "${action.channel}" not found` };
+      }
+      const requesterMember = await resolveRequesterMember(ctx);
+      if (
+        isRequesterDenyAll(requesterMember)
+        || (requesterMember && !requesterCanAccessTargetChannel(targetChannel, requesterMember))
+      ) {
+        return { ok: false, error: 'Permission denied for spawnAgent' };
       }
 
       const label = action.label?.trim() || 'agent';
@@ -184,6 +230,7 @@ export async function executeSpawnAction(
             client: ctx.client,
             channelId: targetChannel.id,
             messageId: `spawn-${Date.now()}`,
+            requesterId: ctx.requesterId,
             deferScheduler: spawnCtx.deferScheduler,
             transport: new DiscordTransportClient(ctx.guild, ctx.client),
             confirmation: { mode: 'automated' },
