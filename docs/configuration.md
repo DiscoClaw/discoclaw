@@ -25,6 +25,8 @@ On first run, `models.json` is scaffolded from built-in defaults. `!models set .
 
 Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as startup fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
 
+For the operator workflow that explains startup defaults vs. overrides, install-mode detection, and safe adapter/model switching, see [docs/runtime-switching.md](runtime-switching.md).
+
 ## Runtime
 
 | Variable | Default | Description |

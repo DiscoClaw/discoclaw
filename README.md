@@ -117,6 +117,8 @@ Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (defau
 
 The `!models` command lets you view and swap AI models per role at runtime — no restart needed. Changes are persisted to `models.json` under the data dir and survive restarts.
 
+For the full operator guide to install-mode detection, persistent adapter switches, fast/voice runtime behavior, and `!models reset` semantics, see [docs/runtime-switching.md](docs/runtime-switching.md).
+
 **Roles:** `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`
 
 | Command | Description |
@@ -240,6 +242,7 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 ### Operations
 
 - [Configuration reference](docs/configuration.md) — all environment variables indexed by category
+- [Runtime/model switching](docs/runtime-switching.md) — operator guide for switching adapters, models, and defaults safely
 - [Webhook exposure](docs/webhook-exposure.md) — tunnel/proxy setup and webhook security
 - [Data migration](docs/data-migration.md) — migrating task data between formats
 
