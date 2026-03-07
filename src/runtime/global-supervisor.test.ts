@@ -7,6 +7,7 @@ import {
   parseGlobalSupervisorBail,
   withGlobalSupervisor,
 } from './global-supervisor.js';
+import { normalizeRuntimeFailure } from './runtime-failure.js';
 import type { EngineEvent, RuntimeAdapter, RuntimeInvokeParams } from './types.js';
 
 async function collectEvents(iter: AsyncIterable<EngineEvent>): Promise<EngineEvent[]> {
@@ -32,9 +33,10 @@ function extractAudit(events: EngineEvent[]): Array<Record<string, unknown>> {
 function findBailError(events: EngineEvent[]): string | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const evt = events[i];
-    if (evt?.type === 'error' && evt.message.startsWith(`${GLOBAL_SUPERVISOR_BAIL_PREFIX} `)) {
+    if (evt?.type === 'error' && evt.failure?.source === 'global_supervisor') {
       return evt.message;
     }
+    if (evt?.type === 'error' && normalizeRuntimeFailure(evt.message).source === 'global_supervisor') return evt.message;
   }
   return null;
 }

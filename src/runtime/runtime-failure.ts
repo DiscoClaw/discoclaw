@@ -50,7 +50,23 @@ export type RuntimeFailureCode =
   | 'GLOBAL_SUPERVISOR_BAIL'
   | 'UNKNOWN';
 
-type RuntimeFailureBase = {
+export type RuntimeFailureMetadata = {
+  operation?: string;
+  ok?: false;
+  failureCodeVersion?: string | null;
+  failureCode?: PipelineFailureCode | null;
+  details?: Record<string, unknown>;
+  reason?: GlobalSupervisorBailReason;
+  cycle?: number;
+  retriesUsed?: number;
+  escalationLevel?: number;
+  failureKind?: GlobalSupervisorFailureKind;
+  signature?: string;
+  lastError?: string | null;
+  limits?: GlobalSupervisorLimits;
+};
+
+export type RuntimeFailure = {
   envelope: typeof RUNTIME_FAILURE_ENVELOPE;
   envelopeVersion: typeof RUNTIME_FAILURE_VERSION;
   source: 'runtime' | 'pipeline_tool' | 'global_supervisor';
@@ -59,33 +75,8 @@ type RuntimeFailureBase = {
   rawMessage: string;
   userMessage: string;
   retryable: boolean | null;
+  metadata: RuntimeFailureMetadata;
 };
-
-export type RuntimeFailure =
-  | (RuntimeFailureBase & {
-      source: 'runtime';
-      details?: Record<string, unknown>;
-    })
-  | (RuntimeFailureBase & {
-      source: 'pipeline_tool';
-      operation: string;
-      ok: false;
-      failureCodeVersion: string | null;
-      failureCode: PipelineFailureCode | null;
-      details: Record<string, unknown>;
-    })
-  | (RuntimeFailureBase & {
-      source: 'global_supervisor';
-      reason: GlobalSupervisorBailReason;
-      cycle: number;
-      retriesUsed: number;
-      escalationLevel: number;
-      failureKind: GlobalSupervisorFailureKind;
-      retryable: boolean;
-      signature: string;
-      lastError: string | null;
-      limits: GlobalSupervisorLimits;
-    });
 
 export type RuntimeFailureEvent = {
   type: 'runtime_failure';
@@ -97,6 +88,7 @@ export type RuntimeFailureInputEvent =
   | {
       type: 'error';
       message: string;
+      failure?: RuntimeFailure;
     };
 
 type LegacyPipelineFailurePayload = {
@@ -119,6 +111,35 @@ type LegacyGlobalSupervisorBailPayload = {
   signature: string;
   lastError: string | null;
   limits: GlobalSupervisorLimits;
+};
+
+type RuntimeFailureInit = Omit<RuntimeFailure, 'envelope' | 'envelopeVersion' | 'metadata'> & {
+  metadata?: RuntimeFailureMetadata;
+};
+
+type PipelineToolRuntimeFailureInit = {
+  operation: string;
+  code: PipelineFailureCode | 'UNKNOWN';
+  message: string;
+  rawMessage?: string;
+  userMessage?: string;
+  retryable?: boolean | null;
+  failureCodeVersion?: string | null;
+  failureCode?: PipelineFailureCode | null;
+  details?: Record<string, unknown>;
+};
+
+type GlobalSupervisorRuntimeFailureInit = {
+  reason: GlobalSupervisorBailReason;
+  cycle: number;
+  retriesUsed: number;
+  escalationLevel: number;
+  failureKind: GlobalSupervisorFailureKind;
+  retryable: boolean;
+  signature: string;
+  lastError: string | null;
+  limits: GlobalSupervisorLimits;
+  rawMessage?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -147,40 +168,207 @@ function defaultUnknownMessage(raw: string): string {
   return raw ? `Runtime error: ${raw}` : 'An unexpected runtime error occurred with no additional detail.';
 }
 
-function buildRuntimeFailure(
-  partial: Omit<Extract<RuntimeFailure, { source: 'runtime' }>, 'envelope' | 'envelopeVersion'>,
-): Extract<RuntimeFailure, { source: 'runtime' }> {
+function normalizeMetadata(metadata: RuntimeFailureMetadata | undefined): RuntimeFailureMetadata {
+  const out: RuntimeFailureMetadata = {};
+  if (!metadata) return out;
+
+  if (typeof metadata.operation === 'string' && metadata.operation.trim() !== '') {
+    out.operation = metadata.operation;
+  }
+  if (metadata.ok === false) {
+    out.ok = false;
+  }
+  if (metadata.failureCodeVersion === null || typeof metadata.failureCodeVersion === 'string') {
+    out.failureCodeVersion = metadata.failureCodeVersion;
+  }
+  if (metadata.failureCode === null || isPipelineFailureCode(metadata.failureCode)) {
+    out.failureCode = metadata.failureCode;
+  }
+  if (isRecord(metadata.details)) {
+    out.details = metadata.details;
+  }
+  if (isGlobalSupervisorBailReason(metadata.reason)) {
+    out.reason = metadata.reason;
+  }
+  if (typeof metadata.cycle === 'number' && Number.isFinite(metadata.cycle)) {
+    out.cycle = metadata.cycle;
+  }
+  if (typeof metadata.retriesUsed === 'number' && Number.isFinite(metadata.retriesUsed)) {
+    out.retriesUsed = metadata.retriesUsed;
+  }
+  if (typeof metadata.escalationLevel === 'number' && Number.isFinite(metadata.escalationLevel)) {
+    out.escalationLevel = metadata.escalationLevel;
+  }
+  if (isGlobalSupervisorFailureKind(metadata.failureKind)) {
+    out.failureKind = metadata.failureKind;
+  }
+  if (typeof metadata.signature === 'string' && metadata.signature.trim() !== '') {
+    out.signature = metadata.signature;
+  }
+  if (metadata.lastError === null || typeof metadata.lastError === 'string') {
+    out.lastError = metadata.lastError;
+  }
+  if (isGlobalSupervisorLimits(metadata.limits)) {
+    out.limits = {
+      maxCycles: normalizeFiniteNumber(metadata.limits.maxCycles),
+      maxRetries: normalizeFiniteNumber(metadata.limits.maxRetries),
+      maxEscalationLevel: normalizeFiniteNumber(metadata.limits.maxEscalationLevel),
+      maxTotalEvents: normalizeFiniteNumber(metadata.limits.maxTotalEvents),
+      maxWallTimeMs: normalizeFiniteNumber(metadata.limits.maxWallTimeMs),
+    };
+  }
+
+  return out;
+}
+
+function getLegacyFailureMetadata(value: Record<string, unknown>): RuntimeFailureMetadata {
+  const metadata: RuntimeFailureMetadata = isRecord(value['metadata'])
+    ? normalizeMetadata(value['metadata'] as RuntimeFailureMetadata)
+    : {};
+
+  if (metadata.operation === undefined && typeof value['operation'] === 'string') {
+    metadata.operation = value['operation'];
+  }
+  if (metadata.ok === undefined && value['ok'] === false) {
+    metadata.ok = false;
+  }
+  if (
+    metadata.failureCodeVersion === undefined
+    && (value['failureCodeVersion'] === null || typeof value['failureCodeVersion'] === 'string')
+  ) {
+    metadata.failureCodeVersion = value['failureCodeVersion'] as string | null;
+  }
+  if (
+    metadata.failureCode === undefined
+    && (value['failureCode'] === null || isPipelineFailureCode(value['failureCode']))
+  ) {
+    metadata.failureCode = value['failureCode'] as PipelineFailureCode | null;
+  }
+  if (metadata.details === undefined && isRecord(value['details'])) {
+    metadata.details = value['details'] as Record<string, unknown>;
+  }
+
+  if (metadata.reason === undefined && isGlobalSupervisorBailReason(value['reason'])) {
+    metadata.reason = value['reason'];
+  }
+  if (metadata.cycle === undefined && typeof value['cycle'] === 'number') {
+    metadata.cycle = value['cycle'];
+  }
+  if (metadata.retriesUsed === undefined && typeof value['retriesUsed'] === 'number') {
+    metadata.retriesUsed = value['retriesUsed'];
+  }
+  if (metadata.escalationLevel === undefined && typeof value['escalationLevel'] === 'number') {
+    metadata.escalationLevel = value['escalationLevel'];
+  }
+  if (metadata.failureKind === undefined && isGlobalSupervisorFailureKind(value['failureKind'])) {
+    metadata.failureKind = value['failureKind'];
+  }
+  if (metadata.signature === undefined && typeof value['signature'] === 'string') {
+    metadata.signature = value['signature'];
+  }
+  if (metadata.lastError === undefined && (value['lastError'] === null || typeof value['lastError'] === 'string')) {
+    metadata.lastError = value['lastError'] as string | null;
+  }
+  if (metadata.limits === undefined && isGlobalSupervisorLimits(value['limits'])) {
+    metadata.limits = {
+      maxCycles: normalizeFiniteNumber(value['limits']['maxCycles']),
+      maxRetries: normalizeFiniteNumber(value['limits']['maxRetries']),
+      maxEscalationLevel: normalizeFiniteNumber(value['limits']['maxEscalationLevel']),
+      maxTotalEvents: normalizeFiniteNumber(value['limits']['maxTotalEvents']),
+      maxWallTimeMs: normalizeFiniteNumber(value['limits']['maxWallTimeMs']),
+    };
+  }
+
+  return metadata;
+}
+
+export function createRuntimeFailure(partial: RuntimeFailureInit): RuntimeFailure {
   return {
     envelope: RUNTIME_FAILURE_ENVELOPE,
     envelopeVersion: RUNTIME_FAILURE_VERSION,
-    ...partial,
+    source: partial.source,
+    code: partial.code,
+    message: partial.message,
+    rawMessage: partial.rawMessage,
+    userMessage: partial.userMessage,
+    retryable: partial.retryable,
+    metadata: normalizeMetadata(partial.metadata),
   };
 }
 
-function buildPipelineFailure(
-  partial: Omit<Extract<RuntimeFailure, { source: 'pipeline_tool' }>, 'envelope' | 'envelopeVersion'>,
-): Extract<RuntimeFailure, { source: 'pipeline_tool' }> {
-  return {
-    envelope: RUNTIME_FAILURE_ENVELOPE,
-    envelopeVersion: RUNTIME_FAILURE_VERSION,
-    ...partial,
-  };
+export function createPipelineToolRuntimeFailure(
+  partial: PipelineToolRuntimeFailureInit,
+): RuntimeFailure {
+  const message = String(partial.message ?? '').trim() || 'Pipeline tool failed.';
+  const rawMessage = partial.rawMessage ?? message;
+  return createRuntimeFailure({
+    source: 'pipeline_tool',
+    code: partial.code,
+    message,
+    rawMessage,
+    userMessage: partial.userMessage ?? defaultUnknownMessage(message),
+    retryable: partial.retryable ?? null,
+    metadata: {
+      operation: partial.operation,
+      ok: false,
+      failureCodeVersion: partial.failureCodeVersion ?? null,
+      failureCode: partial.failureCode ?? (partial.code === 'UNKNOWN' ? null : partial.code),
+      details: partial.details,
+    },
+  });
 }
 
-function buildGlobalSupervisorFailure(
-  partial: Omit<Extract<RuntimeFailure, { source: 'global_supervisor' }>, 'envelope' | 'envelopeVersion'>,
-): Extract<RuntimeFailure, { source: 'global_supervisor' }> {
-  return {
-    envelope: RUNTIME_FAILURE_ENVELOPE,
-    envelopeVersion: RUNTIME_FAILURE_VERSION,
-    ...partial,
-  };
+function buildGlobalSupervisorUserMessage(payload: {
+  reason: GlobalSupervisorBailReason;
+  failureKind: GlobalSupervisorFailureKind;
+}): string {
+  switch (payload.reason) {
+    case 'deterministic_retry_blocked':
+      return 'The global runtime supervisor stopped after the same failure repeated. Try a different strategy before retrying.';
+    case 'max_cycles_exceeded':
+      return 'The global runtime supervisor stopped after reaching its maximum recovery cycles.';
+    case 'max_retries_exceeded':
+      return 'The global runtime supervisor exhausted its retry budget before the runtime recovered.';
+    case 'max_wall_time_exceeded':
+      return 'The global runtime supervisor stopped after exceeding its wall-time limit.';
+    case 'max_events_exceeded':
+      return 'The global runtime supervisor stopped after the runtime emitted too many events.';
+    case 'non_retryable_failure':
+      if (payload.failureKind === 'aborted') {
+        return 'The runtime was aborted before it could finish.';
+      }
+      return 'The global runtime supervisor stopped because the failure was not retryable.';
+  }
+}
+
+export function createGlobalSupervisorRuntimeFailure(
+  partial: GlobalSupervisorRuntimeFailureInit,
+): RuntimeFailure {
+  const message = partial.lastError ?? `Global supervisor bailout: ${partial.reason}`;
+  return createRuntimeFailure({
+    source: 'global_supervisor',
+    code: 'GLOBAL_SUPERVISOR_BAIL',
+    message,
+    rawMessage: partial.rawMessage ?? message,
+    userMessage: buildGlobalSupervisorUserMessage(partial),
+    retryable: partial.retryable,
+    metadata: {
+      reason: partial.reason,
+      cycle: partial.cycle,
+      retriesUsed: partial.retriesUsed,
+      escalationLevel: partial.escalationLevel,
+      failureKind: partial.failureKind,
+      signature: partial.signature,
+      lastError: partial.lastError,
+      limits: partial.limits,
+    },
+  });
 }
 
 function classifyPipelineFailure(
   payload: LegacyPipelineFailurePayload,
   rawMessage: string,
-): Extract<RuntimeFailure, { source: 'pipeline_tool' }> {
+): RuntimeFailure {
   const code = payload.failure_code ?? null;
   const message = String(payload.message ?? '').trim() || 'Pipeline tool failed.';
   const {
@@ -220,15 +408,13 @@ function classifyPipelineFailure(
       break;
   }
 
-  return buildPipelineFailure({
-    source: 'pipeline_tool',
+  return createPipelineToolRuntimeFailure({
+    operation: payload.operation,
     code: code ?? 'UNKNOWN',
     message,
     rawMessage,
     userMessage,
     retryable,
-    operation: payload.operation,
-    ok: false,
     failureCodeVersion: payload.failure_code_version ?? null,
     failureCode: code,
     details,
@@ -293,65 +479,32 @@ function isLegacyGlobalSupervisorBailPayload(value: unknown): value is LegacyGlo
     && isGlobalSupervisorLimits(value['limits']);
 }
 
-function buildGlobalSupervisorUserMessage(payload: LegacyGlobalSupervisorBailPayload): string {
-  switch (payload.reason) {
-    case 'deterministic_retry_blocked':
-      return 'The global runtime supervisor stopped after the same failure repeated. Try a different strategy before retrying.';
-    case 'max_cycles_exceeded':
-      return 'The global runtime supervisor stopped after reaching its maximum recovery cycles.';
-    case 'max_retries_exceeded':
-      return 'The global runtime supervisor exhausted its retry budget before the runtime recovered.';
-    case 'max_wall_time_exceeded':
-      return 'The global runtime supervisor stopped after exceeding its wall-time limit.';
-    case 'max_events_exceeded':
-      return 'The global runtime supervisor stopped after the runtime emitted too many events.';
-    case 'non_retryable_failure':
-      if (payload.failureKind === 'aborted') {
-        return 'The runtime was aborted before it could finish.';
-      }
-      if (payload.failureKind === 'hard_error') {
-        return 'The global runtime supervisor stopped because the failure was not retryable.';
-      }
-      return 'The global runtime supervisor stopped because the failure was not retryable.';
-  }
-}
-
 function classifyGlobalSupervisorFailure(
   payload: LegacyGlobalSupervisorBailPayload,
   rawMessage: string,
-): Extract<RuntimeFailure, { source: 'global_supervisor' }> {
-  return buildGlobalSupervisorFailure({
-    source: 'global_supervisor',
-    code: 'GLOBAL_SUPERVISOR_BAIL',
-    message: payload.lastError ?? `Global supervisor bailout: ${payload.reason}`,
-    rawMessage,
-    userMessage: buildGlobalSupervisorUserMessage(payload),
-    retryable: payload.retryable,
+): RuntimeFailure {
+  return createGlobalSupervisorRuntimeFailure({
     reason: payload.reason,
     cycle: payload.cycle,
     retriesUsed: payload.retriesUsed,
     escalationLevel: payload.escalationLevel,
     failureKind: payload.failureKind,
+    retryable: payload.retryable,
     signature: payload.signature,
     lastError: payload.lastError,
-    limits: {
-      maxCycles: normalizeFiniteNumber(payload.limits.maxCycles),
-      maxRetries: normalizeFiniteNumber(payload.limits.maxRetries),
-      maxEscalationLevel: normalizeFiniteNumber(payload.limits.maxEscalationLevel),
-      maxTotalEvents: normalizeFiniteNumber(payload.limits.maxTotalEvents),
-      maxWallTimeMs: normalizeFiniteNumber(payload.limits.maxWallTimeMs),
-    },
+    limits: payload.limits,
+    rawMessage,
   });
 }
 
-function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, { source: 'runtime' }> {
+function classifyRawRuntimeFailure(rawMessage: string): RuntimeFailure {
   const message = sanitizeRawMessage(rawMessage);
   const lc = message.toLowerCase();
   const mentionsClaude = lc.includes('claude');
   const mentionsGemini = lc.includes('gemini');
 
   if (lc.includes('timed out')) {
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'RUNTIME_TIMEOUT',
       message,
@@ -362,7 +515,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
   }
 
   if (lc.includes('missing permissions') || lc.includes('missing access')) {
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'DISCORD_MISSING_PERMISSIONS',
       message,
@@ -374,7 +527,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
   }
 
   if (mentionsClaude && (lc.includes('not found') || lc.includes('enoent') || lc.includes('spawn'))) {
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'CLAUDE_CLI_NOT_FOUND',
       message,
@@ -385,7 +538,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
   }
 
   if (mentionsGemini && (lc.includes('not found') || lc.includes('enoent') || lc.includes('spawn'))) {
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'GEMINI_CLI_NOT_FOUND',
       message,
@@ -396,7 +549,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
   }
 
   if (mentionsGemini && (lc.includes('unauthorized') || lc.includes('authentication') || lc.includes('not logged in'))) {
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'GEMINI_AUTH_MISSING',
       message,
@@ -407,7 +560,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
   }
 
   if (lc.includes('unauthorized') || lc.includes('authentication') || lc.includes('not logged in')) {
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'CLAUDE_AUTH_MISSING',
       message,
@@ -433,7 +586,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
         })()
       : 'The runtime stream stalled (no output received). This may indicate a network issue or API hang. Try again or increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS.';
 
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'STREAM_STALL',
       message,
@@ -444,7 +597,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
   }
 
   if (lc.includes('configuration error: missing required channel context')) {
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'CHANNEL_CONTEXT_MISSING',
       message,
@@ -456,7 +609,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
   }
 
   if (lc.includes('prompt is too long') || lc.includes('context length exceeded') || lc.includes('context_length_exceeded')) {
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'CONTEXT_LIMIT_EXCEEDED',
       message,
@@ -467,7 +620,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
   }
 
   if (lc.includes('tool_use.name') && lc.includes('at most 200 characters')) {
-    return buildRuntimeFailure({
+    return createRuntimeFailure({
       source: 'runtime',
       code: 'MCP_TOOL_NAME_TOO_LONG',
       message,
@@ -478,7 +631,7 @@ function classifyRawRuntimeFailure(rawMessage: string): Extract<RuntimeFailure, 
     });
   }
 
-  return buildRuntimeFailure({
+  return createRuntimeFailure({
     source: 'runtime',
     code: 'UNKNOWN',
     message,
@@ -499,49 +652,16 @@ function isRuntimeFailure(value: unknown): value is RuntimeFailure {
 }
 
 function normalizeExistingRuntimeFailure(value: RuntimeFailure): RuntimeFailure {
-  if (value.source === 'runtime') {
-    return buildRuntimeFailure({
-      source: 'runtime',
-      code: value.code,
-      message: value.message,
-      rawMessage: value.rawMessage,
-      userMessage: value.userMessage,
-      retryable: value.retryable,
-      details: value.details,
-    });
-  }
-
-  if (value.source === 'pipeline_tool') {
-    return buildPipelineFailure({
-      source: 'pipeline_tool',
-      code: value.code,
-      message: value.message,
-      rawMessage: value.rawMessage,
-      userMessage: value.userMessage,
-      retryable: value.retryable,
-      operation: value.operation,
-      ok: false,
-      failureCodeVersion: value.failureCodeVersion,
-      failureCode: value.failureCode,
-      details: value.details,
-    });
-  }
-
-  return buildGlobalSupervisorFailure({
-    source: 'global_supervisor',
+  const source = value.source;
+  const metadata = getLegacyFailureMetadata(value as unknown as Record<string, unknown>);
+  return createRuntimeFailure({
+    source,
     code: value.code,
     message: value.message,
     rawMessage: value.rawMessage,
     userMessage: value.userMessage,
     retryable: value.retryable,
-    reason: value.reason,
-    cycle: value.cycle,
-    retriesUsed: value.retriesUsed,
-    escalationLevel: value.escalationLevel,
-    failureKind: value.failureKind,
-    signature: value.signature,
-    lastError: value.lastError,
-    limits: value.limits,
+    metadata,
   });
 }
 
@@ -606,6 +726,9 @@ export function normalizeRuntimeFailure(input: unknown): RuntimeFailure {
 
 export function normalizeRuntimeFailureEvent(event: RuntimeFailureInputEvent): RuntimeFailure {
   if (event.type === 'runtime_failure') {
+    return normalizeRuntimeFailure(event.failure);
+  }
+  if (event.failure) {
     return normalizeRuntimeFailure(event.failure);
   }
   return normalizeRuntimeFailure(event.message);

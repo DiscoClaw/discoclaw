@@ -3,13 +3,26 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeToolCall } from './openai-tool-exec.js';
+import { normalizeRuntimeFailure } from './runtime-failure.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
 let tmpDir: string;
 
 function parseJsonResult(result: string): Record<string, unknown> {
-  return JSON.parse(result) as Record<string, unknown>;
+  const parsed = JSON.parse(result) as Record<string, unknown>;
+  if (parsed['envelope'] === 'runtime_failure') {
+    const failure = normalizeRuntimeFailure(parsed);
+    return {
+      ...parsed,
+      operation: failure.metadata.operation,
+      failure_code_version: failure.metadata.failureCodeVersion,
+      failure_code: failure.metadata.failureCode,
+      details: failure.metadata.details,
+      ...failure.metadata.details,
+    };
+  }
+  return parsed;
 }
 
 beforeEach(async () => {

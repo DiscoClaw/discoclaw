@@ -1,3 +1,5 @@
+import type { RuntimeFailure } from './runtime-failure.js';
+
 export type ImageData = {
   base64: string;
   mediaType: string; // 'image/png', 'image/jpeg', 'image/webp', 'image/gif'
@@ -24,7 +26,8 @@ export type EngineEvent =
   | { type: 'tool_start'; name: string; input?: unknown }
   | { type: 'tool_end'; name: string; output?: unknown; ok: boolean }
   | { type: 'usage'; inputTokens?: number; outputTokens?: number; totalTokens?: number; costUsd?: number }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; failure?: RuntimeFailure }
+  | { type: 'runtime_failure'; failure: RuntimeFailure }
   | { type: 'done' };
 
 export type RuntimeCapability =

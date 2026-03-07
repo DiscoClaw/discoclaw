@@ -1,7 +1,13 @@
 import type { EngineEvent, RuntimeAdapter, RuntimeInvokeParams } from './types.js';
+import {
+  GLOBAL_SUPERVISOR_BAIL_PREFIX as LEGACY_GLOBAL_SUPERVISOR_BAIL_PREFIX,
+  createGlobalSupervisorRuntimeFailure,
+  normalizeRuntimeFailure,
+  serializeRuntimeFailure,
+} from './runtime-failure.js';
 
 export const GLOBAL_SUPERVISOR_ENABLED_ENV = 'DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED';
-export const GLOBAL_SUPERVISOR_BAIL_PREFIX = 'GLOBAL_SUPERVISOR_BAIL';
+export const GLOBAL_SUPERVISOR_BAIL_PREFIX = LEGACY_GLOBAL_SUPERVISOR_BAIL_PREFIX;
 
 export type GlobalSupervisorPhase = 'plan' | 'execute' | 'evaluate' | 'decide';
 export type GlobalSupervisorDecision = 'complete' | 'retry' | 'bail';
@@ -303,6 +309,35 @@ function sleepNoop(_ms: number): Promise<void> {
 }
 
 export function parseGlobalSupervisorBail(message: string): GlobalSupervisorBailHandoff | null {
+  const failure = normalizeRuntimeFailure(message);
+  if (failure.source === 'global_supervisor') {
+    const metadata = failure.metadata;
+    if (
+      metadata.reason
+      && typeof metadata.cycle === 'number'
+      && typeof metadata.retriesUsed === 'number'
+      && typeof metadata.escalationLevel === 'number'
+      && metadata.failureKind
+      && typeof failure.retryable === 'boolean'
+      && typeof metadata.signature === 'string'
+      && (metadata.lastError === null || typeof metadata.lastError === 'string')
+      && metadata.limits
+    ) {
+      return {
+        source: 'global_supervisor',
+        reason: metadata.reason,
+        cycle: metadata.cycle,
+        retriesUsed: metadata.retriesUsed,
+        escalationLevel: metadata.escalationLevel,
+        failureKind: metadata.failureKind,
+        retryable: failure.retryable,
+        signature: metadata.signature,
+        lastError: metadata.lastError ?? null,
+        limits: metadata.limits,
+      };
+    }
+  }
+
   if (!message.startsWith(`${GLOBAL_SUPERVISOR_BAIL_PREFIX} `)) return null;
   const raw = message.slice(GLOBAL_SUPERVISOR_BAIL_PREFIX.length + 1);
   try {
@@ -384,7 +419,19 @@ export function withGlobalSupervisor(runtime: RuntimeAdapter, opts: GlobalSuperv
             },
             auditStream,
           );
-          yield { type: 'error', message: `${GLOBAL_SUPERVISOR_BAIL_PREFIX} ${JSON.stringify(bail)}` };
+          const failure = createGlobalSupervisorRuntimeFailure({
+            reason: bail.reason,
+            cycle: bail.cycle,
+            retriesUsed: bail.retriesUsed,
+            escalationLevel: bail.escalationLevel,
+            failureKind: bail.failureKind,
+            retryable: bail.retryable,
+            signature: bail.signature,
+            lastError: bail.lastError,
+            limits: bail.limits,
+            rawMessage: `${GLOBAL_SUPERVISOR_BAIL_PREFIX} ${JSON.stringify(bail)}`,
+          });
+          yield { type: 'error', message: serializeRuntimeFailure(failure), failure };
           yield { type: 'done' };
           return;
         }
@@ -522,7 +569,19 @@ export function withGlobalSupervisor(runtime: RuntimeAdapter, opts: GlobalSuperv
             auditStream,
           );
 
-          yield { type: 'error', message: `${GLOBAL_SUPERVISOR_BAIL_PREFIX} ${JSON.stringify(bail)}` };
+          const failure = createGlobalSupervisorRuntimeFailure({
+            reason: bail.reason,
+            cycle: bail.cycle,
+            retriesUsed: bail.retriesUsed,
+            escalationLevel: bail.escalationLevel,
+            failureKind: bail.failureKind,
+            retryable: bail.retryable,
+            signature: bail.signature,
+            lastError: bail.lastError,
+            limits: bail.limits,
+            rawMessage: `${GLOBAL_SUPERVISOR_BAIL_PREFIX} ${JSON.stringify(bail)}`,
+          });
+          yield { type: 'error', message: serializeRuntimeFailure(failure), failure };
           yield { type: 'done' };
           return;
         }

@@ -13,6 +13,11 @@ import { promisify } from 'node:util';
 
 import { sanitizeExternalContent } from '../sanitize-external.js';
 import { cliExecaEnv, stripAnsi } from './cli-shared.js';
+import {
+  createPipelineToolRuntimeFailure,
+  normalizeRuntimeFailure,
+  type PipelineFailureCode,
+} from './runtime-failure.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -600,12 +605,7 @@ type PipelineRunStatus = 'queued' | 'running' | 'waiting' | 'succeeded' | 'faile
 type PipelineToolName = 'pipeline.start' | 'pipeline.status' | 'pipeline.resume' | 'pipeline.cancel';
 
 const FAILURE_CODE_VERSION = 'v1' as const;
-type FailureCode =
-  | 'E_TOOL_UNAVAILABLE'
-  | 'E_POLICY_BLOCKED'
-  | 'E_RETRY_EXHAUSTED'
-  | 'E_IDEMPOTENCY_CONFLICT'
-  | 'E_RUN_NOT_FOUND';
+type FailureCode = PipelineFailureCode;
 
 type StepToolName = 'step.run' | 'step.assert' | 'step.retry' | 'step.wait';
 
@@ -1277,14 +1277,7 @@ function stepFailure(
 ): ToolResult {
   return {
     ok: false,
-    result: JSON.stringify({
-      ok: false,
-      operation,
-      failure_code_version: FAILURE_CODE_VERSION,
-      failure_code: code,
-      message,
-      ...(extra ?? {}),
-    }),
+    result: buildPipelineFailureResult(operation, code, message, extra),
   };
 }
 
@@ -1310,14 +1303,7 @@ function pipelineFailure(
 ): ToolResult {
   return {
     ok: false,
-    result: JSON.stringify({
-      ok: false,
-      operation,
-      failure_code_version: FAILURE_CODE_VERSION,
-      failure_code: code,
-      message,
-      ...(extra ?? {}),
-    }),
+    result: buildPipelineFailureResult(operation, code, message, extra),
   };
 }
 
@@ -1325,21 +1311,60 @@ function pipelineSuccess(run: PipelineRun, ok = true): ToolResult {
   return { ok, result: JSON.stringify(summarizePipelineRun(run)) };
 }
 
+function buildPipelineFailureResult(
+  operation: PipelineToolName | StepToolName,
+  code: FailureCode,
+  message: string,
+  extra?: Record<string, unknown>,
+): string {
+  const legacyPayload = {
+    ok: false,
+    operation,
+    failure_code_version: FAILURE_CODE_VERSION,
+    failure_code: code,
+    message,
+    ...(extra ?? {}),
+  };
+  const normalized = normalizeRuntimeFailure(JSON.stringify(legacyPayload));
+  return JSON.stringify(createPipelineToolRuntimeFailure({
+    operation,
+    code,
+    message,
+    userMessage: normalized.userMessage,
+    retryable: normalized.retryable,
+    failureCodeVersion: FAILURE_CODE_VERSION,
+    failureCode: code,
+    details: extra,
+  }));
+}
+
 function parseFailureCodePayload(message: string): FailureCode | undefined {
   try {
     const parsed = JSON.parse(message) as Record<string, unknown>;
-    const code = parsed.failure_code;
+    const legacyCode = parsed['failure_code'];
     if (
-      code === 'E_TOOL_UNAVAILABLE'
-      || code === 'E_POLICY_BLOCKED'
-      || code === 'E_RETRY_EXHAUSTED'
-      || code === 'E_IDEMPOTENCY_CONFLICT'
-      || code === 'E_RUN_NOT_FOUND'
+      legacyCode === 'E_TOOL_UNAVAILABLE'
+      || legacyCode === 'E_POLICY_BLOCKED'
+      || legacyCode === 'E_RETRY_EXHAUSTED'
+      || legacyCode === 'E_IDEMPOTENCY_CONFLICT'
+      || legacyCode === 'E_RUN_NOT_FOUND'
     ) {
-      return code;
+      return legacyCode;
     }
   } catch {
-    // Ignore parse failures; regex fallbacks apply.
+    // Ignore parse failures; normalized envelope and regex fallbacks apply.
+  }
+
+  const failure = normalizeRuntimeFailure(message);
+  const code = failure.metadata.failureCode;
+  if (
+    code === 'E_TOOL_UNAVAILABLE'
+    || code === 'E_POLICY_BLOCKED'
+    || code === 'E_RETRY_EXHAUSTED'
+    || code === 'E_IDEMPOTENCY_CONFLICT'
+    || code === 'E_RUN_NOT_FOUND'
+  ) {
+    return code;
   }
   return undefined;
 }

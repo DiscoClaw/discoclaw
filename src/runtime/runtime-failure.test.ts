@@ -25,15 +25,10 @@ describe('normalizeRuntimeFailure', () => {
     expect(failure.code).toBe('E_IDEMPOTENCY_CONFLICT');
     expect(failure.message).toBe('run already exists');
     expect(failure.userMessage).toContain('matching pipeline run already exists');
-
-    if (failure.source !== 'pipeline_tool') {
-      throw new Error('expected pipeline_tool failure');
-    }
-
-    expect(failure.operation).toBe('pipeline.start');
-    expect(failure.failureCodeVersion).toBe('v1');
-    expect(failure.failureCode).toBe('E_IDEMPOTENCY_CONFLICT');
-    expect(failure.details).toEqual({ run_id: 'run-123' });
+    expect(failure.metadata.operation).toBe('pipeline.start');
+    expect(failure.metadata.failureCodeVersion).toBe('v1');
+    expect(failure.metadata.failureCode).toBe('E_IDEMPOTENCY_CONFLICT');
+    expect(failure.metadata.details).toEqual({ run_id: 'run-123' });
   });
 
   it('normalizes legacy global supervisor bail messages', () => {
@@ -61,16 +56,13 @@ describe('normalizeRuntimeFailure', () => {
     expect(failure.source).toBe('global_supervisor');
     expect(failure.code).toBe('GLOBAL_SUPERVISOR_BAIL');
     expect(failure.userMessage).toContain('same failure repeated');
-
-    if (failure.source !== 'global_supervisor') {
-      throw new Error('expected global_supervisor failure');
-    }
-
-    expect(failure.reason).toBe('deterministic_retry_blocked');
-    expect(failure.failureKind).toBe('transient_error');
+    expect(failure.metadata.reason).toBe('deterministic_retry_blocked');
+    expect(failure.metadata.failureKind).toBe('transient_error');
     expect(failure.retryable).toBe(true);
-    expect(failure.lastError).toBe('OpenAI API error: 429 rate limit');
-    expect(failure.limits.maxCycles).toBe(5);
+    expect(failure.metadata.lastError).toBe('OpenAI API error: 429 rate limit');
+    expect(failure.metadata.cycle).toBe(2);
+    expect(failure.metadata.retriesUsed).toBe(1);
+    expect(failure.metadata.limits?.maxCycles).toBe(5);
   });
 
   it('classifies raw runtime strings with preserved user guidance', () => {
