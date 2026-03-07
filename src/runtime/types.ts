@@ -14,7 +14,7 @@ export type EngineEvent =
   | { type: 'thinking_delta'; text: string }
   | {
       type: 'preview_debug';
-      source: 'codex';
+      source: 'codex' | 'claude';
       phase: 'started' | 'completed';
       itemType: string;
       itemId?: string;

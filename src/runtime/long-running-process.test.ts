@@ -393,9 +393,17 @@ describe('LongRunningProcess', () => {
     }
 
     // message_start emits a log_line, thinking_delta emits thinking preview
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'claude',
+      phase: 'started',
+      itemType: 'reasoning',
+      label: 'Hypothesis: reasoning in progress.',
+    });
     const thinkingEvents = events.filter((e) => e.type === 'thinking_delta');
     expect(thinkingEvents.length).toBeGreaterThanOrEqual(1);
     expect(thinkingEvents[0].text).toContain('Let me think');
+    expect(events.findIndex((e) => e.type === 'preview_debug')).toBeLessThan(events.findIndex((e) => e.type === 'thinking_delta'));
   });
 
   it('sendTurn with images writes content-block array to stdin', async () => {

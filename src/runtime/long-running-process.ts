@@ -69,6 +69,7 @@ export class LongRunningProcess {
   private turnImageCount = 0;
   private lastThinkingPreviewAt = 0;
   private thinkingBuf = '';
+  private turnEmittedReasoningStart = false;
 
   /** Called when this process is added to / removed from an external tracking set. */
   onCleanup?: () => void;
@@ -196,6 +197,7 @@ export class LongRunningProcess {
     this.turnImageCount = 0;
     this.lastThinkingPreviewAt = 0;
     this.thinkingBuf = '';
+    this.turnEmittedReasoningStart = false;
     this.stdoutBuffer = '';
 
     // Wire up stdout parsing for this turn.
@@ -356,6 +358,7 @@ export class LongRunningProcess {
           }
         }
         if (thinkingText) {
+          this.emitReasoningStartPreviewIfNeeded();
           const now = Date.now();
           if (this.lastThinkingPreviewAt === 0 || now - this.lastThinkingPreviewAt >= 3_000) {
             this.lastThinkingPreviewAt = now;
@@ -397,6 +400,8 @@ export class LongRunningProcess {
           if (block.type === 'tool_use' && typeof block.name === 'string') {
             this.turnActiveTools.set(idx, block.name);
             this.turnToolInputBufs.set(idx, '');
+          } else if (block.type === 'thinking') {
+            this.emitReasoningStartPreviewIfNeeded();
           }
           continue;
         }
@@ -410,6 +415,7 @@ export class LongRunningProcess {
           }
           // thinking_delta — accumulate reasoning text and emit periodic previews.
           if (delta.type === 'thinking_delta') {
+            this.emitReasoningStartPreviewIfNeeded();
             if (typeof delta.thinking === 'string') this.thinkingBuf += delta.thinking;
             const now = Date.now();
             if (now - this.lastThinkingPreviewAt >= 3_000) {
@@ -484,6 +490,18 @@ export class LongRunningProcess {
       return null;
     }
     return { type: 'usage', inputTokens, outputTokens, totalTokens, costUsd };
+  }
+
+  private emitReasoningStartPreviewIfNeeded(): void {
+    if (this.turnEmittedReasoningStart) return;
+    this.turnEmittedReasoningStart = true;
+    this.pushEvent({
+      type: 'preview_debug',
+      source: 'claude',
+      phase: 'started',
+      itemType: 'reasoning',
+      label: 'Hypothesis: reasoning in progress.',
+    });
   }
 
   private isContextOverflow(text: string): boolean {

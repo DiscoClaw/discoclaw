@@ -135,6 +135,16 @@ describe('adaptRuntimeEventText', () => {
     })).toBe('Command Execution completed.');
   });
 
+  it('renders claude preview_debug lifecycle events', () => {
+    expect(adaptRuntimeEventText({
+      type: 'preview_debug',
+      source: 'claude',
+      phase: 'started',
+      itemType: 'reasoning',
+      label: 'Hypothesis: reasoning in progress.',
+    })).toBe('Hypothesis: reasoning in progress.');
+  });
+
   it('prefers preview_debug labels and sanitizes them', () => {
     expect(adaptRuntimeEventText({
       type: 'preview_debug',
