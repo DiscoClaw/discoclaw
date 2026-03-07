@@ -7,7 +7,6 @@ import {
   resolveModel,
   resolveReasoningEffort,
 } from './model-tiers.js';
-import type { ModelTier } from './model-tiers.js';
 import type { RuntimeId } from './types.js';
 
 describe('isModelTier', () => {
@@ -204,9 +203,7 @@ describe('findRuntimeForModel', () => {
   });
 
   it('returns undefined when an env override makes ownership ambiguous', () => {
-    initTierOverrides({
-      DISCOCLAW_TIER_OPENROUTER_FAST: 'gpt-5-mini',
-    });
+    initTierOverrides({ DISCOCLAW_TIER_OPENROUTER_FAST: 'gpt-5-mini' });
     expect(findRuntimeForModel('gpt-5-mini')).toBeUndefined();
   });
 });

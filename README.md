@@ -111,11 +111,11 @@ When multiple messages arrive while the bot is thinking (i.e., an AI invocation 
 
 Set `PRIMARY_RUNTIME=openrouter` to route requests through [OpenRouter](https://openrouter.ai), which provides access to models from Anthropic, OpenAI, Google, and others via a single API key — useful if you want to switch models without managing multiple provider accounts.
 
-Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`) and `OPENROUTER_MODEL` (default: `anthropic/claude-sonnet-4`). OpenRouter does not have a built-in `fast`/`capable`/`deep` tier map inside DiscoClaw, so if you want tier names or fast/voice auto-switching to resolve through OpenRouter, define `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, and `DISCOCLAW_TIER_OPENROUTER_DEEP` in `.env` and restart. See `.env.example` for the full reference.
+Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`) and `OPENROUTER_MODEL` (default: `anthropic/claude-sonnet-4`). OpenRouter does not have a built-in `fast`/`capable`/`deep` tier map inside DiscoClaw, so if you want tier names or fast/voice auto-switching to resolve through OpenRouter, define the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you need in `.env` and restart. A single unique entry such as `DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini` is enough for that exact-string fast/voice reverse-mapping. See `.env.example` for the full reference.
 
 ## Model Overrides
 
-The `!models` command lets you view and swap AI models per role at runtime — no restart needed. Changes are persisted to `models.json` under the data dir and survive restarts, except chat runtime swaps like `!models set chat openrouter`, which are live-only until the next restart.
+The `!models` command lets you view and swap AI models per role at runtime — no restart needed. Per-role model values persist to `models.json` under the data dir, while fast/voice runtime overlays persist separately to `runtime-overrides.json`. Live runtime swaps like `!models set chat openrouter` are still live-only until the next restart, but they affect the main runtime path broadly, not just chat.
 
 For the full operator guide to install-mode detection, persistent adapter switches, OpenRouter tier overrides, fast/voice runtime behavior, and `!models reset` semantics, see [docs/runtime-switching.md](docs/runtime-switching.md).
 
@@ -130,13 +130,13 @@ For the full operator guide to install-mode detection, persistent adapter switch
 
 **Examples:**
 - `!models set chat claude-sonnet-4` — use Sonnet for chat
-- `!models set chat openrouter` — switch chat to the OpenRouter runtime
+- `!models set chat openrouter` — live-switch the main runtime to OpenRouter until restart
 - `!models set cron-exec haiku` — run crons on a cheaper model
 - `!models set cron-exec default` — clear the cron-exec override and use the startup default again
 - `!models set voice sonnet` — use a specific model for voice
 - `!models reset` — clear all overrides and revert to startup defaults
 
-Setting the `chat` or `voice` role to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) switches the active runtime adapter for that role.
+Setting `chat` to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) live-switches the main runtime path until restart; setting `voice` to a runtime name switches only voice. Exact model-string runtime auto-switching is only implemented for `fast` and `voice`.
 
 ## Secret Management
 
