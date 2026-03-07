@@ -89,6 +89,7 @@ import { validateDiscordToken } from './validate.js';
 import { TaskStore } from './tasks/store.js';
 import { migrateLegacyTaskDataFile, resolveTaskDataPath } from './tasks/path-defaults.js';
 import { resolveCronTagBootstrapForumId, resolveSessionStorePath } from './index.paths.js';
+import { resolveReactionPromptStoreFilePath } from './discord/reaction-prompt-store.js';
 import {
   collectActiveProviders,
   logRuntimeDebugConfig,
@@ -191,6 +192,7 @@ try {
 
 // --- Configure inflight reply persistence (for graceful shutdown + cold-start recovery) ---
 setDataFilePath(path.join(pidLockDir, 'inflight.json'));
+const reactionPromptStorePath = resolveReactionPromptStoreFilePath(process.env);
 
 // --- Resolve current build hash (best-effort; null if git unavailable) ---
 const gitHash = await getGitHash();
@@ -587,6 +589,7 @@ await healCorruptedJsonStores(
     { path: cronStatsPath, label: 'cron-run-stats' },
     { path: cronTagMapPath, label: 'cron-tag-map' },
     { path: tasksTagMapPath, label: 'tasks-tag-map' },
+    { path: reactionPromptStorePath, label: 'reaction-prompts' },
   ],
   log,
 );
