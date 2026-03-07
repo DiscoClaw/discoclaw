@@ -99,6 +99,14 @@ export function cliExecaEnv(overrides?: Record<string, string | undefined>): Rec
   };
 }
 
+const ANSI_ESCAPE_SEQUENCE =
+  /(?:\u001B\][\s\S]*?(?:\u0007|\u001B\\|\u009C)|(?:\u001B\[|\u009B)[0-?]*[ -/]*[@-~]|\u001B[@-_])/g;
+
+/** Remove ANSI escape sequences (CSI, OSC, and single-character ESC forms). */
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_ESCAPE_SEQUENCE, '');
+}
+
 // ---------------------------------------------------------------------------
 // LineBuffer — splits streaming chunks into lines, preserving trailing buffer
 // ---------------------------------------------------------------------------

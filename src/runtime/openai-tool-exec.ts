@@ -12,6 +12,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { sanitizeExternalContent } from '../sanitize-external.js';
+import { stripAnsi } from './cli-shared.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -501,18 +502,22 @@ async function handleBash(
       maxBuffer: BASH_MAX_OUTPUT,
     });
 
+    const cleanStdout = stripAnsi(stdout);
+    const cleanStderr = stripAnsi(stderr);
     const parts: string[] = [];
-    if (stdout) parts.push(stdout);
-    if (stderr) parts.push(`[stderr]\n${stderr}`);
+    if (cleanStdout) parts.push(cleanStdout);
+    if (cleanStderr) parts.push(`[stderr]\n${cleanStderr}`);
     return { result: parts.join('\n') || '(no output)', ok: true };
   } catch (err: unknown) {
     const e = err as { stdout?: string; stderr?: string; killed?: boolean; message?: string };
     if (e.killed) {
       return { result: 'Command timed out (30s limit)', ok: false };
     }
+    const cleanStdout = stripAnsi(e.stdout ?? '');
+    const cleanStderr = stripAnsi(e.stderr ?? '');
     const parts: string[] = [];
-    if (e.stdout) parts.push(e.stdout);
-    if (e.stderr) parts.push(e.stderr);
+    if (cleanStdout) parts.push(cleanStdout);
+    if (cleanStderr) parts.push(cleanStderr);
     return { result: parts.join('\n') || e.message || 'command failed', ok: false };
   }
 }
