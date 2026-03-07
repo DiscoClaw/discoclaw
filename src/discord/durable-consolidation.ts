@@ -154,18 +154,22 @@ export type MaybeConsolidateOpts = RunConsolidationOpts & {
 };
 
 export async function maybeConsolidate(opts: MaybeConsolidateOpts): Promise<void> {
-  const store = await loadDurableMemory(opts.durableDataDir, opts.userId);
-  if (!store) return;
-  const activeCount = store.items.filter((it) => it.status === 'active').length;
-  if (activeCount < opts.threshold) return;
   if (consolidationInFlight.has(opts.userId)) return;
-
   consolidationInFlight.add(opts.userId);
-  runConsolidation(opts)
-    .catch((err: unknown) => {
+
+  void (async () => {
+    try {
+      const store = await loadDurableMemory(opts.durableDataDir, opts.userId);
+      if (!store) return;
+
+      const activeCount = store.items.filter((it) => it.status === 'active').length;
+      if (activeCount < opts.threshold) return;
+
+      await runConsolidation(opts);
+    } catch (err: unknown) {
       opts.log?.error({ err, userId: opts.userId }, '[consolidation] runConsolidation failed');
-    })
-    .finally(() => {
+    } finally {
       consolidationInFlight.delete(opts.userId);
-    });
+    }
+  })();
 }
