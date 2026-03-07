@@ -1,7 +1,7 @@
-import { ChannelType, AttachmentBuilder, type Embed } from 'discord.js';
+import { ChannelType, AttachmentBuilder, PermissionFlagsBits, type Embed } from 'discord.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { DiscordActionResult, ActionContext } from './actions.js';
+import type { DiscordActionResult, ActionContext, RequesterDenyAll, RequesterMemberContext } from './actions.js';
 import { resolveChannel, fmtTime, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { isPathUnderRoots } from '../runtime/tools/path-security.js';
@@ -136,6 +136,72 @@ function errorCode(err: unknown): string | number | undefined {
   return (err as { code?: string | number }).code;
 }
 
+function isRequesterDenyAll(
+  requesterMember: RequesterMemberContext,
+): requesterMember is RequesterDenyAll {
+  return Boolean(requesterMember && typeof requesterMember === 'object' && '__requesterDenyAll' in requesterMember);
+}
+
+function permissionDenied(action: MessagingActionRequest['type']): DiscordActionResult {
+  return { ok: false, error: `Permission denied for ${action}` };
+}
+
+function isGatedMessagingAction(type: MessagingActionRequest['type']): boolean {
+  return (
+    type === 'sendMessage'
+    || type === 'sendFile'
+    || type === 'readMessages'
+    || type === 'fetchMessage'
+    || type === 'listPins'
+    || type === 'threadCreate'
+    || type === 'pinMessage'
+    || type === 'unpinMessage'
+  );
+}
+
+function hasChannelPermissions(
+  channel: unknown,
+  requesterMember: Exclude<RequesterMemberContext, RequesterDenyAll | undefined>,
+  permissions: bigint,
+): boolean {
+  if (!channel || typeof channel !== 'object') return false;
+  if (!('permissionsFor' in channel) || typeof channel.permissionsFor !== 'function') return false;
+  const resolved = channel.permissionsFor(requesterMember);
+  return Boolean(resolved?.has?.(permissions));
+}
+
+function hasPinPermission(
+  channel: unknown,
+  requesterMember: Exclude<RequesterMemberContext, RequesterDenyAll | undefined>,
+): boolean {
+  if (!channel || typeof channel !== 'object') return false;
+  if (!('permissionsFor' in channel) || typeof channel.permissionsFor !== 'function') return false;
+  const resolved = channel.permissionsFor(requesterMember);
+  return Boolean(
+    resolved?.has?.(PermissionFlagsBits.ManageMessages)
+    || resolved?.has?.(PermissionFlagsBits.PinMessages),
+  );
+}
+
+function threadSendPermissionFor(channelType: ChannelType | undefined): bigint {
+  return (
+    channelType === ChannelType.PublicThread
+    || channelType === ChannelType.PrivateThread
+    || channelType === ChannelType.AnnouncementThread
+  )
+    ? PermissionFlagsBits.SendMessagesInThreads
+    : PermissionFlagsBits.SendMessages;
+}
+
+function threadCreatePermissionFor(action: Extract<MessagingActionRequest, { type: 'threadCreate' }>, channelType: ChannelType | undefined): bigint {
+  if (channelType === ChannelType.GuildForum || channelType === ChannelType.GuildMedia) {
+    return PermissionFlagsBits.SendMessages;
+  }
+  return action.messageId
+    ? PermissionFlagsBits.CreatePublicThreads
+    : PermissionFlagsBits.CreatePrivateThreads;
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -143,8 +209,16 @@ function errorCode(err: unknown): string | number | undefined {
 export async function executeMessagingAction(
   action: MessagingActionRequest,
   ctx: ActionContext,
+  requesterMember?: RequesterMemberContext,
 ): Promise<DiscordActionResult> {
   const { guild } = ctx;
+
+  if (isRequesterDenyAll(requesterMember) && isGatedMessagingAction(action.type)) {
+    return permissionDenied(action.type);
+  }
+  const enforcingRequester = requesterMember && !isRequesterDenyAll(requesterMember)
+    ? requesterMember
+    : undefined;
 
   switch (action.type) {
     case 'sendMessage': {
@@ -181,6 +255,13 @@ export async function executeMessagingAction(
           return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot receive messages directly.${hint}` };
         }
         return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived. If this was a task thread, use taskShow with the task ID instead.` };
+      }
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | threadSendPermissionFor(channel.type),
+      )) {
+        return permissionDenied(action.type);
       }
 
       const opts: {
@@ -231,6 +312,13 @@ export async function executeMessagingAction(
         }
         return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived. If this was a task thread, use taskShow with the task ID instead.` };
       }
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory,
+      )) {
+        return permissionDenied(action.type);
+      }
 
       const limit = Math.min(Math.max(1, action.limit ?? 10), 20);
       const opts: { limit: number; before?: string } = { limit };
@@ -263,6 +351,13 @@ export async function executeMessagingAction(
       const channel = guild.channels.cache.get(action.channelId);
       const messageChannel = asMessageChannelRecord(channel);
       if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory,
+      )) {
+        return permissionDenied(action.type);
+      }
       const message = await messageChannel.messages.fetch(action.messageId);
       const author = message.author?.username ?? 'Unknown';
       const time = fmtTime(message.createdAt);
@@ -345,6 +440,13 @@ export async function executeMessagingAction(
 
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | threadCreatePermissionFor(action, channel.type),
+      )) {
+        return permissionDenied(action.type);
+      }
 
       if (action.messageId && 'messages' in channel) {
         const messageChannel = channel as unknown as MessageChannelRecord;
@@ -374,6 +476,16 @@ export async function executeMessagingAction(
       const channel = guild.channels.cache.get(action.channelId);
       const messageChannel = asMessageChannelRecord(channel);
       if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester) {
+        const hasBasePermissions = hasChannelPermissions(
+          channel,
+          enforcingRequester,
+          PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory,
+        );
+        if (!hasBasePermissions || !hasPinPermission(channel, enforcingRequester)) {
+          return permissionDenied(action.type);
+        }
+      }
       const message = await messageChannel.messages.fetch(action.messageId);
       await message.pin();
       return { ok: true, summary: `Pinned message in #${messageChannel.name}` };
@@ -385,6 +497,16 @@ export async function executeMessagingAction(
       const channel = guild.channels.cache.get(action.channelId);
       const messageChannel = asMessageChannelRecord(channel);
       if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester) {
+        const hasBasePermissions = hasChannelPermissions(
+          channel,
+          enforcingRequester,
+          PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory,
+        );
+        if (!hasBasePermissions || !hasPinPermission(channel, enforcingRequester)) {
+          return permissionDenied(action.type);
+        }
+      }
       const message = await messageChannel.messages.fetch(action.messageId);
       await message.unpin();
       return { ok: true, summary: `Unpinned message in #${messageChannel.name}` };
@@ -399,6 +521,13 @@ export async function executeMessagingAction(
           return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel. Use individual thread IDs to list pins.` };
         }
         return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived. If this was a task thread, use taskShow with the task ID instead.` };
+      }
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory,
+      )) {
+        return permissionDenied(action.type);
       }
       const pinned = await channel.messages.fetchPinned();
 
@@ -469,6 +598,14 @@ export async function executeMessagingAction(
           return { ok: false, error: `Channel "${action.channel}" is a ${kind} channel and cannot receive files directly.` };
         }
         return { ok: false, error: `Channel "${action.channel}" not found — it may have been deleted or archived.` };
+      }
+      if (enforcingRequester) {
+        const required = PermissionFlagsBits.ViewChannel
+          | threadSendPermissionFor(channel.type)
+          | PermissionFlagsBits.AttachFiles;
+        if (!hasChannelPermissions(channel, enforcingRequester, required)) {
+          return permissionDenied(action.type);
+        }
       }
       const attachment = new AttachmentBuilder(fileBuffer, { name: path.basename(trimmedPath) });
       const opts: {

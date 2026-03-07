@@ -859,6 +859,7 @@ function createReactionHandler(
               const actCtx = {
                 guild: msg.guild,
                 client: msg.client,
+                requesterId: user.id,
                 channelId: msg.channelId,
                 messageId: msg.id,
                 threadParentId,

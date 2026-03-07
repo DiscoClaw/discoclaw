@@ -206,4 +206,52 @@ describe('message coordinator onboarding', () => {
     expect(queue.run).toHaveBeenCalledTimes(2);
     expect(vi.mocked(completeOnboarding)).not.toHaveBeenCalled();
   });
+
+  it('passes requesterId into onboarding cron dispatch context', async () => {
+    const workspaceCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-onboard-cron-'));
+    await fs.writeFile(path.join(workspaceCwd, 'IDENTITY.md'), 'template marker', 'utf8');
+
+    const params = makeParams(workspaceCwd);
+    params.cronCtx = { id: 'cron-test' } as any;
+    const queue = { run: vi.fn(async () => undefined) };
+    const handler = createMessageCreateHandler(params, queue as any);
+
+    const guildChannel = {
+      id: 'guild-channel-1',
+      name: 'welcome',
+      send: vi.fn(async () => ({})),
+      isThread: () => false,
+    };
+    const guild = { id: 'guild-1' };
+    const startMsg = makeMessage({
+      guildId: 'guild-1',
+      guild,
+      channelId: 'guild-channel-1',
+      channel: guildChannel,
+      client: { channels: { cache: new Map([['guild-channel-1', guildChannel]]) }, user: { id: 'bot-1' } },
+    });
+    await handler(startMsg);
+
+    vi.setSystemTime(new Date('2026-02-22T08:00:01.000Z'));
+    const timedOutMsg = makeMessage({
+      id: 'm2',
+      author: startMsg.author,
+      guildId: 'guild-1',
+      guild,
+      channelId: 'guild-channel-1',
+      channel: guildChannel,
+      client: startMsg.client,
+      content: 'still here',
+    });
+    await handler(timedOutMsg);
+
+    expect(vi.mocked(completeOnboarding)).toHaveBeenCalledWith(
+      { userName: 'Alice', timezone: 'Etc/Test', morningCheckin: false },
+      workspaceCwd,
+      startMsg.author,
+      expect.objectContaining({
+        actionCtx: expect.objectContaining({ requesterId: 'user-1' }),
+      }),
+    );
+  });
 });

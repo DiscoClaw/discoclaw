@@ -5,6 +5,7 @@ import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
 import { inFlightReplyCount, _resetForTest as resetInFlight } from './inflight-replies.js';
 import * as reactionPrompts from './reaction-prompts.js';
+import * as discordActions from './actions.js';
 import * as abortRegistry from './abort-registry.js';
 import * as forgePlanRegistry from './forge-plan-registry.js';
 import { RUNTIME_SIGNAL_SUPPRESSED_LINE } from './runtime-signal-budget.js';
@@ -248,6 +249,29 @@ describe('createReactionAddHandler', () => {
     const replyObj = reaction.message._replyObj;
     const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
     expect(lastEditCall[0].content).toContain('Reaction response!');
+  });
+
+  it('passes requesterId into reaction action context', async () => {
+    const executeSpy = vi.spyOn(discordActions, 'executeDiscordActions').mockResolvedValue([
+      { ok: true, summary: 'Listed channels' },
+    ]);
+    const params = makeParams({
+      runtime: makeMockRuntime('<discord-action>{"type":"channelList"}</discord-action>'),
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    try {
+      await handler(mockReaction() as any, mockUser() as any);
+      expect(executeSpy).toHaveBeenCalledTimes(1);
+      expect(executeSpy.mock.calls[0]?.[1]).toEqual(
+        expect.objectContaining({ requesterId: 'user-1' }),
+      );
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 
   it('prompt includes emoji name, original message content, reacting user, and channel label', async () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChannelType } from 'discord.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import {
   parseDiscordActions,
   executeDiscordActions,
@@ -642,6 +642,83 @@ describe('executeDiscordActions', () => {
     expect(results[0]).toEqual({ ok: true, summary: 'Created #alpha' });
     expect(results[1]).toEqual({ ok: true, summary: 'Created #beta' });
     expect(results[2]).toEqual({ ok: true, summary: 'Created #gamma' });
+  });
+
+  it('fetches requester member once per batch for gated actions', async () => {
+    const channel = {
+      id: 'ch1',
+      name: 'general',
+      type: ChannelType.GuildText,
+      permissionsFor: vi.fn(() => ({
+        has: (perm: bigint) => (
+          (PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory) & perm
+        ) === perm,
+      })),
+      messages: {
+        fetch: vi.fn(async () => new Map()),
+      },
+    };
+    const requester = { id: 'user-1' };
+    const guild = {
+      channels: {
+        cache: {
+          get: (id: string) => (id === 'ch1' ? channel : undefined),
+          find: (fn: (ch: any) => boolean) => (fn(channel) ? channel : undefined),
+          values: () => [channel].values(),
+        },
+      },
+      members: {
+        fetch: vi.fn(async () => requester),
+      },
+    } as any;
+
+    const results = await executeDiscordActions(
+      [
+        { type: 'searchMessages', query: 'needle', channel: 'general' } as any,
+        { type: 'searchMessages', query: 'needle', channel: 'general' } as any,
+      ],
+      { ...makeCtx(guild), requesterId: 'user-1' },
+    );
+
+    expect(guild.members.fetch).toHaveBeenCalledTimes(1);
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.ok)).toBe(true);
+  });
+
+  it('fails closed for gated actions when requester member cannot be resolved', async () => {
+    const channel = {
+      id: 'ch1',
+      name: 'general',
+      type: ChannelType.GuildText,
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
+      messages: {
+        fetch: vi.fn(async () => new Map()),
+      },
+    };
+    const guild = {
+      channels: {
+        cache: {
+          get: (id: string) => (id === 'ch1' ? channel : undefined),
+          find: (fn: (ch: any) => boolean) => (fn(channel) ? channel : undefined),
+          values: () => [channel].values(),
+        },
+      },
+      members: {
+        fetch: vi.fn(async () => {
+          throw new Error('missing');
+        }),
+      },
+    } as any;
+
+    const results = await executeDiscordActions(
+      [{ type: 'searchMessages', query: 'needle', channel: 'general' } as any],
+      { ...makeCtx(guild), requesterId: 'user-1' },
+    );
+
+    expect(guild.members.fetch).toHaveBeenCalledWith('user-1');
+    expect(results).toEqual([{ ok: false, error: 'Permission denied for searchMessages' }]);
   });
 });
 

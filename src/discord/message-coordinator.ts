@@ -671,6 +671,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
   let onboardingCtxRef: {
     guild: Guild | null;
     client: CoordinatorMessage['client'];
+    userId: string;
     channelId: string;
     messageId: string;
     channelName: string;
@@ -704,6 +705,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             actionCtx: {
               guild: ctxRef.guild,
               client: ctxRef.client,
+              requesterId: ctxRef.userId,
               channelId: ctxRef.channelId,
               messageId: ctxRef.messageId,
               transport: new DiscordTransportClient(ctxRef.guild, ctxRef.client),
@@ -1030,6 +1032,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 actionCtx: {
                   guild: ctxRef.guild,
                   client: ctxRef.client,
+                  requesterId: ctxRef.userId,
                   channelId: ctxRef.channelId,
                   messageId: ctxRef.messageId,
                   transport: new DiscordTransportClient(ctxRef.guild, ctxRef.client),
@@ -1084,6 +1087,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   actionCtx: {
                     guild: onboardingCtxRef.guild,
                     client: onboardingCtxRef.client,
+                    requesterId: onboardingCtxRef.userId,
                     channelId: onboardingCtxRef.channelId,
                     messageId: onboardingCtxRef.messageId,
                     transport: new DiscordTransportClient(onboardingCtxRef.guild, onboardingCtxRef.client),
@@ -1164,6 +1168,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               onboardingCtxRef = {
                 guild: msg.guild,
                 client: msg.client,
+                userId,
                 channelId: msg.channelId,
                 messageId: msg.id,
                 channelName: channelName(msg.channel) ?? msg.channelId,
@@ -1300,6 +1305,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const actionCtx: ActionContext = {
           guild: msg.guild ?? ({} as Guild),
           client: msg.client,
+          requesterId: msg.author.id,
           channelId: msg.channelId,
           messageId: msg.id,
           threadParentId,
@@ -2477,6 +2483,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             const actCtx = {
               guild: msg.guild,
               client: msg.client,
+              requesterId: msg.author.id,
               channelId: msg.channelId,
               messageId: msg.id,
               threadParentId,
@@ -3377,6 +3384,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const actCtx = {
                   guild: msg.guild,
                   client: msg.client,
+                  requesterId: !isBotMessage ? msg.author.id : undefined,
                   channelId: msg.channelId,
                   messageId: msg.id,
                   threadParentId,

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChannelType } from 'discord.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import * as fsMod from 'node:fs/promises';
 import { executeMessagingAction, _setSendFileAllowedDirs } from './actions-messaging.js';
 import type { MessagingActionRequest } from './actions-messaging.js';
+import { REQUESTER_MEMBER_DENY_ALL } from './actions.js';
 import type { ActionContext } from './actions.js';
 
 vi.mock('node:fs/promises', () => ({
@@ -17,10 +18,15 @@ vi.mock('node:fs/promises', () => ({
 
 function makeMockChannel(overrides: Partial<any> = {}) {
   const messages = new Map<string, any>();
+  const granted = overrides.permissionsBitfield
+    ?? (PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages | PermissionFlagsBits.ReadMessageHistory);
   return {
     id: overrides.id ?? 'ch1',
     name: overrides.name ?? 'general',
     type: overrides.type ?? ChannelType.GuildText,
+    permissionsFor: vi.fn(() => ({
+      has: (perm: bigint) => (granted & perm) === perm,
+    })),
     send: vi.fn(async () => ({ id: 'sent-1' })),
     messages: {
       fetch: vi.fn(async (arg: any) => {
@@ -1661,5 +1667,78 @@ describe('sendFile', () => {
     // stat and readFile should be called with the resolved real path
     expect(fsMod.stat).toHaveBeenCalledWith('/tmp/real/photo.png');
     expect(fsMod.readFile).toHaveBeenCalledWith('/tmp/real/photo.png');
+  });
+});
+
+describe('requester permission gating', () => {
+  it('denies gated messaging actions when requester resolution failed', async () => {
+    const ch = makeMockChannel({ name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: '#general', content: 'Hello!' },
+      ctx,
+      REQUESTER_MEMBER_DENY_ALL,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Permission denied for sendMessage' });
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('requires SendMessagesInThreads for thread sendMessage', async () => {
+    const ch = makeMockChannel({
+      id: 'thread-1',
+      name: 'topic-thread',
+      type: ChannelType.PublicThread,
+      permissionsBitfield: PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages,
+    });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: 'thread-1', content: 'Hello!' },
+      ctx,
+      { id: 'requester' } as any,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Permission denied for sendMessage' });
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('requires ReadMessageHistory for readMessages', async () => {
+    const ch = makeMockChannel({
+      name: 'general',
+      permissionsBitfield: PermissionFlagsBits.ViewChannel,
+    });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: '#general' },
+      ctx,
+      { id: 'requester' } as any,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Permission denied for readMessages' });
+    expect(ch.messages.fetch).not.toHaveBeenCalled();
+  });
+
+  it('requires AttachFiles for sendFile', async () => {
+    vi.mocked(fsMod.realpath).mockResolvedValue('/tmp/photo.png');
+    vi.mocked(fsMod.stat).mockResolvedValue({ size: 10 } as any);
+    vi.mocked(fsMod.readFile).mockResolvedValue(Buffer.from('data') as any);
+
+    const ch = makeMockChannel({
+      name: 'general',
+      permissionsBitfield: PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages,
+    });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'sendFile', channel: '#general', filePath: '/tmp/photo.png' },
+      ctx,
+      { id: 'requester' } as any,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Permission denied for sendFile' });
+    expect(ch.send).not.toHaveBeenCalled();
   });
 });

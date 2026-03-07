@@ -1,6 +1,6 @@
-import { GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel } from 'discord.js';
+import { GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel, PermissionFlagsBits } from 'discord.js';
 import type { Guild, Role } from 'discord.js';
-import type { DiscordActionResult, ActionContext } from './actions.js';
+import type { DiscordActionResult, ActionContext, RequesterDenyAll, RequesterMemberContext } from './actions.js';
 import { resolveChannel, fmtTime } from './action-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -86,6 +86,65 @@ function resolveRole(guild: Guild, ref: string): Role | undefined {
   );
 }
 
+function isRequesterDenyAll(
+  requesterMember: RequesterMemberContext,
+): requesterMember is RequesterDenyAll {
+  return Boolean(requesterMember && typeof requesterMember === 'object' && '__requesterDenyAll' in requesterMember);
+}
+
+function permissionDenied(action: GuildActionRequest['type']): DiscordActionResult {
+  return { ok: false, error: `Permission denied for ${action}` };
+}
+
+function highestRolePosition(member: { roles?: { highest?: { position?: number }; cache?: { values?: () => Iterable<{ position?: number }> } } }): number {
+  const highest = (member as { roles?: { highest?: { position?: number } } }).roles?.highest?.position;
+  if (typeof highest === 'number') return highest;
+
+  const values = (member as {
+    roles?: { cache?: { values?: () => Iterable<{ position?: number }> } };
+  }).roles?.cache?.values?.();
+  if (!values) return 0;
+
+  let max = 0;
+  for (const role of values) {
+    if (typeof role.position === 'number' && role.position > max) {
+      max = role.position;
+    }
+  }
+  return max;
+}
+
+function requesterHasGuildPermission(
+  requesterMember: Exclude<RequesterMemberContext, RequesterDenyAll | undefined>,
+  permission: bigint,
+): boolean {
+  return Boolean(
+    (requesterMember as { permissions?: { has?: (perm: bigint) => boolean } }).permissions?.has?.(permission),
+  );
+}
+
+function requesterHasChannelPermissions(
+  channel: unknown,
+  requesterMember: Exclude<RequesterMemberContext, RequesterDenyAll | undefined>,
+  permissions: bigint,
+): boolean {
+  if (!channel || typeof channel !== 'object') return false;
+  if (!('permissionsFor' in channel) || typeof channel.permissionsFor !== 'function') return false;
+  const resolved = channel.permissionsFor(requesterMember);
+  return Boolean(resolved?.has?.(permissions));
+}
+
+function isGatedGuildAction(type: GuildActionRequest['type']): boolean {
+  return (
+    type === 'searchMessages'
+    || type === 'roleAdd'
+    || type === 'roleRemove'
+    || type === 'eventCreate'
+    || type === 'eventEdit'
+    || type === 'eventDelete'
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -93,8 +152,16 @@ function resolveRole(guild: Guild, ref: string): Role | undefined {
 export async function executeGuildAction(
   action: GuildActionRequest,
   ctx: ActionContext,
+  requesterMember?: RequesterMemberContext,
 ): Promise<DiscordActionResult> {
   const { guild } = ctx;
+
+  if (isRequesterDenyAll(requesterMember) && isGatedGuildAction(action.type)) {
+    return permissionDenied(action.type);
+  }
+  const enforcingRequester = requesterMember && !isRequesterDenyAll(requesterMember)
+    ? requesterMember
+    : undefined;
 
   switch (action.type) {
     case 'memberInfo': {
@@ -133,6 +200,16 @@ export async function executeGuildAction(
       if (!member) return { ok: false, error: `Member "${action.userId}" not found` };
       const role = resolveRole(guild, action.role);
       if (!role) return { ok: false, error: `Role "${action.role}" not found` };
+      if (enforcingRequester) {
+        if (!requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.ManageRoles)) {
+          return permissionDenied(action.type);
+        }
+        const requesterTopRole = highestRolePosition(enforcingRequester);
+        const targetTopRole = highestRolePosition(member);
+        if (requesterTopRole <= role.position || requesterTopRole <= targetTopRole) {
+          return permissionDenied(action.type);
+        }
+      }
       await member.roles.add(role.id);
       return { ok: true, summary: `Added role "${role.name}" to ${member.displayName}` };
     }
@@ -142,6 +219,16 @@ export async function executeGuildAction(
       if (!member) return { ok: false, error: `Member "${action.userId}" not found` };
       const role = resolveRole(guild, action.role);
       if (!role) return { ok: false, error: `Role "${action.role}" not found` };
+      if (enforcingRequester) {
+        if (!requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.ManageRoles)) {
+          return permissionDenied(action.type);
+        }
+        const requesterTopRole = highestRolePosition(enforcingRequester);
+        const targetTopRole = highestRolePosition(member);
+        if (requesterTopRole <= role.position || requesterTopRole <= targetTopRole) {
+          return permissionDenied(action.type);
+        }
+      }
       await member.roles.remove(role.id);
       return { ok: true, summary: `Removed role "${role.name}" from ${member.displayName}` };
     }
@@ -153,6 +240,13 @@ export async function executeGuildAction(
       const channel = asSearchableChannel(rawChannel);
       if (!channel) {
         return { ok: false, error: `Channel not found` };
+      }
+      if (enforcingRequester && !requesterHasChannelPermissions(
+        rawChannel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory,
+      )) {
+        return permissionDenied(action.type);
       }
 
       const limit = Math.min(Math.max(1, action.limit ?? 25), 50);
@@ -222,6 +316,9 @@ export async function executeGuildAction(
     }
 
     case 'eventCreate': {
+      if (enforcingRequester && !requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.CreateEvents)) {
+        return permissionDenied(action.type);
+      }
       const startTime = new Date(action.startTime);
       if (isNaN(startTime.getTime())) {
         return { ok: false, error: `Invalid startTime: "${action.startTime}"` };
@@ -264,6 +361,9 @@ export async function executeGuildAction(
     }
 
     case 'eventEdit': {
+      if (enforcingRequester && !requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.ManageEvents)) {
+        return permissionDenied(action.type);
+      }
       const { eventId, name, startTime, endTime, description, location } = action;
       if (!name && !startTime && !endTime && description === undefined && !location) {
         return { ok: false, error: 'eventEdit requires at least one field to update' };
@@ -290,6 +390,9 @@ export async function executeGuildAction(
     }
 
     case 'eventDelete': {
+      if (enforcingRequester && !requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.ManageEvents)) {
+        return permissionDenied(action.type);
+      }
       const event = await guild.scheduledEvents.fetch(action.eventId).catch(() => null);
       const name = event?.name ?? action.eventId;
       await guild.scheduledEvents.delete(action.eventId);
