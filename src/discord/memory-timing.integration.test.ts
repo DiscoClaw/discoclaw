@@ -207,6 +207,51 @@ describe('memory timing integration', () => {
     await expect(fs.access(summaryFile)).rejects.toThrow();
   });
 
+  it('bootstraps continuation capsule persistence before the first rolling summary exists', async () => {
+    let seenPrompt = '';
+    const runtime = {
+      id: 'test-runtime',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (p: any) {
+        const prompt = String(p.prompt ?? '');
+        if (!prompt.includes('Updated summary:')) seenPrompt = prompt;
+        yield {
+          type: 'text_final',
+          text: [
+            'Working on it.',
+            '<continuation-capsule>',
+            '{"activeTaskId":"ws-1170","currentFocus":"Keep the current task pinned","nextStep":"Patch the persistence path","blockedOn":"Need bootstrap storage"}',
+            '</continuation-capsule>',
+            'Done.',
+          ].join('\n'),
+        } as any;
+      }),
+    } as any;
+
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-capsule-bootstrap-'));
+    const handler = createMessageCreateHandler(
+      makeParams(runtime, summaryDir, { summaryEveryNTurns: 99 }),
+      makeQueue(),
+    );
+
+    await handler(makeMsg('start fresh', 'r-bootstrap'));
+
+    expect(seenPrompt).toContain('Conversation memory:');
+    expect(seenPrompt).toContain('No rolling summary yet.');
+    expect(seenPrompt).toContain('emit an updated <continuation-capsule> block');
+
+    const stored = await waitForStoredSummary(summaryDir, 'discord:channel:chan', summary =>
+      summary.continuationCapsule?.activeTaskId === 'ws-1170',
+    );
+    expect(stored.summary).toBe('');
+    expect(stored.continuationCapsule).toEqual({
+      activeTaskId: 'ws-1170',
+      currentFocus: 'Keep the current task pinned',
+      nextStep: 'Patch the persistence path',
+      blockedOn: 'Need bootstrap storage',
+    });
+  });
+
   it('shows summary age and newer-turn count when regeneratedAt is available', async () => {
     const now = Date.parse('2026-03-06T20:00:00.000Z');
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
@@ -336,6 +381,79 @@ describe('memory timing integration', () => {
       expect(stored.turnsSinceUpdate).toBe(3);
     } finally {
       nowSpy.mockRestore();
+    }
+  });
+
+  it('preserves newer async-written capsule state during counter-progress saves', async () => {
+    let signalInvokeStarted: (() => void) | undefined;
+    let releaseInvoke: (() => void) | undefined;
+    const invokeStarted = new Promise<void>((resolve) => {
+      signalInvokeStarted = resolve;
+    });
+    const invokeReleased = new Promise<void>((resolve) => {
+      releaseInvoke = resolve;
+    });
+    const runtime = {
+      id: 'test-runtime',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* () {
+        signalInvokeStarted?.();
+        await invokeReleased;
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'memory-counter-progress-capsule-'));
+    try {
+      await saveSummary(summaryDir, 'discord:channel:chan', {
+        summary: 'Older summary',
+        updatedAt: 100,
+        regeneratedAt: 100,
+        turnsSinceUpdate: 2,
+        continuationCapsule: {
+          currentFocus: 'Older focus',
+          nextStep: 'Older next step',
+          blockedOn: 'Older blocker',
+        },
+      });
+
+      const handler = createMessageCreateHandler(
+        makeParams(runtime, summaryDir, { summaryEveryNTurns: 99 }),
+        makeQueue(),
+      );
+
+      const turnPromise = handler(makeMsg('Another turn', 'r-counter-progress-capsule'));
+      await invokeStarted;
+
+      await saveSummary(summaryDir, 'discord:channel:chan', {
+        summary: 'New regenerated summary',
+        updatedAt: 200,
+        regeneratedAt: 200,
+        turnsSinceUpdate: 0,
+        continuationCapsule: {
+          currentFocus: 'Newer focus',
+          nextStep: 'Newer next step',
+          blockedOn: 'Newer blocker',
+        },
+      });
+
+      releaseInvoke?.();
+      await turnPromise;
+
+      const stored = await waitForStoredSummary(
+        summaryDir,
+        'discord:channel:chan',
+        (summary) => summary.summary === 'New regenerated summary' && summary.turnsSinceUpdate === 1,
+      );
+
+      expect(stored.regeneratedAt).toBe(200);
+      expect(stored.continuationCapsule).toEqual({
+        currentFocus: 'Newer focus',
+        nextStep: 'Newer next step',
+        blockedOn: 'Newer blocker',
+      });
+    } finally {
+      releaseInvoke?.();
     }
   });
 

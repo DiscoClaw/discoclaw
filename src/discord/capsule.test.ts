@@ -9,14 +9,15 @@ import {
 describe('capsule', () => {
   it('renders a canonical JSON capsule block', () => {
     const capsule: ContinuationCapsule = {
-      currentTask: 'Implement continuation capsule parsing',
+      activeTaskId: 'ws-1170',
+      currentFocus: 'Implement continuation capsule parsing',
       nextStep: 'Wire the parser into session persistence',
-      blockers: ['Need the persistence hook'],
+      blockedOn: 'Need the persistence hook',
     };
 
     expect(renderContinuationCapsule(capsule)).toBe(
       '<continuation-capsule>\n'
-      + '{"currentTask":"Implement continuation capsule parsing","nextStep":"Wire the parser into session persistence","blockers":["Need the persistence hook"]}\n'
+      + '{"activeTaskId":"ws-1170","currentFocus":"Implement continuation capsule parsing","nextStep":"Wire the parser into session persistence","blockedOn":"Need the persistence hook"}\n'
       + '</continuation-capsule>',
     );
   });
@@ -25,7 +26,7 @@ describe('capsule', () => {
     const input = [
       'Working the task.',
       '<continuation-capsule>',
-      '{"currentTask":"Implement continuation capsule parsing","nextStep":"Add prompt injection later","blockers":["No integration yet"]}',
+      '{"activeTaskId":"ws-1170","currentFocus":"Implement continuation capsule parsing","nextStep":"Add prompt injection later","blockedOn":"No integration yet"}',
       '</continuation-capsule>',
       'Visible reply text.',
     ].join('\n');
@@ -33,30 +34,31 @@ describe('capsule', () => {
     const parsed = parseContinuationCapsule(input);
 
     expect(parsed.capsule).toEqual({
-      currentTask: 'Implement continuation capsule parsing',
+      activeTaskId: 'ws-1170',
+      currentFocus: 'Implement continuation capsule parsing',
       nextStep: 'Add prompt injection later',
-      blockers: ['No integration yet'],
+      blockedOn: 'No integration yet',
     });
     expect(parsed.cleanText).toBe('Working the task.\n\nVisible reply text.');
     expect(parsed.blocks).toHaveLength(1);
-    expect(parsed.blocks[0]!.raw).toContain('"currentTask":"Implement continuation capsule parsing"');
+    expect(parsed.blocks[0]!.raw).toContain('"currentFocus":"Implement continuation capsule parsing"');
   });
 
   it('supports line-based capsule bodies', () => {
     const input = [
       '<continuation-capsule>',
-      'current_task: Preserve the current task across recompression',
+      'active_task_id: ws-1170',
+      'current_focus: Preserve the current task across recompression',
       'next_step: Persist the latest capsule beside the summary',
-      'blockers:',
-      '- Need prompt wiring',
-      '- Need storage wiring',
+      'blocked_on: Need prompt wiring',
       '</continuation-capsule>',
     ].join('\n');
 
     expect(parseContinuationCapsule(input).capsule).toEqual({
-      currentTask: 'Preserve the current task across recompression',
+      activeTaskId: 'ws-1170',
+      currentFocus: 'Preserve the current task across recompression',
       nextStep: 'Persist the latest capsule beside the summary',
-      blockers: ['Need prompt wiring', 'Need storage wiring'],
+      blockedOn: 'Need prompt wiring',
     });
   });
 
@@ -64,23 +66,22 @@ describe('capsule', () => {
     const input = [
       '```md',
       '<continuation-capsule>',
-      '{"currentTask":"ignore","nextStep":"ignore","blockers":[]}',
+      '{"currentFocus":"ignore","nextStep":"ignore"}',
       '</continuation-capsule>',
       '```',
       '',
-      'Literal inline code: `<continuation-capsule>{"currentTask":"still ignore","nextStep":"ignore","blockers":[]}</continuation-capsule>`.',
+      'Literal inline code: `<continuation-capsule>{"currentFocus":"still ignore","nextStep":"ignore"}</continuation-capsule>`.',
       '',
       '<continuation-capsule>',
-      '{"currentTask":"Use the real block","nextStep":"Persist it","blockers":[]}',
+      '{"currentFocus":"Use the real block","nextStep":"Persist it"}',
       '</continuation-capsule>',
     ].join('\n');
 
     const parsed = parseContinuationCapsule(input);
 
     expect(parsed.capsule).toEqual({
-      currentTask: 'Use the real block',
+      currentFocus: 'Use the real block',
       nextStep: 'Persist it',
-      blockers: [],
     });
     expect(parsed.cleanText).toContain('```md');
     expect(parsed.cleanText).toContain('Literal inline code');
@@ -90,11 +91,11 @@ describe('capsule', () => {
   it('returns the last valid capsule when multiple blocks are present', () => {
     const input = [
       '<continuation-capsule>',
-      '{"currentTask":"Old task","nextStep":"Old step","blockers":["Old blocker"]}',
+      '{"currentFocus":"Old task","nextStep":"Old step","blockedOn":"Old blocker"}',
       '</continuation-capsule>',
       '',
       '<continuation-capsule>',
-      '{"currentTask":"Current task","nextStep":"Current step","blockers":["Current blocker"]}',
+      '{"currentFocus":"Current task","nextStep":"Current step","blockedOn":"Current blocker"}',
       '</continuation-capsule>',
     ].join('\n');
 
@@ -102,17 +103,17 @@ describe('capsule', () => {
 
     expect(parsed.blocks).toHaveLength(2);
     expect(parsed.capsule).toEqual({
-      currentTask: 'Current task',
+      currentFocus: 'Current task',
       nextStep: 'Current step',
-      blockers: ['Current blocker'],
+      blockedOn: 'Current blocker',
     });
   });
 
-  it('keeps invalid capsule blocks visible and unparsed', () => {
+  it('strips invalid capsule blocks from visible text while leaving capsule state unset', () => {
     const input = [
       'Before',
       '<continuation-capsule>',
-      '{"currentTask":"Missing next step","blockers":[]}',
+      '{"currentFocus":"Missing next step"}',
       '</continuation-capsule>',
       'After',
     ].join('\n');
@@ -121,14 +122,51 @@ describe('capsule', () => {
 
     expect(parsed.capsule).toBeNull();
     expect(parsed.blocks).toEqual([]);
-    expect(parsed.cleanText).toBe(input);
+    expect(parsed.cleanText).toBe('Before\n\nAfter');
+  });
+
+  it('strips trailing unterminated capsule blocks from visible text', () => {
+    const input = [
+      'Before',
+      '<continuation-capsule>',
+      '{"currentFocus":"Keep focus","nextStep":"Missing close"',
+    ].join('\n');
+
+    const parsed = parseContinuationCapsule(input);
+
+    expect(parsed.capsule).toBeNull();
+    expect(parsed.blocks).toEqual([]);
+    expect(parsed.cleanText).toBe('Before');
+  });
+
+  it('truncates capsule fields to 200 characters', () => {
+    const tooLong = 'x'.repeat(240);
+    const input = [
+      '<continuation-capsule>',
+      JSON.stringify({
+        activeTaskId: tooLong,
+        currentFocus: tooLong,
+        nextStep: tooLong,
+        blockedOn: tooLong,
+      }),
+      '</continuation-capsule>',
+    ].join('\n');
+
+    const parsed = parseContinuationCapsule(input);
+
+    expect(parsed.capsule).toEqual({
+      activeTaskId: 'x'.repeat(200),
+      currentFocus: 'x'.repeat(200),
+      nextStep: 'x'.repeat(200),
+      blockedOn: 'x'.repeat(200),
+    });
   });
 
   it('reports raw ranges for parsed blocks', () => {
     const input = [
       'Reply text',
       '<continuation-capsule>',
-      '{"currentTask":"Track offsets","nextStep":"Use them to strip blocks","blockers":[]}',
+      '{"currentFocus":"Track offsets","nextStep":"Use them to strip blocks"}',
       '</continuation-capsule>',
     ].join('\n');
 

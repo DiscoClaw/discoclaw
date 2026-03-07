@@ -2567,10 +2567,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let historySection = '';
           let summarySection = '';
           let existingSummaryText: string | null = null;
+          let existingSummaryUpdatedAt: number | undefined;
           let existingSummaryRegeneratedAt: number | undefined;
           let existingContinuationCapsule: ContinuationCapsule | undefined;
           let processedText = '';
           let effectiveContinuationCapsule: ContinuationCapsule | undefined;
+          let emittedContinuationCapsule = false;
           try {
 
           const cwd = params.useGroupDirCwd
@@ -2641,6 +2643,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const existing = await loadSummary(params.summaryDataDir, sessionKey);
               if (existing) {
                 existingSummaryText = existing.summary.slice(0, params.summaryMaxChars);
+                existingSummaryUpdatedAt = existing.updatedAt;
                 existingSummaryRegeneratedAt = existing.regeneratedAt;
                 existingContinuationCapsule = existing.continuationCapsule;
                 summarySection = buildConversationMemorySection(existingSummaryText, {
@@ -2654,6 +2657,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
             } catch (err) {
               params.log?.warn({ err, sessionKey }, 'discord:summary load failed');
+            }
+
+            if (!summarySection) {
+              summarySection = buildConversationMemorySection('', undefined, existingContinuationCapsule);
             }
           }
 
@@ -3355,6 +3362,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               parseFailuresCount = parsed.parseFailures;
               if (parsed.continuationCapsule) {
                 effectiveContinuationCapsule = parsed.continuationCapsule;
+                emittedContinuationCapsule = true;
               }
               const cleanProcessedText = parsed.cleanText;
               if (parsed.parseFailures > 0) {
@@ -3457,6 +3465,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             const parsedCapsule = parseCapsuleBlock(processedText);
             if (parsedCapsule.capsule) {
               effectiveContinuationCapsule = parsedCapsule.capsule;
+              emittedContinuationCapsule = true;
             }
             processedText = parsedCapsule.cleanText;
             processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
@@ -3627,16 +3636,38 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 continuationCapsule: effectiveContinuationCapsule,
                 ...(taskStatusContext !== undefined ? { taskStatusContext } : {}),
               };
-            } else if (summarySection) {
+            } else if (existingSummaryText !== null || emittedContinuationCapsule) {
               // Persist counter progress so restarts resume from last known count.
+              // Re-read first so this save does not overwrite a newer async summary
+              // write with stale summary text or carry-forward capsule state.
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              saveSummary(params.summaryDataDir, sessionKey, {
-                summary: (existingSummaryText ?? '').slice(0, params.summaryMaxChars),
-                updatedAt: Date.now(),
-                regeneratedAt: existingSummaryRegeneratedAt,
-                turnsSinceUpdate: count,
-                ...(effectiveContinuationCapsule ? { continuationCapsule: effectiveContinuationCapsule } : {}),
-              });
+              (async () => {
+                try {
+                  const latest = await loadSummary(params.summaryDataDir, sessionKey);
+                  const sawNewerSummary = Boolean(
+                    latest
+                    && typeof latest.updatedAt === 'number'
+                    && typeof existingSummaryUpdatedAt === 'number'
+                    && latest.updatedAt > existingSummaryUpdatedAt,
+                  );
+                  const latestTurnsSinceUpdate = typeof latest?.turnsSinceUpdate === 'number' && latest.turnsSinceUpdate >= 0
+                    ? latest.turnsSinceUpdate
+                    : 0;
+                  const continuationCapsuleToSave = emittedContinuationCapsule
+                    ? effectiveContinuationCapsule
+                    : latest?.continuationCapsule ?? effectiveContinuationCapsule;
+
+                  await saveSummary(params.summaryDataDir, sessionKey, {
+                    summary: ((sawNewerSummary ? latest?.summary : existingSummaryText) ?? '').slice(0, params.summaryMaxChars),
+                    updatedAt: Date.now(),
+                    regeneratedAt: sawNewerSummary ? latest?.regeneratedAt : existingSummaryRegeneratedAt,
+                    turnsSinceUpdate: sawNewerSummary ? Math.max(1, latestTurnsSinceUpdate + 1) : count,
+                    ...(continuationCapsuleToSave ? { continuationCapsule: continuationCapsuleToSave } : {}),
+                  });
+                } catch (err) {
+                  params.log?.warn({ err, sessionKey }, 'discord:summary counter-progress save failed');
+                }
+              })();
             }
           }
 

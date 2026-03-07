@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { ContinuationCapsule } from './capsule.js';
-import { renderContinuationCapsule } from './capsule.js';
+import { normalizeContinuationCapsule, renderContinuationCapsule } from './capsule.js';
 
 export type ConversationSummary = {
   summary: string;
@@ -63,28 +63,8 @@ function asConversationSummary(value: unknown): ConversationSummary | null {
   return summary;
 }
 
-function normalizeCapsuleText(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const normalized = value.replace(/\r\n?/g, '\n').trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
 function asContinuationCapsule(value: unknown): ContinuationCapsule | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const candidate = value as {
-    currentTask?: unknown;
-    nextStep?: unknown;
-    blockers?: unknown;
-  };
-  const currentTask = normalizeCapsuleText(candidate.currentTask);
-  const nextStep = normalizeCapsuleText(candidate.nextStep);
-  if (!currentTask || !nextStep || !Array.isArray(candidate.blockers)) return undefined;
-
-  const blockers = candidate.blockers
-    .map((blocker) => normalizeCapsuleText(blocker))
-    .filter((blocker): blocker is string => blocker !== null);
-
-  return { currentTask, nextStep, blockers };
+  return normalizeContinuationCapsule(value) ?? undefined;
 }
 
 function safeSessionKey(sessionKey: string): string {
@@ -115,7 +95,15 @@ export async function saveSummary(
   await fs.mkdir(dir, { recursive: true });
   const filePath = path.join(dir, `${safeSessionKey(sessionKey)}.json`);
   const tmp = `${filePath}.tmp.${process.pid}`;
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
+  const normalizedCapsule = asContinuationCapsule(data.continuationCapsule);
+  const payload: ConversationSummary = {
+    ...data,
+    ...(normalizedCapsule ? { continuationCapsule: normalizedCapsule } : {}),
+  };
+  if (!normalizedCapsule) {
+    delete payload.continuationCapsule;
+  }
+  await fs.writeFile(tmp, JSON.stringify(payload, null, 2) + '\n', 'utf8');
   await fs.rename(tmp, filePath);
 }
 
@@ -147,11 +135,12 @@ export function buildConversationMemorySection(
   metadata?: { turnsSinceUpdate?: number; regeneratedAt?: number; now?: number },
   continuationCapsule?: ContinuationCapsule,
 ): string {
+  const renderedSummary = summary.trim().length > 0 ? summary : 'No rolling summary yet.';
   const lines = [
     'Conversation memory:',
     `Rolling summary only; treat this as background context.${formatRecencyAnnotation(metadata?.regeneratedAt, metadata?.turnsSinceUpdate, metadata?.now)} If it conflicts with recent conversation, reply context, tool output, or the current user message, trust the fresher evidence.`,
-    summary,
-    'If your current task, next step, or blockers change, emit an updated <continuation-capsule> block in your response.',
+    renderedSummary,
+    'If your active task, current focus, next step, or blocker changes, emit an updated <continuation-capsule> block in your response.',
   ];
   if (continuationCapsule) {
     lines.push('Continuation capsule (verbatim, persisted outside the rolling summary):');

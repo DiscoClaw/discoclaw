@@ -739,7 +739,7 @@ function discordActionsRulesSection(displayName: string): string {
 - Action blocks are stripped from displayed output; results appended automatically.
 - Actions ending in List, Show, Info, Status, or prefixed with fetch/read/search are query actions — results are sent back for follow-up analysis.
 - Include all needed actions in one response. Multiple same-type actions are supported and executed sequentially.
-- If prompt context includes a continuation capsule, keep it current with a single \`<continuation-capsule>{"currentTask":"...","nextStep":"...","blockers":[]}</continuation-capsule>\` block whenever task focus, next step, or blockers change.
+- Keep the continuation capsule current with a single \`<continuation-capsule>{"activeTaskId":"...","currentFocus":"...","nextStep":"...","blockedOn":"..."}</continuation-capsule>\` block whenever the active task, current focus, next step, or blocker changes.
 - Keep continuation capsules machine-readable only; do not mention them in user-facing prose.
 
 ### Permissions

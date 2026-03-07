@@ -1,9 +1,10 @@
 import { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
 
 export type ContinuationCapsule = {
-  currentTask: string;
+  activeTaskId?: string;
+  currentFocus: string;
   nextStep: string;
-  blockers: string[];
+  blockedOn?: string;
 };
 
 export type Capsule = ContinuationCapsule;
@@ -34,29 +35,12 @@ type TextRange = {
 
 const CAPSULE_OPEN = '<continuation-capsule>';
 const CAPSULE_CLOSE = '</continuation-capsule>';
+const CAPSULE_FIELD_MAX_CHARS = 200;
 
 function normalizeTextValue(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const normalized = value.replace(/\r\n?/g, '\n').trim();
+  const normalized = value.replace(/\r\n?/g, '\n').trim().slice(0, CAPSULE_FIELD_MAX_CHARS);
   return normalized.length > 0 ? normalized : null;
-}
-
-function normalizeBlockers(value: unknown): string[] | null {
-  if (Array.isArray(value)) {
-    const blockers = value
-      .map(item => normalizeTextValue(item))
-      .filter((item): item is string => item !== null);
-    return blockers;
-  }
-
-  const single = normalizeTextValue(value);
-  if (single === null) return [];
-
-  if (single === '[]' || /^\((?:none|n\/a)\)$/i.test(single) || /^none$/i.test(single)) {
-    return [];
-  }
-
-  return [single];
 }
 
 function getObjectString(
@@ -70,68 +54,123 @@ function getObjectString(
   return null;
 }
 
-function normalizeCapsuleObject(value: unknown): ContinuationCapsule | null {
+function isNoBlockedOnValue(value: string): boolean {
+  return value === '[]' || /^\((?:none|n\/a)\)$/i.test(value) || /^none$/i.test(value);
+}
+
+function normalizeBlockedOnValue(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    const blockers = value
+      .map(item => normalizeTextValue(item))
+      .filter((item): item is string => item !== null && !isNoBlockedOnValue(item));
+    if (blockers.length === 0) return null;
+    return normalizeTextValue(blockers.join('; '));
+  }
+
+  const normalized = normalizeTextValue(value);
+  if (normalized === null || isNoBlockedOnValue(normalized)) return null;
+  return normalized;
+}
+
+export function normalizeContinuationCapsule(value: unknown): ContinuationCapsule | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
   const record = value as Record<string, unknown>;
-  const currentTask = getObjectString(record, ['currentTask', 'current_task', 'task', 'current']);
+  const activeTaskId = getObjectString(record, ['activeTaskId', 'active_task_id', 'taskId', 'task_id']) ?? undefined;
+  const currentFocus = getObjectString(record, [
+    'currentFocus',
+    'current_focus',
+    'focus',
+    'currentTask',
+    'current_task',
+    'task',
+    'current',
+  ]);
   const nextStep = getObjectString(record, ['nextStep', 'next_step', 'next']);
-  const blockers = normalizeBlockers(record.blockers ?? record.blocker ?? []);
+  const blockedOn = normalizeBlockedOnValue(
+    record.blockedOn ?? record.blocked_on ?? record.blockers ?? record.blocker,
+  ) ?? undefined;
 
-  if (currentTask === null || nextStep === null || blockers === null) return null;
+  if (currentFocus === null || nextStep === null) return null;
 
-  return { currentTask, nextStep, blockers };
+  return {
+    ...(activeTaskId ? { activeTaskId } : {}),
+    currentFocus,
+    nextStep,
+    ...(blockedOn ? { blockedOn } : {}),
+  };
 }
 
 function parseLineBasedCapsule(body: string): ContinuationCapsule | null {
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
-  let currentTask: string | null = null;
+  let activeTaskId: string | null = null;
+  let currentFocus: string | null = null;
   let nextStep: string | null = null;
+  let blockedOn: string | null = null;
   const blockers: string[] = [];
-  let inBlockers = false;
+  let inLegacyBlockers = false;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) continue;
 
-    const currentMatch = line.match(/^(?:currentTask|current_task|task|current)\s*:\s*(.+)$/i);
+    const taskIdMatch = line.match(/^(?:activeTaskId|active_task_id|taskId|task_id)\s*:\s*(.+)$/i);
+    if (taskIdMatch) {
+      activeTaskId = normalizeTextValue(taskIdMatch[1]);
+      inLegacyBlockers = false;
+      continue;
+    }
+
+    const currentMatch = line.match(/^(?:currentFocus|current_focus|focus|currentTask|current_task|task|current)\s*:\s*(.+)$/i);
     if (currentMatch) {
-      currentTask = normalizeTextValue(currentMatch[1]);
-      inBlockers = false;
+      currentFocus = normalizeTextValue(currentMatch[1]);
+      inLegacyBlockers = false;
       continue;
     }
 
     const nextMatch = line.match(/^(?:nextStep|next_step|next)\s*:\s*(.+)$/i);
     if (nextMatch) {
       nextStep = normalizeTextValue(nextMatch[1]);
-      inBlockers = false;
+      inLegacyBlockers = false;
+      continue;
+    }
+
+    const blockedOnMatch = line.match(/^(?:blockedOn|blocked_on|blocked)\s*:\s*(.*)$/i);
+    if (blockedOnMatch) {
+      blockedOn = normalizeBlockedOnValue(blockedOnMatch[1]);
+      inLegacyBlockers = false;
       continue;
     }
 
     const blockersMatch = line.match(/^(?:blockers?)\s*:\s*(.*)$/i);
     if (blockersMatch) {
-      const inlineValue = normalizeTextValue(blockersMatch[1]);
-      if (inlineValue !== null && inlineValue !== '[]' && !/^none$/i.test(inlineValue) && !/^\((?:none|n\/a)\)$/i.test(inlineValue)) {
-        blockers.push(inlineValue);
-      }
-      inBlockers = true;
+      const inlineValue = normalizeBlockedOnValue(blockersMatch[1]);
+      if (inlineValue !== null) blockers.push(inlineValue);
+      inLegacyBlockers = true;
       continue;
     }
 
-    if (!inBlockers) continue;
+    if (!inLegacyBlockers) continue;
 
     const bulletMatch = rawLine.match(/^\s*[-*]\s+(.+)$/);
     if (!bulletMatch) {
-      inBlockers = false;
+      inLegacyBlockers = false;
       continue;
     }
 
     const blocker = normalizeTextValue(bulletMatch[1]);
-    if (blocker !== null) blockers.push(blocker);
+    if (blocker !== null && !isNoBlockedOnValue(blocker)) blockers.push(blocker);
   }
 
-  if (currentTask === null || nextStep === null) return null;
-  return { currentTask, nextStep, blockers };
+  const normalizedBlockedOn = blockedOn ?? normalizeBlockedOnValue(blockers);
+  if (currentFocus === null || nextStep === null) return null;
+
+  return {
+    ...(activeTaskId ? { activeTaskId } : {}),
+    currentFocus,
+    nextStep,
+    ...(normalizedBlockedOn ? { blockedOn: normalizedBlockedOn } : {}),
+  };
 }
 
 function parseCapsuleBody(body: string): ContinuationCapsule | null {
@@ -140,7 +179,7 @@ function parseCapsuleBody(body: string): ContinuationCapsule | null {
 
   if (trimmed.startsWith('{')) {
     try {
-      return normalizeCapsuleObject(JSON.parse(trimmed));
+      return normalizeContinuationCapsule(JSON.parse(trimmed));
     } catch {
       return null;
     }
@@ -199,9 +238,15 @@ function stripRanges(text: string, ranges: TextRange[]): string {
   return collapseCapsuleWhitespace(out);
 }
 
-export function extractContinuationCapsuleBlocks(text: string): ParsedContinuationCapsuleBlock[] {
+type ScannedContinuationCapsuleBlock = {
+  capsule: ContinuationCapsule | null;
+  raw: string;
+  range: CapsuleRange;
+};
+
+function scanContinuationCapsuleBlocks(text: string): ScannedContinuationCapsuleBlock[] {
   const codeRanges = computeMarkdownCodeRanges(text);
-  const blocks: ParsedContinuationCapsuleBlock[] = [];
+  const blocks: ScannedContinuationCapsuleBlock[] = [];
   let cursor = 0;
 
   while (cursor < text.length) {
@@ -212,18 +257,23 @@ export function extractContinuationCapsuleBlocks(text: string): ParsedContinuati
     if (isIndexInRanges(open, codeRanges)) continue;
 
     const close = text.indexOf(CAPSULE_CLOSE, cursor);
-    if (close === -1) break;
+    if (close === -1) {
+      blocks.push({
+        capsule: null,
+        raw: text.slice(open),
+        range: { start: open, end: text.length },
+      });
+      break;
+    }
 
     const end = close + CAPSULE_CLOSE.length;
     const raw = text.slice(open, end);
     const capsule = parseCapsuleBody(text.slice(cursor, close));
-    if (capsule !== null) {
-      blocks.push({
-        capsule,
-        raw,
-        range: { start: open, end },
-      });
-    }
+    blocks.push({
+      capsule,
+      raw,
+      range: { start: open, end },
+    });
 
     cursor = end;
   }
@@ -231,11 +281,20 @@ export function extractContinuationCapsuleBlocks(text: string): ParsedContinuati
   return blocks;
 }
 
+export function extractContinuationCapsuleBlocks(text: string): ParsedContinuationCapsuleBlock[] {
+  return scanContinuationCapsuleBlocks(text).filter(
+    (block): block is ParsedContinuationCapsuleBlock => block.capsule !== null,
+  );
+}
+
 export const extractCapsuleBlocks = extractContinuationCapsuleBlocks;
 
 export function parseContinuationCapsule(text: string): ContinuationCapsuleParseResult {
-  const blocks = extractContinuationCapsuleBlocks(text);
-  const cleanText = stripRanges(text, blocks.map(block => block.range));
+  const scannedBlocks = scanContinuationCapsuleBlocks(text);
+  const blocks = scannedBlocks.filter(
+    (block): block is ParsedContinuationCapsuleBlock => block.capsule !== null,
+  );
+  const cleanText = stripRanges(text, scannedBlocks.map(block => block.range));
   return {
     capsule: blocks.length > 0 ? blocks[blocks.length - 1]!.capsule : null,
     cleanText,
@@ -247,7 +306,7 @@ export const parseCapsule = parseContinuationCapsule;
 export const parseCapsuleBlock = parseContinuationCapsule;
 
 export function renderContinuationCapsule(capsule: ContinuationCapsule): string {
-  const normalized = normalizeCapsuleObject(capsule);
+  const normalized = normalizeContinuationCapsule(capsule);
   if (normalized === null) {
     throw new Error('Invalid continuation capsule');
   }
