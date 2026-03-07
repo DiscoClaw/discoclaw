@@ -217,6 +217,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     );
     const codexStableHome = (process.env.DISCOCLAW_CODEX_STABLE_HOME ?? '').trim();
     let launcherStateRetryUsed = false;
+    let sessionResetNoticeEmitted = false;
 
     const { q, push, wait, wake } = createEventQueue();
     let finished = false;
@@ -282,6 +283,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       const args = strategy.buildArgs(ctx, opts);
       const outputMode = strategy.getOutputMode(ctx, opts);
       const strategyEnvOverrides = strategy.buildEnv?.(ctx, opts);
+      if (ctx.sessionResetReason && !sessionResetNoticeEmitted) {
+        push({ type: 'text_delta', text: `*(${ctx.sessionResetReason})*\n\n` });
+        sessionResetNoticeEmitted = true;
+      }
       if (opts.log) {
         opts.log.debug({ args: args.slice(0, -1), hasImages, promptTooLarge, useStdin }, `${strategy.id}: constructed args`);
       }

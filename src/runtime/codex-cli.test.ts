@@ -1511,15 +1511,15 @@ describe('Codex CLI runtime adapter', () => {
       expect(fs.existsSync(tmpDir)).toBe(false);
     });
 
-    it('resume invocations do NOT include --image flags', async () => {
+    it('resets resumed sessions with images to fresh exec and includes --image flags', async () => {
       const jsonlOutput1 = [
         '{"type":"thread.started","thread_id":"img-thread-1"}',
         '{"type":"item.completed","item":{"type":"agent_message","text":"saw image"}}',
         '{"type":"turn.completed","usage":{}}',
       ].join('\n') + '\n';
       const jsonlOutput2 = [
-        '{"type":"thread.started","thread_id":"img-thread-1"}',
-        '{"type":"item.completed","item":{"type":"agent_message","text":"resumed"}}',
+        '{"type":"thread.started","thread_id":"img-thread-2"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"fresh"}}',
         '{"type":"turn.completed","usage":{}}',
       ].join('\n') + '\n';
 
@@ -1540,7 +1540,7 @@ describe('Codex CLI runtime adapter', () => {
 
       // Second call (resume) — should NOT include --image even with images in params.
       mockExeca.mockImplementation(() => createMockSubprocess({ stdout: jsonlOutput2, exitCode: 0 }));
-      await collectEvents(rt.invoke({
+      const events = await collectEvents(rt.invoke({
         prompt: 'What about now?',
         model: '',
         cwd: '/tmp',
@@ -1550,8 +1550,12 @@ describe('Codex CLI runtime adapter', () => {
 
       const callArgs2 = mockExeca.mock.calls[1][1] as string[];
       expect(callArgs2[0]).toBe('exec');
-      expect(callArgs2[1]).toBe('resume');
-      expect(callArgs2).not.toContain('--image');
+      expect(callArgs2[1]).toBe('-m');
+      expect(callArgs2).toContain('--image');
+      expect(events).toContainEqual({
+        type: 'text_delta',
+        text: '*(Session reset - image attachments require a fresh Codex session because `codex exec resume` does not support `--image`. Starting fresh.)*\n\n',
+      });
     });
   });
 

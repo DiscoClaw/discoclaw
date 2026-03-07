@@ -44,6 +44,8 @@ export type CliInvokeContext = {
   sessionMap?: Map<string, string>;
   /** Temp file paths for images written by prepareImages(). Strategies use these in buildArgs. */
   tempImagePaths?: string[];
+  /** Optional user-facing notice when a strategy intentionally resets session context for this invocation. */
+  sessionResetReason?: string;
 };
 
 // ---------------------------------------------------------------------------
