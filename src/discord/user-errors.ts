@@ -1,4 +1,21 @@
-import { mapRuntimeFailureToUserMessage } from '../runtime/runtime-failure.js';
+import {
+  mapRuntimeFailureToUserMessage,
+  normalizeRuntimeFailure,
+  normalizeRuntimeFailureEvent,
+  type RuntimeFailure,
+  type RuntimeFailureCode,
+  type RuntimeFailureEvent,
+  type RuntimeFailureInputEvent,
+  type RuntimeFailureMetadata,
+} from '../runtime/runtime-failure.js';
+
+export type {
+  RuntimeFailure,
+  RuntimeFailureCode,
+  RuntimeFailureEvent,
+  RuntimeFailureInputEvent,
+  RuntimeFailureMetadata,
+};
 
 export function messageContentIntentHint(): string {
   return (
@@ -7,6 +24,22 @@ export function messageContentIntentHint(): string {
   );
 }
 
-export function mapRuntimeErrorToUserMessage(raw: string): string {
-  return mapRuntimeFailureToUserMessage(raw);
+export function normalizeRuntimeError(
+  input: RuntimeFailure | RuntimeFailureInputEvent | string | Error,
+): RuntimeFailure {
+  if (typeof input === 'string' || input instanceof Error) {
+    return normalizeRuntimeFailure(input);
+  }
+
+  if (input.type === 'error' || input.type === 'runtime_failure') {
+    return normalizeRuntimeFailureEvent(input);
+  }
+
+  return normalizeRuntimeFailure(input);
+}
+
+export function mapRuntimeErrorToUserMessage(
+  input: RuntimeFailure | RuntimeFailureInputEvent | string | Error,
+): string {
+  return mapRuntimeFailureToUserMessage(input);
 }

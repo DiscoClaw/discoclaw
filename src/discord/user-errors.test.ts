@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapRuntimeErrorToUserMessage } from './user-errors.js';
+import { mapRuntimeErrorToUserMessage, normalizeRuntimeError } from './user-errors.js';
 
 describe('mapRuntimeErrorToUserMessage', () => {
   it('maps Claude binary missing errors to install guidance', () => {
@@ -66,5 +66,46 @@ describe('mapRuntimeErrorToUserMessage', () => {
     const msg = mapRuntimeErrorToUserMessage('response must be at most 200 characters');
     expect(msg).toContain('Runtime error:');
     expect(msg).not.toContain('tool name exceeded');
+  });
+});
+
+describe('normalizeRuntimeError', () => {
+  it('normalizes structured runtime_failure events without dropping metadata', () => {
+    const failure = normalizeRuntimeError({
+      type: 'runtime_failure',
+      failure: {
+        envelope: 'runtime_failure',
+        envelopeVersion: 'v1',
+        source: 'pipeline_tool',
+        code: 'E_RUN_NOT_FOUND',
+        message: 'run not found',
+        rawMessage: 'run not found',
+        userMessage: 'The requested pipeline run was not found.',
+        retryable: false,
+        metadata: {
+          operation: 'pipeline.resume',
+          ok: false,
+          failureCodeVersion: 'v1',
+          failureCode: 'E_RUN_NOT_FOUND',
+        },
+      },
+    });
+
+    expect(failure.source).toBe('pipeline_tool');
+    expect(failure.code).toBe('E_RUN_NOT_FOUND');
+    expect(failure.metadata.operation).toBe('pipeline.resume');
+    expect(failure.userMessage).toBe('The requested pipeline run was not found.');
+  });
+
+  it('normalizes legacy error events through the shared classifier', () => {
+    const failure = normalizeRuntimeError({
+      type: 'error',
+      message: 'stream stall: no output for 120000ms',
+    });
+
+    expect(failure.source).toBe('runtime');
+    expect(failure.code).toBe('STREAM_STALL');
+    expect(failure.retryable).toBe(true);
+    expect(failure.userMessage).toContain('2 min');
   });
 });
