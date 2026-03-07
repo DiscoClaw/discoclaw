@@ -33,7 +33,7 @@ type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
 const STREAMING_EDIT_TIMEOUT_MS = 4_000;
 const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
-const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 30_000;
+const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 10_000;
 
 async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -567,7 +567,8 @@ function createReactionHandler(
           });
           let streamEditQueue: Promise<void> = Promise.resolve();
 
-          const maybeEdit = async (force = false) => {
+          const maybeEdit = async (opts?: boolean | { force?: boolean }) => {
+            const force = typeof opts === 'boolean' ? opts : opts?.force ?? false;
             if (!reply) return;
             if (isShuttingDown()) return;
             const currentReply = reply;

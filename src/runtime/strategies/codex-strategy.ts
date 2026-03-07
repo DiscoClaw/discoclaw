@@ -49,6 +49,15 @@ function extractItemId(item: Record<string, unknown>): string | undefined {
   return id || undefined;
 }
 
+function extractReasoningPreviewText(item: Record<string, unknown>, max = 260): string {
+  const raw = typeof item.summary === 'string'
+    ? item.summary
+    : typeof item.text === 'string'
+      ? item.text
+      : '';
+  return compactText(raw, max);
+}
+
 /**
  * Strip prompt content and internal details from error messages.
  * Codex CLI can include the full prompt, session paths, and auth details in stderr on failure.
@@ -100,14 +109,13 @@ export function createCodexStrategy(
     let label: string | undefined;
 
     // Preserve concise reasoning context in the guaranteed preview_debug lane.
-    if (phase === 'completed' && itemType === 'reasoning') {
-      const summary = typeof item.summary === 'string'
-        ? item.summary
-        : typeof item.text === 'string'
-          ? item.text
-          : '';
-      const compactSummary = compactText(summary, 260);
-      if (compactSummary) label = `Reasoning: ${compactSummary}`;
+    if (itemType === 'reasoning') {
+      const compactSummary = extractReasoningPreviewText(item);
+      if (phase === 'started') {
+        label = 'Hypothesis: reasoning in progress.';
+      } else {
+        if (compactSummary) label = `Reasoning: ${compactSummary}`;
+      }
     }
 
     return {
@@ -129,14 +137,8 @@ export function createCodexStrategy(
     if (itemType === 'agent_message') return null;
 
     if (itemType === 'reasoning') {
-      const summary = typeof item.summary === 'string'
-        ? item.summary
-        : typeof item.text === 'string'
-          ? item.text
-          : '';
-      if (phase === 'completed' && summary) {
-        return `Reasoning ${phase}: ${compactText(summary, 260)}`;
-      }
+      const compactSummary = extractReasoningPreviewText(item);
+      if (compactSummary) return `Reasoning ${phase}: ${compactSummary}`;
       return `Reasoning ${phase}${suffix}.`;
     }
 
@@ -315,7 +317,10 @@ export function createCodexStrategy(
         const item = asObject(anyEvt.item);
         if (!item) return { activity: true };
         const phase: 'started' | 'completed' = anyEvt.type === 'item.started' ? 'started' : 'completed';
-        const debugEvent = itemTypeDebug ? itemDebugEvent(phase, item) : null;
+        const alwaysEmitReasoningStartDebug = phase === 'started' && item.type === 'reasoning';
+        const debugEvent = alwaysEmitReasoningStartDebug || itemTypeDebug
+          ? itemDebugEvent(phase, item)
+          : null;
         const previewLine = verbosePreview ? itemPreviewLine(phase, item) : null;
         const previewEvents = [
           ...(debugEvent ? [debugEvent] : []),
