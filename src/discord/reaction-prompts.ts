@@ -1,5 +1,6 @@
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { ReactionPromptStore } from './reaction-prompt-store.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,28 +38,7 @@ function isSendableChannel(channel: unknown): channel is SendableChannel {
     typeof (channel as { send?: unknown }).send === 'function';
 }
 
-// ---------------------------------------------------------------------------
-// Prompt store
-// ---------------------------------------------------------------------------
-
-type PendingPrompt = {
-  question: string;
-  choices: Set<string>;
-};
-
-/**
- * In-memory store for pending reaction prompts.
- * Keyed by the bot's prompt message ID so the reaction handler can look up
- * and match the correct record.
- */
-const pendingPrompts = new Map<string, PendingPrompt>();
-
-/**
- * Register a pending prompt in the store.
- */
-function registerPrompt(messageId: string, question: string, choices: string[]): void {
-  pendingPrompts.set(messageId, { question, choices: new Set(choices) });
-}
+let reactionPromptStore = new ReactionPromptStore();
 
 /**
  * Called by the reaction handler when a user reacts to any message.
@@ -73,27 +53,29 @@ export function tryResolveReactionPrompt(
   messageId: string,
   emoji: string,
 ): { question: string; chosenEmoji: string } | null {
-  const pending = pendingPrompts.get(messageId);
-  if (!pending) return null;
-
-  if (!pending.choices.has(emoji)) return null;
-
-  pendingPrompts.delete(messageId);
-  return { question: pending.question, chosenEmoji: emoji };
+  return reactionPromptStore.tryResolvePrompt(messageId, emoji);
 }
 
 /**
  * Returns the number of currently pending prompts (useful for tests).
  */
 export function pendingPromptCount(): number {
-  return pendingPrompts.size;
+  return reactionPromptStore.pendingCount();
 }
 
 /**
  * Clear all pending prompts — for use in tests only.
  */
 export function _resetForTest(): void {
-  pendingPrompts.clear();
+  reactionPromptStore.resetMemory();
+}
+
+export function _setStoreFilePathForTest(filePath: string): void {
+  reactionPromptStore = new ReactionPromptStore(filePath);
+}
+
+export function _hydrateFromDiskForTest(): void {
+  reactionPromptStore.hydrateFromDisk();
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +125,12 @@ export async function executeReactionPromptAction(
 
   // Register the prompt *before* adding reactions so the reaction handler
   // can match it as soon as the first reaction arrives.
-  registerPrompt(promptMessage.id, action.question, action.choices);
+  try {
+    reactionPromptStore.registerPrompt(promptMessage.id, action.question, action.choices);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `reactionPrompt: failed to persist prompt: ${msg}` };
+  }
 
   // Add reactions for each choice.
   for (const emoji of action.choices) {
@@ -151,7 +138,11 @@ export async function executeReactionPromptAction(
       await promptMessage.react(emoji);
     } catch (err) {
       // Clean up the pending record so it doesn't leak on react failure.
-      pendingPrompts.delete(promptMessage.id);
+      try {
+        reactionPromptStore.removePrompt(promptMessage.id);
+      } catch {
+        // Best-effort cleanup only — preserve the original react failure.
+      }
       const msg = err instanceof Error ? err.message : String(err);
       return { ok: false, error: `reactionPrompt: failed to add reaction "${emoji}": ${msg}` };
     }

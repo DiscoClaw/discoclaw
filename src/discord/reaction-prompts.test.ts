@@ -1,10 +1,15 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   executeReactionPromptAction,
   tryResolveReactionPrompt,
   pendingPromptCount,
   reactionPromptSection,
   _resetForTest,
+  _setStoreFilePathForTest,
+  _hydrateFromDiskForTest,
 } from './reaction-prompts.js';
 import type { ReactionPromptRequest } from './reaction-prompts.js';
 import type { ActionContext } from './actions.js';
@@ -42,8 +47,19 @@ function makeAction(overrides: Partial<ReactionPromptRequest> = {}): ReactionPro
   };
 }
 
-afterEach(() => {
+let tempDir = '';
+let storePath = '';
+
+beforeEach(async () => {
+  tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'reaction-prompts-'));
+  storePath = path.join(tempDir, 'reaction-prompts.json');
+  _setStoreFilePathForTest(storePath);
   _resetForTest();
+});
+
+afterEach(async () => {
+  _resetForTest();
+  await fs.rm(tempDir, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -197,6 +213,26 @@ describe('executeReactionPromptAction — happy path', () => {
     tryResolveReactionPrompt('prompt-cleanup', '✅');
     expect(pendingPromptCount()).toBe(0);
   });
+
+  it('persists a pending prompt to disk when created', async () => {
+    const reactFn = vi.fn().mockResolvedValue(undefined);
+    const promptMsg = { id: 'prompt-persisted', react: reactFn };
+    const sendFn = vi.fn().mockResolvedValue(promptMsg);
+    const ctx = makeCtx();
+    (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
+
+    const result = await executeReactionPromptAction(makeAction({ choices: ['🟢', '🔴'] }), ctx);
+
+    expect(result).toEqual({ ok: true, summary: 'Prompt sent — awaiting user reaction' });
+    const raw = await fs.readFile(storePath, 'utf8');
+    expect(JSON.parse(raw)).toEqual([
+      {
+        messageId: 'prompt-persisted',
+        question: 'Should I proceed?',
+        choices: ['🟢', '🔴'],
+      },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -278,6 +314,48 @@ describe('tryResolveReactionPrompt', () => {
 
     expect(tryResolveReactionPrompt('prompt-once', '✅')).not.toBeNull();
     expect(tryResolveReactionPrompt('prompt-once', '✅')).toBeNull();
+  });
+
+  it('rehydrates pending prompts from disk after an in-memory reset', async () => {
+    const reactFn = vi.fn().mockResolvedValue(undefined);
+    const promptMsg = { id: 'prompt-restart', react: reactFn };
+    const sendFn = vi.fn().mockResolvedValue(promptMsg);
+    const ctx = makeCtx();
+    (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
+
+    await executeReactionPromptAction(makeAction({ choices: ['✅', '❌'] }), ctx);
+    expect(pendingPromptCount()).toBe(1);
+
+    _resetForTest();
+    expect(pendingPromptCount()).toBe(0);
+
+    _hydrateFromDiskForTest();
+    expect(pendingPromptCount()).toBe(1);
+    expect(tryResolveReactionPrompt('prompt-restart', '❌')).toEqual({
+      question: 'Should I proceed?',
+      chosenEmoji: '❌',
+    });
+  });
+
+  it('persists prompt removal so resolved prompts do not reappear after restart', async () => {
+    const reactFn = vi.fn().mockResolvedValue(undefined);
+    const promptMsg = { id: 'prompt-resolved', react: reactFn };
+    const sendFn = vi.fn().mockResolvedValue(promptMsg);
+    const ctx = makeCtx();
+    (ctx.guild.channels.cache.get as any).mockReturnValue({ send: sendFn });
+
+    await executeReactionPromptAction(makeAction(), ctx);
+    expect(tryResolveReactionPrompt('prompt-resolved', '✅')).toEqual({
+      question: 'Should I proceed?',
+      chosenEmoji: '✅',
+    });
+
+    _resetForTest();
+    _hydrateFromDiskForTest();
+
+    expect(pendingPromptCount()).toBe(0);
+    const raw = await fs.readFile(storePath, 'utf8');
+    expect(JSON.parse(raw)).toEqual([]);
   });
 });
 

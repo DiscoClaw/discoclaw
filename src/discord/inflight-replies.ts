@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 
@@ -296,8 +297,14 @@ async function readPersistedEntries(): Promise<OrphanEntry[]> {
 async function writePersistedEntries(entries: OrphanEntry[]): Promise<void> {
   if (!dataFilePath) return;
   const tmpPath = `${dataFilePath}.tmp.${process.pid}`;
-  await fs.writeFile(tmpPath, JSON.stringify(entries) + '\n', 'utf-8');
-  await fs.rename(tmpPath, dataFilePath);
+  await fs.mkdir(path.dirname(dataFilePath), { recursive: true });
+  try {
+    await fs.writeFile(tmpPath, JSON.stringify(entries) + '\n', 'utf-8');
+    await fs.rename(tmpPath, dataFilePath);
+  } catch (err) {
+    await fs.unlink(tmpPath).catch(() => {});
+    throw err;
+  }
 }
 
 function persistAdd(entry: OrphanEntry): Promise<void> {

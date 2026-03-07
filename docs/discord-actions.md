@@ -46,6 +46,7 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-voice.ts`
 - `src/discord/actions-spawn.ts`
 - `src/discord/reaction-prompts.ts`
+- `src/discord/reaction-prompt-store.ts` (durable pending prompt store)
 
 Channel action types (in `src/discord/actions-channels.ts`):
 - `channelList`, `channelCreate`, `channelDelete`, `channelEdit`, `channelInfo`, `channelMove`
@@ -103,6 +104,7 @@ Integration points (where actions are included in the prompt and executed):
 - `src/cron/executor.ts` (cron jobs)
 - `src/discord/deferred-runner.ts` (deferred action execution)
 - `src/discord/reaction-handler.ts` (reaction-based prompt resolution)
+- `src/index.ts` (startup JSON healing for persisted action-related stores, including reaction prompts)
 
 Env wiring:
 - `.env.example` / `.env.example.full`
@@ -431,7 +433,9 @@ Allow the model to present an emoji-based multiple-choice question to the user w
 
 Fields: `question` (string displayed as the bot message), `choices` (2–9 emoji strings added as reactions).
 Gated under the `messaging` flag — no separate env var.
-Prompt store lifecycle: `registerPrompt` records the pending prompt keyed by message ID; `tryResolveReactionPrompt` (called from `reaction-handler.ts`) matches incoming reactions to the stored record, returns the resolved choice, and deletes the record. Bypasses the normal reaction staleness guard since the prompt message is always fresh.
+Persistence: pending prompts are durably persisted to `DISCOCLAW_DATA_DIR/discord/reaction-prompts.json` (default source checkout path: `data/discord/reaction-prompts.json`) by `src/discord/reaction-prompt-store.ts`. The store writes on create, resolve, and cleanup using a temp-file-plus-rename pattern so pending waits survive service restarts.
+Boot rehydration: `ReactionPromptStore` hydrates from disk on construction, and `src/index.ts` includes the store file in startup JSON healing so a corrupted prompt store is backed up before the bot starts.
+Prompt store lifecycle: `registerPrompt` records the pending prompt keyed by message ID and persists it before reactions are added; `tryResolveReactionPrompt` (called from `reaction-handler.ts`) matches incoming reactions to the stored record, returns the resolved choice, removes the record, and persists that deletion. `removePrompt` is used for best-effort cleanup if reaction setup fails after the prompt message is sent.
 When the user reacts, `reaction-handler.ts` detects the match and re-invokes the runtime with a system message conveying the user's choice.
 
 ### Spawn Actions (`actions-spawn.ts`)
@@ -548,7 +552,7 @@ Handler step sequence (for each incoming reaction event):
 2. **Partial fetch** — fetches the reaction and message objects if either is a Discord partial.
 3. **Guild-only** — ignores reactions in DMs (`guildId == null`).
 4. **Allowlist check** — ignores reactions from users not in `DISCORD_ALLOW_USER_IDS`.
-5. **Reaction prompt interception** — before the staleness guard, checks whether the reaction resolves a pending `reactionPrompt` (add mode only). If it does, `resolvedPrompt` is set and the staleness guard is bypassed.
+5. **Reaction prompt interception** — before the staleness guard, checks whether the reaction resolves a pending `reactionPrompt` (add mode only). If it does, `resolvedPrompt` is set and the staleness guard is bypassed. This lookup uses the disk-backed prompt store, so it still works after a service restart.
 6. **Abort intercept** — if the emoji is 🛑 and the reacted message is a bot reply, cancels all active runtime streams and any running forge plan (add mode), or silently consumes the event (remove mode). Skipped when `resolvedPrompt` is non-null.
 7. **Staleness guard** — drops reactions on messages older than `DISCOCLAW_REACTION_MAX_AGE_HOURS`. Bypassed when `resolvedPrompt` is set.
 8. **Channel restriction** — if `DISCORD_CHANNEL_IDS` is configured, ignores reactions outside allowlisted channels or their thread parents.
@@ -575,6 +579,7 @@ Configuration:
 Special behaviors:
 - **🛑 abort intercept:** Reacting with 🛑 to a bot reply cancels all active runtime streams and any running forge plan. In remove mode the event is silently consumed. The abort check is skipped when the reaction resolves a pending `reactionPrompt`.
 - **Staleness guard bypass:** Reactions that resolve a pending `reactionPrompt` always bypass the staleness guard, regardless of `DISCOCLAW_REACTION_MAX_AGE_HOURS`. The age check would otherwise reject reactions on prompt messages that aged out between emission and the user's response.
+- **Restart durability:** If the service restarts after sending a `reactionPrompt` but before the user reacts, the pending prompt is rehydrated from `reaction-prompts.json` on boot and resolves normally when the user eventually reacts.
 - **Guild-only:** Reactions in DMs are always ignored (no action flags are evaluated and no AI invocation occurs).
 
 ## Adding A New Action (Existing Category)

@@ -249,6 +249,18 @@ describe('persistent file', () => {
     expect(entries2).toHaveLength(0);
   });
 
+  it('creates the parent directory before persisting entries', async () => {
+    const filePath = path.join(tmpDir, 'nested', 'state', 'inflight.json');
+    setDataFilePath(filePath);
+
+    registerInFlightReply(mockReply(), 'ch1', 'msg1', 'test');
+    await _waitForPendingPersists();
+
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const entries = JSON.parse(raw);
+    expect(entries).toEqual([{ channelId: 'ch1', messageId: 'msg1' }]);
+  });
+
   it('drain clears the persistent file', async () => {
     const filePath = path.join(tmpDir, 'inflight.json');
     setDataFilePath(filePath);
