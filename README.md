@@ -111,13 +111,13 @@ When multiple messages arrive while the bot is thinking (i.e., an AI invocation 
 
 Set `PRIMARY_RUNTIME=openrouter` to route requests through [OpenRouter](https://openrouter.ai), which provides access to models from Anthropic, OpenAI, Google, and others via a single API key — useful if you want to switch models without managing multiple provider accounts.
 
-Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`) and `OPENROUTER_MODEL` (default: `anthropic/claude-sonnet-4`). See `.env.example` for the full reference.
+Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`) and `OPENROUTER_MODEL` (default: `anthropic/claude-sonnet-4`). OpenRouter does not have a built-in `fast`/`capable`/`deep` tier map inside DiscoClaw, so if you want tier names or fast/voice auto-switching to resolve through OpenRouter, define `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, and `DISCOCLAW_TIER_OPENROUTER_DEEP` in `.env` and restart. See `.env.example` for the full reference.
 
 ## Model Overrides
 
-The `!models` command lets you view and swap AI models per role at runtime — no restart needed. Changes are persisted to `models.json` under the data dir and survive restarts.
+The `!models` command lets you view and swap AI models per role at runtime — no restart needed. Changes are persisted to `models.json` under the data dir and survive restarts, except chat runtime swaps like `!models set chat openrouter`, which are live-only until the next restart.
 
-For the full operator guide to install-mode detection, persistent adapter switches, fast/voice runtime behavior, and `!models reset` semantics, see [docs/runtime-switching.md](docs/runtime-switching.md).
+For the full operator guide to install-mode detection, persistent adapter switches, OpenRouter tier overrides, fast/voice runtime behavior, and `!models reset` semantics, see [docs/runtime-switching.md](docs/runtime-switching.md).
 
 **Roles:** `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`
 

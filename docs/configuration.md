@@ -25,7 +25,7 @@ On first run, `models.json` is scaffolded from the instance startup defaults. `!
 
 Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as startup fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
 
-For the operator workflow that explains startup defaults vs. overrides, install-mode detection, and safe adapter/model switching, see [docs/runtime-switching.md](runtime-switching.md).
+For the operator workflow that explains startup defaults vs. overrides, install-mode detection, `!models reset` semantics, and safe adapter/model switching, see [docs/runtime-switching.md](runtime-switching.md). If you want OpenRouter to participate in tier-based switching, define `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, and `DISCOCLAW_TIER_OPENROUTER_DEEP` there as well.
 
 ## Runtime
 
@@ -92,7 +92,7 @@ Requirement: choose models that reliably support structured JSON output and func
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter base URL |
 | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4` | Default model via OpenRouter |
 
-Same requirement applies when routing through OpenRouter: model reliability for JSON/tool-call output is required.
+Same requirement applies when routing through OpenRouter: model reliability for JSON/tool-call output is required. OpenRouter has no built-in `fast`/`capable`/`deep` tier map in DiscoClaw; define `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, and `DISCOCLAW_TIER_OPENROUTER_DEEP` if you want tier names and fast/voice auto-switching to resolve through OpenRouter.
 
 ### Model validation smoke test (recommended)
 
@@ -132,8 +132,9 @@ Use `DISCOCLAW_TIER_<RUNTIME>_<TIER>` env vars to replace the built-in tier-to-m
 |-------|-------|-------|
 | Pattern | `DISCOCLAW_TIER_<RUNTIME>_<TIER>` | `<RUNTIME>` is the runtime ID in uppercase (for example `OPENAI`, `OPENROUTER`, `GEMINI`, `CODEX`, `CLAUDE_CODE`); `<TIER>` is `FAST`, `CAPABLE`, or `DEEP` |
 | Example | `DISCOCLAW_TIER_OPENAI_CAPABLE=gpt-5.4` | Maps the `capable` tier for that runtime to a concrete model string |
-| Default behavior | Built-in tier map from `src/runtime/model-tiers.ts` | If no override is set, DiscoClaw uses the repo's shipped defaults; runtimes without a built-in map, such as `openrouter`, need explicit tier vars if you want tier auto-switching |
-| Full workflow | [docs/runtime-switching.md](runtime-switching.md) | See the operator guide for install-mode detection, adapter registration checks, restart behavior, and safe switching steps |
+| OpenRouter note | `DISCOCLAW_TIER_OPENROUTER_FAST/CAPABLE/DEEP` | Set all three if you want OpenRouter-backed `fast`, `capable`, and `deep` tiers plus exact-string reverse-mapping for fast/voice runtime auto-switching |
+| Default behavior | Built-in tier map from `src/runtime/model-tiers.ts` | If no override is set, DiscoClaw uses the repo's shipped defaults; runtimes without a built-in map, such as `openrouter`, need explicit tier vars if you want tier-based switching |
+| Full workflow | [docs/runtime-switching.md](runtime-switching.md) | See the canonical operator guide for install-mode detection, adapter registration checks, OpenRouter tier setup, restart behavior, and safe switching steps |
 
 ## Memory
 

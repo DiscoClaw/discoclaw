@@ -1,57 +1,113 @@
 # Runtime and Model Switching Guide
 
-Operator playbook for switching an existing DiscoClaw instance between supported runtime adapters and models.
+Canonical operator guide for switching an existing DiscoClaw instance between supported runtime adapters and model configurations.
 
-This is the canonical reference for:
+Use this page when you need to answer any of these safely:
 
-- moving between `claude`, `gemini`, `codex`, `openai`, and `openrouter`
-- understanding what `!models` changes live vs. what actually persists
-- separating project defaults from instance-specific overrides
-- avoiding the common "edited the wrong `.env`" and "`!models reset` didn't do what I expected" traps
+- Which `.env` is authoritative for this instance?
+- What does `!models` change live, and what survives restart?
+- How do I move between `claude`, `gemini`, `codex`, `openai`, and `openrouter`?
+- How do `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, and `DISCOCLAW_TIER_OPENROUTER_DEEP` actually work?
+- Why did `!models reset` or a restart not do what I expected?
 
-Linux `systemd --user` is the primary path described below.
+Linux `systemd --user` is the primary path described below. macOS launchd differences are called out separately.
 
-## Before you touch anything
+## Quick decision table
 
-Resolve the actual service/unit name first.
+| Goal | Change it in | Restart required | Persists across restart |
+| --- | --- | --- | --- |
+| Test another chat adapter right now | `!models set chat <runtime>` | No | No |
+| Change the default adapter for the whole instance | `.env` (`PRIMARY_RUNTIME`) | Yes | Yes |
+| Change a role's model override | `!models set <role> <tier-or-model>` | No | Yes |
+| Make voice stay on a different adapter | `!models set voice <runtime>` | No | Yes |
+| Make fast-tier work route through OpenRouter | `.env` `DISCOCLAW_TIER_OPENROUTER_FAST/CAPABLE/DEEP`, then use an exact OpenRouter tier-mapped model string for auto-switching | Yes for the env change | Yes |
+| Revert roles to this instance's startup defaults | `!models reset` | No | Yes |
+
+Important: `!models reset` means "reset to this instance's startup defaults as resolved at boot from `.env` plus built-in fallbacks". It does not mean "reset to repo defaults".
+
+## Supported adapters
+
+User-facing adapter names:
+
+| Adapter name | Startup via `PRIMARY_RUNTIME` | Requirement |
+| --- | --- | --- |
+| `claude` | yes | Claude CLI available |
+| `gemini` | yes | Gemini CLI or `GEMINI_API_KEY`, depending on your install path |
+| `codex` | yes | Codex CLI available |
+| `openai` | yes | `OPENAI_API_KEY` |
+| `openrouter` | yes | `OPENROUTER_API_KEY` |
+| `anthropic` | no | Voice-only direct API runtime; not a valid `PRIMARY_RUNTIME` |
+
+For `openai` and `openrouter`, set `OPENAI_COMPAT_TOOLS_ENABLED=1` if you expect full tool use.
+
+Internal note for operators reading logs: the Claude adapter's runtime ID is `claude_code`, but the user-facing adapter name is `claude`.
+
+## Find the authoritative instance first
+
+Do not edit anything until you know which install you are operating on.
+
+### 1. Resolve the unit name
 
 - If `.env` contains `DISCOCLAW_SERVICE_NAME=<name>`, the Linux unit is `<name>.service`.
-- If that variable is unset, the default unit is `discoclaw.service`.
+- Otherwise the default unit is `discoclaw.service`.
 
-Examples below use `discoclaw.service`. Substitute your real unit name everywhere if you run a named multi-instance install.
+Examples below use `discoclaw.service`. Replace it with the real unit name if this is a named multi-instance install.
 
-## macOS launchd caveat
+### 2. Resolve the service working directory
 
-On macOS, `discoclaw install-daemon` writes a launchd plist with the current `.env` values baked into it. launchd does not re-read `.env` on `!restart` or `launchctl kickstart`, so editing `.env` alone is not enough.
+```bash
+systemctl --user show -p WorkingDirectory discoclaw.service
+systemctl --user cat discoclaw.service
+```
 
-After changing adapter credentials, `PRIMARY_RUNTIME`, tier overrides, or model env vars on macOS, do one of these:
+The working directory is the first place to inspect. That is the directory whose `.env` matters on restart.
 
-- rerun `discoclaw install-daemon` from the authoritative working directory
-- or manually rewrite/reload the plist with `launchctl bootout ...` and `launchctl bootstrap ...`
+### 3. Determine install mode
 
-A plain restart only restarts the old plist with the old env snapshot.
+Treat the instance as:
 
-## Three layers that matter
+- source checkout: the working directory is a repo clone and contains `.git`
+- npm-managed install: the working directory contains `.env`, `workspace/`, and `data/`, but no `.git`
 
-There are three different sources of truth involved in runtime/model selection:
+Do not assume the global npm package directory is where you should edit config. For npm-managed installs, the instance working directory created during `discoclaw init` is the authoritative location.
+
+### 4. Identify the data files
+
+Authoritative files for runtime/model state:
+
+- `.env` in the service working directory
+- `models.json` at `$DISCOCLAW_DATA_DIR/models.json`, or `./data/models.json` if `DISCOCLAW_DATA_DIR` is unset
+- `runtime-overrides.json` at `$DISCOCLAW_DATA_DIR/runtime-overrides.json`, or `./data/runtime-overrides.json`
+
+Minimum inspection set:
+
+```bash
+sed -n '1,200p' .env
+sed -n '1,200p' "${DISCOCLAW_DATA_DIR:-./data}/models.json"
+sed -n '1,200p' "${DISCOCLAW_DATA_DIR:-./data}/runtime-overrides.json"
+journalctl --user -u discoclaw.service -n 100 --no-pager
+```
+
+If `DISCOCLAW_DATA_DIR` is defined only inside `.env`, read it from `.env` first and substitute the real path manually. A missing `runtime-overrides.json` file is normal.
+
+## The three layers of runtime/model state
+
+Three layers interact during switching:
 
 | Layer | What it controls | Where it lives | How it changes |
 | --- | --- | --- | --- |
-| Built-in defaults | Baseline role defaults and tier maps shipped by the repo | Code (`src/model-config.ts`, `src/runtime/model-tiers.ts`) | Changes only when the software version changes |
-| Startup defaults for *this instance* | What the service boots with before live overrides | Usually the service working directory `.env`, plus built-in fallbacks when env vars are absent | Edit `.env`, then restart |
-| Persistent live overrides | Role/model/runtime changes made after startup | `models.json` and `runtime-overrides.json` under the data dir | `!models ...` and runtime auto-switches |
+| Built-in defaults | Repo-shipped role defaults and tier maps | Code (`src/model-config.ts`, `src/runtime/model-tiers.ts`) | Only when the software version changes |
+| Startup defaults for this instance | What DiscoClaw boots with before live overrides | `.env` plus built-in fallbacks | Edit `.env`, then restart |
+| Persistent live overrides | Role/model/runtime changes made after startup | `models.json` and `runtime-overrides.json` | `!models ...` and runtime auto-switches |
 
-The most important rule:
+Keep the files separate:
 
-`!models reset` resets back to this instance's startup defaults as resolved at boot from `.env` plus built-in fallbacks, not back to repo defaults and not back to whatever the docs happen to show.
-
-Also keep the files separate in your head:
-
-- `models.json` stores per-role model strings only.
+- `models.json` stores model strings per role.
 - `runtime-overrides.json` stores runtime-only overlays such as `voiceRuntime`, `fastRuntime`, and `ttsVoice`.
-- A missing `runtime-overrides.json` file is normal on a fresh or fully reset instance.
 
-## What the project ships by default
+On first run, `models.json` is scaffolded from the startup defaults that instance booted with.
+
+## What ships by default
 
 Role defaults shipped in code:
 
@@ -73,11 +129,11 @@ Built-in tier maps shipped in code:
 | `openai` | `gpt-5-mini` | `gpt-5.4` | `gpt-5.4-pro` |
 | `codex` | `gpt-5.1-codex-mini` | `gpt-5.4` | `gpt-5.4` |
 
-`openrouter` does not have a built-in tier map. Its adapter default comes from `OPENROUTER_MODEL`, and tier auto-switching only works if you define `DISCOCLAW_TIER_OPENROUTER_FAST/CAPABLE/DEEP` yourself.
+`openrouter` does not ship with a built-in tier map. If you want `fast`, `capable`, or `deep` to resolve to OpenRouter-backed models, you must define the OpenRouter tier env vars yourself.
 
-### OpenRouter tier map recipe
+## OpenRouter tier overrides
 
-If you want `fast`, `capable`, and `deep` to auto-switch into OpenRouter, define all three tier env vars with the exact model strings you expect DiscoClaw to reverse-map later:
+This is the key OpenRouter-specific workflow:
 
 ```bash
 DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini
@@ -85,174 +141,137 @@ DISCOCLAW_TIER_OPENROUTER_CAPABLE=anthropic/claude-sonnet-4
 DISCOCLAW_TIER_OPENROUTER_DEEP=google/gemini-2.5-pro
 ```
 
-Then restart the service. After that:
+### What these env vars do
 
-- `!models set chat openrouter` can use those tier names as OpenRouter-backed defaults
-- `!models set fast openai/gpt-5-mini` can auto-switch the fast runtime to `openrouter`
-- the match is exact-string only, so use the same provider/model IDs everywhere
+At startup, DiscoClaw reads any env vars matching:
 
-## Find the right instance files first
+- `DISCOCLAW_TIER_<RUNTIME>_FAST`
+- `DISCOCLAW_TIER_<RUNTIME>_CAPABLE`
+- `DISCOCLAW_TIER_<RUNTIME>_DEEP`
 
-Do this before changing anything.
+For `OPENROUTER`, those three vars create a tier map entry that does not otherwise exist.
 
-### Source checkout
+That unlocks two separate behaviors:
 
-You are in source mode when the service working directory is the repo and that directory has a `.git` folder.
+1. Tier resolution while already on the OpenRouter adapter.
+   - Example: if chat runtime is `openrouter`, `!models set chat capable` resolves to whatever `DISCOCLAW_TIER_OPENROUTER_CAPABLE` is set to.
+2. Reverse-mapping for fast/voice auto-switching.
+   - Example: if `DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini`, then `!models set fast openai/gpt-5-mini` can auto-switch the fast runtime to `openrouter`.
 
-Typical authoritative files:
+### Exact-match rule
 
-- `.env`: repo root, for example `~/code/discoclaw/.env`
-- `models.json`: `$DISCOCLAW_DATA_DIR/models.json`, otherwise `./data/models.json` under the repo root
-- `runtime-overrides.json`: `$DISCOCLAW_DATA_DIR/runtime-overrides.json`, otherwise `./data/runtime-overrides.json`
+Reverse-mapping is exact-string only.
 
-### npm-managed install
+That means:
 
-You are in npm-managed mode when the package is installed without a `.git` directory at the package root. The important detail is that the package install location is not where you should edit config.
+- `openai/gpt-5-mini` matches `openai/gpt-5-mini`
+- `gpt-5-mini` does not match `openai/gpt-5-mini`
+- `fast` does not match anything because it is a tier name, not a concrete model string
 
-Typical authoritative files:
+For OpenRouter auto-switching, use the exact same provider/model string in both places:
 
-- `.env`: the service working directory created during `discoclaw init`
-- `models.json`: under that instance's data dir
-- `runtime-overrides.json`: under that instance's data dir
+- in `.env` for `DISCOCLAW_TIER_OPENROUTER_FAST/CAPABLE/DEEP`
+- in `!models set fast <model>` or `!models set voice <model>`
 
-For Linux systemd installs, the service reads `.env` from its working directory on every restart. In practice, the working directory is the authoritative location to inspect.
+### Safe OpenRouter rule
 
-### Reliable detection steps
+If you want predictable OpenRouter tier behavior, set all three:
 
-1. Find the service working directory.
-   Linux:
-   ```bash
-   systemctl --user show -p WorkingDirectory discoclaw.service
-   systemctl --user cat discoclaw.service
-   ```
-2. Go to that directory and inspect it.
-   - If it contains `.git`, treat it as a source checkout.
-   - If it has `.env` and workspace/data files but no `.git`, treat it as an npm-managed instance directory.
-3. Only edit files in that working directory (or its configured data dir).
+- `DISCOCLAW_TIER_OPENROUTER_FAST`
+- `DISCOCLAW_TIER_OPENROUTER_CAPABLE`
+- `DISCOCLAW_TIER_OPENROUTER_DEEP`
 
-If you edit a different clone's `.env`, nothing changes.
+Then restart before using tier names like `fast`, `capable`, or `deep` against OpenRouter.
 
-### Minimum inspection set
+Without those vars:
 
-For a safe operator handoff, always inspect these four things together:
+- `PRIMARY_RUNTIME=openrouter` still works
+- `OPENROUTER_MODEL` still provides the adapter default model
+- but OpenRouter does not participate in tier-based auto-switching
 
-```bash
-sed -n '1,200p' .env
-sed -n '1,200p' "${DISCOCLAW_DATA_DIR:-./data}/models.json"
-sed -n '1,200p' "${DISCOCLAW_DATA_DIR:-./data}/runtime-overrides.json"
-journalctl --user -u discoclaw.service -n 100 --no-pager
-```
+## Where each kind of change persists
 
-If `DISCOCLAW_DATA_DIR` is only set inside `.env` and not exported in your current shell, read it from `.env` first and substitute that absolute path manually. A missing `runtime-overrides.json` file is still a valid state.
-
-Interpret them like this:
-
-- `.env` defines startup defaults and credentials.
-- `models.json` shows persistent per-role model choices.
-- `runtime-overrides.json` shows persistent fast/voice/TTS runtime overlays.
-- `journalctl` shows whether the target adapter actually registered at startup.
-
-## Which setting lives where
-
-| Change you want | Persistent home | Notes |
+| Change | Persists in | Notes |
 | --- | --- | --- |
 | Default chat adapter at startup | `.env` `PRIMARY_RUNTIME` | Restart required |
-| Adapter default model | `.env` `CODEX_MODEL`, `GEMINI_MODEL`, `OPENAI_MODEL`, `OPENROUTER_MODEL` | Used when a role is set to the adapter default |
-| Tier mapping for a runtime | `.env` `DISCOCLAW_TIER_<RUNTIME>_<TIER>` | Controls how `fast/capable/deep` resolve |
-| Per-role persistent model override | `models.json` | Written by `!models set <role> <tier-or-model>` |
-| Persistent voice runtime override | `runtime-overrides.json` | Written by `!models set voice <runtime>` or voice auto-switch |
-| Persistent fast-tier runtime override | `runtime-overrides.json` | Written when fast auto-switches to another runtime |
-| TTS voice override | `runtime-overrides.json` | Separate from model/runtime switching, but often present when auditing overrides |
+| Adapter default model | `.env` `OPENAI_MODEL`, `OPENROUTER_MODEL`, `GEMINI_MODEL`, `CODEX_MODEL` | Used when a role follows the adapter default |
+| Tier map for a runtime | `.env` `DISCOCLAW_TIER_<RUNTIME>_<TIER>` | Restart required |
+| Per-role model override | `models.json` | Written by `!models set <role> <tier-or-model>` |
+| Persistent fast runtime override | `runtime-overrides.json` | Written when fast auto-switches to another runtime |
+| Persistent voice runtime override | `runtime-overrides.json` | Written by `!models set voice <runtime>` or by voice auto-switch |
+| Temporary chat runtime experiment | live memory only | Written by `!models set chat <runtime>`; lost on restart |
 
-## Adapter prerequisites
+## What each `!models` command really does
 
-Do not try to switch into an adapter that is not actually configured.
+Role behavior is not uniform.
 
-| Adapter | Startup-supported via `PRIMARY_RUNTIME` | Needs |
+| Role | `!models set` persistence | Runtime behavior |
 | --- | --- | --- |
-| `claude` | yes | Claude CLI available |
-| `gemini` | yes | `GEMINI_API_KEY` or Gemini CLI |
-| `codex` | yes | Codex CLI |
-| `openai` | yes | `OPENAI_API_KEY`; also set `OPENAI_COMPAT_TOOLS_ENABLED=1` for full tool use |
-| `openrouter` | yes | `OPENROUTER_API_KEY`; also set `OPENAI_COMPAT_TOOLS_ENABLED=1` for full tool use |
-| `anthropic` | no | Voice-only runtime; `ANTHROPIC_API_KEY` |
+| `chat` | Tier/model values persist to `models.json` | `!models set chat <runtime>` swaps adapters live only and does not write the runtime name to disk |
+| `fast` | Persists the model value to `models.json` | Concrete model strings can auto-switch the fast runtime and write `fastRuntime` |
+| `summary` | Persists to `models.json` | Uses the fast runtime |
+| `cron` | Persists to `models.json` | Uses the fast runtime |
+| `cron-exec` | Persists to `models.json` unless you use `default` | Follows chat runtime unless overridden by cron-specific config |
+| `forge-drafter` | Persists to `models.json` | Follows chat runtime unless env says otherwise |
+| `forge-auditor` | Persists to `models.json` | Follows chat runtime unless env says otherwise |
+| `voice` | Persists the model to `models.json` | `!models set voice <runtime>` or a concrete cross-provider model can write `voiceRuntime` |
 
-`anthropic` is not a supported `PRIMARY_RUNTIME` value. It is a special direct Messages API runtime that may auto-register for voice use when `ANTHROPIC_API_KEY` is present.
+Important reset semantics:
 
-## Verify adapter registration before switching
+- `!models reset` writes startup-default model strings back into `models.json`
+- `!models reset` clears `fastRuntime` and `voiceRuntime` overlays from `runtime-overrides.json`
+- `!models reset` does not remove legacy env vars such as `DISCOCLAW_FAST_RUNTIME`
+- `!models reset chat` resets the chat model string, but it does not undo a live chat adapter swap until you restart or switch chat again
 
-Do this before trusting a runtime name like `openrouter`, `openai`, `gemini`, `codex`, or `anthropic`.
+That last point matters: if you ran `!models set chat openrouter`, the active runtime row can stay on OpenRouter even after `!models reset chat`. Restart if you want the startup adapter back immediately.
 
-1. Run `!models` and note the current runtime row plus any `[runtime: ...]` annotations on `voice`, `summary`, `cron-auto-tag`, or `tasks-auto-tag`.
-2. If the adapter you expect to use is already active anywhere, confirm `!models` shows a concrete model for that path, not a literal runtime name where a model should be.
-3. If the target adapter is not currently active on any role, remember that `!models` only shows active paths. Use startup logs to confirm registration before you trust the switch.
-4. If a role shows the runtime name literally instead of switching adapters, treat it as unregistered.
-5. Check startup logs:
+## Verify the target adapter is actually registered
+
+Do not trust a runtime name until the adapter is confirmed present.
+
+### First check `!models`
+
+Run `!models` and inspect:
+
+- the `runtime` row
+- any `[runtime: ...]` annotations on `voice`, `summary`, `cron-auto-tag`, or `tasks-auto-tag`
+- whether a role now shows a real model, or a literal adapter name where a model should be
+
+### Then check startup logs
+
+If the adapter is not obviously active anywhere, inspect logs:
 
 ```bash
 journalctl --user -u discoclaw.service -n 100 --no-pager
 ```
 
-Look for missing credential or missing binary warnings at startup. For stale overrides, the most useful warnings are:
+Useful warnings:
 
 - `runtime-overrides: voiceRuntime is not a registered runtime; ignoring`
 - `runtime-overrides: fastRuntime is not a registered runtime; ignoring`
 - `DISCOCLAW_FAST_RUNTIME is not registered; falling back to PRIMARY_RUNTIME`
 
-Do not use `!health` for this check. `!health` does not show runtime adapter registration status.
-
-## How each role switches
-
-Not every role behaves the same way.
-
-| Role | What `!models set` changes | Runtime switch behavior |
-| --- | --- | --- |
-| `chat` | Chat model in `models.json` when you set a tier/model; runtime name is live-only | `!models set chat <runtime>` swaps runtime live, but does **not** persist the runtime name |
-| `fast` | Fast-tier model in `models.json` | Runtime auto-switches only when the concrete model belongs to another runtime's tier map; that runtime override persists |
-| `summary` | Summary model in `models.json` | No separate runtime; uses fast runtime |
-| `cron` | Cron auto-tag/model-classification model in `models.json` | No separate runtime; uses fast runtime |
-| `cron-exec` | Default cron execution model in `models.json` | No separate runtime; follows chat runtime |
-| `forge-drafter` | Drafter model in `models.json` | No separate runtime; follows chat runtime unless env says otherwise |
-| `forge-auditor` | Auditor model in `models.json` | No separate runtime; follows chat runtime unless env says otherwise |
-| `voice` | Voice model in `models.json` | `!models set voice <runtime>` persists a voice runtime override; a concrete model from another provider can also auto-switch voice runtime |
-
-This means:
-
-- if you want a **persistent primary adapter change**, edit `.env`
-- if you want a **live chat experiment until restart**, use `!models set chat <runtime>`
-- if you want **voice to stay on a different adapter across restarts**, `!models set voice <runtime>` is valid
-
-## Legacy fast-runtime override
-
-`DISCOCLAW_FAST_RUNTIME` is deprecated. Prefer `!models set fast <model>`, which writes the fast model to `models.json` and auto-switches the fast runtime when the chosen concrete model belongs to another runtime's tier map.
-
-The legacy env var still matters in two ways:
-
-- it is still read at startup and can seed the fast runtime before any live changes
-- `runtime-overrides.json` can replace it later if a persistent fast-runtime override exists
-
-That interaction is easy to miss:
-
-- startup order is effectively `.env` first, then `runtime-overrides.json`
-- `!models reset fast` clears the live/file-backed fast override, but it does **not** remove `DISCOCLAW_FAST_RUNTIME` from `.env`
-- after the next restart, the legacy env var can take effect again unless you delete or change it
-
-If you are cleaning up an old instance, inspect both `.env` and `runtime-overrides.json`.
+Do not use `!health` as the only registration check. It does not show the runtime registry state.
 
 ## Safe switch recipes
 
 ### 1. Persistently switch the whole instance to another adapter
 
-Use this when the startup/runtime default should permanently move.
+Use this when the default adapter should remain changed after restart.
 
-1. Edit the authoritative `.env`.
-2. Set `PRIMARY_RUNTIME` to one of `claude`, `gemini`, `codex`, `openai`, `openrouter`.
-3. Set or verify the adapter-specific default model if you want adapter default behavior:
+1. Confirm the authoritative working directory and `.env`.
+2. Edit `.env`.
+3. Set `PRIMARY_RUNTIME` to one of `claude`, `gemini`, `codex`, `openai`, `openrouter`.
+4. Set or verify the adapter-specific default model env var if you care about adapter-default behavior:
    - `GEMINI_MODEL`
    - `CODEX_MODEL`
    - `OPENAI_MODEL`
    - `OPENROUTER_MODEL`
-4. Remove or reset any role overrides that should stop fighting the new default:
+5. If the target is OpenRouter tier switching, also set:
+   - `DISCOCLAW_TIER_OPENROUTER_FAST`
+   - `DISCOCLAW_TIER_OPENROUTER_CAPABLE`
+   - `DISCOCLAW_TIER_OPENROUTER_DEEP`
+6. Clear role overrides that should stop fighting the new startup defaults:
    - `!models reset chat`
    - `!models reset fast`
    - `!models reset summary`
@@ -261,23 +280,14 @@ Use this when the startup/runtime default should permanently move.
    - `!models reset voice`
    - `!models reset forge-drafter`
    - `!models reset forge-auditor`
-5. If you rotated credentials through Discord DMs, `!secret set KEY=value` can update the authoritative `.env` in place, for example:
+7. Restart the service.
+8. Verify with `!models` and logs.
 
-```text
-!secret set OPENAI_API_KEY=sk-...
-!secret set OPENROUTER_API_KEY=sk-or-...
-```
+If you changed credentials through Discord DMs, `!secret set KEY=value` updates the authoritative `.env` but does not restart DiscoClaw. You still need a restart.
 
-`!secret` writes the file only. It does **not** restart DiscoClaw automatically, so you must restart the bot yourself after changing credentials.
+### 2. Live-switch chat to another adapter without changing startup defaults
 
-6. Restart the service.
-7. Verify with `!models`.
-
-If the service is source-managed and you only changed `.env`, no rebuild is needed. Restart is enough.
-
-### 2. Live-switch chat to another adapter without touching startup defaults
-
-Use this to test another adapter immediately.
+Use this for a temporary experiment:
 
 ```text
 !models set chat codex
@@ -285,28 +295,23 @@ Use this to test another adapter immediately.
 !models set chat gemini
 ```
 
-Before running one of those, do the adapter-registration check above so you know the target runtime actually exists.
-
 Expected result in `!models`:
 
-- `runtime` row changes to the new adapter
-- `chat` usually becomes that adapter's default model
+- the `runtime` row changes to the new adapter
+- the `chat` row usually becomes that adapter's default model
 
-Important:
+This change is live-only. It is lost on restart.
 
-- this runtime swap is live-only and is lost on restart
-- if the adapter is not registered, DiscoClaw treats the runtime name like a literal model string instead of erroring
+To end the experiment safely:
 
-Bad verification pattern:
+- restart the service, or
+- switch chat to another runtime explicitly
 
-- `runtime` still says `claude`
-- `chat` now literally says ``openrouter`` or ``codex``
+Do not assume `!models reset chat` will switch the runtime row back immediately.
 
-That means you did not switch runtimes. Reset the role, configure the adapter properly, and retry.
+### 3. Change chat to another model on the current adapter
 
-### 3. Switch chat to a different model on the current adapter
-
-Use either a tier or a concrete model string:
+Examples:
 
 ```text
 !models set chat capable
@@ -314,23 +319,28 @@ Use either a tier or a concrete model string:
 !models set chat anthropic/claude-sonnet-4
 ```
 
-This persists to `models.json`.
+- Tier names resolve against the current chat runtime's tier map.
+- Concrete model strings are stored as-is in `models.json`.
 
-Tier names resolve against the current runtime's tier map. Concrete model strings pass through unchanged.
+### 4. Move fast-tier work onto another provider/model
 
-### 4. Switch the fast tier to another provider/model
+Examples:
 
 ```text
 !models set fast gemini-2.5-flash
-!models set fast gpt-5-mini
+!models set fast openai/gpt-5-mini
 !models set fast fast
 ```
 
-Fast runtime auto-switch only happens when the chosen concrete model can be reverse-mapped to another runtime's tier map.
+Fast runtime auto-switching only happens when you set a concrete model string that exactly matches another runtime's tier map entry.
 
-Out of the box this works best for Claude/Gemini/OpenAI/Codex default tier models. It does **not** automatically infer `openrouter` from an arbitrary provider/model string unless you defined `DISCOCLAW_TIER_OPENROUTER_*` in `.env`.
+That means:
 
-### 5. Switch voice independently
+- `!models set fast gemini-2.5-flash` can auto-switch to Gemini
+- `!models set fast openai/gpt-5-mini` can auto-switch to OpenRouter only if `DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini`
+- `!models set fast fast` changes the model tier but does not itself identify another provider
+
+### 5. Move voice independently
 
 Examples:
 
@@ -338,16 +348,18 @@ Examples:
 !models set voice gemini
 !models set voice codex
 !models set voice capable
-!models set voice gemini-2.5-flash
+!models set voice google/gemini-2.5-pro
 ```
 
 Verification pattern in `!models`:
 
-- `voice` line should show `[runtime: <adapter>]` when voice differs from chat
+- the `voice` row shows `[runtime: <adapter>]` when voice differs from chat
 
-Voice runtime overrides persist across restart because they are stored separately from `models.json`.
+Voice runtime changes persist because they write `voiceRuntime` to `runtime-overrides.json`.
 
-### 6. Switch forge / cron / summary roles
+As with fast runtime, a tier name such as `capable` changes the voice model value but does not, by itself, identify another provider. Cross-provider auto-switching needs an exact model string from a tier map.
+
+### 6. Change forge, cron, or summary roles
 
 Examples:
 
@@ -359,54 +371,57 @@ Examples:
 !models set summary fast
 ```
 
-`cron-exec default` is the one special reset-like value for that role; it clears the explicit override and returns cron execution to the startup default for `cron-exec`.
+`cron-exec default` is the one special reset-like value for that role. It clears the explicit `cron-exec` override and returns that role to its startup default.
 
 ## Verification checklist
 
 After any switch:
 
 1. Run `!models`.
-2. Confirm the runtime row and the affected role match what you intended.
-3. Confirm the target adapter is actually registered:
-   - a successful chat runtime switch changes the `runtime` row
-   - a successful voice/fast runtime switch adds `[runtime: <adapter>]` to the affected role paths
-   - a failed registration attempt often leaves the runtime row unchanged and stores the runtime name literally as the model string
-4. If you edited `.env`, restart the service and run `!models` again.
-5. If startup fails, inspect service status/logs before changing more settings.
+2. Confirm the runtime row and the affected role match the intended outcome.
+3. Confirm any separate fast/voice runtime shows as `[runtime: ...]` on the affected rows.
+4. If you edited `.env`, restart and run `!models` again.
+5. If startup failed or the adapter did not switch, inspect service logs before changing anything else.
 
-Good signs in `!models`:
+Good signs:
 
-- `runtime` changed when you intended a chat adapter switch
-- `voice` shows `[runtime: gemini]` or similar when voice is intentionally separate
-- summary/cron/task auto-tag rows show `[runtime: ...]` when fast runtime moved
-- override markers only appear on roles you intentionally changed
+- `runtime` changed after a live chat runtime switch
+- `voice` shows `[runtime: gemini]` or similar when intentionally separated
+- `summary`, `cron-auto-tag`, or `tasks-auto-tag` show `[runtime: ...]` when fast runtime moved
+- the displayed model is a concrete model or a tier resolution like ``capable → anthropic/claude-sonnet-4``
 
-## Restart and rebuild decision tree
+Bad signs:
 
-### No rebuild, no restart
+- `runtime` stayed on the old adapter when you expected a chat runtime swap
+- a role literally shows ``openrouter`` or ``codex`` as the model string
+- startup logs warn that the runtime is unregistered or missing credentials
+
+## Restart and rebuild rules
+
+### No restart, no rebuild
 
 Use `!models set ...` only.
 
-This is enough for:
+Examples:
 
-- live chat model changes
 - live chat adapter experiments
-- persistent `models.json` overrides
+- role model overrides written to `models.json`
+- voice runtime changes via `!models set voice <runtime>`
 
 ### Restart required, rebuild not required
 
 Edit `.env`, then restart.
 
-This is enough for:
+Examples:
 
 - changing `PRIMARY_RUNTIME`
-- changing adapter default model env vars like `CODEX_MODEL`
-- changing tier maps like `DISCOCLAW_TIER_OPENAI_CAPABLE`
-- enabling adapter credentials or tool support
+- changing `OPENROUTER_MODEL`, `OPENAI_MODEL`, `GEMINI_MODEL`, `CODEX_MODEL`
+- changing `DISCOCLAW_TIER_OPENROUTER_FAST/CAPABLE/DEEP`
+- adding credentials such as `OPENROUTER_API_KEY`
 
 ### Rebuild first, then restart
 
-Only needed when you changed source code or updated the installed software.
+Only needed when code changed or the installed package was updated.
 
 Source checkout workflow:
 
@@ -419,11 +434,24 @@ pnpm build
 
 Then restart after the build succeeds.
 
+## macOS launchd caveat
+
+On macOS, `discoclaw install-daemon` writes a launchd plist with the current `.env` values baked into it.
+
+launchd does not re-read `.env` on `!restart` or `launchctl kickstart`, so editing `.env` alone is not enough.
+
+After changing credentials, `PRIMARY_RUNTIME`, `OPENROUTER_MODEL`, or any `DISCOCLAW_TIER_*` env var on macOS, do one of these:
+
+- rerun `discoclaw install-daemon` from the authoritative working directory
+- or manually rewrite and reload the plist with `launchctl bootout ...` and `launchctl bootstrap ...`
+
+A plain restart will reuse the old env snapshot.
+
 ## Troubleshooting
 
 ### `!models reset` did not return the model I expected
 
-`!models reset` goes back to startup defaults from `.env` plus built-in fallbacks, not to repo defaults. Check:
+Check the startup-default env vars first:
 
 - `RUNTIME_MODEL`
 - `DISCOCLAW_FAST_MODEL`
@@ -437,80 +465,51 @@ Then restart after the build succeeds.
 - `FORGE_AUDITOR_MODEL`
 - any `DISCOCLAW_TIER_*` overrides
 
-Also check `DISCOCLAW_FAST_RUNTIME` if fast-path roles keep coming back to the wrong runtime after a restart. `!models reset` does not remove that legacy env var.
+Also inspect:
 
-If voice seems to reset to the wrong adapter, inspect `runtime-overrides.json` for `voiceRuntime` and check whether `ANTHROPIC_API_KEY` is auto-wiring voice to `anthropic` at boot.
+- `DISCOCLAW_FAST_RUNTIME` in `.env`
+- `voiceRuntime` and `fastRuntime` in `runtime-overrides.json`
 
-### Adapter not actually registered
+### The adapter did not actually switch
 
 Symptoms:
 
-- `!models set chat openrouter` leaves `runtime` unchanged
+- `!models set chat openrouter` leaves the `runtime` row unchanged
 - `!models` shows a literal runtime name as the model string
-- startup logs contain warnings about unregistered runtimes or missing prerequisites
+- logs contain missing credential or missing binary warnings
 
-Checks:
-
-```bash
-journalctl --user -u discoclaw.service -n 100 --no-pager
-```
-
-Look for warnings like:
-
-- `runtime-overrides: voiceRuntime is not a registered runtime; ignoring`
-- `runtime-overrides: fastRuntime is not a registered runtime; ignoring`
-- missing API key warnings for `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `ANTHROPIC_API_KEY`
-- missing CLI/binary warnings for Claude, Gemini, or Codex startup paths
-
-Fix the missing credential or binary first, restart, then verify again with `!models`.
-
-### I switched adapters, but `!models` still shows the old runtime
-
-You likely set a literal model string instead of activating a registered runtime. The adapter is missing prerequisites or credentials.
-
-Fix:
-
-1. Configure the adapter first.
-2. Reset the bad role override.
-3. Retry the switch.
-
-### The wrong defaults keep winning after restart
-
-You still have persistent overrides. Inspect:
-
-- `models.json`
-- `runtime-overrides.json`
-- `!models` override markers
+Fix the missing prerequisite first, restart, then retry.
 
 ### I edited `.env`, restarted, and nothing changed
 
-You probably edited the wrong `.env`. Re-check the service working directory and `DISCOCLAW_DATA_DIR`.
+You almost certainly edited the wrong `.env`.
 
-### Stale docs copied only at bootstrap
+Re-check:
 
-Old workspace copies of `workspace/TOOLS.md` or `workspace/AGENTS.md` may still mention outdated model names or adapter lists. Those files do not control runtime registration.
+- `systemctl --user show -p WorkingDirectory discoclaw.service`
+- the path of the `.env` you edited
+- `DISCOCLAW_DATA_DIR` from that same working directory
 
-Prefer the current repo docs, live `!models` output, `.env`, `models.json`, and `runtime-overrides.json` when deciding what the instance can actually use.
+### Old fast defaults keep returning after restart
 
-### Wrong working directory
+You still have a startup or persistent fast-runtime override somewhere.
 
-You likely edited a different clone's `.env` or data dir.
+Inspect all three:
 
-Checks:
+- `.env` for `DISCOCLAW_FAST_RUNTIME`
+- `models.json`
+- `runtime-overrides.json`
 
-- compare `systemctl --user show -p WorkingDirectory discoclaw.service`
-- compare the `.env` path you edited
-- compare `DISCOCLAW_DATA_DIR` in that same working directory
+### Voice keeps coming back on the wrong adapter
 
-If those point at different clones, only one of them is authoritative.
+Inspect:
 
-### Old docs or copied workspace files say something different
+- `runtime-overrides.json` for `voiceRuntime`
+- whether `ANTHROPIC_API_KEY` is auto-registering the voice-only `anthropic` runtime
 
-Prefer the repo docs plus live command output over old bootstrap copies. Runtime behavior is determined by current code, `.env`, `models.json`, and `runtime-overrides.json`, not by whatever was scaffolded into a workspace months ago.
+## AI operator handoff prompt
 
-## AI operator prompt
-
-Use this when guiding someone through an adapter/model switch:
+Use this when another AI agent needs to guide a user through a switch:
 
 ```text
 Help me switch this DiscoClaw instance to a different runtime adapter or model safely.
@@ -519,12 +518,13 @@ First determine whether this is a source checkout or an npm-managed install, and
 
 Then:
 1. Show the current effective state with `!models`.
-2. Verify the target adapter is actually registered before switching to it. Use `!models` to confirm the current runtime/role output is sane, and if the adapter is missing or looks unregistered, inspect startup logs instead of guessing.
-3. Inspect `.env`, `models.json`, and `runtime-overrides.json`, and call out any stale fast/voice runtime overrides before changing anything.
+2. Verify the target adapter is actually registered before switching to it. Use `!models` first, and use startup logs if the adapter is missing or looks unregistered.
+3. Inspect `.env`, `models.json`, and `runtime-overrides.json`, and call out stale fast/voice runtime overrides before changing anything.
 4. Explain which parts are startup defaults from `.env` plus built-in fallbacks versus persistent overrides.
 5. If the goal is a persistent adapter switch, update `.env` and clear conflicting overrides.
-6. If the goal is a live experiment, use `!models set ...` instead of editing `.env`.
-7. After changes, verify with `!models` and service status/logs if needed.
+6. If the goal is OpenRouter tier switching, explicitly inspect or set `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, and `DISCOCLAW_TIER_OPENROUTER_DEEP`, and explain that reverse-mapping is exact-string only.
+7. If the goal is a live experiment, use `!models set ...` instead of editing `.env`.
+8. After changes, verify with `!models` and service logs.
 
-Do not assume `!models reset` means repo defaults; treat it as reset-to-this-instance-startup-defaults.
+Do not assume `!models reset` means repo defaults. Treat it as reset-to-this-instance-startup-defaults, and remember that `!models reset chat` does not undo a live chat runtime swap until restart.
 ```
