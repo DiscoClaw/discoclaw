@@ -107,7 +107,6 @@ import {
   RUNTIME_SIGNAL_SUPPRESSED_LINE,
   RuntimeSignalBudgetTracker,
   runtimeSupportsNativeThinkingStream,
-  shouldBypassStreamingEditCooldown,
 } from './runtime-signal-budget.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
@@ -2938,16 +2937,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
             let streamEditQueue: Promise<void> = Promise.resolve();
             const maybeEdit = async (
-              forceOrOpts?: boolean | { force?: boolean; bypassCooldown?: boolean },
+              force = false,
               opts?: { consumeThrottle?: boolean },
             ) => {
-              const force = typeof forceOrOpts === 'boolean' ? forceOrOpts : forceOrOpts?.force ?? false;
-              const bypassCooldown = typeof forceOrOpts === 'object' && forceOrOpts?.bypassCooldown === true;
               const currentReply = reply;
               if (!currentReply) return;
               if (isShuttingDown()) return;
               const now = Date.now();
-              if (!force && !bypassCooldown && now < streamEditCooldownUntil) return;
+              if (!force && now < streamEditCooldownUntil) return;
               const consumeThrottle = opts?.consumeThrottle ?? true;
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               if (consumeThrottle) lastEditAt = now;
@@ -3048,7 +3045,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
               deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
               if (opts?.edit ?? true) {
-                await maybeEdit({ bypassCooldown: shouldBypassStreamingEditCooldown(evt) });
+                await maybeEdit(false);
               }
             };
 

@@ -112,9 +112,7 @@ export function createCodexStrategy(
     if (itemType === 'reasoning') {
       const compactSummary = extractReasoningPreviewText(item);
       if (phase === 'started') {
-        label = compactSummary
-          ? `Hypothesis: ${compactSummary}`
-          : 'Hypothesis: reasoning in progress.';
+        label = 'Hypothesis: reasoning in progress.';
       } else {
         if (compactSummary) label = `Reasoning: ${compactSummary}`;
       }

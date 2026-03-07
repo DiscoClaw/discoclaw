@@ -1366,7 +1366,7 @@ describe('Codex CLI runtime adapter', () => {
     expect(debugEvents.some((e) => e.itemType === 'agent_message')).toBe(false);
   });
 
-  it('surfaces reasoning item.started summaries immediately in preview_debug labels', async () => {
+  it('uses the generic reasoning-start preview_debug label even when a summary is present', async () => {
     const jsonlOutput = [
       '{"type":"thread.started","thread_id":"reasoning-start-thread-1"}',
       '{"type":"item.started","item":{"id":"item_reason_start_1","type":"reasoning","summary":"Planning the filesystem scan.","status":"in_progress"}}',
@@ -1398,7 +1398,7 @@ describe('Codex CLI runtime adapter', () => {
       itemType: 'reasoning',
       itemId: 'item_reason_start_1',
       status: 'in_progress',
-      label: 'Hypothesis: Planning the filesystem scan.',
+      label: 'Hypothesis: reasoning in progress.',
     });
   });
 
