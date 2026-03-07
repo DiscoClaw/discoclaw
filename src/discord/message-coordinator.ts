@@ -3353,11 +3353,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (params.discordActionsEnabled && msg.guild && canParseActions) {
               const parsed = parseDiscordActions(processedText, actionFlags);
               parseFailuresCount = parsed.parseFailures;
-              const parsedCapsule = parseCapsuleBlock(parsed.cleanText);
-              if (parsedCapsule.capsule) {
-                effectiveContinuationCapsule = parsedCapsule.capsule;
+              if (parsed.continuationCapsule) {
+                effectiveContinuationCapsule = parsed.continuationCapsule;
               }
-              const cleanProcessedText = parsedCapsule.cleanText;
+              const cleanProcessedText = parsed.cleanText;
               if (parsed.parseFailures > 0) {
                 params.log?.warn(`parseDiscordActions: ${parsed.parseFailures} action block(s) failed to parse (sessionKey=${sessionKey})`);
               }

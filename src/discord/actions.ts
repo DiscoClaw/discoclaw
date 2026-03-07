@@ -43,6 +43,8 @@ import { SPAWN_ACTION_TYPES, executeSpawnActions, spawnActionsPromptSection } fr
 import type { SpawnActionRequest, SpawnContext } from './actions-spawn.js';
 import { describeDestructiveConfirmationRequirement } from './destructive-confirmation.js';
 import { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
+import { parseCapsuleBlock } from './capsule.js';
+import type { ContinuationCapsule } from './capsule.js';
 export { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
 
 // ---------------------------------------------------------------------------
@@ -325,7 +327,7 @@ function parseWithRegexFallback(
   flags: ActionCategoryFlags,
   validTypes: Set<string>,
   codeRanges: TextRange[],
-): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[]; parseFailures: number } {
+): ParsedDiscordActionsResult {
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
   const parseFailuresRef = { count: 0 };
@@ -334,18 +336,28 @@ function parseWithRegexFallback(
     parseActionJson(json.trim(), flags, validTypes, actions, strippedUnrecognizedTypes, parseFailuresRef);
     return '';
   });
+  const parsedCapsule = parseCapsuleBlock(cleaned.replace(/\n{3,}/g, '\n\n').trim());
   return {
-    cleanText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+    cleanText: parsedCapsule.cleanText,
     actions,
     strippedUnrecognizedTypes,
     parseFailures: parseFailuresRef.count,
+    continuationCapsule: parsedCapsule.capsule,
   };
 }
+
+export type ParsedDiscordActionsResult = {
+  cleanText: string;
+  actions: DiscordActionRequest[];
+  strippedUnrecognizedTypes: string[];
+  parseFailures: number;
+  continuationCapsule?: ContinuationCapsule | null;
+};
 
 export function parseDiscordActions(
   text: string,
   flags: ActionCategoryFlags,
-): { cleanText: string; actions: DiscordActionRequest[]; strippedUnrecognizedTypes: string[]; parseFailures: number } {
+): ParsedDiscordActionsResult {
   const validTypes = buildValidTypes(flags);
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
@@ -353,11 +365,13 @@ export function parseDiscordActions(
   const parseFailuresRef = { count: 0 };
 
   const cleaned = stripActionsWithScanner(text, flags, validTypes, actions, strippedUnrecognizedTypes, codeRanges, parseFailuresRef);
-  const scanned = {
-    cleanText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+  const parsedCapsule = parseCapsuleBlock(cleaned.replace(/\n{3,}/g, '\n\n').trim());
+  const scanned: ParsedDiscordActionsResult = {
+    cleanText: parsedCapsule.cleanText,
     actions,
     strippedUnrecognizedTypes,
     parseFailures: parseFailuresRef.count,
+    continuationCapsule: parsedCapsule.capsule,
   };
 
   // Compatibility fallback: if scanner leaves markers behind or extracts nothing,
@@ -725,6 +739,8 @@ function discordActionsRulesSection(displayName: string): string {
 - Action blocks are stripped from displayed output; results appended automatically.
 - Actions ending in List, Show, Info, Status, or prefixed with fetch/read/search are query actions — results are sent back for follow-up analysis.
 - Include all needed actions in one response. Multiple same-type actions are supported and executed sequentially.
+- If prompt context includes a continuation capsule, keep it current with a single \`<continuation-capsule>{"currentTask":"...","nextStep":"...","blockers":[]}</continuation-capsule>\` block whenever task focus, next step, or blockers change.
+- Keep continuation capsules machine-readable only; do not mention them in user-facing prose.
 
 ### Permissions
 Bot requires appropriate server-level role permissions (e.g. Manage Channels, Manage Roles, Moderate Members).

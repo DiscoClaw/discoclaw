@@ -55,6 +55,26 @@ describe('parseDiscordActions', () => {
     expect(actions[1]).toEqual({ type: 'channelList' });
   });
 
+  it('extracts a continuation capsule and strips it from cleaned text', () => {
+    const input = [
+      'Working on it.',
+      '<continuation-capsule>',
+      '{"currentTask":"Keep the session focused","nextStep":"Patch actions.ts","blockers":["Need prompt wiring"]}',
+      '</continuation-capsule>',
+      '<discord-action>{"type":"channelList"}</discord-action>',
+      'Done.',
+    ].join('\n');
+
+    const { cleanText, actions, continuationCapsule } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toEqual([{ type: 'channelList' }]);
+    expect(continuationCapsule).toEqual({
+      currentTask: 'Keep the session focused',
+      nextStep: 'Patch actions.ts',
+      blockers: ['Need prompt wiring'],
+    });
+    expect(cleanText).toBe('Working on it.\n\nDone.');
+  });
+
   it('extracts defer actions when defer flag enabled', () => {
     const input = '<discord-action>{"type":"defer","channel":"general","delaySeconds":300,"prompt":"check the forge"}</discord-action>';
     const { actions } = parseDiscordActions(input, ALL_FLAGS);
@@ -744,6 +764,8 @@ describe('discordActionsPromptSection', () => {
     const prompt = discordActionsPromptSection(flags, 'ClawBot');
     expect(prompt).toContain('Perform Discord server actions by including');
     expect(prompt).toContain('### Rules');
+    expect(prompt).toContain('If prompt context includes a continuation capsule');
+    expect(prompt).toContain('<continuation-capsule>{"currentTask":"...","nextStep":"...","blockers":[]}</continuation-capsule>');
   });
 
   it('documents deferred self-invocation when defer actions are enabled', () => {
