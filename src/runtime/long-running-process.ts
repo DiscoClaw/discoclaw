@@ -70,6 +70,9 @@ export class LongRunningProcess {
   private lastThinkingPreviewAt = 0;
   private thinkingBuf = '';
   private turnEmittedReasoningStart = false;
+  private turnStartedAtMs: number | null = null;
+  private firstTurnByteAtMs: number | null = null;
+  private firstTurnEventAtMs: number | null = null;
 
   /** Called when this process is added to / removed from an external tracking set. */
   onCleanup?: () => void;
@@ -188,6 +191,7 @@ export class LongRunningProcess {
     // Reset per-turn state.
     this.turnQueue = [];
     this.turnNotify = null;
+    this.turnStartedAtMs = Date.now();
     this.turnMerged = '';
     this.turnResultText = '';
     this.turnInToolUse = false;
@@ -198,11 +202,14 @@ export class LongRunningProcess {
     this.lastThinkingPreviewAt = 0;
     this.thinkingBuf = '';
     this.turnEmittedReasoningStart = false;
+    this.firstTurnByteAtMs = null;
+    this.firstTurnEventAtMs = null;
     this.stdoutBuffer = '';
 
     // Wire up stdout parsing for this turn.
     const onData = (chunk: Buffer | string) => {
       this.resetHangTimer();
+      if (this.firstTurnByteAtMs == null) this.firstTurnByteAtMs = Date.now();
       this.parseStdoutChunk(String(chunk));
     };
     this.stdoutOnData = onData;
@@ -324,6 +331,11 @@ export class LongRunningProcess {
     }
   }
 
+  private pushParsedTurnEvent(evt: EngineEvent): void {
+    if (this.firstTurnEventAtMs == null) this.firstTurnEventAtMs = Date.now();
+    this.pushEvent(evt);
+  }
+
   private parseStdoutChunk(s: string): void {
     this.stdoutBuffer += s;
     const lines = this.stdoutBuffer.split(/\r?\n/);
@@ -363,7 +375,7 @@ export class LongRunningProcess {
           if (this.lastThinkingPreviewAt === 0 || now - this.lastThinkingPreviewAt >= 3_000) {
             this.lastThinkingPreviewAt = now;
             const preview = thinkingText.length > 200 ? thinkingText.slice(-200) : thinkingText;
-            this.pushEvent({ type: 'thinking_delta', text: preview });
+            this.pushParsedTurnEvent({ type: 'thinking_delta', text: preview });
           }
         }
         continue;
@@ -372,7 +384,7 @@ export class LongRunningProcess {
       // Detect end-of-turn: a `result` event signals Claude finished this turn.
       if (anyEvt.type === 'result') {
         const usageEvt = this.extractUsageEvent(anyEvt.usage);
-        if (usageEvt) this.pushEvent(usageEvt);
+        if (usageEvt) this.pushParsedTurnEvent(usageEvt);
 
         const rt = extractResultText(evt);
         if (rt) this.turnResultText = rt;
@@ -422,7 +434,7 @@ export class LongRunningProcess {
               this.lastThinkingPreviewAt = now;
               const buf = this.thinkingBuf;
               const preview = buf.length > 200 ? buf.slice(-200) : buf;
-              this.pushEvent({ type: 'thinking_delta', text: preview || 'reasoning...' });
+              this.pushParsedTurnEvent({ type: 'thinking_delta', text: preview || 'reasoning...' });
             }
             continue;
           }
@@ -438,8 +450,8 @@ export class LongRunningProcess {
             }
             this.turnActiveTools.delete(idx);
             this.turnToolInputBufs.delete(idx);
-            this.pushEvent({ type: 'tool_start', name, ...(input ? { input } : {}) });
-            this.pushEvent({ type: 'tool_end', name, ok: true });
+            this.pushParsedTurnEvent({ type: 'tool_start', name, ...(input ? { input } : {}) });
+            this.pushParsedTurnEvent({ type: 'tool_end', name, ok: true });
           }
           continue;
         }
@@ -449,7 +461,7 @@ export class LongRunningProcess {
             ? (inner.message as Record<string, unknown>).usage
             : undefined);
         if (usageEvt) {
-          this.pushEvent(usageEvt);
+          this.pushParsedTurnEvent(usageEvt);
           continue;
         }
       }
@@ -461,7 +473,7 @@ export class LongRunningProcess {
         const hasToolOpen = text.includes('<tool_use>') || text.includes('<tool_calls>') || text.includes('<tool_call>') || text.includes('<tool_results>') || text.includes('<tool_result>');
         const hasToolClose = text.includes('</tool_use>') || text.includes('</tool_calls>') || text.includes('</tool_call>') || text.includes('</tool_results>') || text.includes('</tool_result>');
         if (hasToolOpen) this.turnInToolUse = true;
-        if (!this.turnInToolUse) this.pushEvent({ type: 'text_delta', text });
+        if (!this.turnInToolUse) this.pushParsedTurnEvent({ type: 'text_delta', text });
         if (hasToolClose) this.turnInToolUse = false;
       } else {
         // Try extracting a single image from streaming content blocks.
@@ -495,7 +507,7 @@ export class LongRunningProcess {
   private emitReasoningStartPreviewIfNeeded(): void {
     if (this.turnEmittedReasoningStart) return;
     this.turnEmittedReasoningStart = true;
-    this.pushEvent({
+    this.pushParsedTurnEvent({
       type: 'preview_debug',
       source: 'claude',
       phase: 'started',
@@ -518,9 +530,9 @@ export class LongRunningProcess {
     const final = stripToolUseBlocks(raw);
     if (final) {
       if (this.isContextOverflow(final)) {
-        this.pushEvent({ type: 'error', message: 'long-running: context overflow' });
+        this.pushParsedTurnEvent({ type: 'error', message: 'long-running: context overflow' });
       } else {
-        this.pushEvent({ type: 'text_final', text: final });
+        this.pushParsedTurnEvent({ type: 'text_final', text: final });
       }
     }
     this.pushDoneOnce();
@@ -605,12 +617,23 @@ export class LongRunningProcess {
     if (this.turnSeenImages.has(key)) return;
     this.turnSeenImages.add(key);
     this.turnImageCount++;
-    this.pushEvent({ type: 'image_data', image: img });
+    this.pushParsedTurnEvent({ type: 'image_data', image: img });
   }
 
   private pushDoneOnce(): void {
     if (this.turnEnded) return;
     this.turnEnded = true;
+    const startedAtMs = this.turnStartedAtMs;
+    const doneAtMs = Date.now();
+    const toTurnDelta = (ts: number | null): number | null => (
+      startedAtMs == null || ts == null ? null : ts - startedAtMs
+    );
+    this.opts.log?.info?.({
+      turnToFirstByteMs: toTurnDelta(this.firstTurnByteAtMs),
+      turnToFirstEventMs: toTurnDelta(this.firstTurnEventAtMs),
+      totalMs: startedAtMs == null ? null : doneAtMs - startedAtMs,
+      sessionId: this.sessionId,
+    }, 'long-running: turn timing summary');
     this.pushEvent({ type: 'done' });
   }
 

@@ -298,6 +298,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         stdout: 'pipe',
         stderr: 'pipe',
       });
+      const spawnedAtMs = Date.now();
       activeSubprocess = subprocess;
 
       // Write stdin payload if needed.
@@ -423,10 +424,14 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       let procResult: Awaited<typeof subprocess> | null = null;
       const seenImages = new Set<string>();
       let imageCount = 0;
+      let firstStdoutByteAtMs: number | null = null;
+      let firstStderrByteAtMs: number | null = null;
+      let firstParsedEventAtMs: number | null = null;
 
       // --- Stdout handler ---
       subprocess.stdout.on('data', (chunk) => {
         resetStallTimer();
+        if (firstStdoutByteAtMs == null) firstStdoutByteAtMs = Date.now();
         const s = String(chunk);
         mergedStdout += s;
 
@@ -452,6 +457,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           if (strategy.parseLine && evt) {
             const parsed = strategy.parseLine(evt, ctx);
             if (parsed) {
+              if (firstParsedEventAtMs == null) firstParsedEventAtMs = Date.now();
               // Emit extra events (e.g. session mapping).
               if (parsed.extraEvents) {
                 for (const e of parsed.extraEvents) push(e);
@@ -550,6 +556,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       // --- Stderr handler ---
       subprocess.stderr?.on('data', (chunk) => {
         resetStallTimer();
+        if (firstStderrByteAtMs == null) firstStderrByteAtMs = Date.now();
         const s = String(chunk);
         stderrForError += s;
         if (!opts.echoStdio) return;
@@ -578,6 +585,15 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         if (!stderrEnded) return;
         clearStallTimer();
         clearProgressTimer();
+        const finalizeAtMs = Date.now();
+        const toSpawnDelta = (ts: number | null): number | null => (ts == null ? null : ts - spawnedAtMs);
+        opts.log?.info?.({
+          spawnToFirstStdoutMs: toSpawnDelta(firstStdoutByteAtMs),
+          spawnToFirstStderrMs: toSpawnDelta(firstStderrByteAtMs),
+          spawnToFirstEventMs: toSpawnDelta(firstParsedEventAtMs),
+          totalMs: finalizeAtMs - spawnedAtMs,
+          strategyId: strategy.id,
+        }, 'one-shot: timing summary');
 
         const exitCode = procResult.exitCode;
         const stdout = procResult.stdout ?? '';
