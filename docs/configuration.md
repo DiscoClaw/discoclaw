@@ -124,6 +124,17 @@ If any check fails consistently, treat the model as unsupported for DiscoClaw ru
 | `DISCOCLAW_CODEX_VERBOSE_PREVIEW` | `false` | Emit richer reasoning/command preview lines (also forces `model_reasoning_summary="auto"` for Codex runs) |
 | `DISCOCLAW_CODEX_ITEM_TYPE_DEBUG` | `false` | Emit structured `item.started`/`item.completed` item-type debug events in preview (also forces `model_reasoning_summary="auto"` for Codex runs) |
 
+### Tier Overrides
+
+Use `DISCOCLAW_TIER_<RUNTIME>_<TIER>` env vars to replace the built-in tier-to-model map for a runtime.
+
+| Topic | Value | Notes |
+|-------|-------|-------|
+| Pattern | `DISCOCLAW_TIER_<RUNTIME>_<TIER>` | `<RUNTIME>` is the runtime ID in uppercase (for example `OPENAI`, `OPENROUTER`, `GEMINI`, `CODEX`, `CLAUDE_CODE`); `<TIER>` is `FAST`, `CAPABLE`, or `DEEP` |
+| Example | `DISCOCLAW_TIER_OPENAI_CAPABLE=gpt-5.4` | Maps the `capable` tier for that runtime to a concrete model string |
+| Default behavior | Built-in tier map from `src/runtime/model-tiers.ts` | If no override is set, DiscoClaw uses the repo's shipped defaults; runtimes without a built-in map, such as `openrouter`, need explicit tier vars if you want tier auto-switching |
+| Full workflow | [docs/runtime-switching.md](runtime-switching.md) | See the operator guide for install-mode detection, adapter registration checks, restart behavior, and safe switching steps |
+
 ## Memory
 
 See [docs/memory.md](memory.md) for detailed descriptions of each layer.
