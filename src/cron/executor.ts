@@ -265,7 +265,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           authorId: preRunRecord?.authorId ?? null,
           reason: actionRequester.reason,
         },
-        'cron:exec requester context unavailable; permission-gated discord actions will fail closed',
+        'cron:exec requester context unavailable; requester-gated guild-scoped discord actions will fail closed',
       );
     }
 

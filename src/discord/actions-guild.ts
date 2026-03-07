@@ -39,6 +39,14 @@ type SearchableChannel = {
   };
 };
 
+type ScheduledEventLike = {
+  id: string;
+  name: string;
+  description?: string | null;
+  scheduledStartAt?: Date | null;
+  channelId?: string | null;
+};
+
 function asSearchableChannel(channel: unknown): SearchableChannel | null {
   if (!channel || typeof channel !== 'object') return null;
   if (!('messages' in channel) || !('name' in channel)) return null;
@@ -134,11 +142,29 @@ function requesterHasChannelPermissions(
   return Boolean(resolved?.has?.(permissions));
 }
 
+function requesterCanViewScheduledEvent(
+  guild: Guild,
+  event: ScheduledEventLike,
+  requesterMember: Exclude<RequesterMemberContext, RequesterDenyAll | undefined>,
+): boolean {
+  if (!event.channelId) return true;
+  const eventChannel = guild.channels.cache.get(event.channelId);
+  if (!eventChannel) return false;
+  return requesterHasChannelPermissions(
+    eventChannel,
+    requesterMember,
+    PermissionFlagsBits.ViewChannel,
+  );
+}
+
 function isGatedGuildAction(type: GuildActionRequest['type']): boolean {
   return (
-    type === 'searchMessages'
+    type === 'memberInfo'
+    || type === 'roleInfo'
+    || type === 'searchMessages'
     || type === 'roleAdd'
     || type === 'roleRemove'
+    || type === 'eventList'
     || type === 'eventCreate'
     || type === 'eventEdit'
     || type === 'eventDelete'
@@ -304,11 +330,18 @@ export async function executeGuildAction(
 
     case 'eventList': {
       const events = await guild.scheduledEvents.fetch();
-      if (events.size === 0) {
+      const visibleEvents = enforcingRequester
+        ? [...events.values()].filter((event) => requesterCanViewScheduledEvent(
+          guild,
+          event as ScheduledEventLike,
+          enforcingRequester,
+        ))
+        : [...events.values()];
+      if (visibleEvents.length === 0) {
         return { ok: true, summary: 'No scheduled events' };
       }
 
-      const lines = [...events.values()].map((e) => {
+      const lines = visibleEvents.map((e) => {
         const start = e.scheduledStartAt ? fmtTime(e.scheduledStartAt) : 'TBD';
         return `${e.name} (id:${e.id}) — ${start}${e.description ? ` — ${e.description.slice(0, 80)}` : ''}`;
       });
@@ -346,8 +379,19 @@ export async function executeGuildAction(
           opts.scheduledEndTime = new Date(startTime.getTime() + 3600_000).toISOString();
         }
       } else if (action.channelId) {
+        const eventChannel = guild.channels.cache.get(action.channelId);
+        if (!eventChannel) {
+          return { ok: false, error: `Channel "${action.channelId}" not found` };
+        }
+        if (enforcingRequester && !requesterHasChannelPermissions(
+          eventChannel,
+          enforcingRequester,
+          PermissionFlagsBits.ViewChannel,
+        )) {
+          return permissionDenied(action.type);
+        }
         opts.entityType = GuildScheduledEventEntityType.Voice;
-        opts.channel = action.channelId;
+        opts.channel = eventChannel.id;
       } else {
         opts.entityType = GuildScheduledEventEntityType.External;
         opts.entityMetadata = { location: 'TBD' };

@@ -1,4 +1,5 @@
-import type { DiscordActionResult, ActionContext } from './actions.js';
+import { PermissionFlagsBits } from 'discord.js';
+import type { DiscordActionResult, ActionContext, RequesterDenyAll, RequesterMemberContext } from './actions.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,6 +15,29 @@ const MODERATION_TYPE_MAP: Record<ModerationActionRequest['type'], true> = {
 };
 export const MODERATION_ACTION_TYPES = new Set<string>(Object.keys(MODERATION_TYPE_MAP));
 
+function isRequesterDenyAll(
+  requesterMember: RequesterMemberContext,
+): requesterMember is RequesterDenyAll {
+  return Boolean(requesterMember && typeof requesterMember === 'object' && '__requesterDenyAll' in requesterMember);
+}
+
+function permissionDenied(action: ModerationActionRequest['type']): DiscordActionResult {
+  return { ok: false, error: `Permission denied for ${action}` };
+}
+
+function highestRolePosition(member: { roles?: { highest?: { position?: number } } }): number {
+  return typeof member.roles?.highest?.position === 'number' ? member.roles.highest.position : 0;
+}
+
+function requesterHasGuildPermission(
+  requesterMember: Exclude<RequesterMemberContext, RequesterDenyAll | undefined>,
+  permission: bigint,
+): boolean {
+  return Boolean(
+    (requesterMember as { permissions?: { has?: (perm: bigint) => boolean } }).permissions?.has?.(permission),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -21,13 +45,28 @@ export const MODERATION_ACTION_TYPES = new Set<string>(Object.keys(MODERATION_TY
 export async function executeModerationAction(
   action: ModerationActionRequest,
   ctx: ActionContext,
+  requesterMember?: RequesterMemberContext,
 ): Promise<DiscordActionResult> {
   const { guild } = ctx;
+  if (isRequesterDenyAll(requesterMember)) {
+    return permissionDenied(action.type);
+  }
+  const enforcingRequester = requesterMember && !isRequesterDenyAll(requesterMember)
+    ? requesterMember
+    : undefined;
 
   switch (action.type) {
     case 'timeout': {
       const member = await guild.members.fetch(action.userId).catch(() => null);
       if (!member) return { ok: false, error: `Member "${action.userId}" not found` };
+      if (enforcingRequester) {
+        if (!requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.ModerateMembers)) {
+          return permissionDenied(action.type);
+        }
+        if (highestRolePosition(enforcingRequester) <= highestRolePosition(member)) {
+          return permissionDenied(action.type);
+        }
+      }
       const minutes = action.durationMinutes ?? 5;
       const ms = minutes * 60 * 1000;
       await member.timeout(ms, action.reason);
@@ -37,6 +76,14 @@ export async function executeModerationAction(
     case 'kick': {
       const member = await guild.members.fetch(action.userId).catch(() => null);
       if (!member) return { ok: false, error: `Member "${action.userId}" not found` };
+      if (enforcingRequester) {
+        if (!requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.KickMembers)) {
+          return permissionDenied(action.type);
+        }
+        if (highestRolePosition(enforcingRequester) <= highestRolePosition(member)) {
+          return permissionDenied(action.type);
+        }
+      }
       const name = member.displayName;
       await member.kick(action.reason);
       return { ok: true, summary: `Kicked ${name}${action.reason ? `: ${action.reason}` : ''}` };
@@ -45,6 +92,14 @@ export async function executeModerationAction(
     case 'ban': {
       const member = await guild.members.fetch(action.userId).catch(() => null);
       if (!member) return { ok: false, error: `Member "${action.userId}" not found` };
+      if (enforcingRequester) {
+        if (!requesterHasGuildPermission(enforcingRequester, PermissionFlagsBits.BanMembers)) {
+          return permissionDenied(action.type);
+        }
+        if (highestRolePosition(enforcingRequester) <= highestRolePosition(member)) {
+          return permissionDenied(action.type);
+        }
+      }
       const name = member.displayName;
       await member.ban({
         reason: action.reason,

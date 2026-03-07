@@ -408,12 +408,12 @@ export async function executeDiscordActions(
   subs?: SubsystemContexts,
 ): Promise<DiscordActionResult[]> {
   const effectiveSubs = subs ?? {};
-  let requesterMember: RequesterMemberContext;
+  let requesterMember: RequesterMemberContext = REQUESTER_MEMBER_DENY_ALL;
   if (ctx.requesterId) {
     const fetchRequester = (ctx.guild.members as { fetch?: (userId: string) => Promise<GuildMember> })?.fetch;
     requesterMember = typeof fetchRequester === 'function'
       ? await fetchRequester.call(ctx.guild.members, ctx.requesterId).catch(() => REQUESTER_MEMBER_DENY_ALL)
-      : undefined;
+      : REQUESTER_MEMBER_DENY_ALL;
   }
 
   // --- Spawn pre-pass: collect all spawnAgent actions and run in parallel ---
@@ -460,7 +460,7 @@ export async function executeDiscordActions(
       }
 
       if (CHANNEL_ACTION_TYPES.has(action.type)) {
-        result = await executeChannelAction(action as ChannelActionRequest, ctx);
+        result = await executeChannelAction(action as ChannelActionRequest, ctx, requesterMember);
       } else if (MESSAGING_ACTION_TYPES.has(action.type)) {
         result = await executeMessagingAction(action as MessagingActionRequest, ctx, requesterMember);
       } else if (REACTION_PROMPT_ACTION_TYPES.has(action.type)) {
@@ -468,9 +468,9 @@ export async function executeDiscordActions(
       } else if (GUILD_ACTION_TYPES.has(action.type)) {
         result = await executeGuildAction(action as GuildActionRequest, ctx, requesterMember);
       } else if (MODERATION_ACTION_TYPES.has(action.type)) {
-        result = await executeModerationAction(action as ModerationActionRequest, ctx);
+        result = await executeModerationAction(action as ModerationActionRequest, ctx, requesterMember);
       } else if (POLL_ACTION_TYPES.has(action.type)) {
-        result = await executePollAction(action as PollActionRequest, ctx);
+        result = await executePollAction(action as PollActionRequest, ctx, requesterMember);
       } else if (isTaskActionRequest(action)) {
         const taskCtx = effectiveSubs.taskCtx;
         if (!taskCtx) {

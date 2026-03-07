@@ -465,6 +465,31 @@ describe('eventList', () => {
     expect((result as any).summary).toContain('Team Meeting (id:e1)');
   });
 
+  it('filters channel-scoped events the requester cannot view', async () => {
+    const visibleChannel = {
+      id: 'ch-visible',
+      permissionsFor: vi.fn(() => ({ has: () => true })),
+    };
+    const hiddenChannel = {
+      id: 'ch-hidden',
+      permissionsFor: vi.fn(() => ({ has: () => false })),
+    };
+    const events = new Map([
+      ['e-visible', { id: 'e-visible', name: 'Visible Voice', channelId: 'ch-visible', scheduledStartAt: new Date('2025-02-01T15:00:00Z') }],
+      ['e-hidden', { id: 'e-hidden', name: 'Hidden Voice', channelId: 'ch-hidden', scheduledStartAt: new Date('2025-02-01T16:00:00Z') }],
+      ['e-external', { id: 'e-external', name: 'External Event', scheduledStartAt: new Date('2025-02-01T17:00:00Z') }],
+    ]);
+    const requester = makeMockMember({ id: 'requester' });
+    const ctx = makeCtx({ channels: [visibleChannel, hiddenChannel], events });
+
+    const result = await executeGuildAction({ type: 'eventList' }, ctx, requester as any);
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('Visible Voice (id:e-visible)');
+    expect((result as any).summary).toContain('External Event (id:e-external)');
+    expect((result as any).summary).not.toContain('Hidden Voice (id:e-hidden)');
+  });
+
   it('shows empty message when no events', async () => {
     const ctx = makeCtx({ events: new Map() });
     const result = await executeGuildAction({ type: 'eventList' }, ctx);

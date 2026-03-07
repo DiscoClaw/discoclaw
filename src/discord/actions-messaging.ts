@@ -147,16 +147,7 @@ function permissionDenied(action: MessagingActionRequest['type']): DiscordAction
 }
 
 function isGatedMessagingAction(type: MessagingActionRequest['type']): boolean {
-  return (
-    type === 'sendMessage'
-    || type === 'sendFile'
-    || type === 'readMessages'
-    || type === 'fetchMessage'
-    || type === 'listPins'
-    || type === 'threadCreate'
-    || type === 'pinMessage'
-    || type === 'unpinMessage'
-  );
+  return MESSAGING_ACTION_TYPES.has(type);
 }
 
 function hasChannelPermissions(
@@ -283,6 +274,13 @@ export async function executeMessagingAction(
       const channel = guild.channels.cache.get(action.channelId);
       const messageChannel = asMessageChannelRecord(channel);
       if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory | PermissionFlagsBits.AddReactions,
+      )) {
+        return permissionDenied(action.type);
+      }
       const message = await messageChannel.messages.fetch(action.messageId);
       await message.react(action.emoji);
       return { ok: true, summary: `Reacted with ${action.emoji}` };
@@ -295,6 +293,13 @@ export async function executeMessagingAction(
       const channel = guild.channels.cache.get(action.channelId);
       const messageChannel = asMessageChannelRecord(channel);
       if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory | PermissionFlagsBits.AddReactions,
+      )) {
+        return permissionDenied(action.type);
+      }
       const message = await messageChannel.messages.fetch(action.messageId);
       const reaction = message.reactions.resolve(action.emoji);
       if (!reaction) return { ok: false, error: `Reaction "${action.emoji}" not found on message` };
@@ -381,6 +386,13 @@ export async function executeMessagingAction(
       const channel = guild.channels.cache.get(action.channelId);
       const messageChannel = asMessageChannelRecord(channel);
       if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory | PermissionFlagsBits.ManageMessages,
+      )) {
+        return permissionDenied(action.type);
+      }
       const message = await messageChannel.messages.fetch(action.messageId);
       await message.edit({ content: action.content, allowedMentions: NO_MENTIONS });
       return { ok: true, summary: `Edited message in #${messageChannel.name}` };
@@ -392,6 +404,13 @@ export async function executeMessagingAction(
       const channel = guild.channels.cache.get(action.channelId);
       const messageChannel = asMessageChannelRecord(channel);
       if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory | PermissionFlagsBits.ManageMessages,
+      )) {
+        return permissionDenied(action.type);
+      }
       const message = await messageChannel.messages.fetch(action.messageId);
       await message.delete();
       return { ok: true, summary: `Deleted message in #${messageChannel.name}` };
@@ -407,6 +426,13 @@ export async function executeMessagingAction(
       if (!messageChannel || typeof messageChannel.bulkDelete !== 'function') {
         return { ok: false, error: `Channel "${action.channelId}" not found or does not support bulk delete` };
       }
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory | PermissionFlagsBits.ManageMessages,
+      )) {
+        return permissionDenied(action.type);
+      }
       const deleted = await messageChannel.bulkDelete(count, true);
       return { ok: true, summary: `Bulk deleted ${deleted.size} messages in #${messageChannel.name}` };
     }
@@ -419,6 +445,13 @@ export async function executeMessagingAction(
       if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
       if (messageChannel.type !== ChannelType.GuildAnnouncement) {
         return { ok: false, error: `Channel #${messageChannel.name} is not an announcement channel` };
+      }
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory | PermissionFlagsBits.ManageMessages,
+      )) {
+        return permissionDenied(action.type);
       }
       const message = await messageChannel.messages.fetch(action.messageId);
       await message.crosspost();

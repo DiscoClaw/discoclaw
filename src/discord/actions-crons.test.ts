@@ -320,6 +320,22 @@ describe('executeCronAction', () => {
     if (result.ok) expect(result.summary).toContain('New Cron');
   });
 
+  it('cronCreate persists the originating requester as authorId', async () => {
+    const cronCtx = makeCronCtx();
+
+    await executeCronAction(
+      { type: 'cronCreate', name: 'New Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something' },
+      { ...makeActionCtx(), requesterId: 'user-1' },
+      cronCtx,
+    );
+
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ authorId: 'user-1' }),
+    );
+  });
+
   it('cronCreate rejects invalid schedule before creating a thread', async () => {
     const invoke = vi.fn(async function* () {
       yield { type: 'text_final' as const, text: 'monitoring' };

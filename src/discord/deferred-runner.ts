@@ -106,9 +106,9 @@ function isRequesterDenyAll(
 }
 
 async function resolveRequesterMember(context: ActionContext): Promise<RequesterMemberContext> {
-  if (!context.requesterId) return undefined;
+  if (!context.requesterId) return REQUESTER_DENY_ALL;
   const fetchRequester = (context.guild.members as { fetch?: (userId: string) => Promise<GuildMember> })?.fetch;
-  if (typeof fetchRequester !== 'function') return undefined;
+  if (typeof fetchRequester !== 'function') return REQUESTER_DENY_ALL;
   return fetchRequester.call(context.guild.members, context.requesterId).catch(() => REQUESTER_DENY_ALL);
 }
 

@@ -1711,12 +1711,10 @@ if (taskCtx) {
       activeVoiceChannelId?: string;
       candidateIds: string[];
       reason:
-        | 'resolved'
         | 'guild-unavailable'
         | 'voice-manager-unavailable'
         | 'no-active-voice-channel'
-        | 'no-allowlisted-members-in-channel'
-        | 'multiple-allowlisted-members-in-channel';
+        | 'speaker-identity-unavailable';
     } => {
       if (!voiceGuild) {
         return {
@@ -1748,25 +1746,10 @@ if (taskCtx) {
           .map((member) => member.id),
       )];
 
-      if (candidateIds.length === 0) {
-        return {
-          reason: 'no-allowlisted-members-in-channel',
-          activeVoiceChannelId,
-          candidateIds,
-        };
-      }
-
-      if (candidateIds.length > 1) {
-        return {
-          reason: 'multiple-allowlisted-members-in-channel',
-          activeVoiceChannelId,
-          candidateIds,
-        };
-      }
-
       return {
-        reason: 'resolved',
-        requesterId: candidateIds[0],
+        // Voice transcripts are not bound to a specific speaker yet, so
+        // requester-scoped Discord actions must fail closed here.
+        reason: 'speaker-identity-unavailable',
         activeVoiceChannelId,
         candidateIds,
       };
@@ -1793,7 +1776,7 @@ if (taskCtx) {
             activeVoiceChannelId: voiceRequester.activeVoiceChannelId,
             candidateIds: voiceRequester.candidateIds,
           },
-          'voice: requester resolution failed; omitting action execution for this turn',
+          'voice: requester identity unavailable; omitting action execution for this turn',
         );
       }
 
