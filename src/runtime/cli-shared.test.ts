@@ -5,6 +5,7 @@ import {
   createEventQueue,
   SubprocessTracker,
   cliExecaEnv,
+  stripAnsi,
   LineBuffer,
 } from './cli-shared.js';
 
@@ -101,6 +102,20 @@ describe('cliExecaEnv', () => {
     const env = cliExecaEnv({ CODEX_HOME: '/tmp/codex-home-test', NO_COLOR: '0' });
     expect(env.CODEX_HOME).toBe('/tmp/codex-home-test');
     expect(env.NO_COLOR).toBe('0');
+  });
+});
+
+describe('stripAnsi', () => {
+  it('removes SGR color sequences', () => {
+    expect(stripAnsi('\u001B[31mred\u001B[39m plain')).toBe('red plain');
+  });
+
+  it('removes OSC title sequences', () => {
+    expect(stripAnsi('\u001B]0;window title\u0007hello')).toBe('hello');
+  });
+
+  it('removes DCS-style sequences', () => {
+    expect(stripAnsi('start\u001BPpayload\u001B\\end')).toBe('startend');
   });
 });
 

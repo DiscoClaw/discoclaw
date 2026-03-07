@@ -1,6 +1,7 @@
 import { execa } from 'execa';
 import type { RuntimeAdapter, RuntimeInvokeParams, EngineEvent } from '../runtime/types.js';
 import { LoopDetector, type LoopDetectorOpts } from '../runtime/loop-detector.js';
+import { cliExecaEnv, stripAnsi } from '../runtime/cli-shared.js';
 
 export type StepContext = {
   stepIndex: number;
@@ -298,6 +299,7 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
           timeout: step.timeoutMs,
           cancelSignal: signal,
           cwd: step.cwd ?? cwd,
+          env: cliExecaEnv(),
         });
 
         if (result.isCanceled) {
@@ -318,7 +320,7 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
           throw new Error(parts.join(' '));
         }
 
-        text = result.stdout.trimEnd();
+        text = stripAnsi(result.stdout).trimEnd();
       } catch (err) {
         if (step.onError === 'skip') {
           outputs.push('');

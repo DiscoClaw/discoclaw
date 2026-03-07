@@ -2,6 +2,7 @@
 // to eliminate duplication across CLI-based runtime adapters.
 
 import process from 'node:process';
+import { stripVTControlCharacters } from 'node:util';
 import type { ResultPromise } from 'execa';
 import type { EngineEvent } from './types.js';
 
@@ -97,6 +98,18 @@ export function cliExecaEnv(overrides?: Record<string, string | undefined>): Rec
     TERM: process.env.TERM ?? 'dumb',
     ...(overrides ?? {}),
   };
+}
+
+const ANSI_ESCAPE_SEQUENCE =
+  /(?:\u001B\]|\u009D)[\s\S]*?(?:\u0007|\u001B\\|\u009C)|(?:\u001B\[|\u009B)[0-?]*[ -/]*[@-~]|(?:\u001B[P^_]|[\u0090\u009E\u009F])[\s\S]*?(?:\u001B\\|\u009C)|\u001B[@-_]/g;
+
+/**
+ * Remove ANSI/VT control sequences from shell output.
+ * `stripVTControlCharacters()` handles the common cases; the regex pass covers
+ * OSC/DCS/PM/APC string forms that may still appear in raw CLI output.
+ */
+export function stripAnsi(text: string): string {
+  return stripVTControlCharacters(text.replace(ANSI_ESCAPE_SEQUENCE, ''));
 }
 
 // ---------------------------------------------------------------------------

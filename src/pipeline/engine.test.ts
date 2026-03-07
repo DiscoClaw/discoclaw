@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { runPipeline } from './engine.js';
 import type { PipelineDef, PromptStep, ShellStep, DiscordActionStep, StepContext } from './engine.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
+import { cliExecaEnv } from '../runtime/cli-shared.js';
 
 vi.mock('execa', () => ({
   execa: vi.fn(),
@@ -712,8 +713,23 @@ describe('runPipeline', () => {
       expect(vi.mocked(execa)).toHaveBeenCalledWith(
         'ls',
         ['-la'],
-        expect.objectContaining({ reject: false, timeout: 3000, cwd: '/project' }),
+        expect.objectContaining({
+          reject: false,
+          timeout: 3000,
+          cwd: '/project',
+          env: cliExecaEnv(),
+        }),
       );
+    });
+
+    it('strips ANSI sequences from shell stdout before storing output', async () => {
+      vi.mocked(execa).mockResolvedValue(
+        makeExecaResult({ stdout: '\u001B[31mhello\u001B[0m\n' }) as any,
+      );
+
+      const result = await runPipeline(baseParams({ steps: [shellStep(['echo', 'hello'])] }));
+
+      expect(result.outputs).toEqual(['hello']);
     });
 
     it('uses step-level cwd override instead of pipeline cwd', async () => {
