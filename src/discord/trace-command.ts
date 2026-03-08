@@ -13,7 +13,6 @@ type TraceListRow = {
   traceId: string;
 };
 
-const TRACE_ID_WIDTH = 24;
 const FLOW_WIDTH = 8;
 const OUTCOME_WIDTH = 11;
 const EVENTS_WIDTH = 6;
@@ -46,18 +45,6 @@ function pad(value: string, width: number): string {
   return value.padEnd(width, ' ');
 }
 
-function truncate(value: string, width: number): string {
-  if (value.length <= width) {
-    return value;
-  }
-
-  if (width <= 1) {
-    return value.slice(0, width);
-  }
-
-  return `${value.slice(0, width - 1)}…`;
-}
-
 function formatDuration(ms: number): string {
   if (ms < 1000) {
     return `${ms}ms`;
@@ -88,6 +75,7 @@ function toListRow(trace: RunTrace): TraceListRow {
 
 export function renderTraceList(traces: readonly RunTrace[]): string {
   const rows = traces.map(toListRow);
+  const traceIdWidth = Math.max('Trace ID'.length, ...rows.map((row) => row.traceId.length));
   const lines: string[] = [];
 
   lines.push('Recent traces');
@@ -97,15 +85,15 @@ export function renderTraceList(traces: readonly RunTrace[]): string {
   }
 
   lines.push(
-    `${pad('Started', 8)}  ${pad('Flow', FLOW_WIDTH)}  ${pad('Outcome', OUTCOME_WIDTH)}  ${pad('Events', EVENTS_WIDTH)}  ${pad('Duration', DURATION_WIDTH)}  Trace ID`,
+    `${pad('Started', 8)}  ${pad('Flow', FLOW_WIDTH)}  ${pad('Outcome', OUTCOME_WIDTH)}  ${pad('Events', EVENTS_WIDTH)}  ${pad('Duration', DURATION_WIDTH)}  ${pad('Trace ID', traceIdWidth)}`,
   );
   lines.push(
-    `${'-'.repeat(8)}  ${'-'.repeat(FLOW_WIDTH)}  ${'-'.repeat(OUTCOME_WIDTH)}  ${'-'.repeat(EVENTS_WIDTH)}  ${'-'.repeat(DURATION_WIDTH)}  ${'-'.repeat(TRACE_ID_WIDTH)}`,
+    `${'-'.repeat(8)}  ${'-'.repeat(FLOW_WIDTH)}  ${'-'.repeat(OUTCOME_WIDTH)}  ${'-'.repeat(EVENTS_WIDTH)}  ${'-'.repeat(DURATION_WIDTH)}  ${'-'.repeat(traceIdWidth)}`,
   );
 
   for (const row of rows) {
     lines.push(
-      `${pad(row.started, 8)}  ${pad(row.flow, FLOW_WIDTH)}  ${pad(row.outcome, OUTCOME_WIDTH)}  ${pad(row.events, EVENTS_WIDTH)}  ${pad(row.duration, DURATION_WIDTH)}  ${truncate(row.traceId, TRACE_ID_WIDTH)}`,
+      `${pad(row.started, 8)}  ${pad(row.flow, FLOW_WIDTH)}  ${pad(row.outcome, OUTCOME_WIDTH)}  ${pad(row.events, EVENTS_WIDTH)}  ${pad(row.duration, DURATION_WIDTH)}  ${pad(row.traceId, traceIdWidth)}`,
     );
   }
 

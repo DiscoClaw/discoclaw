@@ -129,7 +129,7 @@ export class TraceStore {
 
     trace.outcome = outcome;
     trace.durationMs = Math.max(0, Date.now() - trace.startedAt);
-    this.pruneCompletedToLimit(this.maxEntries);
+    this.pruneToLimit(this.maxEntries);
     return cloneTrace(trace);
   }
 
@@ -151,16 +151,31 @@ export class TraceStore {
   }
 
   private makeRoomForNewTrace(): void {
-    this.pruneCompletedToLimit(this.maxEntries - 1);
+    this.pruneToLimit(this.maxEntries - 1);
   }
 
-  private pruneCompletedToLimit(limit: number): void {
+  private pruneToLimit(limit: number): void {
+    const normalizedLimit = Math.max(0, limit);
     const completed = [...this.traces.values()]
       .filter((trace) => trace.outcome !== 'in_progress')
       .sort((a, b) => a.startedAt - b.startedAt);
 
-    while (this.traces.size > limit && completed.length > 0) {
+    while (this.traces.size > normalizedLimit && completed.length > 0) {
       const oldest = completed.shift();
+      if (!oldest) {
+        break;
+      }
+
+      this.traces.delete(oldest.traceId);
+    }
+
+    if (this.traces.size <= normalizedLimit) {
+      return;
+    }
+
+    const remaining = [...this.traces.values()].sort((a, b) => a.startedAt - b.startedAt);
+    while (this.traces.size > normalizedLimit && remaining.length > 0) {
+      const oldest = remaining.shift();
       if (!oldest) {
         break;
       }

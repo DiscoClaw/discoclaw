@@ -6,6 +6,7 @@ describe('parseTraceCommand', () => {
   it('parses list and detail modes', () => {
     expect(parseTraceCommand('!trace')).toEqual({ mode: 'list' });
     expect(parseTraceCommand('  !trace   trace-123  ')).toEqual({ mode: 'detail', traceId: 'trace-123' });
+    expect(parseTraceCommand('!trace message:123:456')).toEqual({ mode: 'detail', traceId: 'message:123:456' });
   });
 
   it('rejects unsupported or malformed command forms', () => {
@@ -51,7 +52,7 @@ describe('renderTraceList', () => {
     expect(rendered).toContain('Started   Flow      Outcome      Events  Duration  Trace ID');
     expect(rendered).toContain('10:00:05  message   in_progress  1       running   trace-running');
     expect(rendered).toContain('10:00:00  reaction  success      2       1.4s');
-    expect(rendered).toContain('trace-successfully-comp…');
+    expect(rendered).toContain('trace-successfully-completed-abcdef');
   });
 });
 
