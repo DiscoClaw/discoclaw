@@ -2237,6 +2237,59 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   return;
                 }
 
+                if (found.header.status === 'APPROVED' || found.header.status === 'IMPLEMENTING') {
+                  const planActionCtx: ActionContext = {
+                    guild: msg.guild ?? ({} as Guild),
+                    client: msg.client,
+                    requesterId: msg.author.id,
+                    channelId: msg.channelId,
+                    messageId: msg.id,
+                    threadParentId,
+                    deferScheduler: params.deferScheduler,
+                    transport: msg.guild ? new DiscordTransportClient(msg.guild, msg.client) : undefined,
+                  };
+
+                  const planActionCtxConfig: PlanContext = {
+                    plansDir,
+                    workspaceCwd: params.workspaceCwd,
+                    taskStore: params.planCtx?.taskStore ?? (params.taskCtx)?.store ?? new TaskStore(),
+                    log: params.log,
+                    depth: 0,
+                    runtime: params.runtime,
+                    model: resolveModel(params.runtimeModel, params.runtime.id),
+                    phaseTimeoutMs: params.planPhaseTimeoutMs ?? 5 * 60_000,
+                    maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
+                    maxPlanRunPhases: MAX_PLAN_RUN_PHASES,
+                    longRunWatchdog,
+                    longRunStillRunningDelayMs: params.longRunStillRunningDelayMs,
+                    onTaskClosed: params.planCtx?.onTaskClosed,
+                    onProgress: async (progressMsg: string) => {
+                      params.log?.info(
+                        { planId: found.header.planId, progress: progressMsg },
+                        'plan:forge-resume:progress',
+                      );
+                    },
+                  };
+
+                  const runResult = await executePlanAction(
+                    { type: 'planRun', planId: found.header.planId },
+                    planActionCtx,
+                    planActionCtxConfig,
+                  );
+                  if (!runResult.ok) {
+                    await msg.reply({
+                      content: runResult.error ?? `Failed to resume ${found.header.planId}.`,
+                      allowedMentions: NO_MENTIONS,
+                    });
+                    return;
+                  }
+                  await msg.reply({
+                    content: runResult.summary ?? `Plan run started for ${found.header.planId}.`,
+                    allowedMentions: NO_MENTIONS,
+                  });
+                  return;
+                }
+
                 // Resume path — resolve project root from existing plan content
                 let resumeProjectCwd: string;
                 try {

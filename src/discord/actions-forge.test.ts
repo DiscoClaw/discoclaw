@@ -5,6 +5,13 @@ import type { ActionContext } from './actions.js';
 import { _resetForTest, setActiveOrchestrator, addRunningPlan } from './forge-plan-registry.js';
 import { TaskStore } from '../tasks/store.js';
 
+vi.mock('./actions-plan.js', () => ({
+  executePlanAction: vi.fn(async (action: { type: string; planId: string }) => ({
+    ok: true,
+    summary: `Plan run started for **${action.planId}**`,
+  })),
+}));
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
@@ -286,6 +293,46 @@ describe('executeForgeAction', () => {
         expect(result.summary).toContain('Forge resumed');
         expect(result.summary).toContain('plan-042');
       }
+    });
+
+    it('routes approved plans into planRun instead of re-auditing', async () => {
+      const { findPlanFile } = await import('./plan-commands.js');
+      const { executePlanAction } = await import('./actions-plan.js');
+      (findPlanFile as any).mockResolvedValueOnce({
+        filePath: '/tmp/plans/plan-777-test.md',
+        header: {
+          planId: 'plan-777',
+          taskId: 'ws-777',
+          status: 'APPROVED',
+          title: 'Approved Plan',
+          project: 'discoclaw',
+          created: '2026-01-01',
+        },
+      });
+
+      const forgeCtx = makeForgeCtx({
+        planCtx: {
+          plansDir: '/tmp/plans',
+          workspaceCwd: '/tmp/workspace',
+          taskStore: new TaskStore(),
+          runtime: { id: 'claude_code', capabilities: new Set() } as any,
+          model: 'capable',
+        } as any,
+      });
+
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-777' },
+        makeCtx(),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(executePlanAction).toHaveBeenCalledWith(
+        { type: 'planRun', planId: 'plan-777' },
+        expect.any(Object),
+        forgeCtx.planCtx,
+      );
+      expect(forgeCtx.orchestratorFactory).not.toHaveBeenCalled();
     });
 
     it('blocks at recursion depth >= 1', async () => {
