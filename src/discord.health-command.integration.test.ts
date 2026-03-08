@@ -176,6 +176,27 @@ describe('health command integration', () => {
     expect(payload.content).toContain('TestBot Config Doctor');
   });
 
+  it('handles !doctor without invoking runtime', async () => {
+    const metrics = new MetricsRegistry();
+    const queue = makeQueue();
+    const projectCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'doctor-'));
+    const params = baseParams(metrics, { projectCwd });
+    const handler = createMessageCreateHandler(params as any, queue as any);
+    const msg = makeMsg('!doctor');
+
+    try {
+      await handler(msg as any);
+    } finally {
+      await fs.rm(projectCwd, { recursive: true, force: true });
+    }
+
+    expect(msg.reply).toHaveBeenCalledOnce();
+    expect((params.runtime.invoke as any)).not.toHaveBeenCalled();
+    const payload = (msg.reply as any).mock.calls[0]?.[0];
+    expect(payload).toBeTruthy();
+    expect(payload.content).toContain('TestBot Config Doctor');
+  });
+
   it('handles !health doctor fix without invoking runtime', async () => {
     const metrics = new MetricsRegistry();
     const queue = makeQueue();
@@ -196,5 +217,41 @@ describe('health command integration', () => {
     expect(payload).toBeTruthy();
     expect(payload.content).toContain('TestBot Config Doctor');
     expect(payload.content).toContain('Fix results:');
+  });
+
+  it('handles !doctor fix without invoking runtime', async () => {
+    const metrics = new MetricsRegistry();
+    const queue = makeQueue();
+    const projectCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'doctor-fix-'));
+    const params = baseParams(metrics, { projectCwd });
+    const handler = createMessageCreateHandler(params as any, queue as any);
+    const msg = makeMsg('!doctor fix');
+
+    try {
+      await handler(msg as any);
+    } finally {
+      await fs.rm(projectCwd, { recursive: true, force: true });
+    }
+
+    expect(msg.reply).toHaveBeenCalledOnce();
+    expect((params.runtime.invoke as any)).not.toHaveBeenCalled();
+    const payload = (msg.reply as any).mock.calls[0]?.[0];
+    expect(payload).toBeTruthy();
+    expect(payload.content).toContain('TestBot Config Doctor');
+    expect(payload.content).toContain('Fix results:');
+  });
+
+  it('does not handle !doctor as a doctor command when health commands are disabled', async () => {
+    const metrics = new MetricsRegistry();
+    const queue = makeQueue();
+    const params = baseParams(metrics, { healthCommandsEnabled: false });
+    const handler = createMessageCreateHandler(params as any, queue as any);
+    const msg = makeMsg('!doctor');
+
+    await handler(msg as any);
+
+    expect((params.runtime.invoke as any)).toHaveBeenCalledOnce();
+    const payloads = (msg.reply as any).mock.calls.map((call: any[]) => call?.[0]).filter(Boolean);
+    expect(payloads.some((payload: any) => String(payload.content ?? '').includes('Config Doctor'))).toBe(false);
   });
 });
