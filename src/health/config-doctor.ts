@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { parse as parseDotenv } from 'dotenv';
 import type { ModelConfig, ModelRole } from '../model-config.js';
 import { DEFAULTS as MODEL_DEFAULTS, saveModelConfig } from '../model-config.js';
 import type { RuntimeOverrides } from '../runtime-overrides.js';
-import { clearOverrides, saveOverrides } from '../runtime-overrides.js';
+import { clearOverrides } from '../runtime-overrides.js';
 
 export type DoctorSeverity = 'info' | 'warn' | 'error';
 export type InstallMode = 'source' | 'npm-managed';
@@ -50,6 +51,21 @@ type EnvFileState = {
   keys: Set<string>;
 };
 
+type ModelFileState = {
+  exists: boolean;
+  path: string;
+  config: ModelConfig;
+};
+
+type RuntimeOverridesFileState = {
+  exists: boolean;
+  path: string;
+  rawObject: Record<string, unknown>;
+  overrides: RuntimeOverrides;
+  unknownKeys: string[];
+  legacyModels: ModelConfig;
+};
+
 export type DoctorContext = {
   cwd: string;
   installMode: InstallMode;
@@ -57,12 +73,16 @@ export type DoctorContext = {
   explicitEnvKeys: Set<string>;
   configPaths: DoctorReport['configPaths'];
   defaultDataDir: string;
+  modelFileExists: boolean;
   models: ModelConfig;
   runtimeOverrides: RuntimeOverrides;
+  runtimeOverridesFile: RuntimeOverridesFileState;
   envDefaults: ModelConfig;
 };
 
 const KNOWN_RUNTIMES = new Set(['claude', 'openai', 'openrouter', 'gemini', 'codex', 'anthropic']);
+const KNOWN_RUNTIME_OVERRIDE_KEYS = new Set(['ttsVoice', 'voiceRuntime', 'fastRuntime']);
+const ENV_KEY_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=/;
 
 const DEPRECATED_ENV_VARS: Record<
   string,
@@ -129,17 +149,30 @@ function fileExists(filePath: string): boolean {
   return existsSync(filePath);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toModelConfig(value: unknown): ModelConfig {
+  if (!isRecord(value)) return {};
+  const config: ModelConfig = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string') {
+      config[key as ModelRole] = entry;
+    }
+  }
+  return config;
+}
+
 async function loadEnvFile(envPath: string): Promise<EnvFileState> {
   try {
     const raw = await fs.readFile(envPath, 'utf-8');
     const lines = raw.split(/\r?\n/);
-    const values: EnvMap = {};
+    const values: EnvMap = { ...parseDotenv(raw) };
     const keys = new Set<string>();
     for (const line of lines) {
-      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-      if (!match) continue;
-      values[match[1]] = match[2];
-      keys.add(match[1]);
+      const match = line.match(ENV_KEY_RE);
+      if (match) keys.add(match[1]);
     }
     return { exists: true, path: envPath, lines, values, keys };
   } catch (err: unknown) {
@@ -150,38 +183,56 @@ async function loadEnvFile(envPath: string): Promise<EnvFileState> {
   }
 }
 
-async function readModelConfigReadOnly(filePath: string): Promise<ModelConfig> {
+async function readModelConfigReadOnly(filePath: string): Promise<ModelFileState> {
   try {
     const raw = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const config: ModelConfig = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof value === 'string') {
-        config[key as ModelRole] = value;
-      }
-    }
-    return config;
+    return { exists: true, path: filePath, config: toModelConfig(JSON.parse(raw)) };
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    return {};
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { exists: false, path: filePath, config: {} };
+    }
+    return { exists: true, path: filePath, config: {} };
   }
 }
 
-async function readRuntimeOverridesReadOnly(filePath: string): Promise<RuntimeOverrides> {
+async function readRuntimeOverridesReadOnly(filePath: string): Promise<RuntimeOverridesFileState> {
   try {
     const raw = await fs.readFile(filePath, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const obj = parsed as Record<string, unknown>;
+    const obj = isRecord(parsed) ? parsed : {};
     const overrides: RuntimeOverrides = {};
     if (typeof obj['ttsVoice'] === 'string') overrides.ttsVoice = obj['ttsVoice'];
     if (typeof obj['voiceRuntime'] === 'string') overrides.voiceRuntime = obj['voiceRuntime'];
     if (typeof obj['fastRuntime'] === 'string') overrides.fastRuntime = obj['fastRuntime'];
-    return overrides;
+    const legacyModels = toModelConfig(obj['models']);
+    const unknownKeys = Object.keys(obj).filter((key) => !KNOWN_RUNTIME_OVERRIDE_KEYS.has(key));
+    return {
+      exists: true,
+      path: filePath,
+      rawObject: { ...obj },
+      overrides,
+      unknownKeys,
+      legacyModels,
+    };
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    return {};
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return {
+        exists: false,
+        path: filePath,
+        rawObject: {},
+        overrides: {},
+        unknownKeys: [],
+        legacyModels: {},
+      };
+    }
+    return {
+      exists: true,
+      path: filePath,
+      rawObject: {},
+      overrides: {},
+      unknownKeys: [],
+      legacyModels: {},
+    };
   }
 }
 
@@ -265,10 +316,15 @@ export async function loadDoctorContext(opts: InspectOptions = {}): Promise<Doct
     runtimeOverrides: path.join(dataDir, 'runtime-overrides.json'),
   };
 
-  const [models, runtimeOverrides] = await Promise.all([
+  const [modelFile, runtimeOverridesFile] = await Promise.all([
     readModelConfigReadOnly(configPaths.models),
     readRuntimeOverridesReadOnly(configPaths.runtimeOverrides),
   ]);
+  const models = modelFile.exists
+    ? modelFile.config
+    : Object.keys(runtimeOverridesFile.legacyModels).length > 0
+      ? runtimeOverridesFile.legacyModels
+      : {};
 
   return {
     cwd,
@@ -277,8 +333,10 @@ export async function loadDoctorContext(opts: InspectOptions = {}): Promise<Doct
     explicitEnvKeys,
     configPaths,
     defaultDataDir: path.join(cwd, 'data'),
+    modelFileExists: modelFile.exists,
     models,
-    runtimeOverrides,
+    runtimeOverrides: runtimeOverridesFile.overrides,
+    runtimeOverridesFile,
     envDefaults: buildEnvDefaults(env),
   };
 }
@@ -305,6 +363,7 @@ export function detectInstallDrift(ctx: DoctorContext): DoctorFinding[] {
 export function detectDeprecatedEnvVars(ctx: DoctorContext): DoctorFinding[] {
   const findings: DoctorFinding[] = [];
   for (const [key, meta] of Object.entries(DEPRECATED_ENV_VARS)) {
+    if (key === 'RUNTIME_MODEL' && !ctx.modelFileExists) continue;
     if (!envKeyIsExplicit(ctx, key)) continue;
     findings.push({
       id: `deprecated-env:${key}`,
@@ -315,6 +374,22 @@ export function detectDeprecatedEnvVars(ctx: DoctorContext): DoctorFinding[] {
     });
   }
   return findings;
+}
+
+export function detectUnknownRuntimeOverrideKeys(ctx: DoctorContext): DoctorFinding[] {
+  return ctx.runtimeOverridesFile.unknownKeys.map((key) => ({
+    id: `unknown-runtime-override-key:${key}`,
+    severity: 'warn',
+    message:
+      key === 'models'
+        ? 'runtime-overrides.json still contains the legacy models key.'
+        : `runtime-overrides.json contains unknown key "${key}".`,
+    recommendation:
+      key === 'models'
+        ? 'Migrate any legacy model entries into models.json, then remove the legacy models key.'
+        : `Remove "${key}" from runtime-overrides.json or migrate it to a supported config location.`,
+    autoFixable: key === 'models',
+  }));
 }
 
 export function detectConflictingOverrides(ctx: DoctorContext): DoctorFinding[] {
@@ -470,15 +545,20 @@ export function detectMissingSecrets(ctx: DoctorContext): DoctorFinding[] {
   return findings;
 }
 
-export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> {
-  const ctx = await loadDoctorContext(opts);
-  const findings = [
+function collectFindings(ctx: DoctorContext): DoctorFinding[] {
+  return [
     ...detectInstallDrift(ctx),
     ...detectDeprecatedEnvVars(ctx),
     ...detectConflictingOverrides(ctx),
+    ...detectUnknownRuntimeOverrideKeys(ctx),
     ...detectStaleRuntimeAndModelOverrides(ctx),
     ...detectMissingSecrets(ctx),
   ];
+}
+
+export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> {
+  const ctx = await loadDoctorContext(opts);
+  const findings = collectFindings(ctx);
 
   return {
     installMode: ctx.installMode,
@@ -487,13 +567,18 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
   };
 }
 
+function envKeyPattern(key: string): RegExp {
+  return new RegExp(`^\\s*(?:export\\s+)?${key}=`);
+}
+
 function removeEnvKey(lines: string[], key: string): string[] {
-  return lines.filter((line) => !line.match(new RegExp(`^\\s*${key}=`)));
+  const pattern = envKeyPattern(key);
+  return lines.filter((line) => !pattern.test(line));
 }
 
 function setEnvKey(lines: string[], key: string, value: string): string[] {
   const nextLines = [...lines];
-  const pattern = new RegExp(`^\\s*${key}=`);
+  const pattern = envKeyPattern(key);
   const lineIndex = nextLines.findIndex((line) => pattern.test(line));
   const rendered = `${key}=${value}`;
   if (lineIndex >= 0) {
@@ -513,13 +598,24 @@ async function writeEnvLines(envPath: string, lines: string[]): Promise<void> {
   await fs.writeFile(envPath, normalized, 'utf-8');
 }
 
+async function writeJsonFile(filePath: string, value: Record<string, unknown>): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.tmp.${process.pid}`;
+  try {
+    await fs.writeFile(tmpPath, JSON.stringify(value, null, 2) + '\n', 'utf-8');
+    await fs.rename(tmpPath, filePath);
+  } catch (err) {
+    await fs.unlink(tmpPath).catch(() => undefined);
+    throw err;
+  }
+}
+
 export async function applyFixes(report: DoctorReport, opts: InspectOptions = {}): Promise<FixResult> {
   const ctx = await loadDoctorContext(opts);
+  const liveFindings = collectFindings(ctx);
+  const liveFindingsById = new Map(liveFindings.map((finding) => [finding.id, finding]));
   const result: FixResult = { applied: [], skipped: [], errors: [] };
   const requestedIds = new Set(report.findings.map((finding) => finding.id));
-  const autoFixableIds = new Set(
-    report.findings.filter((finding) => finding.autoFixable).map((finding) => finding.id),
-  );
 
   const envFile = await loadEnvFile(ctx.configPaths.env);
   let envLines = [...envFile.lines];
@@ -528,11 +624,16 @@ export async function applyFixes(report: DoctorReport, opts: InspectOptions = {}
   const nextModels: ModelConfig = { ...ctx.models };
   let modelsChanged = false;
 
-  const nextOverrides: RuntimeOverrides = { ...ctx.runtimeOverrides };
+  const nextOverridesRaw: Record<string, unknown> = { ...ctx.runtimeOverridesFile.rawObject };
   let overridesChanged = false;
 
   for (const id of requestedIds) {
-    if (!autoFixableIds.has(id)) {
+    const liveFinding = liveFindingsById.get(id);
+    if (!liveFinding) {
+      result.skipped.push({ id, reason: 'finding no longer present' });
+      continue;
+    }
+    if (!liveFinding.autoFixable) {
       result.skipped.push({ id, reason: 'not auto-fixable' });
       continue;
     }
@@ -570,22 +671,36 @@ export async function applyFixes(report: DoctorReport, opts: InspectOptions = {}
       }
 
       if (id === 'stale-runtime-override:fastRuntime') {
-        if (!nextOverrides.fastRuntime) {
+        if (typeof nextOverridesRaw['fastRuntime'] !== 'string') {
           result.skipped.push({ id, reason: 'fastRuntime override already absent' });
           continue;
         }
-        delete nextOverrides.fastRuntime;
+        delete nextOverridesRaw['fastRuntime'];
         overridesChanged = true;
         result.applied.push(id);
         continue;
       }
 
       if (id === 'stale-runtime-override:voiceRuntime') {
-        if (!nextOverrides.voiceRuntime) {
+        if (typeof nextOverridesRaw['voiceRuntime'] !== 'string') {
           result.skipped.push({ id, reason: 'voiceRuntime override already absent' });
           continue;
         }
-        delete nextOverrides.voiceRuntime;
+        delete nextOverridesRaw['voiceRuntime'];
+        overridesChanged = true;
+        result.applied.push(id);
+        continue;
+      }
+
+      if (id === 'unknown-runtime-override-key:models') {
+        if (!('models' in nextOverridesRaw)) {
+          result.skipped.push({ id, reason: 'legacy models key already absent' });
+          continue;
+        }
+        delete nextOverridesRaw['models'];
+        if (!ctx.modelFileExists && Object.keys(nextModels).length > 0) {
+          modelsChanged = true;
+        }
         overridesChanged = true;
         result.applied.push(id);
         continue;
@@ -624,10 +739,10 @@ export async function applyFixes(report: DoctorReport, opts: InspectOptions = {}
 
   try {
     if (overridesChanged) {
-      if (Object.keys(nextOverrides).length === 0) {
+      if (Object.keys(nextOverridesRaw).length === 0) {
         await clearOverrides(ctx.configPaths.runtimeOverrides);
       } else {
-        await saveOverrides(ctx.configPaths.runtimeOverrides, nextOverrides);
+        await writeJsonFile(ctx.configPaths.runtimeOverrides, nextOverridesRaw);
       }
     }
   } catch (err: unknown) {
