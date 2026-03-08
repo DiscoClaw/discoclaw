@@ -168,13 +168,18 @@ export async function loadWorkspaceMemoryFile(workspaceCwd: string): Promise<str
 
 /** Returns paths for today + yesterday daily logs that exist. */
 export async function loadDailyLogFiles(workspaceCwd: string): Promise<string[]> {
+  const formatLocalDay = (value: Date): string => {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
   const files: string[] = [];
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
-  for (const d of [today, yesterday]) {
-    const name = d.toISOString().slice(0, 10) + '.md';
-    const p = path.join(workspaceCwd, 'memory', name);
+  for (const name of new Set([formatLocalDay(today), formatLocalDay(yesterday)])) {
+    const p = path.join(workspaceCwd, 'memory', `${name}.md`);
     try { await fs.access(p); files.push(p); } catch { /* ignore */ }
   }
   return files;

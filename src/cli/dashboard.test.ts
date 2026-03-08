@@ -255,7 +255,7 @@ describe('collectDashboardSnapshot', () => {
     await fs.writeFile(path.join(cwd, 'data', 'models.json'), '{not-json\n', 'utf-8');
 
     const snapshot = await collectDashboardSnapshot(
-      { cwd },
+      { cwd, env: {} },
       {
         inspect,
         applyFixes: vi.fn(async () => makeFixResult()),
