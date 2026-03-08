@@ -166,6 +166,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Status channel messages (boot-report/offline/error) | `src/discord/status-channel.ts` | **done** |
 | MCP server detection (startup health logging) | `src/mcp-detect.ts`, `src/mcp-detect.test.ts` | **done** |
 | Pino structured logging | throughout | **done** |
+| Per-run trace store (structured invoke/tool/action/error/outcome events keyed by `traceId`; currently instrumented for message flow with operator inspection via `!trace`) | `src/observability/trace-store.ts`, `src/observability/trace-store.test.ts`, `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | Metrics / dashboard | — | *stub — not started* |
 
 ## 13. Ops & Deploy
@@ -296,6 +297,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 |---------|-------------|---------|--------|
 | `!help` | Lists available bang commands | `src/discord/help-command.ts` | **done** |
 | `!health [verbose\|tools]` | Renders runtime metrics, config snapshot, and tool reports | `src/discord/health-command.ts`, `src/discord/health-command.test.ts` | **done** |
+| `!trace [traceId]` | Lists recent run traces or shows a detailed per-run timeline for a specific `traceId` | `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | `!status` | Shows bot status summary | `src/discord/status-command.ts` | **done** |
 | `!restart` | Triggers graceful restart | `src/discord/restart-command.ts` | **done** |
 | `!stop` | Shuts down the bot process | `src/discord/message-coordinator.ts` | **done** |
