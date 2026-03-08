@@ -280,7 +280,15 @@ HTTP server that receives external webhook POSTs, verifies HMAC-SHA256 signature
 
 Config: `DISCOCLAW_WEBHOOK_ENABLED`, `DISCOCLAW_WEBHOOK_PORT`, `DISCOCLAW_WEBHOOK_CONFIG`.
 
-## 20. Configuration
+## 20. CLI & Configuration
+
+### Operator Tools
+
+| Command | Description | File(s) | Status |
+|---------|-------------|---------|--------|
+| `discoclaw dashboard` | Launches the interactive terminal dashboard for common admin tasks: inspect service/runtime state, review config doctor findings, change model assignments, and trigger service actions | `src/cli/index.ts`, `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
+
+### Configuration
 
 Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boolean, number, enum, and string fields with validation, warnings, and info messages emitted at startup.
 
