@@ -15,6 +15,7 @@ export function handleHelpCommand(): string {
     '- `!models` — show or change model assignments; `!models help` for details',
     '- `!health` — show bot health and metrics; `!health verbose` for full config',
     '- `!status` — show live runtime status (uptime, crons, memory, API connectivity)',
+    '- `!trace` — inspect recent run traces or `!trace <traceId>` for a detailed timeline',
     '- `!update` — check for or apply code updates; `!update help` for details',
     '- `!restart` — restart the discoclaw service; `!restart help` for details',
     '- `!stop` — abort all active AI streams and cancel any running forge',
