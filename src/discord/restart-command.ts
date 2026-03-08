@@ -1,8 +1,6 @@
 import { execFile } from 'node:child_process';
-import type { ExecFileException } from 'node:child_process';
-import os from 'node:os';
 import type { LoggerLike } from '../logging/logger-like.js';
-import { getServiceCommands } from '../service-control.js';
+import { getPlatformCommands, run } from '../service-control.js';
 import { writeShutdownContext } from './shutdown-context.js';
 
 export type RestartCommand = {
@@ -24,30 +22,6 @@ export function parseRestartCommand(content: string): RestartCommand | null {
   if (normalized === '!restart logs') return { action: 'logs' };
   if (normalized === '!restart help') return { action: 'help' };
   return null;
-}
-
-function run(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { timeout: 15_000 }, (err, stdout, stderr) => {
-      const exitCode = mapExitCode(err);
-      resolve({
-        stdout: String(stdout ?? ''),
-        stderr: String(stderr ?? ''),
-        exitCode,
-      });
-    });
-  });
-}
-
-function mapExitCode(err: ExecFileException | null): number | null {
-  if (!err) return 0;
-  return typeof err.code === 'number' ? err.code : null;
-}
-
-type PlatformCmds = ReturnType<typeof getServiceCommands>;
-
-function getPlatformCommands(serviceName = 'discoclaw'): PlatformCmds | null {
-  return getServiceCommands(serviceName, process.platform, os.homedir(), process.getuid?.() ?? 501);
 }
 
 /**

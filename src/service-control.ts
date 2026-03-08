@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import type { ExecFileException } from 'node:child_process';
 import os from 'node:os';
 
 export type CommandResult = {
@@ -22,6 +24,11 @@ export type ServiceControlDeps = {
   homeDir: string;
   getUid: () => number;
 };
+
+function mapExitCode(err: ExecFileException | null): number | null {
+  if (!err) return 0;
+  return typeof err.code === 'number' ? err.code : null;
+}
 
 export function normalizeServiceName(value: string | undefined): string {
   const trimmed = value?.trim();
@@ -62,6 +69,22 @@ export function getServiceCommands(
   }
 
   return null;
+}
+
+export function getPlatformCommands(serviceName = 'discoclaw'): ServiceCommands | null {
+  return getServiceCommands(serviceName, process.platform, os.homedir(), process.getuid?.() ?? 501);
+}
+
+export function run(cmd: string, args: string[]): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: 15_000 }, (err, stdout, stderr) => {
+      resolve({
+        stdout: String(stdout ?? ''),
+        stderr: String(stderr ?? ''),
+        exitCode: mapExitCode(err),
+      });
+    });
+  });
 }
 
 export function summarizeServiceStatus(
