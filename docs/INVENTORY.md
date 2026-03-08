@@ -167,7 +167,8 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | MCP server detection (startup health logging) | `src/mcp-detect.ts`, `src/mcp-detect.test.ts` | **done** |
 | Pino structured logging | throughout | **done** |
 | Per-run trace store (structured invoke/tool/action/error/outcome events keyed by `traceId`; currently instrumented for message flow with operator inspection via `!trace`) | `src/observability/trace-store.ts`, `src/observability/trace-store.test.ts`, `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
-| Metrics / dashboard | — | *stub — not started* |
+| Terminal admin dashboard (service state, config doctor, model overrides, service actions) | `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
+| Metrics | — | *stub — not started* |
 
 ## 13. Ops & Deploy
 
