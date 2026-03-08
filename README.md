@@ -274,6 +274,11 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    discoclaw install-daemon --service-name personal
    ```
 
+4. **Open the local operator dashboard:**
+   ```bash
+   discoclaw dashboard
+   ```
+
 #### From source (contributors)
 
 ```bash
