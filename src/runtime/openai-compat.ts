@@ -2,6 +2,7 @@ import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeId, Runtime
 import type { ChatGptTokenProvider } from './openai-auth.js';
 import { buildToolSchemas, OPENAI_TO_DISCO_NAME } from './openai-tool-schemas.js';
 import { executeToolCall } from './openai-tool-exec.js';
+import { createRuntimeErrorEvent } from './runtime-failure.js';
 
 type CommonOpts = {
   id?: RuntimeId;
@@ -185,7 +186,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
               if (!response.ok) {
                 let detail = '';
                 try { const errBody = await response.json(); detail = `: ${JSON.stringify(errBody.error ?? errBody)}`; } catch { /* ignore */ }
-                yield { type: 'error', message: `OpenAI API error: ${response.status} ${response.statusText}${detail}` };
+                yield createRuntimeErrorEvent(`OpenAI API error: ${response.status} ${response.statusText}${detail}`);
                 yield { type: 'done' };
                 return;
               }
@@ -195,7 +196,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
               const assistantMsg = choice?.message;
 
               if (!assistantMsg) {
-                yield { type: 'error', message: 'No response from model' };
+                yield createRuntimeErrorEvent('No response from model');
                 yield { type: 'done' };
                 return;
               }
@@ -257,7 +258,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
             }
 
             // Safety cap reached
-            yield { type: 'error', message: 'Tool loop safety cap reached (25 iterations)' };
+            yield createRuntimeErrorEvent('Tool loop safety cap reached (25 iterations)');
             yield { type: 'done' };
           } else {
             // ── Streaming text path (no tools) ─────────────────────────
@@ -279,13 +280,13 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
             if (!response.ok) {
               let detail = '';
               try { const errBody = await response.json(); detail = `: ${JSON.stringify(errBody.error ?? errBody)}`; } catch { /* ignore */ }
-              yield { type: 'error', message: `OpenAI API error: ${response.status} ${response.statusText}${detail}` };
+              yield createRuntimeErrorEvent(`OpenAI API error: ${response.status} ${response.statusText}${detail}`);
               yield { type: 'done' };
               return;
             }
 
             if (!response.body) {
-              yield { type: 'error', message: 'OpenAI API returned no response body' };
+              yield createRuntimeErrorEvent('OpenAI API returned no response body');
               yield { type: 'done' };
               return;
             }
@@ -360,15 +361,15 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
 
           if (controller.signal.aborted) {
             if (params.signal?.aborted) {
-              yield { type: 'error', message: 'aborted' };
+              yield createRuntimeErrorEvent('aborted');
             } else {
-              yield { type: 'error', message: `openai-compat timed out after ${params.timeoutMs}ms` };
+              yield createRuntimeErrorEvent(`openai-compat timed out after ${params.timeoutMs}ms`);
             }
             yield { type: 'done' };
             return;
           }
 
-          yield { type: 'error', message: String(err) };
+          yield createRuntimeErrorEvent(String(err));
           yield { type: 'done' };
         } finally {
           if (timer) clearTimeout(timer);

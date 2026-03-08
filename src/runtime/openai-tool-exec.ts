@@ -13,6 +13,10 @@ import { promisify } from 'node:util';
 
 import { sanitizeExternalContent } from '../sanitize-external.js';
 import { cliExecaEnv, stripAnsi } from './cli-shared.js';
+import {
+  projectPipelineFailure,
+  type PipelineFailureCode,
+} from './runtime-failure.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -600,12 +604,7 @@ type PipelineRunStatus = 'queued' | 'running' | 'waiting' | 'succeeded' | 'faile
 type PipelineToolName = 'pipeline.start' | 'pipeline.status' | 'pipeline.resume' | 'pipeline.cancel';
 
 const FAILURE_CODE_VERSION = 'v1' as const;
-type FailureCode =
-  | 'E_TOOL_UNAVAILABLE'
-  | 'E_POLICY_BLOCKED'
-  | 'E_RETRY_EXHAUSTED'
-  | 'E_IDEMPOTENCY_CONFLICT'
-  | 'E_RUN_NOT_FOUND';
+type FailureCode = PipelineFailureCode;
 
 type StepToolName = 'step.run' | 'step.assert' | 'step.retry' | 'step.wait';
 
@@ -1249,9 +1248,10 @@ async function executePipelineRun(
     run.updatedAt = step.updatedAt;
 
     if (!result.ok) {
+      const failure = projectPipelineFailure(result.result);
       step.status = 'failed';
       run.status = 'failed';
-      run.failureCode = classifyFailureCode(result.result);
+      run.failureCode = failure.code;
       run.lastError = `step ${run.currentStep + 1} (${step.tool}) failed: ${result.result}`;
       await savePipelineStore(storePath, store);
       return;
@@ -1277,14 +1277,7 @@ function stepFailure(
 ): ToolResult {
   return {
     ok: false,
-    result: JSON.stringify({
-      ok: false,
-      operation,
-      failure_code_version: FAILURE_CODE_VERSION,
-      failure_code: code,
-      message,
-      ...(extra ?? {}),
-    }),
+    result: buildPipelineFailureResult(operation, code, message, extra),
   };
 }
 
@@ -1310,14 +1303,7 @@ function pipelineFailure(
 ): ToolResult {
   return {
     ok: false,
-    result: JSON.stringify({
-      ok: false,
-      operation,
-      failure_code_version: FAILURE_CODE_VERSION,
-      failure_code: code,
-      message,
-      ...(extra ?? {}),
-    }),
+    result: buildPipelineFailureResult(operation, code, message, extra),
   };
 }
 
@@ -1325,41 +1311,60 @@ function pipelineSuccess(run: PipelineRun, ok = true): ToolResult {
   return { ok, result: JSON.stringify(summarizePipelineRun(run)) };
 }
 
-function parseFailureCodePayload(message: string): FailureCode | undefined {
-  try {
-    const parsed = JSON.parse(message) as Record<string, unknown>;
-    const code = parsed.failure_code;
-    if (
-      code === 'E_TOOL_UNAVAILABLE'
-      || code === 'E_POLICY_BLOCKED'
-      || code === 'E_RETRY_EXHAUSTED'
-      || code === 'E_IDEMPOTENCY_CONFLICT'
-      || code === 'E_RUN_NOT_FOUND'
-    ) {
-      return code;
-    }
-  } catch {
-    // Ignore parse failures; regex fallbacks apply.
-  }
-  return undefined;
+function pipelineExecutionFailure(
+  operation: PipelineToolName,
+  run: PipelineRun,
+): ToolResult {
+  const step = run.currentStep < run.steps.length ? run.steps[run.currentStep] : undefined;
+  const rawFailure = typeof step?.result === 'string' && step.result.trim() !== ''
+    ? step.result
+    : run.lastError ?? 'pipeline run failed';
+
+  return wrapProjectedPipelineFailure(
+    operation,
+    rawFailure,
+    { run: summarizePipelineRun(run) },
+    {
+      message: run.lastError ?? String(rawFailure),
+      rawMessage: rawFailure,
+    },
+  );
 }
 
-function classifyFailureCode(message: string): FailureCode {
-  const parsed = parseFailureCodePayload(message);
-  if (parsed) return parsed;
-  if (/tool not allowlisted/i.test(message) || /nested pipeline/i.test(message) || /nested step/i.test(message)) {
-    return 'E_POLICY_BLOCKED';
-  }
-  if (/run not found/i.test(message) || /run_id is required/i.test(message)) {
-    return 'E_RUN_NOT_FOUND';
-  }
-  if (/retry exhausted/i.test(message)) {
-    return 'E_RETRY_EXHAUSTED';
-  }
-  if (/unknown tool/i.test(message)) {
-    return 'E_TOOL_UNAVAILABLE';
-  }
-  return 'E_TOOL_UNAVAILABLE';
+function buildPipelineFailureResult(
+  operation: PipelineToolName | StepToolName,
+  code: FailureCode,
+  message: string,
+  extra?: Record<string, unknown>,
+): string {
+  return JSON.stringify({
+    ok: false,
+    operation,
+    failure_code_version: FAILURE_CODE_VERSION,
+    failure_code: code,
+    message,
+    ...(extra ?? {}),
+  });
+}
+
+function wrapProjectedPipelineFailure(
+  operation: PipelineToolName | StepToolName,
+  input: unknown,
+  extra?: Record<string, unknown>,
+  overrides?: { message?: string; rawMessage?: string },
+): ToolResult {
+  const projected = projectPipelineFailure(input);
+  return {
+    ok: false,
+    result: JSON.stringify({
+      ok: false,
+      operation,
+      failure_code_version: projected.failureCodeVersion ?? FAILURE_CODE_VERSION,
+      failure_code: projected.failureCode ?? projected.code,
+      message: overrides?.message ?? projected.message,
+      ...(extra ?? {}),
+    }),
+  };
 }
 
 type StepToolContext = {
@@ -1671,17 +1676,17 @@ async function handleStepTool(
   ctx.run.updatedAt = completedAt;
 
   if (!result.ok) {
-    const failureCode = classifyFailureCode(result.result);
+    const failure = projectPipelineFailure(result.result);
     ctx.step.status = 'failed';
     ctx.run.status = 'failed';
-    ctx.run.failureCode = failureCode;
+    ctx.run.failureCode = failure.code;
     ctx.run.lastError = `step ${ctx.stepIndex + 1} (${ctx.step.tool}) failed: ${result.result}`;
     await savePipelineStore(ctx.storePath, ctx.store);
-    return stepFailure(
+    return wrapProjectedPipelineFailure(
       operation,
-      failureCode,
-      ctx.run.lastError,
+      result.result,
       { run: summarizePipelineRun(ctx.run) },
+      { message: ctx.run.lastError, rawMessage: result.result },
     );
   }
 
@@ -1805,6 +1810,9 @@ async function handlePipelineTool(
 
     if (autoRun) {
       await executePipelineRun(run, storePath, store, allowedRoots, log, opts);
+      if (run.status === 'failed') {
+        return pipelineExecutionFailure(operation, run);
+      }
     }
 
     return pipelineSuccess(run, run.status !== 'failed');
@@ -1901,7 +1909,10 @@ async function handlePipelineTool(
     }
 
     await executePipelineRun(run, storePath, store, allowedRoots, log, opts);
-    return pipelineSuccess(run, run.status !== 'failed');
+    if (run.status === 'failed') {
+      return pipelineExecutionFailure(operation, run);
+    }
+    return pipelineSuccess(run, true);
   }
 
   if (operation === 'pipeline.cancel') {

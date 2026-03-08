@@ -711,7 +711,9 @@ function withSupervisorAuditLogs(runtimeName: string, runtime: RuntimeAdapter): 
             continue;
           }
         } else if (evt.type === 'error') {
-          const bail = parseGlobalSupervisorBail(evt.message);
+          const bail = evt.failure?.source === 'global_supervisor'
+            ? parseGlobalSupervisorBail(evt.failure.rawMessage) ?? parseGlobalSupervisorBail(evt.message)
+            : parseGlobalSupervisorBail(evt.message);
           if (bail) {
             log.warn({ runtimeName, ...bail }, 'obs.supervisor.bail');
           }

@@ -104,6 +104,7 @@ describe('OpenAI-compat runtime adapter', () => {
     const errorEvt = events.find((e) => e.type === 'error');
     expect(errorEvt).toBeDefined();
     expect((errorEvt as { message: string }).message).toContain('401');
+    expect((errorEvt as { failure?: { message: string } }).failure?.message).toContain('401');
 
     expect(events[events.length - 1]!.type).toBe('done');
   });
@@ -181,6 +182,7 @@ describe('OpenAI-compat runtime adapter', () => {
     const errorEvt = events.find((e) => e.type === 'error');
     expect(errorEvt).toBeDefined();
     expect((errorEvt as { message: string }).message).toContain('timed out');
+    expect((errorEvt as { failure?: { code: string } }).failure?.code).toBe('RUNTIME_TIMEOUT');
     expect(events[events.length - 1]!.type).toBe('done');
   });
 

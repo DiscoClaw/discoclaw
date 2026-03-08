@@ -26,6 +26,7 @@ import {
   stripToolUseBlocks,
 } from './cli-output-parsers.js';
 import type { CliAdapterStrategy, CliInvokeContext, UniversalCliOpts, ParsedLineResult } from './cli-strategy.js';
+import { createRuntimeErrorEvent } from './runtime-failure.js';
 
 // Global subprocess tracker shared across all CLI adapters.
 const globalTracker = new SubprocessTracker();
@@ -147,7 +148,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           if (params.signal?.aborted) {
             pool.remove(params.sessionKey);
             if (sub) globalTracker.delete(sub);
-            yield { type: 'error', message: 'aborted' };
+            yield createRuntimeErrorEvent('aborted');
             yield { type: 'done' };
             return;
           }
@@ -193,7 +194,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     // One-shot path
     // ---------------------------------------------------------------
     if (params.signal?.aborted) {
-      yield { type: 'error', message: 'aborted' };
+      yield createRuntimeErrorEvent('aborted');
       yield { type: 'done' };
       return;
     }
@@ -220,6 +221,9 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
     let sessionResetNoticeEmitted = false;
 
     const { q, push, wait, wake } = createEventQueue();
+    const pushRuntimeError = (input: string | Error): void => {
+      push(createRuntimeErrorEvent(input));
+    };
     let finished = false;
     let activeSubprocess: { kill(signal?: NodeJS.Signals | number, error?: Error): boolean } | null = null;
 
@@ -339,7 +343,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         .catch(() => globalTracker.delete(subprocess));
 
       if (!subprocess.stdout) {
-        push({ type: 'error', message: `${strategy.id}: missing stdout stream` });
+        pushRuntimeError(`${strategy.id}: missing stdout stream`);
         push({ type: 'done' });
         finished = true;
         wake();
@@ -413,7 +417,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           if (attemptSettled || finished) return;
           const ms = opts.streamStallTimeoutMs!;
           opts.log?.info?.(`one-shot: stream stall detected after ${ms}ms, killing process`);
-          push({ type: 'error', message: `stream stall: no output for ${ms}ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: ${ms}ms)` });
+          pushRuntimeError(`stream stall: no output for ${ms}ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: ${ms}ms)`);
           push({ type: 'done' });
           finished = true;
           subprocess.kill('SIGTERM');
@@ -434,7 +438,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           if (attemptSettled || finished) return;
           const ms = opts.progressStallTimeoutMs!;
           opts.log?.info?.(`one-shot: progress stall detected (no text_delta for ${ms}ms, resets=${progressResetCount}), killing process`);
-          push({ type: 'error', message: `progress stall: no text output for ${ms}ms (possible thinking spiral)` });
+          pushRuntimeError(`progress stall: no text output for ${ms}ms (possible thinking spiral)`);
           push({ type: 'done' });
           finished = true;
           subprocess.kill('SIGTERM');
@@ -446,7 +450,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       const onAbort = () => {
         subprocess.kill('SIGKILL');
         if (attemptSettled || finished) return;
-        push({ type: 'error', message: 'aborted' });
+        pushRuntimeError('aborted');
         push({ type: 'done' });
         finished = true;
         wake();
@@ -707,7 +711,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         const stderr = procResult.stderr ?? '';
 
         if (params.signal?.aborted) {
-          push({ type: 'error', message: 'aborted' });
+          pushRuntimeError('aborted');
           push({ type: 'done' });
           finished = true;
           wake();
@@ -718,10 +722,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         if (procResult.timedOut) {
           // Use a fixed message — execa's originalMessage/shortMessage can contain the
           // full command line (including prompt text), so we never expose raw error strings.
-          push({
-            type: 'error',
-            message: `${strategy.id === 'claude_code' ? 'claude' : strategy.id} timed out after ${params.timeoutMs ?? 0}ms`,
-          });
+          pushRuntimeError(`${strategy.id === 'claude_code' ? 'claude' : strategy.id} timed out after ${params.timeoutMs ?? 0}ms`);
           push({ type: 'done' });
           finished = true;
           wake();
@@ -741,10 +742,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
           const spawnMsg = strategy.handleSpawnError?.(procResult, binary);
           if (spawnMsg) {
-            push({ type: 'error', message: spawnMsg });
+            pushRuntimeError(spawnMsg);
           } else {
             const sanitized = strategy.sanitizeError?.(raw, binary) ?? raw;
-            push({ type: 'error', message: sanitized || `${strategy.id} failed (no exit code)` });
+            pushRuntimeError(sanitized || `${strategy.id} failed (no exit code)`);
           }
           push({ type: 'done' });
           finished = true;
@@ -872,10 +873,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
               ? strategy.handleExitError?.(exitCode, stderrForError || stderr, stdout)
               : null;
           if (exitMsg) {
-            push({ type: 'error', message: exitMsg });
+            pushRuntimeError(exitMsg);
           } else {
             const sanitized = strategy.sanitizeError?.(raw, binary) ?? raw;
-            push({ type: 'error', message: sanitized });
+            pushRuntimeError(sanitized);
           }
           push({ type: 'done' });
           finished = true;
@@ -914,10 +915,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
         // Check timeout first — use fixed message to avoid leaking prompt/command line.
         if ((err as { timedOut?: boolean } | undefined)?.timedOut) {
-          push({
-            type: 'error',
-            message: `${strategy.id === 'claude_code' ? 'claude' : strategy.id} timed out after ${params.timeoutMs ?? 0}ms`,
-          });
+          pushRuntimeError(`${strategy.id === 'claude_code' ? 'claude' : strategy.id} timed out after ${params.timeoutMs ?? 0}ms`);
           push({ type: 'done' });
           finished = true;
           wake();
@@ -941,13 +939,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
         const spawnMsg = strategy.handleSpawnError?.(err, binary);
         if (spawnMsg) {
-          push({ type: 'error', message: spawnMsg });
+          pushRuntimeError(spawnMsg);
         } else {
           const sanitized = strategy.sanitizeError?.(raw, binary) ?? raw;
-          push({
-            type: 'error',
-            message: sanitized || `${strategy.id} failed`,
-          });
+          pushRuntimeError(sanitized || `${strategy.id} failed`);
         }
         push({ type: 'done' });
         finished = true;
@@ -972,7 +967,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       if (finished) return;
       const msg = String((err as { message?: unknown })?.message || err || '').trim() || `${strategy.id} failed`;
       const sanitized = strategy.sanitizeError?.(msg, binary) ?? msg;
-      push({ type: 'error', message: sanitized });
+      pushRuntimeError(sanitized);
       push({ type: 'done' });
       finished = true;
       wake();

@@ -187,12 +187,24 @@ Goal: keep Discord progress text concise and human-readable without changing int
 
 Adapter boundary and invariants:
 
-1. Runtime and phase engines continue emitting typed internal payloads (`EngineEvent`, `PlanRunEvent`) unchanged.
+1. Runtime and phase engines continue emitting typed internal payloads (`EngineEvent`, `PlanRunEvent`). `EngineEvent` now carries structured runtime failure data via `type: 'runtime_failure'` and optional `error.failure`, but the preview adapter boundary stays presentation-only.
 2. A presentation adapter (`adaptRuntimeEventText`, `adaptPlanRunEventText`) maps selected events to short Discord-safe text.
 3. Structured payload fragments (JSON-like runtime logs and action tags) are redacted from previews.
 4. Internal payloads remain available to internal consumers and logs; only adapted text is user-facing.
 
 Current rollout status: **DRAFT** pending review sign-off on wording quality and redaction behavior.
+
+### Runtime Failure Envelope (Plan 1)
+
+Goal: converge pipeline-tool failures, global-supervisor bailouts, and raw runtime strings onto one structured `RuntimeFailure` contract before broader Discord consumer wiring.
+
+Plan 1 ownership and invariants:
+
+1. `src/runtime/runtime-failure.ts` is the only place that classifies runtime failures and derives `userMessage`, `retryable`, and structured metadata.
+2. Normalization accepts legacy pipeline JSON payloads, legacy `GLOBAL_SUPERVISOR_BAIL ...` strings, raw runtime strings, and already-normalized `RuntimeFailure` objects.
+3. Runtime emitters may continue yielding `type: 'error'`, but they should attach the normalized `failure` object without changing the existing readable `message` text at the producer boundary.
+4. `type: 'runtime_failure'` exists on `EngineEvent` for structured consumers and tests; presentation adapters must treat it as internal event data, not raw user-facing text.
+5. Discord-facing consumer rewiring is intentionally separate work. Plan 2 covers `message-coordinator`, `reaction-handler`, `deferred-runner`, `cron/executor`, and status-channel/reporting surfaces.
 
 ---
 
@@ -261,9 +273,13 @@ These steps mirror the rebuild workflow in `AGENTS.md`/`TOOLS.md` and ensure we 
 | `src/discord.ts` | Discord message handler: command dispatch for both `!plan` and `!forge`, writer lock, forge lifecycle management |
 | `src/config.ts` | All plan/forge env var parsing |
 | `src/runtime/openai-compat.ts` | OpenAI-compatible runtime adapter (SSE streaming; optional function-calling tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1`) |
+| `src/runtime/openai-tool-exec.ts` | Server-side OpenAI tool handlers; keeps the legacy pipeline failure payload contract and relies on `runtime-failure.ts` for normalization |
 | `src/runtime/codex-cli.ts` | Codex CLI runtime adapter (subprocess, supports read-only tools via `tools_fs` and session persistence via `sessions` capability) |
+| `src/runtime/global-supervisor.ts` | Runtime-wide supervisor loop; attaches normalized supervisor failure metadata on `error.failure` while preserving readable error messages |
 | `src/runtime/registry.ts` | Runtime adapter registry (name → adapter lookup) |
-| `src/runtime/types.ts` | `RuntimeAdapter` interface, `EngineEvent` types |
+| `src/runtime/runtime-failure.ts` | Canonical `RuntimeFailure` envelope, legacy normalizers, serialization helpers, and user-message mapping |
+| `src/runtime/types.ts` | `RuntimeAdapter` interface, `EngineEvent` types, `RuntimeFailure`/`RuntimeFailureEvent` contracts |
+| `src/discord/user-errors.ts` | Thin Discord shim over `mapRuntimeFailureToUserMessage()`; classification no longer lives here |
 
 ### Concurrency model
 

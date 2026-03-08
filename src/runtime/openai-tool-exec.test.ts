@@ -709,8 +709,10 @@ describe('pipeline.start/status/resume/cancel', () => {
     );
     expect(start.ok).toBe(false);
     const payload = parseJsonResult(start.result);
-    expect(payload['status']).toBe('failed');
-    expect(payload['last_error']).toMatch(/not allowlisted/i);
+    expect(payload['operation']).toBe('pipeline.start');
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect(String(payload['message'])).toMatch(/not allowlisted/i);
+    expect((payload['run'] as Record<string, unknown>)['status']).toBe('failed');
   });
 
   it('pipeline.resume requires retry scheduling before rerunning failed step', async () => {
@@ -735,7 +737,10 @@ describe('pipeline.start/status/resume/cancel', () => {
       { allowedToolNames: new Set(['pipeline.resume']) },
     );
     expect(firstResume.ok).toBe(false);
-    expect(parseJsonResult(firstResume.result)['status']).toBe('failed');
+    const firstResumePayload = parseJsonResult(firstResume.result);
+    expect(firstResumePayload['operation']).toBe('pipeline.resume');
+    expect(firstResumePayload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect((firstResumePayload['run'] as Record<string, unknown>)['status']).toBe('failed');
 
     const secondResumeBlocked = await executeToolCall(
       'pipeline.resume',
@@ -942,9 +947,9 @@ describe('pipeline.start/status/resume/cancel', () => {
     );
     expect(start.ok).toBe(false);
     const payload = parseJsonResult(start.result);
-    expect(payload['status']).toBe('failed');
     expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
-    expect(payload['last_error']).toMatch(/nested pipeline/i);
+    expect(String(payload['message'])).toMatch(/nested pipeline/i);
+    expect((payload['run'] as Record<string, unknown>)['status']).toBe('failed');
   });
 
   it('returns structured E_POLICY_BLOCKED when nested pipeline.* is called directly in pipelineStepMode', async () => {
