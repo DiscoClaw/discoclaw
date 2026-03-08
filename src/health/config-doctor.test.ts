@@ -6,6 +6,7 @@ import {
   applyFixes,
   detectConflictingOverrides,
   detectDeprecatedEnvVars,
+  detectInvalidPersistedModelAssignments,
   detectInstallDrift,
   detectMissingSecrets,
   detectStaleRuntimeAndModelOverrides,
@@ -182,6 +183,31 @@ describe('detectMissingSecrets', () => {
       'missing-secret:IMAGEGEN_DEFAULT_MODEL:IMAGEGEN_GEMINI_API_KEY',
     ]);
     expect(findings.every((finding) => finding.severity === 'error')).toBe(true);
+  });
+});
+
+describe('detectInvalidPersistedModelAssignments', () => {
+  it('flags runtime names that were written into models.json model slots', async () => {
+    const cwd = await makeTempInstall('doctor-invalid-model-assignments');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=claude',
+      'DISCOCLAW_VOICE_ENABLED=1',
+    ]);
+    await writeJson(path.join(cwd, 'data', 'models.json'), {
+      chat: 'openrouter',
+      voice: 'anthropic',
+      fast: 'claude',
+    });
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectInvalidPersistedModelAssignments(ctx);
+
+    expect(findings.map((finding) => finding.id)).toEqual([
+      'invalid-model-assignment:chat',
+      'invalid-model-assignment:voice',
+      'invalid-model-assignment:fast',
+    ]);
+    expect(findings.every((finding) => finding.autoFixable === false)).toBe(true);
   });
 });
 

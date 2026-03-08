@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DoctorContext, DoctorReport, FixResult } from '../health/config-doctor.js';
 import type { ModelConfig } from '../model-config.js';
+import type { RuntimeOverrides } from '../runtime-overrides.js';
 import {
   buildModelRows,
   collectDashboardSnapshot,
@@ -15,6 +16,8 @@ function makeDoctorContext(overrides: Partial<DoctorContext> = {}): DoctorContex
     installMode: 'source',
     env: {
       DISCOCLAW_SERVICE_NAME: 'discoclaw-beta',
+      PRIMARY_RUNTIME: 'claude',
+      DISCOCLAW_VOICE_ENABLED: '1',
     },
     explicitEnvKeys: new Set<string>(),
     configPaths: {
@@ -145,6 +148,7 @@ describe('collectDashboardSnapshot', () => {
         applyFixes: vi.fn(async () => makeFixResult()),
         loadDoctorContext: vi.fn(async () => ctx),
         saveModelConfig: vi.fn(async () => undefined),
+        saveOverrides: vi.fn(async () => undefined),
         runCommand: vi.fn(async () => ({
           stdout: '   Active: active (running) since today\n',
           stderr: '',
@@ -164,7 +168,7 @@ describe('collectDashboardSnapshot', () => {
     expect(rendered).toContain('Discoclaw Dashboard');
     expect(rendered).toContain('service: discoclaw-beta (active (running) since today)');
     expect(rendered).toContain('voice-runtime');
-    expect(rendered).toContain('[7] Change model assignment');
+    expect(rendered).toContain('[7] Change model/runtime assignment');
   });
 });
 
@@ -174,6 +178,7 @@ describe('runDashboard', () => {
     const secondCtx = makeDoctorContext({ models: { chat: 'opus' } });
     const report = makeDoctorReport();
     const saveModelConfigMock = vi.fn(async (_filePath: string, _config: ModelConfig) => undefined);
+    const saveOverridesMock = vi.fn(async (_filePath: string, _overrides: RuntimeOverrides) => undefined);
     const loadDoctorContextMock = vi.fn()
       .mockResolvedValueOnce(firstCtx)
       .mockResolvedValueOnce(firstCtx)
@@ -191,6 +196,7 @@ describe('runDashboard', () => {
         applyFixes: vi.fn(async () => makeFixResult()),
         loadDoctorContext: loadDoctorContextMock,
         saveModelConfig: saveModelConfigMock,
+        saveOverrides: saveOverridesMock,
         runCommand: vi.fn(async () => ({
           stdout: 'Active: active (running)\n',
           stderr: '',
@@ -235,6 +241,7 @@ describe('runDashboard', () => {
         applyFixes: applyFixesMock,
         loadDoctorContext: vi.fn(async () => ctx),
         saveModelConfig: vi.fn(async () => undefined),
+        saveOverrides: vi.fn(async () => undefined),
         runCommand: vi.fn(async () => ({
           stdout: 'Active: active (running)\n',
           stderr: '',
@@ -248,5 +255,73 @@ describe('runDashboard', () => {
 
     expect(applyFixesMock).toHaveBeenCalledWith(report, { cwd: '/repo', env: {} });
     expect(frames.some((frame) => frame.includes('Applied IDs: deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL'))).toBe(true);
+  });
+
+  it('rejects persisted chat runtime names because they do not survive restart correctly', async () => {
+    const ctx = makeDoctorContext({ models: {} });
+    const saveModelConfigMock = vi.fn(async (_filePath: string, _config: ModelConfig) => undefined);
+    const saveOverridesMock = vi.fn(async (_filePath: string, _overrides: RuntimeOverrides) => undefined);
+    const { io, frames } = makeIo(['7', 'chat', 'openrouter', 'q']);
+
+    await runDashboard({
+      cwd: '/repo',
+      env: {},
+      io,
+      loadEnv: false,
+      deps: {
+        inspect: vi.fn(async () => makeDoctorReport()),
+        applyFixes: vi.fn(async () => makeFixResult()),
+        loadDoctorContext: vi.fn(async () => ctx),
+        saveModelConfig: saveModelConfigMock,
+        saveOverrides: saveOverridesMock,
+        runCommand: vi.fn(async () => ({
+          stdout: 'Active: active (running)\n',
+          stderr: '',
+          exitCode: 0,
+        })),
+        platform: 'linux',
+        homeDir: '/Users/david',
+        getUid: () => 501,
+      },
+    });
+
+    expect(saveModelConfigMock).not.toHaveBeenCalled();
+    expect(saveOverridesMock).not.toHaveBeenCalled();
+    expect(frames.some((frame) => frame.includes('Chat runtime swaps are live-only'))).toBe(true);
+  });
+
+  it('persists voice runtime overrides into runtime-overrides.json', async () => {
+    const ctx = makeDoctorContext({ models: {}, runtimeOverrides: {} });
+    const saveModelConfigMock = vi.fn(async (_filePath: string, _config: ModelConfig) => undefined);
+    const saveOverridesMock = vi.fn(async (_filePath: string, _overrides: RuntimeOverrides) => undefined);
+    const { io, frames } = makeIo(['7', 'voice', 'openrouter', 'q']);
+
+    await runDashboard({
+      cwd: '/repo',
+      env: {},
+      io,
+      loadEnv: false,
+      deps: {
+        inspect: vi.fn(async () => makeDoctorReport()),
+        applyFixes: vi.fn(async () => makeFixResult()),
+        loadDoctorContext: vi.fn(async () => ctx),
+        saveModelConfig: saveModelConfigMock,
+        saveOverrides: saveOverridesMock,
+        runCommand: vi.fn(async () => ({
+          stdout: 'Active: active (running)\n',
+          stderr: '',
+          exitCode: 0,
+        })),
+        platform: 'linux',
+        homeDir: '/Users/david',
+        getUid: () => 501,
+      },
+    });
+
+    expect(saveModelConfigMock).not.toHaveBeenCalled();
+    expect(saveOverridesMock).toHaveBeenCalledWith('/repo/data/runtime-overrides.json', {
+      voiceRuntime: 'openrouter',
+    });
+    expect(frames.some((frame) => frame.includes('Saved voice runtime override: openrouter.'))).toBe(true);
   });
 });

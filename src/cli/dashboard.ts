@@ -4,9 +4,11 @@ import path from 'node:path';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { config as loadDotenv } from 'dotenv';
+import { findRuntimeForModel } from '../runtime/model-tiers.js';
 import type { DoctorContext, DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
+import { saveOverrides, type RuntimeOverrides } from '../runtime-overrides.js';
 import type { CommandResult, ServiceControlDeps } from '../service-control.js';
 import {
   normalizeServiceName,
@@ -26,6 +28,7 @@ const DASHBOARD_MODEL_ROLES: readonly ModelRole[] = [
   'forge-auditor',
 ];
 
+const KNOWN_RUNTIME_NAMES = ['claude', 'openai', 'openrouter', 'gemini', 'codex', 'anthropic'] as const;
 const ACTION_MENU = [
   '[1] Refresh',
   '[2] Service status',
@@ -33,7 +36,7 @@ const ACTION_MENU = [
   '[4] Restart/start service',
   '[5] Run config doctor',
   '[6] Apply doctor fixes',
-  '[7] Change model assignment',
+  '[7] Change model/runtime assignment',
   '[q] Quit',
 ] as const;
 
@@ -70,6 +73,7 @@ export type DashboardDeps = {
   applyFixes: (report: DoctorReport, opts?: InspectOptions) => Promise<FixResult>;
   loadDoctorContext: (opts?: InspectOptions) => Promise<DoctorContext>;
   saveModelConfig: (filePath: string, config: ModelConfig) => Promise<void>;
+  saveOverrides: (filePath: string, overrides: RuntimeOverrides) => Promise<void>;
   runCommand: (cmd: string, args: string[]) => Promise<CommandResult>;
   platform: NodeJS.Platform;
   homeDir: string;
@@ -109,6 +113,7 @@ function createDefaultDeps(): DashboardDeps {
     applyFixes,
     loadDoctorContext,
     saveModelConfig,
+    saveOverrides,
     runCommand(cmd: string, args: string[]) {
       return new Promise((resolve) => {
         execFile(cmd, args, { timeout: 15_000 }, (err, stdout, stderr) => {
@@ -176,6 +181,54 @@ function isModelRole(value: string): value is ModelRole {
   return (DASHBOARD_MODEL_ROLES as readonly string[]).includes(value);
 }
 
+function normalizeRuntimeName(value: string | undefined): string | undefined {
+  const trimmed = value?.trim().toLowerCase();
+  if (!trimmed) return undefined;
+  const normalized = trimmed === 'claude_code' ? 'claude' : trimmed;
+  return (KNOWN_RUNTIME_NAMES as readonly string[]).includes(normalized) ? normalized : undefined;
+}
+
+function defaultFastRuntime(ctx: DoctorContext): string {
+  return normalizeRuntimeName(ctx.env.DISCOCLAW_FAST_RUNTIME)
+    ?? normalizeRuntimeName(ctx.env.PRIMARY_RUNTIME)
+    ?? 'claude';
+}
+
+function defaultVoiceRuntime(ctx: DoctorContext): string {
+  const primary = normalizeRuntimeName(ctx.env.PRIMARY_RUNTIME) ?? 'claude';
+  const voiceEnabled = ctx.env.DISCOCLAW_VOICE_ENABLED?.trim() === '1';
+  if (voiceEnabled && ctx.env.ANTHROPIC_API_KEY?.trim()) return 'anthropic';
+  return primary;
+}
+
+function runtimeStorageNameForModel(model: string): string | undefined {
+  const owningRuntime = findRuntimeForModel(model);
+  switch (owningRuntime) {
+    case 'claude_code':
+      return 'claude';
+    case 'openai':
+    case 'openrouter':
+    case 'gemini':
+    case 'codex':
+    case 'anthropic':
+      return owningRuntime;
+    default:
+      return undefined;
+  }
+}
+
+async function saveRuntimeOverridesIfChanged(
+  deps: DashboardDeps,
+  ctx: DoctorContext,
+  nextOverrides: RuntimeOverrides,
+): Promise<boolean> {
+  const current = JSON.stringify(ctx.runtimeOverrides);
+  const next = JSON.stringify(nextOverrides);
+  if (current === next) return false;
+  await deps.saveOverrides(ctx.configPaths.runtimeOverrides, nextOverrides);
+  return true;
+}
+
 async function promptForModelChange(
   io: DashboardIo,
   ctx: DoctorContext,
@@ -195,21 +248,97 @@ async function promptForModelChange(
   if (!isModelRole(roleInput)) return `Unknown model role: ${roleInput}`;
 
   const modelInput = (await io.prompt(
-    'New model (blank cancels, "default" clears the override): ',
+    roleInput === 'voice'
+      ? 'New model/runtime (blank cancels, "default" clears the override): '
+      : 'New model (blank cancels, "default" clears the override): ',
   )).trim();
   if (!modelInput) return 'Model change canceled.';
   if (/\s/.test(modelInput)) return 'Model names cannot contain whitespace.';
 
   const clearOverride = modelInput.toLowerCase() === 'default' || modelInput.toLowerCase() === 'reset';
-  const nextConfig = updateModelConfig(ctx.models, roleInput, clearOverride ? null : modelInput);
-  await deps.saveModelConfig(ctx.configPaths.models, nextConfig);
+  const runtimeInput = normalizeRuntimeName(modelInput);
+  const nextOverrides: RuntimeOverrides = { ...ctx.runtimeOverrides };
 
   if (clearOverride) {
+    const nextConfig = updateModelConfig(ctx.models, roleInput, null);
+    await deps.saveModelConfig(ctx.configPaths.models, nextConfig);
+    let runtimeCleared = false;
+    if (roleInput === 'fast' && nextOverrides.fastRuntime) {
+      delete nextOverrides.fastRuntime;
+      runtimeCleared = await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
+    }
+    if (roleInput === 'voice' && nextOverrides.voiceRuntime) {
+      delete nextOverrides.voiceRuntime;
+      runtimeCleared = await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
+    }
     const fallback = ctx.envDefaults[roleInput] ?? MODEL_DEFAULTS[roleInput] ?? '(unset)';
-    return `Cleared ${roleInput} override. Effective model: ${fallback}.`;
+    return runtimeCleared
+      ? `Cleared ${roleInput} override. Effective model: ${fallback}. Cleared the persisted ${roleInput} runtime override too.`
+      : `Cleared ${roleInput} override. Effective model: ${fallback}.`;
   }
 
-  return `Saved ${roleInput} override: ${modelInput}.`;
+  if (runtimeInput) {
+    if (roleInput === 'voice') {
+      const defaultRuntime = defaultVoiceRuntime(ctx);
+      if (runtimeInput === defaultRuntime) {
+        delete nextOverrides.voiceRuntime;
+      } else {
+        nextOverrides.voiceRuntime = runtimeInput;
+      }
+      await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
+      return runtimeInput === defaultRuntime
+        ? `Voice already defaults to ${runtimeInput}. Cleared any redundant voice runtime override.`
+        : `Saved voice runtime override: ${runtimeInput}. Restart discoclaw to apply it.`;
+    }
+    if (roleInput === 'chat') {
+      return 'Chat runtime swaps are live-only and do not belong in models.json. Use a concrete model here, or change PRIMARY_RUNTIME in .env and restart.';
+    }
+    return `Runtime names cannot be stored as the persisted ${roleInput} model. Use a concrete model or "default".`;
+  }
+
+  const nextConfig = updateModelConfig(ctx.models, roleInput, modelInput);
+  await deps.saveModelConfig(ctx.configPaths.models, nextConfig);
+
+  let runtimeMessage = '';
+  if (roleInput === 'fast') {
+    const targetRuntime = runtimeStorageNameForModel(modelInput);
+    if (targetRuntime) {
+      const defaultRuntime = defaultFastRuntime(ctx);
+      const currentRuntime = ctx.runtimeOverrides.fastRuntime ?? defaultRuntime;
+      if (targetRuntime !== currentRuntime) {
+        if (targetRuntime === defaultRuntime) {
+          delete nextOverrides.fastRuntime;
+          await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
+          runtimeMessage = ` Fast runtime returns to the default (${defaultRuntime}).`;
+        } else {
+          nextOverrides.fastRuntime = targetRuntime;
+          await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
+          runtimeMessage = ` Fast runtime override -> ${targetRuntime}.`;
+        }
+      }
+    }
+  }
+
+  if (roleInput === 'voice') {
+    const targetRuntime = runtimeStorageNameForModel(modelInput);
+    if (targetRuntime) {
+      const defaultRuntime = defaultVoiceRuntime(ctx);
+      const currentRuntime = ctx.runtimeOverrides.voiceRuntime ?? defaultRuntime;
+      if (targetRuntime !== currentRuntime) {
+        if (targetRuntime === defaultRuntime) {
+          delete nextOverrides.voiceRuntime;
+          await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
+          runtimeMessage = ` Voice runtime returns to the default (${defaultRuntime}).`;
+        } else {
+          nextOverrides.voiceRuntime = targetRuntime;
+          await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
+          runtimeMessage = ` Voice runtime override -> ${targetRuntime}.`;
+        }
+      }
+    }
+  }
+
+  return `Saved ${roleInput} override: ${modelInput}.${runtimeMessage}`;
 }
 
 export async function collectDashboardSnapshot(
@@ -301,7 +430,7 @@ export async function runDashboard(options: RunDashboardOptions = {}): Promise<v
     loadDotenv({ path: path.join(cwd, '.env') });
   }
 
-  let detail = 'Interactive admin surface for service actions, doctor, and model overrides.';
+  let detail = 'Interactive admin surface for service actions, config doctor, and persisted model/runtime overrides.';
 
   try {
     while (true) {

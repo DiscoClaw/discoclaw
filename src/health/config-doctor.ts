@@ -451,6 +451,47 @@ export function detectStaleRuntimeAndModelOverrides(ctx: DoctorContext): DoctorF
   return findings;
 }
 
+export function detectInvalidPersistedModelAssignments(ctx: DoctorContext): DoctorFinding[] {
+  const findings: DoctorFinding[] = [];
+
+  for (const [role, storedValue] of Object.entries(ctx.models) as Array<[ModelRole, string]>) {
+    const runtimeName = normalizeRuntimeName(storedValue);
+    if (!runtimeName || !KNOWN_RUNTIMES.has(runtimeName)) continue;
+
+    if (role === 'chat') {
+      findings.push({
+        id: `invalid-model-assignment:${role}`,
+        severity: 'warn',
+        message: `models.json stores chat="${storedValue}", but chat runtime swaps are live-only and this value will be treated as a model string on restart.`,
+        recommendation: 'Store a concrete chat model in models.json, or change PRIMARY_RUNTIME in .env if the default chat runtime should change after restart.',
+        autoFixable: false,
+      });
+      continue;
+    }
+
+    if (role === 'voice') {
+      findings.push({
+        id: `invalid-model-assignment:${role}`,
+        severity: 'warn',
+        message: `models.json stores voice="${storedValue}", but persisted voice runtime selection belongs in runtime-overrides.json as voiceRuntime.`,
+        recommendation: 'Move the runtime name into runtime-overrides.json (voiceRuntime) or replace the voice entry with a concrete model string.',
+        autoFixable: false,
+      });
+      continue;
+    }
+
+    findings.push({
+      id: `invalid-model-assignment:${role}`,
+      severity: 'warn',
+      message: `models.json stores ${role}="${storedValue}", but runtime names are not valid persisted model values for that role.`,
+      recommendation: `Replace ${role} with a concrete model string or clear the override so startup defaults apply.`,
+      autoFixable: false,
+    });
+  }
+
+  return findings;
+}
+
 export function detectMissingSecrets(ctx: DoctorContext): DoctorFinding[] {
   const findings: DoctorFinding[] = [];
   const runtimeTargets: Array<{ label: string; runtime: string | undefined }> = [
@@ -558,6 +599,7 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
     ...detectDeprecatedEnvVars(ctx),
     ...detectConflictingOverrides(ctx),
     ...detectStaleRuntimeAndModelOverrides(ctx),
+    ...detectInvalidPersistedModelAssignments(ctx),
     ...detectMissingSecrets(ctx),
   ];
 

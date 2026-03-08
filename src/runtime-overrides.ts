@@ -8,6 +8,7 @@ export type RuntimeOverrides = {
 };
 
 const OVERRIDES_FILENAME = 'runtime-overrides.json';
+const KNOWN_OVERRIDE_KEYS = ['ttsVoice', 'voiceRuntime', 'fastRuntime'] as const;
 
 /**
  * Resolve the path to the runtime-overrides.json file.
@@ -68,7 +69,15 @@ export async function saveOverrides(filePath: string, overrides: RuntimeOverride
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp.${process.pid}`;
   try {
-    await fs.writeFile(tmpPath, JSON.stringify(overrides, null, 2) + '\n', 'utf-8');
+    const preserved = await readExistingRawObject(filePath);
+    for (const key of KNOWN_OVERRIDE_KEYS) {
+      delete preserved[key];
+    }
+    for (const key of KNOWN_OVERRIDE_KEYS) {
+      const value = overrides[key];
+      if (typeof value === 'string') preserved[key] = value;
+    }
+    await fs.writeFile(tmpPath, JSON.stringify(preserved, null, 2) + '\n', 'utf-8');
     await fs.rename(tmpPath, filePath);
   } catch (err) {
     await fs.unlink(tmpPath).catch(() => undefined);
@@ -87,4 +96,17 @@ export async function clearOverrides(filePath: string): Promise<void> {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw err;
   }
+}
+
+async function readExistingRawObject(filePath: string): Promise<Record<string, unknown>> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return { ...(parsed as Record<string, unknown>) };
+    }
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+  }
+  return {};
 }
