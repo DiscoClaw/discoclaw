@@ -121,7 +121,8 @@ export async function syncClosedTaskThread(opts: {
     return false;
   }
 
-  if (opts.taskCtx.hasInFlightForChannel?.(threadId)) {
+  const sameChannelClose = opts.runCtx.channelId === threadId;
+  if (!sameChannelClose && opts.taskCtx.hasInFlightForChannel?.(threadId)) {
     opts.taskCtx.log?.info({ taskId: opts.taskId, threadId }, 'tasks:thread close deferred — active run in channel');
     return true;
   }

@@ -8,6 +8,8 @@ import type {
 export type TaskActionRunContext = {
   client: TaskDiscordClient;
   guild: TaskDiscordGuild;
+  channelId?: string;
+  messageId?: string;
 };
 
 export type TaskActionResult =
