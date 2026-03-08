@@ -67,6 +67,8 @@ function makeCtx(): TaskActionRunContext {
         },
       },
     } as any,
+    channelId: 'ch-current',
+    messageId: 'msg-current',
   };
 }
 
@@ -401,6 +403,57 @@ describe('executeTaskAction', () => {
       makeTaskCtx({ forumCountSync: mockSync as any }),
     );
     expect(mockSync.requestUpdate).toHaveBeenCalled();
+  });
+
+  it('taskClose does not defer when closing the current thread', async () => {
+    const { closeTaskThread } = await import('./thread-ops.js');
+    (closeTaskThread as any).mockClear?.();
+
+    const ctx = makeCtx();
+    ctx.channelId = '111222333';
+
+    const result = await executeTaskAction(
+      { type: 'taskClose', taskId: 'ws-001', reason: 'Done' },
+      ctx,
+      makeTaskCtx({
+        hasInFlightForChannel: vi.fn(() => true),
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('closed');
+    expect((result as any).summary).not.toContain('thread repaired');
+    expect(closeTaskThread).toHaveBeenCalledWith(
+      expect.anything(),
+      '111222333',
+      expect.objectContaining({ id: 'ws-001', status: 'closed' }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('taskClose still defers when a different thread has an active reply', async () => {
+    const { closeTaskThread } = await import('./thread-ops.js');
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    (closeTaskThread as any).mockClear?.();
+    (runTaskSync as any).mockClear?.();
+
+    const ctx = makeCtx();
+    ctx.channelId = 'other-thread';
+
+    const result = await executeTaskAction(
+      { type: 'taskClose', taskId: 'ws-001', reason: 'Done' },
+      ctx,
+      makeTaskCtx({
+        hasInFlightForChannel: vi.fn(() => true),
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(closeTaskThread).not.toHaveBeenCalled();
+    expect(runTaskSync).toHaveBeenCalled();
   });
 
   it('taskShow returns task details', async () => {

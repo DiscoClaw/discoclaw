@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Client, Guild, TextBasedChannel } from 'discord.js';
@@ -87,6 +88,7 @@ import type { VoiceStatusSnapshot } from './voice-status-command.js';
 import { parseVoiceCommand, handleVoiceCommand } from './voice-command.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './health-command.js';
 import { parseStatusCommand, collectStatusSnapshot, renderStatusReport } from './status-command.js';
+import { parseTraceCommand, renderTraceDetail, renderTraceList } from './trace-command.js';
 import type { StatusCommandContext } from './status-command.js';
 import { parseRestartCommand, handleRestartCommand } from './restart-command.js';
 import { parseModelsCommand, handleModelsCommand } from './models-command.js';
@@ -95,6 +97,7 @@ import { consumeDestructiveConfirmation } from './destructive-confirmation.js';
 import type { HealthConfigSnapshot } from './health-command.js';
 import type { MetricsRegistry } from '../observability/metrics.js';
 import { globalMetrics } from '../observability/metrics.js';
+import { globalTraceStore } from '../observability/trace-store.js';
 import { OnboardingFlow } from '../onboarding/onboarding-flow.js';
 import { completeOnboarding } from './onboarding-completion.js';
 import type { SendTarget } from './onboarding-completion.js';
@@ -131,6 +134,40 @@ async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number)
   ]);
   if (timer) clearTimeout(timer);
   return completed;
+}
+
+function summarizeTraceText(value: string, maxChars = 160): string | undefined {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(1, maxChars - 1))}…`;
+}
+
+function summarizeTraceValue(value: unknown, maxChars = 160): string | undefined {
+  if (value == null) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    return summarizeTraceText(value, maxChars);
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized) {
+      return summarizeTraceText(serialized, maxChars);
+    }
+  } catch {
+    // Fall through to String(value).
+  }
+
+  return summarizeTraceText(String(value), maxChars);
 }
 
 export type BotParams = {
@@ -956,6 +993,24 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           deferScheduler: params.deferScheduler,
         });
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
+        return;
+      }
+
+      const traceCmd = parseTraceCommand(String(msg.content ?? ''));
+      if (!isBotMessage && traceCmd) {
+        if (traceCmd.mode === 'detail') {
+          const trace = globalTraceStore.getTrace(traceCmd.traceId);
+          const report = trace
+            ? renderTraceDetail(trace)
+            : `\`\`\`text\nTrace ${traceCmd.traceId} not found.\n\`\`\``;
+          await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
+          return;
+        }
+
+        await msg.reply({
+          content: renderTraceList(globalTraceStore.listRecent(10)),
+          allowedMentions: NO_MENTIONS,
+        });
         return;
       }
 
@@ -2929,116 +2984,146 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let pendingFollowUpPlaceholder: string | null = null;
           let isFailureFollowUp = false;
           effectiveContinuationCapsule = existingContinuationCapsule;
+          const traceId = `message_${randomUUID()}`;
+          let traceOutcome = 'success';
+          globalTraceStore.startTrace(traceId, sessionKey, 'message');
 
-          // -- auto-follow-up loop --
-          // When query actions (channelList, readMessages, etc.) succeed, re-invoke
-          // Claude with the results so it can continue reasoning without user intervention.
-          // eslint-disable-next-line no-constant-condition
-          while (true) {
-            let finalText = '';
-            let deltaText = '';
-            let previewOnlyDeltaText = '';
-            let toolPreviewSnapshot = '';
-            const collectedImages: ImageData[] = [];
-            let activityLabel = '';
-            let statusTick = 1;
-            const t0 = Date.now();
-            metrics.recordInvokeStart('message');
-            params.log?.info({ flow: 'message', sessionKey, followUpDepth }, 'obs.invoke.start');
-            let invokeHadError = false;
-            let invokeErrorMessage = '';
-            let lastEditAt = 0;
-            let streamEditTimeoutStreak = 0;
-            let streamEditCooldownUntil = 0;
-            const minEditIntervalMs = 1250;
-            const previewMode = params.streamPreviewMode ?? 'compact';
-            const debugStreamPreviewLines = Boolean(params.debugStreamPreviewLines);
-            const runtimeSignalBudget = new RuntimeSignalBudgetTracker({
-              useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
-            });
-            hadTextFinal = false;
-
-            // On follow-up iterations, send a new placeholder message.
-            if (followUpDepth > 0) {
-              dispose();
-              abortDispose();
-              const followUpPlaceholderContent = pendingFollowUpPlaceholder ?? formatBoldLabel('(following up...)');
-              reply = await msg.channel.send({ content: followUpPlaceholderContent, allowedMentions: NO_MENTIONS });
-              dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}:followup-${followUpDepth}`);
-              ({ signal: abortSignal, dispose: abortDispose } = registerAbort(reply.id));
-              reactPromise = reply.react?.('🛑')?.catch(() => null);
-              if (reactPromise) setStopReaction(msg.channelId, reply.id, reactPromise);
-              stopReactionRemoved = false;
-              replyFinalized = false;
-              params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
-            }
-
-            let streamEditQueue: Promise<void> = Promise.resolve();
-            const maybeEdit = async (
-              force = false,
-              opts?: { consumeThrottle?: boolean },
-            ) => {
-              const currentReply = reply;
-              if (!currentReply) return;
-              if (isShuttingDown()) return;
-              const now = Date.now();
-              if (!force && now < streamEditCooldownUntil) return;
-              const consumeThrottle = opts?.consumeThrottle ?? true;
-              if (!force && now - lastEditAt < minEditIntervalMs) return;
-              if (consumeThrottle) lastEditAt = now;
-              const out = selectStreamingOutput({
-                deltaText: deltaText + heartbeatLine + previewOnlyDeltaText,
-                activityLabel,
-                finalText,
-                statusTick: statusTick++,
-                previewMode,
-                elapsedMs: Date.now() - t0,
+          try {
+            // -- auto-follow-up loop --
+            // When query actions (channelList, readMessages, etc.) succeed, re-invoke
+            // Claude with the results so it can continue reasoning without user intervention.
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+              let finalText = '';
+              let deltaText = '';
+              let previewOnlyDeltaText = '';
+              let toolPreviewSnapshot = '';
+              const collectedImages: ImageData[] = [];
+              let activityLabel = '';
+              let statusTick = 1;
+              const invokeStartedAt = Date.now();
+              const t0 = Date.now();
+              const toolStartTimesByName = new Map<string, number[]>();
+              globalTraceStore.addEvent(traceId, {
+                type: 'invoke_start',
+                at: invokeStartedAt,
+                summary: followUpDepth === 0 ? 'initial invoke' : `follow-up ${followUpDepth}`,
+                promptPreview: summarizeTraceValue(currentPrompt, 220),
               });
-              streamEditQueue = streamEditQueue
-                .catch(() => undefined)
-                .then(async () => {
-                  try {
-                    const completed = await waitForEditOrTimeout(
-                      currentReply.edit({ content: out, allowedMentions: NO_MENTIONS }),
-                      STREAMING_EDIT_TIMEOUT_MS,
-                    );
-                    if (!completed) {
-                      streamEditTimeoutStreak += 1;
-                      if (streamEditTimeoutStreak >= STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD) {
-                        streamEditCooldownUntil = Date.now() + STREAMING_EDIT_TIMEOUT_COOLDOWN_MS;
-                        params.log?.warn(
-                          {
-                            flow: 'message',
-                            sessionKey,
-                            followUpDepth,
-                            timeoutMs: STREAMING_EDIT_TIMEOUT_MS,
-                            timeoutStreak: streamEditTimeoutStreak,
-                            cooldownMs: STREAMING_EDIT_TIMEOUT_COOLDOWN_MS,
-                          },
-                          'discord:stream edit cooldown active',
-                        );
-                      }
-                      params.log?.warn(
-                        { flow: 'message', sessionKey, followUpDepth, timeoutMs: STREAMING_EDIT_TIMEOUT_MS },
-                        'discord:stream edit timeout',
-                      );
-                    } else if (streamEditTimeoutStreak > 0 || streamEditCooldownUntil > 0) {
-                      streamEditTimeoutStreak = 0;
-                      streamEditCooldownUntil = 0;
-                    }
-                  } catch {
-                    // Ignore Discord edit errors during streaming.
-                  }
-                });
-              await streamEditQueue;
-            };
+              metrics.recordInvokeStart('message');
+              params.log?.info({ flow: 'message', sessionKey, followUpDepth }, 'obs.invoke.start');
+              let invokeHadError = false;
+              let invokeErrorMessage = '';
+              let lastEditAt = 0;
+              let streamEditTimeoutStreak = 0;
+              let streamEditCooldownUntil = 0;
+              const minEditIntervalMs = 1250;
+              const previewMode = params.streamPreviewMode ?? 'compact';
+              const debugStreamPreviewLines = Boolean(params.debugStreamPreviewLines);
+              const runtimeSignalBudget = new RuntimeSignalBudgetTracker({
+                useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
+              });
+              hadTextFinal = false;
 
-            const appendRuntimeSignal = async (
-              evt: Parameters<typeof formatRuntimePreviewSignal>[0],
-              opts?: { edit?: boolean },
-            ) => {
-              const line = adaptRuntimeEventText(evt, { mode: previewMode });
-              if (!line) {
+              // On follow-up iterations, send a new placeholder message.
+              if (followUpDepth > 0) {
+                dispose();
+                abortDispose();
+                const followUpPlaceholderContent = pendingFollowUpPlaceholder ?? formatBoldLabel('(following up...)');
+                reply = await msg.channel.send({ content: followUpPlaceholderContent, allowedMentions: NO_MENTIONS });
+                dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}:followup-${followUpDepth}`);
+                ({ signal: abortSignal, dispose: abortDispose } = registerAbort(reply.id));
+                reactPromise = reply.react?.('🛑')?.catch(() => null);
+                if (reactPromise) setStopReaction(msg.channelId, reply.id, reactPromise);
+                stopReactionRemoved = false;
+                replyFinalized = false;
+                params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
+              }
+
+              let streamEditQueue: Promise<void> = Promise.resolve();
+              const maybeEdit = async (
+                force = false,
+                opts?: { consumeThrottle?: boolean },
+              ) => {
+                const currentReply = reply;
+                if (!currentReply) return;
+                if (isShuttingDown()) return;
+                const now = Date.now();
+                if (!force && now < streamEditCooldownUntil) return;
+                const consumeThrottle = opts?.consumeThrottle ?? true;
+                if (!force && now - lastEditAt < minEditIntervalMs) return;
+                if (consumeThrottle) lastEditAt = now;
+                const out = selectStreamingOutput({
+                  deltaText: deltaText + heartbeatLine + previewOnlyDeltaText,
+                  activityLabel,
+                  finalText,
+                  statusTick: statusTick++,
+                  previewMode,
+                  elapsedMs: Date.now() - t0,
+                });
+                streamEditQueue = streamEditQueue
+                  .catch(() => undefined)
+                  .then(async () => {
+                    try {
+                      const completed = await waitForEditOrTimeout(
+                        currentReply.edit({ content: out, allowedMentions: NO_MENTIONS }),
+                        STREAMING_EDIT_TIMEOUT_MS,
+                      );
+                      if (!completed) {
+                        streamEditTimeoutStreak += 1;
+                        if (streamEditTimeoutStreak >= STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD) {
+                          streamEditCooldownUntil = Date.now() + STREAMING_EDIT_TIMEOUT_COOLDOWN_MS;
+                          params.log?.warn(
+                            {
+                              flow: 'message',
+                              sessionKey,
+                              followUpDepth,
+                              timeoutMs: STREAMING_EDIT_TIMEOUT_MS,
+                              timeoutStreak: streamEditTimeoutStreak,
+                              cooldownMs: STREAMING_EDIT_TIMEOUT_COOLDOWN_MS,
+                            },
+                            'discord:stream edit cooldown active',
+                          );
+                        }
+                        params.log?.warn(
+                          { flow: 'message', sessionKey, followUpDepth, timeoutMs: STREAMING_EDIT_TIMEOUT_MS },
+                          'discord:stream edit timeout',
+                        );
+                      } else if (streamEditTimeoutStreak > 0 || streamEditCooldownUntil > 0) {
+                        streamEditTimeoutStreak = 0;
+                        streamEditCooldownUntil = 0;
+                      }
+                    } catch {
+                      // Ignore Discord edit errors during streaming.
+                    }
+                  });
+                await streamEditQueue;
+              };
+
+              const appendRuntimeSignal = async (
+                evt: Parameters<typeof formatRuntimePreviewSignal>[0],
+                opts?: { edit?: boolean },
+              ) => {
+                const line = adaptRuntimeEventText(evt, { mode: previewMode });
+                if (!line) {
+                  if (debugStreamPreviewLines) {
+                    params.log?.info(
+                      {
+                        flow: 'message',
+                        sessionKey,
+                        followUpDepth,
+                        eventType: evt.type,
+                        dropped: true,
+                        droppedReason: 'adapter_suppressed',
+                      },
+                      'discord:preview-line',
+                    );
+                  }
+                  return;
+                }
+                const budgetResult = runtimeSignalBudget.consume(evt);
+                const forceAllowPreviewDebug = debugStreamPreviewLines && evt.type === 'preview_debug' && !budgetResult.allow;
+                const allowLine = budgetResult.allow || forceAllowPreviewDebug;
                 if (debugStreamPreviewLines) {
                   params.log?.info(
                     {
@@ -3046,505 +3131,557 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       sessionKey,
                       followUpDepth,
                       eventType: evt.type,
-                      dropped: true,
-                      droppedReason: 'adapter_suppressed',
+                      allow: budgetResult.allow,
+                      effectiveAllow: allowLine,
+                      forceAllowPreviewDebug,
+                      appendSuppression: budgetResult.appendSuppression,
+                      suppressionReason: budgetResult.reason,
+                      line: line.length > 500 ? `${line.slice(0, 499)}…` : line,
                     },
                     'discord:preview-line',
                   );
                 }
-                return;
-              }
-              const budgetResult = runtimeSignalBudget.consume(evt);
-              const forceAllowPreviewDebug = debugStreamPreviewLines && evt.type === 'preview_debug' && !budgetResult.allow;
-              const allowLine = budgetResult.allow || forceAllowPreviewDebug;
-              if (debugStreamPreviewLines) {
-                params.log?.info(
-                  {
-                    flow: 'message',
-                    sessionKey,
-                    followUpDepth,
-                    eventType: evt.type,
-                    allow: budgetResult.allow,
-                    effectiveAllow: allowLine,
-                    forceAllowPreviewDebug,
-                    appendSuppression: budgetResult.appendSuppression,
-                    suppressionReason: budgetResult.reason,
-                    line: line.length > 500 ? `${line.slice(0, 499)}…` : line,
+                if (!allowLine) {
+                  if (budgetResult.appendSuppression) {
+                    deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + RUNTIME_SIGNAL_SUPPRESSED_LINE + '\n';
+                    if (opts?.edit ?? true) await maybeEdit(false);
+                  }
+                  return;
+                }
+                deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
+                if (opts?.edit ?? true) {
+                  await maybeEdit(false);
+                }
+              };
+
+              // Stream heartbeat state for long quiet periods.
+              let lastEventAt = invokeStartedAt;
+              let activeToolCount = 0;
+              let stallWarned = false;
+              let lastStallProgressAt = 0;
+              let heartbeatLine = '';
+              let sawRuntimeEvent = false;
+              let sawReasoningEvent = false;
+              let firstByteAtMs: number | undefined;
+              let firstEventAtMs: number | undefined;
+              const trackReasoningGap = params.runtime.id === 'codex' || params.runtime.id === 'claude_code';
+              const markRuntimeByte = (evt: EngineEvent): void => {
+                if (firstByteAtMs != null) return;
+                if (evt.type === 'text_delta' || evt.type === 'log_line' || evt.type === 'thinking_delta') {
+                  firstByteAtMs = Date.now();
+                }
+              };
+              const markRuntimeVisibility = (evt: EngineEvent): void => {
+                if (firstEventAtMs == null) {
+                  firstEventAtMs = Date.now();
+                }
+                previewOnlyDeltaText = '';
+                heartbeatLine = '';
+                sawRuntimeEvent = true;
+                if (trackReasoningGap && !sawReasoningEvent) {
+                  if (evt.type === 'preview_debug' && evt.itemType === 'reasoning') {
+                    sawReasoningEvent = true;
+                  } else if (evt.type === 'thinking_delta') {
+                    sawReasoningEvent = true;
+                  } else if (evt.type === 'log_line' && /\breasoning\b/i.test(evt.line)) {
+                    sawReasoningEvent = true;
+                  }
+                }
+              };
+              const formatRuntimeHeartbeatLine = (stallSeconds: number, first: boolean): string => {
+                const invokeSeconds = Math.max(1, Math.round((Date.now() - invokeStartedAt) / 1000));
+                const normalizedActivity = activityLabel.trim().replace(/\s+/g, ' ');
+                const context = !sawRuntimeEvent
+                  ? `connected; waiting for first runtime event (${invokeSeconds}s since invoke)`
+                  : trackReasoningGap && !sawReasoningEvent
+                    ? `runtime events received; no reasoning emitted yet (${invokeSeconds}s since invoke)`
+                    : activeToolCount > 0
+                      ? `${activeToolCount} tool ${activeToolCount === 1 ? 'step' : 'steps'} in flight`
+                      : normalizedActivity
+                        ? `activity: ${normalizedActivity}`
+                        : 'awaiting runtime output';
+                const prefix = first ? 'Runtime heartbeat' : 'Still active';
+                return `\n*${prefix} (${stallSeconds}s since last event; ${context}).*`;
+              };
+              const heartbeatLatencyFields = (): {
+                spawnToFirstByteMs?: number;
+                spawnToFirstEventMs?: number;
+              } => ({
+                ...(firstByteAtMs != null ? { spawnToFirstByteMs: Math.max(0, firstByteAtMs - invokeStartedAt) } : {}),
+                ...(firstEventAtMs != null ? { spawnToFirstEventMs: Math.max(0, firstEventAtMs - invokeStartedAt) } : {}),
+              });
+
+              // If runtime events go quiet, append periodic heartbeat lines so users can see
+              // the invocation is still alive and what context we currently have.
+              const keepalive = setInterval(() => {
+                if (params.streamStallWarningMs > 0) {
+                  const stallElapsed = Date.now() - lastEventAt;
+                  if (stallElapsed > params.streamStallWarningMs) {
+                    const stallSeconds = Math.round(stallElapsed / 1000);
+                    if (!stallWarned) {
+                      stallWarned = true;
+                      lastStallProgressAt = Date.now();
+                      heartbeatLine = formatRuntimeHeartbeatLine(stallSeconds, true);
+                      previewOnlyDeltaText = '';
+                      params.log?.info(
+                        {
+                          flow: 'message',
+                          sessionKey,
+                          followUpDepth,
+                          stallSeconds,
+                          activeToolCount,
+                          sawRuntimeEvent,
+                          sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                          activityLabel: activityLabel || undefined,
+                          ...heartbeatLatencyFields(),
+                        },
+                        'discord:stream heartbeat',
+                      );
+                    } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
+                      lastStallProgressAt = Date.now();
+                      heartbeatLine = formatRuntimeHeartbeatLine(stallSeconds, false);
+                      params.log?.info(
+                        {
+                          flow: 'message',
+                          sessionKey,
+                          followUpDepth,
+                          stallSeconds,
+                          activeToolCount,
+                          sawRuntimeEvent,
+                          sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
+                          activityLabel: activityLabel || undefined,
+                          ...heartbeatLatencyFields(),
+                        },
+                        'discord:stream heartbeat',
+                      );
+                    }
+                  }
+                }
+                // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                maybeEdit(true);
+              }, 5000);
+
+              // Tool-aware streaming: route events through a state machine that buffers
+              // text during tool execution and streams the final answer cleanly.
+              const taq = params.toolAwareStreaming
+                ? new ToolAwareQueue((action) => {
+                    if (action.type === 'preview_text') {
+                      if (action.text.startsWith(toolPreviewSnapshot)) {
+                        previewOnlyDeltaText += action.text.slice(toolPreviewSnapshot.length);
+                      } else {
+                        previewOnlyDeltaText += action.text;
+                      }
+                      toolPreviewSnapshot = action.text;
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      maybeEdit(false);
+                    } else if (action.type === 'stream_text') {
+                      deltaText += action.text;
+                      previewOnlyDeltaText = '';
+                      toolPreviewSnapshot = '';
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      maybeEdit(false);
+                    } else if (action.type === 'set_final') {
+                      hadTextFinal = true;
+                      finalText = action.text;
+                      previewOnlyDeltaText = '';
+                      toolPreviewSnapshot = '';
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      maybeEdit(true);
+                    } else if (action.type === 'show_activity') {
+                      activityLabel = action.label;
+                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                      maybeEdit(true);
+                    }
+                  }, { flushDelayMs: 800, postToolDelayMs: 500 })
+                : null;
+
+              // Emit a connected line immediately so long cold starts are explicit.
+              previewOnlyDeltaText += '*Runtime connected; waiting for first runtime event.*\n';
+              // Render an initial streaming frame immediately so users always see
+              // explicit thinking/waiting feedback during the invoke. Non-blocking:
+              // avoid delaying runtime startup on Discord API latency.
+              // eslint-disable-next-line @typescript-eslint/no-floating-promises
+              maybeEdit(true, { consumeThrottle: false });
+
+              try {
+                for await (const evt of params.runtime.invoke({
+                  prompt: currentPrompt,
+                  model: resolveModel(params.runtimeModel, params.runtime.id),
+                  cwd,
+                  addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
+                  sessionId,
+                  sessionKey,
+                  tools: effectiveTools,
+                  timeoutMs: params.runtimeTimeoutMs,
+                  // Images only on initial turn — follow-ups are text-only continuations
+                  // with action results; re-downloading would waste time and bandwidth.
+                  images: followUpDepth === 0 ? inputImages : undefined,
+                  signal: abortSignal,
+                  onTelemetry: (telemetry) => {
+                    if (telemetry.type === 'first_byte' && firstByteAtMs == null) {
+                      firstByteAtMs = telemetry.atMs;
+                    }
                   },
-                  'discord:preview-line',
+                })) {
+                  // Track event flow for stall warning.
+                  markRuntimeByte(evt);
+                  markRuntimeVisibility(evt);
+                  lastEventAt = Date.now();
+                  stallWarned = false;
+                  lastStallProgressAt = 0;
+                  if (evt.type === 'tool_start') activeToolCount++;
+                  else if (evt.type === 'tool_end') activeToolCount = Math.max(0, activeToolCount - 1);
+                  if (evt.type === 'tool_start') {
+                    const startedAt = Date.now();
+                    const existingStarts = toolStartTimesByName.get(evt.name) ?? [];
+                    existingStarts.push(startedAt);
+                    toolStartTimesByName.set(evt.name, existingStarts);
+                    globalTraceStore.addEvent(traceId, {
+                      type: 'tool_start',
+                      at: startedAt,
+                      toolName: evt.name,
+                      inputSummary: summarizeTraceValue(evt.input),
+                    });
+                  } else if (evt.type === 'tool_end') {
+                    const endedAt = Date.now();
+                    const existingStarts = toolStartTimesByName.get(evt.name) ?? [];
+                    const startedAt = existingStarts.shift();
+                    if (existingStarts.length > 0) {
+                      toolStartTimesByName.set(evt.name, existingStarts);
+                    } else {
+                      toolStartTimesByName.delete(evt.name);
+                    }
+                    globalTraceStore.addEvent(traceId, {
+                      type: 'tool_end',
+                      at: endedAt,
+                      toolName: evt.name,
+                      ok: evt.ok,
+                      durationMs: startedAt == null ? undefined : Math.max(0, endedAt - startedAt),
+                      outputSummary: summarizeTraceValue(evt.output),
+                    });
+                  } else if (evt.type === 'error') {
+                    traceOutcome = abortSignal.aborted ? 'aborted' : 'error';
+                    globalTraceStore.addEvent(traceId, {
+                      type: 'error',
+                      at: Date.now(),
+                      message: evt.message,
+                      stage: 'runtime',
+                      summary: followUpDepth === 0 ? 'initial invoke' : `follow-up ${followUpDepth}`,
+                    });
+                  }
+
+                  if (taq) {
+                    // Tool-aware mode: route relevant events through the queue.
+                    if (evt.type === 'text_delta' || evt.type === 'text_final' ||
+                        evt.type === 'tool_start' || evt.type === 'tool_end') {
+                      if (evt.type === 'text_delta') {
+                        runtimeSignalBudget.noteNativeTextDelta();
+                      }
+                      if (evt.type === 'tool_start') {
+                        await appendRuntimeSignal(evt, { edit: false });
+                      } else if (evt.type === 'tool_end') {
+                        await appendRuntimeSignal(evt);
+                      }
+                      taq.handleEvent(evt);
+                    } else if (evt.type === 'error') {
+                      invokeHadError = true;
+                      invokeErrorMessage = evt.message;
+                      taq.handleEvent(evt);
+                      finalText = abortSignal.aborted
+                        ? '*(Response aborted.)*'
+                        : mapRuntimeErrorToUserMessage(evt.message);
+                      await maybeEdit(true);
+                      if (!abortSignal.aborted) {
+                        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                        statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                        params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                      }
+                    } else if (evt.type === 'thinking_delta' || evt.type === 'log_line' || evt.type === 'usage' || evt.type === 'preview_debug') {
+                      // Bypass queue for non-text runtime signals.
+                      await appendRuntimeSignal(evt);
+                    } else if (evt.type === 'image_data') {
+                      collectedImages.push(evt.image);
+                    }
+                  } else {
+                    // Flat mode: stream text/final directly and append runtime signals.
+                    if (evt.type === 'text_final') {
+                      hadTextFinal = true;
+                      finalText = evt.text;
+                      await maybeEdit(true);
+                    } else if (evt.type === 'error') {
+                      invokeHadError = true;
+                      invokeErrorMessage = evt.message;
+                      finalText = abortSignal.aborted
+                        ? '*(Response aborted.)*'
+                        : mapRuntimeErrorToUserMessage(evt.message);
+                      await maybeEdit(true);
+                      if (!abortSignal.aborted) {
+                        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                        statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                        params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
+                      }
+                    } else if (evt.type === 'text_delta') {
+                      runtimeSignalBudget.noteNativeTextDelta();
+                      deltaText += evt.text;
+                      await maybeEdit(false);
+                    } else if (
+                      evt.type === 'thinking_delta' ||
+                      evt.type === 'log_line' ||
+                      evt.type === 'tool_start' ||
+                      evt.type === 'tool_end' ||
+                      evt.type === 'usage' ||
+                      evt.type === 'preview_debug'
+                    ) {
+                      await appendRuntimeSignal(evt);
+                    } else if (evt.type === 'image_data') {
+                      collectedImages.push(evt.image);
+                    }
+                  }
+                }
+              } finally {
+                clearInterval(keepalive);
+                taq?.dispose();
+                // Drain all queued streaming edits so they settle before final output.
+                try { await streamEditQueue; } catch { /* ignore */ }
+                streamEditQueue = Promise.resolve();
+              }
+              // Remove 🛑 eagerly after stream completes — the user can no longer abort.
+              // Must happen before action execution: taskClose archives the thread, which
+              // would prevent reaction removal in the finally block.
+              try { const sr = await reactPromise; await sr?.remove?.(); stopReactionRemoved = true; } catch { /* best-effort */ }
+              metrics.recordInvokeResult('message', Date.now() - t0, !invokeHadError, invokeErrorMessage);
+              if (invokeHadError) {
+                traceOutcome = abortSignal.aborted ? 'aborted' : 'error';
+              }
+              globalTraceStore.addEvent(traceId, {
+                type: 'invoke_end',
+                at: Date.now(),
+                ok: !invokeHadError,
+                summary: followUpDepth === 0 ? 'initial invoke' : `follow-up ${followUpDepth}`,
+              });
+              params.log?.info(
+                { flow: 'message', sessionKey, followUpDepth, ms: Date.now() - t0, ok: !invokeHadError },
+                'obs.invoke.end',
+              );
+              if (followUpDepth > 0) {
+                params.log?.info({ sessionKey, followUpDepth, ms: Date.now() - t0 }, 'followup:end');
+              } else {
+                params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');
+              }
+              processedText = finalText || deltaText || (collectedImages.length > 0 ? '' : '(no output)');
+              let actions: { type: string }[] = [];
+              let actionResults: DiscordActionResult[] = [];
+              let strippedUnrecognizedTypes: string[] = [];
+              let parseFailuresCount = 0;
+              // Gate action execution on successful stream completion — do not execute
+              // actions against partial or error output, which could cause side effects
+              // based on incomplete model responses.  Relax the hadTextFinal requirement
+              // when the stream completed without error — some runtime modes (long-running
+              // process, tool-aware queue timing) may deliver complete text via deltaText
+              // without a discrete text_final event.
+              const streamCompletedForActions = !invokeHadError && !abortSignal.aborted;
+              if (!hadTextFinal && streamCompletedForActions && processedText.includes('<discord-action>')) {
+                params.log?.warn(
+                  { flow: 'message', sessionKey, textLen: processedText.length },
+                  'discord:action fallback — hadTextFinal=false but text contains action markers',
                 );
               }
-              if (!allowLine) {
-                if (budgetResult.appendSuppression) {
-                  deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + RUNTIME_SIGNAL_SUPPRESSED_LINE + '\n';
-                  if (opts?.edit ?? true) await maybeEdit(false);
+              const canParseActions = streamCompletedForActions
+                && (hadTextFinal || processedText.includes('<discord-action>'));
+              if (params.discordActionsEnabled && msg.guild && canParseActions) {
+                const parsed = parseDiscordActions(processedText, actionFlags);
+                parseFailuresCount = parsed.parseFailures;
+                if (parsed.continuationCapsule) {
+                  effectiveContinuationCapsule = parsed.continuationCapsule;
+                  emittedContinuationCapsule = true;
                 }
-                return;
-              }
-              deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + line + '\n';
-              if (opts?.edit ?? true) {
-                await maybeEdit(false);
-              }
-            };
-
-            // Stream heartbeat state for long quiet periods.
-            const invokeStartedAt = Date.now();
-            let lastEventAt = invokeStartedAt;
-            let activeToolCount = 0;
-            let stallWarned = false;
-            let lastStallProgressAt = 0;
-            let heartbeatLine = '';
-            let sawRuntimeEvent = false;
-            let sawReasoningEvent = false;
-            let firstByteAtMs: number | undefined;
-            let firstEventAtMs: number | undefined;
-            const trackReasoningGap = params.runtime.id === 'codex' || params.runtime.id === 'claude_code';
-            const markRuntimeByte = (evt: EngineEvent): void => {
-              if (firstByteAtMs != null) return;
-              if (evt.type === 'text_delta' || evt.type === 'log_line' || evt.type === 'thinking_delta') {
-                firstByteAtMs = Date.now();
-              }
-            };
-            const markRuntimeVisibility = (evt: EngineEvent): void => {
-              if (firstEventAtMs == null) {
-                firstEventAtMs = Date.now();
-              }
-              previewOnlyDeltaText = '';
-              heartbeatLine = '';
-              sawRuntimeEvent = true;
-              if (trackReasoningGap && !sawReasoningEvent) {
-                if (evt.type === 'preview_debug' && evt.itemType === 'reasoning') {
-                  sawReasoningEvent = true;
-                } else if (evt.type === 'thinking_delta') {
-                  sawReasoningEvent = true;
-                } else if (evt.type === 'log_line' && /\breasoning\b/i.test(evt.line)) {
-                  sawReasoningEvent = true;
+                const cleanProcessedText = parsed.cleanText;
+                if (parsed.parseFailures > 0) {
+                  params.log?.warn(`parseDiscordActions: ${parsed.parseFailures} action block(s) failed to parse (sessionKey=${sessionKey})`);
                 }
-              }
-            };
-            const formatRuntimeHeartbeatLine = (stallSeconds: number, first: boolean): string => {
-              const invokeSeconds = Math.max(1, Math.round((Date.now() - invokeStartedAt) / 1000));
-              const normalizedActivity = activityLabel.trim().replace(/\s+/g, ' ');
-              const context = !sawRuntimeEvent
-                ? `connected; waiting for first runtime event (${invokeSeconds}s since invoke)`
-                : trackReasoningGap && !sawReasoningEvent
-                  ? `runtime events received; no reasoning emitted yet (${invokeSeconds}s since invoke)`
-                  : activeToolCount > 0
-                    ? `${activeToolCount} tool ${activeToolCount === 1 ? 'step' : 'steps'} in flight`
-                    : normalizedActivity
-                      ? `activity: ${normalizedActivity}`
-                      : 'awaiting runtime output';
-              const prefix = first ? 'Runtime heartbeat' : 'Still active';
-              return `\n*${prefix} (${stallSeconds}s since last event; ${context}).*`;
-            };
-            const heartbeatLatencyFields = (): {
-              spawnToFirstByteMs?: number;
-              spawnToFirstEventMs?: number;
-            } => ({
-              ...(firstByteAtMs != null ? { spawnToFirstByteMs: Math.max(0, firstByteAtMs - invokeStartedAt) } : {}),
-              ...(firstEventAtMs != null ? { spawnToFirstEventMs: Math.max(0, firstEventAtMs - invokeStartedAt) } : {}),
-            });
-
-            // If runtime events go quiet, append periodic heartbeat lines so users can see
-            // the invocation is still alive and what context we currently have.
-            const keepalive = setInterval(() => {
-              if (params.streamStallWarningMs > 0) {
-                const stallElapsed = Date.now() - lastEventAt;
-                if (stallElapsed > params.streamStallWarningMs) {
-                  const stallSeconds = Math.round(stallElapsed / 1000);
-                  if (!stallWarned) {
-                    stallWarned = true;
-                    lastStallProgressAt = Date.now();
-                    heartbeatLine = formatRuntimeHeartbeatLine(stallSeconds, true);
-                    previewOnlyDeltaText = '';
-                    params.log?.info(
-                      {
-                        flow: 'message',
-                        sessionKey,
-                        followUpDepth,
-                        stallSeconds,
-                        activeToolCount,
-                        sawRuntimeEvent,
-                        sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
-                        activityLabel: activityLabel || undefined,
-                        ...heartbeatLatencyFields(),
-                      },
-                      'discord:stream heartbeat',
-                    );
-                  } else if (Date.now() - lastStallProgressAt >= STREAM_STALL_PROGRESS_UPDATE_MS) {
-                    lastStallProgressAt = Date.now();
-                    heartbeatLine = formatRuntimeHeartbeatLine(stallSeconds, false);
-                    params.log?.info(
-                      {
-                        flow: 'message',
-                        sessionKey,
-                        followUpDepth,
-                        stallSeconds,
-                        activeToolCount,
-                        sawRuntimeEvent,
-                        sawReasoningEvent: trackReasoningGap ? sawReasoningEvent : undefined,
-                        activityLabel: activityLabel || undefined,
-                        ...heartbeatLatencyFields(),
-                      },
-                      'discord:stream heartbeat',
-                    );
-                  }
-                }
-              }
-              // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              maybeEdit(true);
-            }, 5000);
-
-            // Tool-aware streaming: route events through a state machine that buffers
-            // text during tool execution and streams the final answer cleanly.
-            const taq = params.toolAwareStreaming
-              ? new ToolAwareQueue((action) => {
-                  if (action.type === 'preview_text') {
-                    if (action.text.startsWith(toolPreviewSnapshot)) {
-                      previewOnlyDeltaText += action.text.slice(toolPreviewSnapshot.length);
-                    } else {
-                      previewOnlyDeltaText += action.text;
-                    }
-                    toolPreviewSnapshot = action.text;
-                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                    maybeEdit(false);
-                  } else if (action.type === 'stream_text') {
-                    deltaText += action.text;
-                    previewOnlyDeltaText = '';
-                    toolPreviewSnapshot = '';
-                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                    maybeEdit(false);
-                  } else if (action.type === 'set_final') {
-                    hadTextFinal = true;
-                    finalText = action.text;
-                    previewOnlyDeltaText = '';
-                    toolPreviewSnapshot = '';
-                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                    maybeEdit(true);
-                  } else if (action.type === 'show_activity') {
-                    activityLabel = action.label;
-                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                    maybeEdit(true);
-                  }
-                }, { flushDelayMs: 800, postToolDelayMs: 500 })
-              : null;
-
-            // Emit a connected line immediately so long cold starts are explicit.
-            previewOnlyDeltaText += '*Runtime connected; waiting for first runtime event.*\n';
-            // Render an initial streaming frame immediately so users always see
-            // explicit thinking/waiting feedback during the invoke. Non-blocking:
-            // avoid delaying runtime startup on Discord API latency.
-            // eslint-disable-next-line @typescript-eslint/no-floating-promises
-            maybeEdit(true, { consumeThrottle: false });
-
-            try {
-              for await (const evt of params.runtime.invoke({
-                prompt: currentPrompt,
-                model: resolveModel(params.runtimeModel, params.runtime.id),
-                cwd,
-                addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
-                sessionId,
-                sessionKey,
-                tools: effectiveTools,
-                timeoutMs: params.runtimeTimeoutMs,
-                // Images only on initial turn — follow-ups are text-only continuations
-                // with action results; re-downloading would waste time and bandwidth.
-                images: followUpDepth === 0 ? inputImages : undefined,
-                signal: abortSignal,
-                onTelemetry: (telemetry) => {
-                  if (telemetry.type === 'first_byte' && firstByteAtMs == null) {
-                    firstByteAtMs = telemetry.atMs;
-                  }
-                },
-              })) {
-                // Track event flow for stall warning.
-                markRuntimeByte(evt);
-                markRuntimeVisibility(evt);
-                lastEventAt = Date.now();
-                stallWarned = false;
-                lastStallProgressAt = 0;
-                if (evt.type === 'tool_start') activeToolCount++;
-                else if (evt.type === 'tool_end') activeToolCount = Math.max(0, activeToolCount - 1);
-
-                if (taq) {
-                  // Tool-aware mode: route relevant events through the queue.
-                  if (evt.type === 'text_delta' || evt.type === 'text_final' ||
-                      evt.type === 'tool_start' || evt.type === 'tool_end') {
-                    if (evt.type === 'text_delta') {
-                      runtimeSignalBudget.noteNativeTextDelta();
-                    }
-                    if (evt.type === 'tool_start') {
-                      await appendRuntimeSignal(evt, { edit: false });
-                    } else if (evt.type === 'tool_end') {
-                      await appendRuntimeSignal(evt);
-                    }
-                    taq.handleEvent(evt);
-                  } else if (evt.type === 'error') {
-                    invokeHadError = true;
-                    invokeErrorMessage = evt.message;
-                    taq.handleEvent(evt);
-                    finalText = abortSignal.aborted
-                      ? '*(Response aborted.)*'
-                      : mapRuntimeErrorToUserMessage(evt.message);
-                    await maybeEdit(true);
-                    if (!abortSignal.aborted) {
-                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                      statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
-                      params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
-                    }
-                  } else if (evt.type === 'thinking_delta' || evt.type === 'log_line' || evt.type === 'usage' || evt.type === 'preview_debug') {
-                    // Bypass queue for non-text runtime signals.
-                    await appendRuntimeSignal(evt);
-                  } else if (evt.type === 'image_data') {
-                    collectedImages.push(evt.image);
-                  }
-                } else {
-                  // Flat mode: stream text/final directly and append runtime signals.
-                  if (evt.type === 'text_final') {
-                    hadTextFinal = true;
-                    finalText = evt.text;
-                    await maybeEdit(true);
-                  } else if (evt.type === 'error') {
-                    invokeHadError = true;
-                    invokeErrorMessage = evt.message;
-                    finalText = abortSignal.aborted
-                      ? '*(Response aborted.)*'
-                      : mapRuntimeErrorToUserMessage(evt.message);
-                    await maybeEdit(true);
-                    if (!abortSignal.aborted) {
-                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                      statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
-                      params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
-                    }
-                  } else if (evt.type === 'text_delta') {
-                    runtimeSignalBudget.noteNativeTextDelta();
-                    deltaText += evt.text;
-                    await maybeEdit(false);
-                  } else if (
-                    evt.type === 'thinking_delta' ||
-                    evt.type === 'log_line' ||
-                    evt.type === 'tool_start' ||
-                    evt.type === 'tool_end' ||
-                    evt.type === 'usage' ||
-                    evt.type === 'preview_debug'
-                  ) {
-                    await appendRuntimeSignal(evt);
-                  } else if (evt.type === 'image_data') {
-                    collectedImages.push(evt.image);
-                  }
-                }
-              }
-            } finally {
-              clearInterval(keepalive);
-              taq?.dispose();
-              // Drain all queued streaming edits so they settle before final output.
-              try { await streamEditQueue; } catch { /* ignore */ }
-              streamEditQueue = Promise.resolve();
-            }
-            // Remove 🛑 eagerly after stream completes — the user can no longer abort.
-            // Must happen before action execution: taskClose archives the thread, which
-            // would prevent reaction removal in the finally block.
-            try { const sr = await reactPromise; await sr?.remove?.(); stopReactionRemoved = true; } catch { /* best-effort */ }
-            metrics.recordInvokeResult('message', Date.now() - t0, !invokeHadError, invokeErrorMessage);
-            params.log?.info(
-              { flow: 'message', sessionKey, followUpDepth, ms: Date.now() - t0, ok: !invokeHadError },
-              'obs.invoke.end',
-            );
-            if (followUpDepth > 0) {
-              params.log?.info({ sessionKey, followUpDepth, ms: Date.now() - t0 }, 'followup:end');
-            } else {
-              params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');
-            }
-            processedText = finalText || deltaText || (collectedImages.length > 0 ? '' : '(no output)');
-            let actions: { type: string }[] = [];
-            let actionResults: DiscordActionResult[] = [];
-            let strippedUnrecognizedTypes: string[] = [];
-            let parseFailuresCount = 0;
-            // Gate action execution on successful stream completion — do not execute
-            // actions against partial or error output, which could cause side effects
-            // based on incomplete model responses.  Relax the hadTextFinal requirement
-            // when the stream completed without error — some runtime modes (long-running
-            // process, tool-aware queue timing) may deliver complete text via deltaText
-            // without a discrete text_final event.
-            const streamCompletedForActions = !invokeHadError && !abortSignal.aborted;
-            if (!hadTextFinal && streamCompletedForActions && processedText.includes('<discord-action>')) {
-              params.log?.warn(
-                { flow: 'message', sessionKey, textLen: processedText.length },
-                'discord:action fallback — hadTextFinal=false but text contains action markers',
-              );
-            }
-            const canParseActions = streamCompletedForActions
-              && (hadTextFinal || processedText.includes('<discord-action>'));
-            if (params.discordActionsEnabled && msg.guild && canParseActions) {
-              const parsed = parseDiscordActions(processedText, actionFlags);
-              parseFailuresCount = parsed.parseFailures;
-              if (parsed.continuationCapsule) {
-                effectiveContinuationCapsule = parsed.continuationCapsule;
-                emittedContinuationCapsule = true;
-              }
-              const cleanProcessedText = parsed.cleanText;
-              if (parsed.parseFailures > 0) {
-                params.log?.warn(`parseDiscordActions: ${parsed.parseFailures} action block(s) failed to parse (sessionKey=${sessionKey})`);
-              }
-              if (parsed.actions.length > 0) {
-                // sendFile deny-filter: block file exfiltration from bot-originated prompts.
-                actions = isBotMessage
-                  ? parsed.actions.filter(a => a.type !== 'sendFile')
-                  : parsed.actions;
-                strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
-                const actCtx = {
-                  guild: msg.guild,
-                  client: msg.client,
-                  requesterId: !isBotMessage ? msg.author.id : undefined,
-                  channelId: msg.channelId,
-                  messageId: msg.id,
-                  threadParentId,
-                  deferScheduler: params.deferScheduler,
-                  transport: new DiscordTransportClient(msg.guild, msg.client),
-                  confirmation: {
-                    mode: 'interactive' as const,
+                if (parsed.actions.length > 0) {
+                  // sendFile deny-filter: block file exfiltration from bot-originated prompts.
+                  actions = isBotMessage
+                    ? parsed.actions.filter(a => a.type !== 'sendFile')
+                    : parsed.actions;
+                  strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
+                  const actCtx = {
+                    guild: msg.guild,
+                    client: msg.client,
+                    requesterId: !isBotMessage ? msg.author.id : undefined,
+                    channelId: msg.channelId,
+                    messageId: msg.id,
+                    threadParentId,
+                    deferScheduler: params.deferScheduler,
+                    transport: new DiscordTransportClient(msg.guild, msg.client),
+                    confirmation: {
+                      mode: 'interactive' as const,
+                      sessionKey,
+                      userId: msg.author.id,
+                      // Bot messages cannot bypass destructive confirmation — !confirm is blocked.
+                      bypassDestructive: !isBotMessage,
+                    },
+                  };
+                  // Construct per-message memoryCtx with real user ID and Discord metadata.
+                  // Null out memoryCtx for bot messages unless memory write is explicitly enabled.
+                  const perMessageMemoryCtx = (params.memoryCtx && (!isBotMessage || params.botMessageMemoryWriteEnabled)) ? {
+                    ...params.memoryCtx,
                     sessionKey,
                     userId: msg.author.id,
-                    // Bot messages cannot bypass destructive confirmation — !confirm is blocked.
-                    bypassDestructive: !isBotMessage,
-                  },
-                };
-                // Construct per-message memoryCtx with real user ID and Discord metadata.
-                // Null out memoryCtx for bot messages unless memory write is explicitly enabled.
-                const perMessageMemoryCtx = (params.memoryCtx && (!isBotMessage || params.botMessageMemoryWriteEnabled)) ? {
-                  ...params.memoryCtx,
-                  sessionKey,
-                  userId: msg.author.id,
-                  channelId: msg.channelId,
-                  messageId: msg.id,
-                  guildId: msg.guildId ?? undefined,
-                  channelName: channelName(msg.channel),
-                } : undefined;
-                // Pre-edit: replace the streaming preview with clean text before
-                // executing actions.  If an action (e.g. taskClose) archives the
-                // thread, the final editThenSendChunks will fail with 50083 and the
-                // streaming preview would remain visible with raw <discord-action>
-                // JSON.  This pre-edit ensures the visible state is clean regardless.
-                try {
-                  const preEditRaw = cleanProcessedText.trimEnd() || '...';
-                  const preEditText = closeFenceIfOpen(preEditRaw.slice(0, 2000));
-                  await reply.edit({ content: preEditText, allowedMentions: NO_MENTIONS });
-                } catch {
-                  // Best-effort — the reply may already be gone or the thread archived
-                  // by a prior follow-up.  The final editThenSendChunks will handle it.
+                    channelId: msg.channelId,
+                    messageId: msg.id,
+                    guildId: msg.guildId ?? undefined,
+                    channelName: channelName(msg.channel),
+                  } : undefined;
+                  // Pre-edit: replace the streaming preview with clean text before
+                  // executing actions.  If an action (e.g. taskClose) archives the
+                  // thread, the final editThenSendChunks will fail with 50083 and the
+                  // streaming preview would remain visible with raw <discord-action>
+                  // JSON.  This pre-edit ensures the visible state is clean regardless.
+                  try {
+                    const preEditRaw = cleanProcessedText.trimEnd() || '...';
+                    const preEditText = closeFenceIfOpen(preEditRaw.slice(0, 2000));
+                    await reply.edit({ content: preEditText, allowedMentions: NO_MENTIONS });
+                  } catch {
+                    // Best-effort — the reply may already be gone or the thread archived
+                    // by a prior follow-up.  The final editThenSendChunks will handle it.
+                  }
+                  actionResults = await executeDiscordActions(actions as Parameters<typeof executeDiscordActions>[0], actCtx, params.log, {
+                    taskCtx: params.taskCtx,
+                    cronCtx: params.cronCtx,
+                    forgeCtx: params.forgeCtx,
+                    planCtx: params.planCtx,
+                    memoryCtx: perMessageMemoryCtx,
+                    configCtx: params.configCtx,
+                    imagegenCtx: params.imagegenCtx,
+                    voiceCtx: params.voiceCtx,
+                    spawnCtx: params.spawnCtx,
+                  });
+                  for (let i = 0; i < actionResults.length; i++) {
+                    const result = actionResults[i];
+                    metrics.recordActionResult(result.ok);
+                    globalTraceStore.addEvent(traceId, {
+                      type: 'action_result',
+                      at: Date.now(),
+                      action: actions[i]?.type ?? 'unknown',
+                      ok: result.ok,
+                      detail: result.ok
+                        ? summarizeTraceValue(result.summary, 220)
+                        : summarizeTraceValue(result.error, 220),
+                    });
+                    params.log?.info(
+                      { flow: 'message', sessionKey, ok: result.ok },
+                      'obs.action.result',
+                    );
+                  }
+                  const anyActionSucceeded = actionResults.some((r) => r.ok);
+                  processedText = appendActionResults(cleanProcessedText.trimEnd(), actions, actionResults);
+                  // When all display lines were suppressed (e.g. sendMessage-only) and there's
+                  // no prose, delete the placeholder instead of posting "(no output)".
+                  if (
+                    !processedText.trim()
+                    && anyActionSucceeded
+                    && collectedImages.length === 0
+                    && strippedUnrecognizedTypes.length === 0
+                    && parseFailuresCount === 0
+                  ) {
+                    try { await reply.delete(); } catch { /* ignore */ }
+                    replyFinalized = true;
+                    params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
+                    break;
+                  }
+                  if (statusRef?.current) {
+                    for (let i = 0; i < actionResults.length; i++) {
+                      const r = actionResults[i];
+                      if (!r.ok) {
+                        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                        statusRef.current.actionFailed(actions[i].type, r.error);
+                      }
+                    }
+                  }
+                } else {
+                  processedText = cleanProcessedText;
+                  strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
                 }
-                actionResults = await executeDiscordActions(actions as Parameters<typeof executeDiscordActions>[0], actCtx, params.log, {
-                  taskCtx: params.taskCtx,
-                  cronCtx: params.cronCtx,
-                  forgeCtx: params.forgeCtx,
-                  planCtx: params.planCtx,
-                  memoryCtx: perMessageMemoryCtx,
-                  configCtx: params.configCtx,
-                  imagegenCtx: params.imagegenCtx,
-                  voiceCtx: params.voiceCtx,
-                  spawnCtx: params.spawnCtx,
-                });
-                for (const result of actionResults) {
-                  metrics.recordActionResult(result.ok);
-                  params.log?.info(
-                    { flow: 'message', sessionKey, ok: result.ok },
-                    'obs.action.result',
-                  );
-                }
-                const anyActionSucceeded = actionResults.some((r) => r.ok);
-                processedText = appendActionResults(cleanProcessedText.trimEnd(), actions, actionResults);
-                // When all display lines were suppressed (e.g. sendMessage-only) and there's
-                // no prose, delete the placeholder instead of posting "(no output)".
-                if (
-                  !processedText.trim()
-                  && anyActionSucceeded
-                  && collectedImages.length === 0
-                  && strippedUnrecognizedTypes.length === 0
-                  && parseFailuresCount === 0
-                ) {
+              }
+              const parsedCapsule = parseCapsuleBlock(processedText);
+              if (parsedCapsule.capsule) {
+                effectiveContinuationCapsule = parsedCapsule.capsule;
+                emittedContinuationCapsule = true;
+              }
+              processedText = parsedCapsule.cleanText;
+              processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
+              processedText = appendParseFailureNotice(processedText, parseFailuresCount);
+
+              // Suppression: if a follow-up response is trivially short and has no further
+              // actions, suppress it to avoid posting empty messages like "Got it."
+              // Skip suppression when images are present, or when unrecognized action blocks
+              // were stripped (the AI tried to act — the user must see "(no output)").
+              if (followUpDepth > 0) {
+                if (shouldSuppressFollowUp(processedText, actions.length, collectedImages.length, strippedUnrecognizedTypes.length)) {
+                  const stripped = processedText.replace(/\s+/g, ' ').trim();
                   try { await reply.delete(); } catch { /* ignore */ }
                   replyFinalized = true;
-                  params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
+                  params.log?.info({ sessionKey, followUpDepth, chars: stripped.length }, 'followup:suppressed');
                   break;
+                } else if (strippedUnrecognizedTypes.length > 0 && actions.length === 0 && collectedImages.length === 0) {
+                  params.log?.info({ sessionKey, followUpDepth, types: strippedUnrecognizedTypes }, 'followup:suppression-bypassed');
                 }
-                if (statusRef?.current) {
-                  for (let i = 0; i < actionResults.length; i++) {
-                    const r = actionResults[i];
-                    if (!r.ok) {
-                      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                      statusRef.current.actionFailed(actions[i].type, r.error);
-                    }
+              } else if (strippedUnrecognizedTypes.length > 0 && actions.length === 0) {
+                params.log?.info({ sessionKey, types: strippedUnrecognizedTypes }, 'discord:unrecognized-action-types-stripped');
+              }
+
+              if (!isShuttingDown()) {
+                try {
+                  await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
+                  replyFinalized = true;
+                } catch (editErr) {
+                  // Thread archived by a taskClose action — the close summary was already
+                  // posted inside closeTaskThread, so the only thing lost is Claude's
+                  // conversational wrapper ("Done. Closing it out now.").  Swallow gracefully.
+                  if (errorCode(editErr) === 50083) {
+                    params.log?.info({ sessionKey }, 'discord:reply skipped (thread archived by action)');
+                    try { await reply.delete(); } catch { /* best-effort cleanup */ }
+                    replyFinalized = true;
+                  } else {
+                    throw editErr;
                   }
                 }
               } else {
-                processedText = cleanProcessedText;
-                strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
-              }
-            }
-            const parsedCapsule = parseCapsuleBlock(processedText);
-            if (parsedCapsule.capsule) {
-              effectiveContinuationCapsule = parsedCapsule.capsule;
-              emittedContinuationCapsule = true;
-            }
-            processedText = parsedCapsule.cleanText;
-            processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
-            processedText = appendParseFailureNotice(processedText, parseFailuresCount);
-
-            // Suppression: if a follow-up response is trivially short and has no further
-            // actions, suppress it to avoid posting empty messages like "Got it."
-            // Skip suppression when images are present, or when unrecognized action blocks
-            // were stripped (the AI tried to act — the user must see "(no output)").
-            if (followUpDepth > 0) {
-              if (shouldSuppressFollowUp(processedText, actions.length, collectedImages.length, strippedUnrecognizedTypes.length)) {
-                const stripped = processedText.replace(/\s+/g, ' ').trim();
-                try { await reply.delete(); } catch { /* ignore */ }
                 replyFinalized = true;
-                params.log?.info({ sessionKey, followUpDepth, chars: stripped.length }, 'followup:suppressed');
-                break;
-              } else if (strippedUnrecognizedTypes.length > 0 && actions.length === 0 && collectedImages.length === 0) {
-                params.log?.info({ sessionKey, followUpDepth, types: strippedUnrecognizedTypes }, 'followup:suppression-bypassed');
               }
-            } else if (strippedUnrecognizedTypes.length > 0 && actions.length === 0) {
-              params.log?.info({ sessionKey, types: strippedUnrecognizedTypes }, 'discord:unrecognized-action-types-stripped');
-            }
 
-            if (!isShuttingDown()) {
-              try {
-                await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
-                replyFinalized = true;
-              } catch (editErr) {
-                // Thread archived by a taskClose action — the close summary was already
-                // posted inside closeTaskThread, so the only thing lost is Claude's
-                // conversational wrapper ("Done. Closing it out now.").  Swallow gracefully.
-                if (errorCode(editErr) === 50083) {
-                  params.log?.info({ sessionKey }, 'discord:reply skipped (thread archived by action)');
-                  try { await reply.delete(); } catch { /* best-effort cleanup */ }
-                  replyFinalized = true;
-                } else {
-                  throw editErr;
-                }
-              }
-            } else {
-              replyFinalized = true;
-            }
+              // -- auto-follow-up check --
+              if (followUpDepth >= params.actionFollowupDepth) break;
+              if (actions.length === 0) break;
+              if (!shouldTriggerFollowUp(actions, actionResults)) break;
 
-            // -- auto-follow-up check --
-            if (followUpDepth >= params.actionFollowupDepth) break;
-            if (actions.length === 0) break;
-            if (!shouldTriggerFollowUp(actions, actionResults)) break;
-
-            // Build follow-up prompt with action results.
-            pendingFollowUpPlaceholder = buildFailureRetryPlaceholder(actions, actionResults);
-            isFailureFollowUp = pendingFollowUpPlaceholder !== null;
-            const followUpLines = buildAllResultLines(actionResults);
-            const followUpSuffix = isFailureFollowUp
-              ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
-              : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
-            currentPrompt =
-              `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
-              followUpLines.join('\n') +
-              `\n\n${followUpSuffix}`;
-            followUpDepth++;
+              // Build follow-up prompt with action results.
+              pendingFollowUpPlaceholder = buildFailureRetryPlaceholder(actions, actionResults);
+              isFailureFollowUp = pendingFollowUpPlaceholder !== null;
+              const followUpLines = buildAllResultLines(actionResults);
+              const followUpSuffix = isFailureFollowUp
+                ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
+                : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
+              currentPrompt =
+                `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
+                followUpLines.join('\n') +
+                `\n\n${followUpSuffix}`;
+              followUpDepth++;
+          }
+          } catch (traceErr) {
+            traceOutcome = abortSignal?.aborted ? 'aborted' : 'error';
+            globalTraceStore.addEvent(traceId, {
+              type: 'error',
+              at: Date.now(),
+              message: traceErr instanceof Error ? traceErr.message : String(traceErr),
+              name: traceErr instanceof Error ? traceErr.name : undefined,
+              stack: traceErr instanceof Error ? summarizeTraceValue(traceErr.stack, 400) : undefined,
+              stage: 'message_flow',
+            });
+            throw traceErr;
+          } finally {
+            globalTraceStore.endTrace(traceId, abortSignal?.aborted ? 'aborted' : traceOutcome);
           }
 
           } catch (innerErr) {
