@@ -7,6 +7,7 @@ import {
   buildTieredDiscordActionsPromptSection,
   buildDisplayResultLines,
   buildAllResultLines,
+  withoutRequesterGatedActionFlags,
 } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionResult } from './actions.js';
 import { TaskStore } from '../tasks/store.js';
@@ -352,6 +353,46 @@ describe('parseDiscordActions', () => {
   it('prompt Rules section confirms multiple same-type actions are supported', () => {
     const prompt = discordActionsPromptSection(ALL_FLAGS, 'ClawBot');
     expect(prompt).toContain('Multiple same-type actions are supported');
+  });
+});
+
+describe('withoutRequesterGatedActionFlags', () => {
+  it('disables requester-gated Discord categories and preserves internal ones', () => {
+    expect(withoutRequesterGatedActionFlags({
+      channels: true,
+      messaging: true,
+      guild: true,
+      moderation: true,
+      polls: true,
+      tasks: true,
+      crons: true,
+      botProfile: true,
+      forge: true,
+      plan: true,
+      memory: true,
+      config: true,
+      defer: true,
+      imagegen: true,
+      voice: true,
+      spawn: true,
+    })).toEqual({
+      channels: false,
+      messaging: false,
+      guild: false,
+      moderation: false,
+      polls: false,
+      tasks: true,
+      crons: true,
+      botProfile: true,
+      forge: true,
+      plan: true,
+      memory: true,
+      config: true,
+      defer: true,
+      imagegen: true,
+      voice: true,
+      spawn: true,
+    });
   });
 });
 

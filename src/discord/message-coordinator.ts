@@ -10,7 +10,7 @@ import { KeyedQueue } from '../group-queue.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { discordSessionKey } from './session-key.js';
-import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildDisplayResultLines, buildAllResultLines, appendActionResults } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildDisplayResultLines, buildAllResultLines, appendActionResults, withoutRequesterGatedActionFlags } from './actions.js';
 import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './actions.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
@@ -808,22 +808,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       };
 
       if (isBotMessage) {
-        actionFlags.channels = false;
-        actionFlags.guild = false;
+        Object.assign(actionFlags, withoutRequesterGatedActionFlags(actionFlags));
         actionFlags.forge = false;
         actionFlags.plan = false;
         actionFlags.memory = false;
         actionFlags.config = false;
         actionFlags.defer = false;
         actionFlags.botProfile = false;
-        actionFlags.moderation = false;
         actionFlags.crons = false;
         actionFlags.tasks = false;
         actionFlags.imagegen = false;
         actionFlags.voice = false;
         actionFlags.spawn = false;
-        actionFlags.polls = false;
-        actionFlags.messaging = true;
       }
 
       if (!isDm && params.allowChannelIds) {

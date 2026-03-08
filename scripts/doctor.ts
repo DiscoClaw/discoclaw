@@ -11,6 +11,7 @@ import 'dotenv/config';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { inspect } from '../src/health/config-doctor.js';
 import { validateDiscordToken, validateSnowflake, validateSnowflakes } from '../src/validate.js';
 import { missingEnvVars } from './doctor-env-diff.js';
 import { checkRequiredForums, checkRuntimeBinaries } from './doctor-lib.js';
@@ -242,6 +243,22 @@ if (channelIds) {
 for (const check of checkRequiredForums(process.env)) {
   if (check.ok) ok(check.label);
   else fail(check.label, check.hint);
+}
+
+// 10b. Shared config doctor findings
+const doctorReport = await inspect({ cwd: root, env: process.env });
+if (doctorReport.findings.length === 0) {
+  ok('Config doctor found no config drift');
+} else {
+  for (const finding of doctorReport.findings) {
+    const label = `Config doctor [${finding.severity}] ${finding.message}`;
+    const hint = finding.autoFixable
+      ? `${finding.recommendation} Auto-fixable via: discoclaw doctor --fix`
+      : finding.recommendation;
+
+    if (finding.severity === 'info') ok(label);
+    else fail(label, hint);
+  }
 }
 
 // 11. Discord connection test (--check-connection only)
