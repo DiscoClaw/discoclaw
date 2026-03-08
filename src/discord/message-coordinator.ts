@@ -86,7 +86,12 @@ import { parseHelpCommand, handleHelpCommand } from './help-command.js';
 import { parseVoiceStatusCommand, renderVoiceStatusReport } from './voice-status-command.js';
 import type { VoiceStatusSnapshot } from './voice-status-command.js';
 import { parseVoiceCommand, handleVoiceCommand } from './voice-command.js';
-import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './health-command.js';
+import {
+  parseHealthCommand,
+  renderHealthDoctorReport,
+  renderHealthReport,
+  renderHealthToolsReport,
+} from './health-command.js';
 import { parseStatusCommand, collectStatusSnapshot, renderStatusReport } from './status-command.js';
 import { parseTraceCommand, renderTraceDetail, renderTraceList } from './trace-command.js';
 import type { StatusCommandContext } from './status-command.js';
@@ -934,6 +939,30 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         ? parseHealthCommand(String(msg.content ?? ''))
         : null;
       if (!isBotMessage && healthMode) {
+        if (healthMode === 'doctor' || healthMode === 'doctor-fix') {
+          try {
+            const { inspect, applyFixes } = await import('../health/config-doctor.js');
+            const doctorReport = await inspect({ cwd: params.projectCwd, env: process.env });
+            const fixResult = healthMode === 'doctor-fix'
+              ? await applyFixes(doctorReport, { cwd: params.projectCwd, env: process.env })
+              : undefined;
+            await msg.reply({
+              content: renderHealthDoctorReport({
+                report: doctorReport,
+                fixResult,
+                botDisplayName: params.botDisplayName,
+              }),
+              allowedMentions: NO_MENTIONS,
+            });
+          } catch (err) {
+            await msg.reply({
+              content: `\`\`\`text\nConfig doctor error: ${String(err)}\n\`\`\``,
+              allowedMentions: NO_MENTIONS,
+            });
+          }
+          return;
+        }
+
         if (healthMode === 'tools') {
           const liveTools = await resolveEffectiveTools({
             workspaceCwd: params.workspaceCwd,
