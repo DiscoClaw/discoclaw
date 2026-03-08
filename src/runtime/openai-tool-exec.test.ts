@@ -3,26 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeToolCall } from './openai-tool-exec.js';
-import { normalizeRuntimeFailure } from './runtime-failure.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
 let tmpDir: string;
 
 function parseJsonResult(result: string): Record<string, unknown> {
-  const parsed = JSON.parse(result) as Record<string, unknown>;
-  if (parsed['envelope'] === 'runtime_failure') {
-    const failure = normalizeRuntimeFailure(parsed);
-    return {
-      ...parsed,
-      operation: failure.metadata.operation,
-      failure_code_version: failure.metadata.failureCodeVersion,
-      failure_code: failure.metadata.failureCode,
-      details: failure.metadata.details,
-      ...failure.metadata.details,
-    };
-  }
-  return parsed;
+  return JSON.parse(result) as Record<string, unknown>;
 }
 
 beforeEach(async () => {
@@ -722,8 +709,10 @@ describe('pipeline.start/status/resume/cancel', () => {
     );
     expect(start.ok).toBe(false);
     const payload = parseJsonResult(start.result);
-    expect(payload['status']).toBe('failed');
-    expect(payload['last_error']).toMatch(/not allowlisted/i);
+    expect(payload['operation']).toBe('pipeline.start');
+    expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect(String(payload['message'])).toMatch(/not allowlisted/i);
+    expect((payload['run'] as Record<string, unknown>)['status']).toBe('failed');
   });
 
   it('pipeline.resume requires retry scheduling before rerunning failed step', async () => {
@@ -748,7 +737,10 @@ describe('pipeline.start/status/resume/cancel', () => {
       { allowedToolNames: new Set(['pipeline.resume']) },
     );
     expect(firstResume.ok).toBe(false);
-    expect(parseJsonResult(firstResume.result)['status']).toBe('failed');
+    const firstResumePayload = parseJsonResult(firstResume.result);
+    expect(firstResumePayload['operation']).toBe('pipeline.resume');
+    expect(firstResumePayload['failure_code']).toBe('E_POLICY_BLOCKED');
+    expect((firstResumePayload['run'] as Record<string, unknown>)['status']).toBe('failed');
 
     const secondResumeBlocked = await executeToolCall(
       'pipeline.resume',
@@ -955,9 +947,9 @@ describe('pipeline.start/status/resume/cancel', () => {
     );
     expect(start.ok).toBe(false);
     const payload = parseJsonResult(start.result);
-    expect(payload['status']).toBe('failed');
     expect(payload['failure_code']).toBe('E_POLICY_BLOCKED');
-    expect(payload['last_error']).toMatch(/nested pipeline/i);
+    expect(String(payload['message'])).toMatch(/nested pipeline/i);
+    expect((payload['run'] as Record<string, unknown>)['status']).toBe('failed');
   });
 
   it('returns structured E_POLICY_BLOCKED when nested pipeline.* is called directly in pipelineStepMode', async () => {

@@ -4,6 +4,7 @@
 
 import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeInvokeParams } from './types.js';
 import { splitSystemPrompt } from './openai-compat.js';
+import { createRuntimeErrorEvent } from './runtime-failure.js';
 
 export type GeminiRestOpts = {
   apiKey: string;
@@ -84,16 +85,15 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
             } catch {
               /* ignore parse error */
             }
-            yield {
-              type: 'error',
-              message: `Gemini API error: ${response.status} ${response.statusText}${detail ? `: ${detail}` : ''}`,
-            };
+            yield createRuntimeErrorEvent(
+              `Gemini API error: ${response.status} ${response.statusText}${detail ? `: ${detail}` : ''}`,
+            );
             yield { type: 'done' };
             return;
           }
 
           if (!response.body) {
-            yield { type: 'error', message: 'Gemini API returned no response body' };
+            yield createRuntimeErrorEvent('Gemini API returned no response body');
             yield { type: 'done' };
             return;
           }
@@ -184,15 +184,15 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
 
           if (controller.signal.aborted) {
             if (params.signal?.aborted) {
-              yield { type: 'error', message: 'aborted' };
+              yield createRuntimeErrorEvent('aborted');
             } else {
-              yield { type: 'error', message: `gemini-rest timed out after ${params.timeoutMs}ms` };
+              yield createRuntimeErrorEvent(`gemini-rest timed out after ${params.timeoutMs}ms`);
             }
             yield { type: 'done' };
             return;
           }
 
-          yield { type: 'error', message: String(err) };
+          yield createRuntimeErrorEvent(String(err));
           yield { type: 'done' };
         } finally {
           if (timer) clearTimeout(timer);

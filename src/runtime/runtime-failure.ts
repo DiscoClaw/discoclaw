@@ -7,6 +7,7 @@ import {
   type PipelineFailureCode,
   type RuntimeFailure,
   type RuntimeFailureCode,
+  type RuntimeErrorEvent,
   type RuntimeFailureEvent,
   type RuntimeFailureInputEvent,
   type RuntimeFailureMetadata,
@@ -32,7 +33,7 @@ type LegacyPipelineFailurePayload = {
   ok: false;
   operation: string;
   failure_code_version?: string | null;
-  failure_code?: PipelineFailureCode | null;
+  failure_code?: string | null;
   message: string;
   [key: string]: unknown;
 };
@@ -78,6 +79,20 @@ type GlobalSupervisorRuntimeFailureInit = {
   limits: GlobalSupervisorLimits;
   rawMessage?: string;
 };
+
+export type ProjectedPipelineFailure = {
+  code: PipelineFailureCode;
+  message: string;
+  rawMessage: string;
+  userMessage: string;
+  retryable: boolean | null;
+  failureCodeVersion: string | null;
+  failureCode: PipelineFailureCode | null;
+};
+
+const SUPERVISOR_TRANSIENT_ERROR_RE = /(timed?\s*out|timeout|rate\s*limit|429|overload|temporar|econnreset|eai_again|503|connection\s+reset|network\s+error|service\s+unavailable)/i;
+const SUPERVISOR_HARD_ERROR_RE = /(invalid\s+api\s+key|unauthoriz|forbidden|permission\s+denied|outside\s+allowed\s+roots|malformed\s+json)/i;
+const SUPERVISOR_ABORTED_RE = /abort(ed)?/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -302,11 +317,55 @@ export function createGlobalSupervisorRuntimeFailure(
   });
 }
 
+function getPipelineToolClassification(
+  code: PipelineFailureCode | 'UNKNOWN',
+): { code: PipelineFailureCode; userMessage: string; retryable: boolean | null } {
+  switch (code) {
+    case 'E_TOOL_UNAVAILABLE':
+      return {
+        code,
+        userMessage: 'The requested pipeline tool is unavailable in this runtime configuration.',
+        retryable: false,
+      };
+    case 'E_POLICY_BLOCKED':
+      return {
+        code,
+        userMessage: 'The requested pipeline action was blocked by runtime policy.',
+        retryable: false,
+      };
+    case 'E_RETRY_EXHAUSTED':
+      return {
+        code,
+        userMessage: 'The pipeline exhausted its retry budget before finishing.',
+        retryable: true,
+      };
+    case 'E_IDEMPOTENCY_CONFLICT':
+      return {
+        code,
+        userMessage: 'A matching pipeline run already exists. Check the existing run instead of starting a duplicate.',
+        retryable: true,
+      };
+    case 'E_RUN_NOT_FOUND':
+      return {
+        code,
+        userMessage: 'The requested pipeline run was not found.',
+        retryable: false,
+      };
+    default:
+      return {
+        code: 'E_TOOL_UNAVAILABLE',
+        userMessage: defaultUnknownMessage('Pipeline tool failed.'),
+        retryable: null,
+      };
+  }
+}
+
 function classifyPipelineFailure(
   payload: LegacyPipelineFailurePayload,
   rawMessage: string,
 ): RuntimeFailure {
   const code = payload.failure_code ?? null;
+  const knownCode = isPipelineFailureCode(code) ? code : null;
   const message = String(payload.message ?? '').trim() || 'Pipeline tool failed.';
   const {
     ok: _ok,
@@ -317,43 +376,17 @@ function classifyPipelineFailure(
     ...details
   } = payload;
 
-  let userMessage = defaultUnknownMessage(message);
-  let retryable: boolean | null = null;
-
-  switch (code) {
-    case 'E_TOOL_UNAVAILABLE':
-      userMessage = 'The requested pipeline tool is unavailable in this runtime configuration.';
-      retryable = false;
-      break;
-    case 'E_POLICY_BLOCKED':
-      userMessage = 'The requested pipeline action was blocked by runtime policy.';
-      retryable = false;
-      break;
-    case 'E_RETRY_EXHAUSTED':
-      userMessage = 'The pipeline exhausted its retry budget before finishing.';
-      retryable = true;
-      break;
-    case 'E_IDEMPOTENCY_CONFLICT':
-      userMessage = 'A matching pipeline run already exists. Check the existing run instead of starting a duplicate.';
-      retryable = true;
-      break;
-    case 'E_RUN_NOT_FOUND':
-      userMessage = 'The requested pipeline run was not found.';
-      retryable = false;
-      break;
-    default:
-      break;
-  }
+  const classification = getPipelineToolClassification(knownCode ?? 'UNKNOWN');
 
   return createPipelineToolRuntimeFailure({
     operation: payload.operation,
-    code: code ?? 'UNKNOWN',
+    code: knownCode ?? 'UNKNOWN',
     message,
     rawMessage,
-    userMessage,
-    retryable,
+    userMessage: knownCode ? classification.userMessage : defaultUnknownMessage(message),
+    retryable: classification.retryable,
     failureCodeVersion: payload.failure_code_version ?? null,
-    failureCode: code,
+    failureCode: knownCode,
     details,
   });
 }
@@ -371,7 +404,7 @@ function isLegacyPipelineFailurePayload(value: unknown): value is LegacyPipeline
   if (value['ok'] !== false) return false;
   if (typeof value['operation'] !== 'string' || typeof value['message'] !== 'string') return false;
   const code = value['failure_code'];
-  return code === undefined || code === null || isPipelineFailureCode(code);
+  return code === undefined || code === null || typeof code === 'string';
 }
 
 function isGlobalSupervisorFailureKind(value: unknown): value is GlobalSupervisorFailureKind {
@@ -661,6 +694,141 @@ export function normalizeRuntimeFailure(input: unknown): RuntimeFailure {
   return classifyRawRuntimeFailure(String(input ?? ''));
 }
 
+export function classifyRuntimeFailureForGlobalSupervisor(
+  input: RuntimeFailure | string | Error,
+  opts: { treatAbortedAsRetryable: boolean; signalAborted: boolean },
+): { kind: GlobalSupervisorFailureKind; retryable: boolean } {
+  const failure = normalizeRuntimeFailure(input);
+  const message = sanitizeRawMessage(failure.rawMessage) || sanitizeRawMessage(failure.message);
+
+  if (failure.source === 'global_supervisor' && failure.metadata.failureKind && typeof failure.retryable === 'boolean') {
+    return {
+      kind: failure.metadata.failureKind,
+      retryable: failure.retryable,
+    };
+  }
+
+  if (SUPERVISOR_ABORTED_RE.test(message)) {
+    return {
+      kind: 'aborted',
+      retryable: opts.treatAbortedAsRetryable && !opts.signalAborted,
+    };
+  }
+
+  if (failure.retryable === false) {
+    return {
+      kind: 'hard_error',
+      retryable: false,
+    };
+  }
+
+  if (failure.retryable === true) {
+    if (
+      failure.code === 'RUNTIME_TIMEOUT'
+      || failure.code === 'STREAM_STALL'
+      || SUPERVISOR_TRANSIENT_ERROR_RE.test(message)
+    ) {
+      return {
+        kind: 'transient_error',
+        retryable: true,
+      };
+    }
+
+    return {
+      kind: 'runtime_error',
+      retryable: true,
+    };
+  }
+
+  if (SUPERVISOR_HARD_ERROR_RE.test(message)) {
+    return {
+      kind: 'hard_error',
+      retryable: false,
+    };
+  }
+
+  if (SUPERVISOR_TRANSIENT_ERROR_RE.test(message)) {
+    return {
+      kind: 'transient_error',
+      retryable: true,
+    };
+  }
+
+  return {
+    kind: 'runtime_error',
+    retryable: true,
+  };
+}
+
+function classifyProjectedPipelineFailure(message: string): {
+  code: PipelineFailureCode;
+  userMessage: string;
+  retryable: boolean | null;
+} {
+  if (/tool not allowlisted/i.test(message) || /nested pipeline/i.test(message) || /nested step/i.test(message)) {
+    return getPipelineToolClassification('E_POLICY_BLOCKED');
+  }
+  if (/run not found/i.test(message) || /run_id is required/i.test(message)) {
+    return getPipelineToolClassification('E_RUN_NOT_FOUND');
+  }
+  if (/retry exhausted/i.test(message)) {
+    return getPipelineToolClassification('E_RETRY_EXHAUSTED');
+  }
+  if (/idempotency key conflict/i.test(message) || /pipeline run already exists/i.test(message)) {
+    return getPipelineToolClassification('E_IDEMPOTENCY_CONFLICT');
+  }
+  if (/unknown tool/i.test(message)) {
+    return getPipelineToolClassification('E_TOOL_UNAVAILABLE');
+  }
+  if (
+    /\bis required\b/i.test(message)
+    || /old_string not found in file/i.test(message)
+    || /must be unique/i.test(message)
+    || /file too large/i.test(message)
+    || /invalid (glob pattern|url)/i.test(message)
+    || /unsafe glob match rejected/i.test(message)
+    || /path (outside allowed roots|not accessible)/i.test(message)
+    || /pattern (must be relative|cannot contain parent directory traversal|contains malformed glob syntax)/i.test(message)
+    || /^blocked:/i.test(message)
+  ) {
+    return {
+      code: 'E_POLICY_BLOCKED',
+      userMessage: 'The pipeline step failed because its tool input, path, or content constraints were not satisfied.',
+      retryable: false,
+    };
+  }
+  return getPipelineToolClassification('E_TOOL_UNAVAILABLE');
+}
+
+export function projectPipelineFailure(input: unknown): ProjectedPipelineFailure {
+  const normalized = normalizeRuntimeFailure(input);
+  const message = normalized.message;
+  const rawMessage = normalized.rawMessage;
+  const structuredCode = normalized.metadata.failureCode;
+  if (structuredCode) {
+    return {
+      code: structuredCode,
+      message,
+      rawMessage,
+      userMessage: normalized.userMessage,
+      retryable: normalized.retryable,
+      failureCodeVersion: normalized.metadata.failureCodeVersion ?? null,
+      failureCode: structuredCode,
+    };
+  }
+
+  const classification = classifyProjectedPipelineFailure(rawMessage || message);
+  return {
+    code: classification.code,
+    message,
+    rawMessage,
+    userMessage: classification.userMessage,
+    retryable: classification.retryable,
+    failureCodeVersion: null,
+    failureCode: classification.code,
+  };
+}
+
 export function normalizeRuntimeFailureEvent(event: RuntimeFailureInputEvent): RuntimeFailure {
   if (event.type === 'runtime_failure') {
     return normalizeRuntimeFailure(event.failure);
@@ -669,6 +837,15 @@ export function normalizeRuntimeFailureEvent(event: RuntimeFailureInputEvent): R
     return normalizeRuntimeFailure(event.failure);
   }
   return normalizeRuntimeFailure(event.message);
+}
+
+export function createRuntimeErrorEvent(input: RuntimeFailure | string | Error): RuntimeErrorEvent {
+  const failure = normalizeRuntimeFailure(input);
+  return {
+    type: 'error',
+    message: failure.message,
+    failure,
+  };
 }
 
 export function serializeRuntimeFailure(input: RuntimeFailure): string {

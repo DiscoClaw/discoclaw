@@ -7,6 +7,7 @@ vi.mock('execa', () => ({
 
 import { execa } from 'execa';
 import { LongRunningProcess, type LongRunningProcessOpts } from './long-running-process.js';
+import { normalizeRuntimeFailure } from './runtime-failure.js';
 
 function createMockSubprocess() {
   const stdout = new EventEmitter();
@@ -162,7 +163,10 @@ describe('LongRunningProcess', () => {
 
     await genPromise;
 
-    expect(events.find((e) => e.type === 'error')?.message).toContain('hang detected');
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(normalizeRuntimeFailure((error as { message: string }).message).message).toContain('hang detected');
+    expect((error as { failure?: { message: string } }).failure?.message).toContain('hang detected');
     expect(events.find((e) => e.type === 'done')).toBeTruthy();
     expect(proc.state).toBe('dead');
   });
@@ -202,7 +206,10 @@ describe('LongRunningProcess', () => {
 
     await genPromise;
 
-    expect(events.find((e) => e.type === 'error')?.message).toContain('process exited unexpectedly');
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(normalizeRuntimeFailure((error as { message: string }).message).message).toContain('process exited unexpectedly');
+    expect((error as { failure?: { message: string } }).failure?.message).toContain('process exited unexpectedly');
     expect(events.find((e) => e.type === 'done')).toBeTruthy();
     expect(proc.state).toBe('dead');
   });
@@ -229,7 +236,10 @@ describe('LongRunningProcess', () => {
 
     expect(events.find((e) => e.type === 'done')).toBeTruthy();
     expect(proc.state).toBe('dead');
-    expect(events.find((e) => e.type === 'error')?.message).toBe('multi-turn: terminated');
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(normalizeRuntimeFailure((error as { message: string }).message).message).toBe('multi-turn: terminated');
+    expect((error as { failure?: { message: string } }).failure?.message).toBe('multi-turn: terminated');
   });
 
   it('forceKill() while busy unblocks the consumer (emits done)', async () => {
@@ -254,7 +264,10 @@ describe('LongRunningProcess', () => {
 
     expect(events.find((e) => e.type === 'done')).toBeTruthy();
     expect(proc.state).toBe('dead');
-    expect(events.find((e) => e.type === 'error')?.message).toBe('multi-turn: terminated');
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(normalizeRuntimeFailure((error as { message: string }).message).message).toBe('multi-turn: terminated');
+    expect((error as { failure?: { message: string } }).failure?.message).toBe('multi-turn: terminated');
   });
 
   it('sendTurn on non-idle process yields error', async () => {
@@ -270,7 +283,10 @@ describe('LongRunningProcess', () => {
       events.push(evt);
     }
 
-    expect(events.find((e) => e.type === 'error')?.message).toContain('cannot send turn');
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(normalizeRuntimeFailure((error as { message: string }).message).message).toContain('cannot send turn');
+    expect((error as { failure?: { message: string } }).failure?.message).toContain('cannot send turn');
     expect(events.find((e) => e.type === 'done')).toBeTruthy();
   });
 
@@ -488,7 +504,10 @@ describe('LongRunningProcess', () => {
       events.push(evt);
     }
 
-    expect(events.find((e) => e.type === 'error')?.message).toBe('long-running: context overflow');
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(normalizeRuntimeFailure((error as { message: string }).message).message).toBe('long-running: context overflow');
+    expect((error as { failure?: { message: string } }).failure?.message).toBe('long-running: context overflow');
     expect(events.find((e) => e.type === 'done')).toBeTruthy();
     expect(events.find((e) => e.type === 'text_final')).toBeUndefined();
     expect(proc.state).toBe('idle');

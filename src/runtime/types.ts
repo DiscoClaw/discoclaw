@@ -81,6 +81,7 @@ export type RuntimeFailure = {
 export type RuntimeErrorEvent = {
   type: 'error';
   message: string;
+  /** Optional normalized failure envelope; when present, consumers should prefer this over `message`. */
   failure?: RuntimeFailure;
 };
 

@@ -55,9 +55,8 @@ Runtime-wide wrapper for every invocation (`plan -> execute -> evaluate -> decid
 | `DISCOCLAW_GLOBAL_SUPERVISOR_MAX_TOTAL_EVENTS` | `5000` | Max total streamed runtime events across all cycles before bail. Must be `>= 1`. |
 | `DISCOCLAW_GLOBAL_SUPERVISOR_MAX_WALL_TIME_MS` | `0` | Wall-time cap for the full supervisor loop. `0` disables the cap. Must be `>= 0`. |
 
-If the supervisor bails, it now emits a serialized `RuntimeFailure` envelope on the runtime error path. The embedded `rawMessage` preserves the legacy handoff format for compatibility:
+If the supervisor bails, the normalized `RuntimeFailure` stays attached on `error.failure`, while the runtime error message remains operator-readable. The envelope still preserves the legacy handoff format in `rawMessage` for compatibility:
 
-- Runtime error prefix: `RUNTIME_FAILURE `
 - Envelope fields: `envelope`, `envelopeVersion`, `source`, `code`, `message`, `rawMessage`, `userMessage`, `retryable`, and `metadata`.
 - Legacy compatibility prefix inside `rawMessage`: `GLOBAL_SUPERVISOR_BAIL `
 - Supervisor metadata: `reason`, `cycle`, `retriesUsed`, `escalationLevel`, `failureKind`, `signature`, `lastError`, and `limits`.
@@ -81,9 +80,11 @@ If the supervisor bails, it now emits a serialized `RuntimeFailure` envelope on 
 
 Normalization accepts all current runtime failure inputs:
 
-- Pipeline tool failures from `src/runtime/openai-tool-exec.ts` (`ok: false` JSON payloads with `failure_code` and `failure_code_version`)
+- Pipeline tool failures from `src/runtime/openai-tool-exec.ts`, including failed auto-run `pipeline.start` / `pipeline.resume` executions (legacy `{ ok: false, operation, failure_code_version, failure_code, message }` payloads)
 - Legacy global supervisor bail strings prefixed with `GLOBAL_SUPERVISOR_BAIL `
 - Raw runtime error strings that previously relied on Discord-side pattern matching
+
+Runtime emitters that still use `type: 'error'` now attach `error.failure` while keeping `error.message` in its existing readable form.
 
 This changes failure shape, not runtime configuration: operators do not need new env vars or migration steps to adopt the unified envelope.
 

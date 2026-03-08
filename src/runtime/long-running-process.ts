@@ -10,6 +10,7 @@ import {
   imageDedupeKey,
   stripToolUseBlocks,
 } from './cli-output-parsers.js';
+import { createRuntimeErrorEvent } from './runtime-failure.js';
 import { SessionFileScanner } from './session-scanner.js';
 
 export type LongRunningProcessState = 'starting' | 'idle' | 'busy' | 'dead';
@@ -196,7 +197,7 @@ export class LongRunningProcess {
     onTelemetry?: (evt: RuntimeTelemetryEvent) => void,
   ): AsyncGenerator<EngineEvent> {
     if (this._state !== 'idle') {
-      yield { type: 'error', message: `long-running: cannot send turn in state ${this._state}` };
+      yield createRuntimeErrorEvent(`long-running: cannot send turn in state ${this._state}`);
       yield { type: 'done' };
       return;
     }
@@ -609,7 +610,7 @@ export class LongRunningProcess {
     const final = stripToolUseBlocks(raw);
     if (final) {
       if (this.isContextOverflow(final)) {
-        this.pushParsedTurnEvent({ type: 'error', message: 'long-running: context overflow' });
+        this.pushParsedTurnEvent(createRuntimeErrorEvent('long-running: context overflow'));
       } else {
         this.pushParsedTurnEvent({ type: 'text_final', text: final });
       }
@@ -625,7 +626,7 @@ export class LongRunningProcess {
     this.clearKillAfterTimer();
 
     if (hadActiveTurn) {
-      this.pushEvent({ type: 'error', message: 'long-running: process exited unexpectedly' });
+      this.pushEvent(createRuntimeErrorEvent('long-running: process exited unexpectedly'));
       this.pushDoneOnce();
     }
     this.cleanupOnce();
@@ -758,7 +759,7 @@ export class LongRunningProcess {
     // If a consumer is blocked waiting for events, guarantee we unblock it.
     if (this.turnActive && !this.turnEnded) {
       if (opts.emitTurnError && opts.errorMessage) {
-        this.pushEvent({ type: 'error', message: opts.errorMessage });
+        this.pushEvent(createRuntimeErrorEvent(opts.errorMessage));
       }
       this.pushDoneOnce();
     }

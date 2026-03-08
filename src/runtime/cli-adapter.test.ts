@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CliAdapterStrategy } from './cli-strategy.js';
+import { normalizeRuntimeFailure } from './runtime-failure.js';
 import type { EngineEvent } from './types.js';
 
 const mockExeca = vi.fn();
@@ -208,10 +209,13 @@ describe('createCliRuntime', () => {
     }));
 
     expect(mockExeca).not.toHaveBeenCalled();
-    expect(events).toEqual([
-      { type: 'error', message: 'aborted' },
-      { type: 'done' },
-    ]);
+    expect(events[0]).toMatchObject({
+      type: 'error',
+      failure: expect.objectContaining({ message: 'aborted' }),
+    });
+    expect((events[0] as { message: string }).message).toBe('aborted');
+    expect(normalizeRuntimeFailure((events[0] as { message: string }).message).message).toBe('aborted');
+    expect(events[1]).toEqual({ type: 'done' });
   });
 
   it('parses JSONL output via parseLine and emits text_final from resultText', async () => {
@@ -349,7 +353,11 @@ describe('createCliRuntime', () => {
       cwd: '/tmp',
     }));
 
-    expect(events).toContainEqual({ type: 'error', message: 'exit=17; stderr=bad flag' });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      message: 'exit=17; stderr=bad flag',
+      failure: expect.objectContaining({ message: 'exit=17; stderr=bad flag' }),
+    }));
     expect(events[events.length - 1]).toEqual({ type: 'done' });
   });
 
@@ -593,7 +601,10 @@ describe('createCliRuntime', () => {
     controlled.resolve();
 
     const events = await pending;
-    expect(events).toContainEqual({ type: 'error', message: 'aborted' });
+    const errorEvt = events.find((e) => e.type === 'error') as { message: string; failure?: { message: string } } | undefined;
+    expect(errorEvt).toBeDefined();
+    expect(errorEvt?.message).toBe('aborted');
+    expect(errorEvt?.failure?.message).toBe('aborted');
     expect(info).toHaveBeenCalledWith(expect.objectContaining({
       strategyId: 'other',
       attempt: 1,
@@ -624,7 +635,11 @@ describe('createCliRuntime', () => {
       cwd: '/tmp',
     }));
 
-    expect(events).toContainEqual({ type: 'error', message: 'spawn exploded' });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      message: 'spawn exploded',
+      failure: expect.objectContaining({ message: 'spawn exploded' }),
+    }));
     expect(info).toHaveBeenCalledWith(expect.objectContaining({
       strategyId: 'other',
       attempt: 1,

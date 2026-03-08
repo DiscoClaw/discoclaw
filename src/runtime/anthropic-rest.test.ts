@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAnthropicRestRuntime } from './anthropic-rest.js';
+import { normalizeRuntimeFailure } from './runtime-failure.js';
 import type { EngineEvent } from './types.js';
 
 async function collectEvents(iter: AsyncIterable<EngineEvent>): Promise<EngineEvent[]> {
@@ -319,8 +320,10 @@ describe('Anthropic REST runtime adapter', () => {
 
     const error = events.find((e) => e.type === 'error');
     expect(error).toBeDefined();
-    expect((error as { message: string }).message).toContain('429');
-    expect((error as { message: string }).message).toContain('rate limit exceeded');
+    const failure = normalizeRuntimeFailure((error as { message: string }).message);
+    expect(failure.message).toContain('429');
+    expect(failure.message).toContain('rate limit exceeded');
+    expect((error as { failure?: { message: string } }).failure?.message).toContain('429');
   });
 
   it('handles streaming error event from Anthropic', async () => {
@@ -342,7 +345,9 @@ describe('Anthropic REST runtime adapter', () => {
 
     const error = events.find((e) => e.type === 'error');
     expect(error).toBeDefined();
-    expect((error as { message: string }).message).toBe('overloaded');
+    const failure = normalizeRuntimeFailure((error as { message: string }).message);
+    expect(failure.message).toBe('overloaded');
+    expect((error as { failure?: { message: string } }).failure?.message).toBe('overloaded');
 
     // Should still emit text_final with whatever was accumulated
     const final = events.find((e) => e.type === 'text_final');
@@ -367,7 +372,9 @@ describe('Anthropic REST runtime adapter', () => {
 
     const error = events.find((e) => e.type === 'error');
     expect(error).toBeDefined();
-    expect((error as { message: string }).message).toBe('aborted');
+    const failure = normalizeRuntimeFailure((error as { message: string }).message);
+    expect(failure.message).toBe('aborted');
+    expect((error as { failure?: { message: string } }).failure?.message).toBe('aborted');
   });
 
   it('has runtime id "claude_code"', () => {

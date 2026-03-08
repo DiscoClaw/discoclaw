@@ -31,7 +31,7 @@ export function normalizeRuntimeError(
     return normalizeRuntimeFailure(input);
   }
 
-  if (input.type === 'error' || input.type === 'runtime_failure') {
+  if ('type' in input && (input.type === 'error' || input.type === 'runtime_failure')) {
     return normalizeRuntimeFailureEvent(input);
   }
 

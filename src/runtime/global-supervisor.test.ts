@@ -34,7 +34,7 @@ function findBailError(events: EngineEvent[]): string | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const evt = events[i];
     if (evt?.type === 'error' && evt.failure?.source === 'global_supervisor') {
-      return evt.message;
+      return evt.failure.rawMessage;
     }
     if (evt?.type === 'error' && normalizeRuntimeFailure(evt.message).source === 'global_supervisor') return evt.message;
   }
@@ -208,6 +208,37 @@ describe('withGlobalSupervisor', () => {
     expect(bail?.cycle).toBe(1);
   });
 
+  it('prefers attached runtime failure metadata over raw error text when deciding retries', async () => {
+    let calls = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        calls += 1;
+        yield {
+          type: 'error',
+          message: 'OpenAI API error: 429 rate limit',
+          failure: normalizeRuntimeFailure('Discord missing permissions for channel send'),
+        };
+        yield { type: 'done' };
+      },
+    };
+
+    const wrapped = withGlobalSupervisor(runtime, {
+      env: { [GLOBAL_SUPERVISOR_ENABLED_ENV]: '1' },
+      limits: { maxCycles: 4, maxRetries: 3 },
+    });
+
+    const events = await collectEvents(wrapped.invoke({ prompt: 'x', model: 'm', cwd: '/tmp' }));
+    const bailMsg = findBailError(events);
+    const bail = bailMsg ? parseGlobalSupervisorBail(bailMsg) : null;
+
+    expect(calls).toBe(1);
+    expect(bail?.reason).toBe('non_retryable_failure');
+    expect(bail?.failureKind).toBe('hard_error');
+    expect(bail?.retryable).toBe(false);
+  });
+
   it('allows per-invocation supervisor disable override', async () => {
     let calls = 0;
     const runtime: RuntimeAdapter = {
@@ -355,5 +386,23 @@ describe('withGlobalSupervisor', () => {
 
     expect(bail?.reason).toBe('max_events_exceeded');
     expect(bail?.failureKind).toBe('event_limit');
+  });
+});
+
+describe('parseGlobalSupervisorBail', () => {
+  it('rejects malformed legacy bail payloads that fail RuntimeFailure normalization', () => {
+    const malformed = `${GLOBAL_SUPERVISOR_BAIL_PREFIX} ${JSON.stringify({
+      source: 'global_supervisor',
+      reason: 'deterministic_retry_blocked',
+      cycle: 2,
+      retriesUsed: 1,
+      escalationLevel: 1,
+      failureKind: 'transient_error',
+      retryable: true,
+      signature: 'transient_error:rate limit',
+      lastError: 'OpenAI API error: 429 rate limit',
+    })}`;
+
+    expect(parseGlobalSupervisorBail(malformed)).toBeNull();
   });
 });

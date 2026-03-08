@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGeminiRestRuntime } from './gemini-rest.js';
+import { normalizeRuntimeFailure } from './runtime-failure.js';
 import type { EngineEvent } from './types.js';
 
 async function collectEvents(iter: AsyncIterable<EngineEvent>): Promise<EngineEvent[]> {
@@ -190,8 +191,10 @@ describe('Gemini REST runtime adapter', () => {
 
     const error = events.find((e) => e.type === 'error');
     expect(error).toBeDefined();
-    expect((error as { message: string }).message).toContain('429');
-    expect((error as { message: string }).message).toContain('quota exceeded');
+    const failure = normalizeRuntimeFailure((error as { message: string }).message);
+    expect(failure.message).toContain('429');
+    expect(failure.message).toContain('quota exceeded');
+    expect((error as { failure?: { message: string } }).failure?.message).toContain('429');
   });
 
   it('reports aborted when caller signal fires', async () => {
@@ -211,7 +214,9 @@ describe('Gemini REST runtime adapter', () => {
 
     const error = events.find((e) => e.type === 'error');
     expect(error).toBeDefined();
-    expect((error as { message: string }).message).toBe('aborted');
+    const failure = normalizeRuntimeFailure((error as { message: string }).message);
+    expect(failure.message).toBe('aborted');
+    expect((error as { failure?: { message: string } }).failure?.message).toBe('aborted');
   });
 
   it('has runtime id "gemini"', () => {

@@ -4,6 +4,7 @@
 
 import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeInvokeParams } from './types.js';
 import { splitSystemPrompt } from './openai-compat.js';
+import { createRuntimeErrorEvent } from './runtime-failure.js';
 
 export type AnthropicRestOpts = {
   apiKey: string;
@@ -91,16 +92,15 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
             } catch {
               /* ignore parse error */
             }
-            yield {
-              type: 'error',
-              message: `Anthropic API error: ${response.status} ${response.statusText}${detail ? `: ${detail}` : ''}`,
-            };
+            yield createRuntimeErrorEvent(
+              `Anthropic API error: ${response.status} ${response.statusText}${detail ? `: ${detail}` : ''}`,
+            );
             yield { type: 'done' };
             return;
           }
 
           if (!response.body) {
-            yield { type: 'error', message: 'Anthropic API returned no response body' };
+            yield createRuntimeErrorEvent('Anthropic API returned no response body');
             yield { type: 'done' };
             return;
           }
@@ -147,10 +147,7 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
                   };
                 }
               } else if (parsed.type === 'error') {
-                yield {
-                  type: 'error',
-                  message: parsed.error?.message ?? 'Unknown Anthropic streaming error',
-                };
+                yield createRuntimeErrorEvent(parsed.error?.message ?? 'Unknown Anthropic streaming error');
               }
               // message_stop, content_block_start, content_block_stop, ping — ignored
             } catch {
@@ -184,15 +181,15 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
 
           if (controller.signal.aborted) {
             if (params.signal?.aborted) {
-              yield { type: 'error', message: 'aborted' };
+              yield createRuntimeErrorEvent('aborted');
             } else {
-              yield { type: 'error', message: `anthropic-rest timed out after ${params.timeoutMs}ms` };
+              yield createRuntimeErrorEvent(`anthropic-rest timed out after ${params.timeoutMs}ms`);
             }
             yield { type: 'done' };
             return;
           }
 
-          yield { type: 'error', message: String(err) };
+          yield createRuntimeErrorEvent(String(err));
           yield { type: 'done' };
         } finally {
           if (timer) clearTimeout(timer);
