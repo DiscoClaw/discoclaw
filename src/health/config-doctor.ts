@@ -70,7 +70,7 @@ export type DoctorContext = {
   envDefaults: ModelConfig;
 };
 
-const KNOWN_RUNTIMES = new Set(['claude', 'openai', 'openrouter', 'gemini', 'codex', 'anthropic']);
+export const KNOWN_RUNTIMES = new Set(['claude', 'openai', 'openrouter', 'gemini', 'codex', 'anthropic']);
 const KNOWN_RUNTIME_OVERRIDE_KEYS = new Set(['ttsVoice', 'voiceRuntime', 'fastRuntime']);
 
 const DEPRECATED_ENV_VARS: Record<
