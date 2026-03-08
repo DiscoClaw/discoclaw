@@ -335,6 +335,46 @@ describe('executeForgeAction', () => {
       expect(forgeCtx.orchestratorFactory).not.toHaveBeenCalled();
     });
 
+    it('routes implementing plans into planRun instead of re-auditing', async () => {
+      const { findPlanFile } = await import('./plan-commands.js');
+      const { executePlanAction } = await import('./actions-plan.js');
+      (findPlanFile as any).mockResolvedValueOnce({
+        filePath: '/tmp/plans/plan-888-test.md',
+        header: {
+          planId: 'plan-888',
+          taskId: 'ws-888',
+          status: 'IMPLEMENTING',
+          title: 'Implementing Plan',
+          project: 'discoclaw',
+          created: '2026-01-01',
+        },
+      });
+
+      const forgeCtx = makeForgeCtx({
+        planCtx: {
+          plansDir: '/tmp/plans',
+          workspaceCwd: '/tmp/workspace',
+          taskStore: new TaskStore(),
+          runtime: { id: 'claude_code', capabilities: new Set() } as any,
+          model: 'capable',
+        } as any,
+      });
+
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-888' },
+        makeCtx(),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(executePlanAction).toHaveBeenCalledWith(
+        { type: 'planRun', planId: 'plan-888' },
+        expect.any(Object),
+        forgeCtx.planCtx,
+      );
+      expect(forgeCtx.orchestratorFactory).not.toHaveBeenCalled();
+    });
+
     it('blocks at recursion depth >= 1', async () => {
       const result = await executeForgeAction(
         { type: 'forgeResume', planId: 'plan-042' },
@@ -500,5 +540,13 @@ describe('forgeActionsPromptSection', () => {
     const section = forgeActionsPromptSection();
     expect(section).toContain('one forge');
     expect(section).toContain('asynchronous');
+  });
+
+  it('describes forgeResume as status-dependent', () => {
+    const section = forgeActionsPromptSection();
+    expect(section).toContain('Continue an existing plan based on its current status');
+    expect(section).toContain('DRAFT / REVIEW');
+    expect(section).toContain('APPROVED / IMPLEMENTING');
+    expect(section).toContain('planRun');
   });
 });

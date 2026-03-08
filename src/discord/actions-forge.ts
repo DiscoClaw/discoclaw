@@ -406,11 +406,13 @@ export function forgeActionsPromptSection(): string {
 - \`description\` (required): What to plan for.
 - \`context\` (optional): Additional context appended to the plan.
 
-**forgeResume** — Resume auditing an existing plan (re-enters the audit/revise loop):
+**forgeResume** — Continue an existing plan based on its current status:
 \`\`\`
 <discord-action>{"type":"forgeResume","planId":"plan-042"}</discord-action>
 \`\`\`
 - \`planId\` (required): The plan ID to resume.
+- DRAFT / REVIEW: re-enter the forge audit/revise loop.
+- APPROVED / IMPLEMENTING: route to \`planRun\` and continue implementation.
 
 **forgeStatus** — Check if a forge is currently running:
 \`\`\`
@@ -425,5 +427,6 @@ export function forgeActionsPromptSection(): string {
 #### Forge Guidelines
 - Only one forge can run at a time. Check status before starting a new one.
 - Forge runs are asynchronous — progress updates are posted to the channel.
-- Use forgeResume to re-audit a plan that needs another pass (e.g., after manual edits).`;
+- Use forgeResume when you want DiscoClaw to pick up a plan again; the next step depends on the plan's status.
+- Re-audit with forgeResume after manual plan edits when the plan is still in DRAFT or REVIEW.`;
 }
