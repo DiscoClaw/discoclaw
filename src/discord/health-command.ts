@@ -3,6 +3,7 @@ import type { DoctorReport, FixResult } from '../health/config-doctor.js';
 import { renderMemoryLine } from '../observability/memory-sampler.js';
 
 export type HealthCommandMode = 'basic' | 'verbose' | 'tools' | 'doctor' | 'doctor-fix';
+export type DoctorCommandMode = 'inspect' | 'fix';
 
 export type HealthConfigSnapshot = {
   runtimeModel: string;
@@ -26,6 +27,13 @@ export type HealthConfigSnapshot = {
   requireChannelContext: boolean;
   autoIndexChannelContext: boolean;
 };
+
+export function parseDoctorCommand(content: string): DoctorCommandMode | null {
+  const normalized = String(content ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (normalized === '!doctor') return 'inspect';
+  if (normalized === '!doctor fix') return 'fix';
+  return null;
+}
 
 export function parseHealthCommand(content: string): HealthCommandMode | null {
   const normalized = String(content ?? '').trim().toLowerCase().replace(/\s+/g, ' ');

@@ -87,6 +87,7 @@ import { parseVoiceStatusCommand, renderVoiceStatusReport } from './voice-status
 import type { VoiceStatusSnapshot } from './voice-status-command.js';
 import { parseVoiceCommand, handleVoiceCommand } from './voice-command.js';
 import {
+  parseDoctorCommand,
   parseHealthCommand,
   renderHealthDoctorReport,
   renderHealthReport,
@@ -935,31 +936,43 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         }
       }
 
+      const handleDoctorCommand = async (mode: 'inspect' | 'fix'): Promise<void> => {
+        try {
+          const { inspect, applyFixes } = await import('../health/config-doctor.js');
+          const doctorReport = await inspect({ cwd: params.projectCwd, env: process.env });
+          const fixResult = mode === 'fix'
+            ? await applyFixes(doctorReport, { cwd: params.projectCwd, env: process.env })
+            : undefined;
+          await msg.reply({
+            content: renderHealthDoctorReport({
+              report: doctorReport,
+              fixResult,
+              botDisplayName: params.botDisplayName,
+            }),
+            allowedMentions: NO_MENTIONS,
+          });
+        } catch (err) {
+          await msg.reply({
+            content: `\`\`\`text\nConfig doctor error: ${String(err)}\n\`\`\``,
+            allowedMentions: NO_MENTIONS,
+          });
+        }
+      };
+
       const healthMode = (params.healthCommandsEnabled ?? true)
         ? parseHealthCommand(String(msg.content ?? ''))
         : null;
+      const doctorMode = (params.healthCommandsEnabled ?? true)
+        ? parseDoctorCommand(String(msg.content ?? ''))
+        : null;
+      if (!isBotMessage && doctorMode) {
+        await handleDoctorCommand(doctorMode);
+        return;
+      }
+
       if (!isBotMessage && healthMode) {
         if (healthMode === 'doctor' || healthMode === 'doctor-fix') {
-          try {
-            const { inspect, applyFixes } = await import('../health/config-doctor.js');
-            const doctorReport = await inspect({ cwd: params.projectCwd, env: process.env });
-            const fixResult = healthMode === 'doctor-fix'
-              ? await applyFixes(doctorReport, { cwd: params.projectCwd, env: process.env })
-              : undefined;
-            await msg.reply({
-              content: renderHealthDoctorReport({
-                report: doctorReport,
-                fixResult,
-                botDisplayName: params.botDisplayName,
-              }),
-              allowedMentions: NO_MENTIONS,
-            });
-          } catch (err) {
-            await msg.reply({
-              content: `\`\`\`text\nConfig doctor error: ${String(err)}\n\`\`\``,
-              allowedMentions: NO_MENTIONS,
-            });
-          }
+          await handleDoctorCommand(healthMode === 'doctor-fix' ? 'fix' : 'inspect');
           return;
         }
 

@@ -298,6 +298,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 |---------|-------------|---------|--------|
 | `!help` | Lists available bang commands | `src/discord/help-command.ts` | **done** |
 | `!health [verbose\|tools\|doctor [fix]]` | Renders runtime metrics, config snapshot, tool reports, and shared config-doctor findings/fixes | `src/discord/health-command.ts`, `src/discord/health-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
+| `!doctor [fix]` | Runs the shared config doctor to report or apply config-health fixes | `src/discord/health-command.ts`, `src/discord/health-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | `!trace [traceId]` | Lists recent run traces or shows a detailed per-run timeline for a specific `traceId` | `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | `!status` | Shows bot status summary | `src/discord/status-command.ts` | **done** |
 | `!restart` | Triggers graceful restart | `src/discord/restart-command.ts` | **done** |

@@ -14,6 +14,7 @@ export function handleHelpCommand(): string {
     '- `!secret` — manage API keys and secrets via DM; `!secret help` for details',
     '- `!models` — show or change model assignments; `!models help` for details',
     '- `!health` — show bot health and metrics; `!health verbose` for full config',
+    '- `!doctor` — alias for `!health doctor`; inspect config drift, deprecated env vars, stale overrides, and missing secrets',
     '- `!health doctor` — inspect config drift, deprecated env vars, stale overrides, and missing secrets; add `fix` to apply safe remediations',
     '- `!status` — show live runtime status (uptime, crons, memory, API connectivity)',
     '- `!trace` — inspect recent run traces or `!trace <traceId>` for a detailed timeline',

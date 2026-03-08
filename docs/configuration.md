@@ -338,7 +338,7 @@ Master switch and per-category flags for Discord actions. See [docs/discord-acti
 | `USE_GROUP_DIR_CWD` | `false` | Use group directory as runtime CWD |
 | `DISCOCLAW_STATUS_CHANNEL` | — | Channel ID for boot/status messages |
 | `DISCOCLAW_SERVICE_NAME` | `discoclaw` | systemd service name (for multi-instance setups) |
-| `DISCOCLAW_HEALTH_COMMANDS_ENABLED` | `true` | Enable `!health` bang command |
+| `DISCOCLAW_HEALTH_COMMANDS_ENABLED` | `true` | Enable `!health` and `!doctor` bang commands |
 | `DISCOCLAW_HEALTH_VERBOSE_ALLOWLIST` | — | User IDs allowed verbose health output |
 | `DISCOCLAW_SESSION_SCANNING` | `true` | Enable session scanning |
 | `DISCOCLAW_TOOL_AWARE_STREAMING` | `true` | Enable tool-aware streaming and presentation-layer runtime signal adaptation for Discord previews (concise human-readable lines derived from runtime events, while internal event payloads stay unchanged). |

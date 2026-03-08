@@ -165,7 +165,7 @@ Two setup paths:
 ### Health/Status
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DISCOCLAW_HEALTH_COMMANDS_ENABLED` | `1` | Enable `!health` command (uptime, memory, runtime status) |
+| `DISCOCLAW_HEALTH_COMMANDS_ENABLED` | `1` | Enable `!health` and `!doctor` commands (uptime, memory, runtime status, config doctor) |
 | `DISCOCLAW_HEALTH_VERBOSE_ALLOWLIST` | *(empty — falls back to `DISCORD_ALLOW_USER_IDS`)* | Space/comma-separated user IDs that can request verbose health output |
 
 ### Plan & Forge

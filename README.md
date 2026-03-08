@@ -314,7 +314,7 @@ pnpm install
 pnpm build
 ```
 
-Run `pnpm preflight` — it flags configuration options from `.env.example` that aren't in your `.env` yet. You can also run `discoclaw doctor` to inspect config drift and related issues, `discoclaw doctor --fix` to apply safe remediations, or use `!health doctor` / `!health doctor fix` from Discord. Restart the service afterward for fixed config to take effect.
+Run `pnpm preflight` — it flags configuration options from `.env.example` that aren't in your `.env` yet. You can also run `discoclaw doctor` to inspect config drift and related issues, `discoclaw doctor --fix` to apply safe remediations, or use `!doctor` / `!doctor fix` from Discord (`!health doctor` / `!health doctor fix` remain supported). Restart the service afterward for fixed config to take effect.
 
 If running as a systemd service, restart it:
 
