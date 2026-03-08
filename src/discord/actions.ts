@@ -117,6 +117,17 @@ export type RequesterMemberContext = GuildMember | RequesterDenyAll | undefined;
 
 export const REQUESTER_MEMBER_DENY_ALL: RequesterDenyAll = { __requesterDenyAll: true };
 
+export function withoutRequesterGatedActionFlags(flags: ActionCategoryFlags): ActionCategoryFlags {
+  return {
+    ...flags,
+    channels: false,
+    messaging: false,
+    guild: false,
+    moderation: false,
+    polls: false,
+  };
+}
+
 import { appendOutsideFence } from './output-utils.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 

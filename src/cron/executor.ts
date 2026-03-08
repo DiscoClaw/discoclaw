@@ -19,6 +19,7 @@ import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import { DiscordTransportClient } from '../discord/transport-client.js';
 import * as discordActions from '../discord/actions.js';
+import { withoutRequesterGatedActionFlags } from '../discord/actions.js';
 import { sendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from '../discord/output-common.js';
 import { buildPromptPreamble, loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
@@ -268,6 +269,9 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         'cron:exec requester context unavailable; requester-gated guild-scoped discord actions will fail closed',
       );
     }
+    const cronActionFlags = actionRequester.trusted
+      ? ctx.actionFlags
+      : withoutRequesterGatedActionFlags(ctx.actionFlags);
 
     let prompt =
       buildPromptPreamble(inlinedContext) +
@@ -285,7 +289,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     // Inject tiered action schema documentation when discord actions are enabled.
     if (ctx.discordActionsEnabled) {
       const actionSelection = buildTieredDiscordActionsPromptSection(
-        ctx.actionFlags,
+        cronActionFlags,
         ctx.botDisplayName,
         { userText: job.def.prompt },
       );
@@ -440,7 +444,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     // Handle Discord actions if enabled.
     if (ctx.discordActionsEnabled) {
-      const parsed = discordActions.parseDiscordActions(processedText, ctx.actionFlags);
+      const parsed = discordActions.parseDiscordActions(processedText, cronActionFlags);
       const { cleanText, actions: parsedActions } = parsed;
       strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
       parseFailuresCount = parsed.parseFailures;
