@@ -27,6 +27,68 @@ function buildDefault(): Record<string, Record<ModelTier, string>> {
 
 let tierMap = buildDefault();
 
+type RuntimeOwnerHint = {
+  runtimeId: string;
+  matches(model: string): boolean;
+};
+
+const runtimeOwnerHints: ReadonlyArray<RuntimeOwnerHint> = [
+  // OpenRouter models are typically provider-prefixed (for example:
+  // `anthropic/claude-sonnet-4` or `openai/gpt-5-mini`).
+  {
+    runtimeId: 'openrouter',
+    matches(model: string) {
+      return /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9._:-]*$/i.test(model);
+    },
+  },
+  {
+    runtimeId: 'claude_code',
+    matches(model: string) {
+      return model === 'haiku'
+        || model === 'sonnet'
+        || model === 'opus'
+        || model.startsWith('claude-');
+    },
+  },
+  {
+    runtimeId: 'gemini',
+    matches(model: string) {
+      return model.startsWith('gemini-');
+    },
+  },
+  {
+    runtimeId: 'codex',
+    matches(model: string) {
+      return model.includes('codex');
+    },
+  },
+  {
+    runtimeId: 'openai',
+    matches(model: string) {
+      return model.startsWith('gpt-') || /^o[1345](?:$|[-.])/.test(model);
+    },
+  },
+];
+
+function normalizeModelLookup(model: string): string {
+  return model.trim().toLowerCase();
+}
+
+function findExactRuntimeForModel(model: string): string | null | undefined {
+  let owningRuntimeId: string | undefined;
+  for (const [runtimeId, tiers] of Object.entries(tierMap)) {
+    for (const value of Object.values(tiers)) {
+      if (normalizeModelLookup(value) !== model) continue;
+      if (owningRuntimeId === undefined) {
+        owningRuntimeId = runtimeId;
+        continue;
+      }
+      if (owningRuntimeId !== runtimeId) return null;
+    }
+  }
+  return owningRuntimeId;
+}
+
 /**
  * Read env vars matching `DISCOCLAW_TIER_<RUNTIME>_<TIER>` and overlay them
  * onto the hardcoded defaults. Resets to defaults on each call so repeated
@@ -106,22 +168,26 @@ export function resolveReasoningEffort(tier: string, runtimeId: RuntimeId): stri
 /**
  * Reverse-lookup: find which runtime owns a concrete model string.
  *
- * Iterates the live tier map and returns a runtime ID only when ownership is
- * unambiguous. Skips empty-string sentinel values so that adapter-default
- * entries never match. Returns `undefined` when no runtime claims the model or
- * when multiple runtimes claim the same concrete model string.
+ * Resolution order:
+ * - Exact live tier-map ownership, when unambiguous.
+ * - Common model-family hints for operator-facing literals like `sonnet`,
+ *   `claude-sonnet-*`, `gemini-*`, `gpt-*`, and OpenRouter-style
+ *   `provider/model` identifiers.
+ *
+ * Exact ambiguity still wins: if multiple runtimes claim the same concrete
+ * model string in the live tier map, this returns `undefined` instead of
+ * falling through to the hint-based inference.
  */
 export function findRuntimeForModel(model: string): string | undefined {
-  let owningRuntimeId: string | undefined;
-  for (const [runtimeId, tiers] of Object.entries(tierMap)) {
-    for (const value of Object.values(tiers)) {
-      if (value === '' || value !== model) continue;
-      if (owningRuntimeId === undefined) {
-        owningRuntimeId = runtimeId;
-        continue;
-      }
-      if (owningRuntimeId !== runtimeId) return undefined;
-    }
+  const normalized = normalizeModelLookup(model);
+  if (!normalized || isModelTier(normalized)) return undefined;
+
+  const exactOwner = findExactRuntimeForModel(normalized);
+  if (exactOwner === null) return undefined;
+  if (exactOwner !== undefined) return exactOwner;
+
+  for (const hint of runtimeOwnerHints) {
+    if (hint.matches(normalized)) return hint.runtimeId;
   }
-  return owningRuntimeId;
+  return undefined;
 }

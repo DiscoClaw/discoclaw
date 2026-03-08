@@ -22,6 +22,16 @@ switch (command) {
   case 'install-daemon':
     await runDaemonInstaller();
     break;
+  case 'dashboard': {
+    const cwd = process.cwd();
+    const { config } = await import('dotenv');
+    const { runDashboard } = await import('./dashboard.js');
+
+    config({ path: path.join(cwd, '.env') });
+
+    await runDashboard();
+    break;
+  }
   case 'doctor': {
     const cwd = process.cwd();
     const shouldFix = process.argv.includes('--fix');
@@ -102,6 +112,7 @@ function printHelp(ver: string): void {
       `\nUsage: discoclaw <command>\n` +
       `\nCommands:\n` +
       `  init                                  Interactive setup wizard — creates .env and workspace/\n` +
+      `  dashboard                             Interactive terminal dashboard for common admin tasks\n` +
       `  doctor [--fix]                        Inspect config drift, deprecated env vars, conflicting/stale overrides, and missing secrets; use --fix for auto-fixes\n` +
       `  install-daemon [--service-name <name>]  Register discoclaw as a persistent background service\n` +
       `                                          Use --service-name to run multiple instances side-by-side.\n` +

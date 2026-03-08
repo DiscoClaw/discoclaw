@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process';
-import type { ExecFileException } from 'node:child_process';
-import os from 'node:os';
 import type { LoggerLike } from '../logging/logger-like.js';
+import { getPlatformCommands, run } from '../service-control.js';
 import { writeShutdownContext } from './shutdown-context.js';
 
 export type RestartCommand = {
@@ -22,61 +21,6 @@ export function parseRestartCommand(content: string): RestartCommand | null {
   if (normalized === '!restart status') return { action: 'status' };
   if (normalized === '!restart logs') return { action: 'logs' };
   if (normalized === '!restart help') return { action: 'help' };
-  return null;
-}
-
-function run(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { timeout: 15_000 }, (err, stdout, stderr) => {
-      const exitCode = mapExitCode(err);
-      resolve({
-        stdout: String(stdout ?? ''),
-        stderr: String(stderr ?? ''),
-        exitCode,
-      });
-    });
-  });
-}
-
-function mapExitCode(err: ExecFileException | null): number | null {
-  if (!err) return 0;
-  return typeof err.code === 'number' ? err.code : null;
-}
-
-type PlatformCmds = {
-  statusCmd: [string, string[]];
-  logsCmd: [string, string[]];
-  checkActiveCmd: [string, string[]];
-  isActive: (result: { exitCode: number | null; stdout: string }) => boolean;
-  restartCmd: (wasActive: boolean) => [string, string[]];
-};
-
-function getPlatformCommands(serviceName = 'discoclaw'): PlatformCmds | null {
-  if (process.platform === 'linux') {
-    return {
-      statusCmd: ['systemctl', ['--user', 'status', serviceName]],
-      logsCmd: ['journalctl', ['--user', '-u', serviceName, '--no-pager', '-n', '30']],
-      checkActiveCmd: ['systemctl', ['--user', 'status', serviceName]],
-      isActive: (result) => result.stdout.includes('active (running)'),
-      restartCmd: () => ['systemctl', ['--user', 'restart', serviceName]],
-    };
-  }
-  if (process.platform === 'darwin') {
-    const uid = process.getuid?.() ?? 501;
-    const label = `com.discoclaw.${serviceName}`;
-    const plistPath = `${os.homedir()}/Library/LaunchAgents/${label}.plist`;
-    const domain = `gui/${uid}`;
-    return {
-      statusCmd: ['launchctl', ['list', label]],
-      logsCmd: ['log', ['show', '--predicate', 'process == "node"', '--last', '5m', '--style', 'compact']],
-      checkActiveCmd: ['launchctl', ['list', label]],
-      isActive: (result) => result.exitCode === 0,
-      restartCmd: (wasActive) =>
-        wasActive
-          ? ['launchctl', ['kickstart', '-k', `${domain}/${label}`]]
-          : ['launchctl', ['bootstrap', domain, plistPath]],
-    };
-  }
   return null;
 }
 

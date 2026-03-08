@@ -274,6 +274,11 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    discoclaw install-daemon --service-name personal
    ```
 
+4. **Open the local operator dashboard:**
+   ```bash
+   discoclaw dashboard
+   ```
+
 #### From source (contributors)
 
 ```bash
@@ -315,6 +320,8 @@ pnpm build
 ```
 
 Run `pnpm preflight` — it flags configuration options from `.env.example` that aren't in your `.env` yet. You can also run `discoclaw doctor` to inspect config drift and related issues, `discoclaw doctor --fix` to apply safe remediations, or use `!doctor` / `!doctor fix` from Discord (`!health doctor` / `!health doctor fix` remain supported). Restart the service afterward for fixed config to take effect.
+
+For a local operator console, run `discoclaw dashboard` in the project directory. It shows the active service target, current model assignments, runtime overrides, config doctor status, and quick actions for status/logs/restart.
 
 If running as a systemd service, restart it:
 

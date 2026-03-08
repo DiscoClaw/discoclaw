@@ -206,6 +206,22 @@ describe('saveOverrides', () => {
     expect(JSON.parse(raw)).toEqual({ ttsVoice: 'voice-b' });
   });
 
+  it('preserves unknown keys while replacing known runtime override fields', async () => {
+    const dir = await tmpDir();
+    dirs.push(dir);
+    const filePath = path.join(dir, 'runtime-overrides.json');
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({ customFlag: true, voiceRuntime: 'anthropic', ttsVoice: 'voice-a' }),
+      'utf-8',
+    );
+
+    await saveOverrides(filePath, { fastRuntime: 'openrouter' });
+
+    const raw = await fs.readFile(filePath, 'utf-8');
+    expect(JSON.parse(raw)).toEqual({ customFlag: true, fastRuntime: 'openrouter' });
+  });
+
   it('writes an empty overrides object', async () => {
     const dir = await tmpDir();
     dirs.push(dir);

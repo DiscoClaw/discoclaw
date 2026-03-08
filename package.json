@@ -28,6 +28,7 @@
   "scripts": {
     "prepare": "simple-git-hooks",
     "dev": "tsx src/index.ts",
+    "dashboard": "tsx src/cli/dashboard.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "discord:invite-url": "tsx scripts/discord-invite-url.ts",
