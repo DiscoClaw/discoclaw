@@ -302,6 +302,7 @@ describe('applyFixes', () => {
 
     expect(result.applied).toEqual([]);
     expect(result.skipped).toEqual([
+      { id: 'deprecated-env:RUNTIME_MODEL', reason: 'not auto-fixable' },
       { id: 'missing-secret:PRIMARY_RUNTIME:OPENROUTER_API_KEY', reason: 'not auto-fixable' },
     ]);
   });
