@@ -39,6 +39,7 @@ describe('handleHelpCommand', () => {
     expect(result).toContain('!memory');
     expect(result).toContain('!models');
     expect(result).toContain('!health');
+    expect(result).toContain('!health doctor');
     expect(result).toContain('!trace');
     expect(result).toContain('!update');
     expect(result).toContain('!restart');

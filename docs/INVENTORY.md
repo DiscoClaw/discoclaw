@@ -288,7 +288,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | Config parser (`DiscoclawConfig` type, env-var parsing, validation) | `src/config.ts` | **done** |
 | Config parser tests | `src/config.test.ts` | **done** |
 | Model configuration (`models.json` loader, env-var fallback, slot resolution) | `src/model-config.ts` | **done** |
-| Config doctor engine (shared config-health inspection/apply-fixes logic for install drift, deprecated env vars, conflicting overrides, stale runtime/model overrides, and missing secrets) | `src/health/config-doctor.ts` | **done** |
+| Config doctor engine (shared config-health inspection/apply-fixes logic for install drift, deprecated env vars, conflicting overrides, stale runtime/model overrides, and missing secrets; reused by CLI, preflight, and Discord) | `src/health/config-doctor.ts`, `src/cli/index.ts`, `scripts/doctor.ts`, `src/discord/health-command.ts`, `src/discord/message-coordinator.ts` | **done** |
 
 ## 21. Bang Commands
 
@@ -297,7 +297,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | Command | Description | File(s) | Status |
 |---------|-------------|---------|--------|
 | `!help` | Lists available bang commands | `src/discord/help-command.ts` | **done** |
-| `!health [verbose\|tools]` | Renders runtime metrics, config snapshot, and tool reports | `src/discord/health-command.ts`, `src/discord/health-command.test.ts` | **done** |
+| `!health [verbose\|tools\|doctor [fix]]` | Renders runtime metrics, config snapshot, tool reports, and shared config-doctor findings/fixes | `src/discord/health-command.ts`, `src/discord/health-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | `!trace [traceId]` | Lists recent run traces or shows a detailed per-run timeline for a specific `traceId` | `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | `!status` | Shows bot status summary | `src/discord/status-command.ts` | **done** |
 | `!restart` | Triggers graceful restart | `src/discord/restart-command.ts` | **done** |

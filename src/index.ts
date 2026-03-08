@@ -1579,6 +1579,9 @@ if (taskCtx) {
       longRunWatchdog: longRunWatchdog ?? undefined,
       longRunStillRunningDelayMs,
     };
+    if (botParams.forgeCtx) {
+      botParams.forgeCtx.planCtx = botParams.planCtx;
+    }
     log.info('plan:action context initialized');
   }
 

@@ -563,4 +563,46 @@ describe('message coordinator plan run phase-start posts', () => {
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
+
+  it('routes !forge plan-id to planRun when the plan is already approved', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-forge-approved-'));
+    const planFilePath = path.join(tmpDir, 'plan-123.md');
+    await fs.writeFile(planFilePath, '# Plan', 'utf8');
+
+    const { looksLikePlanId, findPlanFile } = await import('./plan-commands.js');
+    (looksLikePlanId as any).mockImplementation((value: string) => value === 'plan-123');
+    (findPlanFile as any).mockResolvedValue({
+      filePath: planFilePath,
+      header: { planId: 'plan-123', title: 'Plan 123', status: 'APPROVED' },
+    });
+
+    const params = {
+      ...makeParams(),
+      forgeCommandsEnabled: true,
+      planCommandsEnabled: true,
+    };
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue as any);
+    const msg = makeMessage('!forge plan-123');
+
+    await handler(msg as any);
+
+    const { executePlanAction } = await import('./actions-plan.js');
+    await vi.waitFor(() => {
+      expect(executePlanAction).toHaveBeenCalledWith(
+        { type: 'planRun', planId: 'plan-123' },
+        expect.any(Object),
+        expect.objectContaining({
+          plansDir: expect.any(String),
+          workspaceCwd: expect.any(String),
+        }),
+      );
+    });
+
+    expect(msg.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'Auto plan run summary' }),
+    );
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
 });

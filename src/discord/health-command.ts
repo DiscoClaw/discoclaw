@@ -1,7 +1,8 @@
 import type { MetricsRegistry } from '../observability/metrics.js';
+import type { DoctorReport, FixResult } from '../health/config-doctor.js';
 import { renderMemoryLine } from '../observability/memory-sampler.js';
 
-export type HealthCommandMode = 'basic' | 'verbose' | 'tools';
+export type HealthCommandMode = 'basic' | 'verbose' | 'tools' | 'doctor' | 'doctor-fix';
 
 export type HealthConfigSnapshot = {
   runtimeModel: string;
@@ -31,6 +32,8 @@ export function parseHealthCommand(content: string): HealthCommandMode | null {
   if (normalized === '!health') return 'basic';
   if (normalized === '!health verbose') return 'verbose';
   if (normalized === '!health tools') return 'tools';
+  if (normalized === '!health doctor') return 'doctor';
+  if (normalized === '!health doctor fix') return 'doctor-fix';
   return null;
 }
 
@@ -162,5 +165,75 @@ export function renderHealthToolsReport(opts: {
   lines.push(`Permission tier: ${opts.permissionTier}`);
   lines.push(`Effective tools: ${opts.effectiveTools.length > 0 ? opts.effectiveTools.join(', ') : '(none)'}`);
   lines.push(`Configured runtime tools: ${opts.configuredRuntimeTools.length > 0 ? opts.configuredRuntimeTools.join(', ') : '(none)'}`);
+  return `\`\`\`text\n${lines.join('\n')}\n\`\`\``;
+}
+
+export function renderHealthDoctorReport(opts: {
+  report: DoctorReport;
+  fixResult?: FixResult;
+  botDisplayName?: string;
+}): string {
+  const severityCounts = opts.report.findings.reduce<Record<'error' | 'warn' | 'info', number>>(
+    (counts, finding) => {
+      counts[finding.severity] += 1;
+      return counts;
+    },
+    { error: 0, warn: 0, info: 0 },
+  );
+
+  const lines: string[] = [];
+  lines.push(`${opts.botDisplayName ?? 'Discoclaw'} Config Doctor`);
+  lines.push(`Install mode: ${opts.report.installMode}`);
+  lines.push(
+    `Findings: ${opts.report.findings.length} (errors=${severityCounts.error}, warnings=${severityCounts.warn}, info=${severityCounts.info})`,
+  );
+  lines.push(`.env: ${opts.report.configPaths.env}`);
+  lines.push(`data dir: ${opts.report.configPaths.dataDir}`);
+
+  if (opts.report.findings.length === 0) {
+    lines.push('No config doctor findings.');
+  } else {
+    lines.push('');
+    for (const finding of opts.report.findings) {
+      const autoFixLabel = finding.autoFixable ? 'auto-fixable' : 'manual-fix';
+      lines.push(`[${finding.severity.toUpperCase()}] ${finding.id} (${autoFixLabel})`);
+      lines.push(`  ${finding.message}`);
+      lines.push(`  Recommended fix: ${finding.recommendation}`);
+    }
+  }
+
+  if (opts.fixResult) {
+    lines.push('');
+    lines.push('Fix results:');
+    lines.push(`  Applied: ${opts.fixResult.applied.length}`);
+    lines.push(`  Skipped: ${opts.fixResult.skipped.length}`);
+    lines.push(`  Errors: ${opts.fixResult.errors.length}`);
+    lines.push('  Restart required: restart discoclaw for fixed config to take effect.');
+
+    if (opts.fixResult.applied.length > 0) {
+      lines.push('');
+      lines.push('Applied fixes:');
+      for (const id of opts.fixResult.applied) {
+        lines.push(`  - ${id}`);
+      }
+    }
+
+    if (opts.fixResult.skipped.length > 0) {
+      lines.push('');
+      lines.push('Skipped fixes:');
+      for (const entry of opts.fixResult.skipped) {
+        lines.push(`  - ${entry.id}: ${entry.reason}`);
+      }
+    }
+
+    if (opts.fixResult.errors.length > 0) {
+      lines.push('');
+      lines.push('Fix errors:');
+      for (const entry of opts.fixResult.errors) {
+        lines.push(`  - ${entry.id}: ${entry.message}`);
+      }
+    }
+  }
+
   return `\`\`\`text\n${lines.join('\n')}\n\`\`\``;
 }

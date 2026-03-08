@@ -53,10 +53,11 @@ describe('detectInstallDrift', () => {
 });
 
 describe('detectDeprecatedEnvVars', () => {
-  it('returns findings for deprecated env vars and marks the voice channel migration as auto-fixable', async () => {
+  it('flags the approved deprecated env vars, including RUNTIME_MODEL when it is the only chat default', async () => {
     const cwd = await makeTempInstall('doctor-deprecated-env');
     await writeEnv(cwd, [
       'RUNTIME_MODEL=capable',
+      'DISCOCLAW_FAST_MODEL=fast',
       'DISCOCLAW_FAST_RUNTIME=openai',
       'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL=123',
     ]);
@@ -69,6 +70,7 @@ describe('detectDeprecatedEnvVars', () => {
       'deprecated-env:DISCOCLAW_FAST_RUNTIME',
       'deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL',
     ]);
+    expect(findings.some((finding) => finding.id === 'deprecated-env:DISCOCLAW_FAST_MODEL')).toBe(false);
     expect(
       findings.find((finding) => finding.id === 'deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL')
         ?.autoFixable,
@@ -101,7 +103,7 @@ describe('detectConflictingOverrides', () => {
 });
 
 describe('detectStaleRuntimeAndModelOverrides', () => {
-  it('flags redundant model/runtime overrides and invalid runtime names', async () => {
+  it('treats redundant model entries as info-only and detects the legacy runtime-overrides models key', async () => {
     const cwd = await makeTempInstall('doctor-stale-overrides');
     await writeEnv(cwd, [
       'RUNTIME_MODEL=capable',
@@ -111,6 +113,7 @@ describe('detectStaleRuntimeAndModelOverrides', () => {
       chat: 'capable',
     });
     await writeJson(path.join(cwd, 'data', 'runtime-overrides.json'), {
+      models: { chat: 'capable' },
       fastRuntime: 'claude',
       voiceRuntime: 'not-a-runtime',
     });
@@ -119,22 +122,48 @@ describe('detectStaleRuntimeAndModelOverrides', () => {
     const findings = detectStaleRuntimeAndModelOverrides(ctx);
 
     expect(findings.map((finding) => finding.id)).toEqual([
+      'legacy-runtime-overrides-key:models',
       'stale-model-override:chat',
       'stale-runtime-override:fastRuntime',
       'stale-runtime-override:voiceRuntime',
     ]);
-    expect(findings.every((finding) => finding.autoFixable)).toBe(true);
+    expect(findings.find((finding) => finding.id === 'stale-model-override:chat')?.severity).toBe('info');
+    expect(findings.find((finding) => finding.id === 'stale-model-override:chat')?.autoFixable).toBe(false);
+    expect(findings.find((finding) => finding.id === 'legacy-runtime-overrides-key:models')?.autoFixable).toBe(true);
+    expect(findings.find((finding) => finding.id === 'stale-runtime-override:fastRuntime')?.autoFixable).toBe(true);
+    expect(findings.find((finding) => finding.id === 'stale-runtime-override:voiceRuntime')?.autoFixable).toBe(true);
+  });
+
+  it('treats an invalid DISCOCLAW_FAST_RUNTIME env value as falling back to PRIMARY_RUNTIME', async () => {
+    const cwd = await makeTempInstall('doctor-stale-fast-runtime-fallback');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=claude',
+      'DISCOCLAW_FAST_RUNTIME=not-a-runtime',
+    ]);
+    await writeJson(path.join(cwd, 'data', 'runtime-overrides.json'), {
+      fastRuntime: 'claude',
+    });
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectStaleRuntimeAndModelOverrides(ctx);
+
+    expect(findings.map((finding) => finding.id)).toEqual([
+      'stale-runtime-override:fastRuntime',
+    ]);
   });
 });
 
 describe('detectMissingSecrets', () => {
-  it('flags missing runtime and voice-provider secrets', async () => {
+  it('flags missing runtime, voice, cold-storage, and imagegen secrets', async () => {
     const cwd = await makeTempInstall('doctor-missing-secrets');
     await writeEnv(cwd, [
       'PRIMARY_RUNTIME=openrouter',
       'DISCOCLAW_VOICE_ENABLED=1',
       'DISCOCLAW_STT_PROVIDER=deepgram',
       'DISCOCLAW_TTS_PROVIDER=cartesia',
+      'DISCOCLAW_COLD_STORAGE_ENABLED=1',
+      'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1',
+      'IMAGEGEN_DEFAULT_MODEL=imagen-4.0-generate-001',
     ]);
     await writeJson(path.join(cwd, 'data', 'runtime-overrides.json'), {
       voiceRuntime: 'openai',
@@ -148,6 +177,9 @@ describe('detectMissingSecrets', () => {
       'missing-secret:runtime-overrides.voiceRuntime:OPENAI_API_KEY',
       'missing-secret:DISCOCLAW_STT_PROVIDER:DEEPGRAM_API_KEY',
       'missing-secret:DISCOCLAW_TTS_PROVIDER:CARTESIA_API_KEY',
+      'missing-secret:DISCOCLAW_COLD_STORAGE_ENABLED:COLD_STORAGE_API_KEY-or-OPENAI_API_KEY',
+      'missing-secret:DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN:OPENAI_API_KEY-or-IMAGEGEN_GEMINI_API_KEY',
+      'missing-secret:IMAGEGEN_DEFAULT_MODEL:IMAGEGEN_GEMINI_API_KEY',
     ]);
     expect(findings.every((finding) => finding.severity === 'error')).toBe(true);
   });
@@ -181,7 +213,7 @@ describe('inspect', () => {
 });
 
 describe('applyFixes', () => {
-  it('migrates the deprecated voice env var and prunes stale model/runtime overrides', async () => {
+  it('comments the migrated voice env var and prunes only auto-fixable runtime override issues', async () => {
     const cwd = await makeTempInstall('doctor-apply-fixes');
     await writeEnv(cwd, [
       'RUNTIME_MODEL=capable',
@@ -193,6 +225,7 @@ describe('applyFixes', () => {
       fast: 'fast',
     });
     await writeJson(path.join(cwd, 'data', 'runtime-overrides.json'), {
+      models: { chat: 'capable' },
       fastRuntime: 'claude',
       voiceRuntime: 'mystery-runtime',
     });
@@ -202,22 +235,58 @@ describe('applyFixes', () => {
 
     expect(result.applied).toEqual([
       'deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL',
-      'stale-model-override:chat',
-      'stale-model-override:fast',
+      'legacy-runtime-overrides-key:models',
       'stale-runtime-override:fastRuntime',
       'stale-runtime-override:voiceRuntime',
+    ]);
+    expect(result.skipped).toEqual([
+      { id: 'deprecated-env:RUNTIME_MODEL', reason: 'not auto-fixable' },
+      { id: 'stale-model-override:chat', reason: 'not auto-fixable' },
+      { id: 'stale-model-override:fast', reason: 'not auto-fixable' },
     ]);
     expect(result.errors).toEqual([]);
 
     const envContent = await fs.readFile(path.join(cwd, '.env'), 'utf-8');
     expect(envContent).toContain('DISCOCLAW_VOICE_HOME_CHANNEL=voice-home-123');
-    expect(envContent).not.toContain('DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL=');
+    expect(envContent).toContain('# [doctor-migrated] DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL=voice-home-123');
+    expect(envContent).not.toMatch(/^DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL=/m);
 
     const modelsRaw = await fs.readFile(path.join(cwd, 'data', 'models.json'), 'utf-8');
-    expect(JSON.parse(modelsRaw)).toEqual({});
+    expect(JSON.parse(modelsRaw)).toEqual({
+      chat: 'capable',
+      fast: 'fast',
+    });
 
     await expect(fs.readFile(path.join(cwd, 'data', 'runtime-overrides.json'), 'utf-8')).rejects.toMatchObject({
       code: 'ENOENT',
+    });
+  });
+
+  it('preserves unknown runtime-overrides keys when applying known runtime override fixes', async () => {
+    const cwd = await makeTempInstall('doctor-apply-preserve-unknown-runtime-keys');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=claude',
+    ]);
+    await writeJson(path.join(cwd, 'data', 'runtime-overrides.json'), {
+      customFlag: true,
+      models: { chat: 'capable' },
+      fastRuntime: 'claude',
+    });
+
+    const report = await inspect({ cwd });
+    const result = await applyFixes(report, { cwd });
+
+    expect(result.applied).toEqual([
+      'legacy-runtime-overrides-key:models',
+      'stale-runtime-override:fastRuntime',
+    ]);
+    expect(result.skipped).toEqual([
+      { id: 'unknown-runtime-override-key:customFlag', reason: 'not auto-fixable' },
+    ]);
+
+    const runtimeOverridesRaw = await fs.readFile(path.join(cwd, 'data', 'runtime-overrides.json'), 'utf-8');
+    expect(JSON.parse(runtimeOverridesRaw)).toEqual({
+      customFlag: true,
     });
   });
 
@@ -236,5 +305,21 @@ describe('applyFixes', () => {
       { id: 'deprecated-env:RUNTIME_MODEL', reason: 'not auto-fixable' },
       { id: 'missing-secret:PRIMARY_RUNTIME:OPENROUTER_API_KEY', reason: 'not auto-fixable' },
     ]);
+  });
+
+  it('does not report a fix as applied when persistence fails', async () => {
+    const cwd = await makeTempInstall('doctor-apply-write-failure');
+    await writeEnv(cwd, [
+      'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL=voice-home-123',
+    ]);
+
+    const report = await inspect({ cwd });
+    await fs.mkdir(`${path.join(cwd, '.env')}.tmp.${process.pid}`, { recursive: true });
+
+    const result = await applyFixes(report, { cwd });
+
+    expect(result.applied).toEqual([]);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]?.id).toBe('deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL');
   });
 });

@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { MetricsRegistry } from '../observability/metrics.js';
-import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './health-command.js';
+import {
+  parseHealthCommand,
+  renderHealthDoctorReport,
+  renderHealthReport,
+  renderHealthToolsReport,
+} from './health-command.js';
 
 describe('parseHealthCommand', () => {
   it('parses supported command forms', () => {
     expect(parseHealthCommand('!health')).toBe('basic');
     expect(parseHealthCommand('  !health   verbose ')).toBe('verbose');
     expect(parseHealthCommand('!health tools')).toBe('tools');
+    expect(parseHealthCommand('!health doctor')).toBe('doctor');
+    expect(parseHealthCommand('!health doctor fix')).toBe('doctor-fix');
     expect(parseHealthCommand('!memory show')).toBeNull();
   });
 });
@@ -295,5 +302,42 @@ describe('renderHealthReport', () => {
     expect(out).toContain('Permission tier: standard');
     expect(out).toContain('Effective tools: Read, Edit');
     expect(out).toContain('Configured runtime tools: Read, Edit, WebSearch');
+  });
+});
+
+describe('renderHealthDoctorReport', () => {
+  it('renders findings and fix results', () => {
+    const out = renderHealthDoctorReport({
+      botDisplayName: 'TestBot',
+      report: {
+        installMode: 'source',
+        configPaths: {
+          cwd: '/tmp/discoclaw',
+          env: '/tmp/discoclaw/.env',
+          dataDir: '/tmp/discoclaw/data',
+          models: '/tmp/discoclaw/data/models.json',
+          runtimeOverrides: '/tmp/discoclaw/data/runtime-overrides.json',
+        },
+        findings: [
+          {
+            id: 'deprecated-env:RUNTIME_MODEL',
+            severity: 'warn',
+            message: 'RUNTIME_MODEL is deprecated and still configured.',
+            recommendation: 'Move the chat default into models.json.',
+            autoFixable: false,
+          },
+        ],
+      },
+      fixResult: {
+        applied: ['legacy-runtime-overrides-key:models'],
+        skipped: [{ id: 'deprecated-env:RUNTIME_MODEL', reason: 'not auto-fixable' }],
+        errors: [],
+      },
+    });
+
+    expect(out).toContain('TestBot Config Doctor');
+    expect(out).toContain('[WARN] deprecated-env:RUNTIME_MODEL (manual-fix)');
+    expect(out).toContain('Applied fixes:');
+    expect(out).toContain('legacy-runtime-overrides-key:models');
   });
 });

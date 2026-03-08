@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createMessageCreateHandler } from './discord.js';
 import { MetricsRegistry } from './observability/metrics.js';
@@ -150,5 +153,48 @@ describe('health command integration', () => {
     expect(payload.content).toContain('TestBot Tools');
     expect(payload.content).toContain('Permission tier: env');
     expect(payload.content).toContain('Effective tools: Read, Edit, WebSearch');
+  });
+
+  it('handles !health doctor without invoking runtime', async () => {
+    const metrics = new MetricsRegistry();
+    const queue = makeQueue();
+    const projectCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'health-doctor-'));
+    const params = baseParams(metrics, { projectCwd });
+    const handler = createMessageCreateHandler(params as any, queue as any);
+    const msg = makeMsg('!health doctor');
+
+    try {
+      await handler(msg as any);
+    } finally {
+      await fs.rm(projectCwd, { recursive: true, force: true });
+    }
+
+    expect(msg.reply).toHaveBeenCalledOnce();
+    expect((params.runtime.invoke as any)).not.toHaveBeenCalled();
+    const payload = (msg.reply as any).mock.calls[0]?.[0];
+    expect(payload).toBeTruthy();
+    expect(payload.content).toContain('TestBot Config Doctor');
+  });
+
+  it('handles !health doctor fix without invoking runtime', async () => {
+    const metrics = new MetricsRegistry();
+    const queue = makeQueue();
+    const projectCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'health-doctor-fix-'));
+    const params = baseParams(metrics, { projectCwd });
+    const handler = createMessageCreateHandler(params as any, queue as any);
+    const msg = makeMsg('!health doctor fix');
+
+    try {
+      await handler(msg as any);
+    } finally {
+      await fs.rm(projectCwd, { recursive: true, force: true });
+    }
+
+    expect(msg.reply).toHaveBeenCalledOnce();
+    expect((params.runtime.invoke as any)).not.toHaveBeenCalled();
+    const payload = (msg.reply as any).mock.calls[0]?.[0];
+    expect(payload).toBeTruthy();
+    expect(payload.content).toContain('TestBot Config Doctor');
+    expect(payload.content).toContain('Fix results:');
   });
 });

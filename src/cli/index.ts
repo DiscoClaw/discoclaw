@@ -102,7 +102,7 @@ function printHelp(ver: string): void {
       `\nUsage: discoclaw <command>\n` +
       `\nCommands:\n` +
       `  init                                  Interactive setup wizard — creates .env and workspace/\n` +
-      `  doctor [--fix]                        Inspect config drift and missing secrets; use --fix for auto-fixes\n` +
+      `  doctor [--fix]                        Inspect config drift, deprecated env vars, conflicting/stale overrides, and missing secrets; use --fix for auto-fixes\n` +
       `  install-daemon [--service-name <name>]  Register discoclaw as a persistent background service\n` +
       `                                          Use --service-name to run multiple instances side-by-side.\n` +
       `                                          Defaults to "discoclaw".\n` +
@@ -150,6 +150,7 @@ function printDoctorFixResult(result: FixResult): void {
   console.log(`  Applied: ${result.applied.length}`);
   console.log(`  Skipped: ${result.skipped.length}`);
   console.log(`  Errors: ${result.errors.length}`);
+  console.log('  Restart required: restart discoclaw for fixed config to take effect.');
 
   if (result.applied.length > 0) {
     console.log('\nApplied fixes:');

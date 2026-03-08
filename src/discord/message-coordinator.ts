@@ -86,7 +86,12 @@ import { parseHelpCommand, handleHelpCommand } from './help-command.js';
 import { parseVoiceStatusCommand, renderVoiceStatusReport } from './voice-status-command.js';
 import type { VoiceStatusSnapshot } from './voice-status-command.js';
 import { parseVoiceCommand, handleVoiceCommand } from './voice-command.js';
-import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './health-command.js';
+import {
+  parseHealthCommand,
+  renderHealthDoctorReport,
+  renderHealthReport,
+  renderHealthToolsReport,
+} from './health-command.js';
 import { parseStatusCommand, collectStatusSnapshot, renderStatusReport } from './status-command.js';
 import { parseTraceCommand, renderTraceDetail, renderTraceList } from './trace-command.js';
 import type { StatusCommandContext } from './status-command.js';
@@ -934,6 +939,30 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         ? parseHealthCommand(String(msg.content ?? ''))
         : null;
       if (!isBotMessage && healthMode) {
+        if (healthMode === 'doctor' || healthMode === 'doctor-fix') {
+          try {
+            const { inspect, applyFixes } = await import('../health/config-doctor.js');
+            const doctorReport = await inspect({ cwd: params.projectCwd, env: process.env });
+            const fixResult = healthMode === 'doctor-fix'
+              ? await applyFixes(doctorReport, { cwd: params.projectCwd, env: process.env })
+              : undefined;
+            await msg.reply({
+              content: renderHealthDoctorReport({
+                report: doctorReport,
+                fixResult,
+                botDisplayName: params.botDisplayName,
+              }),
+              allowedMentions: NO_MENTIONS,
+            });
+          } catch (err) {
+            await msg.reply({
+              content: `\`\`\`text\nConfig doctor error: ${String(err)}\n\`\`\``,
+              allowedMentions: NO_MENTIONS,
+            });
+          }
+          return;
+        }
+
         if (healthMode === 'tools') {
           const liveTools = await resolveEffectiveTools({
             workspaceCwd: params.workspaceCwd,
@@ -2232,6 +2261,59 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 if (!found) {
                   await msg.reply({
                     content: `No plan found matching "${forgeCmd.args}". Use \`!forge <description>\` to create a new plan.`,
+                    allowedMentions: NO_MENTIONS,
+                  });
+                  return;
+                }
+
+                if (found.header.status === 'APPROVED' || found.header.status === 'IMPLEMENTING') {
+                  const planActionCtx: ActionContext = {
+                    guild: msg.guild ?? ({} as Guild),
+                    client: msg.client,
+                    requesterId: msg.author.id,
+                    channelId: msg.channelId,
+                    messageId: msg.id,
+                    threadParentId,
+                    deferScheduler: params.deferScheduler,
+                    transport: msg.guild ? new DiscordTransportClient(msg.guild, msg.client) : undefined,
+                  };
+
+                  const planActionCtxConfig: PlanContext = {
+                    plansDir,
+                    workspaceCwd: params.workspaceCwd,
+                    taskStore: params.planCtx?.taskStore ?? (params.taskCtx)?.store ?? new TaskStore(),
+                    log: params.log,
+                    depth: 0,
+                    runtime: params.runtime,
+                    model: resolveModel(params.runtimeModel, params.runtime.id),
+                    phaseTimeoutMs: params.planPhaseTimeoutMs ?? 5 * 60_000,
+                    maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
+                    maxPlanRunPhases: MAX_PLAN_RUN_PHASES,
+                    longRunWatchdog,
+                    longRunStillRunningDelayMs: params.longRunStillRunningDelayMs,
+                    onTaskClosed: params.planCtx?.onTaskClosed,
+                    onProgress: async (progressMsg: string) => {
+                      params.log?.info(
+                        { planId: found.header.planId, progress: progressMsg },
+                        'plan:forge-resume:progress',
+                      );
+                    },
+                  };
+
+                  const runResult = await executePlanAction(
+                    { type: 'planRun', planId: found.header.planId },
+                    planActionCtx,
+                    planActionCtxConfig,
+                  );
+                  if (!runResult.ok) {
+                    await msg.reply({
+                      content: runResult.error ?? `Failed to resume ${found.header.planId}.`,
+                      allowedMentions: NO_MENTIONS,
+                    });
+                    return;
+                  }
+                  await msg.reply({
+                    content: runResult.summary ?? `Plan run started for ${found.header.planId}.`,
                     allowedMentions: NO_MENTIONS,
                   });
                   return;

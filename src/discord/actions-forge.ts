@@ -1,6 +1,8 @@
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { ForgeOrchestrator } from './forge-commands.js';
+import { executePlanAction } from './actions-plan.js';
+import type { PlanContext } from './actions-plan.js';
 import type { TaskStore } from '../tasks/store.js';
 import { looksLikePlanId, findPlanFile, listPlanFiles } from './plan-commands.js';
 import type { HandlePlanCommandOpts } from './plan-commands.js';
@@ -57,6 +59,8 @@ export type ForgeContext = {
   longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete'>;
   /** Optional override for watchdog still-running check-in delay. */
   longRunStillRunningDelayMs?: number;
+  /** Optional plan action context so approved plans can resume implementation via planRun. */
+  planCtx?: PlanContext;
 };
 
 type SendFn = (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
@@ -76,6 +80,10 @@ function errorCode(err: unknown): number | null {
 
 function isArchivedThreadError(err: unknown): boolean {
   return errorCode(err) === 50083;
+}
+
+function shouldRouteForgeResumeToPlanRun(status: string | undefined): boolean {
+  return status === 'APPROVED' || status === 'IMPLEMENTING';
 }
 
 async function resolveLinkedTaskForThread(
@@ -283,6 +291,24 @@ export async function executeForgeAction(
       const found = await findPlanFile(forgeCtx.plansDir, action.planId);
       if (!found) {
         return { ok: false, error: `Plan not found: ${action.planId}` };
+      }
+
+      if (shouldRouteForgeResumeToPlanRun(found.header.status)) {
+        if (!forgeCtx.planCtx) {
+          return {
+            ok: false,
+            error: `Plan ${found.header.planId} is ${found.header.status}, but planRun is not configured in this context.`,
+          };
+        }
+
+        const runResult = await executePlanAction(
+          { type: 'planRun', planId: found.header.planId },
+          ctx,
+          forgeCtx.planCtx,
+        );
+        return runResult.ok
+          ? { ok: true, summary: runResult.summary ?? `Plan run started for ${found.header.planId}.` }
+          : runResult;
       }
 
       const progress = await buildProgressCallbacks(

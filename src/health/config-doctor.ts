@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { ModelConfig, ModelRole } from '../model-config.js';
 import { DEFAULTS as MODEL_DEFAULTS, saveModelConfig } from '../model-config.js';
 import type { RuntimeOverrides } from '../runtime-overrides.js';
-import { clearOverrides, saveOverrides } from '../runtime-overrides.js';
+import { clearOverrides } from '../runtime-overrides.js';
 
 export type DoctorSeverity = 'info' | 'warn' | 'error';
 export type InstallMode = 'source' | 'npm-managed';
@@ -50,6 +50,13 @@ type EnvFileState = {
   keys: Set<string>;
 };
 
+type RuntimeOverridesFileState = {
+  exists: boolean;
+  unknownKeys: string[];
+  raw: Record<string, unknown>;
+  values: RuntimeOverrides;
+};
+
 export type DoctorContext = {
   cwd: string;
   installMode: InstallMode;
@@ -59,23 +66,17 @@ export type DoctorContext = {
   defaultDataDir: string;
   models: ModelConfig;
   runtimeOverrides: RuntimeOverrides;
+  runtimeOverridesFile: RuntimeOverridesFileState;
   envDefaults: ModelConfig;
 };
 
 const KNOWN_RUNTIMES = new Set(['claude', 'openai', 'openrouter', 'gemini', 'codex', 'anthropic']);
+const KNOWN_RUNTIME_OVERRIDE_KEYS = new Set(['ttsVoice', 'voiceRuntime', 'fastRuntime']);
 
 const DEPRECATED_ENV_VARS: Record<
   string,
   { recommendation: string; autoFixable: boolean }
 > = {
-  RUNTIME_MODEL: {
-    recommendation: 'Move the chat default into models.json or reset the chat role so startup defaults can apply cleanly.',
-    autoFixable: false,
-  },
-  DISCOCLAW_FAST_MODEL: {
-    recommendation: 'Move the fast default into models.json or clear redundant fast-tier overrides so startup defaults come from the current config.',
-    autoFixable: false,
-  },
   DISCOCLAW_FAST_RUNTIME: {
     recommendation: "Replace DISCOCLAW_FAST_RUNTIME with '!models set fast <model>' and remove the env var once the runtime override is no longer needed.",
     autoFixable: false,
@@ -168,20 +169,25 @@ async function readModelConfigReadOnly(filePath: string): Promise<ModelConfig> {
   }
 }
 
-async function readRuntimeOverridesReadOnly(filePath: string): Promise<RuntimeOverrides> {
+async function readRuntimeOverridesFileState(filePath: string): Promise<RuntimeOverridesFileState> {
   try {
     const raw = await fs.readFile(filePath, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return { exists: true, unknownKeys: [], raw: {}, values: {} };
+    }
     const obj = parsed as Record<string, unknown>;
     const overrides: RuntimeOverrides = {};
     if (typeof obj['ttsVoice'] === 'string') overrides.ttsVoice = obj['ttsVoice'];
     if (typeof obj['voiceRuntime'] === 'string') overrides.voiceRuntime = obj['voiceRuntime'];
     if (typeof obj['fastRuntime'] === 'string') overrides.fastRuntime = obj['fastRuntime'];
-    return overrides;
+    const unknownKeys = Object.keys(obj).filter((key) => !KNOWN_RUNTIME_OVERRIDE_KEYS.has(key));
+    return { exists: true, unknownKeys, raw: obj, values: overrides };
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    return {};
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { exists: false, unknownKeys: [], raw: {}, values: {} };
+    }
+    return { exists: false, unknownKeys: [], raw: {}, values: {} };
   }
 }
 
@@ -211,9 +217,9 @@ function buildEnvDefaults(env: EnvMap): ModelConfig {
 }
 
 function defaultFastRuntime(env: EnvMap): string {
-  return normalizeRuntimeName(env.DISCOCLAW_FAST_RUNTIME)
-    ?? normalizeRuntimeName(env.PRIMARY_RUNTIME)
-    ?? 'claude';
+  const fastRuntime = normalizeRuntimeName(env.DISCOCLAW_FAST_RUNTIME);
+  if (fastRuntime && KNOWN_RUNTIMES.has(fastRuntime)) return fastRuntime;
+  return normalizeRuntimeName(env.PRIMARY_RUNTIME) ?? 'claude';
 }
 
 function defaultVoiceRuntime(env: EnvMap): string {
@@ -265,9 +271,9 @@ export async function loadDoctorContext(opts: InspectOptions = {}): Promise<Doct
     runtimeOverrides: path.join(dataDir, 'runtime-overrides.json'),
   };
 
-  const [models, runtimeOverrides] = await Promise.all([
+  const [models, runtimeOverridesFile] = await Promise.all([
     readModelConfigReadOnly(configPaths.models),
-    readRuntimeOverridesReadOnly(configPaths.runtimeOverrides),
+    readRuntimeOverridesFileState(configPaths.runtimeOverrides),
   ]);
 
   return {
@@ -278,7 +284,8 @@ export async function loadDoctorContext(opts: InspectOptions = {}): Promise<Doct
     configPaths,
     defaultDataDir: path.join(cwd, 'data'),
     models,
-    runtimeOverrides,
+    runtimeOverrides: runtimeOverridesFile.values,
+    runtimeOverridesFile,
     envDefaults: buildEnvDefaults(env),
   };
 }
@@ -304,6 +311,16 @@ export function detectInstallDrift(ctx: DoctorContext): DoctorFinding[] {
 
 export function detectDeprecatedEnvVars(ctx: DoctorContext): DoctorFinding[] {
   const findings: DoctorFinding[] = [];
+  if (envKeyIsExplicit(ctx, 'RUNTIME_MODEL')) {
+    findings.push({
+      id: 'deprecated-env:RUNTIME_MODEL',
+      severity: 'warn',
+      message: 'RUNTIME_MODEL is deprecated and still configured.',
+      recommendation: 'Move the chat default into models.json or reset the chat role so startup defaults can apply cleanly.',
+      autoFixable: false,
+    });
+  }
+
   for (const [key, meta] of Object.entries(DEPRECATED_ENV_VARS)) {
     if (!envKeyIsExplicit(ctx, key)) continue;
     findings.push({
@@ -355,16 +372,37 @@ export function detectConflictingOverrides(ctx: DoctorContext): DoctorFinding[] 
 export function detectStaleRuntimeAndModelOverrides(ctx: DoctorContext): DoctorFinding[] {
   const findings: DoctorFinding[] = [];
 
+  for (const key of ctx.runtimeOverridesFile.unknownKeys) {
+    if (key === 'models') {
+      findings.push({
+        id: 'legacy-runtime-overrides-key:models',
+        severity: 'warn',
+        message: 'runtime-overrides.json still contains the legacy "models" key, which is ignored by the current config loader.',
+        recommendation: 'Rewrite runtime-overrides.json so it keeps only supported keys.',
+        autoFixable: true,
+      });
+      continue;
+    }
+
+    findings.push({
+      id: `unknown-runtime-override-key:${key}`,
+      severity: 'warn',
+      message: `runtime-overrides.json contains unknown key "${key}", which is ignored by the current config loader.`,
+      recommendation: 'Remove the unknown key from runtime-overrides.json or rename it to a supported override.',
+      autoFixable: false,
+    });
+  }
+
   for (const [role, storedValue] of Object.entries(ctx.models) as Array<[ModelRole, string]>) {
     const envDefault = trimValue(ctx.envDefaults[role]);
     if (!envDefault || trimValue(storedValue) !== envDefault) continue;
     findings.push({
       id: `stale-model-override:${role}`,
-      severity: 'warn',
+      severity: 'info',
       message: `models.json stores ${role}="${storedValue}", which now matches the startup default and is redundant.`,
       recommendation:
         `Remove the redundant ${role} entry from models.json so future env default changes can flow through.`,
-      autoFixable: true,
+      autoFixable: false,
     });
   }
 
@@ -467,6 +505,49 @@ export function detectMissingSecrets(ctx: DoctorContext): DoctorFinding[] {
     }
   }
 
+  const coldStorageEnabled = parseBoolean(ctx.env.DISCOCLAW_COLD_STORAGE_ENABLED, false);
+  if (coldStorageEnabled && !hasSecret(ctx.env, 'COLD_STORAGE_API_KEY') && !hasSecret(ctx.env, 'OPENAI_API_KEY')) {
+    findings.push({
+      id: 'missing-secret:DISCOCLAW_COLD_STORAGE_ENABLED:COLD_STORAGE_API_KEY-or-OPENAI_API_KEY',
+      severity: 'error',
+      message: 'DISCOCLAW_COLD_STORAGE_ENABLED=1 but neither COLD_STORAGE_API_KEY nor OPENAI_API_KEY is set.',
+      recommendation: 'Set COLD_STORAGE_API_KEY or OPENAI_API_KEY, or disable cold storage on this install.',
+      autoFixable: false,
+    });
+  }
+
+  const imagegenEnabled = parseBoolean(ctx.env.DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN, false);
+  if (imagegenEnabled && !hasSecret(ctx.env, 'OPENAI_API_KEY') && !hasSecret(ctx.env, 'IMAGEGEN_GEMINI_API_KEY')) {
+    findings.push({
+      id: 'missing-secret:DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN:OPENAI_API_KEY-or-IMAGEGEN_GEMINI_API_KEY',
+      severity: 'error',
+      message: 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1 but neither OPENAI_API_KEY nor IMAGEGEN_GEMINI_API_KEY is set.',
+      recommendation: 'Set OPENAI_API_KEY or IMAGEGEN_GEMINI_API_KEY, or disable image generation actions on this install.',
+      autoFixable: false,
+    });
+  }
+
+  const imagegenDefaultModel = trimValue(ctx.env.IMAGEGEN_DEFAULT_MODEL);
+  if (imagegenDefaultModel) {
+    if ((imagegenDefaultModel.startsWith('imagen-') || imagegenDefaultModel.startsWith('gemini-')) && !hasSecret(ctx.env, 'IMAGEGEN_GEMINI_API_KEY')) {
+      findings.push({
+        id: 'missing-secret:IMAGEGEN_DEFAULT_MODEL:IMAGEGEN_GEMINI_API_KEY',
+        severity: 'error',
+        message: `IMAGEGEN_DEFAULT_MODEL="${imagegenDefaultModel}" requires IMAGEGEN_GEMINI_API_KEY, but it is not set.`,
+        recommendation: 'Set IMAGEGEN_GEMINI_API_KEY or choose an imagegen model that uses a configured provider.',
+        autoFixable: false,
+      });
+    } else if ((imagegenDefaultModel.startsWith('dall-e-') || imagegenDefaultModel.startsWith('gpt-image-')) && !hasSecret(ctx.env, 'OPENAI_API_KEY')) {
+      findings.push({
+        id: 'missing-secret:IMAGEGEN_DEFAULT_MODEL:OPENAI_API_KEY',
+        severity: 'error',
+        message: `IMAGEGEN_DEFAULT_MODEL="${imagegenDefaultModel}" requires OPENAI_API_KEY, but it is not set.`,
+        recommendation: 'Set OPENAI_API_KEY or choose an imagegen model that uses a configured provider.',
+        autoFixable: false,
+      });
+    }
+  }
+
   return findings;
 }
 
@@ -487,8 +568,17 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
   };
 }
 
-function removeEnvKey(lines: string[], key: string): string[] {
-  return lines.filter((line) => !line.match(new RegExp(`^\\s*${key}=`)));
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function commentMigratedEnvKey(lines: string[], key: string): string[] {
+  const pattern = new RegExp(`^(\\s*)(${escapeRegex(key)}=.*)$`);
+  return lines.map((line) => {
+    const match = line.match(pattern);
+    if (!match) return line;
+    return `${match[1]}# [doctor-migrated] ${match[2]}`;
+  });
 }
 
 function setEnvKey(lines: string[], key: string, value: string): string[] {
@@ -510,7 +600,26 @@ function setEnvKey(lines: string[], key: string, value: string): string[] {
 async function writeEnvLines(envPath: string, lines: string[]): Promise<void> {
   const body = lines.join('\n');
   const normalized = body.endsWith('\n') ? body : `${body}\n`;
-  await fs.writeFile(envPath, normalized, 'utf-8');
+  const tmpPath = `${envPath}.tmp.${process.pid}`;
+  try {
+    await fs.writeFile(tmpPath, normalized, 'utf-8');
+    await fs.rename(tmpPath, envPath);
+  } catch (err) {
+    await fs.unlink(tmpPath).catch(() => undefined);
+    throw err;
+  }
+}
+
+async function writeJsonObject(filePath: string, value: Record<string, unknown>): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.tmp.${process.pid}`;
+  try {
+    await fs.writeFile(tmpPath, JSON.stringify(value, null, 2) + '\n', 'utf-8');
+    await fs.rename(tmpPath, filePath);
+  } catch (err) {
+    await fs.unlink(tmpPath).catch(() => undefined);
+    throw err;
+  }
 }
 
 export async function applyFixes(report: DoctorReport, opts: InspectOptions = {}): Promise<FixResult> {
@@ -527,9 +636,12 @@ export async function applyFixes(report: DoctorReport, opts: InspectOptions = {}
 
   const nextModels: ModelConfig = { ...ctx.models };
   let modelsChanged = false;
+  const pendingModelIds: string[] = [];
 
-  const nextOverrides: RuntimeOverrides = { ...ctx.runtimeOverrides };
+  const nextOverridesFile = { ...ctx.runtimeOverridesFile.raw };
   let overridesChanged = false;
+  const pendingOverrideIds: string[] = [];
+  const pendingEnvIds: string[] = [];
 
   for (const id of requestedIds) {
     if (!autoFixableIds.has(id)) {
@@ -551,9 +663,24 @@ export async function applyFixes(report: DoctorReport, opts: InspectOptions = {}
         if (trimValue(ctx.env.DISCOCLAW_VOICE_HOME_CHANNEL) === undefined) {
           envLines = setEnvKey(envLines, 'DISCOCLAW_VOICE_HOME_CHANNEL', legacyValue ?? '');
         }
-        envLines = removeEnvKey(envLines, 'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL');
+        envLines = commentMigratedEnvKey(envLines, 'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL');
         envChanged = true;
-        result.applied.push(id);
+        pendingEnvIds.push(id);
+        continue;
+      }
+
+      if (id === 'legacy-runtime-overrides-key:models') {
+        if (!ctx.runtimeOverridesFile.exists) {
+          result.skipped.push({ id, reason: 'runtime-overrides.json not found' });
+          continue;
+        }
+        if (!ctx.runtimeOverridesFile.unknownKeys.includes('models')) {
+          result.skipped.push({ id, reason: 'legacy models key already absent' });
+          continue;
+        }
+        delete nextOverridesFile.models;
+        overridesChanged = true;
+        pendingOverrideIds.push(id);
         continue;
       }
 
@@ -565,29 +692,29 @@ export async function applyFixes(report: DoctorReport, opts: InspectOptions = {}
         }
         delete nextModels[role];
         modelsChanged = true;
-        result.applied.push(id);
+        pendingModelIds.push(id);
         continue;
       }
 
       if (id === 'stale-runtime-override:fastRuntime') {
-        if (!nextOverrides.fastRuntime) {
+        if (typeof nextOverridesFile.fastRuntime !== 'string') {
           result.skipped.push({ id, reason: 'fastRuntime override already absent' });
           continue;
         }
-        delete nextOverrides.fastRuntime;
+        delete nextOverridesFile.fastRuntime;
         overridesChanged = true;
-        result.applied.push(id);
+        pendingOverrideIds.push(id);
         continue;
       }
 
       if (id === 'stale-runtime-override:voiceRuntime') {
-        if (!nextOverrides.voiceRuntime) {
+        if (typeof nextOverridesFile.voiceRuntime !== 'string') {
           result.skipped.push({ id, reason: 'voiceRuntime override already absent' });
           continue;
         }
-        delete nextOverrides.voiceRuntime;
+        delete nextOverridesFile.voiceRuntime;
         overridesChanged = true;
-        result.applied.push(id);
+        pendingOverrideIds.push(id);
         continue;
       }
 
@@ -604,37 +731,40 @@ export async function applyFixes(report: DoctorReport, opts: InspectOptions = {}
     if (envChanged) {
       await writeEnvLines(ctx.configPaths.env, envLines);
     }
+    result.applied.push(...pendingEnvIds);
   } catch (err: unknown) {
-    result.errors.push({
-      id: 'deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL',
-      message: err instanceof Error ? err.message : String(err),
-    });
+    const message = err instanceof Error ? err.message : String(err);
+    for (const id of pendingEnvIds) {
+      result.errors.push({ id, message });
+    }
   }
 
   try {
     if (modelsChanged) {
       await saveModelConfig(ctx.configPaths.models, nextModels);
     }
+    result.applied.push(...pendingModelIds);
   } catch (err: unknown) {
-    result.errors.push({
-      id: 'stale-model-override',
-      message: err instanceof Error ? err.message : String(err),
-    });
+    const message = err instanceof Error ? err.message : String(err);
+    for (const id of pendingModelIds) {
+      result.errors.push({ id, message });
+    }
   }
 
   try {
     if (overridesChanged) {
-      if (Object.keys(nextOverrides).length === 0) {
+      if (Object.keys(nextOverridesFile).length === 0) {
         await clearOverrides(ctx.configPaths.runtimeOverrides);
       } else {
-        await saveOverrides(ctx.configPaths.runtimeOverrides, nextOverrides);
+        await writeJsonObject(ctx.configPaths.runtimeOverrides, nextOverridesFile);
       }
     }
+    result.applied.push(...pendingOverrideIds);
   } catch (err: unknown) {
-    result.errors.push({
-      id: 'stale-runtime-override',
-      message: err instanceof Error ? err.message : String(err),
-    });
+    const message = err instanceof Error ? err.message : String(err);
+    for (const id of pendingOverrideIds) {
+      result.errors.push({ id, message });
+    }
   }
 
   return result;
