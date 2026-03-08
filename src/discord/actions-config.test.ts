@@ -651,6 +651,24 @@ describe('modelSet voice runtime swap', () => {
     expect(ctx.botParams.voiceModelCtx!.model).toBe('sonnet');
   });
 
+  it('auto-switches voice runtime when a plain model name belongs to another provider', () => {
+    const ctx = makeCtx({
+      voiceModelCtx: {
+        model: 'gemini-2.5-flash',
+        runtime: geminiRuntime,
+        runtimeName: 'gemini',
+      },
+    });
+    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime], ['claude', stubRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'sonnet' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBe(stubRuntime);
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('claude');
+    expect(ctx.botParams.voiceModelCtx!.model).toBe('sonnet');
+    expect(result.summary).toContain('voice runtime → claude (auto-switched)');
+  });
+
   it('calls persistVoiceRuntime (not persistOverride) for runtime swaps', () => {
     let persistOverrideCalled = false;
     let persistVoiceRuntimeName: string | undefined;

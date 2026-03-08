@@ -206,4 +206,33 @@ describe('findRuntimeForModel', () => {
     initTierOverrides({ DISCOCLAW_TIER_OPENROUTER_FAST: 'gpt-5-mini' });
     expect(findRuntimeForModel('gpt-5-mini')).toBeUndefined();
   });
+
+  it('infers claude ownership for legacy family aliases', () => {
+    expect(findRuntimeForModel('haiku')).toBe('claude_code');
+    expect(findRuntimeForModel('sonnet')).toBe('claude_code');
+    expect(findRuntimeForModel('opus')).toBe('claude_code');
+  });
+
+  it('infers claude ownership for full claude model identifiers', () => {
+    expect(findRuntimeForModel('claude-sonnet-4-5-20250929')).toBe('claude_code');
+    expect(findRuntimeForModel('claude-haiku-4-5-20251001')).toBe('claude_code');
+  });
+
+  it('infers openrouter ownership for provider-prefixed model identifiers', () => {
+    expect(findRuntimeForModel('anthropic/claude-sonnet-4')).toBe('openrouter');
+    expect(findRuntimeForModel('openai/gpt-5-mini')).toBe('openrouter');
+  });
+
+  it('infers openai ownership for openai-only model families outside the tier map', () => {
+    expect(findRuntimeForModel('gpt-4o')).toBe('openai');
+    expect(findRuntimeForModel('o3-mini')).toBe('openai');
+  });
+
+  it('keeps exact ambiguity ahead of heuristic ownership inference', () => {
+    initTierOverrides({
+      DISCOCLAW_TIER_CLAUDE_CODE_FAST: 'sonnet',
+      DISCOCLAW_TIER_OPENROUTER_FAST: 'sonnet',
+    });
+    expect(findRuntimeForModel('sonnet')).toBeUndefined();
+  });
 });
