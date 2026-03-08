@@ -5,8 +5,10 @@
  */
 
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import { runInitWizard } from './init-wizard.js';
 import { runDaemonInstaller } from './daemon-installer.js';
+import type { DoctorFinding, DoctorReport, FixResult } from '../health/config-doctor.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json') as { version: string };
@@ -20,6 +22,23 @@ switch (command) {
   case 'install-daemon':
     await runDaemonInstaller();
     break;
+  case 'doctor': {
+    const cwd = process.cwd();
+    const shouldFix = process.argv.includes('--fix');
+    const { config } = await import('dotenv');
+    const { inspect, applyFixes } = await import('../health/config-doctor.js');
+
+    config({ path: path.join(cwd, '.env') });
+
+    const report = await inspect({ cwd, env: process.env });
+    printDoctorReport(report);
+
+    if (shouldFix) {
+      const result = await applyFixes(report, { cwd, env: process.env });
+      printDoctorFixResult(result);
+    }
+    break;
+  }
   case 'update': {
     const subcommand = process.argv[3];
     const { isNpmManaged, getLocalVersion, getLatestNpmVersion, npmGlobalUpgrade } =
@@ -83,6 +102,7 @@ function printHelp(ver: string): void {
       `\nUsage: discoclaw <command>\n` +
       `\nCommands:\n` +
       `  init                                  Interactive setup wizard — creates .env and workspace/\n` +
+      `  doctor [--fix]                        Inspect config drift and missing secrets; use --fix for auto-fixes\n` +
       `  install-daemon [--service-name <name>]  Register discoclaw as a persistent background service\n` +
       `                                          Use --service-name to run multiple instances side-by-side.\n` +
       `                                          Defaults to "discoclaw".\n` +
@@ -91,5 +111,74 @@ function printHelp(ver: string): void {
       `\nOptions:\n` +
       `  -v, --version   Print version\n` +
       `  -h, --help      Print this help\n`,
+  );
+}
+
+function printDoctorReport(report: DoctorReport): void {
+  const severityCounts = countDoctorSeverities(report.findings);
+
+  console.log(`Doctor report for ${report.configPaths.cwd}`);
+  console.log(`  Install mode: ${report.installMode}`);
+  console.log(`  .env: ${report.configPaths.env}`);
+  console.log(`  data dir: ${report.configPaths.dataDir}`);
+  console.log(`  models: ${report.configPaths.models}`);
+  console.log(`  runtime overrides: ${report.configPaths.runtimeOverrides}`);
+  console.log(
+    `  Findings: ${report.findings.length} (errors=${severityCounts.error}, warnings=${severityCounts.warn}, info=${severityCounts.info})`,
+  );
+
+  if (report.findings.length === 0) {
+    console.log('\nNo config doctor findings.');
+    return;
+  }
+
+  console.log('');
+  for (const finding of report.findings) {
+    printDoctorFinding(finding);
+  }
+}
+
+function printDoctorFinding(finding: DoctorFinding): void {
+  const autoFixLabel = finding.autoFixable ? 'auto-fixable' : 'manual-fix';
+  console.log(`[${finding.severity.toUpperCase()}] ${finding.id} (${autoFixLabel})`);
+  console.log(`  ${finding.message}`);
+  console.log(`  Recommended fix: ${finding.recommendation}`);
+}
+
+function printDoctorFixResult(result: FixResult): void {
+  console.log('\nFix results:');
+  console.log(`  Applied: ${result.applied.length}`);
+  console.log(`  Skipped: ${result.skipped.length}`);
+  console.log(`  Errors: ${result.errors.length}`);
+
+  if (result.applied.length > 0) {
+    console.log('\nApplied fixes:');
+    for (const id of result.applied) {
+      console.log(`  - ${id}`);
+    }
+  }
+
+  if (result.skipped.length > 0) {
+    console.log('\nSkipped fixes:');
+    for (const entry of result.skipped) {
+      console.log(`  - ${entry.id}: ${entry.reason}`);
+    }
+  }
+
+  if (result.errors.length > 0) {
+    console.log('\nFix errors:');
+    for (const entry of result.errors) {
+      console.log(`  - ${entry.id}: ${entry.message}`);
+    }
+  }
+}
+
+function countDoctorSeverities(findings: DoctorFinding[]): Record<'error' | 'warn' | 'info', number> {
+  return findings.reduce<Record<'error' | 'warn' | 'info', number>>(
+    (counts, finding) => {
+      counts[finding.severity] += 1;
+      return counts;
+    },
+    { error: 0, warn: 0, info: 0 },
   );
 }
