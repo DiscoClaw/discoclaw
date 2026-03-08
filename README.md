@@ -314,7 +314,7 @@ pnpm install
 pnpm build
 ```
 
-Run `pnpm preflight` — it flags configuration options from `.env.example` that aren't in your `.env` yet.
+Run `pnpm preflight` — it flags configuration options from `.env.example` that aren't in your `.env` yet. You can also run `discoclaw doctor` to inspect config drift and related issues; `discoclaw doctor --fix` applies safe remediations, but you'll need to restart the service afterward.
 
 If running as a systemd service, restart it:
 
