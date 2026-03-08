@@ -8,7 +8,6 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { runInitWizard } from './init-wizard.js';
 import { runDaemonInstaller } from './daemon-installer.js';
-import { runDashboard } from './dashboard.js';
 import type { DoctorFinding, DoctorReport, FixResult } from '../health/config-doctor.js';
 
 const require = createRequire(import.meta.url);
@@ -23,9 +22,16 @@ switch (command) {
   case 'install-daemon':
     await runDaemonInstaller();
     break;
-  case 'dashboard':
+  case 'dashboard': {
+    const cwd = process.cwd();
+    const { config } = await import('dotenv');
+    const { runDashboard } = await import('./dashboard.js');
+
+    config({ path: path.join(cwd, '.env') });
+
     await runDashboard();
     break;
+  }
   case 'doctor': {
     const cwd = process.cwd();
     const shouldFix = process.argv.includes('--fix');
