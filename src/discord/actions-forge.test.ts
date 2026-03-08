@@ -295,6 +295,55 @@ describe('executeForgeAction', () => {
       }
     });
 
+    it('posts a status-aware forge review progress message for review plans', async () => {
+      const edit = vi.fn(async () => ({}));
+      const send = vi.fn(async () => ({ edit }));
+      const fetch = vi.fn(async () => ({ send }));
+
+      const forgeCtx = makeForgeCtx();
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-042' },
+        makeCtx({ client: { channels: { fetch } } as any }),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({
+        content: 'Resuming forge review for **plan-042** from REVIEW status...',
+      }));
+    });
+
+    it('posts a status-aware forge review progress message for draft plans', async () => {
+      const { findPlanFile } = await import('./plan-commands.js');
+      (findPlanFile as any).mockResolvedValueOnce({
+        filePath: '/tmp/plans/plan-123-test.md',
+        header: {
+          planId: 'plan-123',
+          taskId: 'ws-123',
+          status: 'DRAFT',
+          title: 'Draft Plan',
+          project: 'discoclaw',
+          created: '2026-01-01',
+        },
+      });
+
+      const edit = vi.fn(async () => ({}));
+      const send = vi.fn(async () => ({ edit }));
+      const fetch = vi.fn(async () => ({ send }));
+
+      const forgeCtx = makeForgeCtx();
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-123' },
+        makeCtx({ client: { channels: { fetch } } as any }),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({
+        content: 'Resuming forge review for **plan-123** from DRAFT status...',
+      }));
+    });
+
     it('routes approved plans into planRun instead of re-auditing', async () => {
       const { findPlanFile } = await import('./plan-commands.js');
       const { executePlanAction } = await import('./actions-plan.js');
@@ -548,5 +597,6 @@ describe('forgeActionsPromptSection', () => {
     expect(section).toContain('DRAFT / REVIEW');
     expect(section).toContain('APPROVED / IMPLEMENTING');
     expect(section).toContain('planRun');
+    expect(section).toContain('pick up a plan again; the next step depends on the plan\'s status');
   });
 });

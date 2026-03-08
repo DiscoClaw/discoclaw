@@ -564,6 +564,22 @@ describe('message coordinator plan run phase-start posts', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  it('shows status-aware !forge help for plan IDs', async () => {
+    const params = {
+      ...makeParams(),
+      forgeCommandsEnabled: true,
+    };
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue as any);
+    const msg = makeMessage('!forge help');
+
+    await handler(msg as any);
+
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('`!forge <plan-id>` — resume DRAFT/REVIEW plans in forge, or start plan run for APPROVED/IMPLEMENTING plans'),
+    }));
+  });
+
   it('routes !forge plan-id to planRun when the plan is already approved', async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-forge-approved-'));
     const planFilePath = path.join(tmpDir, 'plan-123.md');
@@ -602,6 +618,79 @@ describe('message coordinator plan run phase-start posts', () => {
     expect(msg.reply).toHaveBeenCalledWith(
       expect.objectContaining({ content: 'Auto plan run summary' }),
     );
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('routes !forge plan-id to planRun when the plan is already implementing', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-forge-implementing-'));
+    const planFilePath = path.join(tmpDir, 'plan-456.md');
+    await fs.writeFile(planFilePath, '# Plan', 'utf8');
+
+    const { looksLikePlanId, findPlanFile } = await import('./plan-commands.js');
+    (looksLikePlanId as any).mockImplementation((value: string) => value === 'plan-456');
+    (findPlanFile as any).mockResolvedValue({
+      filePath: planFilePath,
+      header: { planId: 'plan-456', title: 'Plan 456', status: 'IMPLEMENTING' },
+    });
+
+    const params = {
+      ...makeParams(),
+      forgeCommandsEnabled: true,
+      planCommandsEnabled: true,
+    };
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue as any);
+    const msg = makeMessage('!forge plan-456');
+
+    await handler(msg as any);
+
+    const { executePlanAction } = await import('./actions-plan.js');
+    await vi.waitFor(() => {
+      expect(executePlanAction).toHaveBeenCalledWith(
+        { type: 'planRun', planId: 'plan-456' },
+        expect.any(Object),
+        expect.objectContaining({
+          plansDir: expect.any(String),
+          workspaceCwd: expect.any(String),
+        }),
+      );
+    });
+
+    expect(msg.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'Auto plan run summary' }),
+    );
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('resumes !forge plan-id in forge when the plan is in review', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-forge-review-'));
+    const planFilePath = path.join(tmpDir, 'plan-789.md');
+    await fs.writeFile(planFilePath, '# Plan', 'utf8');
+
+    const { looksLikePlanId, findPlanFile } = await import('./plan-commands.js');
+    (looksLikePlanId as any).mockImplementation((value: string) => value === 'plan-789');
+    (findPlanFile as any).mockResolvedValue({
+      filePath: planFilePath,
+      header: { planId: 'plan-789', title: 'Plan 789', status: 'REVIEW' },
+    });
+
+    const params = {
+      ...makeParams(),
+      forgeCommandsEnabled: true,
+    };
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue as any);
+    const msg = makeMessage('!forge plan-789');
+
+    await handler(msg as any);
+
+    await vi.waitFor(() => {
+      expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+        content: 'Resuming forge review for **plan-789** from REVIEW status...',
+      }));
+    });
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });

@@ -314,7 +314,9 @@ export async function executeForgeAction(
       const progress = await buildProgressCallbacks(
         ctx,
         forgeCtx,
-        `Re-auditing **${found.header.planId}**...`,
+        found.header.status === 'DRAFT' || found.header.status === 'REVIEW'
+          ? `Resuming forge review for **${found.header.planId}** from ${found.header.status} status...`
+          : `Resuming forge review for **${found.header.planId}**...`,
       );
       const orchestrator = forgeCtx.orchestratorFactory();
       setActiveOrchestrator(orchestrator, ctx.channelId);
