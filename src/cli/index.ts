@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { runInitWizard } from './init-wizard.js';
 import { runDaemonInstaller } from './daemon-installer.js';
+import { runDashboard } from './dashboard.js';
 import type { DoctorFinding, DoctorReport, FixResult } from '../health/config-doctor.js';
 
 const require = createRequire(import.meta.url);
@@ -21,6 +22,9 @@ switch (command) {
     break;
   case 'install-daemon':
     await runDaemonInstaller();
+    break;
+  case 'dashboard':
+    await runDashboard();
     break;
   case 'doctor': {
     const cwd = process.cwd();
@@ -102,6 +106,7 @@ function printHelp(ver: string): void {
       `\nUsage: discoclaw <command>\n` +
       `\nCommands:\n` +
       `  init                                  Interactive setup wizard — creates .env and workspace/\n` +
+      `  dashboard                             Interactive terminal dashboard for common admin tasks\n` +
       `  doctor [--fix]                        Inspect config drift, deprecated env vars, conflicting/stale overrides, and missing secrets; use --fix for auto-fixes\n` +
       `  install-daemon [--service-name <name>]  Register discoclaw as a persistent background service\n` +
       `                                          Use --service-name to run multiple instances side-by-side.\n` +
