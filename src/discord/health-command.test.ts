@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MetricsRegistry } from '../observability/metrics.js';
 import {
+  parseDoctorCommand,
   parseHealthCommand,
   renderHealthDoctorReport,
   renderHealthReport,
@@ -15,6 +16,26 @@ describe('parseHealthCommand', () => {
     expect(parseHealthCommand('!health doctor')).toBe('doctor');
     expect(parseHealthCommand('!health doctor fix')).toBe('doctor-fix');
     expect(parseHealthCommand('!memory show')).toBeNull();
+  });
+});
+
+describe('parseDoctorCommand', () => {
+  it('parses !doctor as inspect', () => {
+    expect(parseDoctorCommand('!doctor')).toBe('inspect');
+  });
+
+  it('parses !doctor fix as fix', () => {
+    expect(parseDoctorCommand('!doctor fix')).toBe('fix');
+  });
+
+  it('returns null for unrelated input', () => {
+    expect(parseDoctorCommand('!health doctor')).toBeNull();
+    expect(parseDoctorCommand('!status')).toBeNull();
+  });
+
+  it('normalizes whitespace', () => {
+    expect(parseDoctorCommand('  !doctor   fix  ')).toBe('fix');
+    expect(parseDoctorCommand('\n!doctor\t')).toBe('inspect');
   });
 });
 

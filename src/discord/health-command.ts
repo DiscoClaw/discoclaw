@@ -27,6 +27,13 @@ export type HealthConfigSnapshot = {
   autoIndexChannelContext: boolean;
 };
 
+export function parseDoctorCommand(content: string): 'inspect' | 'fix' | null {
+  const normalized = String(content ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (normalized === '!doctor') return 'inspect';
+  if (normalized === '!doctor fix') return 'fix';
+  return null;
+}
+
 export function parseHealthCommand(content: string): HealthCommandMode | null {
   const normalized = String(content ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
   if (normalized === '!health') return 'basic';
