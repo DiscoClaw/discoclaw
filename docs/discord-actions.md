@@ -192,18 +192,19 @@ The forge, plan, and memory categories enable the AI runtime to self-initiate op
 
 ### Forge Actions (`actions-forge.ts`)
 
-Allow the model to start, monitor, and cancel forge runs (plan drafting + audit loops) without a human `!forge` command.
+Allow the model to start new forge runs, resume existing plans, monitor progress, and cancel forge work without a human `!forge` command.
 
 | Action | Description | Mutating? | Async? |
 |--------|-------------|-----------|--------|
 | `forgeCreate` | Start a new forge run from a description | Yes | Yes (fire-and-forget; progress posted to channel) |
-| `forgeResume` | Re-enter the audit/revise loop for an existing plan | Yes | Yes (fire-and-forget) |
+| `forgeResume` | Continue an existing plan based on its current status: DRAFT/REVIEW re-enter forge, APPROVED/IMPLEMENTING route to `planRun` | Yes | Yes (fire-and-forget) |
 | `forgeStatus` | Check if a forge is currently running | No | No |
 | `forgeCancel` | Cancel the running forge | Yes | No (sets cancel flag) |
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1, requires `DISCOCLAW_FORGE_COMMANDS_ENABLED`).
-Context: Requires `ForgeContext` with an `orchestratorFactory`, plans directory, and progress callback.
+Context: Requires `ForgeContext` with an `orchestratorFactory`, plans directory, and progress callback. If `forgeResume` needs to continue an `APPROVED` or `IMPLEMENTING` plan, `ForgeContext.planCtx` must also be configured so it can delegate to `planRun`.
 Concurrency: Only one forge at a time (module-level singleton via `forge-plan-registry.ts`). Acquires the workspace writer lock for the duration of the run.
+Status routing: `forgeResume` inspects the current plan status before choosing a path. `DRAFT` / `REVIEW` plans resume the forge audit/revise loop. `APPROVED` / `IMPLEMENTING` plans skip re-auditing and hand off directly to `planRun` for implementation.
 Recursion guard: `forgeCreate` and `forgeResume` are blocked at `depth >= 1` to prevent forge-initiated forges.
 
 ### Plan Actions (`actions-plan.ts`)

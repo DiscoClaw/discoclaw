@@ -336,7 +336,8 @@ Show available forge commands.
 **Output:**
 ```
 **!forge commands:**
-- `!forge <description>` — auto-draft and audit a plan
+- `!forge <description>` — draft and audit a new plan
+- `!forge <plan-id>` — resume DRAFT/REVIEW plans in forge, or start plan run for APPROVED/IMPLEMENTING plans
 - `!forge status` — check if a forge is running
 - `!forge cancel` — cancel the running forge
 ```
@@ -347,7 +348,7 @@ Show available forge commands.
 
 ### `!forge <description>`
 
-Create a plan and automatically draft, audit, and revise it. Runs in the background; progress is reported by editing a Discord message.
+Create a new plan and automatically draft, audit, and revise it. Runs in the background; progress is reported by editing a Discord message.
 
 ```
 !forge Add rate limiting to the webhook endpoint
@@ -373,6 +374,35 @@ A forge is already running. Use `!forge cancel` to stop it first.
 ```
 
 This is checked in `src/discord/message-coordinator.ts` via the `getActiveOrchestrator()?.isRunning` guard. Additionally, `ForgeOrchestrator.run()` throws if called while `running === true` as defense-in-depth.
+
+### `!forge <plan-id>`
+
+Resume an existing plan by plan ID. The behavior is status-dependent:
+
+- `DRAFT` / `REVIEW` — re-enter the forge audit/revise loop.
+- `APPROVED` / `IMPLEMENTING` — skip re-auditing and immediately route to `!plan run` / `planRun` to continue implementation.
+
+```
+!forge plan-018
+```
+
+**Output (`DRAFT` / `REVIEW` path):**
+```
+Resuming forge review for **plan-018** from REVIEW status...
+```
+
+After that, the command follows the normal forge progress/edit flow and ends with the usual forge terminal post.
+
+**Output (`APPROVED` / `IMPLEMENTING` path):**
+```
+Plan run started for plan-018.
+```
+
+On this path, the command hands off to the plan runner immediately, so the operator sees `!plan run`-style progress updates rather than another forge audit cycle.
+
+**Common failure modes:**
+- The supplied ID does not match an existing plan: `No plan found matching "<plan-id>". Use \`!forge <description>\` to create a new plan.`
+- Another forge is already active: `A forge is already running. Use \`!forge cancel\` to stop it first.`
 
 ### `!forge status`
 
