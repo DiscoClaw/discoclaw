@@ -7,6 +7,7 @@ import {
   detectConflictingOverrides,
   detectDeprecatedEnvVars,
   detectInvalidPersistedModelAssignments,
+  detectInvalidModelsFile,
   detectInstallDrift,
   detectMissingSecrets,
   detectStaleRuntimeAndModelOverrides,
@@ -211,6 +212,25 @@ describe('detectInvalidPersistedModelAssignments', () => {
   });
 });
 
+describe('detectInvalidModelsFile', () => {
+  it('surfaces corrupt models.json instead of silently normalizing it away', async () => {
+    const cwd = await makeTempInstall('doctor-invalid-models-file');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=claude',
+    ]);
+    await fs.mkdir(path.join(cwd, 'data'), { recursive: true });
+    await fs.writeFile(path.join(cwd, 'data', 'models.json'), '{not-json\n', 'utf-8');
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectInvalidModelsFile(ctx);
+
+    expect(ctx.models).toEqual({});
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.id).toBe('invalid-model-config:models-json');
+    expect(findings[0]?.severity).toBe('error');
+  });
+});
+
 describe('inspect', () => {
   it('returns install mode, resolved paths, and combined findings', async () => {
     const cwd = await makeTempInstall('doctor-inspect');
@@ -234,6 +254,21 @@ describe('inspect', () => {
       'deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL',
       'stale-model-override:chat',
       'missing-secret:PRIMARY_RUNTIME:OPENROUTER_API_KEY',
+    ]);
+  });
+
+  it('includes an explicit finding when models.json is corrupt', async () => {
+    const cwd = await makeTempInstall('doctor-inspect-invalid-models-file');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=claude',
+    ]);
+    await fs.mkdir(path.join(cwd, 'data'), { recursive: true });
+    await fs.writeFile(path.join(cwd, 'data', 'models.json'), '{not-json\n', 'utf-8');
+
+    const report = await inspect({ cwd });
+
+    expect(report.findings.map((finding) => finding.id)).toEqual([
+      'invalid-model-config:models-json',
     ]);
   });
 });

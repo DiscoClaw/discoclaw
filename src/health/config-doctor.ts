@@ -57,6 +57,12 @@ type RuntimeOverridesFileState = {
   values: RuntimeOverrides;
 };
 
+type ModelsFileState = {
+  exists: boolean;
+  values: ModelConfig;
+  error?: string;
+};
+
 export type DoctorContext = {
   cwd: string;
   installMode: InstallMode;
@@ -65,6 +71,7 @@ export type DoctorContext = {
   configPaths: DoctorReport['configPaths'];
   defaultDataDir: string;
   models: ModelConfig;
+  modelsFile: ModelsFileState;
   runtimeOverrides: RuntimeOverrides;
   runtimeOverridesFile: RuntimeOverridesFileState;
   envDefaults: ModelConfig;
@@ -151,21 +158,36 @@ async function loadEnvFile(envPath: string): Promise<EnvFileState> {
   }
 }
 
-async function readModelConfigReadOnly(filePath: string): Promise<ModelConfig> {
+async function readModelConfigReadOnly(filePath: string): Promise<ModelsFileState> {
   try {
     const raw = await fs.readFile(filePath, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {
+        exists: true,
+        values: {},
+        error: 'models.json must contain a JSON object with role-to-model string entries.',
+      };
+    }
     const config: ModelConfig = {};
     for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
       if (typeof value === 'string') {
         config[key as ModelRole] = value;
       }
     }
-    return config;
+    return {
+      exists: true,
+      values: config,
+    };
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    return {};
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { exists: false, values: {} };
+    }
+    return {
+      exists: true,
+      values: {},
+      error: `Failed to read models.json: ${(err as Error).message}`,
+    };
   }
 }
 
@@ -271,7 +293,7 @@ export async function loadDoctorContext(opts: InspectOptions = {}): Promise<Doct
     runtimeOverrides: path.join(dataDir, 'runtime-overrides.json'),
   };
 
-  const [models, runtimeOverridesFile] = await Promise.all([
+  const [modelsFile, runtimeOverridesFile] = await Promise.all([
     readModelConfigReadOnly(configPaths.models),
     readRuntimeOverridesFileState(configPaths.runtimeOverrides),
   ]);
@@ -283,11 +305,23 @@ export async function loadDoctorContext(opts: InspectOptions = {}): Promise<Doct
     explicitEnvKeys,
     configPaths,
     defaultDataDir: path.join(cwd, 'data'),
-    models,
+    models: modelsFile.values,
+    modelsFile,
     runtimeOverrides: runtimeOverridesFile.values,
     runtimeOverridesFile,
     envDefaults: buildEnvDefaults(env),
   };
+}
+
+export function detectInvalidModelsFile(ctx: DoctorContext): DoctorFinding[] {
+  if (!ctx.modelsFile.error) return [];
+  return [{
+    id: 'invalid-model-config:models-json',
+    severity: 'error',
+    message: `models.json could not be loaded cleanly: ${ctx.modelsFile.error}`,
+    recommendation: 'Fix data/models.json so it is valid JSON with a top-level object containing string model values.',
+    autoFixable: false,
+  }];
 }
 
 export function detectInstallDrift(ctx: DoctorContext): DoctorFinding[] {
@@ -595,6 +629,7 @@ export function detectMissingSecrets(ctx: DoctorContext): DoctorFinding[] {
 export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> {
   const ctx = await loadDoctorContext(opts);
   const findings = [
+    ...detectInvalidModelsFile(ctx),
     ...detectInstallDrift(ctx),
     ...detectDeprecatedEnvVars(ctx),
     ...detectConflictingOverrides(ctx),

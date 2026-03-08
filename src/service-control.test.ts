@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  getServiceCommands,
+  getPlatformCommands,
+  getServiceLogs,
+  getServiceStatus,
   normalizeServiceName,
-  probeServiceSummary,
-  runServiceAction,
+  restartService,
   summarizeServiceStatus,
   truncateCommandOutput,
   type CommandResult,
@@ -37,15 +38,15 @@ describe('normalizeServiceName', () => {
   });
 });
 
-describe('getServiceCommands', () => {
+describe('getPlatformCommands', () => {
   it('builds linux systemd commands with the provided service name', () => {
-    const commands = getServiceCommands('discoclaw-beta', 'linux', '/Users/david', 501);
+    const commands = getPlatformCommands('discoclaw-beta', 'linux', '/Users/david', 501);
     expect(commands?.statusCmd).toEqual(['systemctl', ['--user', 'status', 'discoclaw-beta']]);
     expect(commands?.logsCmd).toEqual(['journalctl', ['--user', '-u', 'discoclaw-beta', '--no-pager', '-n', '30']]);
   });
 
   it('builds macOS launchctl commands and bootstraps when inactive', () => {
-    const commands = getServiceCommands('discoclaw-beta', 'darwin', '/Users/david', 502);
+    const commands = getPlatformCommands('discoclaw-beta', 'darwin', '/Users/david', 502);
     expect(commands?.restartCmd(false)).toEqual([
       'launchctl',
       [
@@ -78,35 +79,41 @@ describe('truncateCommandOutput', () => {
   });
 });
 
-describe('probeServiceSummary', () => {
-  it('returns the summarized status detail', async () => {
+describe('getServiceStatus', () => {
+  it('returns the raw service status result', async () => {
     const deps = makeDeps({
       runCommand: vi.fn(async () => makeResult({
         stdout: 'Loaded: loaded\n   Active: active (running) since today\n',
       })),
     });
 
-    await expect(probeServiceSummary('discoclaw-beta', deps)).resolves.toBe('active (running) since today');
+    await expect(getServiceStatus('discoclaw-beta', deps)).resolves.toEqual(
+      makeResult({ stdout: 'Loaded: loaded\n   Active: active (running) since today\n' }),
+    );
   });
 });
 
-describe('runServiceAction', () => {
-  it('returns status output for status actions', async () => {
+describe('getServiceLogs', () => {
+  it('returns the raw service log output', async () => {
     const deps = makeDeps({
-      runCommand: vi.fn(async () => makeResult({ stdout: '   Active: active (running)\n' })),
+      runCommand: vi.fn(async () => makeResult({ stdout: 'line one\nline two\n' })),
     });
 
-    await expect(runServiceAction('status', 'discoclaw-beta', deps)).resolves.toBe('Active: active (running)');
+    await expect(getServiceLogs('discoclaw-beta', deps)).resolves.toEqual(
+      makeResult({ stdout: 'line one\nline two\n' }),
+    );
   });
+});
 
+describe('restartService', () => {
   it('requests a restart when the service is already active', async () => {
     const runCommand = vi.fn()
       .mockResolvedValueOnce(makeResult({ stdout: '   Active: active (running)\n' }))
       .mockResolvedValueOnce(makeResult({ stdout: 'done\n' }));
     const deps = makeDeps({ runCommand });
 
-    await expect(runServiceAction('restart', 'discoclaw-beta', deps)).resolves.toBe(
-      'Restart requested for discoclaw-beta.\n\ndone',
+    await expect(restartService('discoclaw-beta', deps)).resolves.toEqual(
+      makeResult({ stdout: 'done\n' }),
     );
     expect(runCommand).toHaveBeenNthCalledWith(2, 'systemctl', ['--user', 'restart', 'discoclaw-beta']);
   });
@@ -122,8 +129,8 @@ describe('runServiceAction', () => {
       getUid: () => 502,
     });
 
-    await expect(runServiceAction('restart', 'discoclaw-beta', deps)).resolves.toBe(
-      'Start requested for discoclaw-beta.\n\nbootstrapped',
+    await expect(restartService('discoclaw-beta', deps)).resolves.toEqual(
+      makeResult({ stdout: 'bootstrapped\n' }),
     );
     expect(runCommand).toHaveBeenNthCalledWith(2, 'launchctl', [
       'bootstrap',

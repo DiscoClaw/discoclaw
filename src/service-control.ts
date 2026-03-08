@@ -8,8 +8,6 @@ export type CommandResult = {
   exitCode: number | null;
 };
 
-export type ServiceAction = 'status' | 'logs' | 'restart';
-
 export type ServiceCommands = {
   statusCmd: [string, string[]];
   logsCmd: [string, string[]];
@@ -25,6 +23,14 @@ export type ServiceControlDeps = {
   getUid: () => number;
 };
 
+function unsupportedResult(platform: NodeJS.Platform): CommandResult {
+  return {
+    stdout: '',
+    stderr: `Service actions are not supported on ${platform}.`,
+    exitCode: null,
+  };
+}
+
 function mapExitCode(err: ExecFileException | null): number | null {
   if (!err) return 0;
   return typeof err.code === 'number' ? err.code : null;
@@ -35,7 +41,7 @@ export function normalizeServiceName(value: string | undefined): string {
   return trimmed ? trimmed : 'discoclaw';
 }
 
-export function getServiceCommands(
+function getServiceCommands(
   serviceName = 'discoclaw',
   platform: NodeJS.Platform = process.platform,
   homeDir = os.homedir(),
@@ -71,8 +77,13 @@ export function getServiceCommands(
   return null;
 }
 
-export function getPlatformCommands(serviceName = 'discoclaw'): ServiceCommands | null {
-  return getServiceCommands(serviceName, process.platform, os.homedir(), process.getuid?.() ?? 501);
+export function getPlatformCommands(
+  serviceName = 'discoclaw',
+  platform: NodeJS.Platform = process.platform,
+  homeDir = os.homedir(),
+  uid = process.getuid?.() ?? 501,
+): ServiceCommands | null {
+  return getServiceCommands(serviceName, platform, homeDir, uid);
 }
 
 export function run(cmd: string, args: string[]): Promise<CommandResult> {
@@ -112,48 +123,32 @@ export function truncateCommandOutput(text: string, maxChars = 4000): string {
   return `${trimmed.slice(0, maxChars - 15)}\n[output truncated]`;
 }
 
-export async function runServiceAction(
-  action: ServiceAction,
+export async function getServiceStatus(
   serviceName: string,
   deps: ServiceControlDeps,
-): Promise<string> {
+): Promise<CommandResult> {
   const commands = getServiceCommands(serviceName, deps.platform, deps.homeDir, deps.getUid());
-  if (!commands) {
-    return `Service actions are not supported on ${deps.platform}.`;
-  }
+  if (!commands) return unsupportedResult(deps.platform);
+  return deps.runCommand(commands.statusCmd[0], commands.statusCmd[1]);
+}
 
-  if (action === 'status') {
-    const result = await deps.runCommand(commands.statusCmd[0], commands.statusCmd[1]);
-    return truncateCommandOutput(result.stdout || result.stderr);
-  }
+export async function getServiceLogs(
+  serviceName: string,
+  deps: ServiceControlDeps,
+): Promise<CommandResult> {
+  const commands = getServiceCommands(serviceName, deps.platform, deps.homeDir, deps.getUid());
+  if (!commands) return unsupportedResult(deps.platform);
+  return deps.runCommand(commands.logsCmd[0], commands.logsCmd[1]);
+}
 
-  if (action === 'logs') {
-    const result = await deps.runCommand(commands.logsCmd[0], commands.logsCmd[1]);
-    return truncateCommandOutput(result.stdout || result.stderr);
-  }
-
+export async function restartService(
+  serviceName: string,
+  deps: ServiceControlDeps,
+): Promise<CommandResult> {
+  const commands = getServiceCommands(serviceName, deps.platform, deps.homeDir, deps.getUid());
+  if (!commands) return unsupportedResult(deps.platform);
   const before = await deps.runCommand(commands.checkActiveCmd[0], commands.checkActiveCmd[1]);
   const wasActive = commands.isActive(before);
   const [cmd, args] = commands.restartCmd(wasActive);
-  const result = await deps.runCommand(cmd, args);
-  const detail = truncateCommandOutput(
-    result.stdout || result.stderr || (result.exitCode === 0 ? 'Command completed.' : 'No output.'),
-  );
-  if (result.exitCode === 0) {
-    return wasActive
-      ? `Restart requested for ${serviceName}.\n\n${detail}`
-      : `Start requested for ${serviceName}.\n\n${detail}`;
-  }
-
-  return `Service action failed for ${serviceName} (exit ${result.exitCode ?? 'unknown'}).\n\n${detail}`;
-}
-
-export async function probeServiceSummary(
-  serviceName: string,
-  deps: ServiceControlDeps,
-): Promise<string> {
-  const commands = getServiceCommands(serviceName, deps.platform, deps.homeDir, deps.getUid());
-  if (!commands) return `unsupported on ${deps.platform}`;
-  const result = await deps.runCommand(commands.statusCmd[0], commands.statusCmd[1]);
-  return summarizeServiceStatus(result, deps.platform);
+  return deps.runCommand(cmd, args);
 }

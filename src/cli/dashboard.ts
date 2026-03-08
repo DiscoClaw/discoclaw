@@ -4,16 +4,20 @@ import path from 'node:path';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { config as loadDotenv } from 'dotenv';
-import { findRuntimeForModel } from '../runtime/model-tiers.js';
+import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
+import { isModelTier } from '../runtime/model-tiers.js';
+import { getGitHash } from '../version.js';
 import type { DoctorContext, DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
-import { applyFixes, inspect, loadDoctorContext } from '../health/config-doctor.js';
+import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
 import { saveOverrides, type RuntimeOverrides } from '../runtime-overrides.js';
 import type { CommandResult, ServiceControlDeps } from '../service-control.js';
 import {
+  getServiceLogs,
+  getServiceStatus,
+  restartService,
   normalizeServiceName,
-  probeServiceSummary,
-  runServiceAction,
+  summarizeServiceStatus,
   truncateCommandOutput,
 } from '../service-control.js';
 
@@ -28,7 +32,6 @@ const DASHBOARD_MODEL_ROLES: readonly ModelRole[] = [
   'forge-auditor',
 ];
 
-const KNOWN_RUNTIME_NAMES = ['claude', 'openai', 'openrouter', 'gemini', 'codex', 'anthropic'] as const;
 const ACTION_MENU = [
   '[1] Refresh',
   '[2] Service status',
@@ -36,7 +39,7 @@ const ACTION_MENU = [
   '[4] Restart/start service',
   '[5] Run config doctor',
   '[6] Apply doctor fixes',
-  '[7] Change model/runtime assignment',
+  '[7] Change model assignment',
   '[q] Quit',
 ] as const;
 
@@ -49,7 +52,9 @@ export type DashboardModelRow = {
 
 export type DashboardSnapshot = {
   cwd: string;
+  version: string;
   installMode: DoctorReport['installMode'];
+  gitHash: string | null;
   serviceName: string;
   serviceSummary: string;
   doctorSummary: string;
@@ -75,6 +80,9 @@ export type DashboardDeps = {
   saveModelConfig: (filePath: string, config: ModelConfig) => Promise<void>;
   saveOverrides: (filePath: string, overrides: RuntimeOverrides) => Promise<void>;
   runCommand: (cmd: string, args: string[]) => Promise<CommandResult>;
+  getLocalVersion: () => string;
+  isNpmManaged: () => Promise<boolean>;
+  getGitHash: () => Promise<string | null>;
   platform: NodeJS.Platform;
   homeDir: string;
   getUid: () => number;
@@ -125,6 +133,9 @@ function createDefaultDeps(): DashboardDeps {
         });
       });
     },
+    getLocalVersion,
+    isNpmManaged,
+    getGitHash,
     platform: process.platform,
     homeDir: os.homedir(),
     getUid: () => process.getuid?.() ?? 501,
@@ -149,11 +160,12 @@ export function buildModelRows(ctx: DoctorContext): DashboardModelRow[] {
   return DASHBOARD_MODEL_ROLES.map((role) => {
     const overrideValue = ctx.models[role];
     const fallback = ctx.envDefaults[role] ?? MODEL_DEFAULTS[role] ?? '(unset)';
+    const isOverride = overrideValue !== undefined && overrideValue !== fallback;
     return {
       role,
       effectiveModel: overrideValue ?? fallback,
-      source: overrideValue ? 'override' : 'default',
-      overrideValue,
+      source: isOverride ? 'override' : 'default',
+      overrideValue: isOverride ? overrideValue : undefined,
     };
   });
 }
@@ -185,48 +197,16 @@ function normalizeRuntimeName(value: string | undefined): string | undefined {
   const trimmed = value?.trim().toLowerCase();
   if (!trimmed) return undefined;
   const normalized = trimmed === 'claude_code' ? 'claude' : trimmed;
-  return (KNOWN_RUNTIME_NAMES as readonly string[]).includes(normalized) ? normalized : undefined;
+  return KNOWN_RUNTIMES.has(normalized) ? normalized : undefined;
 }
 
-function defaultFastRuntime(ctx: DoctorContext): string {
-  return normalizeRuntimeName(ctx.env.DISCOCLAW_FAST_RUNTIME)
-    ?? normalizeRuntimeName(ctx.env.PRIMARY_RUNTIME)
-    ?? 'claude';
+async function confirmAction(io: DashboardIo, prompt: string): Promise<boolean> {
+  const answer = normalizeActionInput(await io.prompt(prompt));
+  return answer === 'y' || answer === 'yes';
 }
 
-function defaultVoiceRuntime(ctx: DoctorContext): string {
-  const primary = normalizeRuntimeName(ctx.env.PRIMARY_RUNTIME) ?? 'claude';
-  const voiceEnabled = ctx.env.DISCOCLAW_VOICE_ENABLED?.trim() === '1';
-  if (voiceEnabled && ctx.env.ANTHROPIC_API_KEY?.trim()) return 'anthropic';
-  return primary;
-}
-
-function runtimeStorageNameForModel(model: string): string | undefined {
-  const owningRuntime = findRuntimeForModel(model);
-  switch (owningRuntime) {
-    case 'claude_code':
-      return 'claude';
-    case 'openai':
-    case 'openrouter':
-    case 'gemini':
-    case 'codex':
-    case 'anthropic':
-      return owningRuntime;
-    default:
-      return undefined;
-  }
-}
-
-async function saveRuntimeOverridesIfChanged(
-  deps: DashboardDeps,
-  ctx: DoctorContext,
-  nextOverrides: RuntimeOverrides,
-): Promise<boolean> {
-  const current = JSON.stringify(ctx.runtimeOverrides);
-  const next = JSON.stringify(nextOverrides);
-  if (current === next) return false;
-  await deps.saveOverrides(ctx.configPaths.runtimeOverrides, nextOverrides);
-  return true;
+function formatCommandResult(result: CommandResult): string {
+  return truncateCommandOutput(result.stdout || result.stderr || (result.exitCode === 0 ? 'Command completed.' : 'No output.'));
 }
 
 async function promptForModelChange(
@@ -248,8 +228,8 @@ async function promptForModelChange(
   if (!isModelRole(roleInput)) return `Unknown model role: ${roleInput}`;
 
   const modelInput = (await io.prompt(
-    roleInput === 'voice'
-      ? 'New model/runtime (blank cancels, "default" clears the override): '
+    roleInput === 'fast' || roleInput === 'voice'
+      ? 'New model tier (fast, capable, deep; blank cancels, "default" clears the override): '
       : 'New model (blank cancels, "default" clears the override): ',
   )).trim();
   if (!modelInput) return 'Model change canceled.';
@@ -257,88 +237,51 @@ async function promptForModelChange(
 
   const clearOverride = modelInput.toLowerCase() === 'default' || modelInput.toLowerCase() === 'reset';
   const runtimeInput = normalizeRuntimeName(modelInput);
-  const nextOverrides: RuntimeOverrides = { ...ctx.runtimeOverrides };
 
   if (clearOverride) {
-    const nextConfig = updateModelConfig(ctx.models, roleInput, null);
+    const fallback = ctx.envDefaults[roleInput] ?? MODEL_DEFAULTS[roleInput];
+    if (!fallback) {
+      return `No default model is configured for ${roleInput}.`;
+    }
+    const nextConfig = updateModelConfig(ctx.models, roleInput, fallback);
     await deps.saveModelConfig(ctx.configPaths.models, nextConfig);
-    let runtimeCleared = false;
-    if (roleInput === 'fast' && nextOverrides.fastRuntime) {
+    let clearedRuntimeOverride: 'fastRuntime' | 'voiceRuntime' | null = null;
+    if (roleInput === 'fast' && ctx.runtimeOverrides.fastRuntime) {
+      const nextOverrides: RuntimeOverrides = { ...ctx.runtimeOverrides };
       delete nextOverrides.fastRuntime;
-      runtimeCleared = await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
-    }
-    if (roleInput === 'voice' && nextOverrides.voiceRuntime) {
+      await deps.saveOverrides(ctx.configPaths.runtimeOverrides, nextOverrides);
+      clearedRuntimeOverride = 'fastRuntime';
+    } else if (roleInput === 'voice' && ctx.runtimeOverrides.voiceRuntime) {
+      const nextOverrides: RuntimeOverrides = { ...ctx.runtimeOverrides };
       delete nextOverrides.voiceRuntime;
-      runtimeCleared = await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
+      await deps.saveOverrides(ctx.configPaths.runtimeOverrides, nextOverrides);
+      clearedRuntimeOverride = 'voiceRuntime';
     }
-    const fallback = ctx.envDefaults[roleInput] ?? MODEL_DEFAULTS[roleInput] ?? '(unset)';
-    return runtimeCleared
-      ? `Cleared ${roleInput} override. Effective model: ${fallback}. Cleared the persisted ${roleInput} runtime override too.`
-      : `Cleared ${roleInput} override. Effective model: ${fallback}.`;
+
+    const clearedRuntimeMessage = clearedRuntimeOverride ? ` Cleared ${clearedRuntimeOverride} override.` : '';
+    return `Reset ${roleInput} to default: ${fallback}.${clearedRuntimeMessage} Changes take effect on next service restart.`;
   }
 
   if (runtimeInput) {
-    if (roleInput === 'voice') {
-      const defaultRuntime = defaultVoiceRuntime(ctx);
-      if (runtimeInput === defaultRuntime) {
-        delete nextOverrides.voiceRuntime;
-      } else {
-        nextOverrides.voiceRuntime = runtimeInput;
-      }
-      await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
-      return runtimeInput === defaultRuntime
-        ? `Voice already defaults to ${runtimeInput}. Cleared any redundant voice runtime override.`
-        : `Saved voice runtime override: ${runtimeInput}. Restart discoclaw to apply it.`;
-    }
     if (roleInput === 'chat') {
       return 'Chat runtime swaps are live-only and do not belong in models.json. Use a concrete model here, or change PRIMARY_RUNTIME in .env and restart.';
+    }
+    if (roleInput === 'fast' || roleInput === 'voice') {
+      return `${roleInput} accepts only model tiers (fast, capable, deep) or "default".`;
     }
     return `Runtime names cannot be stored as the persisted ${roleInput} model. Use a concrete model or "default".`;
   }
 
-  const nextConfig = updateModelConfig(ctx.models, roleInput, modelInput);
+  const normalizedModelInput = (roleInput === 'fast' || roleInput === 'voice')
+    ? modelInput.toLowerCase()
+    : modelInput;
+  if ((roleInput === 'fast' || roleInput === 'voice') && !isModelTier(normalizedModelInput)) {
+    return `${roleInput} accepts only model tiers (fast, capable, deep) or "default".`;
+  }
+
+  const nextConfig = updateModelConfig(ctx.models, roleInput, normalizedModelInput);
   await deps.saveModelConfig(ctx.configPaths.models, nextConfig);
-
-  let runtimeMessage = '';
-  if (roleInput === 'fast') {
-    const targetRuntime = runtimeStorageNameForModel(modelInput);
-    if (targetRuntime) {
-      const defaultRuntime = defaultFastRuntime(ctx);
-      const currentRuntime = ctx.runtimeOverrides.fastRuntime ?? defaultRuntime;
-      if (targetRuntime !== currentRuntime) {
-        if (targetRuntime === defaultRuntime) {
-          delete nextOverrides.fastRuntime;
-          await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
-          runtimeMessage = ` Fast runtime returns to the default (${defaultRuntime}).`;
-        } else {
-          nextOverrides.fastRuntime = targetRuntime;
-          await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
-          runtimeMessage = ` Fast runtime override -> ${targetRuntime}.`;
-        }
-      }
-    }
-  }
-
-  if (roleInput === 'voice') {
-    const targetRuntime = runtimeStorageNameForModel(modelInput);
-    if (targetRuntime) {
-      const defaultRuntime = defaultVoiceRuntime(ctx);
-      const currentRuntime = ctx.runtimeOverrides.voiceRuntime ?? defaultRuntime;
-      if (targetRuntime !== currentRuntime) {
-        if (targetRuntime === defaultRuntime) {
-          delete nextOverrides.voiceRuntime;
-          await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
-          runtimeMessage = ` Voice runtime returns to the default (${defaultRuntime}).`;
-        } else {
-          nextOverrides.voiceRuntime = targetRuntime;
-          await saveRuntimeOverridesIfChanged(deps, ctx, nextOverrides);
-          runtimeMessage = ` Voice runtime override -> ${targetRuntime}.`;
-        }
-      }
-    }
-  }
-
-  return `Saved ${roleInput} override: ${modelInput}.${runtimeMessage}`;
+  return `Saved ${roleInput} override: ${normalizedModelInput}. Changes take effect on next service restart.`;
 }
 
 export async function collectDashboardSnapshot(
@@ -347,16 +290,21 @@ export async function collectDashboardSnapshot(
 ): Promise<DashboardSnapshot> {
   const cwd = path.resolve(opts.cwd ?? process.cwd());
   const inspectOpts = { cwd, env: opts.env ?? process.env };
-  const [ctx, report] = await Promise.all([
+  const [ctx, report, npmManaged, gitHash] = await Promise.all([
     deps.loadDoctorContext(inspectOpts),
     deps.inspect(inspectOpts),
+    deps.isNpmManaged(),
+    deps.getGitHash(),
   ]);
   const serviceName = normalizeServiceName(ctx.env.DISCOCLAW_SERVICE_NAME);
-  const serviceSummary = await probeServiceSummary(serviceName, deps as ServiceControlDeps);
+  const serviceStatus = await getServiceStatus(serviceName, deps as ServiceControlDeps);
+  const serviceSummary = summarizeServiceStatus(serviceStatus, deps.platform);
 
   return {
     cwd,
-    installMode: report.installMode,
+    version: deps.getLocalVersion(),
+    installMode: npmManaged ? 'npm-managed' : report.installMode,
+    gitHash,
     serviceName,
     serviceSummary,
     doctorSummary: formatDoctorSummary(report),
@@ -375,7 +323,9 @@ export function renderDashboard(snapshot: DashboardSnapshot, detail = ''): strin
     'Discoclaw Dashboard',
     '===================',
     `cwd: ${snapshot.cwd}`,
+    `version: ${snapshot.version}`,
     `install mode: ${snapshot.installMode}`,
+    `git hash: ${snapshot.gitHash ?? '(not available)'}`,
     `service: ${snapshot.serviceName} (${snapshot.serviceSummary})`,
     `doctor: ${snapshot.doctorSummary}`,
     '',
@@ -430,7 +380,7 @@ export async function runDashboard(options: RunDashboardOptions = {}): Promise<v
     loadDotenv({ path: path.join(cwd, '.env') });
   }
 
-  let detail = 'Interactive admin surface for service actions, config doctor, and persisted model/runtime overrides.';
+  let detail = 'Interactive admin surface for service actions, config doctor, and persisted model overrides.';
 
   try {
     while (true) {
@@ -447,17 +397,27 @@ export async function runDashboard(options: RunDashboardOptions = {}): Promise<v
       }
 
       if (action === '2' || action === 'status' || action === 's') {
-        detail = await runServiceAction('status', snapshot.serviceName, deps as ServiceControlDeps);
+        const result = await getServiceStatus(snapshot.serviceName, deps as ServiceControlDeps);
+        detail = formatCommandResult(result);
         continue;
       }
 
       if (action === '3' || action === 'logs' || action === 'l') {
-        detail = await runServiceAction('logs', snapshot.serviceName, deps as ServiceControlDeps);
+        const result = await getServiceLogs(snapshot.serviceName, deps as ServiceControlDeps);
+        detail = formatCommandResult(result);
         continue;
       }
 
       if (action === '4' || action === 'restart') {
-        detail = await runServiceAction('restart', snapshot.serviceName, deps as ServiceControlDeps);
+        const confirmed = await confirmAction(io, `Restart/start ${snapshot.serviceName}? [y/N]: `);
+        if (!confirmed) {
+          detail = 'Restart/start canceled.';
+          continue;
+        }
+        const result = await restartService(snapshot.serviceName, deps as ServiceControlDeps);
+        detail = result.exitCode === 0
+          ? `Restart/start requested for ${snapshot.serviceName}.\n\n${formatCommandResult(result)}`
+          : `Service action failed for ${snapshot.serviceName} (exit ${result.exitCode ?? 'unknown'}).\n\n${formatCommandResult(result)}`;
         continue;
       }
 
@@ -474,6 +434,16 @@ export async function runDashboard(options: RunDashboardOptions = {}): Promise<v
 
       if (action === '6' || action === 'fix' || action === 'doctor-fix') {
         const report = await deps.inspect(inspectOpts);
+        const autoFixableCount = report.findings.filter((finding) => finding.autoFixable).length;
+        if (autoFixableCount === 0) {
+          detail = 'No auto-fixable doctor findings.';
+          continue;
+        }
+        const confirmed = await confirmAction(io, `Apply ${autoFixableCount} auto-fixable doctor finding(s)? [y/N]: `);
+        if (!confirmed) {
+          detail = 'Doctor fixes canceled.';
+          continue;
+        }
         const result = await deps.applyFixes(report, inspectOpts);
         detail = [
           `Applied: ${result.applied.length}`,
