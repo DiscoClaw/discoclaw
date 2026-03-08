@@ -2157,7 +2157,7 @@ function makePlanContent(overrides: { status?: string; title?: string; planId?: 
 }
 
 describe('ForgeOrchestrator.resume()', () => {
-  it('loads existing plan and runs audit loop (skipping draft)', async () => {
+  it('loads an existing REVIEW plan and runs the audit loop without drafting again', async () => {
     const tmpDir = await makeTmpDir();
     const opts = await baseOpts(tmpDir, makeMockRuntime([
       // Only audit output — no draft call
@@ -2181,6 +2181,30 @@ describe('ForgeOrchestrator.resume()', () => {
     expect(result.error).toBeUndefined();
     expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
     // Should NOT contain draft-phase progress
+    expect(progress.some((p) => p.includes('Drafting'))).toBe(false);
+  });
+
+  it('loads an existing DRAFT plan and enters the audit loop without re-drafting it', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(tmpDir, makeMockRuntime([
+      '**Verdict:** Ready to approve.',
+    ]));
+
+    const planContent = makePlanContent({ planId: 'plan-001', status: 'DRAFT' });
+    const filePath = path.join(opts.plansDir, 'plan-001-test.md');
+    await fs.writeFile(filePath, planContent, 'utf-8');
+
+    const orchestrator = new ForgeOrchestrator(opts);
+    const progress: string[] = [];
+    const result = await orchestrator.resume('plan-001', filePath, 'Test Plan', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.planId).toBe('plan-001');
+    expect(result.rounds).toBe(1);
+    expect(result.reachedMaxRounds).toBe(false);
+    expect(result.error).toBeUndefined();
+    expect(progress.some((p) => p.includes('Audit round 1'))).toBe(true);
     expect(progress.some((p) => p.includes('Drafting'))).toBe(false);
   });
 

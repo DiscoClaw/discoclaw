@@ -2208,7 +2208,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          // Handle !forge commands — long-running, async plan creation.
+          // Handle !forge commands — long-running, async plan creation or status-aware plan resume.
           if (!isBotMessage && params.forgeCommandsEnabled) {
             const forgeCmd = parseForgeCommand(String(msg.content ?? ''));
             if (forgeCmd) {
@@ -2216,7 +2216,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 await msg.reply({
                   content: [
                     '**!forge commands:**',
-                    '- `!forge <description>` — auto-draft and audit a plan',
+                    '- `!forge <description>` — draft and audit a new plan',
+                    '- `!forge <plan-id>` — resume DRAFT/REVIEW plans in forge, or start plan run for APPROVED/IMPLEMENTING plans',
                     '- `!forge status` — check if a forge is running',
                     '- `!forge cancel` — cancel the running forge',
                   ].join('\n'),
@@ -2254,7 +2255,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 return;
               }
 
-              // --- Detect plan-ID references (resume existing plan) ---
+              // --- Detect plan-ID references (status-aware resume/run of an existing plan) ---
               if (looksLikePlanId(forgeCmd.args)) {
                 const plansDir = path.join(params.workspaceCwd, 'plans');
                 const found = await findPlanFile(plansDir, forgeCmd.args);
@@ -2352,8 +2353,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 });
                 setActiveOrchestrator(resumeOrchestrator, msg.channelId);
 
+                const resumeStatus = found.header.status;
+                const resumeProgressMessage = resumeStatus === 'DRAFT' || resumeStatus === 'REVIEW'
+                  ? `Resuming forge review for **${found.header.planId}** from ${resumeStatus} status...`
+                  : `Resuming forge review for **${found.header.planId}**...`;
                 const progressReply = await msg.reply({
-                  content: `Re-auditing **${found.header.planId}**...`,
+                  content: resumeProgressMessage,
                   allowedMentions: NO_MENTIONS,
                 });
                 const forgeResumeWatchdogId = buildWatchdogRunId(
