@@ -677,6 +677,30 @@ describe('executeCronJob permissionNote injection', () => {
     const passedPrompt = invokeSpy.mock.calls[0][0].prompt;
     expect(passedPrompt).not.toContain('Permission note:');
   });
+
+  it('suppresses requester-gated Discord actions for untrusted cron authors', async () => {
+    const { runtime, invokeSpy } = makeCapturingRuntime(
+      'Checking history.\n<discord-action>{"type":"readMessages","channel":"#general"}</discord-action>',
+    );
+    const ctx = makeCtx({
+      runtime,
+      cwd: wsDir,
+      discordActionsEnabled: true,
+      actionFlags: makeCronActionFlags({ messaging: true }),
+    });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const passedPrompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(passedPrompt).not.toContain('**readMessages**');
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+    expect(channel.send.mock.calls[0][0].content).not.toContain('Permission denied for readMessages');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1172,7 +1196,10 @@ describe('executeCronJob allowedActions filtering', () => {
   it('executes permitted action and blocks denied action when allowedActions is set', async () => {
     const statsPath = path.join(statsDir, 'stats.json');
     const statsStore = await loadRunStats(statsPath);
-    await statsStore.upsertRecord('cron-test0001', 'thread-1', { allowedActions: ['sendMessage'] });
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      authorId: 'user-1',
+      allowedActions: ['sendMessage'],
+    });
 
     const executeDiscordActionsSpy = vi.spyOn(discordActions, 'executeDiscordActions');
 
@@ -1226,7 +1253,7 @@ describe('executeCronJob allowedActions filtering', () => {
     const statsPath = path.join(statsDir, 'stats.json');
     const statsStore = await loadRunStats(statsPath);
     // No allowedActions set — all actions should pass through.
-    await statsStore.upsertRecord('cron-test0001', 'thread-1');
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', { authorId: 'user-1' });
 
     const executeDiscordActionsSpy = vi.spyOn(discordActions, 'executeDiscordActions');
 
