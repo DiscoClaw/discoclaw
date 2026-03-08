@@ -4,7 +4,6 @@ import type { ModelConfig } from '../model-config.js';
 import {
   buildModelRows,
   collectDashboardSnapshot,
-  getServiceCommands,
   renderDashboard,
   runDashboard,
   updateModelConfig,
@@ -121,26 +120,6 @@ describe('updateModelConfig', () => {
 
     const cleared = updateModelConfig(updated, 'chat', null);
     expect(cleared).toEqual({});
-  });
-});
-
-describe('getServiceCommands', () => {
-  it('builds linux systemd commands with the provided service name', () => {
-    const commands = getServiceCommands('discoclaw-beta', 'linux', '/Users/david', 501);
-    expect(commands?.statusCmd).toEqual(['systemctl', ['--user', 'status', 'discoclaw-beta']]);
-    expect(commands?.logsCmd).toEqual(['journalctl', ['--user', '-u', 'discoclaw-beta', '--no-pager', '-n', '30']]);
-  });
-
-  it('builds macOS launchctl commands and bootstraps when inactive', () => {
-    const commands = getServiceCommands('discoclaw-beta', 'darwin', '/Users/david', 502);
-    expect(commands?.restartCmd(false)).toEqual([
-      'launchctl',
-      [
-        'bootstrap',
-        'gui/502',
-        '/Users/david/Library/LaunchAgents/com.discoclaw.discoclaw-beta.plist',
-      ],
-    ]);
   });
 });
 

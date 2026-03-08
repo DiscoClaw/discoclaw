@@ -7,6 +7,13 @@ import { config as loadDotenv } from 'dotenv';
 import type { DoctorContext, DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
+import type { CommandResult, ServiceControlDeps } from '../service-control.js';
+import {
+  normalizeServiceName,
+  probeServiceSummary,
+  runServiceAction,
+  truncateCommandOutput,
+} from '../service-control.js';
 
 const DASHBOARD_MODEL_ROLES: readonly ModelRole[] = [
   'chat',
@@ -29,12 +36,6 @@ const ACTION_MENU = [
   '[7] Change model assignment',
   '[q] Quit',
 ] as const;
-
-export type CommandResult = {
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-};
 
 export type DashboardModelRow = {
   role: ModelRole;
@@ -83,16 +84,6 @@ export type RunDashboardOptions = {
   loadEnv?: boolean;
 };
 
-type ServiceCommands = {
-  statusCmd: [string, string[]];
-  logsCmd: [string, string[]];
-  checkActiveCmd: [string, string[]];
-  isActive: (result: CommandResult) => boolean;
-  restartCmd: (wasActive: boolean) => [string, string[]];
-};
-
-type ServiceAction = 'status' | 'logs' | 'restart';
-
 function createDefaultDashboardIo(): DashboardIo {
   const rl = readline.createInterface({ input, output });
   return {
@@ -135,11 +126,6 @@ function createDefaultDeps(): DashboardDeps {
   };
 }
 
-export function normalizeServiceName(value: string | undefined): string {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : 'discoclaw';
-}
-
 export function updateModelConfig(
   currentConfig: ModelConfig,
   role: ModelRole,
@@ -167,57 +153,6 @@ export function buildModelRows(ctx: DoctorContext): DashboardModelRow[] {
   });
 }
 
-export function getServiceCommands(
-  serviceName = 'discoclaw',
-  platform: NodeJS.Platform = process.platform,
-  homeDir = os.homedir(),
-  uid = process.getuid?.() ?? 501,
-): ServiceCommands | null {
-  if (platform === 'linux') {
-    return {
-      statusCmd: ['systemctl', ['--user', 'status', serviceName]],
-      logsCmd: ['journalctl', ['--user', '-u', serviceName, '--no-pager', '-n', '30']],
-      checkActiveCmd: ['systemctl', ['--user', 'status', serviceName]],
-      isActive: (result) => result.stdout.includes('active (running)'),
-      restartCmd: () => ['systemctl', ['--user', 'restart', serviceName]],
-    };
-  }
-
-  if (platform === 'darwin') {
-    const label = `com.discoclaw.${serviceName}`;
-    const plistPath = `${homeDir}/Library/LaunchAgents/${label}.plist`;
-    const domain = `gui/${uid}`;
-    return {
-      statusCmd: ['launchctl', ['list', label]],
-      logsCmd: ['log', ['show', '--predicate', 'process == "node"', '--last', '5m', '--style', 'compact']],
-      checkActiveCmd: ['launchctl', ['list', label]],
-      isActive: (result) => result.exitCode === 0,
-      restartCmd: (wasActive) => (
-        wasActive
-          ? ['launchctl', ['kickstart', '-k', `${domain}/${label}`]]
-          : ['launchctl', ['bootstrap', domain, plistPath]]
-      ),
-    };
-  }
-
-  return null;
-}
-
-function summarizeServiceStatus(result: CommandResult, platform: NodeJS.Platform): string {
-  const outputText = (result.stdout || result.stderr).trim();
-  if (!outputText) {
-    return result.exitCode === 0 ? 'status available' : 'status unavailable';
-  }
-
-  if (platform === 'linux') {
-    const activeMatch = outputText.match(/^\s*Active:\s+(.+)$/m);
-    if (activeMatch) return activeMatch[1].trim();
-  }
-
-  const firstLine = outputText.split(/\r?\n/).find((line) => line.trim().length > 0);
-  return firstLine?.trim() ?? 'status unavailable';
-}
-
 function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 'info', number> {
   return report.findings.reduce<Record<'error' | 'warn' | 'info', number>>(
     (counts, finding) => {
@@ -231,13 +166,6 @@ function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 
 function formatDoctorSummary(report: DoctorReport): string {
   const counts = countDoctorSeverities(report);
   return `${report.findings.length} findings (errors=${counts.error}, warnings=${counts.warn}, info=${counts.info})`;
-}
-
-function truncateDetail(text: string, maxChars = 4000): string {
-  const trimmed = text.trim();
-  if (!trimmed) return '(no output)';
-  if (trimmed.length <= maxChars) return trimmed;
-  return `${trimmed.slice(0, maxChars - 15)}\n[output truncated]`;
 }
 
 function normalizeActionInput(value: string): string {
@@ -284,46 +212,6 @@ async function promptForModelChange(
   return `Saved ${roleInput} override: ${modelInput}.`;
 }
 
-async function runServiceAction(
-  action: ServiceAction,
-  serviceName: string,
-  deps: DashboardDeps,
-): Promise<string> {
-  const commands = getServiceCommands(serviceName, deps.platform, deps.homeDir, deps.getUid());
-  if (!commands) {
-    return `Service actions are not supported on ${deps.platform}.`;
-  }
-
-  if (action === 'status') {
-    const result = await deps.runCommand(commands.statusCmd[0], commands.statusCmd[1]);
-    return truncateDetail(result.stdout || result.stderr);
-  }
-
-  if (action === 'logs') {
-    const result = await deps.runCommand(commands.logsCmd[0], commands.logsCmd[1]);
-    return truncateDetail(result.stdout || result.stderr);
-  }
-
-  const before = await deps.runCommand(commands.checkActiveCmd[0], commands.checkActiveCmd[1]);
-  const wasActive = commands.isActive(before);
-  const [cmd, args] = commands.restartCmd(wasActive);
-  const result = await deps.runCommand(cmd, args);
-  const detail = truncateDetail(result.stdout || result.stderr || (result.exitCode === 0 ? 'Command completed.' : 'No output.'));
-  if (result.exitCode === 0) {
-    return wasActive
-      ? `Restart requested for ${serviceName}.\n\n${detail}`
-      : `Start requested for ${serviceName}.\n\n${detail}`;
-  }
-  return `Service action failed for ${serviceName} (exit ${result.exitCode ?? 'unknown'}).\n\n${detail}`;
-}
-
-async function probeServiceSummary(serviceName: string, deps: DashboardDeps): Promise<string> {
-  const commands = getServiceCommands(serviceName, deps.platform, deps.homeDir, deps.getUid());
-  if (!commands) return `unsupported on ${deps.platform}`;
-  const result = await deps.runCommand(commands.statusCmd[0], commands.statusCmd[1]);
-  return summarizeServiceStatus(result, deps.platform);
-}
-
 export async function collectDashboardSnapshot(
   opts: Pick<RunDashboardOptions, 'cwd' | 'env'> = {},
   deps: DashboardDeps = createDefaultDeps(),
@@ -335,7 +223,7 @@ export async function collectDashboardSnapshot(
     deps.inspect(inspectOpts),
   ]);
   const serviceName = normalizeServiceName(ctx.env.DISCOCLAW_SERVICE_NAME);
-  const serviceSummary = await probeServiceSummary(serviceName, deps);
+  const serviceSummary = await probeServiceSummary(serviceName, deps as ServiceControlDeps);
 
   return {
     cwd,
@@ -392,7 +280,7 @@ export function renderDashboard(snapshot: DashboardSnapshot, detail = ''): strin
   );
 
   if (detail.trim()) {
-    lines.push('', 'Last action', '-----------', truncateDetail(detail));
+    lines.push('', 'Last action', '-----------', truncateCommandOutput(detail));
   }
 
   return `${lines.join('\n')}\n`;
@@ -430,17 +318,17 @@ export async function runDashboard(options: RunDashboardOptions = {}): Promise<v
       }
 
       if (action === '2' || action === 'status' || action === 's') {
-        detail = await runServiceAction('status', snapshot.serviceName, deps);
+        detail = await runServiceAction('status', snapshot.serviceName, deps as ServiceControlDeps);
         continue;
       }
 
       if (action === '3' || action === 'logs' || action === 'l') {
-        detail = await runServiceAction('logs', snapshot.serviceName, deps);
+        detail = await runServiceAction('logs', snapshot.serviceName, deps as ServiceControlDeps);
         continue;
       }
 
       if (action === '4' || action === 'restart') {
-        detail = await runServiceAction('restart', snapshot.serviceName, deps);
+        detail = await runServiceAction('restart', snapshot.serviceName, deps as ServiceControlDeps);
         continue;
       }
 
