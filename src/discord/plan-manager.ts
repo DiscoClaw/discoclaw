@@ -91,6 +91,7 @@ export type PlanRunEvent =
 export type PhaseExecutionOpts = {
   runtime: RuntimeAdapter;
   model: string;
+  reasoningEffort?: string;
   projectCwd: string;
   addDirs: string[];
   timeoutMs: number;
@@ -1689,6 +1690,7 @@ export async function executePhase(
         onEvent: opts.onEvent,
         signal: opts.signal,
         supervisor: PLAN_PHASE_SUPERVISOR_POLICY,
+        reasoningEffort: opts.reasoningEffort,
       },
     );
     const sanitizedOutput = sanitizePhaseOutput(output);
@@ -2008,6 +2010,7 @@ export async function runNextPhase(
               onEvent: opts.onEvent,
               signal: opts.signal,
               supervisor: PLAN_PHASE_SUPERVISOR_POLICY,
+              reasoningEffort: opts.reasoningEffort,
             },
           );
         } catch (err) {

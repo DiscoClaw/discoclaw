@@ -26,6 +26,7 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { adaptPlanRunEventText } from './runtime-event-text-adapter.js';
 import { runtimeSupportsNativeThinkingStream } from './runtime-signal-budget.js';
+import { resolveModel, resolveReasoningEffort } from '../runtime/model-tiers.js';
 
 const DEFAULT_PLAN_PHASE_TIMEOUT_MS = 1_800_000;
 
@@ -427,9 +428,12 @@ export async function executePlanAction(
         const runtimeEventAdapter: ((evt: EngineEvent) => void) | undefined =
           (planCtx.toolAwareStreaming ?? true) ? streamingController?.onEvent : undefined;
 
+        const resolvedModel = resolveModel(planCtx.model!, planCtx.runtime!.id);
+        const resolvedReasoningEffort = resolveReasoningEffort(planCtx.model!, planCtx.runtime!.id);
         const phaseOpts = {
           runtime: planCtx.runtime!,
-          model: planCtx.model!,
+          model: resolvedModel,
+          reasoningEffort: resolvedReasoningEffort,
           projectCwd,
           addDirs: [] as string[],
           timeoutMs,
