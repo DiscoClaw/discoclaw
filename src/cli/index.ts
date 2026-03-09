@@ -28,6 +28,7 @@ switch (command) {
     const { runDashboard, startDashboardServer } = await import('./dashboard.js');
     const {
       DASHBOARD_HOST,
+      formatDashboardUrl,
       parseDashboardPort,
       parseDashboardTrustedHosts,
       resolveDashboardBindHost,
@@ -54,10 +55,10 @@ switch (command) {
       });
       const address = handle.server.address() as { port: number } | null;
       const boundPort = address?.port ?? port;
-      console.log(`Discoclaw dashboard listening at http://${DASHBOARD_HOST}:${boundPort}/`);
+      console.log(`Discoclaw dashboard listening at ${formatDashboardUrl(DASHBOARD_HOST, boundPort)}`);
       if (trustedHosts.size > 0) {
         const [firstTrustedHost] = trustedHosts;
-        console.log(`Trusted host URL: http://${firstTrustedHost}:${boundPort}/`);
+        console.log(`Trusted host URL: ${formatDashboardUrl(firstTrustedHost, boundPort)}`);
       }
       console.log('Press Ctrl+C to stop.');
       await waitForDashboardSignal();

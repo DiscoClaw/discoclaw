@@ -788,4 +788,51 @@ describe('startDashboardServer', () => {
 
     expect(handle.server.address()).toBeTruthy();
   });
+
+  it('maps listen EADDRINUSE errors to an actionable dashboard port message', async () => {
+    handle = await startDashboardServer({
+      port: 0,
+      host: '127.0.0.1',
+      cwd: '/repo',
+      env: {},
+      deps: makeDeps(),
+      log: mockLog(),
+    });
+    const port = (handle.server.address() as { port: number }).port;
+
+    await expect(startDashboardServer({
+      port,
+      host: '127.0.0.1',
+      cwd: '/repo',
+      env: {},
+      deps: makeDeps(),
+      log: mockLog(),
+    })).rejects.toThrow(
+      `Dashboard port ${port} is already in use. Another DiscoClaw instance or process may be using it. Set DISCOCLAW_DASHBOARD_PORT to a different value in .env.`,
+    );
+  });
+
+  it('logs the formatted dashboard URL when the server starts listening', async () => {
+    const log = mockLog();
+
+    handle = await startDashboardServer({
+      port: 0,
+      host: '127.0.0.1',
+      cwd: '/repo',
+      env: {},
+      deps: makeDeps(),
+      log,
+    });
+    const port = (handle.server.address() as { port: number }).port;
+
+    expect(log.info).toHaveBeenCalledWith(
+      {
+        host: '127.0.0.1',
+        port,
+        cwd: '/repo',
+        url: `http://127.0.0.1:${port}/`,
+      },
+      'dashboard:server listening',
+    );
+  });
 });
