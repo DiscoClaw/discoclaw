@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import http from 'node:http';
+import { isIP } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -44,6 +45,7 @@ const DASHBOARD_MODEL_ROLES: readonly ModelRole[] = [
 
 const MAX_BODY_BYTES = 64 * 1024;
 const CROSS_ORIGIN_MUTATION_ERROR = 'Cross-origin mutation requests are not allowed.';
+const DNS_REBIND_ERROR = 'Dashboard requests must use a loopback Host header.';
 
 type KnownRuntimesType = typeof KNOWN_RUNTIMES;
 
@@ -158,10 +160,38 @@ function normalizeDashboardHost(host: string | undefined): string {
   throw new Error(`Dashboard server must bind to ${DASHBOARD_HOST}; received ${host ?? value}.`);
 }
 
+function normalizeHostname(hostname: string): string {
+  let value = hostname.trim().toLowerCase();
+  if (value.startsWith('[') && value.endsWith(']')) {
+    value = value.slice(1, -1);
+  }
+  if (value.endsWith('.')) {
+    value = value.slice(0, -1);
+  }
+  return value;
+}
+
 function normalizeOriginHost(hostname: string): string {
-  const value = hostname.trim().toLowerCase();
+  const value = normalizeHostname(hostname);
   if (value === 'localhost' || value === '::1') return DASHBOARD_HOST;
   return value;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const value = normalizeHostname(hostname);
+  if (value === 'localhost' || value === '::1') return true;
+  if (isIP(value) !== 4) return value === DASHBOARD_HOST;
+  return value.split('.').every((segment) => segment !== '') && value.startsWith('127.');
+}
+
+function parseHostHeaderHostname(hostHeader: string | undefined): string | null {
+  if (typeof hostHeader !== 'string' || hostHeader.trim() === '') return null;
+
+  try {
+    return new URL(`http://${hostHeader.trim()}`).hostname;
+  } catch {
+    return null;
+  }
 }
 
 function originPort(url: URL): string {
@@ -178,7 +208,8 @@ function hasSafeDashboardOrigin(req: http.IncomingMessage): boolean {
 
   try {
     const originUrl = new URL(origin);
-    const hostUrl = new URL(`http://${hostHeader}`);
+    const hostUrl = new URL(`http://${hostHeader.trim()}`);
+    if (!isLoopbackHostname(hostUrl.hostname)) return false;
     return (
       normalizeOriginHost(originUrl.hostname) === normalizeOriginHost(hostUrl.hostname)
       && originPort(originUrl) === originPort(hostUrl)
@@ -433,6 +464,11 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
 
   const server = http.createServer(async (req, res) => {
     const method = req.method ?? 'GET';
+    const requestHostname = parseHostHeaderHostname(req.headers.host);
+    if (!requestHostname || !isLoopbackHostname(requestHostname)) {
+      respondJson(res, 403, { ok: false, message: DNS_REBIND_ERROR });
+      return;
+    }
     const pathname = new URL(req.url ?? '/', `http://${DASHBOARD_HOST}`).pathname;
 
     try {
