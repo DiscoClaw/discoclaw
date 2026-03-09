@@ -68,7 +68,7 @@ const INTERRUPTED_COLD = '*(Interrupted \u2014 bot was restarted.)*';
 
 // --- Module state ---
 const registry = new Map<string, InFlightEntry>();
-const pendingChannels = new Set<string>();
+const pendingChannels = new Map<string, number>();
 let shuttingDown = false;
 let dataFilePath: string | null = null;
 
@@ -122,12 +122,17 @@ export function markChannelPending(channelId: string): () => void {
     return () => {};
   }
 
-  pendingChannels.add(channelId);
+  pendingChannels.set(channelId, (pendingChannels.get(channelId) ?? 0) + 1);
 
   let disposed = false;
   return () => {
     if (disposed) return;
     disposed = true;
+    const remaining = (pendingChannels.get(channelId) ?? 0) - 1;
+    if (remaining > 0) {
+      pendingChannels.set(channelId, remaining);
+      return;
+    }
     pendingChannels.delete(channelId);
   };
 }
@@ -158,7 +163,7 @@ export function inFlightReplyCount(): number {
  * Returns true if there is at least one in-flight reply for the given channelId.
  */
 export function hasInFlightForChannel(channelId: string): boolean {
-  if (pendingChannels.has(channelId)) return true;
+  if ((pendingChannels.get(channelId) ?? 0) > 0) return true;
   for (const entry of registry.values()) {
     if (entry.channelId === channelId) return true;
   }

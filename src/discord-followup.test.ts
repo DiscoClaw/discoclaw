@@ -1312,6 +1312,71 @@ describe('in-flight reply registry cleanup', () => {
     expect(inFlightReplyCount()).toBe(0);
   });
 
+  it('keeps the channel marked in-flight while an overlapping same-thread handler is still pre-registration', async () => {
+    const blockedSession = deferred<string>();
+    let sessionCall = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: 'Hello there!' } as any;
+      }),
+    } as any;
+    const sessionManager = {
+      getOrCreate: vi.fn(async () => {
+        sessionCall += 1;
+        if (sessionCall === 1) return blockedSession.promise;
+        return 'sess-fast';
+      }),
+    } as any;
+    const threadChannel = {
+      id: 'thread-1',
+      parentId: 'chan-parent',
+      isThread: () => true,
+      send: vi.fn(async () => ({ edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) })),
+      name: 'task-thread',
+    };
+
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, {
+        allowUserIds: new Set(['123', '456']),
+        sessionManager,
+      }),
+      makeQueue(),
+    );
+    const blockedMsg = makeMsg({
+      author: { id: '456', bot: false, displayName: 'Other', username: 'other' },
+      channelId: 'thread-1',
+      channel: threadChannel,
+      id: 'msg-blocked',
+    });
+    const fastMsg = makeMsg({
+      channelId: 'thread-1',
+      channel: threadChannel,
+      id: 'msg-fast',
+    });
+
+    const blockedPending = handler(blockedMsg);
+    await vi.waitFor(() => {
+      expect(sessionManager.getOrCreate).toHaveBeenCalledTimes(1);
+    });
+
+    expect(hasInFlightForChannel(blockedMsg.channelId)).toBe(true);
+    expect(inFlightReplyCount()).toBe(0);
+    expect(blockedMsg.reply).not.toHaveBeenCalled();
+
+    await handler(fastMsg);
+
+    expect(hasInFlightForChannel(blockedMsg.channelId)).toBe(true);
+    expect(inFlightReplyCount()).toBe(0);
+    expect(fastMsg.reply).toHaveBeenCalled();
+    expect(blockedMsg.reply).not.toHaveBeenCalled();
+
+    blockedSession.resolve('sess-blocked');
+    await blockedPending;
+
+    expect(hasInFlightForChannel(blockedMsg.channelId)).toBe(false);
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
   it('no leaked registry entries after runtime error', async () => {
     const runtime = {
       invoke: vi.fn(async function* () {

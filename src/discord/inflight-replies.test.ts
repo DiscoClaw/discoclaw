@@ -118,6 +118,19 @@ describe('markChannelPending', () => {
     expect(hasInFlightForChannel('ch1')).toBe(false);
   });
 
+  it('keeps a channel pending until all overlapping disposers are called', () => {
+    const disposeA = markChannelPending('ch1');
+    const disposeB = markChannelPending('ch1');
+
+    expect(hasInFlightForChannel('ch1')).toBe(true);
+
+    disposeA();
+    expect(hasInFlightForChannel('ch1')).toBe(true);
+
+    disposeB();
+    expect(hasInFlightForChannel('ch1')).toBe(false);
+  });
+
   it('marking during shutdown returns an immediate no-op disposer', async () => {
     await drainInFlightReplies();
     expect(isShuttingDown()).toBe(true);
