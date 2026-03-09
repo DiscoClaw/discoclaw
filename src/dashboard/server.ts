@@ -7,6 +7,7 @@ import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
 import { getGitHash } from '../version.js';
 import type { DashboardDeps, DashboardSnapshot } from '../cli/dashboard.js';
 import { collectDashboardSnapshot, updateModelConfig } from '../cli/dashboard.js';
+import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT } from './options.js';
 import type { InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
@@ -592,14 +593,14 @@ function buildDashboardHtml(): string {
 export async function startDashboardServer(opts: DashboardServerOptions = {}): Promise<DashboardServer> {
   const inspectOpts = buildInspectOptions(opts);
   const deps: DashboardDeps = { ...createDefaultDeps(), ...opts.deps };
-  const host = opts.host ?? '127.0.0.1';
-  const port = opts.port ?? 8080;
+  const host = opts.host ?? DASHBOARD_HOST;
+  const port = opts.port ?? DEFAULT_DASHBOARD_PORT;
   const log = opts.log;
   const html = buildDashboardHtml();
 
   const server = http.createServer(async (req, res) => {
     const method = req.method ?? 'GET';
-    const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+    const pathname = new URL(req.url ?? '/', `http://${DASHBOARD_HOST}`).pathname;
 
     try {
       if (method === 'GET' && pathname === '/') {

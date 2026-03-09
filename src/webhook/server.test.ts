@@ -175,6 +175,25 @@ describe('startWebhookServer HTTP routing', () => {
     expect(res.status).toBe(404);
   });
 
+  it('keeps the dashboard unmounted when dashboardEnabled is false', async () => {
+    const configPath = path.join(tmpDir, 'webhooks-dashboard-off.json');
+    await fs.writeFile(configPath, JSON.stringify(config), 'utf8');
+    const localHandle = await startWebhookServer({
+      ...baseOpts(),
+      configPath,
+      port: 0,
+      dashboardEnabled: false,
+    });
+    const localPort = (localHandle.server.address() as { port: number }).port;
+
+    try {
+      const res = await makeRequest(localPort, { path: '/dashboard' });
+      expect(res.status).toBe(404);
+    } finally {
+      await localHandle.close();
+    }
+  });
+
   it('returns 404 for /webhook/ with no source segment', async () => {
     const res = await makeRequest(port, { path: '/webhook/' });
     expect(res.status).toBe(404);

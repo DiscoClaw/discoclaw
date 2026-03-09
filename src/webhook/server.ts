@@ -3,7 +3,7 @@
  *
  * - `/webhook/:source` keeps the existing HMAC-verified webhook ingress.
  * - `/` + `/api/*` expose the operator dashboard when started in dashboard mode.
- * - `/dashboard` + `/dashboard/api/*` expose the same dashboard alongside webhooks.
+ * - `/dashboard` + `/dashboard/api/*` can expose the same dashboard alongside webhooks.
  *
  * The dashboard path reuses the existing dashboard data layer from `src/cli/dashboard.ts`
  * so the web UI and the CLI stay aligned on doctor/model/service behavior.
@@ -81,6 +81,8 @@ export type WebhookServerOptions = {
   port?: number;
   /** Host to bind to. Default: '127.0.0.1' (loopback only). */
   host?: string;
+  /** Mount the operator dashboard on this server. Default: true. */
+  dashboardEnabled?: boolean;
   /** Guild ID used when constructing synthetic webhook CronJobs. */
   guildId?: string;
   /** Executor context passed directly to executeCronJob for webhooks. */
@@ -202,7 +204,15 @@ function buildInspectOptions(opts: WebhookServerOptions): Required<Pick<InspectO
   };
 }
 
-function buildDashboardMount(configPath?: string): DashboardMount {
+function buildDashboardMount(configPath: string | undefined, enabled: boolean): DashboardMount {
+  if (!enabled) {
+    return {
+      enabled: false,
+      rootPath: '/',
+      apiPrefix: '/api',
+    };
+  }
+
   if (configPath) {
     return {
       enabled: true,
@@ -755,6 +765,8 @@ async function handleDashboardRequest(
   log: LoggerLike | undefined,
   html: string,
 ): Promise<boolean> {
+  if (!mount.enabled) return false;
+
   const method = req.method ?? 'GET';
 
   try {
@@ -854,6 +866,7 @@ export async function startWebhookServer(opts: WebhookServerOptions = {}): Promi
     configPath,
     port = 8080,
     host = '127.0.0.1',
+    dashboardEnabled = true,
     guildId,
     executorCtx,
     log,
@@ -865,7 +878,7 @@ export async function startWebhookServer(opts: WebhookServerOptions = {}): Promi
 
   const inspectOpts = buildInspectOptions(opts);
   const deps: DashboardDeps = { ...createDefaultDashboardDeps(), ...opts.deps };
-  const dashboardMount = buildDashboardMount(configPath);
+  const dashboardMount = buildDashboardMount(configPath, dashboardEnabled);
   const dashboardHtml = buildDashboardHtml(dashboardMount);
 
   let config: WebhookConfig = {};
@@ -951,7 +964,7 @@ export async function startWebhookServer(opts: WebhookServerOptions = {}): Promi
     {
       host,
       port: (server.address() as { port: number } | null)?.port ?? port,
-      dashboardPath: dashboardMount.rootPath,
+      dashboardPath: dashboardMount.enabled ? dashboardMount.rootPath : null,
       webhookSources: Object.keys(config),
     },
     'webhook:server listening',

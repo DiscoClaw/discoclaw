@@ -71,6 +71,9 @@ import { ensureForumTags, isSnowflake } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
 import { startWebhookServer } from './webhook/server.js';
 import type { WebhookServer } from './webhook/server.js';
+import { startDashboardServer } from './dashboard/server.js';
+import type { DashboardServer as LocalDashboardServer } from './dashboard/server.js';
+import { DASHBOARD_HOST } from './dashboard/options.js';
 import { resolveModel, initTierOverrides } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
@@ -227,6 +230,7 @@ let cronTagMapWatcher: { stop(): void } | null = null;
 let taskForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
 let webhookServer: WebhookServer | null = null;
+let dashboardServer: LocalDashboardServer | null = null;
 let savedCronExecCtx: import('./cron/executor.js').CronExecutorContext | null = null;
 let voiceManager: VoiceConnectionManager | null = null;
 let audioPipeline: AudioPipelineManager | null = null;
@@ -306,6 +310,9 @@ const shutdown = async () => {
   clearInterval(memorySamplerInterval);
   if (webhookServer) {
     await webhookServer.close().catch((err) => log.warn({ err }, 'webhook:close error'));
+  }
+  if (dashboardServer) {
+    await dashboardServer.close().catch((err) => log.warn({ err }, 'dashboard:close error'));
   }
   coldStorageSubsystem?.close();
   await botStatus?.offline();
@@ -2347,6 +2354,7 @@ if (cfg.webhookEnabled && savedCronExecCtx) {
           configPath: cfg.webhookConfigPath,
           port: cfg.webhookPort,
           host: webhookHost,
+          dashboardEnabled: false,
           guildId: resolvedGuildId,
           executorCtx: webhookExecCtx,
           log,
@@ -2365,6 +2373,20 @@ if (cfg.webhookEnabled && savedCronExecCtx) {
   }
 } else if (cfg.webhookEnabled && !savedCronExecCtx) {
   log.warn('DISCOCLAW_WEBHOOK_ENABLED=1 but cron executor context is not available; webhook server disabled');
+}
+
+if (cfg.dashboardEnabled) {
+  try {
+    dashboardServer = await startDashboardServer({
+      port: cfg.dashboardPort,
+      host: DASHBOARD_HOST,
+      cwd: process.cwd(),
+      env: process.env,
+      log,
+    });
+  } catch (err) {
+    log.error({ err, port: cfg.dashboardPort }, 'dashboard:server failed to start');
+  }
 }
 
 if (reactionHandlerEnabled) log.info({ reactionMaxAgeHours }, 'reaction:handler enabled');

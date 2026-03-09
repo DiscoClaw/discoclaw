@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { parseAllowBotIds, parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
+import { DEFAULT_DASHBOARD_PORT } from './dashboard/options.js';
 
 export const KNOWN_TOOLS = new Set([
   'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Pipeline', 'Step',
@@ -184,6 +185,8 @@ export type DiscoclawConfig = {
   webhookEnabled: boolean;
   webhookPort: number;
   webhookConfigPath?: string;
+  dashboardEnabled: boolean;
+  dashboardPort: number;
 
   tasksEnabled: boolean;
   tasksCwdOverride?: string;
@@ -523,6 +526,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const webhookEnabled = parseBoolean(env, 'DISCOCLAW_WEBHOOK_ENABLED', false);
   const webhookPort = parsePositiveInt(env, 'DISCOCLAW_WEBHOOK_PORT', 9400);
   const webhookConfigPath = parseTrimmedString(env, 'DISCOCLAW_WEBHOOK_CONFIG');
+  const dashboardEnabled = parseBoolean(env, 'DISCOCLAW_DASHBOARD_ENABLED', false);
+  const dashboardPort = parsePositiveInt(env, 'DISCOCLAW_DASHBOARD_PORT', DEFAULT_DASHBOARD_PORT);
 
   const tasksEnabled = parseBoolean(env, 'DISCOCLAW_TASKS_ENABLED', true);
   let tasksForum = parseTrimmedString(env, 'DISCOCLAW_TASKS_FORUM');
@@ -888,6 +893,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       webhookEnabled,
       webhookPort,
       webhookConfigPath,
+      dashboardEnabled,
+      dashboardPort,
 
       tasksEnabled,
       tasksCwdOverride,
