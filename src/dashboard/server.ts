@@ -16,6 +16,7 @@ import {
 import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT, formatDashboardUrl } from './options.js';
 import { renderDashboardPage } from './page.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
+import { mapListenError } from './server-errors.js';
 import type { DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
@@ -48,7 +49,6 @@ const CROSS_ORIGIN_MUTATION_ERROR = 'Cross-origin mutation requests are not allo
 const DNS_REBIND_ERROR = 'Dashboard requests must use a loopback Host header.';
 
 type KnownRuntimesType = typeof KNOWN_RUNTIMES;
-type ListenErrorLike = { code?: unknown };
 
 export type { DashboardSnapshotApiResponse } from './api/snapshot.js';
 
@@ -454,29 +454,6 @@ function isDashboardBadRequest(message: string): boolean {
   );
 }
 
-function hasListenErrorCode(err: unknown, code: string): boolean {
-  return typeof err === 'object' && err !== null && (err as ListenErrorLike).code === code;
-}
-
-function mapDashboardListenError(err: unknown, port: number): Error {
-  if (hasListenErrorCode(err, 'EADDRINUSE')) {
-    return new Error(
-      `Dashboard port ${port} is already in use. Another DiscoClaw instance or process may be using it. Set DISCOCLAW_DASHBOARD_PORT to a different value in .env.`,
-      { cause: err instanceof Error ? err : undefined },
-    );
-  }
-
-  if (hasListenErrorCode(err, 'EACCES')) {
-    return new Error(
-      `Dashboard port ${port} requires elevated privileges. Use a port above 1024. Set DISCOCLAW_DASHBOARD_PORT to a different value in .env.`,
-      { cause: err instanceof Error ? err : undefined },
-    );
-  }
-
-  if (err instanceof Error) return err;
-  return new Error(String(err));
-}
-
 export async function startDashboardServer(opts: DashboardServerOptions = {}): Promise<DashboardServer> {
   const inspectOpts = buildInspectOptions(opts);
   const deps: DashboardDeps = { ...createDefaultDeps(), ...opts.deps };
@@ -594,7 +571,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error) => {
       cleanup();
-      reject(mapDashboardListenError(err, port));
+      reject(mapListenError(err, host, port));
     };
     const onListening = () => {
       cleanup();
