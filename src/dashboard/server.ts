@@ -14,6 +14,7 @@ import {
 } from '../cli/dashboard.js';
 import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT } from './options.js';
 import { renderDashboardPage } from './page.js';
+import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
 import type { DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
@@ -44,6 +45,8 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 type KnownRuntimesType = typeof KNOWN_RUNTIMES;
 
+export type { DashboardSnapshotApiResponse } from './api/snapshot.js';
+
 export type DashboardServerOptions = {
   port?: number;
   host?: string;
@@ -63,11 +66,6 @@ type JsonRecord = Record<string, unknown>;
 type ModelChangeInput = {
   role?: unknown;
   model?: unknown;
-};
-
-export type DashboardSnapshotApiResponse = {
-  ok: true;
-  snapshot: DashboardSnapshot;
 };
 
 export type DashboardServiceApiResponse = {
@@ -197,16 +195,6 @@ async function loadServiceName(
 ): Promise<string> {
   const ctx = await deps.loadDoctorContext(inspectOpts);
   return normalizeServiceName(ctx.env.DISCOCLAW_SERVICE_NAME);
-}
-
-async function buildSnapshotResponse(
-  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
-  deps: DashboardDeps,
-): Promise<DashboardSnapshotApiResponse> {
-  return {
-    ok: true,
-    snapshot: await collectDashboardSnapshot(inspectOpts, deps),
-  };
 }
 
 async function buildServiceResponse(
