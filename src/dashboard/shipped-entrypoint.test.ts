@@ -150,6 +150,10 @@ function makeRequest(port: number, opts: RequestOptions = {}): Promise<Response>
   });
 }
 
+function parseJson<T>(text: string): T {
+  return JSON.parse(text) as T;
+}
+
 async function loadShippedEntrypoint(): Promise<{ startDashboardServer: (opts?: Record<string, unknown>) => Promise<ShippedHandle> }> {
   return import(new URL('../../dashboard/server.js', import.meta.url).href) as Promise<{
     startDashboardServer: (opts?: Record<string, unknown>) => Promise<ShippedHandle>;
@@ -164,7 +168,7 @@ afterEach(async () => {
 });
 
 describe('dashboard/server.js shipped entrypoint', () => {
-  it('loads the built dashboard server and enforces the current POST origin protections', async () => {
+  it('loads the built dashboard server and enforces loopback Host validation before routing', async () => {
     const { startDashboardServer } = await loadShippedEntrypoint();
     const restartExecutor = vi.fn();
     handle = await startDashboardServer({
@@ -177,15 +181,32 @@ describe('dashboard/server.js shipped entrypoint', () => {
     });
     const port = (handle.server.address() as { port: number }).port;
 
-    const blocked = await makeRequest(port, {
+    const blockedRead = await makeRequest(port, {
+      path: '/api/snapshot',
+      headers: {
+        Host: `evil.example:${port}`,
+      },
+    });
+    expect(blockedRead.status).toBe(403);
+    expect(parseJson<{ ok: boolean; message: string }>(blockedRead.text)).toEqual({
+      ok: false,
+      message: 'Dashboard requests must use a loopback Host header.',
+    });
+
+    const blockedWrite = await makeRequest(port, {
       path: '/api/restart',
       method: 'POST',
       body: JSON.stringify({ confirm: true }),
       headers: {
-        Origin: 'http://evil.example',
+        Host: `evil.example:${port}`,
+        Origin: `http://evil.example:${port}`,
       },
     });
-    expect(blocked.status).toBe(403);
+    expect(blockedWrite.status).toBe(403);
+    expect(parseJson<{ ok: boolean; message: string }>(blockedWrite.text)).toEqual({
+      ok: false,
+      message: 'Dashboard requests must use a loopback Host header.',
+    });
 
     const allowed = await makeRequest(port, {
       path: '/api/restart',
