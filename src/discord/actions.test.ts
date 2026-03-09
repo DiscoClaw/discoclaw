@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelType, PermissionFlagsBits } from 'discord.js';
+import { buildUnavailableActionTypesNotice } from './output-common.js';
 import {
   parseDiscordActions,
   executeDiscordActions,
@@ -350,6 +351,33 @@ describe('parseDiscordActions', () => {
     expect(strippedUnrecognizedTypes).toEqual(['voiceLeave']);
   });
 
+  it('keeps allowlisted action types when allowedActionTypes is provided', () => {
+    const input = '<discord-action>{"type":"channelList"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS, ['channelList']);
+    expect(actions).toEqual([{ type: 'channelList' }]);
+    expect(strippedUnrecognizedTypes).toEqual([]);
+  });
+
+  it('strips category-enabled action types that are not in allowedActionTypes', () => {
+    const input =
+      '<discord-action>{"type":"channelList"}</discord-action>' +
+      '<discord-action>{"type":"channelCreate","name":"ops"}</discord-action>';
+    const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS, ['channelList']);
+    expect(actions).toEqual([{ type: 'channelList' }]);
+    expect(strippedUnrecognizedTypes).toEqual(['channelCreate']);
+  });
+
+  it('reports allowlist-blocked action names through stripped-type notices', () => {
+    const input =
+      '<discord-action>{"type":"channelCreate","name":"ops"}</discord-action>' +
+      '<discord-action>{"type":"channelDelete","channelId":"123"}</discord-action>';
+    const { strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS, ['channelList']);
+    const notice = buildUnavailableActionTypesNotice(strippedUnrecognizedTypes);
+    expect(strippedUnrecognizedTypes).toEqual(['channelCreate', 'channelDelete']);
+    expect(notice).toContain('channelCreate');
+    expect(notice).toContain('channelDelete');
+  });
+
   it('prompt Rules section confirms multiple same-type actions are supported', () => {
     const prompt = discordActionsPromptSection(ALL_FLAGS, 'ClawBot');
     expect(prompt).toContain('Multiple same-type actions are supported');
@@ -372,6 +400,7 @@ describe('withoutRequesterGatedActionFlags', () => {
       memory: true,
       config: true,
       defer: true,
+      loop: true,
       imagegen: true,
       voice: true,
       spawn: true,
@@ -389,6 +418,7 @@ describe('withoutRequesterGatedActionFlags', () => {
       memory: true,
       config: true,
       defer: true,
+      loop: true,
       imagegen: true,
       voice: true,
       spawn: true,

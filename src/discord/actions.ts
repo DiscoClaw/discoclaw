@@ -83,10 +83,32 @@ export type ActionCategoryFlags = {
   memory: boolean;
   defer: boolean;
   config: boolean;
+  loop?: boolean;
   imagegen?: boolean;
   voice?: boolean;
   spawn?: boolean;
 };
+
+export type LoopActionRequest =
+  | { type: 'loopCreate'; [key: string]: unknown }
+  | { type: 'loopList'; [key: string]: unknown }
+  | { type: 'loopCancel'; [key: string]: unknown };
+
+const LOOP_ACTION_TYPES = new Set<string>(['loopCreate', 'loopList', 'loopCancel']);
+
+async function executeLoopAction(
+  _action: LoopActionRequest,
+  _ctx: ActionContext,
+): Promise<DiscordActionResult> {
+  return { ok: false, error: 'Loop actions are not configured for this bot' };
+}
+
+function loopActionsPromptSection(): string {
+  return `### Repeating loops
+Use <discord-action>{"type":"loopCreate","channel":"general","intervalSeconds":900,"prompt":"Check the forge status for forge-123 and report changes","label":"forge-watch"}</discord-action> to schedule a repeating self-invocation. Loops are inspectable repeating jobs with metadata such as interval, next run time, origin channel/thread, and an optional purpose label.
+
+Use <discord-action>{"type":"loopList"}</discord-action> to inspect active loops and <discord-action>{"type":"loopCancel","id":123}</discord-action> to stop one. As with defer, the prompt must be fully self-contained because each loop tick runs without conversation history.`;
+}
 
 export type DiscordActionRequest =
   | ChannelActionRequest
@@ -102,6 +124,7 @@ export type DiscordActionRequest =
   | MemoryActionRequest
   | DeferActionRequest
   | DeferListActionRequest
+  | LoopActionRequest
   | ConfigActionRequest
   | ReactionPromptRequest
   | ImagegenActionRequest
@@ -162,11 +185,23 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.plan) for (const t of PLAN_ACTION_TYPES) types.add(t);
   if (flags.memory) for (const t of MEMORY_ACTION_TYPES) types.add(t);
   if (flags.defer) for (const t of DEFER_ACTION_TYPES) types.add(t);
+  if (flags.loop) for (const t of LOOP_ACTION_TYPES) types.add(t);
   if (flags.config) for (const t of CONFIG_ACTION_TYPES) types.add(t);
   if (flags.imagegen) for (const t of IMAGEGEN_ACTION_TYPES) types.add(t);
   if (flags.voice) for (const t of VOICE_ACTION_TYPES) types.add(t);
   if (flags.spawn) for (const t of SPAWN_ACTION_TYPES) types.add(t);
   return types;
+}
+
+function buildAllowedTypes(
+  flags: ActionCategoryFlags,
+  allowedActionTypes?: Iterable<string>,
+): Set<string> {
+  const validTypes = buildValidTypes(flags);
+  if (!allowedActionTypes) return validTypes;
+
+  const allowedSet = new Set(allowedActionTypes);
+  return new Set([...validTypes].filter((type) => allowedSet.has(type)));
 }
 
 function rewriteLegacyPlanCloseToTaskClose(
@@ -374,8 +409,9 @@ export type ParsedDiscordActionsResult = {
 export function parseDiscordActions(
   text: string,
   flags: ActionCategoryFlags,
+  allowedActionTypes?: Iterable<string>,
 ): ParsedDiscordActionsResult {
-  const validTypes = buildValidTypes(flags);
+  const validTypes = buildAllowedTypes(flags, allowedActionTypes);
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
   const codeRanges = computeMarkdownCodeRanges(text);
@@ -521,6 +557,8 @@ export async function executeDiscordActions(
         } else {
           result = await executeDeferAction(action as DeferActionRequest, ctx);
         }
+      } else if (LOOP_ACTION_TYPES.has(action.type)) {
+        result = await executeLoopAction(action as LoopActionRequest, ctx);
       } else if (CONFIG_ACTION_TYPES.has(action.type)) {
         if (!effectiveSubs.configCtx) {
           result = { ok: false, error: 'Config subsystem not configured' };
@@ -633,6 +671,7 @@ type ActionSchemaCategory =
   | 'plan'
   | 'memory'
   | 'defer'
+  | 'loop'
   | 'config'
   | 'imagegen'
   | 'voice'
@@ -650,11 +689,12 @@ const ACTION_SCHEMA_CATEGORY_ORDER: ActionSchemaCategory[] = [
   'forge',
   'plan',
   'memory',
+  'defer',
+  'loop',
   'config',
   'imagegen',
   'voice',
   'spawn',
-  'defer',
 ];
 
 const ACTION_SCHEMA_CORE_CATEGORIES: ActionSchemaCategory[] = ['messaging', 'channels'];
@@ -674,6 +714,7 @@ const ACTION_SCHEMA_KEYWORD_RULES: ActionSchemaKeywordRule[] = [
   { hit: 'plan', pattern: /\b(plan|roadmap|milestone|phase)\b/i, categories: ['plan', 'forge'] },
   { hit: 'forge', pattern: /\bforge\b/i, categories: ['forge', 'plan'] },
   { hit: 'cron', pattern: /\b(cron|schedule|scheduled|reminder|remind|later)\b/i, categories: ['crons', 'defer'] },
+  { hit: 'loop', pattern: /\b(loop|repeat|repeating|interval)\b/i, categories: ['loop'] },
   { hit: 'config', pattern: /\b(model|config|configure|setting)\b/i, categories: ['config'] },
   { hit: 'imagegen', pattern: /\b(image|generate image|draw|illustration|photo)\b/i, categories: ['imagegen'] },
   { hit: 'voice', pattern: /\b(voice|speak|mute|unmute)\b/i, categories: ['voice'] },
@@ -707,6 +748,7 @@ function isActionSchemaCategoryEnabled(flags: ActionCategoryFlags, category: Act
     case 'plan': return flags.plan;
     case 'memory': return flags.memory;
     case 'defer': return flags.defer;
+    case 'loop': return Boolean(flags.loop);
     case 'config': return flags.config;
     case 'imagegen': return Boolean(flags.imagegen);
     case 'voice': return Boolean(flags.voice);
@@ -740,6 +782,8 @@ function renderActionSchemaCategorySection(category: ActionSchemaCategory): stri
       return memoryActionsPromptSection();
     case 'config':
       return configActionsPromptSection();
+    case 'loop':
+      return loopActionsPromptSection();
     case 'imagegen':
       return imagegenActionsPromptSection();
     case 'voice':
