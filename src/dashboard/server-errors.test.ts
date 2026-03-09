@@ -6,7 +6,7 @@ describe('dashboard server listen errors', () => {
     const err = Object.assign(new Error('listen EADDRINUSE'), { code: 'EADDRINUSE' });
 
     expect(mapListenError(err, '127.0.0.1', 9401).message).toBe(
-      'Dashboard failed to bind 127.0.0.1:9401 because the port is already in use. Another DiscoClaw instance may already be running with the dashboard enabled. Set DISCOCLAW_DASHBOARD_PORT to a different port in .env for one instance (for example, 9402), or disable the dashboard on one of them.',
+      'Dashboard failed to bind 127.0.0.1:9401 (http://127.0.0.1:9401/) because the port is already in use. Another DiscoClaw instance may already be running with the dashboard enabled. Set DISCOCLAW_DASHBOARD_PORT to a different port in .env for one instance (for example, 9402), or disable the dashboard on one of them.',
     );
   });
 
@@ -14,7 +14,7 @@ describe('dashboard server listen errors', () => {
     const err = Object.assign(new Error('listen EACCES'), { code: 'EACCES' });
 
     expect(mapListenError(err, '127.0.0.1', 80).message).toBe(
-      'Dashboard failed to bind 127.0.0.1:80 because it requires elevated privileges. Use a port above 1024, or set DISCOCLAW_DASHBOARD_PORT to a non-privileged port in .env.',
+      'Dashboard failed to bind 127.0.0.1:80 (http://127.0.0.1:80/) because it requires elevated privileges. Use a port above 1024, or set DISCOCLAW_DASHBOARD_PORT to a non-privileged port in .env.',
     );
   });
 

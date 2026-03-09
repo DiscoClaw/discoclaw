@@ -2438,7 +2438,11 @@ if (cfg.dashboardEnabled) {
       log,
     });
   } catch (err) {
-    log.error({ err, port: cfg.dashboardPort, url: dashboardUrl }, 'dashboard:server failed to start');
+    const detail = err instanceof Error ? err.message : String(err);
+    log.error(
+      { err, host: dashboardHost, port: cfg.dashboardPort, url: dashboardUrl },
+      `dashboard:server failed to start: ${detail}`,
+    );
   }
 }
 

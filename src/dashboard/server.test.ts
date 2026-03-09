@@ -808,7 +808,7 @@ describe('startDashboardServer', () => {
       deps: makeDeps(),
       log: mockLog(),
     })).rejects.toThrow(
-      `Dashboard failed to bind 127.0.0.1:${port} because the port is already in use. Another DiscoClaw instance may already be running with the dashboard enabled. Set DISCOCLAW_DASHBOARD_PORT to a different port in .env for one instance (for example, 9402), or disable the dashboard on one of them.`,
+      `Dashboard failed to bind 127.0.0.1:${port} (http://127.0.0.1:${port}/) because the port is already in use. Another DiscoClaw instance may already be running with the dashboard enabled. Set DISCOCLAW_DASHBOARD_PORT to a different port in .env for one instance (for example, 9402), or disable the dashboard on one of them.`,
     );
   });
 

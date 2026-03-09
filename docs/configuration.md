@@ -282,6 +282,18 @@ See [docs/webhook-exposure.md](webhook-exposure.md) for setup and security detai
 | `DISCOCLAW_WEBHOOK_PORT` | `9400` | Port for the webhook server |
 | `DISCOCLAW_WEBHOOK_CONFIG` | — | Path to webhook config file |
 
+## Dashboard
+
+See [docs/dashboard-tailscale.md](dashboard-tailscale.md) for access and trusted-host details.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCOCLAW_DASHBOARD_ENABLED` | `false` | Enable the local operator dashboard |
+| `DISCOCLAW_DASHBOARD_PORT` | `9401` | Port for the dashboard HTTP server. Each DiscoClaw instance on the same machine needs its own dashboard port. |
+| `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` | — | Comma-separated exact hosts accepted in the dashboard `Host` header. When non-empty, DiscoClaw binds the dashboard to `0.0.0.0` so trusted Tailscale hosts can reach it. |
+
+If you run multiple DiscoClaw instances on one machine and want dashboards on both, assign distinct `DISCOCLAW_DASHBOARD_PORT` values such as `9401` and `9402`.
+
 ## Actions
 
 Master switch and per-category flags for Discord actions. See [docs/discord-actions.md](discord-actions.md).

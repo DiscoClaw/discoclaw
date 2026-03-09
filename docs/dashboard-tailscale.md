@@ -32,6 +32,22 @@ Notes:
 - `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` is a comma-separated allowlist of exact hosts the dashboard will accept in the `Host` header.
 - Hostnames are normalized to lowercase and trailing dots are ignored, so `Phone.Tailnet.ts.net.` and `phone.tailnet.ts.net` are treated the same.
 
+## Multiple local instances
+
+If you run two DiscoClaw instances on the same machine and enable the dashboard for both, they cannot share the same port.
+
+Set a different `DISCOCLAW_DASHBOARD_PORT` in each instance's `.env`, for example:
+
+```dotenv
+# instance A
+DISCOCLAW_DASHBOARD_PORT=9401
+
+# instance B
+DISCOCLAW_DASHBOARD_PORT=9402
+```
+
+If you forget, the later instance will keep running but its dashboard will stay disabled for that process, and the startup error will name the conflicting bind target and URL.
+
 ## Supported host values
 
 `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` supports:
