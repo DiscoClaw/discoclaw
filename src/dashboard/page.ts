@@ -426,15 +426,15 @@ export function renderDashboardPage(): string {
     <section class="hero">
       <div class="hero-bar">
         <div>
-          <div class="eyebrow">Discoclaw Local Dashboard</div>
-          <h1>Operator surface over HTTP</h1>
+          <div class="eyebrow">Discoclaw Control Panel</div>
+          <h1>Local Control Panel</h1>
         </div>
-        <button id="refresh-btn" type="button">Refresh snapshot</button>
+        <button id="refresh-btn" type="button">Refresh</button>
       </div>
-      <p class="hero-copy">Control plane for the local Discoclaw service. By default it is loopback-only; optional trusted hosts can expose it on a private network without disabling Host-header checks.</p>
+      <p class="hero-copy">Check service health, review settings, and make common changes from one place. This dashboard stays local by default.</p>
       <div class="hero-status">
         <div id="hero-service-pill" class="pill">Service: loading</div>
-        <div id="hero-runtime-pill" class="pill">Runtime overrides: loading</div>
+        <div id="hero-runtime-pill" class="pill">Special settings: loading</div>
       </div>
       <div id="hero-status" class="status"></div>
     </section>
@@ -629,6 +629,22 @@ export function renderDashboardPage(): string {
       modelInput.select();
     }
 
+    function formatServicePill(summary) {
+      const normalized = String(summary || '').toLowerCase();
+      if (normalized.includes('active (running)')) return 'running';
+      if (normalized.includes('activating')) return 'starting';
+      if (normalized.includes('failed')) return 'failed';
+      if (normalized.includes('inactive') || normalized.includes('dead')) return 'stopped';
+      return String(summary || 'unknown');
+    }
+
+    function formatRuntimePill(overrides) {
+      const parts = [];
+      if (overrides.fastRuntime) parts.push('fast=' + overrides.fastRuntime);
+      if (overrides.voiceRuntime) parts.push('voice=' + overrides.voiceRuntime);
+      return parts.length > 0 ? parts.join(' | ') : 'defaults';
+    }
+
     function renderSnapshot(snapshot) {
       lastSnapshot = snapshot;
 
@@ -678,9 +694,8 @@ export function renderDashboardPage(): string {
       appendRuntimeOverride(runtimeOverrides, 'fast runtime', snapshot.runtimeOverrides.fastRuntime || 'default');
       appendRuntimeOverride(runtimeOverrides, 'voice runtime', snapshot.runtimeOverrides.voiceRuntime || 'default');
 
-      heroServicePill.textContent = 'Service: ' + snapshot.serviceSummary;
-      heroRuntimePill.textContent = 'Runtime overrides: fast=' + (snapshot.runtimeOverrides.fastRuntime || 'default')
-        + ' voice=' + (snapshot.runtimeOverrides.voiceRuntime || 'default');
+      heroServicePill.textContent = 'Service: ' + formatServicePill(snapshot.serviceSummary);
+      heroRuntimePill.textContent = 'Special settings: ' + formatRuntimePill(snapshot.runtimeOverrides);
       setStatus(serviceStatus, snapshot.serviceSummary, 'ok');
     }
 
