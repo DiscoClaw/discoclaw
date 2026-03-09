@@ -3,7 +3,7 @@ import { ChannelType } from 'discord.js';
 
 import { createMessageCreateHandler } from './discord.js';
 import { hasQueryAction, QUERY_ACTION_TYPES, shouldTriggerFollowUp } from './discord/action-categories.js';
-import { inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
+import { hasInFlightForChannel, inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
 import * as abortRegistry from './discord/abort-registry.js';
 import * as discordActions from './discord/actions.js';
 import { _resetDestructiveConfirmationForTest as resetDestructiveConfirm } from './discord/destructive-confirmation.js';
@@ -1268,6 +1268,47 @@ describe('in-flight reply registry cleanup', () => {
     await handler(makeMsg());
 
     expect(runtime.invoke).toHaveBeenCalledTimes(2);
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('marks the channel as in-flight before reply registration and clears it after completion', async () => {
+    const allowSession = deferred<string>();
+    const runtimeStarted = deferred<void>();
+    const allowRuntimeDone = deferred<void>();
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        runtimeStarted.resolve();
+        await allowRuntimeDone.promise;
+        yield { type: 'text_final', text: 'Hello there!' } as any;
+      }),
+    } as any;
+    const sessionManager = {
+      getOrCreate: vi.fn(async () => allowSession.promise),
+    } as any;
+
+    const msg = makeMsg();
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { sessionManager }),
+      makeQueue(),
+    );
+    const pending = handler(msg);
+
+    await vi.waitFor(() => {
+      expect(sessionManager.getOrCreate).toHaveBeenCalledOnce();
+    });
+
+    expect(hasInFlightForChannel(msg.channelId)).toBe(true);
+    expect(inFlightReplyCount()).toBe(0);
+    expect(msg.reply).not.toHaveBeenCalled();
+
+    allowSession.resolve('sess');
+    await runtimeStarted.promise;
+    expect(hasInFlightForChannel(msg.channelId)).toBe(true);
+
+    allowRuntimeDone.resolve();
+    await pending;
+
+    expect(hasInFlightForChannel(msg.channelId)).toBe(false);
     expect(inFlightReplyCount()).toBe(0);
   });
 
