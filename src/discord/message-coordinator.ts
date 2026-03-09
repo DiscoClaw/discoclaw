@@ -64,7 +64,7 @@ import { sanitizeErrorMessage, sanitizePhaseError } from './status-channel.js';
 import { ToolAwareQueue } from './tool-aware-queue.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
-import { registerInFlightReply, setStopReaction, isShuttingDown } from './inflight-replies.js';
+import { registerInFlightReply, setStopReaction, isShuttingDown, markChannelPending } from './inflight-replies.js';
 import { registerAbort, tryAbortAll } from './abort-registry.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
@@ -1518,6 +1518,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         }
         const activeMsg = batch[batch.length - 1];
         const isBatch = batch.length > 1;
+        const disposePendingChannel = markChannelPending(msg.channelId);
 
         let reply: ReplyTarget | null = null;
         let abortSignal: AbortSignal | undefined;
@@ -3964,6 +3965,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             log: params.log,
             flow: 'message',
           });
+          disposePendingChannel();
         }
       });
 

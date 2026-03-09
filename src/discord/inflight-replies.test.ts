@@ -5,6 +5,7 @@ import os from 'node:os';
 
 import {
   registerInFlightReply,
+  markChannelPending,
   inFlightReplyCount,
   hasInFlightForChannel,
   isShuttingDown,
@@ -87,6 +88,58 @@ describe('registerInFlightReply', () => {
     expect(inFlightReplyCount()).toBe(0);
     dispose();
     expect(inFlightReplyCount()).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// markChannelPending
+// ---------------------------------------------------------------------------
+
+describe('markChannelPending', () => {
+  it('marks a channel as in-flight before reply registration', () => {
+    markChannelPending('ch1');
+    expect(hasInFlightForChannel('ch1')).toBe(true);
+  });
+
+  it('restores false after the disposer is called', () => {
+    const dispose = markChannelPending('ch1');
+    expect(hasInFlightForChannel('ch1')).toBe(true);
+
+    dispose();
+    expect(hasInFlightForChannel('ch1')).toBe(false);
+  });
+
+  it('double-dispose is a no-op', () => {
+    const dispose = markChannelPending('ch1');
+
+    dispose();
+    dispose();
+
+    expect(hasInFlightForChannel('ch1')).toBe(false);
+  });
+
+  it('keeps a channel pending until all overlapping disposers are called', () => {
+    const disposeA = markChannelPending('ch1');
+    const disposeB = markChannelPending('ch1');
+
+    expect(hasInFlightForChannel('ch1')).toBe(true);
+
+    disposeA();
+    expect(hasInFlightForChannel('ch1')).toBe(true);
+
+    disposeB();
+    expect(hasInFlightForChannel('ch1')).toBe(false);
+  });
+
+  it('marking during shutdown returns an immediate no-op disposer', async () => {
+    await drainInFlightReplies();
+    expect(isShuttingDown()).toBe(true);
+
+    const dispose = markChannelPending('ch1');
+
+    expect(hasInFlightForChannel('ch1')).toBe(false);
+    dispose();
+    expect(hasInFlightForChannel('ch1')).toBe(false);
   });
 });
 
@@ -192,6 +245,15 @@ describe('drainInFlightReplies', () => {
     expect(inFlightReplyCount()).toBe(0);
     await drainInFlightReplies();
     expect(isShuttingDown()).toBe(true);
+  });
+
+  it('clears pending channels during drain', async () => {
+    markChannelPending('ch1');
+    expect(hasInFlightForChannel('ch1')).toBe(true);
+
+    await drainInFlightReplies();
+
+    expect(hasInFlightForChannel('ch1')).toBe(false);
   });
 
   it('removes 🛑 reaction after editing', async () => {

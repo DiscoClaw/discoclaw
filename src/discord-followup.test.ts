@@ -3,7 +3,7 @@ import { ChannelType } from 'discord.js';
 
 import { createMessageCreateHandler } from './discord.js';
 import { hasQueryAction, QUERY_ACTION_TYPES, shouldTriggerFollowUp } from './discord/action-categories.js';
-import { inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
+import { hasInFlightForChannel, inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
 import * as abortRegistry from './discord/abort-registry.js';
 import * as discordActions from './discord/actions.js';
 import { _resetDestructiveConfirmationForTest as resetDestructiveConfirm } from './discord/destructive-confirmation.js';
@@ -1268,6 +1268,112 @@ describe('in-flight reply registry cleanup', () => {
     await handler(makeMsg());
 
     expect(runtime.invoke).toHaveBeenCalledTimes(2);
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('marks the channel as in-flight before reply registration and clears it after completion', async () => {
+    const allowSession = deferred<string>();
+    const runtimeStarted = deferred<void>();
+    const allowRuntimeDone = deferred<void>();
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        runtimeStarted.resolve();
+        await allowRuntimeDone.promise;
+        yield { type: 'text_final', text: 'Hello there!' } as any;
+      }),
+    } as any;
+    const sessionManager = {
+      getOrCreate: vi.fn(async () => allowSession.promise),
+    } as any;
+
+    const msg = makeMsg();
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { sessionManager }),
+      makeQueue(),
+    );
+    const pending = handler(msg);
+
+    await vi.waitFor(() => {
+      expect(sessionManager.getOrCreate).toHaveBeenCalledOnce();
+    });
+
+    expect(hasInFlightForChannel(msg.channelId)).toBe(true);
+    expect(inFlightReplyCount()).toBe(0);
+    expect(msg.reply).not.toHaveBeenCalled();
+
+    allowSession.resolve('sess');
+    await runtimeStarted.promise;
+    expect(hasInFlightForChannel(msg.channelId)).toBe(true);
+
+    allowRuntimeDone.resolve();
+    await pending;
+
+    expect(hasInFlightForChannel(msg.channelId)).toBe(false);
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('keeps the channel marked in-flight while an overlapping same-thread handler is still pre-registration', async () => {
+    const blockedSession = deferred<string>();
+    let sessionCall = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: 'Hello there!' } as any;
+      }),
+    } as any;
+    const sessionManager = {
+      getOrCreate: vi.fn(async () => {
+        sessionCall += 1;
+        if (sessionCall === 1) return blockedSession.promise;
+        return 'sess-fast';
+      }),
+    } as any;
+    const threadChannel = {
+      id: 'thread-1',
+      parentId: 'chan-parent',
+      isThread: () => true,
+      send: vi.fn(async () => ({ edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) })),
+      name: 'task-thread',
+    };
+
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, {
+        allowUserIds: new Set(['123', '456']),
+        sessionManager,
+      }),
+      makeQueue(),
+    );
+    const blockedMsg = makeMsg({
+      author: { id: '456', bot: false, displayName: 'Other', username: 'other' },
+      channelId: 'thread-1',
+      channel: threadChannel,
+      id: 'msg-blocked',
+    });
+    const fastMsg = makeMsg({
+      channelId: 'thread-1',
+      channel: threadChannel,
+      id: 'msg-fast',
+    });
+
+    const blockedPending = handler(blockedMsg);
+    await vi.waitFor(() => {
+      expect(sessionManager.getOrCreate).toHaveBeenCalledTimes(1);
+    });
+
+    expect(hasInFlightForChannel(blockedMsg.channelId)).toBe(true);
+    expect(inFlightReplyCount()).toBe(0);
+    expect(blockedMsg.reply).not.toHaveBeenCalled();
+
+    await handler(fastMsg);
+
+    expect(hasInFlightForChannel(blockedMsg.channelId)).toBe(true);
+    expect(inFlightReplyCount()).toBe(0);
+    expect(fastMsg.reply).toHaveBeenCalled();
+    expect(blockedMsg.reply).not.toHaveBeenCalled();
+
+    blockedSession.resolve('sess-blocked');
+    await blockedPending;
+
+    expect(hasInFlightForChannel(blockedMsg.channelId)).toBe(false);
     expect(inFlightReplyCount()).toBe(0);
   });
 
