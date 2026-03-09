@@ -74,6 +74,41 @@ export function createEvidence(input: VerificationEvidenceInput): VerificationEv
   return evidence;
 }
 
+export function coerceEvidenceArray(value: unknown, field: string): VerificationEvidence[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Malformed phases json: ${field} must be VerificationEvidence[]`);
+  }
+
+  return value.map((entry, idx) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`Malformed phases json: ${field}[${idx}] must be an object`);
+    }
+    const obj = entry as Record<string, unknown>;
+
+    const asOptionalString = (key: 'command' | 'summary' | 'reason'): string | null | undefined => {
+      const raw = obj[key];
+      if (raw === undefined || raw === null) return raw;
+      if (typeof raw !== 'string') {
+        throw new Error(`Malformed phases json: ${field}[${idx}].${key} must be a string`);
+      }
+      return raw;
+    };
+
+    try {
+      return createEvidence({
+        kind: typeof obj.kind === 'string' ? obj.kind : String(obj.kind),
+        status: typeof obj.status === 'string' ? obj.status : String(obj.status),
+        command: asOptionalString('command'),
+        summary: asOptionalString('summary'),
+        reason: asOptionalString('reason'),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Malformed phases json: ${field}[${idx}] ${msg}`);
+    }
+  });
+}
+
 export function formatEvidenceLine(evidence: VerificationEvidence): string {
   const parts = [`${evidence.kind}: ${evidence.status}`];
 
@@ -90,4 +125,16 @@ export function formatEvidenceLine(evidence: VerificationEvidence): string {
   }
 
   return parts.join(' - ');
+}
+
+export function formatEvidenceSummary(evidence: VerificationEvidence): string {
+  const detail = evidence.status === 'fail'
+    ? evidence.reason?.trim()
+    : evidence.summary?.trim();
+
+  if (detail) {
+    return `${evidence.kind}: ${evidence.status} (${collapseToOneLine(detail)})`;
+  }
+
+  return `${evidence.kind}: ${evidence.status}`;
 }

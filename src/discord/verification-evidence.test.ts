@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  coerceEvidenceArray,
   createEvidence,
   formatEvidenceLine,
+  formatEvidenceSummary,
 } from './verification-evidence.js';
 
 describe('createEvidence', () => {
@@ -87,5 +89,35 @@ describe('formatEvidenceLine', () => {
       kind: 'test',
       status: 'pass',
     }))).toBe('test: pass');
+  });
+});
+
+describe('coerceEvidenceArray', () => {
+  it('reuses canonical evidence validation for persisted records', () => {
+    expect(coerceEvidenceArray([
+      { kind: 'build', status: 'pass', command: 'pnpm build', summary: 'clean' },
+    ], 'evidence')).toEqual([
+      { kind: 'build', status: 'pass', command: 'pnpm build', summary: 'clean' },
+    ]);
+  });
+
+  it('rejects invalid pass/fail invariants in persisted records', () => {
+    expect(() => coerceEvidenceArray([
+      { kind: 'audit', status: 'fail' },
+    ], 'evidence')).toThrow('Failed verification evidence requires a reason');
+
+    expect(() => coerceEvidenceArray([
+      { kind: 'test', status: 'pass', reason: 'should not be here' },
+    ], 'evidence')).toThrow('Passed verification evidence cannot include a reason');
+  });
+});
+
+describe('formatEvidenceSummary', () => {
+  it('formats evidence for compact plan summaries', () => {
+    expect(formatEvidenceSummary(createEvidence({
+      kind: 'test',
+      status: 'pass',
+      summary: '14 passed',
+    }))).toBe('test: pass (14 passed)');
   });
 });

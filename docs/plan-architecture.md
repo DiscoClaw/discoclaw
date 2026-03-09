@@ -407,6 +407,12 @@ Field semantics:
 | `summary` | No | Short success-oriented human summary. Use for compact positive outcomes such as "dist built cleanly" or "all targeted tests passed". |
 | `reason` | No, but required for `fail` | Failure-oriented explanation for why verification failed. This is the primary machine-readable explanation downstream consumers should surface. |
 
+Production path:
+
+- Implement phases may append a dedicated trailer line to their worker response: `**Phase Evidence:** [JSON array]`. The phase runner extracts that trailer before persisting `output`, validates it through the canonical evidence parser, and stores the resulting records in `phase.evidence`.
+- Audit phases do not rely on worker-supplied JSON. The runner synthesizes an `audit` evidence record directly from the parsed audit verdict, so audit evidence is always available on successful audit execution.
+- Phase retries clear previously stored evidence before rerunning, so `phase.evidence` always reflects the latest execution attempt rather than stale prior results.
+
 Outcome semantics:
 
 | Verification outcome | How it is represented | Notes |
@@ -418,7 +424,7 @@ Outcome semantics:
 
 Evidence differs from phase output:
 
-- `output` and `error` remain the full human-readable transcript for operators.
+- `output` and `error` remain the full human-readable transcript for operators. The optional `**Phase Evidence:**` trailer is stripped before `output` is persisted.
 - `evidence` is the compact structured contract for machines and summaries.
 - Evidence should capture verification intent and verdict, while `output` preserves raw logs, stack traces, and contextual detail.
-- Evidence is persisted in both the JSON state file and the markdown phases file so downstream readers can recover the same machine-readable contract from either storage format. In markdown, the evidence JSON lives in the phase metadata preamble; free-text transcript content is not scanned for evidence markers.
+- Evidence is persisted in both the JSON state file and the markdown phases file so downstream readers can recover the same machine-readable contract from either storage format. In markdown, the persisted evidence JSON lives in the phase metadata preamble; arbitrary free-text transcript content is not scanned for evidence markers.

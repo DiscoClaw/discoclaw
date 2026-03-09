@@ -70,6 +70,13 @@ function makeSuccessRuntime(text: string): RuntimeAdapter {
   ]);
 }
 
+function withPhaseEvidence(
+  text: string,
+  evidence: unknown[] = [],
+): string {
+  return `${text}\n**Phase Evidence:** ${JSON.stringify(evidence)}`;
+}
+
 function makeErrorRuntime(msg: string): RuntimeAdapter {
   return makeRuntime([
     { type: 'error', message: msg },
@@ -1229,6 +1236,7 @@ describe('buildPhasePrompt', () => {
     const prompt = buildPhasePrompt(phase, SAMPLE_PLAN);
     expect(prompt).toContain('Read, Write, Edit, Glob, Grep, and Bash');
     expect(prompt).toContain('include the exact commands you ran');
+    expect(prompt).toContain('**Phase Evidence:**');
   });
 
   it('read phase uses read-only instruction', () => {
@@ -1615,9 +1623,17 @@ describe('executePhase', () => {
   }
 
   it('returns done on success', async () => {
-    const result = await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime('Done!')));
+    const result = await executePhase(
+      phase,
+      SAMPLE_PLAN,
+      basePhases,
+      makeOpts(makeSuccessRuntime(withPhaseEvidence('Done!'))),
+    );
     expect(result.status).toBe('done');
     expect(result.output).toBe('Done!');
+    if (result.status === 'done') {
+      expect(result.evidence).toEqual([]);
+    }
   });
 
   it('returns failed on runtime error', async () => {
@@ -1630,7 +1646,7 @@ describe('executePhase', () => {
 
   it('does not mutate phases object', async () => {
     const phasesCopy = JSON.parse(JSON.stringify(basePhases));
-    await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime('ok')));
+    await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(withPhaseEvidence('ok'))));
     expect(basePhases).toEqual(phasesCopy);
   });
 
@@ -1641,7 +1657,7 @@ describe('executePhase', () => {
       capabilities: new Set(['streaming_text']),
       async *invoke(params) {
         capturedPrompt = params.prompt;
-        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'text_final', text: withPhaseEvidence('ok') };
         yield { type: 'done' };
       },
     };
@@ -1658,7 +1674,7 @@ describe('executePhase', () => {
       capabilities: new Set(['streaming_text']),
       async *invoke(params) {
         capturedSignal = params.signal;
-        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'text_final', text: withPhaseEvidence('ok') };
         yield { type: 'done' };
       },
     };
@@ -1683,7 +1699,7 @@ describe('executePhase', () => {
       capabilities: new Set(['streaming_text']),
       async *invoke(params) {
         capturedSupervisor = params.supervisor;
-        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'text_final', text: withPhaseEvidence('ok') };
         yield { type: 'done' };
       },
     };
@@ -1726,7 +1742,7 @@ describe('executePhase', () => {
       capabilities: new Set(['streaming_text']),
       async *invoke(params) {
         capturedAddDirs = params.addDirs;
-        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'text_final', text: withPhaseEvidence('ok') };
         yield { type: 'done' };
       },
     };
@@ -1765,7 +1781,7 @@ describe('executePhase', () => {
       capabilities: new Set(['streaming_text']),
       async *invoke(params) {
         capturedAddDirs = params.addDirs;
-        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'text_final', text: withPhaseEvidence('ok') };
         yield { type: 'done' };
       },
     };
@@ -1782,7 +1798,7 @@ describe('executePhase', () => {
   it('forwards events to opts.onEvent via PhaseExecutionOpts', async () => {
     const events: EngineEvent[] = [
       { type: 'text_delta', text: 'working...' },
-      { type: 'text_final', text: 'Done!' },
+      { type: 'text_final', text: withPhaseEvidence('Done!') },
       { type: 'done' },
     ];
     const runtime = makeRuntime(events);
@@ -1800,7 +1816,7 @@ describe('executePhase', () => {
     const events: EngineEvent[] = [
       { type: 'text_delta', text: 'a' },
       { type: 'text_delta', text: 'b' },
-      { type: 'text_final', text: 'ab' },
+      { type: 'text_final', text: withPhaseEvidence('ab') },
       { type: 'done' },
     ];
     const runtime = makeRuntime(events);
@@ -1816,7 +1832,7 @@ describe('executePhase', () => {
   });
 
   it('throwing onEvent does not abort phase execution', async () => {
-    const runtime = makeSuccessRuntime('Done!');
+    const runtime = makeSuccessRuntime(withPhaseEvidence('Done!'));
     const opts = makeOpts(runtime);
     opts.onEvent = () => { throw new Error('callback error'); };
 
@@ -1843,10 +1859,40 @@ describe('executePhase', () => {
   });
 
   it('strips non-terminal [progress] lines from phase output', async () => {
-    const rawOutput = '[progress] still working\nFinal answer\n[progress] cleaning up';
+    const rawOutput = withPhaseEvidence('[progress] still working\nFinal answer\n[progress] cleaning up');
     const result = await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(rawOutput)));
     expect(result.status).toBe('done');
-    expect(result.output).toBe('Final answer\n');
+    expect(result.output).toBe('Final answer');
+  });
+
+  it('extracts structured evidence from implement phase output', async () => {
+    const output = withPhaseEvidence('Implemented foo.', [
+      { kind: 'build', status: 'pass', command: 'pnpm build', summary: 'dist built cleanly' },
+      { kind: 'test', status: 'fail', command: 'pnpm test', reason: '2 tests failed' },
+    ]);
+
+    const result = await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(output)));
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toBe('Implemented foo.');
+      expect(result.evidence).toEqual([
+        { kind: 'build', status: 'pass', command: 'pnpm build', summary: 'dist built cleanly' },
+        { kind: 'test', status: 'fail', command: 'pnpm test', reason: '2 tests failed' },
+      ]);
+    }
+  });
+
+  it('fails implement phases when the evidence trailer is malformed', async () => {
+    const result = await executePhase(
+      phase,
+      SAMPLE_PLAN,
+      basePhases,
+      makeOpts(makeSuccessRuntime('Implemented foo.\n**Phase Evidence:** not-json')),
+    );
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error).toContain('Invalid phase evidence trailer');
+    }
   });
 });
 
@@ -1911,12 +1957,42 @@ describe('runNextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Phase done!')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('Phase done!'))), onProgress);
     expect(result.result).toBe('done');
 
     // Read back phases file to verify status was updated
     const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
     expect(updated.phases[0]!.status).toBe('done');
+    expect(updated.phases[0]!.evidence).toEqual([]);
+  });
+
+  it('reruns replace stale evidence with the latest execution evidence', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    phases.phases[0]!.status = 'failed';
+    phases.phases[0]!.error = 'previous failure';
+    phases.phases[0]!.modifiedFiles = ['README.md'];
+    phases.phases[0]!.failureHashes = { 'README.md': '2cf24dba5fb0a30e' };
+    phases.phases[0]!.evidence = [{ kind: 'build', status: 'pass', summary: 'stale result' }];
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(
+      phasesPath,
+      planPath,
+      makeOpts(makeSuccessRuntime(withPhaseEvidence('Phase rerun done!', [
+        { kind: 'build', status: 'pass', command: 'pnpm build', summary: 'fresh result' },
+      ]))),
+      onProgress,
+    );
+    expect(result.result).toBe('done');
+
+    const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
+    expect(updated.phases[0]!.evidence).toEqual([
+      { kind: 'build', status: 'pass', command: 'pnpm build', summary: 'fresh result' },
+    ]);
   });
 
   it('target phase run succeeds when dependencies are terminal', async () => {
@@ -1930,7 +2006,7 @@ describe('runNextPhase', () => {
     const result = await runNextPhase(
       phasesPath,
       planPath,
-      makeOpts(makeSuccessRuntime('target done')),
+      makeOpts(makeSuccessRuntime(withPhaseEvidence('target done'))),
       onProgress,
       phases.phases[1]!.id,
     );
@@ -1951,7 +2027,7 @@ describe('runNextPhase', () => {
     const result = await runNextPhase(
       phasesPath,
       planPath,
-      makeOpts(makeSuccessRuntime('target done')),
+      makeOpts(makeSuccessRuntime(withPhaseEvidence('target done'))),
       onProgress,
       phases.phases[1]!.id,
     );
@@ -1971,7 +2047,7 @@ describe('runNextPhase', () => {
     writePhasesFile(phasesPath, phases);
 
     const events: PlanRunEvent[] = [];
-    const opts = makeOpts(makeSuccessRuntime('Phase done!'));
+    const opts = makeOpts(makeSuccessRuntime(withPhaseEvidence('Phase done!')));
     opts.onPlanEvent = (evt) => {
       events.push(evt);
     };
@@ -2012,7 +2088,7 @@ describe('runNextPhase', () => {
     // Modify plan after generating phases
     await fs.writeFile(planPath, SAMPLE_PLAN + '\nModified!');
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('ok'))), onProgress);
     expect(result.result).toBe('stale');
   });
 
@@ -2026,7 +2102,7 @@ describe('runNextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('ok'))), onProgress);
     expect(result.result).toBe('nothing_to_run');
   });
 
@@ -2037,7 +2113,7 @@ describe('runNextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     fsSync.writeFileSync(phasesPath, 'garbage content', 'utf-8');
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('ok'))), onProgress);
     expect(result.result).toBe('corrupt');
   });
 
@@ -2072,7 +2148,7 @@ describe('runNextPhase', () => {
     writePhasesFile(phasesPath, phases);
 
     const phaseEvents: PlanRunEvent[] = [];
-    const opts = makeOpts(makeSuccessRuntime('ok'));
+    const opts = makeOpts(makeSuccessRuntime(withPhaseEvidence('ok')));
     opts.onPlanEvent = (evt) => {
       phaseEvents.push(evt);
     };
@@ -2100,7 +2176,7 @@ describe('runNextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('ok'))), onProgress);
     expect(result.result).toBe('retry_blocked');
     if (result.result === 'retry_blocked') {
       expect(result.message).toContain('failureHashes');
@@ -2128,7 +2204,7 @@ describe('runNextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('ok'))), onProgress);
     expect(result.result).toBe('done');
     expect(fsSync.existsSync(artifactAbsPath)).toBe(false);
   });
@@ -2143,7 +2219,7 @@ describe('runNextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('ok'))), onProgress);
     expect(result.result).toBe('done');
   });
 
@@ -2156,7 +2232,7 @@ describe('runNextPhase', () => {
     writePhasesFile(phasesPath, phases);
 
     // Runtime that doesn't create any files
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Done!')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('Done!'))), onProgress);
     expect(result.result).toBe('done');
 
     // No git commit should be created for this phase
@@ -2280,7 +2356,7 @@ describe('phase progress messages and nextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Done!')), onProgress);
+    await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('Done!'))), onProgress);
 
     const firstPhaseId = phases.phases[0]!.id;
     const firstPhaseTitle = phases.phases[0]!.title;
@@ -2313,7 +2389,7 @@ describe('phase progress messages and nextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Done!')), onProgress);
+    await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('Done!'))), onProgress);
 
     // "Executing" sub-step includes phase ID prefix
     expect(progressMsgs.some(m => m === '**phase-1**: Executing implement phase...')).toBe(true);
@@ -2331,7 +2407,7 @@ describe('phase progress messages and nextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Done!')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('Done!'))), onProgress);
     expect(result.result).toBe('done');
     if (result.result === 'done') {
       expect(result.nextPhase).toBeDefined();
@@ -2353,7 +2429,7 @@ describe('phase progress messages and nextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('Final phase done!')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('Final phase done!'))), onProgress);
     expect(result.result).toBe('done');
     if (result.result === 'done') {
       expect(result.nextPhase).toBeUndefined();
@@ -2415,6 +2491,14 @@ describe('updatePhaseStatus', () => {
     const updated = updatePhaseStatus(phases, phases.phases[0]!.id, 'failed', undefined, 'error msg');
     expect(updated.updatedAt).toBeTruthy();
     expect(updated.phases[0]!.error).toBe('error msg');
+  });
+
+  it('clears stale evidence when explicitly requested', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'test.md');
+    phases.phases[0]!.evidence = [{ kind: 'build', status: 'pass', summary: 'old result' }];
+
+    const updated = updatePhaseStatus(phases, phases.phases[0]!.id, 'in-progress', undefined, undefined, null);
+    expect(updated.phases[0]!.evidence).toBeUndefined();
   });
 });
 
@@ -2486,6 +2570,9 @@ describe('executePhase audit verdict', () => {
     if (result.status === 'audit_failed') {
       expect(result.verdict.maxSeverity).toBe('blocking');
       expect(result.verdict.shouldLoop).toBe(true);
+      expect(result.evidence).toEqual([
+        { kind: 'audit', status: 'fail', reason: 'Audit found blocking severity deviations' },
+      ]);
     }
   });
 
@@ -2493,6 +2580,11 @@ describe('executePhase audit verdict', () => {
     const auditOutput = '**Concern 1: Minor nitpick**\n**Severity: minor**\n\n**Verdict:** Ready to approve.';
     const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
     expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.evidence).toEqual([
+        { kind: 'audit', status: 'pass', summary: 'Audit passed with minor non-blocking concerns' },
+      ]);
+    }
   });
 
   it('audit phase with only medium severity returns done (auto-approves)', async () => {
@@ -2508,7 +2600,7 @@ describe('executePhase audit verdict', () => {
   });
 
   it('implement phase ignores severity markers in output', async () => {
-    const implOutput = '**Severity: HIGH**\nDone implementing.';
+    const implOutput = withPhaseEvidence('**Severity: HIGH**\nDone implementing.');
     const result = await executePhase(implPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(implOutput)));
     expect(result.status).toBe('done');
   });
@@ -2666,7 +2758,7 @@ describe('runNextPhase audit verdict', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime('ok')), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('ok'))), onProgress);
     expect(result.result).toBe('retry_blocked');
   });
 });
