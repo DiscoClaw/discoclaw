@@ -927,9 +927,9 @@ describe('parseConfig', () => {
   });
 
   // --- Stream stall detection ---
-  it('defaults streamStallTimeoutMs to 600000', () => {
+  it('defaults streamStallTimeoutMs to 1800000', () => {
     const { config } = parseConfig(env());
-    expect(config.streamStallTimeoutMs).toBe(600000);
+    expect(config.streamStallTimeoutMs).toBe(1800000);
   });
 
   it('defaults streamStallWarningMs to 300000', () => {
@@ -958,9 +958,9 @@ describe('parseConfig', () => {
   });
 
   // --- Progress stall detection ---
-  it('defaults progressStallTimeoutMs to 300000', () => {
+  it('defaults progressStallTimeoutMs to 1800000', () => {
     const { config } = parseConfig(env());
-    expect(config.progressStallTimeoutMs).toBe(300000);
+    expect(config.progressStallTimeoutMs).toBe(1800000);
   });
 
   it('parses custom progressStallTimeoutMs', () => {
