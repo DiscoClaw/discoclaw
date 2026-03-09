@@ -15,7 +15,7 @@ export type ModelsCommand =
 // Parser
 // ---------------------------------------------------------------------------
 
-const VALID_ROLES = new Set<string>(['chat', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec', 'voice']);
+const VALID_ROLES = new Set<string>(['chat', 'plan-run', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec', 'voice']);
 
 export function parseModelsCommand(content: string): ModelsCommand | null {
   const tokens = String(content ?? '').trim().split(/\s+/).filter(Boolean);
@@ -74,7 +74,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models reset <role>` — revert a specific role to its startup default',
       '- `!models help` — this message',
       '',
-      '**Roles:** `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`',
+      '**Roles:** `chat`, `plan-run`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`',
       '',
       '**Runtime switching (chat and voice roles):**',
       'Setting the `chat` or `voice` role to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) switches the active runtime adapter so invocations route through that provider.',
@@ -83,6 +83,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models set chat sonnet`',
       '- `!models set chat openrouter` — switch chat to the OpenRouter runtime',
       '- `!models set chat gemini` — switch chat to the Gemini runtime',
+      '- `!models set plan-run capable`',
       '- `!models set fast haiku`',
       '- `!models set forge-drafter opus`',
       '- `!models set cron-exec haiku` — run crons on a cheaper model',

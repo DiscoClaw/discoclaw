@@ -81,7 +81,8 @@ export type ConfigMutableParams = {
 // ---------------------------------------------------------------------------
 
 const ROLE_DESCRIPTIONS: Record<ModelRole, string> = {
-  chat: 'Discord messages, plan runs, deferred runs, forge fallback',
+  chat: 'Discord messages, deferred runs, forge fallback',
+  'plan-run': 'Plan phase execution',
   fast: 'All small/fast tasks (summary, cron, cron auto-tag, tasks auto-tag)',
   'forge-drafter': 'Forge plan drafting/revision',
   'forge-auditor': 'Forge plan auditing',
@@ -143,21 +144,21 @@ export function executeConfigAction(
                 bp.cronCtx.executorCtx.model = runtimeModel;
               }
             }
-            if (bp.planCtx) {
-              bp.planCtx.runtime = newRuntime;
-              bp.planCtx.model = runtimeModel;
-            }
+            if (bp.planCtx) bp.planCtx.runtime = newRuntime;
             if (bp.deferOpts) bp.deferOpts.runtime = newRuntime;
             changes.push(`runtime → ${normalized}`);
             if (runtimeModel) changes.push(`chat → ${runtimeModel} (adapter default)`);
           } else {
             bp.runtimeModel = model;
-            if (bp.planCtx) bp.planCtx.model = model;
             if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = model;
             changes.push(`chat → ${model}`);
           }
           break;
         }
+        case 'plan-run':
+          if (bp.planCtx) bp.planCtx.model = model;
+          changes.push(`plan-run → ${model}`);
+          break;
         case 'fast':
           bp.summaryModel = model;
           changes.push(`summary → ${model}`);
@@ -329,9 +330,13 @@ export function executeConfigAction(
           case 'chat':
             if (defaultModel === undefined) break;
             bp.runtimeModel = defaultModel;
-            if (bp.planCtx) bp.planCtx.model = defaultModel;
             if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = defaultModel;
             resetChanges.push(`chat → ${defaultModel}`);
+            break;
+          case 'plan-run':
+            if (defaultModel === undefined) break;
+            if (bp.planCtx) bp.planCtx.model = defaultModel;
+            resetChanges.push(`plan-run → ${defaultModel}`);
             break;
           case 'fast':
             if (defaultModel === undefined) break;
@@ -424,6 +429,7 @@ export function executeConfigAction(
       const rows: [string, string, string, string][] = [
         ['runtime', runtimeName, `Active runtime adapter (${rid})`, ovr('chat')],
         ['chat', bp.runtimeModel, ROLE_DESCRIPTIONS.chat, ovr('chat')],
+        ['plan-run', bp.planCtx?.model ?? configCtx.envDefaults?.['plan-run'] ?? bp.runtimeModel, ROLE_DESCRIPTIONS['plan-run'], ovr('plan-run')],
         ['summary', bp.summaryModel, ROLE_DESCRIPTIONS.summary, ovr('summary') || ovr('fast')],
         ['forge-drafter', bp.forgeDrafterModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-drafter'], ovr('forge-drafter')],
         ['forge-auditor', bp.forgeAuditorModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-auditor'], ovr('forge-auditor')],
@@ -511,7 +517,8 @@ export function configActionsPromptSection(): string {
 **Roles:**
 | Role | What it controls |
 |------|-----------------|
-| \`chat\` | Discord messages, plan runs, deferred runs, forge fallback |
+| \`chat\` | Discord messages, deferred runs, forge fallback |
+| \`plan-run\` | Plan phase execution |
 | \`fast\` | All small/fast tasks (summary, cron auto-tag, tasks auto-tag) |
 | \`forge-drafter\` | Forge plan drafting/revision |
 | \`forge-auditor\` | Forge plan auditing |

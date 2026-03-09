@@ -25,6 +25,7 @@ export type DiscoclawConfig = {
   fastRuntime?: string;
 
   runtimeModel: string;
+  planRunModel: string;
   runtimeTools: string[];
   runtimeTimeoutMs: number;
 
@@ -670,6 +671,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const fastModel = parseTrimmedString(env, 'DISCOCLAW_FAST_MODEL') ?? 'fast';
   const runtimeModel = parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'capable';
+  const planRunModel = parseTrimmedString(env, 'DISCOCLAW_PLAN_RUN_MODEL') ?? runtimeModel;
   const voiceModel = voiceModelRaw ?? runtimeModel;
 
   const tasksCwdOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_CWD');
@@ -696,6 +698,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       fastRuntime,
 
       runtimeModel,
+      planRunModel,
       runtimeTools: parseRuntimeTools(env, warnings),
       runtimeTimeoutMs: parsePositiveNumber(env, 'RUNTIME_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       runtimeFallbackModel: parseTrimmedString(env, 'RUNTIME_FALLBACK_MODEL'),

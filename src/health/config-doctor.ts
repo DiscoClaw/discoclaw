@@ -96,6 +96,7 @@ const DEPRECATED_ENV_VARS: Record<
 
 const ROLE_ENV_KEYS: Partial<Record<ModelRole, string>> = {
   chat: 'RUNTIME_MODEL',
+  'plan-run': 'DISCOCLAW_PLAN_RUN_MODEL',
   fast: 'DISCOCLAW_FAST_MODEL',
   summary: 'DISCOCLAW_SUMMARY_MODEL',
   cron: 'DISCOCLAW_CRON_AUTO_TAG_MODEL',
@@ -215,6 +216,7 @@ async function readRuntimeOverridesFileState(filePath: string): Promise<RuntimeO
 
 function buildEnvDefaults(env: EnvMap): ModelConfig {
   const runtimeModel = trimValue(env.RUNTIME_MODEL) ?? 'capable';
+  const planRunModel = trimValue(env.DISCOCLAW_PLAN_RUN_MODEL) ?? runtimeModel;
   const fastModel = trimValue(env.DISCOCLAW_FAST_MODEL) ?? 'fast';
   const summaryModel = trimValue(env.DISCOCLAW_SUMMARY_MODEL) ?? fastModel;
   const cronModel = trimValue(env.DISCOCLAW_CRON_AUTO_TAG_MODEL) ?? fastModel;
@@ -223,6 +225,7 @@ function buildEnvDefaults(env: EnvMap): ModelConfig {
   const envDefaults: ModelConfig = {
     ...MODEL_DEFAULTS,
     chat: runtimeModel,
+    'plan-run': planRunModel,
     fast: fastModel,
     summary: summaryModel,
     cron: cronModel,

@@ -7,6 +7,7 @@ import path from 'node:path';
 
 export type ModelRole =
   | 'chat'
+  | 'plan-run'
   | 'fast'
   | 'forge-drafter'
   | 'forge-auditor'
@@ -30,6 +31,7 @@ export type LoadResult =
 
 export const DEFAULTS: Readonly<ModelConfig> = {
   chat: 'capable',
+  'plan-run': 'capable',
   fast: 'fast',
   summary: 'fast',
   'forge-drafter': 'capable',

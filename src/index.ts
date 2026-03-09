@@ -160,6 +160,7 @@ const overridesPath = resolveOverridesPath(dataDir, projectRoot);
 const envModelDefaults: ModelConfig = {
   ...MODEL_DEFAULTS,
   chat: cfg.runtimeModel,
+  'plan-run': cfg.planRunModel,
   fast: fastModelDefault,
   summary: cfg.summaryModel,
   cron: cfg.cronAutoTagModel,
@@ -1076,6 +1077,7 @@ const clearOverride = (role?: ModelRole): void => {
   const envDefaults = { ...envModelDefaults };
   const allRoles: ModelRole[] = [
     'chat',
+    'plan-run',
     'fast',
     'forge-drafter',
     'forge-auditor',
@@ -1562,13 +1564,14 @@ if (taskCtx) {
   }
 
   if (planCommandsEnabled && discordActionsPlan) {
+    const planRunModel = currentModelConfig['plan-run'] ?? envModelDefaults['plan-run'] ?? cfg.planRunModel;
     botParams.planCtx = {
       plansDir,
       workspaceCwd,
       taskStore: effectiveTaskStore,
       log,
       runtime: limitedRuntime,
-      model: runtimeModel,
+      model: planRunModel,
       phaseTimeoutMs: planPhaseTimeoutMs,
       maxAuditFixAttempts: planPhaseMaxAuditFixAttempts,
       onProgress: async (msg) => {
