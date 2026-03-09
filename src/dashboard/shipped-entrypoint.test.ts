@@ -166,12 +166,14 @@ afterEach(async () => {
 describe('dashboard/server.js shipped entrypoint', () => {
   it('loads the built dashboard server and enforces the current POST origin protections', async () => {
     const { startDashboardServer } = await loadShippedEntrypoint();
+    const restartExecutor = vi.fn();
     handle = await startDashboardServer({
       port: 0,
       host: '127.0.0.1',
       cwd: '/repo',
       env: {},
       deps: makeDeps(),
+      restartExecutor,
     });
     const port = (handle.server.address() as { port: number }).port;
 
@@ -193,6 +195,8 @@ describe('dashboard/server.js shipped entrypoint', () => {
         Origin: `http://127.0.0.1:${port}`,
       },
     });
-    expect(allowed.status).toBe(200);
+    expect(allowed.status).toBe(202);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(restartExecutor).toHaveBeenCalledWith('systemctl', ['--user', 'restart', 'discoclaw-beta']);
   });
 });

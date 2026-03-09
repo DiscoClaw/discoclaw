@@ -697,12 +697,14 @@ export function renderDashboardPage(): string {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ confirm: true }),
         });
-        setOutput(response.result.stdout || response.result.stderr || '(no output)');
-        renderSnapshot(response.snapshot);
         setStatus(serviceStatus, response.message, 'ok');
         setStatus(heroStatus, response.message, 'ok');
+        setOutput(response.message);
       } catch (error) {
-        setStatus(serviceStatus, String(error), 'error');
+        const message = 'Restart requested. If the dashboard is embedded in the service, a connection drop is expected. Reload in a few seconds.';
+        setStatus(serviceStatus, message, 'ok');
+        setStatus(heroStatus, message, 'ok');
+        setOutput(message);
       }
     });
 

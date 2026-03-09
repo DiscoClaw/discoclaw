@@ -26,6 +26,10 @@ type Response = {
   headers: http.IncomingHttpHeaders;
 };
 
+type StartServerOptions = {
+  restartExecutor?: (cmd: string, args: string[]) => void;
+};
+
 let handle: DashboardServer | null = null;
 
 function makeDoctorContext(overrides: Partial<DoctorContext> = {}): DoctorContext {
@@ -173,7 +177,10 @@ function parseJson<T>(text: string): T {
   return JSON.parse(text) as T;
 }
 
-async function startServer(deps: Partial<DashboardDeps> = {}): Promise<{ port: number; deps: DashboardDeps }> {
+async function startServer(
+  deps: Partial<DashboardDeps> = {},
+  options: StartServerOptions = {},
+): Promise<{ port: number; deps: DashboardDeps }> {
   const fullDeps = makeDeps(deps);
   handle = await startDashboardServer({
     port: 0,
@@ -181,6 +188,7 @@ async function startServer(deps: Partial<DashboardDeps> = {}): Promise<{ port: n
     cwd: '/repo',
     env: {},
     deps: fullDeps,
+    restartExecutor: options.restartExecutor,
     log: mockLog(),
   });
   const address = handle.server.address() as { port: number };
@@ -335,22 +343,16 @@ describe('startDashboardServer', () => {
     expect(runCommand).not.toHaveBeenCalled();
   });
 
-  it('restarts the service and returns a refreshed snapshot from /api/restart', async () => {
-    const runCommand = vi.fn(async (_cmd: string, args: string[]) => {
-      if (args[1] === 'restart') {
-        return {
-          stdout: 'restart queued\n',
-          stderr: '',
-          exitCode: 0,
-        };
-      }
+  it('queues a deferred restart and returns a 202 from /api/restart', async () => {
+    const restartExecutor = vi.fn();
+    const runCommand = vi.fn(async () => {
       return {
         stdout: '   Active: active (running) since today\n',
         stderr: '',
         exitCode: 0,
       };
     });
-    const { port } = await startServer({ runCommand });
+    const { port } = await startServer({ runCommand }, { restartExecutor });
 
     const response = await makeRequest(port, {
       path: '/api/restart',
@@ -362,19 +364,14 @@ describe('startDashboardServer', () => {
     });
     const body = parseJson<DashboardRestartApiResponse>(response.text);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(body.ok).toBe(true);
-    expect(body.message).toBe('Restart/start requested for discoclaw-beta.');
+    expect(body.message).toBe('Restarting discoclaw-beta. This dashboard may disconnect; reload in a few seconds.');
     expect(body.serviceName).toBe('discoclaw-beta');
-    expect(body.result).toEqual({
-      stdout: 'restart queued\n',
-      stderr: '',
-      exitCode: 0,
-    });
-    expect(body.snapshot.serviceName).toBe('discoclaw-beta');
-    expect(body.snapshot.serviceSummary).toBe('active (running) since today');
-    expect(runCommand).toHaveBeenCalledWith('systemctl', ['--user', 'restart', 'discoclaw-beta']);
-    expect(runCommand.mock.calls.filter(([, args]) => args[1] === 'status')).toHaveLength(2);
+    expect(body.expectedDisconnect).toBe(true);
+    expect(runCommand).toHaveBeenCalledWith('systemctl', ['--user', 'status', 'discoclaw-beta']);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(restartExecutor).toHaveBeenCalledWith('systemctl', ['--user', 'restart', 'discoclaw-beta']);
   });
 
   it('returns doctor report JSON from /api/doctor', async () => {

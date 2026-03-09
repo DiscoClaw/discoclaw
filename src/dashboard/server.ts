@@ -23,10 +23,10 @@ import type { RuntimeOverrides } from '../runtime-overrides.js';
 import { saveOverrides } from '../runtime-overrides.js';
 import type { CommandResult, ServiceControlDeps } from '../service-control.js';
 import {
+  getPlatformCommands,
   getServiceLogs,
   getServiceStatus,
   normalizeServiceName,
-  restartService,
   summarizeServiceStatus,
 } from '../service-control.js';
 
@@ -55,6 +55,7 @@ export type DashboardServerOptions = {
   env?: NodeJS.ProcessEnv;
   log?: LoggerLike;
   deps?: Partial<DashboardDeps>;
+  restartExecutor?: (cmd: string, args: string[]) => void;
 };
 
 export type DashboardServer = {
@@ -97,8 +98,7 @@ export type DashboardRestartApiResponse = {
   ok: true;
   message: string;
   serviceName: string;
-  result: CommandResult;
-  snapshot: DashboardSnapshot;
+  expectedDisconnect: boolean;
 };
 
 export type DashboardModelApiResponse = {
@@ -281,18 +281,37 @@ async function buildDoctorFixResponse(
   };
 }
 
+type DeferredRestart = {
+  response: DashboardRestartApiResponse;
+  deferred: () => void;
+};
+
 async function buildRestartResponse(
   inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
   deps: DashboardDeps,
-): Promise<DashboardRestartApiResponse> {
+  restartExecutor: (cmd: string, args: string[]) => void,
+): Promise<DeferredRestart> {
   const serviceName = await loadServiceName(inspectOpts, deps);
-  const result = await restartService(serviceName, deps as ServiceControlDeps);
+  const commands = getPlatformCommands(serviceName, deps.platform, deps.homeDir, deps.getUid());
+  if (!commands) {
+    throw new Error(`Service actions are not supported on ${deps.platform}.`);
+  }
+  const before = await deps.runCommand(commands.checkActiveCmd[0], commands.checkActiveCmd[1]);
+  const wasActive = commands.isActive(before);
+  const [cmd, args] = commands.restartCmd(wasActive);
+
   return {
-    ok: true,
-    message: `Restart/start requested for ${serviceName}.`,
-    serviceName,
-    result,
-    snapshot: await collectDashboardSnapshot(inspectOpts, deps),
+    response: {
+      ok: true,
+      message: wasActive
+        ? `Restarting ${serviceName}. This dashboard may disconnect; reload in a few seconds.`
+        : `Starting ${serviceName}. Reload in a few seconds if the service was down.`,
+      serviceName,
+      expectedDisconnect: wasActive,
+    },
+    deferred: () => {
+      restartExecutor(cmd, args);
+    },
   };
 }
 
@@ -403,6 +422,13 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
   const port = opts.port ?? DEFAULT_DASHBOARD_PORT;
   const log = opts.log;
   const html = renderDashboardPage();
+  const restartExecutor = opts.restartExecutor ?? ((cmd: string, args: string[]) => {
+    execFile(cmd, args, (err) => {
+      if (err) {
+        log?.error({ err, cmd, args }, 'dashboard:restart failed');
+      }
+    });
+  });
 
   const server = http.createServer(async (req, res) => {
     const method = req.method ?? 'GET';
@@ -443,7 +469,11 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 400, { ok: false, message: 'Restart requires {"confirm": true}.' });
           return;
         }
-        respondJson(res, 200, await buildRestartResponse(inspectOpts, deps));
+        const restart = await buildRestartResponse(inspectOpts, deps, restartExecutor);
+        res.once('finish', () => {
+          setTimeout(restart.deferred, 25);
+        });
+        respondJson(res, 202, restart.response);
         return;
       }
 
