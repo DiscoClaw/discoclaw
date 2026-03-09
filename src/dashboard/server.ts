@@ -44,6 +44,7 @@ const DASHBOARD_MODEL_ROLES: readonly ModelRole[] = [
 
 const MAX_BODY_BYTES = 64 * 1024;
 const CROSS_ORIGIN_MUTATION_ERROR = 'Cross-origin mutation requests are not allowed.';
+const DNS_REBIND_ERROR = 'Dashboard requests must use a loopback Host header.';
 
 type KnownRuntimesType = typeof KNOWN_RUNTIMES;
 
@@ -160,8 +161,23 @@ function normalizeDashboardHost(host: string | undefined): string {
 
 function normalizeOriginHost(hostname: string): string {
   const value = hostname.trim().toLowerCase();
-  if (value === 'localhost' || value === '::1') return DASHBOARD_HOST;
+  if (value === 'localhost' || value === '::1' || value === '[::1]') return DASHBOARD_HOST;
   return value;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const value = hostname.trim().toLowerCase();
+  return value === DASHBOARD_HOST || value === 'localhost' || value === '::1' || value === '[::1]';
+}
+
+function parseHostHeaderHostname(hostHeader: string | undefined): string | null {
+  if (typeof hostHeader !== 'string' || hostHeader.trim() === '') return null;
+
+  try {
+    return new URL(`http://${hostHeader.trim()}`).hostname;
+  } catch {
+    return null;
+  }
 }
 
 function originPort(url: URL): string {
@@ -178,7 +194,8 @@ function hasSafeDashboardOrigin(req: http.IncomingMessage): boolean {
 
   try {
     const originUrl = new URL(origin);
-    const hostUrl = new URL(`http://${hostHeader}`);
+    const hostUrl = new URL(`http://${hostHeader.trim()}`);
+    if (!isLoopbackHostname(hostUrl.hostname)) return false;
     return (
       normalizeOriginHost(originUrl.hostname) === normalizeOriginHost(hostUrl.hostname)
       && originPort(originUrl) === originPort(hostUrl)
@@ -433,6 +450,11 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
 
   const server = http.createServer(async (req, res) => {
     const method = req.method ?? 'GET';
+    const requestHostname = parseHostHeaderHostname(req.headers.host);
+    if (!requestHostname || !isLoopbackHostname(requestHostname)) {
+      respondJson(res, 403, { ok: false, message: DNS_REBIND_ERROR });
+      return;
+    }
     const pathname = new URL(req.url ?? '/', `http://${DASHBOARD_HOST}`).pathname;
 
     try {

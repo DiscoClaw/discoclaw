@@ -1,4 +1,5 @@
 import http from 'node:http';
+import net from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DashboardDeps, DashboardSnapshot } from '../cli/dashboard.js';
 import type { DoctorContext, DoctorReport, FixResult } from '../health/config-doctor.js';
@@ -173,6 +174,48 @@ function makeRequest(port: number, opts: RequestOptions = {}): Promise<Response>
   });
 }
 
+function makeRawRequest(port: number, rawRequest: string): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+    const chunks: Buffer[] = [];
+
+    socket.on('connect', () => {
+      socket.write(rawRequest);
+    });
+    socket.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    socket.on('end', () => {
+      const text = Buffer.concat(chunks).toString('utf8');
+      const separator = '\r\n\r\n';
+      const separatorIndex = text.indexOf(separator);
+      const head = separatorIndex >= 0 ? text.slice(0, separatorIndex) : text;
+      const body = separatorIndex >= 0 ? text.slice(separatorIndex + separator.length) : '';
+      const lines = head.split('\r\n');
+      const statusMatch = lines[0]?.match(/^HTTP\/1\.[01] (\d{3})/);
+
+      if (!statusMatch) {
+        reject(new Error(`Could not parse raw HTTP response: ${lines[0] ?? '<empty>'}`));
+        return;
+      }
+
+      const headers: http.IncomingHttpHeaders = {};
+      for (const line of lines.slice(1)) {
+        const separatorOffset = line.indexOf(':');
+        if (separatorOffset <= 0) continue;
+        headers[line.slice(0, separatorOffset).toLowerCase()] = line.slice(separatorOffset + 1).trim();
+      }
+
+      resolve({
+        status: Number(statusMatch[1]),
+        text: body,
+        headers,
+      });
+    });
+    socket.on('error', reject);
+  });
+}
+
 function parseJson<T>(text: string): T {
   return JSON.parse(text) as T;
 }
@@ -243,6 +286,52 @@ describe('startDashboardServer', () => {
       source: 'override',
       overrideValue: 'opus',
     });
+  });
+
+  it('rejects read requests with a non-loopback Host header', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/snapshot',
+      headers: {
+        Host: `evil.example:${port}`,
+      },
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({
+      ok: false,
+      message: 'Dashboard requests must use a loopback Host header.',
+    });
+  });
+
+  it('fails closed when the Host header is missing', async () => {
+    const { port } = await startServer();
+    const response = await makeRawRequest(
+      port,
+      'GET /api/snapshot HTTP/1.0\r\nConnection: close\r\n\r\n',
+    );
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({
+      ok: false,
+      message: 'Dashboard requests must use a loopback Host header.',
+    });
+  });
+
+  it('allows loopback reads with an IPv6 Host header', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/snapshot',
+      headers: {
+        Host: `[::1]:${port}`,
+      },
+    });
+    const body = parseJson<DashboardSnapshotApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
   });
 
   it('returns service status JSON from /api/status', async () => {
@@ -343,6 +432,33 @@ describe('startDashboardServer', () => {
     expect(runCommand).not.toHaveBeenCalled();
   });
 
+  it('rejects rebinding-style mutation requests even when Origin matches Host', async () => {
+    const runCommand = vi.fn(async () => ({
+      stdout: 'unexpected\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const { port } = await startServer({ runCommand });
+
+    const response = await makeRequest(port, {
+      path: '/api/restart',
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+      headers: {
+        Host: `evil.example:${port}`,
+        Origin: `http://evil.example:${port}`,
+      },
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({
+      ok: false,
+      message: 'Dashboard requests must use a loopback Host header.',
+    });
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
   it('queues a deferred restart and returns a 202 from /api/restart', async () => {
     const restartExecutor = vi.fn();
     const runCommand = vi.fn(async () => {
@@ -370,6 +486,32 @@ describe('startDashboardServer', () => {
     expect(body.serviceName).toBe('discoclaw-beta');
     expect(body.expectedDisconnect).toBe(true);
     expect(runCommand).toHaveBeenCalledWith('systemctl', ['--user', 'status', 'discoclaw-beta']);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(restartExecutor).toHaveBeenCalledWith('systemctl', ['--user', 'restart', 'discoclaw-beta']);
+  });
+
+  it('accepts mutation requests when Host and Origin use localhost', async () => {
+    const restartExecutor = vi.fn();
+    const runCommand = vi.fn(async () => ({
+      stdout: '   Active: active (running) since today\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const { port } = await startServer({ runCommand }, { restartExecutor });
+
+    const response = await makeRequest(port, {
+      path: '/api/restart',
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+      headers: {
+        Host: `localhost:${port}`,
+        Origin: `http://localhost:${port}`,
+      },
+    });
+    const body = parseJson<DashboardRestartApiResponse>(response.text);
+
+    expect(response.status).toBe(202);
+    expect(body.ok).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(restartExecutor).toHaveBeenCalledWith('systemctl', ['--user', 'restart', 'discoclaw-beta']);
   });
