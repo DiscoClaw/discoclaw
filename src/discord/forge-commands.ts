@@ -221,6 +221,54 @@ export function resolveForgeDescription(
   return task.title;
 }
 
+function stripAuditLogForPrompt(planContent: string): string {
+  const auditLogMarker = '\n---\n\n## Audit Log';
+  const idx = planContent.indexOf(auditLogMarker);
+  return (idx === -1 ? planContent : planContent.slice(0, idx)).trimEnd();
+}
+
+function summarizePriorAuditHistory(planContent: string): string | undefined {
+  const auditLogHeading = '\n## Audit Log';
+  const implNotesHeading = '\n## Implementation Notes';
+  const auditStart = planContent.indexOf(auditLogHeading);
+  if (auditStart === -1) return undefined;
+
+  const bodyStart = auditStart + auditLogHeading.length;
+  const implStart = planContent.indexOf(implNotesHeading, bodyStart);
+  const auditBody = (implStart === -1
+    ? planContent.slice(bodyStart)
+    : planContent.slice(bodyStart, implStart)).trim();
+
+  if (!auditBody || /^_Audit notes go here\._?$/m.test(auditBody)) return undefined;
+
+  const reviewMatches = [...auditBody.matchAll(/^### Review\s+(\d+)\s+—\s+([^\n]+)$/gm)];
+  if (reviewMatches.length === 0) return undefined;
+
+  const summaries: string[] = [];
+  for (let i = 0; i < reviewMatches.length; i++) {
+    const match = reviewMatches[i]!;
+    const sectionStart = match.index ?? 0;
+    const sectionEnd = reviewMatches[i + 1]?.index ?? auditBody.length;
+    const section = auditBody.slice(sectionStart, sectionEnd);
+    const reviewNumber = match[1]!;
+
+    const concerns = [...section.matchAll(
+      /\*\*Concern [^:]*:\s*([\s\S]*?)\*\*[\s\S]*?\*\*Severity:\s*(blocking|medium|minor|suggestion)\*\*/g,
+    )]
+      .map((concernMatch) => {
+        const title = concernMatch[1]!.replace(/\s+/g, ' ').trim();
+        const severity = concernMatch[2]!;
+        return `${title} [${severity}]`;
+      });
+
+    if (concerns.length > 0) {
+      summaries.push(`- Review ${reviewNumber}: ${concerns.join('; ')}`);
+    }
+  }
+
+  return summaries.length > 0 ? summaries.join('\n') : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Prompt builders
 // ---------------------------------------------------------------------------
@@ -278,10 +326,13 @@ export function buildAuditorPrompt(
   projectContext?: string,
   opts?: { hasTools?: boolean },
 ): string {
+  const planForPrompt = stripAuditLogForPrompt(planContent);
+  const priorAuditSummary = roundNumber > 1 ? summarizePriorAuditHistory(planContent) : undefined;
   const sections = [
     PHASE_SAFETY_REMINDER,
     '',
-    'You are an adversarial senior engineer auditing a technical plan. Your job is to find flaws, gaps, and risks.',
+    'You are a rigorous senior engineer auditing a technical plan.',
+    'Find real flaws, gaps, and risks, but optimize for closure: raise only issues that materially change whether the plan can ship.',
     '',
     '## Key Audit Criteria',
     '',
@@ -304,7 +355,7 @@ export function buildAuditorPrompt(
     '## Plan to Audit',
     '',
     '```markdown',
-    planContent,
+    planForPrompt,
     '```',
     '',
     `## This is audit round ${roundNumber}.`,
@@ -321,11 +372,23 @@ export function buildAuditorPrompt(
     instructions.push(
       '### Prior Audit History',
       '',
-      'The plan contains prior audit reviews (### Review N sections) with resolutions inline. These represent concerns that were already raised and addressed in earlier rounds.',
+      'The current plan prompt omits the raw audit log to reduce repetition. Prior rounds are summarized here only so you can avoid re-litigating resolved concerns.',
+      '',
+    );
+    if (priorAuditSummary) {
+      instructions.push(
+        'Summary of prior reviews:',
+        '',
+        priorAuditSummary,
+        '',
+      );
+    }
+    instructions.push(
       '',
       '- **DO NOT re-raise concerns that were adequately resolved.** If a prior resolution is sound, move on.',
-      '- **If a prior resolution is inadequate**, reference the specific prior review (e.g., "Review 1, Concern 3\'s resolution fails because...") and explain why it doesn\'t hold. This counts as a new concern.',
+      '- **If a prior resolution is inadequate**, reference the specific prior review and point to the exact contradiction in the current plan text or a verified code fact.',
       '- **Focus on genuinely new issues** — things not yet examined, edge cases the prior rounds missed, or problems introduced by the revisions themselves.',
+      '- **Do not split one root cause into multiple blocking concerns.** Merge duplicates and report the root issue once.',
       '',
     );
   }
@@ -335,6 +398,10 @@ export function buildAuditorPrompt(
   instructions.push(
     'Review the plan for:',
     ...AUDIT_CRITERIA_LINES,
+    '',
+    '- Prefer the smallest correct unblocker. If narrowing the contract, docs, or tests resolves the issue, recommend that instead of expanding implementation scope.',
+    '- A blocking concern must cite the contradictory plan text or a verified code fact.',
+    '- Report at most 3 blocking concerns in a single round; merge related issues.',
     '',
   );
 
@@ -413,6 +480,7 @@ export function buildRevisionPrompt(
   description: string,
   projectContext?: string,
 ): string {
+  const planForPrompt = stripAuditLogForPrompt(planContent);
   const sections = [
     PHASE_SAFETY_REMINDER,
     '',
@@ -439,7 +507,7 @@ export function buildRevisionPrompt(
     '## Current Plan',
     '',
     '```markdown',
-    planContent,
+    planForPrompt,
     '```',
     '',
     '## Audit Feedback',
@@ -453,8 +521,11 @@ export function buildRevisionPrompt(
     '- Keep the same plan structure and format.',
     '- In `## Changes`, every file entry must use a concrete backtick-wrapped repo-relative path (for example, `src/discord/forge-commands.ts`). Replace placeholder paths like `path/to/file.ts`.',
     '- Preserve resolutions from prior audit rounds that were accepted — do not weaken, revert, or remove them unless the current audit explicitly challenges them.',
+    '- Prefer the smallest change that resolves the blocker. Narrow the contract, docs, or tests before adding new runtime machinery.',
+    '- When an audit exposes a guarantee the runtime cannot actually provide, rewrite the plan to match the real guarantee unless the task explicitly requires the stronger one.',
     '- **Push back on re-raised concerns.** If a concern is a refinement or restatement of something already resolved in a prior round, you may note it as "previously addressed" in the resolution and decline to make further changes. The auditor should raise genuinely new issues, not re-litigate resolved ones from a slightly different angle.',
     '- **Reject perfectionism beyond the plan\'s goal.** If a concern demands a standard higher than what the plan set out to achieve (e.g., provably decodable payloads when the goal is "reject obviously broken ones"), acknowledge the concern but explain why the current approach is sufficient. Not every valid observation requires a code change.',
+    '- Treat the current plan body as the source of truth. Do not copy old audit-log prose back into the revised plan.',
     '- Output the complete revised plan markdown starting with `# Plan:`. Output ONLY the plan markdown — no preamble, no explanation.',
   );
 
