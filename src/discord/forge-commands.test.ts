@@ -732,6 +732,7 @@ describe('buildAuditorPrompt', () => {
   it('includes prior audit history instructions for round > 1', () => {
     const prompt = buildAuditorPrompt('# Plan: Test', 3);
     expect(prompt).toContain('Prior Audit History');
+    expect(prompt).toContain('omits the raw audit log to reduce repetition');
     expect(prompt).toContain('DO NOT re-raise concerns that were adequately resolved');
     expect(prompt).toContain('Focus on genuinely new issues');
   });
@@ -814,6 +815,65 @@ describe('buildAuditorPrompt', () => {
       expect(count).toBe(3);
     }
   });
+
+  it('strips raw audit log content and includes summarized prior concerns', () => {
+    const plan = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-123',
+      '**Task:** ws-123',
+      '**Created:** 2026-03-09',
+      '**Status:** REVIEW',
+      '**Project:** discoclaw',
+      '',
+      '---',
+      '',
+      '## Objective',
+      '',
+      'Do the thing.',
+      '',
+      '## Scope',
+      '',
+      'Keep it tight.',
+      '',
+      '## Changes',
+      '',
+      '#### `src/test.ts`',
+      'Update behavior.',
+      '',
+      '## Risks',
+      '',
+      'Some risk.',
+      '',
+      '## Testing',
+      '',
+      'One test.',
+      '',
+      '---',
+      '',
+      '## Audit Log',
+      '',
+      '### Review 1 — 2026-03-09',
+      '**Status:** COMPLETE',
+      '',
+      '**Concern 1: Old blocker**',
+      'Old audit detail that should not be re-injected verbatim.',
+      '**Severity: blocking**',
+      '',
+      '---',
+      '',
+      '## Implementation Notes',
+      '',
+      '_Filled in during/after implementation._',
+    ].join('\n');
+
+    const prompt = buildAuditorPrompt(plan, 2);
+    expect(prompt).toContain('Summary of prior reviews:');
+    expect(prompt).toContain('Review 1: Old blocker [blocking]');
+    expect(prompt).not.toContain('Old audit detail that should not be re-injected verbatim.');
+    expect(prompt).toContain('Prefer the smallest correct unblocker');
+    expect(prompt).toContain('Report at most 3 blocking concerns');
+  });
 });
 
 describe('buildRevisionPrompt', () => {
@@ -851,6 +911,64 @@ describe('buildRevisionPrompt', () => {
     const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
     expect(prompt).toContain('blocking severity concerns');
     expect(prompt).not.toContain('high and medium severity');
+  });
+
+  it('keeps raw audit log prose out of the revision prompt', () => {
+    const plan = [
+      '# Plan: Test',
+      '',
+      '**ID:** plan-123',
+      '**Task:** ws-123',
+      '**Created:** 2026-03-09',
+      '**Status:** REVIEW',
+      '**Project:** discoclaw',
+      '',
+      '---',
+      '',
+      '## Objective',
+      '',
+      'Do the thing.',
+      '',
+      '## Scope',
+      '',
+      'Keep it tight.',
+      '',
+      '## Changes',
+      '',
+      '#### `src/test.ts`',
+      'Update behavior.',
+      '',
+      '## Risks',
+      '',
+      'Some risk.',
+      '',
+      '## Testing',
+      '',
+      'One test.',
+      '',
+      '---',
+      '',
+      '## Audit Log',
+      '',
+      '### Review 1 — 2026-03-09',
+      '**Status:** COMPLETE',
+      '',
+      '**Concern 1: Old blocker**',
+      'Old audit detail that should not be copied forward.',
+      '**Severity: blocking**',
+      '',
+      '---',
+      '',
+      '## Implementation Notes',
+      '',
+      '_Filled in during/after implementation._',
+    ].join('\n');
+
+    const prompt = buildRevisionPrompt(plan, 'Concern 1: bad', 'Add feature');
+    expect(prompt).not.toContain('Old audit detail that should not be copied forward.');
+    expect(prompt).toContain('Prefer the smallest change that resolves the blocker');
+    expect(prompt).toContain('rewrite the plan to match the real guarantee');
+    expect(prompt).toContain('Do not copy old audit-log prose back into the revised plan');
   });
 });
 
