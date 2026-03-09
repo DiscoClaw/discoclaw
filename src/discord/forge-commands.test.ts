@@ -660,6 +660,7 @@ describe('buildDrafterPrompt', () => {
     expect(prompt).toContain('Read the codebase');
     expect(prompt).toContain('concrete repo-relative file paths');
     expect(prompt).toContain('Do not use placeholder paths like `path/to/file.ts`');
+    expect(prompt).toContain('name the exact enforcement mechanism');
     // Instructions come before template
     expect(prompt.indexOf('## Instructions')).toBeLessThan(prompt.indexOf('## Expected Output Structure'));
     // Anti-echo instruction
@@ -749,6 +750,13 @@ describe('buildAuditorPrompt', () => {
     expect(prompt).toContain('Read, Glob, and Grep tools');
     expect(prompt).toContain('Use them before raising concerns');
     expect(prompt).toContain('concern evaporates after checking the code');
+  });
+
+  it('requires auditors to verify restriction claims against a real enforcement primitive', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    expect(prompt).toContain('restricted subset of a broader capability');
+    expect(prompt).toContain('exact gating primitive');
+    expect(prompt).toContain('only describes the restriction in prose, that is a blocking concern');
   });
 
   it('includes criteria near the start of the prompt before ## Plan to Audit', () => {
@@ -899,6 +907,12 @@ describe('buildRevisionPrompt', () => {
   it('includes instruction to preserve prior resolutions', () => {
     const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
     expect(prompt).toContain('Preserve resolutions from prior audit rounds');
+  });
+
+  it('requires revisions to name concrete enforcement mechanisms for restriction claims', () => {
+    const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
+    expect(prompt).toContain('If you keep or add a restriction claim');
+    expect(prompt).toContain('rewrite it to name the exact enforcement mechanism');
   });
 
   it('requires concrete repo-relative file paths in Changes during revision', () => {
