@@ -9,13 +9,18 @@ import { appendParseFailureNotice, appendUnavailableActionTypesNotice } from './
 import {
   buildContextFiles,
   buildOpenTasksSection,
-  buildPromptPreamble,
+  buildScheduledSelfInvocationPrompt,
   buildPromptSectionEstimates,
   inlineContextFilesWithMeta,
   loadWorkspacePaFiles,
   resolveEffectiveTools,
 } from './prompt-common.js';
 import type { InlinedContextSection } from './prompt-common.js';
+import {
+  LoopScheduler as LoopSchedulerImpl,
+  type LoopJobInfo as ScheduledLoopJobInfo,
+  type LoopSchedulerRun,
+} from './defer-scheduler.js';
 import type { CronContext } from './actions-crons.js';
 import type { ForgeContext } from './actions-forge.js';
 import type { PlanContext } from './actions-plan.js';
@@ -158,38 +163,14 @@ export type ConfigureLoopSchedulerOpts = {
   status?: StatusPoster | null;
 };
 
-export type LoopJob = {
-  id: number;
-  label: string;
-  intervalSeconds: number;
-  prompt: string;
-  channel: string;
+type LoopOriginMeta = {
   originChannelId: string;
-  createdAt: Date;
-  nextRunAt: Date;
-  running: boolean;
-  consecutiveFailures: number;
-  timer: ReturnType<typeof setInterval>;
+  originThreadId: string | null;
 };
 
-export type LoopJobInfo = Omit<LoopJob, 'timer'>;
-
-type LoopCreateResult =
-  | { ok: true; job: LoopJobInfo }
-  | { ok: false; error: string };
-
-type LoopTickContext = {
-  action: LoopCreateActionRequest;
-  context: ActionContext;
-};
-
-type LoopSchedulerOptions = {
-  minIntervalSeconds: number;
-  maxIntervalSeconds: number;
-  maxConcurrent: number;
-  tickHandler: (job: LoopJobInfo, tickContext: LoopTickContext) => Promise<void> | void;
-  log?: LoggerLike;
-};
+type ConfiguredLoopScheduler = LoopSchedulerImpl<LoopCreateActionRequest, ActionContext, LoopOriginMeta>;
+type LoopJobInfo = ScheduledLoopJobInfo<LoopCreateActionRequest, LoopOriginMeta>;
+type LoopTickRun = LoopSchedulerRun<LoopCreateActionRequest, ActionContext, LoopOriginMeta>;
 
 class LoopTerminalError extends Error {
   readonly code: 'channel-not-found' | 'guild-not-found';
@@ -200,159 +181,7 @@ class LoopTerminalError extends Error {
   }
 }
 
-export class LoopScheduler {
-  private nextId = 1;
-  private readonly activeJobs = new Map<number, LoopJob>();
-  private readonly minIntervalSeconds: number;
-  private readonly maxIntervalSeconds: number;
-  private readonly maxConcurrent: number;
-  private readonly tickHandler: LoopSchedulerOptions['tickHandler'];
-  private readonly log?: LoggerLike;
-
-  constructor(opts: LoopSchedulerOptions) {
-    this.minIntervalSeconds = opts.minIntervalSeconds;
-    this.maxIntervalSeconds = opts.maxIntervalSeconds;
-    this.maxConcurrent = opts.maxConcurrent;
-    this.tickHandler = opts.tickHandler;
-    this.log = opts.log;
-  }
-
-  get concurrentCap(): number {
-    return this.maxConcurrent;
-  }
-
-  create(action: LoopCreateActionRequest, context: ActionContext): LoopCreateResult {
-    const intervalSeconds = action.intervalSeconds;
-    if (!Number.isFinite(intervalSeconds)) {
-      return { ok: false, error: 'intervalSeconds must be a number' };
-    }
-    if (intervalSeconds < this.minIntervalSeconds) {
-      return {
-        ok: false,
-        error: `intervalSeconds must be at least ${this.minIntervalSeconds} seconds`,
-      };
-    }
-    if (intervalSeconds > this.maxIntervalSeconds) {
-      return {
-        ok: false,
-        error: `intervalSeconds cannot exceed ${this.maxIntervalSeconds} seconds`,
-      };
-    }
-    if (this.activeJobs.size >= this.maxConcurrent) {
-      return {
-        ok: false,
-        error: `Maximum of ${this.maxConcurrent} loops are already active`,
-      };
-    }
-
-    const id = this.nextId++;
-    const createdAt = new Date();
-    const nextRunAt = new Date(createdAt.getTime() + intervalSeconds * 1000);
-    const intervalMs = intervalSeconds * 1000;
-
-    const timer = setInterval(() => {
-      void this.runTick(id, { action, context });
-    }, intervalMs);
-    timer.unref?.();
-
-    const job: LoopJob = {
-      id,
-      label: action.label ?? '',
-      intervalSeconds,
-      prompt: action.prompt,
-      channel: action.channel,
-      originChannelId: context.channelId,
-      createdAt,
-      nextRunAt,
-      running: false,
-      consecutiveFailures: 0,
-      timer,
-    };
-
-    this.activeJobs.set(id, job);
-    return { ok: true, job: this.snapshot(job) };
-  }
-
-  list(): LoopJobInfo[] {
-    return [...this.activeJobs.values()]
-      .map((job) => this.snapshot(job))
-      .sort((a, b) => a.id - b.id);
-  }
-
-  cancel(id: number): boolean {
-    const job = this.activeJobs.get(id);
-    if (!job) return false;
-    clearInterval(job.timer);
-    this.activeJobs.delete(id);
-    return true;
-  }
-
-  cancelAll(): number {
-    const count = this.activeJobs.size;
-    for (const job of this.activeJobs.values()) {
-      clearInterval(job.timer);
-    }
-    this.activeJobs.clear();
-    return count;
-  }
-
-  private snapshot(job: LoopJob): LoopJobInfo {
-    return {
-      id: job.id,
-      label: job.label,
-      intervalSeconds: job.intervalSeconds,
-      prompt: job.prompt,
-      channel: job.channel,
-      originChannelId: job.originChannelId,
-      createdAt: new Date(job.createdAt.getTime()),
-      nextRunAt: new Date(job.nextRunAt.getTime()),
-      running: job.running,
-      consecutiveFailures: job.consecutiveFailures,
-    };
-  }
-
-  private async runTick(id: number, tickContext: LoopTickContext): Promise<void> {
-    const job = this.activeJobs.get(id);
-    if (!job) return;
-
-    job.nextRunAt = new Date(Date.now() + job.intervalSeconds * 1000);
-    if (job.running) {
-      this.log?.warn({ loopId: job.id, label: job.label, channel: job.channel }, 'loop:skip (previous tick still active)');
-      return;
-    }
-
-    job.running = true;
-    try {
-      await Promise.resolve(this.tickHandler(this.snapshot(job), tickContext));
-      const current = this.activeJobs.get(id);
-      if (current) current.consecutiveFailures = 0;
-    } catch (err) {
-      const current = this.activeJobs.get(id);
-      if (!current) return;
-
-      if (err instanceof LoopTerminalError) {
-        this.log?.warn({ loopId: current.id, code: err.code, err }, 'loop:terminal failure, canceling');
-        this.cancel(id);
-        return;
-      }
-
-      current.consecutiveFailures += 1;
-      this.log?.warn(
-        { loopId: current.id, failures: current.consecutiveFailures, err },
-        'loop:tick failed',
-      );
-      if (current.consecutiveFailures >= 3) {
-        this.log?.warn({ loopId: current.id, failures: current.consecutiveFailures }, 'loop:max failures reached, canceling');
-        this.cancel(id);
-      }
-    } finally {
-      const current = this.activeJobs.get(id);
-      if (current) current.running = false;
-    }
-  }
-}
-
-let configuredLoopScheduler: LoopScheduler | null = null;
+let configuredLoopScheduler: ConfiguredLoopScheduler | null = null;
 
 type TextChannelLike = GuildTextBasedChannel & {
   send: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown>;
@@ -388,6 +217,13 @@ function configuredConcurrentCapLabel(): string {
 
 function buildLoopActionSummaryPrefix(label: string): string {
   return label ? `Loop "${label}"` : 'Loop';
+}
+
+function formatLoopOrigin(meta: LoopOriginMeta): string {
+  if (meta.originThreadId) {
+    return `thread:${meta.originThreadId} (channel:${meta.originChannelId})`;
+  }
+  return `channel:${meta.originChannelId}`;
 }
 
 function buildLoopActionsReferenceSection(
@@ -450,13 +286,6 @@ async function buildLoopPrompt(
   );
   const actionsReferenceSection = buildLoopActionsReferenceSection(actionSelection);
 
-  let prompt =
-    buildPromptPreamble(inlinedContext.text) + '\n\n' +
-    (openTasksSection
-      ? `---\n${openTasksSection}\n\n`
-      : '') +
-    `---\n${actionsReferenceSection}\n`;
-
   const promptSectionEstimates = buildPromptSectionEstimates({
     contextSections: inlinedContext.sections,
     channelContextPath: channelCtx.contextPath,
@@ -494,29 +323,29 @@ async function buildLoopPrompt(
     opts.log?.warn({ flow: 'loop', channelId: channel.id, err }, 'loop:resolve effective tools failed');
   }
 
-  if (noteLines.length > 0) {
-    prompt += `\n---\n${noteLines.join('\n')}\n`;
-  }
-
-  prompt +=
-    `---\nRepeating loop tick for <#${channel.id}>.\n` +
-    `Loop prompts are isolated: there is no conversation history.\n---\n` +
-    `User message:\n${action.prompt}`;
-  return prompt;
+  return buildScheduledSelfInvocationPrompt({
+    inlinedContext: inlinedContext.text,
+    openTasksSection,
+    actionsReferenceSection,
+    noteLines,
+    invocationNotice:
+      `Repeating loop tick for <#${channel.id}>.\n` +
+      'Loop prompts are isolated: there is no conversation history.',
+    userMessage: action.prompt,
+  });
 }
 
 async function handleLoopTick(
   opts: ConfigureLoopSchedulerOpts,
-  job: LoopJobInfo,
-  tickContext: LoopTickContext,
+  run: LoopTickRun,
 ): Promise<void> {
-  const { action, context } = tickContext;
+  const { action, context } = run;
   const guild = context.guild;
   if (!guild) {
     throw new LoopTerminalError('guild-not-found', 'loop guild context missing');
   }
 
-  const channel = ensureLoopTextChannel(guild, job.channel);
+  const channel = ensureLoopTextChannel(guild, action.channel);
   if (opts.state.allowChannelIds?.size) {
     const allowed = opts.state.allowChannelIds.has(channel.id);
     if (!allowed) {
@@ -585,7 +414,7 @@ async function handleLoopTick(
     guild,
     client: context.client,
     channelId: channel.id,
-    messageId: `loop-${job.id}-${Date.now()}`,
+    messageId: `loop-${run.id}-${Date.now()}`,
     requesterId: context.requesterId,
     threadParentId: null,
     transport: new DiscordTransportClient(guild, context.client),
@@ -615,14 +444,16 @@ async function handleLoopTick(
   await channel.send({ content: outgoingText, allowedMentions: NO_MENTIONS });
 }
 
-export function configureLoopScheduler(opts: ConfigureLoopSchedulerOpts): LoopScheduler {
+export function configureLoopScheduler(opts: ConfigureLoopSchedulerOpts): ConfiguredLoopScheduler {
   configuredLoopScheduler?.cancelAll();
-  configuredLoopScheduler = new LoopScheduler({
+  configuredLoopScheduler = new LoopSchedulerImpl({
     minIntervalSeconds: opts.minIntervalSeconds,
     maxIntervalSeconds: opts.maxIntervalSeconds,
     maxConcurrent: opts.maxConcurrent,
-    tickHandler: (job, tickContext) => handleLoopTick(opts, job, tickContext),
-    log: opts.log,
+    maxConsecutiveFailures: 3,
+    isTerminalError: (err) => err instanceof LoopTerminalError,
+    tickHandler: (run) => handleLoopTick(opts, run),
+    log: opts.log as LoggerLike | undefined,
   });
   opts.log?.info(
     {
@@ -633,6 +464,10 @@ export function configureLoopScheduler(opts: ConfigureLoopSchedulerOpts): LoopSc
     'loop:scheduler configured',
   );
   return configuredLoopScheduler;
+}
+
+export function hasConfiguredLoopScheduler(): boolean {
+  return configuredLoopScheduler !== null;
 }
 
 export async function executeLoopAction(
@@ -662,14 +497,21 @@ export async function executeLoopAction(
         label,
         intervalSeconds: action.intervalSeconds,
       };
-      const result = scheduler.create(normalized, ctx);
+      const result = scheduler.create({
+        action: normalized,
+        context: ctx,
+        meta: {
+          originChannelId: ctx.threadParentId ?? ctx.channelId,
+          originThreadId: ctx.threadParentId ? ctx.channelId : null,
+        },
+      });
       if (!result.ok) {
         return { ok: false, error: buildLoopCreateRejection(channel, result.error) };
       }
       return {
         ok: true,
         summary:
-          `${buildLoopActionSummaryPrefix(label)} scheduled for ${channel} every ${formatDuration(result.job.intervalSeconds)} ` +
+          `${buildLoopActionSummaryPrefix(label)} scheduled for ${channel} every ${formatDuration(result.job.action.intervalSeconds)} ` +
           `(id=${result.job.id}, next run ${fmtTime(result.job.nextRunAt)})`,
       };
     }
@@ -680,7 +522,7 @@ export async function executeLoopAction(
       }
       const lines = active.map((job, index) => {
         const remainingSec = Math.max(0, Math.floor((job.nextRunAt.getTime() - Date.now()) / 1000));
-        return `${index + 1}. id=${job.id} | label=${job.label || '-'} | channel=${job.channel} | every=${formatDuration(job.intervalSeconds)} | nextRunAt=${fmtTime(job.nextRunAt)} | remaining=${formatDuration(remainingSec)} | origin=${job.originChannelId} | failures=${job.consecutiveFailures} | prompt="${job.prompt}"`;
+        return `${index + 1}. id=${job.id} | label=${job.action.label || '-'} | channel=${job.action.channel} | every=${formatDuration(job.action.intervalSeconds)} | nextRunAt=${fmtTime(job.nextRunAt)} | remaining=${formatDuration(remainingSec)} | origin=${formatLoopOrigin(job.meta)} | failures=${job.consecutiveFailures} | prompt="${job.action.prompt}"`;
       });
       return { ok: true, summary: `Active loops (${active.length}):\n${lines.join('\n')}` };
     }
@@ -699,7 +541,7 @@ export async function executeLoopAction(
 export function loopActionsPromptSection(): string {
   const cap = configuredConcurrentCapLabel();
   return `### Repeating loops
-Use <discord-action>{"type":"loopCreate","channel":"general","intervalSeconds":900,"prompt":"Check the forge status for forge-123 and report changes","label":"forge-watch"}</discord-action> to schedule a repeating self-invocation. The scheduler enforces a maximum of ${cap} concurrent active loops. Every loop is inspectable via \`loopList\`, including its interval, next run time, origin channel/thread, purpose label, and failure state.
+Use <discord-action>{"type":"loopCreate","channel":"general","intervalSeconds":900,"prompt":"Check the forge status for forge-123 and report changes","label":"forge-watch"}</discord-action> to schedule a repeating self-invocation. Prefer this for recurring checks instead of chaining \`defer\` actions together. The scheduler enforces a maximum of ${cap} concurrent active loops. Every loop is inspectable via \`loopList\`, including its interval, next run time, origin channel/thread, purpose label, and failure state.
 
 Use <discord-action>{"type":"loopList"}</discord-action> to inspect active loops and <discord-action>{"type":"loopCancel","id":123}</discord-action> to stop one. Each loop tick runs with no conversation history, so the \`prompt\` must be fully self-contained.`;
 }

@@ -811,6 +811,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         memory: params.discordActionsMemory ?? false,
         config: params.discordActionsConfig ?? false,
         defer: !isDm && (params.discordActionsDefer ?? false),
+        loop: !isDm && Boolean(params.deferScheduler),
         imagegen: params.discordActionsImagegen ?? false,
         voice: params.discordActionsVoice ?? false,
         spawn: params.discordActionsSpawn ?? false,
@@ -823,6 +824,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         actionFlags.memory = false;
         actionFlags.config = false;
         actionFlags.defer = false;
+        actionFlags.loop = false;
         actionFlags.botProfile = false;
         actionFlags.crons = false;
         actionFlags.tasks = false;

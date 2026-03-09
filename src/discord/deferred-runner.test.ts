@@ -15,6 +15,12 @@ vi.mock('./prompt-common.js', () => ({
     runtimeCapabilityNote: null,
   })),
   buildPromptPreamble: vi.fn(() => ''),
+  buildScheduledSelfInvocationPrompt: vi.fn((input: {
+    openTasksSection?: string;
+    actionsReferenceSection?: string;
+    invocationNotice: string;
+    userMessage: string;
+  }) => [input.openTasksSection, input.actionsReferenceSection, input.invocationNotice, `User message:\n${input.userMessage}`].filter(Boolean).join('\n\n')),
   buildOpenTasksSection: vi.fn(() => ''),
   buildPromptSectionEstimates: vi.fn(() => ({
     sections: {},

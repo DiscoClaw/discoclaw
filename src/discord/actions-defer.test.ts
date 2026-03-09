@@ -106,7 +106,7 @@ describe('executeDeferAction', () => {
     const result = await executeDeferAction(action, ctx);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('defer action unexpectedly succeeded despite exceeding max delay');
-    expect(result.error).toBe('Deferred follow-up for general rejected: delaySeconds cannot exceed 5 seconds');
+    expect(result.error).toBe('One-shot deferred follow-up for general rejected: delaySeconds cannot exceed 5 seconds');
   });
 });
 
@@ -133,7 +133,7 @@ describe('executeDeferListAction', () => {
     const result = executeDeferListAction(ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('deferList failed unexpectedly');
-    expect(result.summary).toBe('No pending deferred actions.');
+    expect(result.summary).toBe('No pending one-shot deferred actions.');
   });
 
   it('lists pending jobs with id, channel, prompt, and time remaining', () => {
@@ -155,7 +155,7 @@ describe('executeDeferListAction', () => {
     const result = executeDeferListAction(ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('deferList failed unexpectedly');
-    expect(result.summary).toContain('Pending deferred actions (2)');
+    expect(result.summary).toContain('Pending one-shot deferred actions (2)');
     expect(result.summary).toMatch(/id=\d+/);
     expect(result.summary).toContain('channel=general');
     expect(result.summary).toContain('prompt="check status"');
@@ -208,7 +208,7 @@ describe('executeDeferListAction', () => {
     const result = executeDeferListAction(ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('deferList failed unexpectedly');
-    expect(result.summary).toContain('Pending deferred actions (1)');
+    expect(result.summary).toContain('Pending one-shot deferred actions (1)');
     expect(result.summary).toContain('channel=alerts');
     expect(result.summary).not.toContain('channel=general');
   });

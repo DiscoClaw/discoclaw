@@ -19,7 +19,7 @@ import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { buildDurableMemorySection } from './discord/prompt-common.js';
 import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
-import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines } from './discord/actions.js';
+import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines, appendActionResults } from './discord/actions.js';
 import { DiscordTransportClient } from './discord/transport-client.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
 import { loadVoiceIdentity, buildVoicePrompt, buildVoiceFollowUpPrompt, buildVoicePromptSectionEstimates } from './voice/voice-prompt-builder.js';
@@ -30,6 +30,7 @@ import { shouldTriggerFollowUp } from './discord/action-categories.js';
 import type { DeferScheduler } from './discord/defer-scheduler.js';
 import type { DeferActionRequest } from './discord/actions-defer.js';
 import { configureDeferredScheduler, type ConfigureDeferredSchedulerOpts } from './discord/deferred-runner.js';
+import { configureLoopScheduler } from './discord/actions-loop.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { LongRunWatchdog, type LongRunWatchdogRun } from './discord/long-run-watchdog.js';
@@ -238,6 +239,7 @@ let voiceManager: VoiceConnectionManager | null = null;
 let audioPipeline: AudioPipelineManager | null = null;
 let voicePresenceHandler: VoicePresenceHandler | null = null;
 let deferSchedulerRef: DeferScheduler<DeferActionRequest, ActionContext> | null = null;
+let loopSchedulerRef: { cancelAll(): number } | null = null;
 let longRunWatchdog: LongRunWatchdog | null = null;
 const memorySampler = new MemorySampler();
 globalMetrics.setMemorySampler(memorySampler);
@@ -272,8 +274,15 @@ const shutdown = async () => {
   // Cancel watchdog timers before draining replies.
   longRunWatchdog?.dispose();
 
-  // Cancel deferred timers first — before drain — so they cannot fire and produce
-  // new in-flight replies during the drain window.
+  if (loopSchedulerRef) {
+    const cancelled = loopSchedulerRef.cancelAll();
+    if (cancelled > 0) {
+      log.info({ cancelled }, 'shutdown:loop timers cancelled');
+    }
+  }
+
+  // Cancel scheduled loop/defer timers before drain so they cannot fire and
+  // produce new in-flight replies during the drain window.
   if (deferSchedulerRef) {
     const cancelled = deferSchedulerRef.cancelAll();
     if (cancelled > 0) {
@@ -1377,6 +1386,27 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
   botParams.deferScheduler = deferScheduler;
   deferSchedulerRef = deferScheduler;
   botParams.deferOpts = deferOpts;
+  loopSchedulerRef = configureLoopScheduler({
+    minIntervalSeconds: 1,
+    maxIntervalSeconds: cfg.deferMaxDelaySeconds,
+    maxConcurrent: cfg.deferMaxConcurrent,
+    state: botParams,
+    runtime,
+    runtimeTools,
+    runtimeTimeoutMs,
+    workspaceCwd,
+    discordChannelContext,
+    appendSystemPrompt,
+    useGroupDirCwd,
+    botDisplayName,
+    actionsApi: {
+      parseDiscordActions,
+      executeDiscordActions,
+      buildTieredDiscordActionsPromptSection,
+      appendActionResults,
+    },
+    log,
+  });
 }
 
 let client!: Awaited<ReturnType<typeof startDiscordBot>>['client'], status!: Awaited<ReturnType<typeof startDiscordBot>>['status'], system!: Awaited<ReturnType<typeof startDiscordBot>>['system'];

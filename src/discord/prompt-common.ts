@@ -56,6 +56,32 @@ export function buildPromptPreamble(
     .join('\n\n');
 }
 
+export function buildScheduledSelfInvocationPrompt(input: {
+  inlinedContext: string;
+  openTasksSection?: string;
+  actionsReferenceSection?: string;
+  noteLines?: string[];
+  invocationNotice: string;
+  userMessage: string;
+}): string {
+  let prompt =
+    buildPromptPreamble(input.inlinedContext) + '\n\n' +
+    (input.openTasksSection
+      ? `---\n${input.openTasksSection}\n\n`
+      : '');
+
+  if (input.actionsReferenceSection) {
+    prompt += `---\n${input.actionsReferenceSection}\n`;
+  }
+
+  if (input.noteLines && input.noteLines.length > 0) {
+    prompt += `\n---\n${input.noteLines.join('\n')}\n`;
+  }
+
+  prompt += `---\n${input.invocationNotice}\n---\nUser message:\n${input.userMessage}`;
+  return prompt;
+}
+
 export function estimateTokensFromChars(chars: number): number {
   if (!Number.isFinite(chars) || chars <= 0) return 0;
   return Math.ceil(chars / 4);

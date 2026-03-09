@@ -60,7 +60,7 @@ export async function executeDeferAction(
   const when = fmtTime(result.runsAt);
   return {
     ok: true,
-    summary: `Deferred follow-up scheduled for ${channel} in ${delayLabel} (id=${result.id}, runs at ${when})`,
+    summary: `One-shot deferred follow-up scheduled for ${channel} in ${delayLabel} (id=${result.id}, runs at ${when})`,
   };
 }
 
@@ -74,7 +74,7 @@ export function executeDeferListAction(
 
   const active = scheduler.listActive();
   if (active.length === 0) {
-    return { ok: true, summary: 'No pending deferred actions.' };
+    return { ok: true, summary: 'No pending one-shot deferred actions.' };
   }
 
   const lines = active.map((job, i) => {
@@ -85,7 +85,7 @@ export function executeDeferListAction(
     return `${i + 1}. id=${job.id} | channel=${channel} | remaining=${formatDuration(remainingSec)} | runsAt=${fmtTime(job.runsAt)} | prompt="${prompt}"`;
   });
 
-  return { ok: true, summary: `Pending deferred actions (${active.length}):\n${lines.join('\n')}` };
+  return { ok: true, summary: `Pending one-shot deferred actions (${active.length}):\n${lines.join('\n')}` };
 }
 
 function formatDuration(seconds: number): string {
@@ -110,5 +110,5 @@ function formatDuration(seconds: number): string {
 
 function buildDeferRejection(channel: string, reason: string): string {
   const target = channel || 'requested channel';
-  return `Deferred follow-up for ${target} rejected: ${reason}`;
+  return `One-shot deferred follow-up for ${target} rejected: ${reason}`;
 }
