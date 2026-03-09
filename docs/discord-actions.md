@@ -132,7 +132,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1; also requires plan commands enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
-  - `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` default 1, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` default 5)
+  - `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` default 60, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` default 86400, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` default 5)
   - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
   - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 8)
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
@@ -383,7 +383,7 @@ Fields (`loopCancel`):
 - `id` — positive numeric loop ID returned by `loopCreate` and shown by `loopList`
 
 Env: `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1).
-`LoopScheduler` constraints: intervals must stay within `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` (default 1 s) and `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` (default 1800 s); at most `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` (default 5) loops may be active simultaneously. Like defer timers, loops are in-process only and do not survive a restart.
+`LoopScheduler` constraints: intervals must stay within `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` (default 60 s) and `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` (default 86400 s); at most `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` (default 5) loops may be active simultaneously. Like defer timers, loops are in-process only and do not survive a restart.
 Origin metadata: every loop stores where it came from so `loopList` can show the origin channel or thread that created it, alongside the label and next run time.
 Failure behavior: terminal errors such as missing guild/channel cancel the loop immediately. Non-terminal tick failures increment a consecutive-failure counter; after 3 consecutive failures the scheduler auto-cancels the loop. If a tick is still running when the next interval arrives, the overlapping tick is skipped rather than run concurrently.
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ChannelType } from 'discord.js';
 import type { Client, Guild } from 'discord.js';
 import { appendActionResults, parseDiscordActions } from './actions.js';
 import {
@@ -58,30 +59,63 @@ function makeRuntime(events: EngineEvent[]) {
   };
 }
 
-function makeContext(): ActionContext {
+function makeThrowingRuntime(message: string) {
   return {
-    guild: { id: 'guild-1' } as Guild,
+    id: 'other' as const,
+    capabilities: new Set() as ReadonlySet<never>,
+    async *invoke(): AsyncIterable<EngineEvent> {
+      throw new Error(message);
+    },
+  };
+}
+
+function makeContext(overrides: Partial<ActionContext> = {}): ActionContext {
+  const requesterMember = { id: 'user-1' };
+  return {
+    guild: {
+      id: 'guild-1',
+      members: {
+        fetch: vi.fn(async () => requesterMember),
+      },
+    } as Guild,
     client: { token: 'dummy' } as Client,
     channelId: 'origin-thread-1',
     messageId: 'message-1',
     requesterId: 'user-1',
     confirmation: { mode: 'automated' },
+    ...overrides,
   };
 }
 
-function makeChannel() {
+function makeChannel(overrides: Record<string, unknown> = {}) {
   return {
     id: 'target-1',
+    type: ChannelType.GuildText,
+    isThread: () => false,
+    parentId: null,
+    permissionsFor: vi.fn(() => ({
+      has: vi.fn(() => true),
+    })),
     send: vi.fn(async (_opts: { content: string; allowedMentions: unknown }) => ({})),
+    ...overrides,
   };
 }
 
 function configureForTick(opts?: {
   runtimeText?: string;
   executeResults?: DiscordActionResult[];
+  allowChannelIds?: Set<string>;
+  channel?: ReturnType<typeof makeChannel>;
+  runtime?: ReturnType<typeof makeRuntime> | ReturnType<typeof makeThrowingRuntime>;
 }) {
   const executeDiscordActions = vi.fn(async (..._args: unknown[]) => opts?.executeResults ?? []);
-  const channel = makeChannel();
+  const buildTieredDiscordActionsPromptSection = vi.fn(() => ({
+    prompt: '### Allowed loop tick actions',
+    includedCategories: ['messaging', 'channels'],
+    tierBuckets: { core: ['messaging', 'channels'], channelContextual: [], keywordTriggered: [] },
+    keywordHits: [],
+  }));
+  const channel = opts?.channel ?? makeChannel();
   resolveChannelMock.mockReturnValue(channel);
 
   const scheduler = configureLoopScheduler({
@@ -90,8 +124,9 @@ function configureForTick(opts?: {
     maxConcurrent: 3,
     state: {
       runtimeModel: 'fast',
+      allowChannelIds: opts?.allowChannelIds,
     },
-    runtime: makeRuntime([
+    runtime: opts?.runtime ?? makeRuntime([
       { type: 'text_final', text: opts?.runtimeText ?? '' } as EngineEvent,
       { type: 'done' } as EngineEvent,
     ]),
@@ -103,18 +138,13 @@ function configureForTick(opts?: {
     actionsApi: {
       parseDiscordActions,
       executeDiscordActions,
-      buildTieredDiscordActionsPromptSection: vi.fn(() => ({
-        prompt: '### Allowed loop tick actions',
-        includedCategories: ['messaging', 'channels'],
-        tierBuckets: { core: ['messaging', 'channels'], channelContextual: [], keywordTriggered: [] },
-        keywordHits: [],
-      })),
+      buildTieredDiscordActionsPromptSection,
       appendActionResults,
     },
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   });
 
-  return { scheduler, executeDiscordActions, channel };
+  return { scheduler, executeDiscordActions, channel, buildTieredDiscordActionsPromptSection };
 }
 
 describe('loop tick policy', () => {
@@ -191,6 +221,46 @@ describe('loop tick policy', () => {
     );
   });
 
+  it('rejects loopCreate when the target channel cannot be resolved', async () => {
+    configureForTick();
+    resolveChannelMock.mockReturnValue(undefined);
+
+    const create = await executeLoopAction({
+      type: 'loopCreate',
+      channel: 'missing-channel',
+      intervalSeconds: 5,
+      prompt: 'Read recent messages and report',
+      label: 'missing',
+    }, makeContext());
+
+    expect(create).toEqual({
+      ok: false,
+      error: 'Loop for missing-channel rejected: loop target channel "missing-channel" not found',
+    });
+  });
+
+  it('rejects loopCreate when the requester lacks access to the target channel', async () => {
+    const inaccessible = makeChannel({
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => false),
+      })),
+    });
+    configureForTick({ channel: inaccessible });
+
+    const create = await executeLoopAction({
+      type: 'loopCreate',
+      channel: 'general',
+      intervalSeconds: 5,
+      prompt: 'Read recent messages and report',
+      label: 'forbidden',
+    }, makeContext());
+
+    expect(create).toEqual({
+      ok: false,
+      error: 'Loop for general rejected: loop requester lacks permission for channel target-1',
+    });
+  });
+
   it('rejects mutating actions from enabled parent categories during loop ticks', async () => {
     const { executeDiscordActions, channel } = configureForTick({
       runtimeText: [
@@ -240,6 +310,62 @@ describe('loop tick policy', () => {
     const sentCall = channel.send.mock.calls[0] as unknown as [{ content: string }];
     expect(sentCall[0]).toEqual(
       expect.objectContaining({ content: 'Loop tick completed successfully.' }),
+    );
+  });
+
+  it('applies parent-aware allowlist and thread context for thread targets', async () => {
+    const threadChannel = makeChannel({
+      id: 'thread-1',
+      type: ChannelType.PublicThread,
+      isThread: () => true,
+      parentId: 'parent-1',
+    });
+    const { executeDiscordActions, buildTieredDiscordActionsPromptSection } = configureForTick({
+      runtimeText: '<discord-action>{"type":"loopList"}</discord-action>',
+      executeResults: [{ ok: true, summary: 'No active loops.' }],
+      channel: threadChannel,
+      allowChannelIds: new Set(['parent-1']),
+    });
+
+    const create = await executeLoopAction({
+      type: 'loopCreate',
+      channel: 'ops-thread',
+      intervalSeconds: 5,
+      prompt: 'Inspect loop state',
+      label: 'thread-check',
+    }, makeContext());
+    expect(create.ok).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(buildTieredDiscordActionsPromptSection).toHaveBeenCalledWith(
+      expect.anything(),
+      'Discoclaw',
+      expect.objectContaining({ isThread: true }),
+    );
+    const executeCall = executeDiscordActions.mock.calls[0] as unknown as [unknown, ActionContext];
+    expect(executeCall[1].threadParentId).toBe('parent-1');
+  });
+
+  it('posts mapped runtime errors when the runtime throws during a loop tick', async () => {
+    const { executeDiscordActions, channel } = configureForTick({
+      runtime: makeThrowingRuntime('boom'),
+    });
+
+    const create = await executeLoopAction({
+      type: 'loopCreate',
+      channel: 'general',
+      intervalSeconds: 5,
+      prompt: 'Report failures',
+      label: 'runtime-failure',
+    }, makeContext());
+    expect(create.ok).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(executeDiscordActions).not.toHaveBeenCalled();
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'Runtime error: boom' }),
     );
   });
 });

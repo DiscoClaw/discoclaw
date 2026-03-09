@@ -1,5 +1,13 @@
-import type { GuildTextBasedChannel } from 'discord.js';
-import type { ActionCategoryFlags, ActionContext, DiscordActionRequest, DiscordActionResult, SubsystemContexts } from './actions.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
+import type { GuildMember, GuildTextBasedChannel } from 'discord.js';
+import type {
+  ActionCategoryFlags,
+  ActionContext,
+  DiscordActionRequest,
+  DiscordActionResult,
+  RequesterMemberContext,
+  SubsystemContexts,
+} from './actions.js';
 import { fmtTime, resolveChannel } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { DiscordTransportClient } from './transport-client.js';
@@ -168,6 +176,11 @@ type LoopOriginMeta = {
   originThreadId: string | null;
 };
 
+type ThreadChannelShape = {
+  isThread?: () => boolean;
+  parentId?: unknown;
+};
+
 type ConfiguredLoopScheduler = LoopSchedulerImpl<LoopCreateActionRequest, ActionContext, LoopOriginMeta>;
 type LoopJobInfo = ScheduledLoopJobInfo<LoopCreateActionRequest, LoopOriginMeta>;
 type LoopTickRun = LoopSchedulerRun<LoopCreateActionRequest, ActionContext, LoopOriginMeta>;
@@ -182,6 +195,9 @@ class LoopTerminalError extends Error {
 }
 
 let configuredLoopScheduler: ConfiguredLoopScheduler | null = null;
+let configuredLoopState: LoopRunnerState | null = null;
+
+const REQUESTER_DENY_ALL = { __requesterDenyAll: true } as const;
 
 type TextChannelLike = GuildTextBasedChannel & {
   send: (opts: { content: string; allowedMentions: unknown }) => Promise<unknown>;
@@ -233,6 +249,51 @@ function buildLoopActionsReferenceSection(
   return `${selection.prompt}\n\n${loopActionsPromptSection()}`;
 }
 
+function getThreadParentId(candidate: unknown): string | null {
+  const channel = candidate as ThreadChannelShape | null | undefined;
+  if (!channel) return null;
+  const isThread = typeof channel.isThread === 'function' ? channel.isThread() : false;
+  if (!isThread) return null;
+  if (channel.parentId === null || channel.parentId === undefined) return null;
+  return String(channel.parentId);
+}
+
+function isRequesterDenyAll(
+  requesterMember: RequesterMemberContext,
+): requesterMember is typeof REQUESTER_DENY_ALL {
+  return Boolean(requesterMember && typeof requesterMember === 'object' && '__requesterDenyAll' in requesterMember);
+}
+
+async function resolveRequesterMember(context: ActionContext): Promise<RequesterMemberContext> {
+  if (!context.requesterId) return REQUESTER_DENY_ALL;
+  const fetchRequester = (context.guild.members as { fetch?: (userId: string) => Promise<GuildMember> })?.fetch;
+  if (typeof fetchRequester !== 'function') return REQUESTER_DENY_ALL;
+  return fetchRequester.call(context.guild.members, context.requesterId).catch(() => REQUESTER_DENY_ALL);
+}
+
+function threadSendPermissionFor(channelType: ChannelType | undefined): bigint {
+  return (
+    channelType === ChannelType.PublicThread
+    || channelType === ChannelType.PrivateThread
+    || channelType === ChannelType.AnnouncementThread
+  )
+    ? PermissionFlagsBits.SendMessagesInThreads
+    : PermissionFlagsBits.SendMessages;
+}
+
+function requesterCanAccessTargetChannel(
+  channel: unknown,
+  requesterMember: Exclude<RequesterMemberContext, typeof REQUESTER_DENY_ALL | undefined>,
+): boolean {
+  if (!channel || typeof channel !== 'object') return false;
+  if (!('permissionsFor' in channel) || typeof channel.permissionsFor !== 'function') return false;
+  const resolved = channel.permissionsFor(requesterMember);
+  const channelType = 'type' in channel ? channel.type as ChannelType | undefined : undefined;
+  return Boolean(
+    resolved?.has?.(PermissionFlagsBits.ViewChannel | threadSendPermissionFor(channelType)),
+  );
+}
+
 function ensureLoopTextChannel(
   guild: ActionContext['guild'],
   ref: string,
@@ -244,16 +305,45 @@ function ensureLoopTextChannel(
   return channel;
 }
 
+function ensureLoopAllowlisted(
+  channel: TextChannelLike,
+  allowChannelIds?: Set<string>,
+): string | null {
+  const threadParentId = getThreadParentId(channel);
+  if (!allowChannelIds?.size) return threadParentId;
+  const allowed =
+    allowChannelIds.has(channel.id) ||
+    (threadParentId !== null && allowChannelIds.has(threadParentId));
+  if (!allowed) {
+    throw new Error(`loop target channel ${channel.id} not in allowlist`);
+  }
+  return threadParentId;
+}
+
+async function ensureLoopRequesterAccess(
+  context: ActionContext,
+  channel: TextChannelLike,
+): Promise<void> {
+  const requesterMember = await resolveRequesterMember(context);
+  if (
+    isRequesterDenyAll(requesterMember)
+    || (requesterMember && !requesterCanAccessTargetChannel(channel, requesterMember))
+  ) {
+    throw new Error(`loop requester lacks permission for channel ${channel.id}`);
+  }
+}
+
 async function buildLoopPrompt(
   opts: ConfigureLoopSchedulerOpts,
   channel: TextChannelLike,
   action: LoopCreateActionRequest,
 ): Promise<string> {
+  const threadParentId = getThreadParentId(channel);
   const channelCtx = resolveDiscordChannelContext({
     ctx: opts.discordChannelContext,
     isDm: false,
     channelId: channel.id,
-    threadParentId: null,
+    threadParentId,
   });
 
   const paFiles = await loadWorkspacePaFiles(opts.workspaceCwd, { skip: !!opts.appendSystemPrompt });
@@ -280,7 +370,7 @@ async function buildLoopPrompt(
     {
       channelName: channelCtx.channelName,
       channelContextPath: channelCtx.contextPath,
-      isThread: false,
+      isThread: threadParentId !== null,
       userText: action.prompt,
     },
   );
@@ -346,12 +436,8 @@ async function handleLoopTick(
   }
 
   const channel = ensureLoopTextChannel(guild, action.channel);
-  if (opts.state.allowChannelIds?.size) {
-    const allowed = opts.state.allowChannelIds.has(channel.id);
-    if (!allowed) {
-      throw new Error(`loop target channel ${channel.id} not in allowlist`);
-    }
-  }
+  const threadParentId = ensureLoopAllowlisted(channel, opts.state.allowChannelIds);
+  await ensureLoopRequesterAccess(context, channel);
 
   const prompt = await buildLoopPrompt(opts, channel, action);
   const addDirs: string[] = [];
@@ -400,7 +486,7 @@ async function handleLoopTick(
     const msg = err instanceof Error ? err.message : String(err);
     runtimeError = msg;
     finalText = mapRuntimeErrorToUserMessage(msg);
-    throw new Error(msg);
+    opts.log?.warn({ flow: 'loop', channelId: channel.id, err }, 'loop:runtime invocation failed');
   }
 
   const processedText = finalText || deltaText || '';
@@ -416,7 +502,7 @@ async function handleLoopTick(
     channelId: channel.id,
     messageId: `loop-${run.id}-${Date.now()}`,
     requesterId: context.requesterId,
-    threadParentId: null,
+    threadParentId,
     transport: new DiscordTransportClient(guild, context.client),
     confirmation: {
       mode: 'automated',
@@ -446,6 +532,7 @@ async function handleLoopTick(
 
 export function configureLoopScheduler(opts: ConfigureLoopSchedulerOpts): ConfiguredLoopScheduler {
   configuredLoopScheduler?.cancelAll();
+  configuredLoopState = opts.state;
   configuredLoopScheduler = new LoopSchedulerImpl({
     minIntervalSeconds: opts.minIntervalSeconds,
     maxIntervalSeconds: opts.maxIntervalSeconds,
@@ -475,7 +562,8 @@ export async function executeLoopAction(
   ctx: ActionContext,
 ): Promise<DiscordActionResult> {
   const scheduler = configuredLoopScheduler;
-  if (!scheduler) {
+  const state = configuredLoopState;
+  if (!scheduler || !state) {
     return { ok: false, error: 'Loop actions are not configured for this bot' };
   }
 
@@ -490,6 +578,15 @@ export async function executeLoopAction(
         return { ok: false, error: 'Loop actions require a prompt to re-run' };
       }
       const label = action.label?.trim() ?? '';
+      let resolvedChannel: TextChannelLike;
+      try {
+        resolvedChannel = ensureLoopTextChannel(ctx.guild, channel);
+        ensureLoopAllowlisted(resolvedChannel, state.allowChannelIds);
+        await ensureLoopRequesterAccess(ctx, resolvedChannel);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: buildLoopCreateRejection(channel, msg) };
+      }
       const normalized: LoopCreateActionRequest = {
         ...action,
         channel,

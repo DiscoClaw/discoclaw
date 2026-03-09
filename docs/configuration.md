@@ -309,8 +309,8 @@ Master switch and per-category flags for Discord actions. See [docs/discord-acti
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` | `1800` | Max delay for deferred actions |
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` | `5` | Max concurrent deferred actions |
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH` | `4` | Max nesting depth for nested defers |
-| `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` | `1` | Minimum interval accepted for `loopCreate` |
-| `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` | `1800` | Maximum interval accepted for `loopCreate` |
+| `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` | `60` | Minimum interval accepted for `loopCreate` |
+| `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` | `86400` | Maximum interval accepted for `loopCreate` |
 | `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` | `5` | Max concurrent active loops |
 | `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` | `8` | Max concurrent spawned agents |
 | `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` | `3` | Max follow-up depth for action chains |
