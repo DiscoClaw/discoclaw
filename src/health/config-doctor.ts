@@ -216,7 +216,7 @@ async function readRuntimeOverridesFileState(filePath: string): Promise<RuntimeO
 
 function buildEnvDefaults(env: EnvMap): ModelConfig {
   const runtimeModel = trimValue(env.RUNTIME_MODEL) ?? 'capable';
-  const planRunModel = trimValue(env.DISCOCLAW_PLAN_RUN_MODEL) ?? runtimeModel;
+  const planRunModel = trimValue(env.DISCOCLAW_PLAN_RUN_MODEL) ?? 'capable';
   const fastModel = trimValue(env.DISCOCLAW_FAST_MODEL) ?? 'fast';
   const summaryModel = trimValue(env.DISCOCLAW_SUMMARY_MODEL) ?? fastModel;
   const cronModel = trimValue(env.DISCOCLAW_CRON_AUTO_TAG_MODEL) ?? fastModel;

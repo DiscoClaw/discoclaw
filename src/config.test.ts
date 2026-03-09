@@ -27,6 +27,7 @@ describe('parseConfig', () => {
     expect(config.primaryRuntime).toBe('claude');
     expect(config.fastRuntime).toBeUndefined();
     expect(config.runtimeModel).toBe('capable');
+    expect(config.planRunModel).toBe('capable');
     expect(config.summaryModel).toBe('fast');
     expect(config.summaryMaxTokens).toBe(1500);
     expect(config.summaryTargetRatio).toBe(0.65);
@@ -806,6 +807,17 @@ describe('parseConfig', () => {
   it('DISCOCLAW_CRON_EXEC_MODEL overrides cronExecModel default', () => {
     const { config } = parseConfig(env({ DISCOCLAW_CRON_EXEC_MODEL: 'fast' }));
     expect(config.cronExecModel).toBe('fast');
+  });
+
+  it('defaults planRunModel independently from RUNTIME_MODEL', () => {
+    const { config } = parseConfig(env({ RUNTIME_MODEL: 'deep' }));
+    expect(config.runtimeModel).toBe('deep');
+    expect(config.planRunModel).toBe('capable');
+  });
+
+  it('DISCOCLAW_PLAN_RUN_MODEL overrides the planRunModel default', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_PLAN_RUN_MODEL: 'deep' }));
+    expect(config.planRunModel).toBe('deep');
   });
 
   it('allows missing tasksForum when tasksEnabled (bootstrap will auto-create)', () => {

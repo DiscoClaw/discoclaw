@@ -150,6 +150,7 @@ const restrictChannelIds = cfg.restrictChannelIds;
 const primaryRuntimeName = cfg.primaryRuntime;
 const fastRuntimeName = cfg.fastRuntime;
 let runtimeModel = cfg.runtimeModel;
+let planRunModel = cfg.planRunModel;
 const runtimeTools = cfg.runtimeTools;
 const runtimeTimeoutMs = cfg.runtimeTimeoutMs;
 const fastModelDefault = (process.env.DISCOCLAW_FAST_MODEL ?? '').trim() || 'fast';
@@ -1004,6 +1005,10 @@ if (currentModelConfig['chat']) {
   runtimeModel = currentModelConfig['chat'];
   log.info({ runtimeModel }, 'models: chat model applied');
 }
+if (currentModelConfig['plan-run']) {
+  planRunModel = currentModelConfig['plan-run'];
+  log.info({ planRunModel }, 'models: plan-run model applied');
+}
 if (currentModelConfig['voice']) {
   voiceModelRef.model = currentModelConfig['voice'];
   log.info({ voiceModel: currentModelConfig['voice'] }, 'models: voice model applied');
@@ -1185,6 +1190,7 @@ const botParams = {
   groupsDir,
   useGroupDirCwd,
   runtimeModel,
+  planRunModel,
   runtimeTools,
   runtimeTimeoutMs,
   discordActionsEnabled,
@@ -1564,14 +1570,13 @@ if (taskCtx) {
   }
 
   if (planCommandsEnabled && discordActionsPlan) {
-    const planRunModel = currentModelConfig['plan-run'] ?? envModelDefaults['plan-run'] ?? cfg.planRunModel;
     botParams.planCtx = {
       plansDir,
       workspaceCwd,
       taskStore: effectiveTaskStore,
       log,
       runtime: limitedRuntime,
-      model: planRunModel,
+      model: botParams.planRunModel,
       phaseTimeoutMs: planPhaseTimeoutMs,
       maxAuditFixAttempts: planPhaseMaxAuditFixAttempts,
       onProgress: async (msg) => {

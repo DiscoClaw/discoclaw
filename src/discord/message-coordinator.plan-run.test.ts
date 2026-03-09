@@ -133,6 +133,7 @@ function makeParams() {
     groupsDir: '/tmp/workspace',
     useGroupDirCwd: false,
     runtimeModel: 'capable',
+    planRunModel: 'plan-model',
     runtimeTools: [],
     runtimeTimeoutMs: 30_000,
     discordActionsEnabled: false,
@@ -448,7 +449,7 @@ describe('message coordinator plan run phase-start posts', () => {
       expect(runNextPhase).toHaveBeenCalledWith(
         '/tmp/plans/plan-042-phases.md',
         '/tmp/plans/plan-042-test.md',
-        expect.any(Object),
+        expect.objectContaining({ model: 'plan-model' }),
         expect.any(Function),
         'phase-3',
       );
@@ -557,6 +558,7 @@ describe('message coordinator plan run phase-start posts', () => {
       );
       expect(planRunCalls).toHaveLength(1);
       const planCtx = planRunCalls[0][2];
+      expect(planCtx.model).toBe('plan-model');
       expect(planCtx.longRunWatchdog).toBe(watchdog);
       expect(planCtx.longRunStillRunningDelayMs).toBe(43210);
     });
@@ -611,6 +613,7 @@ describe('message coordinator plan run phase-start posts', () => {
         expect.objectContaining({
           plansDir: expect.any(String),
           workspaceCwd: expect.any(String),
+          model: 'plan-model',
         }),
       );
     });
@@ -653,6 +656,7 @@ describe('message coordinator plan run phase-start posts', () => {
         expect.objectContaining({
           plansDir: expect.any(String),
           workspaceCwd: expect.any(String),
+          model: 'plan-model',
         }),
       );
     });

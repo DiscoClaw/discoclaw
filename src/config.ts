@@ -671,7 +671,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const fastModel = parseTrimmedString(env, 'DISCOCLAW_FAST_MODEL') ?? 'fast';
   const runtimeModel = parseTrimmedString(env, 'RUNTIME_MODEL') ?? 'capable';
-  const planRunModel = parseTrimmedString(env, 'DISCOCLAW_PLAN_RUN_MODEL') ?? runtimeModel;
+  const planRunModel = parseTrimmedString(env, 'DISCOCLAW_PLAN_RUN_MODEL') ?? 'capable';
   const voiceModel = voiceModelRaw ?? runtimeModel;
 
   const tasksCwdOverride = parseTrimmedString(env, 'DISCOCLAW_TASKS_CWD');

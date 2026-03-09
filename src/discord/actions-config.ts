@@ -58,6 +58,7 @@ export type ConfigContext = {
 /** The subset of BotParams fields that modelSet/modelShow reads and mutates. */
 export type ConfigMutableParams = {
   runtimeModel: string;
+  planRunModel: string;
   summaryModel: string;
   runtime?: RuntimeAdapter;
   fastRuntime?: RuntimeAdapter;
@@ -156,6 +157,7 @@ export function executeConfigAction(
           break;
         }
         case 'plan-run':
+          bp.planRunModel = model;
           if (bp.planCtx) bp.planCtx.model = model;
           changes.push(`plan-run → ${model}`);
           break;
@@ -335,6 +337,7 @@ export function executeConfigAction(
             break;
           case 'plan-run':
             if (defaultModel === undefined) break;
+            bp.planRunModel = defaultModel;
             if (bp.planCtx) bp.planCtx.model = defaultModel;
             resetChanges.push(`plan-run → ${defaultModel}`);
             break;
@@ -429,7 +432,7 @@ export function executeConfigAction(
       const rows: [string, string, string, string][] = [
         ['runtime', runtimeName, `Active runtime adapter (${rid})`, ovr('chat')],
         ['chat', bp.runtimeModel, ROLE_DESCRIPTIONS.chat, ovr('chat')],
-        ['plan-run', bp.planCtx?.model ?? configCtx.envDefaults?.['plan-run'] ?? bp.runtimeModel, ROLE_DESCRIPTIONS['plan-run'], ovr('plan-run')],
+        ['plan-run', bp.planRunModel || bp.planCtx?.model || configCtx.envDefaults?.['plan-run'] || '', ROLE_DESCRIPTIONS['plan-run'], ovr('plan-run')],
         ['summary', bp.summaryModel, ROLE_DESCRIPTIONS.summary, ovr('summary') || ovr('fast')],
         ['forge-drafter', bp.forgeDrafterModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-drafter'], ovr('forge-drafter')],
         ['forge-auditor', bp.forgeAuditorModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-auditor'], ovr('forge-auditor')],
@@ -511,7 +514,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"chat","model":"sonnet"}</discord-action>
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
-- \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
+- \`role\` (required): One of \`chat\`, \`plan-run\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
 - \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` and \`voice\` roles, swaps the active runtime adapter independently), or \`default\` (for cron-exec only, to revert to the startup default for that role). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
 
 **Roles:**
