@@ -234,6 +234,7 @@ export type BotParams = {
   deferMaxDelaySeconds?: number;
   deferMaxConcurrent?: number;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
+  loopScheduler?: { list(): Array<{ running?: boolean }> };
   taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -1019,6 +1020,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           messageHistoryBudget: params.messageHistoryBudget,
           reactionHandlerEnabled: params.reactionHandlerEnabled,
           reactionRemoveHandlerEnabled: params.reactionRemoveHandlerEnabled,
+          loopActionsEnabled: params.discordActionsLoop ?? false,
           cronEnabled: Boolean(params.cronCtx),
           tasksEnabled: Boolean(params.taskCtx),
           tasksActive: Boolean(params.taskCtx),
@@ -1035,6 +1037,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           mode,
           botDisplayName: params.botDisplayName,
           deferScheduler: params.deferScheduler,
+          loopScheduler: params.loopScheduler,
         });
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
         return;

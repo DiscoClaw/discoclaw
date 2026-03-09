@@ -1,4 +1,5 @@
-// Action types that return data Claude likely wants to process (read-only queries).
+// Action types that return data Claude likely wants to process.
+// This includes read-only queries plus scheduler inspection actions like deferList/loopList.
 // When any of these succeed, the auto-follow-up loop re-invokes Claude with the results.
 export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   // Channels
@@ -32,9 +33,8 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'forgeStatus',
   // Voice
   'voiceStatus',
-  // Defer
+  // Scheduling
   'deferList',
-  // Loop
   'loopList',
   // Spawn
   'spawnAgent',

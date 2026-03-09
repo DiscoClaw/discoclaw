@@ -239,7 +239,7 @@ let voiceManager: VoiceConnectionManager | null = null;
 let audioPipeline: AudioPipelineManager | null = null;
 let voicePresenceHandler: VoicePresenceHandler | null = null;
 let deferSchedulerRef: DeferScheduler<DeferActionRequest, ActionContext> | null = null;
-let loopSchedulerRef: { cancelAll(): number } | null = null;
+let loopSchedulerRef: { cancelAll(): number; list(): Array<{ running?: boolean }> } | null = null;
 let longRunWatchdog: LongRunWatchdog | null = null;
 const memorySampler = new MemorySampler();
 globalMetrics.setMemorySampler(memorySampler);
@@ -278,6 +278,11 @@ const shutdown = async () => {
     const cancelled = loopSchedulerRef.cancelAll();
     if (cancelled > 0) {
       log.info({ cancelled }, 'shutdown:loop timers cancelled');
+      try {
+        await patchShutdownContext(pidLockDir, { cancelledLoops: cancelled });
+      } catch (err) {
+        log.warn({ err }, 'shutdown:failed to patch cancelledLoops');
+      }
     }
   }
 
@@ -1225,6 +1230,7 @@ const botParams = {
   deferMaxDelaySeconds: cfg.deferMaxDelaySeconds,
   deferMaxConcurrent: cfg.deferMaxConcurrent,
   deferScheduler: undefined as DeferScheduler<DeferActionRequest, ActionContext> | undefined,
+  loopScheduler: undefined as { list(): Array<{ running?: boolean }> } | undefined,
   taskCtx: undefined as TaskContext | undefined,
   cronCtx: undefined as CronContext | undefined,
   forgeCtx: undefined as ForgeContext | undefined,
@@ -1319,6 +1325,7 @@ const botParams = {
     messageHistoryBudget,
     reactionHandlerEnabled,
     reactionRemoveHandlerEnabled,
+    loopActionsEnabled: cfg.discordActionsLoop,
     cronEnabled,
     tasksEnabled,
     tasksActive: false,
@@ -1411,6 +1418,7 @@ if (discordActionsEnabled && cfg.discordActionsLoop) {
     },
     log,
   });
+  botParams.loopScheduler = loopSchedulerRef;
 }
 
 let client!: Awaited<ReturnType<typeof startDiscordBot>>['client'], status!: Awaited<ReturnType<typeof startDiscordBot>>['status'], system!: Awaited<ReturnType<typeof startDiscordBot>>['system'];
