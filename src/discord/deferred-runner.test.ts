@@ -709,6 +709,28 @@ describe('deferred-runner observability', () => {
     expect(flags.spawn).toBe(false);
   });
 
+  it('deferred runs do not expose loop actions even when loop support is enabled globally', async () => {
+    const { parseDiscordActions } = await import('./actions.js');
+    const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;
+    mockParse.mockClear();
+    mockParse.mockReturnValue({
+      actions: [],
+      cleanText: 'ok',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+
+    const opts = makeOpts({
+      state: { ...makeState(), discordActionsLoop: true },
+    });
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const flags = mockParse.mock.calls[0][1];
+    expect(flags.loop).toBeUndefined();
+  });
+
   it('spawnCtx is forwarded to executeDiscordActions subsystems', async () => {
     const { parseDiscordActions, executeDiscordActions } = await import('./actions.js');
     const mockParse = parseDiscordActions as ReturnType<typeof vi.fn>;

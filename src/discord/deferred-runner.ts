@@ -32,7 +32,6 @@ import {
   resolveEffectiveTools,
 } from './prompt-common.js';
 import type { InlinedContextSection } from './prompt-common.js';
-import { hasConfiguredLoopScheduler } from './actions-loop.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { globalMetrics } from '../observability/metrics.js';
@@ -60,7 +59,6 @@ type DeferredRunnerState = {
   discordActionsForge?: boolean;
   discordActionsPlan?: boolean;
   discordActionsConfig?: boolean;
-  discordActionsLoop?: boolean;
   discordActionsImagegen?: boolean;
   discordActionsVoice?: boolean;
   discordActionsSpawn?: boolean;
@@ -153,7 +151,6 @@ function buildDeferredActionFlags(state: DeferredRunnerState, depth: number, max
     memory: false,
     config: Boolean(state.discordActionsConfig),
     defer: depth < maxDepth,
-    loop: Boolean(state.discordActionsLoop) && hasConfiguredLoopScheduler(),
     imagegen: Boolean(state.discordActionsImagegen),
     voice: Boolean(state.discordActionsVoice),
     spawn: Boolean(state.discordActionsSpawn),
