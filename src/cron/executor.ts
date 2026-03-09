@@ -73,6 +73,8 @@ async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string):
 
 const MAX_CHAIN_DEPTH = 10;
 const CRON_REQUESTER_DENY_ALL_PREFIX = '__cron_requester_deny_all__';
+const activeCronRunKeys = new Set<string>();
+const queuedCronRerunKeys = new Set<string>();
 
 type CronActionRequester = {
   requesterId: string;
@@ -157,6 +159,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
   let cancelRequested = false;
   const cancelReason = 'Run canceled by cron control action';
   let runtimeIterator: AsyncIterator<EngineEvent> | undefined;
+  const runKey = job.cronId || job.id;
   const requestCancel = () => {
     cancelRequested = true;
     if (runtimeIterator?.return) {
@@ -167,7 +170,12 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
   // Overlap guard: skip if previous run is still going (in-memory, no lock touched).
   if (job.running) {
     metrics.increment('cron.run.skipped');
-    ctx.log?.warn({ jobId: job.id, name: job.name }, 'cron:skip (previous run still active)');
+    if (activeCronRunKeys.has(runKey)) {
+      queuedCronRerunKeys.add(runKey);
+      ctx.log?.warn({ jobId: job.id, name: job.name, cronId: job.cronId }, 'cron:skip (previous run still active; queued rerun)');
+    } else {
+      ctx.log?.warn({ jobId: job.id, name: job.name, cronId: job.cronId }, 'cron:skip (previous run still active)');
+    }
     return;
   }
 
@@ -184,6 +192,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
   }
 
   job.running = true;
+  activeCronRunKeys.add(runKey);
   ctx.runControl?.register(job.id, requestCancel);
 
   try {
@@ -617,12 +626,14 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     await recordError(ctx, job, msg);
   } finally {
+    const shouldRerun = queuedCronRerunKeys.delete(runKey);
     if (lockToken && ctx.lockDir && job.cronId) {
       await releaseCronLock(ctx.lockDir, job.cronId, lockToken).catch((err) => {
         ctx.log?.warn({ err, jobId: job.id, cronId: job.cronId }, 'cron:exec lock release failed');
       });
     }
     ctx.runControl?.clear(job.id, requestCancel);
+    activeCronRunKeys.delete(runKey);
     job.running = false;
 
     // Update bot-owned status message.
@@ -635,6 +646,15 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       } catch (statusErr) {
         ctx.log?.warn({ err: statusErr, jobId: job.id }, 'cron:exec status message update failed');
       }
+    }
+
+    if (shouldRerun) {
+      ctx.log?.info({ jobId: job.id, cronId: job.cronId }, 'cron:rerun firing queued overlap');
+      queueMicrotask(() => {
+        void executeCronJob(job, ctx).catch((err) => {
+          ctx.log?.warn({ err, jobId: job.id, cronId: job.cronId }, 'cron:rerun queued overlap failed');
+        });
+      });
     }
   }
 }

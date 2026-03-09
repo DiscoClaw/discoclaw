@@ -186,6 +186,66 @@ describe('executeCronJob', () => {
     expect(ctx.log?.warn).toHaveBeenCalled();
   });
 
+  it('coalesces overlapping invokes into a single queued rerun', async () => {
+    let invokeCount = 0;
+    let markFirstRunStarted!: () => void;
+    let allowFirstRunToFinish!: () => void;
+    let finishSecondRun!: () => void;
+    const firstRunStarted = new Promise<void>((resolve) => {
+      markFirstRunStarted = resolve;
+    });
+    const firstRunRelease = new Promise<void>((resolve) => {
+      allowFirstRunToFinish = resolve;
+    });
+    const secondRunFinished = new Promise<void>((resolve) => {
+      finishSecondRun = resolve;
+    });
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        invokeCount += 1;
+        const runNumber = invokeCount;
+        if (runNumber === 1) {
+          markFirstRunStarted();
+          await firstRunRelease;
+        }
+        yield { type: 'text_final', text: `run ${runNumber}` };
+        yield { type: 'done' };
+        if (runNumber === 2) {
+          finishSecondRun();
+        }
+      },
+    };
+
+    const ctx = makeCtx({ runtime });
+    const job = makeJob();
+
+    const firstRun = executeCronJob(job, ctx);
+    await firstRunStarted;
+
+    await executeCronJob(job, ctx);
+    await executeCronJob(job, ctx);
+    expect(invokeCount).toBe(1);
+
+    allowFirstRunToFinish();
+    await firstRun;
+    await secondRunFinished;
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    for (let i = 0; i < 20 && channel.send.mock.calls.length < 2; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(invokeCount).toBe(2);
+    expect(channel.send).toHaveBeenCalledTimes(2);
+    expect(ctx.log?.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: job.id, cronId: job.cronId }),
+      'cron:skip (previous run still active; queued rerun)',
+    );
+  });
+
   it('handles runtime error gracefully', async () => {
     const status = {
       online: vi.fn(),
