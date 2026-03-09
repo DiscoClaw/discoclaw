@@ -2354,7 +2354,6 @@ if (cfg.webhookEnabled && savedCronExecCtx) {
           configPath: cfg.webhookConfigPath,
           port: cfg.webhookPort,
           host: webhookHost,
-          dashboardEnabled: false,
           guildId: resolvedGuildId,
           executorCtx: webhookExecCtx,
           log,

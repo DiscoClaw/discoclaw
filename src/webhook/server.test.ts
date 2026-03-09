@@ -6,7 +6,6 @@ import path from 'node:path';
 import os from 'node:os';
 import { startWebhookServer, loadWebhookConfig, type WebhookConfig, type WebhookServerOptions } from './server.js';
 import { executeCronJob } from '../cron/executor.js';
-import type { DoctorContext, DoctorReport } from '../health/config-doctor.js';
 import { sanitizeExternalContent } from '../sanitize-external.js';
 
 vi.mock('../cron/executor.js', () => ({
@@ -35,11 +34,6 @@ type Response = {
   body: { ok: boolean; message: string };
 };
 
-type JsonResponse<T> = {
-  status: number;
-  body: T;
-};
-
 function makeRequest(port: number, opts: RequestOptions = {}): Promise<Response> {
   return new Promise((resolve, reject) => {
     const rawBody = opts.body ?? '';
@@ -63,42 +57,6 @@ function makeRequest(port: number, opts: RequestOptions = {}): Promise<Response>
           const text = Buffer.concat(chunks).toString('utf8');
           try {
             resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) });
-          } catch {
-            reject(new Error(`Failed to parse response body: ${text}`));
-          }
-        });
-        res.on('error', reject);
-      },
-    );
-    req.on('error', reject);
-    if (bodyBuf.length) req.write(bodyBuf);
-    req.end();
-  });
-}
-
-function makeJsonRequest<T>(port: number, opts: RequestOptions = {}): Promise<JsonResponse<T>> {
-  return new Promise((resolve, reject) => {
-    const rawBody = opts.body ?? '';
-    const bodyBuf = typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody;
-    const req = http.request(
-      {
-        hostname: '127.0.0.1',
-        port,
-        path: opts.path ?? '/',
-        method: opts.method ?? 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': bodyBuf.length,
-          ...opts.headers,
-        },
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => {
-          const text = Buffer.concat(chunks).toString('utf8');
-          try {
-            resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) as T });
           } catch {
             reject(new Error(`Failed to parse response body: ${text}`));
           }
@@ -217,162 +175,10 @@ describe('startWebhookServer HTTP routing', () => {
     expect(res.status).toBe(404);
   });
 
-  it('keeps the dashboard unmounted when dashboardEnabled is false', async () => {
-    const configPath = path.join(tmpDir, 'webhooks-dashboard-off.json');
-    await fs.writeFile(configPath, JSON.stringify(config), 'utf8');
-    const localHandle = await startWebhookServer({
-      ...baseOpts(),
-      configPath,
-      port: 0,
-      dashboardEnabled: false,
-    });
-    const localPort = (localHandle.server.address() as { port: number }).port;
-
-    try {
-      const res = await makeRequest(localPort, { path: '/dashboard' });
-      expect(res.status).toBe(404);
-    } finally {
-      await localHandle.close();
-    }
-  });
-
-  it('applies doctor fixes from the mounted dashboard API and returns refreshed state', async () => {
-    const initialReport: DoctorReport = {
-      installMode: 'source',
-      findings: [
-        {
-          id: 'deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL',
-          severity: 'warn',
-          message: 'Legacy env var is present.',
-          recommendation: 'Rename it.',
-          autoFixable: true,
-        },
-      ],
-      configPaths: {
-        cwd: '/repo',
-        env: '/repo/.env',
-        dataDir: '/repo/data',
-        models: '/repo/data/models.json',
-        runtimeOverrides: '/repo/data/runtime-overrides.json',
-      },
-    };
-    const refreshedReport: DoctorReport = {
-      ...initialReport,
-      findings: [],
-    };
-    let inspectCalls = 0;
-    const inspect = vi.fn(async () => {
-      inspectCalls += 1;
-      return inspectCalls === 1 ? initialReport : refreshedReport;
-    });
-    const applyFixes = vi.fn(async () => ({
-      applied: ['deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL'],
-      skipped: [],
-      errors: [],
-    }));
-    const loadDoctorContext = vi.fn(async (): Promise<DoctorContext> => ({
-      cwd: '/repo',
-      installMode: 'source',
-      env: {
-        DISCOCLAW_SERVICE_NAME: 'discoclaw-beta',
-        PRIMARY_RUNTIME: 'claude',
-      },
-      explicitEnvKeys: new Set<string>(),
-      configPaths: initialReport.configPaths,
-      defaultDataDir: '/repo/data',
-      models: { chat: 'opus' },
-      modelsFile: { exists: true, values: { chat: 'opus' } },
-      runtimeOverrides: {},
-      runtimeOverridesFile: { exists: true, unknownKeys: [], raw: {}, values: {} },
-      envDefaults: {
-        chat: 'capable',
-        fast: 'fast',
-        summary: 'fast',
-        cron: 'fast',
-        'cron-exec': 'capable',
-        voice: 'capable',
-        'forge-drafter': 'capable',
-        'forge-auditor': 'deep',
-      },
-    }));
-    const dashboardHandle = await startWebhookServer({
-      ...baseOpts(),
-      configPath: path.join(tmpDir, 'webhooks.json'),
-      port: 0,
-      deps: {
-        inspect,
-        applyFixes,
-        loadDoctorContext,
-        saveModelConfig: vi.fn(async () => undefined),
-        saveOverrides: vi.fn(async () => undefined),
-        runCommand: vi.fn(async (_cmd: string, args: string[]) => {
-          if (args[1] === 'status') {
-            return {
-              stdout: '   Active: active (running) since today\n',
-              stderr: '',
-              exitCode: 0,
-            };
-          }
-          return {
-            stdout: '',
-            stderr: '',
-            exitCode: 0,
-          };
-        }),
-        getLocalVersion: vi.fn(() => '1.2.3'),
-        isNpmManaged: vi.fn(async () => false),
-        getGitHash: vi.fn(async () => 'abc1234'),
-        platform: 'linux',
-        homeDir: '/Users/david',
-        getUid: () => 501,
-      },
-    });
-    const dashboardPort = (dashboardHandle.server.address() as { port: number }).port;
-
-    try {
-      const response = await makeJsonRequest<{
-        ok: true;
-        message: string;
-        summary: string;
-        counts: Record<'error' | 'warn' | 'info', number>;
-        result: { applied: string[]; skipped: Array<{ id: string; reason: string }>; errors: Array<{ id: string; message: string }> };
-        report: { findings: Array<{ id: string }> };
-        snapshot: { doctorSummary: string; serviceName: string };
-      }>(dashboardPort, {
-        path: '/dashboard/api/doctor/fix',
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-
-      expect(response.status).toBe(200);
-      expect(response.body.message).toBe('Doctor fixes finished. Applied=1 Skipped=0 Errors=0.');
-      expect(response.body.summary).toBe('0 findings (errors=0, warnings=0, info=0)');
-      expect(response.body.counts).toEqual({ error: 0, warn: 0, info: 0 });
-      expect(response.body.result.applied).toEqual(['deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL']);
-      expect(response.body.report.findings).toEqual([]);
-      expect(response.body.snapshot.doctorSummary).toBe('0 findings (errors=0, warnings=0, info=0)');
-      expect(response.body.snapshot.serviceName).toBe('discoclaw-beta');
-      expect(applyFixes).toHaveBeenCalledWith(initialReport, { cwd: process.cwd(), env: process.env });
-    } finally {
-      await dashboardHandle.close();
-    }
-  });
-
-  it('rejects cross-origin mutation requests on the mounted dashboard API', async () => {
-    const response = await makeJsonRequest<{ ok: boolean; message: string }>(port, {
-      path: '/dashboard/api/doctor/fix',
-      method: 'POST',
-      body: JSON.stringify({}),
-      headers: {
-        Origin: 'http://evil.example',
-      },
-    });
-
-    expect(response.status).toBe(403);
-    expect(response.body).toEqual({
-      ok: false,
-      message: 'Cross-origin mutation requests are not allowed.',
-    });
+  it('returns 404 for dashboard paths', async () => {
+    const res = await makeRequest(port, { path: '/dashboard/api/doctor/fix', method: 'POST', body: '{}' });
+    expect(res.status).toBe(404);
+    expect(res.body.ok).toBe(false);
   });
 
   it('returns 404 for /webhook/ with no source segment', async () => {
