@@ -168,7 +168,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | MCP server detection (startup health logging) | `src/mcp-detect.ts`, `src/mcp-detect.test.ts` | **done** |
 | Pino structured logging | throughout | **done** |
 | Per-run trace store (structured invoke/tool/action/error/outcome events keyed by `traceId`; currently instrumented for message flow with operator inspection via `!trace`) | `src/observability/trace-store.ts`, `src/observability/trace-store.test.ts`, `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
-| Admin dashboard (terminal UI + localhost web UI for service state, config doctor, model overrides, and service actions) | `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
+| Admin dashboard (terminal UI + loopback-by-default web UI for service state, config doctor, model overrides, and service actions; supports private Tailscale access through trusted host allowlisting) | `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
 | Metrics | — | *stub — not started* |
 
 ## 13. Ops & Deploy
@@ -215,6 +215,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Prompt ordering (primacy/recency zone optimization) | `docs/prompt-ordering.md` | **done** |
 | Configuration reference (all env vars) | `docs/configuration.md` | **done** |
 | Canonical runtime/model switching operator guide (startup defaults, live overrides, OpenRouter tier override workflow) | `docs/runtime-switching.md` | **done** |
+| Dashboard Tailscale access guide | `docs/dashboard-tailscale.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | **done** |
 
@@ -287,7 +288,7 @@ Config: `DISCOCLAW_WEBHOOK_ENABLED`, `DISCOCLAW_WEBHOOK_PORT`, `DISCOCLAW_WEBHOO
 
 | Command | Description | File(s) | Status |
 |---------|-------------|---------|--------|
-| `discoclaw dashboard` | Launches the operator dashboard for common admin tasks: inspect service/runtime state, review config doctor findings, change model assignments, and trigger service actions through the local web UI/HTTP server | `src/cli/index.ts`, `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
+| `discoclaw dashboard` | Launches the operator dashboard for common admin tasks: inspect service/runtime state, review config doctor findings, change model assignments, and trigger service actions through the loopback-by-default web UI/HTTP server, with optional trusted-host Tailscale access | `src/cli/index.ts`, `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
 
 ### Configuration
 
