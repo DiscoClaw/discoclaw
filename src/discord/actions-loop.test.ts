@@ -77,7 +77,7 @@ function makeContext(overrides: Partial<ActionContext> = {}): ActionContext {
       members: {
         fetch: vi.fn(async () => requesterMember),
       },
-    } as Guild,
+    } as unknown as Guild,
     client: { token: 'dummy' } as Client,
     channelId: 'origin-thread-1',
     messageId: 'message-1',
