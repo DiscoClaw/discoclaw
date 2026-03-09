@@ -29,12 +29,20 @@ import {
   extractObjective,
   resolveProjectCwd,
   resolveContextFilePath,
+  serializePhasesStateJson,
+  deserializePhasesStateJson,
   writePhasesFile,
   readPhasesFile,
   executePhase,
   runNextPhase,
 } from './plan-manager.js';
-import type { PlanPhases, PlanPhase, PhaseExecutionOpts, PlanRunEvent } from './plan-manager.js';
+import type {
+  PlanPhases,
+  PlanPhase,
+  PhaseExecutionOpts,
+  PlanRunEvent,
+  VerificationEvidence,
+} from './plan-manager.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -549,6 +557,12 @@ describe('decomposePlan', () => {
 // ---------------------------------------------------------------------------
 
 describe('serialization', () => {
+  const sampleEvidence: VerificationEvidence[] = [
+    { kind: 'build', status: 'pass', command: 'pnpm build' },
+    { kind: 'test', status: 'pass', command: 'pnpm test', summary: '14 passed' },
+    { kind: 'audit', status: 'fail', reason: 'Blocking findings remain' },
+  ];
+
   it('serializePhases → deserializePhases round-trip', () => {
     const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
     const serialized = serializePhases(phases);
@@ -610,6 +624,38 @@ describe('serialization', () => {
     const deserialized = deserializePhases(serialized);
     const roundTripAudit = deserialized.phases.find((p) => p.id === auditPhase.id);
     expect(roundTripAudit?.auditConvergence).toEqual(auditPhase.auditConvergence);
+  });
+
+  it('evidence round-trips via markdown serialization', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    phases.phases[0]!.evidence = sampleEvidence;
+
+    const serialized = serializePhases(phases);
+    const deserialized = deserializePhases(serialized);
+    expect(deserialized.phases[0]!.evidence).toEqual(sampleEvidence);
+  });
+
+  it('evidence round-trips via json serialization', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    phases.phases[0]!.evidence = sampleEvidence;
+
+    const serialized = serializePhasesStateJson(phases);
+    const deserialized = deserializePhasesStateJson(serialized);
+    expect(deserialized.phases[0]!.evidence).toEqual(sampleEvidence);
+  });
+
+  it('migrates v1 phases json to v2 with evidence defaulting to undefined', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    const v1Blob = JSON.stringify({
+      version: 1,
+      ...phases,
+    }, null, 2);
+
+    const migrated = deserializePhasesStateJson(v1Blob);
+    expect(migrated.phases).toHaveLength(phases.phases.length);
+    for (const phase of migrated.phases) {
+      expect(phase.evidence).toBeUndefined();
+    }
   });
 
   it('throws on malformed file', () => {
@@ -927,6 +973,170 @@ describe('resequenceKeepingDone', () => {
     expect(resequenced.droppedDone.some((d) => d.phaseId === 'phase-30')).toBe(true);
     expect(resequenced.dependencyErrors.some((msg) => msg.includes('phase-30'))).toBe(true);
   });
+
+  it('preserves evidence for matched done phases', () => {
+    const evidence: VerificationEvidence[] = [
+      { kind: 'build', status: 'pass', command: 'pnpm build' },
+      { kind: 'test', status: 'pass', command: 'pnpm test', summary: '14 passed' },
+    ];
+
+    const previous: PlanPhases = {
+      planId: 'plan-001',
+      planFile: 'test.md',
+      planContentHash: 'aaa',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'Implement alpha.ts',
+          kind: 'implement',
+          description: 'alpha',
+          status: 'done',
+          dependsOn: [],
+          contextFiles: ['src/alpha.ts'],
+          evidence,
+        },
+      ],
+    };
+
+    const regenerated: PlanPhases = {
+      ...previous,
+      planContentHash: 'bbb',
+      phases: [
+        {
+          id: 'phase-10',
+          title: 'Implement alpha.ts',
+          kind: 'implement',
+          description: 'alpha',
+          status: 'pending',
+          dependsOn: [],
+          contextFiles: ['src/alpha.ts'],
+        },
+      ],
+    };
+
+    const resequenced = resequenceKeepingDone(previous, regenerated);
+    const kept = resequenced.phases.phases[0]!;
+    expect(kept.status).toBe('done');
+    expect(kept.evidence).toEqual(evidence);
+    expect(kept.evidence).not.toBe(evidence);
+  });
+
+  it('clears evidence when a kept done phase is demoted because a dependency is missing', () => {
+    const previous: PlanPhases = {
+      planId: 'plan-001',
+      planFile: 'test.md',
+      planContentHash: 'aaa',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'Implement alpha.ts',
+          kind: 'implement',
+          description: 'alpha',
+          status: 'done',
+          dependsOn: [],
+          contextFiles: ['src/alpha.ts'],
+        },
+        {
+          id: 'phase-2',
+          title: 'Verify alpha.ts',
+          kind: 'audit',
+          description: 'verify',
+          status: 'done',
+          dependsOn: ['phase-1'],
+          contextFiles: ['src/alpha.ts'],
+          evidence: [{ kind: 'audit', status: 'pass', summary: 'Ready to approve' }],
+          output: 'done audit',
+        },
+      ],
+    };
+
+    const regenerated: PlanPhases = {
+      ...previous,
+      planContentHash: 'bbb',
+      phases: [
+        {
+          id: 'phase-10',
+          title: 'Verify alpha.ts',
+          kind: 'audit',
+          description: 'verify',
+          status: 'pending',
+          dependsOn: ['phase-999'],
+          contextFiles: ['src/alpha.ts'],
+        },
+      ],
+    };
+
+    const resequenced = resequenceKeepingDone(previous, regenerated);
+    const phase = resequenced.phases.phases[0]!;
+    expect(phase.status).toBe('pending');
+    expect(phase.evidence).toBeUndefined();
+  });
+
+  it('clears evidence when a kept done phase is demoted because a dependency is non-terminal', () => {
+    const previous: PlanPhases = {
+      planId: 'plan-001',
+      planFile: 'test.md',
+      planContentHash: 'aaa',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      phases: [
+        {
+          id: 'phase-1',
+          title: 'Implement alpha.ts',
+          kind: 'implement',
+          description: 'alpha',
+          status: 'done',
+          dependsOn: [],
+          contextFiles: ['src/alpha.ts'],
+        },
+        {
+          id: 'phase-2',
+          title: 'Verify alpha.ts',
+          kind: 'audit',
+          description: 'verify',
+          status: 'done',
+          dependsOn: ['phase-1'],
+          contextFiles: ['src/alpha.ts'],
+          evidence: [{ kind: 'audit', status: 'fail', reason: 'Blocking findings remain' }],
+          output: 'done audit',
+        },
+      ],
+    };
+
+    const regenerated: PlanPhases = {
+      ...previous,
+      planContentHash: 'bbb',
+      phases: [
+        {
+          id: 'phase-10',
+          title: 'Implement alpha.ts',
+          kind: 'implement',
+          description: 'alpha changed',
+          status: 'pending',
+          dependsOn: [],
+          contextFiles: ['src/alpha.ts'],
+        },
+        {
+          id: 'phase-20',
+          title: 'Verify alpha.ts',
+          kind: 'audit',
+          description: 'verify',
+          status: 'pending',
+          dependsOn: ['phase-10'],
+          contextFiles: ['src/alpha.ts'],
+        },
+      ],
+    };
+
+    const resequenced = resequenceKeepingDone(previous, regenerated);
+    const phase = resequenced.phases.phases.find((p) => p.id === 'phase-20')!;
+    expect(phase.status).toBe('pending');
+    expect(phase.evidence).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1216,7 +1426,7 @@ describe('writePhasesFile', () => {
     const content = fsSync.readFileSync(filePath, 'utf-8');
     expect(content).toContain('plan-011');
     const json = JSON.parse(fsSync.readFileSync(jsonPath, 'utf-8'));
-    expect(json.version).toBe(1);
+    expect(json.version).toBe(2);
     expect(json.planId).toBe('plan-011');
   });
 
@@ -1255,7 +1465,65 @@ describe('writePhasesFile', () => {
 
     const backfilled = JSON.parse(fsSync.readFileSync(jsonPath, 'utf-8'));
     expect(backfilled.planId).toBe('plan-011');
-    expect(backfilled.version).toBe(1);
+    expect(backfilled.version).toBe(2);
+  });
+
+  it('readPhasesFile upgrades an on-disk v1 json file with evidence defaulting to undefined', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'test.md');
+    const filePath = path.join(tmpDir, 'phases-v1.md');
+    const jsonPath = path.join(tmpDir, 'phases-v1.json');
+
+    fsSync.writeFileSync(filePath, serializePhases(phases), 'utf-8');
+    fsSync.writeFileSync(jsonPath, JSON.stringify({
+      version: 1,
+      ...phases,
+    }, null, 2), 'utf-8');
+
+    const read = readPhasesFile(filePath);
+    for (const phase of read.phases) {
+      expect(phase.evidence).toBeUndefined();
+    }
+  });
+
+  it('readPhasesFile falls back to markdown when persisted json evidence is malformed', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'test.md');
+    const filePath = path.join(tmpDir, 'phases-malformed.md');
+    const jsonPath = path.join(tmpDir, 'phases-malformed.json');
+    writePhasesFile(filePath, phases);
+
+    const malformedCases = [
+      {
+        label: 'missing kind',
+        mutate: (json: any) => {
+          json.phases[0].evidence = [{ status: 'pass' }];
+        },
+      },
+      {
+        label: 'invalid status',
+        mutate: (json: any) => {
+          json.phases[0].evidence = [{ kind: 'build', status: 'maybe' }];
+        },
+      },
+      {
+        label: 'non-array value',
+        mutate: (json: any) => {
+          json.phases[0].evidence = { kind: 'build', status: 'pass' };
+        },
+      },
+    ];
+
+    for (const testCase of malformedCases) {
+      const json = JSON.parse(fsSync.readFileSync(jsonPath, 'utf-8'));
+      testCase.mutate(json);
+      fsSync.writeFileSync(jsonPath, JSON.stringify(json, null, 2) + '\n', 'utf-8');
+
+      expect(() => deserializePhasesStateJson(fsSync.readFileSync(jsonPath, 'utf-8')))
+        .toThrow();
+
+      const read = readPhasesFile(filePath);
+      expect(read.planId).toBe(phases.planId);
+      expect(read.phases[0]!.evidence).toBeUndefined();
+    }
   });
 });
 
@@ -3254,5 +3522,25 @@ describe('buildPostRunSummary', () => {
     expect(summary).toContain('[!]');
     expect(summary).toContain('[-]');
     expect(summary).toContain('abc1234');
+  });
+
+  it('appends compact evidence summaries when present', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          evidence: [
+            { kind: 'build', status: 'pass', command: 'pnpm build' },
+            { kind: 'test', status: 'pass', command: 'pnpm test', summary: '14 passed' },
+            { kind: 'audit', status: 'fail', reason: 'Blocking findings remain' },
+          ],
+        },
+      ],
+    });
+    const summary = buildPostRunSummary(phases);
+    expect(summary).toContain('build: pass');
+    expect(summary).toContain('test: pass (14 passed)');
+    expect(summary).toContain('audit: fail (Blocking findings remain)');
   });
 });

@@ -37,6 +37,17 @@ export type AuditConvergenceState = {
   blockedAt?: string;
 };
 
+export type VerificationEvidenceKind = 'build' | 'test' | 'audit';
+export type VerificationEvidenceStatus = 'pass' | 'fail';
+
+export type VerificationEvidence = {
+  kind: VerificationEvidenceKind;
+  status: VerificationEvidenceStatus;
+  command?: string;
+  summary?: string;
+  reason?: string;
+};
+
 export type PlanPhase = {
   id: string;
   title: string;
@@ -52,6 +63,7 @@ export type PlanPhase = {
   modifiedFiles?: string[];
   failureHashes?: Record<string, string>;
   auditConvergence?: AuditConvergenceState;
+  evidence?: VerificationEvidence[];
 };
 
 export type PlanPhases = {
@@ -63,8 +75,15 @@ export type PlanPhases = {
   updatedAt: string;
 };
 
-export type PlanPhasesStateV1 = PlanPhases & {
+type PlanPhaseStateV1 = Omit<PlanPhase, 'evidence'>;
+
+export type PlanPhasesStateV1 = Omit<PlanPhases, 'phases'> & {
   version: 1;
+  phases: PlanPhaseStateV1[];
+};
+
+export type PlanPhasesStateV2 = PlanPhases & {
+  version: 2;
 };
 
 export type PlanRunEvent =
@@ -133,7 +152,9 @@ function isRolloutPathMissingError(error?: string): boolean {
 
 const VALID_STATUSES: Set<string> = new Set(['pending', 'in-progress', 'done', 'failed', 'skipped']);
 const VALID_KINDS: Set<string> = new Set(['implement', 'read', 'audit']);
-const PHASES_STATE_VERSION = 1;
+const VALID_EVIDENCE_KINDS: Set<string> = new Set(['build', 'test', 'audit']);
+const VALID_EVIDENCE_STATUSES: Set<string> = new Set(['pass', 'fail']);
+const PHASES_STATE_VERSION = 2;
 const AUDIT_CONVERGENCE_REPEAT_LIMIT = 2;
 const NON_TERMINAL_PROGRESS_LINE_RE = /^[ \t]*\[progress\].*(?:\r?\n|$)/gim;
 
@@ -583,6 +604,9 @@ export function serializePhases(phases: PlanPhases): string {
     if (phase.auditConvergence) {
       lines.push(`**Audit convergence:** ${JSON.stringify(phase.auditConvergence)}`);
     }
+    if (phase.evidence) {
+      lines.push(`**Evidence:** ${JSON.stringify(phase.evidence)}`);
+    }
     lines.push('');
     lines.push(phase.description);
 
@@ -645,6 +669,7 @@ export function deserializePhases(content: string): PlanPhases {
     const modifiedMatch = section.match(/^\*\*Modified files:\*\*\s*(.+)$/m);
     const failureHashesMatch = section.match(/^\*\*Failure hashes:\*\*\s*(.+)$/m);
     const auditConvergenceMatch = section.match(/^\*\*Audit convergence:\*\*\s*(.+)$/m);
+    const evidenceMatch = section.match(/^\*\*Evidence:\*\*\s*(.+)$/m);
     const outputMatch = section.match(/^\*\*Output:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Error|Change spec):\*\*|\n---|\n$)/m);
     const errorMatch = section.match(/^\*\*Error:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Output|Change spec):\*\*|\n---|\n$)/m);
     const changeSpecMatch = section.match(/^\*\*Change spec:\*\*\n([\s\S]*?)(?=\n\*\*(?:Output|Error):\*\*|\n---|\n$)/m);
@@ -675,7 +700,7 @@ export function deserializePhases(content: string): PlanPhases {
     if (metadataEnd !== -1) {
       const afterMetadata = section.slice(metadataEnd + 2);
       // Description is everything until the first **field or ---
-      const descEnd = afterMetadata.search(/^\*\*(Change spec|Output|Error|Modified files|Failure hashes|Audit convergence):\*\*/m);
+      const descEnd = afterMetadata.search(/^\*\*(Change spec|Output|Error|Modified files|Failure hashes|Audit convergence|Evidence):\*\*/m);
       const dashEnd = afterMetadata.indexOf('\n---');
       const cutoff = descEnd >= 0 ? descEnd : (dashEnd >= 0 ? dashEnd : afterMetadata.length);
       description = afterMetadata.slice(0, cutoff).trim();
@@ -714,6 +739,17 @@ export function deserializePhases(content: string): PlanPhases {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(`Malformed auditConvergence in ${id}: ${msg}`);
+      }
+    }
+    if (evidenceMatch) {
+      try {
+        phase.evidence = asEvidenceArray(
+          JSON.parse(evidenceMatch[1]!),
+          `evidence in ${id}`,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Malformed evidence in ${id}: ${msg}`);
       }
     }
 
@@ -879,6 +915,7 @@ function clonePlanPhase(phase: PlanPhase): PlanPhase {
     contextFiles: [...phase.contextFiles],
     modifiedFiles: phase.modifiedFiles ? [...phase.modifiedFiles] : undefined,
     failureHashes: phase.failureHashes ? { ...phase.failureHashes } : undefined,
+    evidence: phase.evidence ? phase.evidence.map((entry) => ({ ...entry })) : undefined,
     auditConvergence: phase.auditConvergence
       ? {
           ...phase.auditConvergence,
@@ -929,6 +966,7 @@ export function resequenceKeepingDone(
     phase.gitCommit = matched.gitCommit;
     phase.modifiedFiles = matched.modifiedFiles ? [...matched.modifiedFiles] : undefined;
     phase.failureHashes = matched.failureHashes ? { ...matched.failureHashes } : undefined;
+    phase.evidence = matched.evidence ? matched.evidence.map((entry) => ({ ...entry })) : undefined;
     phase.auditConvergence = matched.auditConvergence
       ? {
           ...matched.auditConvergence,
@@ -964,6 +1002,7 @@ export function resequenceKeepingDone(
         phase.gitCommit = undefined;
         phase.modifiedFiles = undefined;
         phase.failureHashes = undefined;
+        phase.evidence = undefined;
         phase.auditConvergence = undefined;
         break;
       }
@@ -980,6 +1019,7 @@ export function resequenceKeepingDone(
         phase.gitCommit = undefined;
         phase.modifiedFiles = undefined;
         phase.failureHashes = undefined;
+        phase.evidence = undefined;
         phase.auditConvergence = undefined;
         break;
       }
@@ -1200,8 +1240,10 @@ export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): stri
 
     let line = `${indicator} **${phase.id}:** ${phase.title}${commit}${fileCount}`;
 
-    // For audit phases, append a one-line verdict extracted from output
-    if (phase.kind === 'audit' && phase.output) {
+    if (phase.evidence && phase.evidence.length > 0) {
+      line += ` — ${phase.evidence.map(formatVerificationEvidence).join(' · ')}`;
+    } else if (phase.kind === 'audit' && phase.output) {
+      // For audit phases, append a one-line verdict extracted from output
       const verdictMatch = phase.output.match(/\*\*Verdict:\*\*\s*(.+)/);
       if (verdictMatch) {
         line += ` — ${verdictMatch[1]!.trim()}`;
@@ -1507,8 +1549,8 @@ function writeTextAtomically(filePath: string, content: string): void {
   }
 }
 
-function serializePhasesStateJson(phases: PlanPhases): string {
-  const state: PlanPhasesStateV1 = {
+export function serializePhasesStateJson(phases: PlanPhases): string {
+  const state: PlanPhasesStateV2 = {
     version: PHASES_STATE_VERSION,
     ...phases,
   };
@@ -1572,7 +1614,74 @@ function asAuditConvergence(value: unknown, field: string): AuditConvergenceStat
   return parsed;
 }
 
-function deserializePhasesStateJson(raw: string): PlanPhases {
+function asEvidenceArray(value: unknown, field: string): VerificationEvidence[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Malformed phases json: ${field} must be VerificationEvidence[]`);
+  }
+
+  return value.map((entry, idx) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`Malformed phases json: ${field}[${idx}] must be an object`);
+    }
+    const obj = entry as Record<string, unknown>;
+    const kind = asString(obj.kind, `${field}[${idx}].kind`);
+    const status = asString(obj.status, `${field}[${idx}].status`);
+    if (!VALID_EVIDENCE_KINDS.has(kind)) {
+      throw new Error(`Unknown verification evidence kind: '${kind}' in ${field}[${idx}]`);
+    }
+    if (!VALID_EVIDENCE_STATUSES.has(status)) {
+      throw new Error(`Unknown verification evidence status: '${status}' in ${field}[${idx}]`);
+    }
+
+    const parsed: VerificationEvidence = {
+      kind: kind as VerificationEvidenceKind,
+      status: status as VerificationEvidenceStatus,
+    };
+    if (typeof obj.command === 'string') parsed.command = obj.command;
+    if (typeof obj.summary === 'string') parsed.summary = obj.summary;
+    if (typeof obj.reason === 'string') parsed.reason = obj.reason;
+    if (obj.command !== undefined && typeof obj.command !== 'string') {
+      throw new Error(`Malformed phases json: ${field}[${idx}].command must be a string`);
+    }
+    if (obj.summary !== undefined && typeof obj.summary !== 'string') {
+      throw new Error(`Malformed phases json: ${field}[${idx}].summary must be a string`);
+    }
+    if (obj.reason !== undefined && typeof obj.reason !== 'string') {
+      throw new Error(`Malformed phases json: ${field}[${idx}].reason must be a string`);
+    }
+    return parsed;
+  });
+}
+
+function migratePhasesStateJson(parsed: Record<string, unknown>): Record<string, unknown> {
+  if (parsed.version === PHASES_STATE_VERSION) {
+    return parsed;
+  }
+
+  if (parsed.version === 1) {
+    const phases = Array.isArray(parsed.phases)
+      ? parsed.phases.map((phase) => {
+        if (!phase || typeof phase !== 'object' || Array.isArray(phase)) {
+          return phase;
+        }
+        return {
+          ...(phase as Record<string, unknown>),
+          evidence: undefined,
+        };
+      })
+      : parsed.phases;
+
+    return {
+      ...parsed,
+      version: PHASES_STATE_VERSION,
+      phases,
+    };
+  }
+
+  throw new Error(`Malformed phases json: unsupported version '${String(parsed.version)}'`);
+}
+
+export function deserializePhasesStateJson(raw: string): PlanPhases {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -1583,10 +1692,7 @@ function deserializePhasesStateJson(raw: string): PlanPhases {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Malformed phases json: expected object');
   }
-  const obj = parsed as Record<string, unknown>;
-  if (obj.version !== PHASES_STATE_VERSION) {
-    throw new Error(`Malformed phases json: unsupported version '${String(obj.version)}'`);
-  }
+  const obj = migratePhasesStateJson(parsed as Record<string, unknown>);
 
   const phasesRaw = obj.phases;
   if (!Array.isArray(phasesRaw)) {
@@ -1626,6 +1732,9 @@ function deserializePhasesStateJson(raw: string): PlanPhases {
     if (p.auditConvergence !== undefined) {
       phase.auditConvergence = asAuditConvergence(p.auditConvergence, `phases[${idx}].auditConvergence`);
     }
+    if (p.evidence !== undefined) {
+      phase.evidence = asEvidenceArray(p.evidence, `phases[${idx}].evidence`);
+    }
     return phase;
   });
 
@@ -1637,6 +1746,14 @@ function deserializePhasesStateJson(raw: string): PlanPhases {
     createdAt: asString(obj.createdAt, 'createdAt'),
     updatedAt: asString(obj.updatedAt, 'updatedAt'),
   };
+}
+
+function formatVerificationEvidence(evidence: VerificationEvidence): string {
+  const detail = evidence.summary?.trim() || evidence.reason?.trim();
+  if (detail) {
+    return `${evidence.kind}: ${evidence.status} (${detail})`;
+  }
+  return `${evidence.kind}: ${evidence.status}`;
 }
 
 export async function executePhase(
