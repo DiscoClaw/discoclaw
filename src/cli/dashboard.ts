@@ -170,7 +170,7 @@ export function buildModelRows(ctx: DoctorContext): DashboardModelRow[] {
   });
 }
 
-function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 'info', number> {
+export function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 'info', number> {
   return report.findings.reduce<Record<'error' | 'warn' | 'info', number>>(
     (counts, finding) => {
       counts[finding.severity] += 1;
@@ -180,7 +180,7 @@ function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 
   );
 }
 
-function formatDoctorSummary(report: DoctorReport): string {
+export function formatDoctorSummary(report: DoctorReport): string {
   const counts = countDoctorSeverities(report);
   return `${report.findings.length} findings (errors=${counts.error}, warnings=${counts.warn}, info=${counts.info})`;
 }

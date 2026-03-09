@@ -6,9 +6,14 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
 import { getGitHash } from '../version.js';
 import type { DashboardDeps, DashboardSnapshot } from '../cli/dashboard.js';
-import { collectDashboardSnapshot, updateModelConfig } from '../cli/dashboard.js';
+import {
+  collectDashboardSnapshot,
+  countDoctorSeverities,
+  formatDoctorSummary,
+  updateModelConfig,
+} from '../cli/dashboard.js';
 import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT } from './options.js';
-import type { InspectOptions } from '../health/config-doctor.js';
+import type { DoctorReport, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
 import { isModelTier } from '../runtime/model-tiers.js';
@@ -20,6 +25,7 @@ import {
   getServiceStatus,
   normalizeServiceName,
   restartService,
+  summarizeServiceStatus,
 } from '../service-control.js';
 
 const DASHBOARD_MODEL_ROLES: readonly ModelRole[] = [
@@ -56,6 +62,25 @@ type JsonRecord = Record<string, unknown>;
 type ModelChangeInput = {
   role?: unknown;
   model?: unknown;
+};
+
+export type DashboardSnapshotApiResponse = {
+  ok: true;
+  snapshot: DashboardSnapshot;
+};
+
+export type DashboardServiceApiResponse = {
+  ok: true;
+  serviceName: string;
+  summary: string;
+  result: CommandResult;
+};
+
+export type DashboardDoctorApiResponse = {
+  ok: true;
+  summary: string;
+  counts: Record<'error' | 'warn' | 'info', number>;
+  report: DoctorReport;
 };
 
 function createDefaultDeps(): DashboardDeps {
@@ -147,6 +172,44 @@ async function loadServiceName(
 ): Promise<string> {
   const ctx = await deps.loadDoctorContext(inspectOpts);
   return normalizeServiceName(ctx.env.DISCOCLAW_SERVICE_NAME);
+}
+
+async function buildSnapshotResponse(
+  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
+  deps: DashboardDeps,
+): Promise<DashboardSnapshotApiResponse> {
+  return {
+    ok: true,
+    snapshot: await collectDashboardSnapshot(inspectOpts, deps),
+  };
+}
+
+async function buildServiceResponse(
+  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
+  deps: DashboardDeps,
+  loader: (serviceName: string, serviceDeps: ServiceControlDeps) => Promise<CommandResult>,
+): Promise<DashboardServiceApiResponse> {
+  const serviceName = await loadServiceName(inspectOpts, deps);
+  const result = await loader(serviceName, deps as ServiceControlDeps);
+  return {
+    ok: true,
+    serviceName,
+    summary: summarizeServiceStatus(result, deps.platform),
+    result,
+  };
+}
+
+async function buildDoctorResponse(
+  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
+  deps: DashboardDeps,
+): Promise<DashboardDoctorApiResponse> {
+  const report = await deps.inspect(inspectOpts);
+  return {
+    ok: true,
+    summary: formatDoctorSummary(report),
+    counts: countDoctorSeverities(report),
+    report,
+  };
 }
 
 async function applyModelChange(
@@ -481,16 +544,16 @@ function buildDashboardHtml(): string {
     }
 
     async function refreshSnapshot() {
-      const snapshot = await fetchJson('/api/snapshot');
-      renderSnapshot(snapshot);
-      return snapshot;
+      const response = await fetchJson('/api/snapshot');
+      renderSnapshot(response.snapshot);
+      return response.snapshot;
     }
 
     async function refreshDoctor() {
-      const report = await fetchJson('/api/doctor');
-      renderDoctor(report);
-      setStatus(doctorStatus, report.findings.length + ' finding(s) loaded.', true);
-      return report;
+      const response = await fetchJson('/api/doctor');
+      renderDoctor(response.report);
+      setStatus(doctorStatus, response.summary, true);
+      return response.report;
     }
 
     document.getElementById('refresh-btn').addEventListener('click', async () => {
@@ -505,8 +568,8 @@ function buildDashboardHtml(): string {
     document.getElementById('status-btn').addEventListener('click', async () => {
       try {
         const result = await fetchJson('/api/status');
-        serviceOutput.textContent = result.stdout || result.stderr || '(no output)';
-        setStatus(serviceStatus, 'Status fetched.', true);
+        serviceOutput.textContent = result.result.stdout || result.result.stderr || '(no output)';
+        setStatus(serviceStatus, result.summary, true);
       } catch (err) {
         setStatus(serviceStatus, String(err));
       }
@@ -515,8 +578,8 @@ function buildDashboardHtml(): string {
     document.getElementById('logs-btn').addEventListener('click', async () => {
       try {
         const result = await fetchJson('/api/logs');
-        serviceOutput.textContent = result.stdout || result.stderr || '(no output)';
-        setStatus(serviceStatus, 'Logs fetched.', true);
+        serviceOutput.textContent = result.result.stdout || result.result.stderr || '(no output)';
+        setStatus(serviceStatus, result.summary, true);
       } catch (err) {
         setStatus(serviceStatus, String(err));
       }
@@ -609,19 +672,17 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
 
       if (method === 'GET' && pathname === '/api/snapshot') {
-        respondJson(res, 200, await collectDashboardSnapshot(inspectOpts, deps));
+        respondJson(res, 200, await buildSnapshotResponse(inspectOpts, deps));
         return;
       }
 
       if (method === 'GET' && pathname === '/api/status') {
-        const serviceName = await loadServiceName(inspectOpts, deps);
-        respondJson(res, 200, await getServiceStatus(serviceName, deps as ServiceControlDeps));
+        respondJson(res, 200, await buildServiceResponse(inspectOpts, deps, getServiceStatus));
         return;
       }
 
       if (method === 'GET' && pathname === '/api/logs') {
-        const serviceName = await loadServiceName(inspectOpts, deps);
-        respondJson(res, 200, await getServiceLogs(serviceName, deps as ServiceControlDeps));
+        respondJson(res, 200, await buildServiceResponse(inspectOpts, deps, getServiceLogs));
         return;
       }
 
@@ -642,7 +703,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
 
       if (method === 'GET' && pathname === '/api/doctor') {
-        respondJson(res, 200, await deps.inspect(inspectOpts));
+        respondJson(res, 200, await buildDoctorResponse(inspectOpts, deps));
         return;
       }
 

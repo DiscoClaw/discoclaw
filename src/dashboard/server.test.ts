@@ -2,7 +2,13 @@ import http from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DashboardDeps, DashboardSnapshot } from '../cli/dashboard.js';
 import type { DoctorContext, DoctorReport, FixResult } from '../health/config-doctor.js';
-import { startDashboardServer, type DashboardServer } from './server.js';
+import {
+  startDashboardServer,
+  type DashboardDoctorApiResponse,
+  type DashboardServer,
+  type DashboardServiceApiResponse,
+  type DashboardSnapshotApiResponse,
+} from './server.js';
 
 type RequestOptions = {
   method?: string;
@@ -198,9 +204,11 @@ describe('startDashboardServer', () => {
   it('returns dashboard snapshot JSON from /api/snapshot', async () => {
     const { port } = await startServer();
     const response = await makeRequest(port, { path: '/api/snapshot' });
-    const snapshot = parseJson<DashboardSnapshot>(response.text);
+    const body = parseJson<DashboardSnapshotApiResponse>(response.text);
+    const snapshot: DashboardSnapshot = body.snapshot;
 
     expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
     expect(snapshot).toMatchObject({
       cwd: '/repo',
       version: '1.2.3',
@@ -224,6 +232,52 @@ describe('startDashboardServer', () => {
       source: 'override',
       overrideValue: 'opus',
     });
+  });
+
+  it('returns service status JSON from /api/status', async () => {
+    const runCommand = vi.fn(async () => ({
+      stdout: '   Active: active (running) since today\n   Docs: https://discoclaw.ai\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const { port } = await startServer({ runCommand });
+    const body = parseJson<DashboardServiceApiResponse>((await makeRequest(port, { path: '/api/status' })).text);
+
+    expect(body).toEqual({
+      ok: true,
+      serviceName: 'discoclaw-beta',
+      summary: 'active (running) since today',
+      result: {
+        stdout: '   Active: active (running) since today\n   Docs: https://discoclaw.ai\n',
+        stderr: '',
+        exitCode: 0,
+      },
+    });
+    expect(runCommand).toHaveBeenCalledWith('systemctl', ['--user', 'status', 'discoclaw-beta']);
+  });
+
+  it('returns service logs JSON from /api/logs', async () => {
+    const runCommand = vi.fn(async () => ({
+      stdout: 'Mar 08 12:00:00 host discoclaw[123]: startup complete\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const { port } = await startServer({ runCommand });
+    const response = await makeRequest(port, { path: '/api/logs' });
+    const body = parseJson<DashboardServiceApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      serviceName: 'discoclaw-beta',
+      summary: 'Mar 08 12:00:00 host discoclaw[123]: startup complete',
+      result: {
+        stdout: 'Mar 08 12:00:00 host discoclaw[123]: startup complete\n',
+        stderr: '',
+        exitCode: 0,
+      },
+    });
+    expect(runCommand).toHaveBeenCalledWith('journalctl', ['--user', '-u', 'discoclaw-beta', '--no-pager', '-n', '30']);
   });
 
   it('rejects restart requests without confirm: true', async () => {
@@ -269,12 +323,15 @@ describe('startDashboardServer', () => {
     });
 
     const response = await makeRequest(port, { path: '/api/doctor' });
-    const body = parseJson<DoctorReport>(response.text);
+    const body = parseJson<DashboardDoctorApiResponse>(response.text);
 
     expect(response.status).toBe(200);
-    expect(Array.isArray(body.findings)).toBe(true);
-    expect(body.findings).toHaveLength(1);
-    expect(body.findings[0]?.id).toBe('missing-secret:OPENAI_API_KEY');
+    expect(body.ok).toBe(true);
+    expect(body.summary).toBe('1 findings (errors=1, warnings=0, info=0)');
+    expect(body.counts).toEqual({ error: 1, warn: 0, info: 0 });
+    expect(Array.isArray(body.report.findings)).toBe(true);
+    expect(body.report.findings).toHaveLength(1);
+    expect(body.report.findings[0]?.id).toBe('missing-secret:OPENAI_API_KEY');
   });
 
   it('validates model role names on /api/model', async () => {
