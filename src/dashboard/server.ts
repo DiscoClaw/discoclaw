@@ -13,9 +13,10 @@ import {
   formatDoctorSummary,
   updateModelConfig,
 } from '../cli/dashboard.js';
-import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT } from './options.js';
+import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT, formatDashboardUrl } from './options.js';
 import { renderDashboardPage } from './page.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
+import { mapListenError } from './server-errors.js';
 import type { DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
@@ -568,11 +569,30 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
   });
 
   await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => resolve());
+    const onError = (err: Error) => {
+      cleanup();
+      reject(mapListenError(err, host, port));
+    };
+    const onListening = () => {
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      server.off('error', onError);
+      server.off('listening', onListening);
+    };
+
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, host);
   });
 
-  log?.info({ host, port: (server.address() as { port: number } | null)?.port ?? port, cwd: inspectOpts.cwd }, 'dashboard:server listening');
+  const address = server.address() as { address: string; port: number } | null;
+  const boundHost = address?.address ?? host;
+  const boundPort = address?.port ?? port;
+  const url = formatDashboardUrl(boundHost, boundPort);
+
+  log?.info({ host: boundHost, port: boundPort, cwd: inspectOpts.cwd, url }, 'dashboard:server listening');
 
   return {
     server,

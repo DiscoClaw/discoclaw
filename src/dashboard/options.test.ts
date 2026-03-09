@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DASHBOARD_HOST,
+  formatDashboardUrl,
   parseDashboardPort,
   parseDashboardTrustedHosts,
   resolveDashboardBindHost,
@@ -28,5 +29,9 @@ describe('dashboard options', () => {
   it('resolves the dashboard bind host from trusted hosts', () => {
     expect(resolveDashboardBindHost(new Set())).toBe(DASHBOARD_HOST);
     expect(resolveDashboardBindHost(new Set(['phone.tailnet.ts.net']))).toBe('0.0.0.0');
+  });
+
+  it('formats a dashboard URL from host and port', () => {
+    expect(formatDashboardUrl('127.0.0.1', 9401)).toBe('http://127.0.0.1:9401/');
   });
 });

@@ -1,6 +1,10 @@
 export const DASHBOARD_HOST = '127.0.0.1';
 export const DEFAULT_DASHBOARD_PORT = 9401;
 
+export function formatDashboardUrl(host: string, port: number): string {
+  return `http://${host}:${port}/`;
+}
+
 export function parseDashboardPort(env: NodeJS.ProcessEnv): number {
   const raw = env.DISCOCLAW_DASHBOARD_PORT?.trim();
   if (!raw) return DEFAULT_DASHBOARD_PORT;
