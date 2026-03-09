@@ -24,6 +24,7 @@ import {
 
 const DASHBOARD_MODEL_ROLES: readonly ModelRole[] = [
   'chat',
+  'plan-run',
   'fast',
   'summary',
   'cron',

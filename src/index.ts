@@ -150,6 +150,7 @@ const restrictChannelIds = cfg.restrictChannelIds;
 const primaryRuntimeName = cfg.primaryRuntime;
 const fastRuntimeName = cfg.fastRuntime;
 let runtimeModel = cfg.runtimeModel;
+let planRunModel = cfg.planRunModel;
 const runtimeTools = cfg.runtimeTools;
 const runtimeTimeoutMs = cfg.runtimeTimeoutMs;
 const fastModelDefault = (process.env.DISCOCLAW_FAST_MODEL ?? '').trim() || 'fast';
@@ -160,6 +161,7 @@ const overridesPath = resolveOverridesPath(dataDir, projectRoot);
 const envModelDefaults: ModelConfig = {
   ...MODEL_DEFAULTS,
   chat: cfg.runtimeModel,
+  'plan-run': cfg.planRunModel ?? MODEL_DEFAULTS['plan-run'],
   fast: fastModelDefault,
   summary: cfg.summaryModel,
   cron: cfg.cronAutoTagModel,
@@ -1003,6 +1005,10 @@ if (currentModelConfig['chat']) {
   runtimeModel = currentModelConfig['chat'];
   log.info({ runtimeModel }, 'models: chat model applied');
 }
+if (currentModelConfig['plan-run']) {
+  planRunModel = currentModelConfig['plan-run'];
+  log.info({ planRunModel }, 'models: plan-run model applied');
+}
 if (currentModelConfig['voice']) {
   voiceModelRef.model = currentModelConfig['voice'];
   log.info({ voiceModel: currentModelConfig['voice'] }, 'models: voice model applied');
@@ -1076,6 +1082,7 @@ const clearOverride = (role?: ModelRole): void => {
   const envDefaults = { ...envModelDefaults };
   const allRoles: ModelRole[] = [
     'chat',
+    'plan-run',
     'fast',
     'forge-drafter',
     'forge-auditor',
@@ -1183,6 +1190,7 @@ const botParams = {
   groupsDir,
   useGroupDirCwd,
   runtimeModel,
+  planRunModel,
   runtimeTools,
   runtimeTimeoutMs,
   discordActionsEnabled,
@@ -1568,7 +1576,7 @@ if (taskCtx) {
       taskStore: effectiveTaskStore,
       log,
       runtime: limitedRuntime,
-      model: runtimeModel,
+      model: botParams.planRunModel,
       phaseTimeoutMs: planPhaseTimeoutMs,
       maxAuditFixAttempts: planPhaseMaxAuditFixAttempts,
       onProgress: async (msg) => {

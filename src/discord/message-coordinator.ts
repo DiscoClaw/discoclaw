@@ -209,6 +209,7 @@ export type BotParams = {
   groupsDir: string;
   useGroupDirCwd: boolean;
   runtimeModel: string;
+  planRunModel?: string;
   runtimeTools: string[];
   runtimeTimeoutMs: number;
   fastRuntime?: RuntimeAdapter;
@@ -694,6 +695,8 @@ function isQueueLevelCommand(m: CoordinatorMessage, params: Omit<BotParams, 'tok
 
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
   const longRunWatchdog = params.longRunWatchdog;
+  const resolvePlanRunModelForRuntime = (): string =>
+    params.planCtx?.model ?? params.planRunModel ?? '';
   if (longRunWatchdog) {
     void longRunWatchdog.startupSweep().then((result) => {
       if (result.interruptedRuns > 0 || result.finalRetried > 0 || result.finalFailed > 0) {
@@ -1364,7 +1367,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           log: params.log,
           depth: 0,
           runtime: params.runtime,
-          model: resolveModel(params.runtimeModel, params.runtime.id),
+          model: resolveModel(resolvePlanRunModelForRuntime(), params.runtime.id),
           phaseTimeoutMs: params.planPhaseTimeoutMs ?? 5 * 60_000,
           maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
           maxPlanRunPhases: MAX_PLAN_RUN_PHASES,
@@ -1815,7 +1818,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                   const phaseOpts = {
                     runtime: params.runtime,
-                    model: resolveModel(params.runtimeModel, params.runtime.id),
+                    model: resolveModel(resolvePlanRunModelForRuntime(), params.runtime.id),
                     projectCwd,
                     addDirs: [] as string[],
                     timeoutMs,
@@ -2300,7 +2303,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     log: params.log,
                     depth: 0,
                     runtime: params.runtime,
-                    model: resolveModel(params.runtimeModel, params.runtime.id),
+                    model: resolveModel(resolvePlanRunModelForRuntime(), params.runtime.id),
                     phaseTimeoutMs: params.planPhaseTimeoutMs ?? 5 * 60_000,
                     maxAuditFixAttempts: params.planPhaseMaxAuditFixAttempts,
                     maxPlanRunPhases: MAX_PLAN_RUN_PHASES,

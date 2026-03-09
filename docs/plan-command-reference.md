@@ -177,6 +177,8 @@ Dependency validation: OK.
 
 Execute all pending phases sequentially (up to 50, safety cap). Requires the plan to be in `APPROVED` or `IMPLEMENTING` status. Acquires the workspace writer lock per-phase, validates staleness, then fires in the background. Stops on failure, audit deviation, convergence guard block, staleness, or shutdown — resume with targeted commands or another `!plan run`.
 
+**Execution model role:** Plan execution uses the dedicated `plan-run` model role. Startup defaults come from `DISCOCLAW_PLAN_RUN_MODEL` (default `capable`), and runtime overrides persist in `models.json`; it no longer inherits the current `chat` model string.
+
 **Auto-close:** When all phases reach a terminal status (done or skipped), the plan is automatically set to `CLOSED` and its backing task is closed. This happens in both the command path (`!plan run` in Discord) and the action path (`planRun` via Discord actions).
 
 **Command-path heartbeat lifecycle (`!plan run`, `!plan run-one`, `!plan run-phase`, and command-triggered `!forge`):**
@@ -441,6 +443,8 @@ Forge cancel requested.
 ## Configuration Reference
 
 All env vars that control plan/forge behavior, verified against `config.ts`:
+
+Plan execution model selection has a dedicated startup env var: `DISCOCLAW_PLAN_RUN_MODEL` (default `capable`). `!plan run`, `!plan run-one`, `!plan run-phase`, and action-path `planRun` use the `plan-run` role from `models.json`, which is scaffolded/reset from that startup default.
 
 ### Plan commands
 

@@ -89,7 +89,7 @@ describe('parseModelsCommand', () => {
   });
 
   it('parses all valid roles', () => {
-    for (const role of ['chat', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec']) {
+    for (const role of ['chat', 'plan-run', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec']) {
       expect(parseModelsCommand(`!models set ${role} haiku`)).toEqual({
         action: 'set',
         role,
@@ -107,6 +107,7 @@ describe('handleModelsCommand', () => {
   const mockConfigCtx: ConfigContext = {
     botParams: {
       runtimeModel: 'sonnet',
+      planRunModel: 'capable',
       summaryModel: 'haiku',
       forgeDrafterModel: 'opus',
       forgeAuditorModel: 'sonnet',

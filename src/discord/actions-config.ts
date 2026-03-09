@@ -58,6 +58,7 @@ export type ConfigContext = {
 /** The subset of BotParams fields that modelSet/modelShow reads and mutates. */
 export type ConfigMutableParams = {
   runtimeModel: string;
+  planRunModel?: string;
   summaryModel: string;
   runtime?: RuntimeAdapter;
   fastRuntime?: RuntimeAdapter;
@@ -81,7 +82,8 @@ export type ConfigMutableParams = {
 // ---------------------------------------------------------------------------
 
 const ROLE_DESCRIPTIONS: Record<ModelRole, string> = {
-  chat: 'Discord messages, plan runs, deferred runs, forge fallback',
+  chat: 'Discord messages, deferred runs, forge fallback',
+  'plan-run': 'Plan phase execution',
   fast: 'All small/fast tasks (summary, cron, cron auto-tag, tasks auto-tag)',
   'forge-drafter': 'Forge plan drafting/revision',
   'forge-auditor': 'Forge plan auditing',
@@ -145,19 +147,22 @@ export function executeConfigAction(
             }
             if (bp.planCtx) {
               bp.planCtx.runtime = newRuntime;
-              bp.planCtx.model = runtimeModel;
             }
             if (bp.deferOpts) bp.deferOpts.runtime = newRuntime;
             changes.push(`runtime → ${normalized}`);
             if (runtimeModel) changes.push(`chat → ${runtimeModel} (adapter default)`);
           } else {
             bp.runtimeModel = model;
-            if (bp.planCtx) bp.planCtx.model = model;
             if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = model;
             changes.push(`chat → ${model}`);
           }
           break;
         }
+        case 'plan-run':
+          bp.planRunModel = model;
+          if (bp.planCtx) bp.planCtx.model = model;
+          changes.push(`plan-run → ${model}`);
+          break;
         case 'fast':
           bp.summaryModel = model;
           changes.push(`summary → ${model}`);
@@ -329,9 +334,13 @@ export function executeConfigAction(
           case 'chat':
             if (defaultModel === undefined) break;
             bp.runtimeModel = defaultModel;
-            if (bp.planCtx) bp.planCtx.model = defaultModel;
             if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = defaultModel;
             resetChanges.push(`chat → ${defaultModel}`);
+            break;
+          case 'plan-run':
+            bp.planRunModel = defaultModel;
+            if (bp.planCtx) bp.planCtx.model = defaultModel;
+            resetChanges.push(`plan-run → ${defaultModel ?? '(unset)'}`);
             break;
           case 'fast':
             if (defaultModel === undefined) break;
@@ -421,9 +430,13 @@ export function executeConfigAction(
       const ovr = (role: ModelRole) => (overrides[role] ? ' *(override)*' : '');
 
       const runtimeName = configCtx.runtimeName ?? rid;
+      const planRunDisplay = bp.planRunModel
+        || bp.planCtx?.model
+        || '(unset)';
       const rows: [string, string, string, string][] = [
         ['runtime', runtimeName, `Active runtime adapter (${rid})`, ovr('chat')],
         ['chat', bp.runtimeModel, ROLE_DESCRIPTIONS.chat, ovr('chat')],
+        ['plan-run', planRunDisplay, ROLE_DESCRIPTIONS['plan-run'], ovr('plan-run')],
         ['summary', bp.summaryModel, ROLE_DESCRIPTIONS.summary, ovr('summary') || ovr('fast')],
         ['forge-drafter', bp.forgeDrafterModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-drafter'], ovr('forge-drafter')],
         ['forge-auditor', bp.forgeAuditorModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-auditor'], ovr('forge-auditor')],
@@ -505,13 +518,14 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"chat","model":"sonnet"}</discord-action>
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
-- \`role\` (required): One of \`chat\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
+- \`role\` (required): One of \`chat\`, \`plan-run\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
 - \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` and \`voice\` roles, swaps the active runtime adapter independently), or \`default\` (for cron-exec only, to revert to the startup default for that role). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
 
 **Roles:**
 | Role | What it controls |
 |------|-----------------|
-| \`chat\` | Discord messages, plan runs, deferred runs, forge fallback |
+| \`chat\` | Discord messages, deferred runs, forge fallback |
+| \`plan-run\` | Plan phase execution |
 | \`fast\` | All small/fast tasks (summary, cron auto-tag, tasks auto-tag) |
 | \`forge-drafter\` | Forge plan drafting/revision |
 | \`forge-auditor\` | Forge plan auditing |

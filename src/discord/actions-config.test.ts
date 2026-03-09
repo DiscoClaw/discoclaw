@@ -40,6 +40,7 @@ function makeRegistry(...entries: [string, RuntimeAdapter][]): RuntimeRegistry {
 function makeBotParams(overrides?: Partial<ConfigMutableParams>): ConfigMutableParams {
   return {
     runtimeModel: 'capable',
+    planRunModel: 'capable',
     summaryModel: 'fast',
     runtime: stubRuntime,
     forgeDrafterModel: undefined,
@@ -84,10 +85,23 @@ describe('modelShow', () => {
     if (!result.ok) return;
     expect(result.summary).toContain('chat');
     expect(result.summary).toContain('capable');
+    expect(result.summary).toContain('plan-run');
     expect(result.summary).toContain('summary');
     expect(result.summary).toContain('forge-drafter');
     expect(result.summary).toContain('forge-auditor');
     expect(result.summary).toContain('cron');
+  });
+
+  it('shows plan-run as unset instead of falling back to chat', () => {
+    const ctx = makeCtx({ planRunModel: undefined, planCtx: { runtime: stubRuntime } });
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const lines = result.summary.split('\n');
+    const planRunLine = lines.find(l => l.includes('**plan-run**'));
+    expect(planRunLine).toContain('(unset)');
+    expect(planRunLine).not.toContain('RUNTIME_MODEL');
+    expect(planRunLine).not.toContain('follows chat');
   });
 
   it('shows forge models falling back to runtimeModel', () => {
@@ -288,6 +302,14 @@ describe('modelSet', () => {
     expect(ctx.botParams.taskCtx!.autoTagModel).toBe('haiku');
   });
 
+  it('sets plan-run model independently', () => {
+    const ctx = makeCtx({ planCtx: { model: 'capable', runtime: stubRuntime } });
+    const result = executeConfigAction({ type: 'modelSet', role: 'plan-run', model: 'deep' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.planRunModel).toBe('deep');
+    expect(ctx.botParams.planCtx!.model).toBe('deep');
+  });
+
   it('sets forge-drafter model', () => {
     const ctx = makeCtx();
     const result = executeConfigAction({ type: 'modelSet', role: 'forge-drafter', model: 'opus' }, ctx);
@@ -386,11 +408,11 @@ describe('modelSet', () => {
     expect(ctx.botParams.runtimeModel).toBe('claude-sonnet-4-5-20250929');
   });
 
-  it('chat propagates to planCtx.model', () => {
-    const ctx = makeCtx();
-    ctx.botParams.planCtx = { model: 'old', runtime: stubRuntime };
+  it('chat does not propagate to plan-run model', () => {
+    const ctx = makeCtx({ planRunModel: 'deep', planCtx: { model: 'deep', runtime: stubRuntime } });
     executeConfigAction({ type: 'modelSet', role: 'chat', model: 'sonnet' }, ctx);
-    expect(ctx.botParams.planCtx!.model).toBe('sonnet');
+    expect(ctx.botParams.planRunModel).toBe('deep');
+    expect(ctx.botParams.planCtx!.model).toBe('deep');
   });
 
   it('chat propagates to cronCtx.executorCtx.model', () => {
@@ -483,7 +505,8 @@ describe('modelSet runtime swap', () => {
     expect(ctx.runtimeName).toBe('openrouter');
     expect(ctx.botParams.runtimeModel).toBe('anthropic/claude-sonnet-4');
     expect(ctx.botParams.planCtx!.runtime).toBe(openrouterRuntime);
-    expect(ctx.botParams.planCtx!.model).toBe('anthropic/claude-sonnet-4');
+    expect(ctx.botParams.planCtx!.model).toBe('capable');
+    expect(ctx.botParams.planRunModel).toBe('capable');
     expect(ctx.botParams.cronCtx!.runtime).toBe(openrouterRuntime);
     expect(ctx.botParams.cronCtx!.executorCtx!.runtime).toBe(openrouterRuntime);
     expect(ctx.botParams.cronCtx!.executorCtx!.model).toBe('anthropic/claude-sonnet-4');
@@ -571,6 +594,18 @@ describe('modelReset', () => {
     expect(result.ok).toBe(true);
     expect(ctx.overrideSources['cron-exec']).toBeUndefined();
     expect(clearedRole).toBe('cron-exec');
+  });
+
+  it('plan-run modelReset restores the startup default for plan execution', () => {
+    const ctx = makeCtx({ planRunModel: 'deep', planCtx: { model: 'deep', runtime: stubRuntime } });
+    ctx.envDefaults = { 'plan-run': 'capable' };
+    const result = executeConfigAction({ type: 'modelReset', role: 'plan-run' }, ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.planRunModel).toBe('capable');
+    expect(ctx.botParams.planCtx!.model).toBe('capable');
+    if (!result.ok) return;
+    expect(result.summary).toContain('plan-run → capable');
+    expect(result.summary).not.toContain('RUNTIME_MODEL');
   });
 
   it('forge-auditor modelReset sets the configured default instead of following chat', () => {

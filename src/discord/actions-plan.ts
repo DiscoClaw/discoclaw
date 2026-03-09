@@ -290,8 +290,12 @@ export async function executePlanAction(
         return { ok: false, error: 'planRun requires a planId' };
       }
 
-      if (!planCtx.runtime || !planCtx.model) {
-        return { ok: false, error: 'planRun requires runtime and model to be configured' };
+      if (!planCtx.runtime) {
+        return { ok: false, error: 'planRun requires runtime to be configured' };
+      }
+      const executionModel = planCtx.model;
+      if (!executionModel) {
+        return { ok: false, error: 'planRun requires a plan-run model to be configured' };
       }
 
       if (isPlanRunning(action.planId)) {
@@ -428,8 +432,8 @@ export async function executePlanAction(
         const runtimeEventAdapter: ((evt: EngineEvent) => void) | undefined =
           (planCtx.toolAwareStreaming ?? true) ? streamingController?.onEvent : undefined;
 
-        const resolvedModel = resolveModel(planCtx.model!, planCtx.runtime!.id);
-        const resolvedReasoningEffort = resolveReasoningEffort(planCtx.model!, planCtx.runtime!.id);
+        const resolvedModel = resolveModel(executionModel, planCtx.runtime!.id);
+        const resolvedReasoningEffort = resolveReasoningEffort(executionModel, planCtx.runtime!.id);
         const phaseOpts = {
           runtime: planCtx.runtime!,
           model: resolvedModel,
