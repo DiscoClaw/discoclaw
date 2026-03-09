@@ -296,7 +296,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 |-----------|---------|--------|
 | Config parser (`DiscoclawConfig` type, env-var parsing, validation) | `src/config.ts` | **done** |
 | Config parser tests | `src/config.test.ts` | **done** |
-| Model configuration (`models.json` loader, env-var fallback, slot resolution) | `src/model-config.ts` | **done** |
+| Model configuration (`models.json` loader, env-var fallback, slot resolution for `chat`, `fast`, `plan-run`, `voice`, forge roles, and cron roles) | `src/model-config.ts` | **done** |
 | Config doctor engine (shared config-health inspection/apply-fixes logic for install drift, deprecated env vars, conflicting overrides, stale runtime/model overrides, and missing secrets; reused by CLI, preflight, and Discord) | `src/health/config-doctor.ts`, `src/cli/index.ts`, `scripts/doctor.ts`, `src/discord/health-command.ts`, `src/discord/message-coordinator.ts` | **done** |
 
 ## 21. Bang Commands
