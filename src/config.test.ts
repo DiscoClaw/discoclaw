@@ -1092,6 +1092,24 @@ describe('parseConfig', () => {
     expect(config.dashboardPort).toBe(8766);
   });
 
+  it('defaults dashboardTrustedHosts to an empty set', () => {
+    const { config } = parseConfig(env());
+    expect(config.dashboardTrustedHosts).toEqual(new Set());
+  });
+
+  it('parses DISCOCLAW_DASHBOARD_TRUSTED_HOSTS when set', () => {
+    const { config } = parseConfig(env({
+      DISCOCLAW_DASHBOARD_TRUSTED_HOSTS: ' Phone.Tailnet.ts.net.,100.64.0.12 ',
+    }));
+    expect(config.dashboardTrustedHosts).toEqual(new Set(['phone.tailnet.ts.net', '100.64.0.12']));
+  });
+
+  it('rejects IPv6 entries in DISCOCLAW_DASHBOARD_TRUSTED_HOSTS', () => {
+    expect(() => parseConfig(env({
+      DISCOCLAW_DASHBOARD_TRUSTED_HOSTS: 'fd7a:115c:a1e0::1',
+    }))).toThrow(/DISCOCLAW_DASHBOARD_TRUSTED_HOSTS does not support IPv6 literals/);
+  });
+
   it('throws on DISCOCLAW_DASHBOARD_PORT=0 (non-positive)', () => {
     expect(() => parseConfig(env({ DISCOCLAW_DASHBOARD_PORT: '0' })))
       .toThrow(/DISCOCLAW_DASHBOARD_PORT must be a positive number/);

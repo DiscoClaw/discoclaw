@@ -278,6 +278,8 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    ```bash
    discoclaw dashboard
    ```
+   By default this listens on `127.0.0.1`. To reach it from a phone over Tailscale,
+   set `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` to your tailnet IP or MagicDNS hostname.
 
 #### From source (contributors)
 
@@ -321,7 +323,7 @@ pnpm build
 
 Run `pnpm preflight` — it flags configuration options from `.env.example` that aren't in your `.env` yet. You can also run `discoclaw doctor` to inspect config drift and related issues, `discoclaw doctor --fix` to apply safe remediations, or use `!doctor` / `!doctor fix` from Discord (`!health doctor` / `!health doctor fix` remain supported). Restart the service afterward for fixed config to take effect.
 
-For a local operator console, run `discoclaw dashboard` in the project directory. It shows the active service target, current model assignments, runtime overrides, config doctor status, and quick actions for status/logs/restart.
+For a local operator console, run `discoclaw dashboard` in the project directory. It shows the active service target, current model assignments, runtime overrides, config doctor status, and quick actions for status/logs/restart. It binds to `127.0.0.1` by default; set `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` to explicitly allow a Tailscale IP or MagicDNS hostname while keeping Host-header checks in place for all other names.
 
 If running as a systemd service, restart it:
 
