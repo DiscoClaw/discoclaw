@@ -358,6 +358,23 @@ describe('startWebhookServer HTTP routing', () => {
     }
   });
 
+  it('rejects cross-origin mutation requests on the mounted dashboard API', async () => {
+    const response = await makeJsonRequest<{ ok: boolean; message: string }>(port, {
+      path: '/dashboard/api/doctor/fix',
+      method: 'POST',
+      body: JSON.stringify({}),
+      headers: {
+        Origin: 'http://evil.example',
+      },
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({
+      ok: false,
+      message: 'Cross-origin mutation requests are not allowed.',
+    });
+  });
+
   it('returns 404 for /webhook/ with no source segment', async () => {
     const res = await makeRequest(port, { path: '/webhook/' });
     expect(res.status).toBe(404);

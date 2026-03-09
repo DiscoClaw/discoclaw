@@ -47,6 +47,7 @@ import { getGitHash } from '../version.js';
 
 const WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 const DASHBOARD_MAX_BODY_BYTES = 64 * 1024;
+const DASHBOARD_CROSS_ORIGIN_MUTATION_ERROR = 'Cross-origin mutation requests are not allowed.';
 
 const DASHBOARD_MODEL_ROLES: readonly ModelRole[] = [
   'chat',
@@ -252,6 +253,36 @@ function respondJson(res: http.ServerResponse, status: number, body: unknown): v
 function respondHtml(res: http.ServerResponse, status: number, body: string): void {
   res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(body);
+}
+
+function normalizeOriginHost(hostname: string): string {
+  const value = hostname.trim().toLowerCase();
+  if (value === 'localhost' || value === '::1') return '127.0.0.1';
+  return value;
+}
+
+function originPort(url: URL): string {
+  if (url.port) return url.port;
+  return url.protocol === 'https:' ? '443' : '80';
+}
+
+function hasSafeDashboardOrigin(req: http.IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (typeof origin !== 'string' || origin.trim() === '') return true;
+
+  const hostHeader = req.headers.host;
+  if (typeof hostHeader !== 'string' || hostHeader.trim() === '') return false;
+
+  try {
+    const originUrl = new URL(origin);
+    const hostUrl = new URL(`http://${hostHeader}`);
+    return (
+      normalizeOriginHost(originUrl.hostname) === normalizeOriginHost(hostUrl.hostname)
+      && originPort(originUrl) === originPort(hostUrl)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function readBody(req: http.IncomingMessage, maxBytes: number): Promise<Buffer> {
@@ -804,6 +835,10 @@ async function handleDashboardRequest(
         respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
         return true;
       }
+      if (!hasSafeDashboardOrigin(req)) {
+        respondJson(res, 403, { ok: false, message: DASHBOARD_CROSS_ORIGIN_MUTATION_ERROR });
+        return true;
+      }
       const body = await readJsonBody(req);
       if (body.confirm !== true) {
         respondJson(res, 400, { ok: false, message: 'Restart requires {"confirm": true}.' });
@@ -825,6 +860,10 @@ async function handleDashboardRequest(
         respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
         return true;
       }
+      if (!hasSafeDashboardOrigin(req)) {
+        respondJson(res, 403, { ok: false, message: DASHBOARD_CROSS_ORIGIN_MUTATION_ERROR });
+        return true;
+      }
       const report = await deps.inspect(inspectOpts);
       const result = await deps.applyFixes(report, inspectOpts);
       const nextReport = await deps.inspect(inspectOpts);
@@ -843,6 +882,10 @@ async function handleDashboardRequest(
     if (pathname === `${mount.apiPrefix}/model`) {
       if (method !== 'POST') {
         respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+        return true;
+      }
+      if (!hasSafeDashboardOrigin(req)) {
+        respondJson(res, 403, { ok: false, message: DASHBOARD_CROSS_ORIGIN_MUTATION_ERROR });
         return true;
       }
       const body = await readJsonBody(req);

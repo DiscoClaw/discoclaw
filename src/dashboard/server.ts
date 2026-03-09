@@ -42,6 +42,7 @@ const DASHBOARD_MODEL_ROLES: readonly ModelRole[] = [
 ];
 
 const MAX_BODY_BYTES = 64 * 1024;
+const CROSS_ORIGIN_MUTATION_ERROR = 'Cross-origin mutation requests are not allowed.';
 
 type KnownRuntimesType = typeof KNOWN_RUNTIMES;
 
@@ -148,6 +149,42 @@ function respondJson(res: http.ServerResponse, status: number, body: unknown): v
 function respondHtml(res: http.ServerResponse, status: number, body: string): void {
   res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(body);
+}
+
+function normalizeDashboardHost(host: string | undefined): string {
+  const value = (host ?? DASHBOARD_HOST).trim().toLowerCase();
+  if (!value || value === 'localhost' || value === DASHBOARD_HOST) return DASHBOARD_HOST;
+  throw new Error(`Dashboard server must bind to ${DASHBOARD_HOST}; received ${host ?? value}.`);
+}
+
+function normalizeOriginHost(hostname: string): string {
+  const value = hostname.trim().toLowerCase();
+  if (value === 'localhost' || value === '::1') return DASHBOARD_HOST;
+  return value;
+}
+
+function originPort(url: URL): string {
+  if (url.port) return url.port;
+  return url.protocol === 'https:' ? '443' : '80';
+}
+
+function hasSafeDashboardOrigin(req: http.IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (typeof origin !== 'string' || origin.trim() === '') return true;
+
+  const hostHeader = req.headers.host;
+  if (typeof hostHeader !== 'string' || hostHeader.trim() === '') return false;
+
+  try {
+    const originUrl = new URL(origin);
+    const hostUrl = new URL(`http://${hostHeader}`);
+    return (
+      normalizeOriginHost(originUrl.hostname) === normalizeOriginHost(hostUrl.hostname)
+      && originPort(originUrl) === originPort(hostUrl)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function readBody(req: http.IncomingMessage): Promise<Buffer> {
@@ -362,7 +399,7 @@ function isDashboardBadRequest(message: string): boolean {
 export async function startDashboardServer(opts: DashboardServerOptions = {}): Promise<DashboardServer> {
   const inspectOpts = buildInspectOptions(opts);
   const deps: DashboardDeps = { ...createDefaultDeps(), ...opts.deps };
-  const host = opts.host ?? DASHBOARD_HOST;
+  const host = normalizeDashboardHost(opts.host);
   const port = opts.port ?? DEFAULT_DASHBOARD_PORT;
   const log = opts.log;
   const html = renderDashboardPage();
@@ -397,6 +434,10 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
           return;
         }
+        if (!hasSafeDashboardOrigin(req)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
         const body = await readJsonBody(req);
         if (body.confirm !== true) {
           respondJson(res, 400, { ok: false, message: 'Restart requires {"confirm": true}.' });
@@ -416,6 +457,10 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
           return;
         }
+        if (!hasSafeDashboardOrigin(req)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
         respondJson(res, 200, await buildDoctorFixResponse(inspectOpts, deps));
         return;
       }
@@ -423,6 +468,10 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       if (pathname === '/api/model') {
         if (method !== 'POST') {
           respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+          return;
+        }
+        if (!hasSafeDashboardOrigin(req)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
           return;
         }
         const body = await readJsonBody(req);

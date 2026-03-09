@@ -309,6 +309,32 @@ describe('startDashboardServer', () => {
     expect(runCommandMock).not.toHaveBeenCalled();
   });
 
+  it('rejects cross-origin mutation requests', async () => {
+    const runCommand = vi.fn(async () => ({
+      stdout: 'unexpected\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const { port } = await startServer({ runCommand });
+
+    const response = await makeRequest(port, {
+      path: '/api/restart',
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+      headers: {
+        Origin: 'http://evil.example',
+      },
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({
+      ok: false,
+      message: 'Cross-origin mutation requests are not allowed.',
+    });
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
   it('restarts the service and returns a refreshed snapshot from /api/restart', async () => {
     const runCommand = vi.fn(async (_cmd: string, args: string[]) => {
       if (args[1] === 'restart') {
@@ -330,6 +356,9 @@ describe('startDashboardServer', () => {
       path: '/api/restart',
       method: 'POST',
       body: JSON.stringify({ confirm: true }),
+      headers: {
+        Origin: `http://127.0.0.1:${port}`,
+      },
     });
     const body = parseJson<DashboardRestartApiResponse>(response.text);
 
@@ -504,5 +533,16 @@ describe('startDashboardServer', () => {
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
     expect(response.headers['access-control-allow-headers']).toBeUndefined();
     expect(response.headers['access-control-allow-methods']).toBeUndefined();
+  });
+
+  it('rejects non-loopback host bindings', async () => {
+    await expect(startDashboardServer({
+      port: 0,
+      host: '0.0.0.0',
+      cwd: '/repo',
+      env: {},
+      deps: makeDeps(),
+      log: mockLog(),
+    })).rejects.toThrow('Dashboard server must bind to 127.0.0.1; received 0.0.0.0.');
   });
 });
