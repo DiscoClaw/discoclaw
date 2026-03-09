@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { startWebhookServer, loadWebhookConfig, type WebhookConfig, type WebhookServerOptions } from './server.js';
 import { executeCronJob } from '../cron/executor.js';
+import type { DoctorContext, DoctorReport } from '../health/config-doctor.js';
 import { sanitizeExternalContent } from '../sanitize-external.js';
 
 vi.mock('../cron/executor.js', () => ({
@@ -236,7 +237,7 @@ describe('startWebhookServer HTTP routing', () => {
   });
 
   it('applies doctor fixes from the mounted dashboard API and returns refreshed state', async () => {
-    const initialReport = {
+    const initialReport: DoctorReport = {
       installMode: 'source',
       findings: [
         {
@@ -254,8 +255,8 @@ describe('startWebhookServer HTTP routing', () => {
         models: '/repo/data/models.json',
         runtimeOverrides: '/repo/data/runtime-overrides.json',
       },
-    } as const;
-    const refreshedReport = {
+    };
+    const refreshedReport: DoctorReport = {
       ...initialReport,
       findings: [],
     };
@@ -269,7 +270,7 @@ describe('startWebhookServer HTTP routing', () => {
       skipped: [],
       errors: [],
     }));
-    const loadDoctorContext = vi.fn(async () => ({
+    const loadDoctorContext = vi.fn(async (): Promise<DoctorContext> => ({
       cwd: '/repo',
       installMode: 'source',
       env: {
