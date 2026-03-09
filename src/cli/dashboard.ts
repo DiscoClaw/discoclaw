@@ -7,6 +7,7 @@ import { config as loadDotenv } from 'dotenv';
 import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
 import { isModelTier } from '../runtime/model-tiers.js';
 import { getGitHash } from '../version.js';
+import type { DashboardServer, DashboardServerOptions } from '../dashboard/server.js';
 import type { DoctorContext, DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
@@ -140,6 +141,11 @@ function createDefaultDeps(): DashboardDeps {
     homeDir: os.homedir(),
     getUid: () => process.getuid?.() ?? 501,
   };
+}
+
+export async function startDashboardServer(options: DashboardServerOptions = {}): Promise<DashboardServer> {
+  const serverModule = await import('../dashboard/server.js');
+  return serverModule.startDashboardServer(options);
 }
 
 export function updateModelConfig(

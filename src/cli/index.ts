@@ -24,10 +24,16 @@ switch (command) {
     break;
   case 'dashboard': {
     const cwd = process.cwd();
-    const { config } = await import('dotenv');
-    const { startDashboardServer } = await import('../dashboard/server.js');
+    const useLegacyDashboard = process.argv.includes('--legacy');
+    const { runDashboard, startDashboardServer } = await import('./dashboard.js');
     const { DASHBOARD_HOST, parseDashboardPort } = await import('../dashboard/options.js');
 
+    if (useLegacyDashboard) {
+      await runDashboard({ cwd });
+      break;
+    }
+
+    const { config } = await import('dotenv');
     config({ path: path.join(cwd, '.env') });
 
     try {
@@ -42,6 +48,8 @@ switch (command) {
       const boundPort = address?.port ?? port;
       console.log(`Discoclaw dashboard listening at http://${DASHBOARD_HOST}:${boundPort}/`);
       console.log('Press Ctrl+C to stop.');
+      await waitForDashboardSignal();
+      await handle.close();
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
@@ -209,4 +217,24 @@ function countDoctorSeverities(findings: DoctorFinding[]): Record<'error' | 'war
     },
     { error: 0, warn: 0, info: 0 },
   );
+}
+
+function waitForDashboardSignal(): Promise<NodeJS.Signals> {
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+    };
+    const onSigint = () => {
+      cleanup();
+      resolve('SIGINT');
+    };
+    const onSigterm = () => {
+      cleanup();
+      resolve('SIGTERM');
+    };
+
+    process.once('SIGINT', onSigint);
+    process.once('SIGTERM', onSigterm);
+  });
 }
