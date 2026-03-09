@@ -14,3 +14,25 @@ export function parseDashboardPort(env: NodeJS.ProcessEnv): number {
   }
   return value;
 }
+
+export function parseDashboardTrustedHosts(env: NodeJS.ProcessEnv): Set<string> {
+  const raw = env.DISCOCLAW_DASHBOARD_TRUSTED_HOSTS?.trim();
+  if (!raw) return new Set();
+
+  const trustedHosts = new Set<string>();
+  for (const entry of raw.split(',')) {
+    const value = entry.trim().toLowerCase().replace(/\.+$/, '');
+    if (!value) continue;
+    if (value.includes(':')) {
+      throw new Error(
+        'DISCOCLAW_DASHBOARD_TRUSTED_HOSTS does not support IPv6 literals. Use hostnames or IPv4 addresses only; see the dashboard docs for supported values.',
+      );
+    }
+    trustedHosts.add(value);
+  }
+  return trustedHosts;
+}
+
+export function resolveDashboardBindHost(trustedHosts: Set<string>): string {
+  return trustedHosts.size > 0 ? '0.0.0.0' : DASHBOARD_HOST;
+}

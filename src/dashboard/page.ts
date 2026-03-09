@@ -354,7 +354,7 @@ export function renderDashboardPage(): string {
         </div>
         <button id="refresh-btn" type="button">Refresh snapshot</button>
       </div>
-      <p class="hero-copy">Loopback-only control plane for the local Discoclaw service. This page reuses the dashboard snapshot, doctor, model, and service actions already available in the CLI.</p>
+      <p class="hero-copy">Control plane for the local Discoclaw service. By default it is loopback-only; optional trusted hosts can expose it on a private network without disabling Host-header checks.</p>
       <div class="hero-status">
         <div id="hero-service-pill" class="pill">Service: loading</div>
         <div id="hero-runtime-pill" class="pill">Runtime overrides: loading</div>

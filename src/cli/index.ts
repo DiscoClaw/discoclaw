@@ -26,7 +26,12 @@ switch (command) {
     const cwd = process.cwd();
     const useLegacyDashboard = process.argv.includes('--legacy');
     const { runDashboard, startDashboardServer } = await import('./dashboard.js');
-    const { DASHBOARD_HOST, parseDashboardPort } = await import('../dashboard/options.js');
+    const {
+      DASHBOARD_HOST,
+      parseDashboardPort,
+      parseDashboardTrustedHosts,
+      resolveDashboardBindHost,
+    } = await import('../dashboard/options.js');
 
     if (useLegacyDashboard) {
       await runDashboard({ cwd });
@@ -38,15 +43,22 @@ switch (command) {
 
     try {
       const port = parseDashboardPort(process.env);
+      const trustedHosts = parseDashboardTrustedHosts(process.env);
+      const host = resolveDashboardBindHost(trustedHosts);
       const handle = await startDashboardServer({
         cwd,
         env: process.env,
-        host: DASHBOARD_HOST,
+        host,
         port,
+        trustedHosts,
       });
       const address = handle.server.address() as { port: number } | null;
       const boundPort = address?.port ?? port;
       console.log(`Discoclaw dashboard listening at http://${DASHBOARD_HOST}:${boundPort}/`);
+      if (trustedHosts.size > 0) {
+        const [firstTrustedHost] = trustedHosts;
+        console.log(`Trusted host URL: http://${firstTrustedHost}:${boundPort}/`);
+      }
       console.log('Press Ctrl+C to stop.');
       await waitForDashboardSignal();
       await handle.close();
@@ -136,7 +148,7 @@ function printHelp(ver: string): void {
       `\nUsage: discoclaw <command>\n` +
       `\nCommands:\n` +
       `  init                                  Interactive setup wizard — creates .env and workspace/\n` +
-      `  dashboard                             Local web dashboard for common admin tasks (HTTP on 127.0.0.1)\n` +
+      `  dashboard                             Local web dashboard for common admin tasks (HTTP on 127.0.0.1 by default)\n` +
       `  doctor [--fix]                        Inspect config drift, deprecated env vars, conflicting/stale overrides, and missing secrets; use --fix for auto-fixes\n` +
       `  install-daemon [--service-name <name>]  Register discoclaw as a persistent background service\n` +
       `                                          Use --service-name to run multiple instances side-by-side.\n` +
