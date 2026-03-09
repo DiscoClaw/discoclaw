@@ -1,0 +1,93 @@
+export const VERIFICATION_EVIDENCE_KINDS = ['build', 'test', 'audit'] as const;
+export const VERIFICATION_EVIDENCE_STATUSES = ['pass', 'fail'] as const;
+
+export type VerificationEvidenceKind = (typeof VERIFICATION_EVIDENCE_KINDS)[number];
+export type VerificationEvidenceStatus = (typeof VERIFICATION_EVIDENCE_STATUSES)[number];
+
+export type VerificationEvidence = {
+  kind: VerificationEvidenceKind;
+  status: VerificationEvidenceStatus;
+  command?: string;
+  summary?: string;
+  reason?: string;
+};
+
+export type VerificationEvidenceInput = {
+  kind: string;
+  status: string;
+  command?: string | null;
+  summary?: string | null;
+  reason?: string | null;
+};
+
+const VALID_EVIDENCE_KINDS = new Set<string>(VERIFICATION_EVIDENCE_KINDS);
+const VALID_EVIDENCE_STATUSES = new Set<string>(VERIFICATION_EVIDENCE_STATUSES);
+
+function normalizeOptionalText(
+  value: string | null | undefined,
+  field: keyof Pick<VerificationEvidence, 'command' | 'summary' | 'reason'>,
+): string | undefined {
+  if (value == null) return undefined;
+
+  if (typeof value !== 'string') {
+    throw new Error(`VerificationEvidence ${field} must be a string`);
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function collapseToOneLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+export function createEvidence(input: VerificationEvidenceInput): VerificationEvidence {
+  if (!VALID_EVIDENCE_KINDS.has(input.kind)) {
+    throw new Error(`Unknown verification evidence kind: '${input.kind}'`);
+  }
+
+  if (!VALID_EVIDENCE_STATUSES.has(input.status)) {
+    throw new Error(`Unknown verification evidence status: '${input.status}'`);
+  }
+
+  const command = normalizeOptionalText(input.command, 'command');
+  const summary = normalizeOptionalText(input.summary, 'summary');
+  const reason = normalizeOptionalText(input.reason, 'reason');
+
+  if (input.status === 'fail' && !reason) {
+    throw new Error('Failed verification evidence requires a reason');
+  }
+
+  if (input.status === 'pass' && reason) {
+    throw new Error('Passed verification evidence cannot include a reason');
+  }
+
+  const evidence: VerificationEvidence = {
+    kind: input.kind as VerificationEvidenceKind,
+    status: input.status as VerificationEvidenceStatus,
+  };
+
+  if (command) evidence.command = command;
+  if (summary) evidence.summary = summary;
+  if (reason) evidence.reason = reason;
+
+  return evidence;
+}
+
+export function formatEvidenceLine(evidence: VerificationEvidence): string {
+  const parts = [`${evidence.kind}: ${evidence.status}`];
+
+  if (evidence.command?.trim()) {
+    parts.push(collapseToOneLine(evidence.command));
+  }
+
+  const detail = evidence.status === 'fail'
+    ? evidence.reason?.trim()
+    : evidence.summary?.trim();
+
+  if (detail) {
+    parts.push(collapseToOneLine(detail));
+  }
+
+  return parts.join(' - ');
+}
