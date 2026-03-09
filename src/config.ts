@@ -7,6 +7,9 @@ export const KNOWN_TOOLS = new Set([
 export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS = 1800;
 export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT = 5;
 export const DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DEPTH = 4;
+export const DEFAULT_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS = 1;
+export const DEFAULT_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS = 1800;
+export const DEFAULT_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT = 5;
 
 type ParseResult = {
   config: DiscoclawConfig;
@@ -49,6 +52,7 @@ export type DiscoclawConfig = {
   discordActionsPlan: boolean;
   discordActionsMemory: boolean;
   discordActionsDefer: boolean;
+  discordActionsLoop: boolean;
   discordActionsImagegen: boolean;
   discordActionsVoice: boolean;
   discordActionsSpawn: boolean;
@@ -57,6 +61,9 @@ export type DiscoclawConfig = {
   deferMaxDepth: number;
   spawnMaxConcurrent: number;
   deferMaxConcurrent: number;
+  loopMinIntervalSeconds: number;
+  loopMaxIntervalSeconds: number;
+  loopMaxConcurrent: number;
 
   messageHistoryBudget: number;
   summaryEnabled: boolean;
@@ -471,6 +478,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsPlan = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_PLAN', true);
   const discordActionsMemory = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', true);
   const discordActionsDefer = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_DEFER', true);
+  const discordActionsLoop = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_LOOP', true);
   const discordActionsImagegen = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', false);
   const discordActionsVoice = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_VOICE', false);
   const discordActionsSpawn = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN', true);
@@ -490,6 +498,26 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     'DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH',
     DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DEPTH,
   );
+  const loopMinIntervalSeconds = parsePositiveNumber(
+    env,
+    'DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS',
+    DEFAULT_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS,
+  );
+  const loopMaxIntervalSeconds = parsePositiveNumber(
+    env,
+    'DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS',
+    DEFAULT_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS,
+  );
+  const loopMaxConcurrent = parsePositiveInt(
+    env,
+    'DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT',
+    DEFAULT_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT,
+  );
+  if (loopMinIntervalSeconds > loopMaxIntervalSeconds) {
+    throw new Error(
+      'DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS cannot exceed DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS',
+    );
+  }
 
   if (!discordActionsEnabled) {
     const enabledCategories = [
@@ -505,6 +533,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       { name: 'DISCOCLAW_DISCORD_ACTIONS_PLAN', enabled: discordActionsPlan },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_MEMORY', enabled: discordActionsMemory },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_DEFER', enabled: discordActionsDefer },
+      { name: 'DISCOCLAW_DISCORD_ACTIONS_LOOP', enabled: discordActionsLoop },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', enabled: discordActionsImagegen },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_VOICE', enabled: discordActionsVoice },
       { name: 'DISCOCLAW_DISCORD_ACTIONS_SPAWN', enabled: discordActionsSpawn },
@@ -752,6 +781,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsPlan,
       discordActionsMemory,
       discordActionsDefer,
+      discordActionsLoop,
       discordActionsImagegen,
       discordActionsVoice,
       discordActionsSpawn,
@@ -760,6 +790,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       deferMaxDepth,
       deferMaxConcurrent,
       spawnMaxConcurrent,
+      loopMinIntervalSeconds,
+      loopMaxIntervalSeconds,
+      loopMaxConcurrent,
 
       messageHistoryBudget: parseNonNegativeInt(env, 'DISCOCLAW_MESSAGE_HISTORY_BUDGET', 3000),
       summaryEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_ENABLED', true),

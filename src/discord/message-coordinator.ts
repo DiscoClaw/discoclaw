@@ -227,6 +227,7 @@ export type BotParams = {
   discordActionsMemory?: boolean;
   discordActionsConfig?: boolean;
   discordActionsDefer?: boolean;
+  discordActionsLoop?: boolean;
   discordActionsImagegen?: boolean;
   discordActionsVoice?: boolean;
   discordActionsSpawn?: boolean;
@@ -811,7 +812,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         memory: params.discordActionsMemory ?? false,
         config: params.discordActionsConfig ?? false,
         defer: !isDm && (params.discordActionsDefer ?? false),
-        loop: !isDm && Boolean(params.deferScheduler),
+        loop: !isDm && (params.discordActionsLoop ?? false),
         imagegen: params.discordActionsImagegen ?? false,
         voice: params.discordActionsVoice ?? false,
         spawn: params.discordActionsSpawn ?? false,

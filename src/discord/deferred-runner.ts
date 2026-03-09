@@ -60,6 +60,7 @@ type DeferredRunnerState = {
   discordActionsForge?: boolean;
   discordActionsPlan?: boolean;
   discordActionsConfig?: boolean;
+  discordActionsLoop?: boolean;
   discordActionsImagegen?: boolean;
   discordActionsVoice?: boolean;
   discordActionsSpawn?: boolean;
@@ -152,7 +153,7 @@ function buildDeferredActionFlags(state: DeferredRunnerState, depth: number, max
     memory: false,
     config: Boolean(state.discordActionsConfig),
     defer: depth < maxDepth,
-    loop: hasConfiguredLoopScheduler(),
+    loop: Boolean(state.discordActionsLoop) && hasConfiguredLoopScheduler(),
     imagegen: Boolean(state.discordActionsImagegen),
     voice: Boolean(state.discordActionsVoice),
     spawn: Boolean(state.discordActionsSpawn),

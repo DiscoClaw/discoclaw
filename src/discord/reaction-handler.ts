@@ -435,6 +435,7 @@ function createReactionHandler(
             memory: params.discordActionsMemory ?? false,
             config: params.discordActionsConfig ?? false,
             defer: !isDm && (params.discordActionsDefer ?? false),
+            loop: !isDm && (params.discordActionsLoop ?? false),
             imagegen: params.discordActionsImagegen ?? false,
             voice: params.discordActionsVoice ?? false,
             spawn: params.discordActionsSpawn ?? false,

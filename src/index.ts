@@ -1221,6 +1221,7 @@ const botParams = {
   discordActionsSpawn: cfg.discordActionsSpawn,
   discordActionsConfig: discordActionsEnabled, // Always enabled when actions are on — model switching is a core capability.
   discordActionsDefer: cfg.discordActionsDefer,
+  discordActionsLoop: cfg.discordActionsLoop,
   deferMaxDelaySeconds: cfg.deferMaxDelaySeconds,
   deferMaxConcurrent: cfg.deferMaxConcurrent,
   deferScheduler: undefined as DeferScheduler<DeferActionRequest, ActionContext> | undefined,
@@ -1386,10 +1387,13 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
   botParams.deferScheduler = deferScheduler;
   deferSchedulerRef = deferScheduler;
   botParams.deferOpts = deferOpts;
+}
+
+if (discordActionsEnabled && cfg.discordActionsLoop) {
   loopSchedulerRef = configureLoopScheduler({
-    minIntervalSeconds: 1,
-    maxIntervalSeconds: cfg.deferMaxDelaySeconds,
-    maxConcurrent: cfg.deferMaxConcurrent,
+    minIntervalSeconds: cfg.loopMinIntervalSeconds,
+    maxIntervalSeconds: cfg.loopMaxIntervalSeconds,
+    maxConcurrent: cfg.loopMaxConcurrent,
     state: botParams,
     runtime,
     runtimeTools,
@@ -2160,6 +2164,7 @@ if (cronEnabled && effectiveCronForum) {
     memory: false, // No user context in cron flows.
     config: false, // No model switching from cron flows.
     defer: false,
+    loop: false, // Cron jobs do not schedule repeating self-invocations via action blocks.
     imagegen: Boolean(botParams.imagegenCtx), // Follows env flag (DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN + API key) — cron jobs may generate images if explicitly configured.
     voice: Boolean(botParams.voiceCtx), // Follows env flag (DISCOCLAW_DISCORD_ACTIONS_VOICE + VOICE_ENABLED) — cron jobs may use voice if configured.
     spawn: false, // Spawn is excluded from cron flows to prevent recursive agent spawning from scheduled jobs.
