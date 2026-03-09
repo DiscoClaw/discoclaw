@@ -54,14 +54,10 @@ switch (command) {
       });
       const address = handle.server.address() as { port: number } | null;
       const boundPort = address?.port ?? port;
+      console.log(`Discoclaw dashboard listening at http://${DASHBOARD_HOST}:${boundPort}/`);
       if (trustedHosts.size > 0) {
-        console.log(`Discoclaw dashboard listening on ${host}:${boundPort}`);
-        console.log(`Trusted Host allowlist: ${Array.from(trustedHosts).join(', ')}`);
-        for (const trustedHost of trustedHosts) {
-          console.log(`Access URL: http://${trustedHost}:${boundPort}/`);
-        }
-      } else {
-        console.log(`Discoclaw dashboard listening at http://${DASHBOARD_HOST}:${boundPort}/`);
+        const [firstTrustedHost] = trustedHosts;
+        console.log(`Trusted host URL: http://${firstTrustedHost}:${boundPort}/`);
       }
       console.log('Press Ctrl+C to stop.');
       await waitForDashboardSignal();
