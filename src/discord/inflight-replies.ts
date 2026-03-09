@@ -68,6 +68,7 @@ const INTERRUPTED_COLD = '*(Interrupted \u2014 bot was restarted.)*';
 
 // --- Module state ---
 const registry = new Map<string, InFlightEntry>();
+const pendingChannels = new Set<string>();
 let shuttingDown = false;
 let dataFilePath: string | null = null;
 
@@ -113,6 +114,25 @@ export function registerInFlightReply(
 }
 
 /**
+ * Mark a channel as having a reply run in progress before the placeholder
+ * message has been registered. Returns an idempotent disposer.
+ */
+export function markChannelPending(channelId: string): () => void {
+  if (shuttingDown) {
+    return () => {};
+  }
+
+  pendingChannels.add(channelId);
+
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    pendingChannels.delete(channelId);
+  };
+}
+
+/**
  * Attach the stop-reaction promise to a registered in-flight reply.
  * The drain path uses this to remove the 🛑 directly instead of
  * relying on reactions.resolve(), which can miss the cache.
@@ -138,6 +158,7 @@ export function inFlightReplyCount(): number {
  * Returns true if there is at least one in-flight reply for the given channelId.
  */
 export function hasInFlightForChannel(channelId: string): boolean {
+  if (pendingChannels.has(channelId)) return true;
   for (const entry of registry.values()) {
     if (entry.channelId === channelId) return true;
   }
@@ -167,6 +188,7 @@ export async function drainInFlightReplies(opts?: {
   // Atomic snapshot + clear + flag.
   const entries = Array.from(registry.values());
   registry.clear();
+  pendingChannels.clear();
   shuttingDown = true;
 
   if (entries.length === 0) {
@@ -356,6 +378,7 @@ export function _waitForPendingPersists(): Promise<void> {
  */
 export function _resetForTest(): void {
   registry.clear();
+  pendingChannels.clear();
   shuttingDown = false;
   dataFilePath = null;
   persistQueue = Promise.resolve();
