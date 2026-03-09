@@ -18,6 +18,7 @@ export type HealthConfigSnapshot = {
   messageHistoryBudget: number;
   reactionHandlerEnabled: boolean;
   reactionRemoveHandlerEnabled: boolean;
+  loopActionsEnabled?: boolean;
   cronEnabled: boolean;
   tasksEnabled: boolean;
   tasksActive: boolean;
@@ -55,6 +56,10 @@ function formatUptime(ms: number): string {
 
 function asCount(counters: Record<string, number>, name: string): number {
   return Number(counters[name] ?? 0);
+}
+
+function countRunningLoops(jobs: Array<{ running?: boolean }>): number {
+  return jobs.reduce((count, job) => count + (job.running ? 1 : 0), 0);
 }
 
 function formatTaskSyncVerboseLines(counters: Record<string, number>): string[] {
@@ -100,6 +105,7 @@ export function renderHealthReport(opts: {
   mode: HealthCommandMode;
   botDisplayName?: string;
   deferScheduler?: { listActive(): unknown[] };
+  loopScheduler?: { list(): Array<{ running?: boolean }> };
 }): string {
   const snap = opts.metrics.snapshot();
   const counters = snap.counters;
@@ -120,6 +126,8 @@ export function renderHealthReport(opts: {
   const deferFailed = asCount(counters, 'invoke.defer.failed');
   const deferPending = opts.deferScheduler ? opts.deferScheduler.listActive().length : 0;
   lines.push(`Defer: started=${deferStarted} ok=${deferOk} failed=${deferFailed} pending=${deferPending}`);
+  const activeLoops = opts.loopScheduler ? opts.loopScheduler.list() : [];
+  lines.push(`Loops: active=${activeLoops.length} running=${countRunningLoops(activeLoops)}`);
 
   lines.push(
     `Latency(ms): msg p50=${snap.latencies.message.p50Ms} p95=${snap.latencies.message.p95Ms}; ` +
@@ -138,7 +146,7 @@ export function renderHealthReport(opts: {
     const tasksActive = opts.config.tasksActive;
     const tasksEnabled = opts.config.tasksEnabled;
     const tasksState = tasksActive ? 'active' : tasksEnabled ? 'degraded' : 'off';
-    lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} cron=${opts.config.cronEnabled} tasks=${tasksState}`);
+    lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} loopActions=${opts.config.loopActionsEnabled ?? false} cron=${opts.config.cronEnabled} tasks=${tasksState}`);
     lines.push(
       `taskSyncPolicy: failureRetry=${opts.config.tasksSyncFailureRetryEnabled ? 'on' : 'off'} failureDelayMs=${opts.config.tasksSyncFailureRetryDelayMs} deferredDelayMs=${opts.config.tasksSyncDeferredRetryDelayMs}`,
     );

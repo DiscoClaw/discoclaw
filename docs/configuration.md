@@ -301,6 +301,7 @@ Master switch and per-category flags for Discord actions. See [docs/discord-acti
 | `DISCOCLAW_DISCORD_ACTIONS_PLAN` | `true` | Plan actions |
 | `DISCOCLAW_DISCORD_ACTIONS_MEMORY` | `true` | Memory actions |
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER` | `true` | Deferred (scheduled) actions |
+| `DISCOCLAW_DISCORD_ACTIONS_LOOP` | `true` | Loop actions (repeating scheduled self-invocations) |
 | `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` | `false` | Image generation actions |
 | `DISCOCLAW_DISCORD_ACTIONS_VOICE` | `false` | Voice actions |
 | `DISCOCLAW_DISCORD_ACTIONS_SPAWN` | `true` | Spawn parallel sub-agent invocations |
@@ -308,6 +309,9 @@ Master switch and per-category flags for Discord actions. See [docs/discord-acti
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` | `1800` | Max delay for deferred actions |
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` | `5` | Max concurrent deferred actions |
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH` | `4` | Max nesting depth for nested defers |
+| `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` | `60` | Minimum interval accepted for `loopCreate` |
+| `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` | `86400` | Maximum interval accepted for `loopCreate` |
+| `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` | `5` | Max concurrent active loops |
 | `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` | `8` | Max concurrent spawned agents |
 | `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` | `3` | Max follow-up depth for action chains |
 

@@ -271,6 +271,48 @@ describe('renderHealthReport', () => {
     expect(basic).toContain('pending=3');
   });
 
+  it('shows active and running loop counts from loopScheduler', () => {
+    const metrics = new MetricsRegistry();
+    const mockScheduler = { list: () => [{ running: true }, { running: false }, { running: true }] };
+
+    const basic = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        loopActionsEnabled: true, cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+      },
+      mode: 'basic',
+      loopScheduler: mockScheduler,
+    });
+    expect(basic).toContain('Loops: active=3 running=2');
+  });
+
+  it('shows loopActions flag in verbose config output', () => {
+    const metrics = new MetricsRegistry();
+
+    const verbose = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        loopActionsEnabled: true, cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+      },
+      mode: 'verbose',
+    });
+    expect(verbose).toContain('loopActions=true');
+  });
+
   it('shows defer latency in the latency line', () => {
     const metrics = new MetricsRegistry();
     metrics.recordInvokeResult('defer', 150, true);

@@ -4,6 +4,9 @@ import {
   DEFAULT_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT,
   DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS,
   DEFAULT_DISCORD_ACTIONS_DEFER_MAX_DEPTH,
+  DEFAULT_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT,
+  DEFAULT_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS,
+  DEFAULT_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS,
 } from './config.js';
 
 function env(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
@@ -172,6 +175,34 @@ describe('parseConfig', () => {
     expect(config.deferMaxDepth).toBe(8);
   });
 
+  it('defaults discordActionsLoop settings', () => {
+    const { config } = parseConfig(env());
+    expect(config.discordActionsLoop).toBe(true);
+    expect(config.loopMinIntervalSeconds).toBe(DEFAULT_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS);
+    expect(config.loopMaxIntervalSeconds).toBe(DEFAULT_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS);
+    expect(config.loopMaxConcurrent).toBe(DEFAULT_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT);
+  });
+
+  it('parses loop config overrides', () => {
+    const { config } = parseConfig(env({
+      DISCOCLAW_DISCORD_ACTIONS_LOOP: '1',
+      DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS: '30',
+      DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS: '900',
+      DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT: '2',
+    }));
+    expect(config.discordActionsLoop).toBe(true);
+    expect(config.loopMinIntervalSeconds).toBe(30);
+    expect(config.loopMaxIntervalSeconds).toBe(900);
+    expect(config.loopMaxConcurrent).toBe(2);
+  });
+
+  it('throws when loop min interval exceeds loop max interval', () => {
+    expect(() => parseConfig(env({
+      DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS: '901',
+      DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS: '900',
+    }))).toThrow(/DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS cannot exceed DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS/);
+  });
+
   it('throws on non-positive or non-integer deferMaxDepth', () => {
     expect(() => parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH: '0' })))
       .toThrow(/DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH must be a positive number/);
@@ -196,6 +227,14 @@ describe('parseConfig', () => {
       DISCOCLAW_DISCORD_ACTIONS_DEFER: '1',
     }));
     expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_DEFER'))).toBe(true);
+  });
+
+  it('reports ignored loop category flag when master actions off', () => {
+    const { infos } = parseConfig(env({
+      DISCOCLAW_DISCORD_ACTIONS: '0',
+      DISCOCLAW_DISCORD_ACTIONS_LOOP: '1',
+    }));
+    expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_LOOP'))).toBe(true);
   });
 
   it('parses DISCOCLAW_BOT_NAME when set', () => {

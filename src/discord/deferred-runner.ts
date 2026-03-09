@@ -26,7 +26,7 @@ import {
   buildPromptSectionEstimates,
   buildContextFiles,
   buildOpenTasksSection,
-  buildPromptPreamble,
+  buildScheduledSelfInvocationPrompt,
   inlineContextFilesWithMeta,
   loadWorkspacePaFiles,
   resolveEffectiveTools,
@@ -239,13 +239,6 @@ export function configureDeferredScheduler(
         keywordHits: string[];
       }
       | null = null;
-    // Section order: preamble (primacy) → open tasks (middle) → actions/notes (recency) → user message (last).
-    let prompt =
-      buildPromptPreamble(inlinedContext.text) + '\n\n' +
-      (openTasksSection
-        ? `---\n${openTasksSection}\n\n`
-        : '');
-
     if (opts.state.discordActionsEnabled) {
       const actionSelection = buildTieredDiscordActionsPromptSection(
         deferredActionFlags,
@@ -263,7 +256,6 @@ export function configureDeferredScheduler(
         tierBuckets: actionSelection.tierBuckets,
         keywordHits: actionSelection.keywordHits,
       };
-      prompt += '\n\n---\n' + actionsReferenceSection;
     }
 
     const promptSectionEstimates = buildPromptSectionEstimates({
@@ -301,14 +293,14 @@ export function configureDeferredScheduler(
       opts.log?.warn({ flow: 'defer', channelId: channel.id, err }, 'defer:resolve effective tools failed');
     }
 
-    if (noteLines.length > 0) {
-      prompt += `\n\n---\n${noteLines.join('\n')}\n`;
-    }
-
-    // User message — absolute last in prompt to maximize recency bias.
-    prompt +=
-      `---\nDeferred follow-up scheduled for <#${channel.id}> (runs at ${fmtTime(run.runsAt)}).\n---\n` +
-      `User message:\n${action.prompt}`;
+    const prompt = buildScheduledSelfInvocationPrompt({
+      inlinedContext: inlinedContext.text,
+      openTasksSection,
+      actionsReferenceSection,
+      noteLines,
+      invocationNotice: `Deferred follow-up scheduled for <#${channel.id}> (runs at ${fmtTime(run.runsAt)}).`,
+      userMessage: action.prompt,
+    });
 
     const addDirs: string[] = [];
     if (opts.useGroupDirCwd) addDirs.push(opts.workspaceCwd);

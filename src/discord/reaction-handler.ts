@@ -363,6 +363,8 @@ function createReactionHandler(
               : '');
 
           // User content block — assembled separately, appended after actions/notes.
+          const actionRoutingParts: string[] = [messageContent];
+          if (resolvedPrompt?.question) actionRoutingParts.push(resolvedPrompt.question);
           let userContent =
             `---\nReaction event:\n` +
             eventLine + `\n\n` +
@@ -395,6 +397,7 @@ function createReactionHandler(
                 if (textResult.texts.length > 0) {
                   const sections = textResult.texts.map(t => `[Attached file: ${t.name}]\n\`\`\`\n${t.content}\n\`\`\``);
                   userContent += '\n\n' + sections.join('\n\n');
+                  actionRoutingParts.push(...textResult.texts.map((t) => t.content));
                   params.log?.info({ fileCount: textResult.texts.length }, `${logPrefix}:text attachments downloaded`);
                 }
                 if (textResult.errors.length > 0) {
@@ -416,6 +419,7 @@ function createReactionHandler(
               return parts.join(' ') || '(embed)';
             });
             userContent += `\nEmbeds: ${embedInfos.join(', ')}`;
+            actionRoutingParts.push(embedInfos.join(', '));
           }
 
           userContent += `\n\n${guidanceLine}`;
@@ -435,6 +439,7 @@ function createReactionHandler(
             memory: params.discordActionsMemory ?? false,
             config: params.discordActionsConfig ?? false,
             defer: !isDm && (params.discordActionsDefer ?? false),
+            loop: !isDm && (params.discordActionsLoop ?? false),
             imagegen: params.discordActionsImagegen ?? false,
             voice: params.discordActionsVoice ?? false,
             spawn: params.discordActionsSpawn ?? false,
@@ -448,7 +453,7 @@ function createReactionHandler(
                 channelName: channelCtx.channelName ?? channelNameFrom(msg.channel),
                 channelContextPath: channelCtx.contextPath,
                 isThread,
-                userText: String(msg.content ?? ''),
+                userText: actionRoutingParts.filter((part) => part.trim().length > 0).join('\n\n'),
               },
             );
             actionsReferenceSection = actionSelection.prompt;

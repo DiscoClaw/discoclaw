@@ -227,12 +227,14 @@ export type BotParams = {
   discordActionsMemory?: boolean;
   discordActionsConfig?: boolean;
   discordActionsDefer?: boolean;
+  discordActionsLoop?: boolean;
   discordActionsImagegen?: boolean;
   discordActionsVoice?: boolean;
   discordActionsSpawn?: boolean;
   deferMaxDelaySeconds?: number;
   deferMaxConcurrent?: number;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
+  loopScheduler?: { list(): Array<{ running?: boolean }> };
   taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -811,6 +813,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         memory: params.discordActionsMemory ?? false,
         config: params.discordActionsConfig ?? false,
         defer: !isDm && (params.discordActionsDefer ?? false),
+        loop: !isDm && (params.discordActionsLoop ?? false),
         imagegen: params.discordActionsImagegen ?? false,
         voice: params.discordActionsVoice ?? false,
         spawn: params.discordActionsSpawn ?? false,
@@ -823,6 +826,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         actionFlags.memory = false;
         actionFlags.config = false;
         actionFlags.defer = false;
+        actionFlags.loop = false;
         actionFlags.botProfile = false;
         actionFlags.crons = false;
         actionFlags.tasks = false;
@@ -1016,6 +1020,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           messageHistoryBudget: params.messageHistoryBudget,
           reactionHandlerEnabled: params.reactionHandlerEnabled,
           reactionRemoveHandlerEnabled: params.reactionRemoveHandlerEnabled,
+          loopActionsEnabled: params.discordActionsLoop ?? false,
           cronEnabled: Boolean(params.cronCtx),
           tasksEnabled: Boolean(params.taskCtx),
           tasksActive: Boolean(params.taskCtx),
@@ -1032,6 +1037,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           mode,
           botDisplayName: params.botDisplayName,
           deferScheduler: params.deferScheduler,
+          loopScheduler: params.loopScheduler,
         });
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
         return;

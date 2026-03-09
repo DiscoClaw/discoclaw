@@ -102,6 +102,7 @@ All actions are gated by category env flags (off by default except channels).
 | Reaction prompts (durable pending wait persistence across restarts) | `reactionPrompt` | `reaction-prompts.ts`, `reaction-prompt-store.ts`, `reaction-handler.ts`, `index.ts` | **done** |
 | Defer scheduler (in-process timers with concurrency limits) | — | `src/discord/defer-scheduler.ts` | **done** |
 | Deferred runner (wires defer action type into action/runtime pipeline) | — | `src/discord/deferred-runner.ts` | **done** |
+| Loop actions (first-class repeating scheduled self-invocations with inspectable metadata) | `loopCreate`, `loopList`, `loopCancel` | `actions-loop.ts` | **done** |
 | Voice (session control) | join, leave, status, mute, deafen | `actions-voice.ts` | **done** |
 | Spawn (parallel sub-agent invocations) | spawnAgent | `actions-spawn.ts` | **done** |
 

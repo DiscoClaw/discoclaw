@@ -14,6 +14,7 @@ export type ShutdownContext = {
   activeForge?: string;
   requestedBy?: string;
   cancelledDefers?: number;
+  cancelledLoops?: number;
   cancelledSpawns?: number;
 };
 
@@ -151,6 +152,9 @@ export async function readAndClearShutdownContext(
   const cancelledDefers = typeof parsedObj.cancelledDefers === 'number' && Number.isFinite(parsedObj.cancelledDefers) && parsedObj.cancelledDefers > 0
     ? Math.floor(parsedObj.cancelledDefers)
     : undefined;
+  const cancelledLoops = typeof parsedObj.cancelledLoops === 'number' && Number.isFinite(parsedObj.cancelledLoops) && parsedObj.cancelledLoops > 0
+    ? Math.floor(parsedObj.cancelledLoops)
+    : undefined;
   const cancelledSpawns = typeof parsedObj.cancelledSpawns === 'number' && Number.isFinite(parsedObj.cancelledSpawns) && parsedObj.cancelledSpawns > 0
     ? Math.floor(parsedObj.cancelledSpawns)
     : undefined;
@@ -162,6 +166,7 @@ export async function readAndClearShutdownContext(
     activeForge: typeof parsedObj.activeForge === 'string' ? parsedObj.activeForge.slice(0, MAX_FIELD_LENGTH) : undefined,
     requestedBy: typeof parsedObj.requestedBy === 'string' ? parsedObj.requestedBy : undefined,
     cancelledDefers,
+    cancelledLoops,
     cancelledSpawns,
   };
 
@@ -219,6 +224,11 @@ export function formatStartupInjection(ctx: StartupContext): string | null {
   if (ctx.shutdown?.cancelledDefers) {
     const n = ctx.shutdown.cancelledDefers;
     line += ` ${n} deferred action${n === 1 ? ' was' : 's were'} cancelled and did not run.`;
+  }
+
+  if (ctx.shutdown?.cancelledLoops) {
+    const n = ctx.shutdown.cancelledLoops;
+    line += ` ${n} repeating loop${n === 1 ? ' was' : 's were'} cancelled and will not run again.`;
   }
 
   if (ctx.shutdown?.cancelledSpawns) {

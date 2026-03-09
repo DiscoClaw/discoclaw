@@ -291,6 +291,17 @@ describe('readAndClearShutdownContext', () => {
     expect(result.shutdown?.cancelledDefers).toBe(3);
   });
 
+  it('preserves cancelledLoops in shutdown context', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'restart-command',
+      timestamp: '2026-02-13T00:00:00.000Z',
+      cancelledLoops: 2,
+    });
+
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledLoops).toBe(2);
+  });
+
   it('reads cancelledDefers patched into existing context', async () => {
     await writeShutdownContext(tmpDir, {
       reason: 'restart-command',
@@ -302,6 +313,20 @@ describe('readAndClearShutdownContext', () => {
     const result = await readAndClearShutdownContext(tmpDir);
     expect(result.type).toBe('intentional');
     expect(result.shutdown?.cancelledDefers).toBe(5);
+    expect(result.shutdown?.message).toBe('User requested via !restart');
+  });
+
+  it('reads cancelledLoops patched into existing context', async () => {
+    await writeShutdownContext(tmpDir, {
+      reason: 'restart-command',
+      message: 'User requested via !restart',
+      timestamp: '2026-02-13T00:00:00.000Z',
+    });
+    await patchShutdownContext(tmpDir, { cancelledLoops: 4 });
+
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.type).toBe('intentional');
+    expect(result.shutdown?.cancelledLoops).toBe(4);
     expect(result.shutdown?.message).toBe('User requested via !restart');
   });
 
@@ -339,6 +364,42 @@ describe('readAndClearShutdownContext', () => {
     );
     const result = await readAndClearShutdownContext(tmpDir);
     expect(result.shutdown?.cancelledDefers).toBe(2);
+  });
+
+  it('ignores cancelledLoops when zero', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledLoops: 0 }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledLoops).toBeUndefined();
+  });
+
+  it('ignores cancelledLoops when negative', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledLoops: -1 }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledLoops).toBeUndefined();
+  });
+
+  it('ignores cancelledLoops when not a number', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledLoops: 'three' }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledLoops).toBeUndefined();
+  });
+
+  it('floors fractional cancelledLoops', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'shutdown-context.json'),
+      JSON.stringify({ reason: 'restart-command', timestamp: '', cancelledLoops: 2.7 }),
+    );
+    const result = await readAndClearShutdownContext(tmpDir);
+    expect(result.shutdown?.cancelledLoops).toBe(2);
   });
 
   it('preserves cancelledSpawns in shutdown context', async () => {
@@ -552,6 +613,32 @@ describe('formatStartupInjection', () => {
     expect(result).toContain('3 deferred actions were cancelled and did not run.');
   });
 
+  it('appends cancelled loops info (singular) when cancelledLoops is 1', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledLoops: 1,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('1 repeating loop was cancelled and will not run again.');
+  });
+
+  it('appends cancelled loops info (plural) when cancelledLoops > 1', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledLoops: 3,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('3 repeating loops were cancelled and will not run again.');
+  });
+
   it('does not mention cancelled defers when count is 0 or absent', () => {
     const ctx: StartupContext = {
       type: 'intentional',
@@ -562,6 +649,18 @@ describe('formatStartupInjection', () => {
     };
     const result = formatStartupInjection(ctx);
     expect(result).not.toContain('deferred action');
+  });
+
+  it('does not mention cancelled loops when count is 0 or absent', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).not.toContain('repeating loop');
   });
 
   it('includes both forge and cancelled defers when both present', () => {
@@ -577,6 +676,21 @@ describe('formatStartupInjection', () => {
     const result = formatStartupInjection(ctx);
     expect(result).toContain('plan-037');
     expect(result).toContain('2 deferred actions were cancelled');
+  });
+
+  it('includes both cancelled defers and cancelled loops when both present', () => {
+    const ctx: StartupContext = {
+      type: 'intentional',
+      shutdown: {
+        reason: 'restart-command',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledDefers: 2,
+        cancelledLoops: 3,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('2 deferred actions were cancelled');
+    expect(result).toContain('3 repeating loops were cancelled');
   });
 
   it('appends cancelled spawns info (singular) when cancelledSpawns is 1', () => {
@@ -673,6 +787,19 @@ describe('formatStartupInjection', () => {
     };
     const result = formatStartupInjection(ctx);
     expect(result).toContain('4 deferred actions were cancelled');
+  });
+
+  it('includes cancelled loops for graceful-unknown type', () => {
+    const ctx: StartupContext = {
+      type: 'graceful-unknown',
+      shutdown: {
+        reason: 'unknown',
+        timestamp: '2026-02-13T00:00:00.000Z',
+        cancelledLoops: 2,
+      },
+    };
+    const result = formatStartupInjection(ctx);
+    expect(result).toContain('2 repeating loops were cancelled');
   });
 
   it('includes resolved-task guard for all non-null results', () => {

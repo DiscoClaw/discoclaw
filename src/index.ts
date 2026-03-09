@@ -19,7 +19,7 @@ import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { buildDurableMemorySection } from './discord/prompt-common.js';
 import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
-import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines } from './discord/actions.js';
+import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines, appendActionResults } from './discord/actions.js';
 import { DiscordTransportClient } from './discord/transport-client.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
 import { loadVoiceIdentity, buildVoicePrompt, buildVoiceFollowUpPrompt, buildVoicePromptSectionEstimates } from './voice/voice-prompt-builder.js';
@@ -30,6 +30,7 @@ import { shouldTriggerFollowUp } from './discord/action-categories.js';
 import type { DeferScheduler } from './discord/defer-scheduler.js';
 import type { DeferActionRequest } from './discord/actions-defer.js';
 import { configureDeferredScheduler, type ConfigureDeferredSchedulerOpts } from './discord/deferred-runner.js';
+import { configureLoopScheduler } from './discord/actions-loop.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { LongRunWatchdog, type LongRunWatchdogRun } from './discord/long-run-watchdog.js';
@@ -238,6 +239,7 @@ let voiceManager: VoiceConnectionManager | null = null;
 let audioPipeline: AudioPipelineManager | null = null;
 let voicePresenceHandler: VoicePresenceHandler | null = null;
 let deferSchedulerRef: DeferScheduler<DeferActionRequest, ActionContext> | null = null;
+let loopSchedulerRef: { cancelAll(): number; list(): Array<{ running?: boolean }> } | null = null;
 let longRunWatchdog: LongRunWatchdog | null = null;
 const memorySampler = new MemorySampler();
 globalMetrics.setMemorySampler(memorySampler);
@@ -272,8 +274,20 @@ const shutdown = async () => {
   // Cancel watchdog timers before draining replies.
   longRunWatchdog?.dispose();
 
-  // Cancel deferred timers first — before drain — so they cannot fire and produce
-  // new in-flight replies during the drain window.
+  if (loopSchedulerRef) {
+    const cancelled = loopSchedulerRef.cancelAll();
+    log.info({ cancelled }, 'shutdown:loop timers cancelled');
+    if (cancelled > 0) {
+      try {
+        await patchShutdownContext(pidLockDir, { cancelledLoops: cancelled });
+      } catch (err) {
+        log.warn({ err }, 'shutdown:failed to patch cancelledLoops');
+      }
+    }
+  }
+
+  // Cancel scheduled loop/defer timers before drain so they cannot fire and
+  // produce new in-flight replies during the drain window.
   if (deferSchedulerRef) {
     const cancelled = deferSchedulerRef.cancelAll();
     if (cancelled > 0) {
@@ -1212,9 +1226,11 @@ const botParams = {
   discordActionsSpawn: cfg.discordActionsSpawn,
   discordActionsConfig: discordActionsEnabled, // Always enabled when actions are on — model switching is a core capability.
   discordActionsDefer: cfg.discordActionsDefer,
+  discordActionsLoop: cfg.discordActionsLoop,
   deferMaxDelaySeconds: cfg.deferMaxDelaySeconds,
   deferMaxConcurrent: cfg.deferMaxConcurrent,
   deferScheduler: undefined as DeferScheduler<DeferActionRequest, ActionContext> | undefined,
+  loopScheduler: undefined as { list(): Array<{ running?: boolean }> } | undefined,
   taskCtx: undefined as TaskContext | undefined,
   cronCtx: undefined as CronContext | undefined,
   forgeCtx: undefined as ForgeContext | undefined,
@@ -1309,6 +1325,7 @@ const botParams = {
     messageHistoryBudget,
     reactionHandlerEnabled,
     reactionRemoveHandlerEnabled,
+    loopActionsEnabled: cfg.discordActionsLoop,
     cronEnabled,
     tasksEnabled,
     tasksActive: false,
@@ -1377,6 +1394,31 @@ if (discordActionsEnabled && cfg.discordActionsDefer) {
   botParams.deferScheduler = deferScheduler;
   deferSchedulerRef = deferScheduler;
   botParams.deferOpts = deferOpts;
+}
+
+if (discordActionsEnabled && cfg.discordActionsLoop) {
+  loopSchedulerRef = configureLoopScheduler({
+    minIntervalSeconds: cfg.loopMinIntervalSeconds,
+    maxIntervalSeconds: cfg.loopMaxIntervalSeconds,
+    maxConcurrent: cfg.loopMaxConcurrent,
+    state: botParams,
+    runtime,
+    runtimeTools,
+    runtimeTimeoutMs,
+    workspaceCwd,
+    discordChannelContext,
+    appendSystemPrompt,
+    useGroupDirCwd,
+    botDisplayName,
+    actionsApi: {
+      parseDiscordActions,
+      executeDiscordActions,
+      buildTieredDiscordActionsPromptSection,
+      appendActionResults,
+    },
+    log,
+  });
+  botParams.loopScheduler = loopSchedulerRef;
 }
 
 let client!: Awaited<ReturnType<typeof startDiscordBot>>['client'], status!: Awaited<ReturnType<typeof startDiscordBot>>['status'], system!: Awaited<ReturnType<typeof startDiscordBot>>['system'];
@@ -2130,6 +2172,7 @@ if (cronEnabled && effectiveCronForum) {
     memory: false, // No user context in cron flows.
     config: false, // No model switching from cron flows.
     defer: false,
+    loop: false, // Cron jobs do not schedule repeating self-invocations via action blocks.
     imagegen: Boolean(botParams.imagegenCtx), // Follows env flag (DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN + API key) — cron jobs may generate images if explicitly configured.
     voice: Boolean(botParams.voiceCtx), // Follows env flag (DISCOCLAW_DISCORD_ACTIONS_VOICE + VOICE_ENABLED) — cron jobs may use voice if configured.
     spawn: false, // Spawn is excluded from cron flows to prevent recursive agent spawning from scheduled jobs.

@@ -31,6 +31,8 @@ import type { MemoryActionRequest, MemoryContext } from './actions-memory.js';
 import { DEFER_ACTION_TYPES, executeDeferAction, executeDeferListAction } from './actions-defer.js';
 import type { DeferActionRequest, DeferListActionRequest, DeferActionRequestUnion } from './actions-defer.js';
 import type { DeferScheduler } from './defer-scheduler.js';
+import { LOOP_ACTION_TYPES, executeLoopAction, loopActionsPromptSection } from './actions-loop.js';
+import type { LoopActionRequest } from './actions-loop.js';
 import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } from './actions-config.js';
 import type { ConfigActionRequest, ConfigContext } from './actions-config.js';
 import { executeReactionPromptAction as executeReactionPrompt, REACTION_PROMPT_ACTION_TYPES, reactionPromptSection } from './reaction-prompts.js';
@@ -83,6 +85,7 @@ export type ActionCategoryFlags = {
   memory: boolean;
   defer: boolean;
   config: boolean;
+  loop?: boolean;
   imagegen?: boolean;
   voice?: boolean;
   spawn?: boolean;
@@ -102,6 +105,7 @@ export type DiscordActionRequest =
   | MemoryActionRequest
   | DeferActionRequest
   | DeferListActionRequest
+  | LoopActionRequest
   | ConfigActionRequest
   | ReactionPromptRequest
   | ImagegenActionRequest
@@ -162,11 +166,23 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.plan) for (const t of PLAN_ACTION_TYPES) types.add(t);
   if (flags.memory) for (const t of MEMORY_ACTION_TYPES) types.add(t);
   if (flags.defer) for (const t of DEFER_ACTION_TYPES) types.add(t);
+  if (flags.loop) for (const t of LOOP_ACTION_TYPES) types.add(t);
   if (flags.config) for (const t of CONFIG_ACTION_TYPES) types.add(t);
   if (flags.imagegen) for (const t of IMAGEGEN_ACTION_TYPES) types.add(t);
   if (flags.voice) for (const t of VOICE_ACTION_TYPES) types.add(t);
   if (flags.spawn) for (const t of SPAWN_ACTION_TYPES) types.add(t);
   return types;
+}
+
+function buildAllowedTypes(
+  flags: ActionCategoryFlags,
+  allowedActionTypes?: Iterable<string>,
+): Set<string> {
+  const validTypes = buildValidTypes(flags);
+  if (!allowedActionTypes) return validTypes;
+
+  const allowedSet = new Set(allowedActionTypes);
+  return new Set([...validTypes].filter((type) => allowedSet.has(type)));
 }
 
 function rewriteLegacyPlanCloseToTaskClose(
@@ -374,8 +390,9 @@ export type ParsedDiscordActionsResult = {
 export function parseDiscordActions(
   text: string,
   flags: ActionCategoryFlags,
+  allowedActionTypes?: Iterable<string>,
 ): ParsedDiscordActionsResult {
-  const validTypes = buildValidTypes(flags);
+  const validTypes = buildAllowedTypes(flags, allowedActionTypes);
   const actions: DiscordActionRequest[] = [];
   const strippedUnrecognizedTypes: string[] = [];
   const codeRanges = computeMarkdownCodeRanges(text);
@@ -521,6 +538,8 @@ export async function executeDiscordActions(
         } else {
           result = await executeDeferAction(action as DeferActionRequest, ctx);
         }
+      } else if (LOOP_ACTION_TYPES.has(action.type)) {
+        result = await executeLoopAction(action as LoopActionRequest, ctx);
       } else if (CONFIG_ACTION_TYPES.has(action.type)) {
         if (!effectiveSubs.configCtx) {
           result = { ok: false, error: 'Config subsystem not configured' };
@@ -633,6 +652,7 @@ type ActionSchemaCategory =
   | 'plan'
   | 'memory'
   | 'defer'
+  | 'loop'
   | 'config'
   | 'imagegen'
   | 'voice'
@@ -650,11 +670,12 @@ const ACTION_SCHEMA_CATEGORY_ORDER: ActionSchemaCategory[] = [
   'forge',
   'plan',
   'memory',
+  'defer',
+  'loop',
   'config',
   'imagegen',
   'voice',
   'spawn',
-  'defer',
 ];
 
 const ACTION_SCHEMA_CORE_CATEGORIES: ActionSchemaCategory[] = ['messaging', 'channels'];
@@ -674,6 +695,7 @@ const ACTION_SCHEMA_KEYWORD_RULES: ActionSchemaKeywordRule[] = [
   { hit: 'plan', pattern: /\b(plan|roadmap|milestone|phase)\b/i, categories: ['plan', 'forge'] },
   { hit: 'forge', pattern: /\bforge\b/i, categories: ['forge', 'plan'] },
   { hit: 'cron', pattern: /\b(cron|schedule|scheduled|reminder|remind|later)\b/i, categories: ['crons', 'defer'] },
+  { hit: 'loop', pattern: /\b(loop|repeat|repeating|interval)\b/i, categories: ['loop'] },
   { hit: 'config', pattern: /\b(model|config|configure|setting)\b/i, categories: ['config'] },
   { hit: 'imagegen', pattern: /\b(image|generate image|draw|illustration|photo)\b/i, categories: ['imagegen'] },
   { hit: 'voice', pattern: /\b(voice|speak|mute|unmute)\b/i, categories: ['voice'] },
@@ -707,6 +729,7 @@ function isActionSchemaCategoryEnabled(flags: ActionCategoryFlags, category: Act
     case 'plan': return flags.plan;
     case 'memory': return flags.memory;
     case 'defer': return flags.defer;
+    case 'loop': return Boolean(flags.loop);
     case 'config': return flags.config;
     case 'imagegen': return Boolean(flags.imagegen);
     case 'voice': return Boolean(flags.voice);
@@ -740,6 +763,8 @@ function renderActionSchemaCategorySection(category: ActionSchemaCategory): stri
       return memoryActionsPromptSection();
     case 'config':
       return configActionsPromptSection();
+    case 'loop':
+      return loopActionsPromptSection();
     case 'imagegen':
       return imagegenActionsPromptSection();
     case 'voice':
@@ -773,11 +798,11 @@ If "Missing Permissions" errors occur, tell the user to check **Server Settings 
 
 function deferredSelfInvocationSection(): string {
   return `### Deferred self-invocation
-Use a <discord-action>{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}</discord-action> block to schedule a follow-up run inside the requested channel without another user prompt. You must specify the channel by name or ID; delaySeconds is how long to wait (capped by DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS) and prompt becomes the user message when the deferred invocation runs. The scheduler enforces DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT pending jobs, respects the same channel permissions as this response, automatically posts the follow-up output, and allows nested defers up to the configured depth limit (DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH, default 4); once the limit is reached, \`defer\` is disabled for that run. If a guard rail rejects the request (too long, too many active defers, missing permissions, or the channel becomes invalid) the action fails with an explanatory message.
+Use a <discord-action>{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}</discord-action> block to schedule a one-shot follow-up run inside the requested channel without another user prompt. You must specify the channel by name or ID; delaySeconds is how long to wait (capped by DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS) and prompt becomes the user message when the deferred invocation runs. The scheduler enforces DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT pending jobs, respects the same channel permissions as this response, automatically posts the follow-up output, and allows nested defers up to the configured depth limit (DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH, default 4); once the limit is reached, \`defer\` is disabled for that run. If the task is recurring, use \`loopCreate\` instead of chaining repeated defers. If a guard rail rejects the request (too long, too many active defers, missing permissions, or the channel becomes invalid) the action fails with an explanatory message.
 
 **Context isolation warning:** The deferred invocation runs with no conversation history — the \`prompt\` string is the **only** context the AI receives. It must include all relevant IDs, file paths, channel references, and state needed to act. Vague prompts like "check on that" will fail because the AI has no memory of what "that" refers to. Write every deferred prompt as a fully self-contained instruction.
 
-Use <discord-action>{"type":"deferList"}</discord-action> to query all pending deferred actions. Returns a job \`id\`, channel, prompt, and time remaining for each entry. This is a read-only query action — results are automatically sent back for further analysis.`;
+Use <discord-action>{"type":"deferList"}</discord-action> to query all pending one-shot deferred actions. Returns a job \`id\`, channel, prompt, and time remaining for each entry. This is a read-only query action — results are automatically sent back for further analysis.`;
 }
 
 function deriveContextualCategories(opts: {
