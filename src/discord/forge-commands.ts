@@ -24,11 +24,12 @@ export type { AuditVerdict };
 export const AUDIT_CRITERIA_LINES: string[] = [
   '1. Missing or underspecified details (vague scope, unclear file changes)',
   '2. Structural integrity — the plan MUST have a `## Changes` section with concrete file paths. If file changes are described only inside a `## Phases` section (or any section other than `## Changes`), flag it as **blocking**.',
-  '3. Architectural issues (wrong abstraction, missing error handling, wrong patterns)',
-  '4. Risk gaps (unidentified failure modes, missing rollback plans)',
-  '5. Test coverage gaps (missing edge cases, untested error paths)',
-  '6. Dependency issues (circular deps, version conflicts, missing imports)',
-  '7. Documentation gaps (does the plan update relevant docs, README, .env.example, INVENTORY.md, or inline comments for new/changed features, config options, or public APIs? Missing doc updates are medium severity.)',
+  '3. Enforceability of restrictions — if the plan claims a limited capability ("read-only", "post-only", "only these actions"), it must name the concrete enforcement mechanism in the current codebase or explicitly add one. If the mechanism does not exist, flag it as **blocking**.',
+  '4. Architectural issues (wrong abstraction, missing error handling, wrong patterns)',
+  '5. Risk gaps (unidentified failure modes, missing rollback plans)',
+  '6. Test coverage gaps (missing edge cases, untested error paths)',
+  '7. Dependency issues (circular deps, version conflicts, missing imports)',
+  '8. Documentation gaps (does the plan update relevant docs, README, .env.example, INVENTORY.md, or inline comments for new/changed features, config options, or public APIs? Missing doc updates are medium severity.)',
 ];
 
 // ---------------------------------------------------------------------------
@@ -298,6 +299,7 @@ export function buildDrafterPrompt(
     '- **Read the codebase using your tools (Read, Glob, Grep) first**, then write the plan. Do not guess — base every section on what you find in the actual code.',
     '- **`## Changes` is a required top-level section.** List every file that will be created, modified, or deleted with concrete repo-relative file paths (for example, `src/discord/forge-commands.ts`). Do not place file change information inside a `## Phases` section or any other section — changes belong exclusively in `## Changes`. If you need to describe implementation sequencing, use a separate `## Phases` section.',
     '- In `## Changes`, each file entry must include a backtick-wrapped path and specific planned edits (function names and type signatures when relevant). Do not use placeholder paths like `path/to/file.ts`.',
+    '- If you claim a restriction on what the system can do ("read-only", "post-only", "only these actions", etc.), name the exact enforcement mechanism that makes it true in the current codebase or as part of this plan. Do not rely on policy prose alone.',
     '- Identify real risks and dependencies based on the actual codebase.',
     '- Write concrete, verifiable test cases.',
     '- Include documentation updates in the Changes section when adding new features, config options, or public APIs. Consider: docs/*.md, .env.example files, README.md, INVENTORY.md, and inline code comments.',
@@ -401,6 +403,7 @@ export function buildAuditorPrompt(
     '',
     '- Prefer the smallest correct unblocker. If narrowing the contract, docs, or tests resolves the issue, recommend that instead of expanding implementation scope.',
     '- A blocking concern must cite the contradictory plan text or a verified code fact.',
+    '- If the plan claims a restricted subset of a broader capability, verify the exact gating primitive that enforces it (for example: category flags, explicit allowlist, permission check, dedicated parser path). If the plan only describes the restriction in prose, that is a blocking concern.',
     '- Report at most 3 blocking concerns in a single round; merge related issues.',
     '',
   );
@@ -520,6 +523,7 @@ export function buildRevisionPrompt(
     '- Read the codebase using your tools if needed to resolve concerns.',
     '- Keep the same plan structure and format.',
     '- In `## Changes`, every file entry must use a concrete backtick-wrapped repo-relative path (for example, `src/discord/forge-commands.ts`). Replace placeholder paths like `path/to/file.ts`.',
+    '- If you keep or add a restriction claim ("read-only", "post-only", "only these actions"), rewrite it to name the exact enforcement mechanism. If no such mechanism exists, narrow the claim or add the necessary implementation work.',
     '- Preserve resolutions from prior audit rounds that were accepted — do not weaken, revert, or remove them unless the current audit explicitly challenges them.',
     '- Prefer the smallest change that resolves the blocker. Narrow the contract, docs, or tests before adding new runtime machinery.',
     '- When an audit exposes a guarantee the runtime cannot actually provide, rewrite the plan to match the real guarantee unless the task explicitly requires the stronger one.',
