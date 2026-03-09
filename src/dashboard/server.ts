@@ -83,6 +83,16 @@ export type DashboardDoctorApiResponse = {
   report: DoctorReport;
 };
 
+export type DashboardDoctorFixApiResponse = {
+  ok: true;
+  message: string;
+  summary: string;
+  counts: Record<'error' | 'warn' | 'info', number>;
+  result: FixResult;
+  report: DoctorReport;
+  snapshot: DashboardSnapshot;
+};
+
 export type DashboardRestartApiResponse = {
   ok: true;
   message: string;
@@ -223,6 +233,25 @@ async function buildDoctorResponse(
     summary: formatDoctorSummary(report),
     counts: countDoctorSeverities(report),
     report,
+  };
+}
+
+async function buildDoctorFixResponse(
+  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
+  deps: DashboardDeps,
+): Promise<DashboardDoctorFixApiResponse> {
+  const report = await deps.inspect(inspectOpts);
+  const result = await deps.applyFixes(report, inspectOpts);
+  const nextReport = await deps.inspect(inspectOpts);
+
+  return {
+    ok: true,
+    message: `Doctor fixes finished. Applied=${result.applied.length} Skipped=${result.skipped.length} Errors=${result.errors.length}.`,
+    summary: formatDoctorSummary(nextReport),
+    counts: countDoctorSeverities(nextReport),
+    result,
+    report: nextReport,
+    snapshot: await collectDashboardSnapshot(inspectOpts, deps),
   };
 }
 
@@ -766,10 +795,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
           return;
         }
-        const report = await deps.inspect(inspectOpts);
-        const result = await deps.applyFixes(report, inspectOpts);
-        const nextReport = await deps.inspect(inspectOpts);
-        respondJson(res, 200, { ok: true, result, report: nextReport });
+        respondJson(res, 200, await buildDoctorFixResponse(inspectOpts, deps));
         return;
       }
 

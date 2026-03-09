@@ -16,7 +16,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { DashboardDeps, DashboardSnapshot } from '../cli/dashboard.js';
-import { collectDashboardSnapshot, updateModelConfig } from '../cli/dashboard.js';
+import {
+  collectDashboardSnapshot,
+  countDoctorSeverities,
+  formatDoctorSummary,
+  updateModelConfig,
+} from '../cli/dashboard.js';
 import { executeCronJob, type CronExecutorContext } from '../cron/executor.js';
 import type { CronJob } from '../cron/types.js';
 import type { InspectOptions } from '../health/config-doctor.js';
@@ -823,7 +828,15 @@ async function handleDashboardRequest(
       const report = await deps.inspect(inspectOpts);
       const result = await deps.applyFixes(report, inspectOpts);
       const nextReport = await deps.inspect(inspectOpts);
-      respondJson(res, 200, { ok: true, result, report: nextReport });
+      respondJson(res, 200, {
+        ok: true,
+        message: `Doctor fixes finished. Applied=${result.applied.length} Skipped=${result.skipped.length} Errors=${result.errors.length}.`,
+        summary: formatDoctorSummary(nextReport),
+        counts: countDoctorSeverities(nextReport),
+        result,
+        report: nextReport,
+        snapshot: await collectDashboardSnapshot(inspectOpts, deps),
+      });
       return true;
     }
 

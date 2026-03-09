@@ -5,6 +5,7 @@ import type { DoctorContext, DoctorReport, FixResult } from '../health/config-do
 import {
   startDashboardServer,
   type DashboardDoctorApiResponse,
+  type DashboardDoctorFixApiResponse,
   type DashboardModelApiResponse,
   type DashboardRestartApiResponse,
   type DashboardServer,
@@ -373,6 +374,52 @@ describe('startDashboardServer', () => {
     expect(Array.isArray(body.report.findings)).toBe(true);
     expect(body.report.findings).toHaveLength(1);
     expect(body.report.findings[0]?.id).toBe('missing-secret:OPENAI_API_KEY');
+  });
+
+  it('applies doctor fixes and returns refreshed dashboard state from /api/doctor/fix', async () => {
+    const initialReport = makeDoctorReport({
+      findings: [
+        {
+          id: 'deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL',
+          severity: 'warn',
+          message: 'Legacy env var is present.',
+          recommendation: 'Rename it.',
+          autoFixable: true,
+        },
+      ],
+    });
+    const refreshedReport = makeDoctorReport();
+    let inspectCalls = 0;
+    const inspect = vi.fn(async () => {
+      inspectCalls += 1;
+      return inspectCalls === 1 ? initialReport : refreshedReport;
+    });
+    const applyFixes = vi.fn(async () => makeFixResult({
+      applied: ['deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL'],
+    }));
+    const { port } = await startServer({ inspect, applyFixes });
+
+    const response = await makeRequest(port, {
+      path: '/api/doctor/fix',
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const body = parseJson<DashboardDoctorFixApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toBe('Doctor fixes finished. Applied=1 Skipped=0 Errors=0.');
+    expect(body.summary).toBe('0 findings (errors=0, warnings=0, info=0)');
+    expect(body.counts).toEqual({ error: 0, warn: 0, info: 0 });
+    expect(body.result).toEqual({
+      applied: ['deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL'],
+      skipped: [],
+      errors: [],
+    });
+    expect(body.report.findings).toEqual([]);
+    expect(body.snapshot.doctorSummary).toBe('0 findings (errors=0, warnings=0, info=0)');
+    expect(inspect).toHaveBeenCalledTimes(3);
+    expect(applyFixes).toHaveBeenCalledWith(initialReport, { cwd: '/repo', env: {} });
   });
 
   it('validates model role names on /api/model', async () => {
