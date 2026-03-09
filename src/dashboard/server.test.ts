@@ -29,6 +29,8 @@ type Response = {
 
 type StartServerOptions = {
   restartExecutor?: (cmd: string, args: string[]) => void;
+  host?: string;
+  trustedHosts?: Set<string>;
 };
 
 let handle: DashboardServer | null = null;
@@ -227,7 +229,8 @@ async function startServer(
   const fullDeps = makeDeps(deps);
   handle = await startDashboardServer({
     port: 0,
-    host: '127.0.0.1',
+    host: options.host ?? '127.0.0.1',
+    trustedHosts: options.trustedHosts,
     cwd: '/repo',
     env: {},
     deps: fullDeps,
@@ -340,6 +343,23 @@ describe('startDashboardServer', () => {
       path: '/api/snapshot',
       headers: {
         Host: `localhost.:${port}`,
+      },
+    });
+    const body = parseJson<DashboardSnapshotApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+  });
+
+  it('allows trusted host reads when configured', async () => {
+    const { port } = await startServer({}, {
+      host: '0.0.0.0',
+      trustedHosts: new Set(['phone.tailnet.ts.net']),
+    });
+    const response = await makeRequest(port, {
+      path: '/api/snapshot',
+      headers: {
+        Host: `PHONE.TAILNET.TS.NET.:${port}`,
       },
     });
     const body = parseJson<DashboardSnapshotApiResponse>(response.text);
@@ -556,6 +576,36 @@ describe('startDashboardServer', () => {
     expect(restartExecutor).toHaveBeenCalledWith('systemctl', ['--user', 'restart', 'discoclaw-beta']);
   });
 
+  it('accepts mutation requests when Host and Origin use a trusted host', async () => {
+    const restartExecutor = vi.fn();
+    const runCommand = vi.fn(async () => ({
+      stdout: '   Active: active (running) since today\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const { port } = await startServer({ runCommand }, {
+      host: '0.0.0.0',
+      trustedHosts: new Set(['phone.tailnet.ts.net']),
+      restartExecutor,
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/restart',
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+      headers: {
+        Host: `phone.tailnet.ts.net:${port}`,
+        Origin: `http://PHONE.TAILNET.TS.NET.:${port}`,
+      },
+    });
+    const body = parseJson<DashboardRestartApiResponse>(response.text);
+
+    expect(response.status).toBe(202);
+    expect(body.ok).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(restartExecutor).toHaveBeenCalledWith('systemctl', ['--user', 'restart', 'discoclaw-beta']);
+  });
+
   it('returns doctor report JSON from /api/doctor', async () => {
     const report = makeDoctorReport({
       findings: [
@@ -723,5 +773,19 @@ describe('startDashboardServer', () => {
       deps: makeDeps(),
       log: mockLog(),
     })).rejects.toThrow('Dashboard server must bind to 127.0.0.1; received 0.0.0.0.');
+  });
+
+  it('allows 0.0.0.0 host bindings when trusted hosts are configured', async () => {
+    handle = await startDashboardServer({
+      port: 0,
+      host: '0.0.0.0',
+      trustedHosts: new Set(['phone.tailnet.ts.net']),
+      cwd: '/repo',
+      env: {},
+      deps: makeDeps(),
+      log: mockLog(),
+    });
+
+    expect(handle.server.address()).toBeTruthy();
   });
 });

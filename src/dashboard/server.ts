@@ -54,6 +54,7 @@ export type { DashboardSnapshotApiResponse } from './api/snapshot.js';
 export type DashboardServerOptions = {
   port?: number;
   host?: string;
+  trustedHosts?: Set<string>;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   log?: LoggerLike;
@@ -154,9 +155,10 @@ function respondHtml(res: http.ServerResponse, status: number, body: string): vo
   res.end(body);
 }
 
-function normalizeDashboardHost(host: string | undefined): string {
+function normalizeDashboardHost(host: string | undefined, trustedHosts?: ReadonlySet<string>): string {
   const value = (host ?? DASHBOARD_HOST).trim().toLowerCase();
   if (!value || value === 'localhost' || value === DASHBOARD_HOST) return DASHBOARD_HOST;
+  if (value === '0.0.0.0' && trustedHosts && trustedHosts.size > 0) return value;
   throw new Error(`Dashboard server must bind to ${DASHBOARD_HOST}; received ${host ?? value}.`);
 }
 
@@ -165,9 +167,7 @@ function normalizeHostname(hostname: string): string {
   if (value.startsWith('[') && value.endsWith(']')) {
     value = value.slice(1, -1);
   }
-  if (value.endsWith('.')) {
-    value = value.slice(0, -1);
-  }
+  value = value.replace(/\.+$/, '');
   return value;
 }
 
@@ -182,6 +182,11 @@ function isLoopbackHostname(hostname: string): boolean {
   if (value === 'localhost' || value === '::1') return true;
   if (isIP(value) !== 4) return value === DASHBOARD_HOST;
   return value.split('.').every((segment) => segment !== '') && value.startsWith('127.');
+}
+
+function isAllowedHostname(hostname: string, trustedHosts?: ReadonlySet<string>): boolean {
+  const value = normalizeHostname(hostname);
+  return isLoopbackHostname(value) || trustedHosts?.has(value) === true;
 }
 
 function parseHostHeaderHostname(hostHeader: string | undefined): string | null {
@@ -199,7 +204,7 @@ function originPort(url: URL): string {
   return url.protocol === 'https:' ? '443' : '80';
 }
 
-function hasSafeDashboardOrigin(req: http.IncomingMessage): boolean {
+function hasSafeDashboardOrigin(req: http.IncomingMessage, trustedHosts?: ReadonlySet<string>): boolean {
   const origin = req.headers.origin;
   if (typeof origin !== 'string' || origin.trim() === '') return true;
 
@@ -209,7 +214,8 @@ function hasSafeDashboardOrigin(req: http.IncomingMessage): boolean {
   try {
     const originUrl = new URL(origin);
     const hostUrl = new URL(`http://${hostHeader.trim()}`);
-    if (!isLoopbackHostname(hostUrl.hostname)) return false;
+    if (!isAllowedHostname(hostUrl.hostname, trustedHosts)) return false;
+    if (!isAllowedHostname(originUrl.hostname, trustedHosts)) return false;
     return (
       normalizeOriginHost(originUrl.hostname) === normalizeOriginHost(hostUrl.hostname)
       && originPort(originUrl) === originPort(hostUrl)
@@ -450,7 +456,8 @@ function isDashboardBadRequest(message: string): boolean {
 export async function startDashboardServer(opts: DashboardServerOptions = {}): Promise<DashboardServer> {
   const inspectOpts = buildInspectOptions(opts);
   const deps: DashboardDeps = { ...createDefaultDeps(), ...opts.deps };
-  const host = normalizeDashboardHost(opts.host);
+  const trustedHosts = opts.trustedHosts;
+  const host = normalizeDashboardHost(opts.host, trustedHosts);
   const port = opts.port ?? DEFAULT_DASHBOARD_PORT;
   const log = opts.log;
   const html = renderDashboardPage();
@@ -465,7 +472,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
   const server = http.createServer(async (req, res) => {
     const method = req.method ?? 'GET';
     const requestHostname = parseHostHeaderHostname(req.headers.host);
-    if (!requestHostname || !isLoopbackHostname(requestHostname)) {
+    if (!requestHostname || !isAllowedHostname(requestHostname, trustedHosts)) {
       respondJson(res, 403, { ok: false, message: DNS_REBIND_ERROR });
       return;
     }
@@ -497,7 +504,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
           return;
         }
-        if (!hasSafeDashboardOrigin(req)) {
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
           respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
           return;
         }
@@ -524,7 +531,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
           return;
         }
-        if (!hasSafeDashboardOrigin(req)) {
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
           respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
           return;
         }
@@ -537,7 +544,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
           return;
         }
-        if (!hasSafeDashboardOrigin(req)) {
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
           respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
           return;
         }
