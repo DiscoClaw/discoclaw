@@ -334,6 +334,20 @@ describe('startDashboardServer', () => {
     expect(body.ok).toBe(true);
   });
 
+  it('allows loopback reads with a localhost Host alias', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/snapshot',
+      headers: {
+        Host: `localhost.:${port}`,
+      },
+    });
+    const body = parseJson<DashboardSnapshotApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+  });
+
   it('returns service status JSON from /api/status', async () => {
     const runCommand = vi.fn(async () => ({
       stdout: '   Active: active (running) since today\n   Docs: https://discoclaw.ai\n',
@@ -506,6 +520,32 @@ describe('startDashboardServer', () => {
       headers: {
         Host: `localhost:${port}`,
         Origin: `http://localhost:${port}`,
+      },
+    });
+    const body = parseJson<DashboardRestartApiResponse>(response.text);
+
+    expect(response.status).toBe(202);
+    expect(body.ok).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(restartExecutor).toHaveBeenCalledWith('systemctl', ['--user', 'restart', 'discoclaw-beta']);
+  });
+
+  it('accepts mutation requests when Host and Origin use a localhost alias', async () => {
+    const restartExecutor = vi.fn();
+    const runCommand = vi.fn(async () => ({
+      stdout: '   Active: active (running) since today\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+    const { port } = await startServer({ runCommand }, { restartExecutor });
+
+    const response = await makeRequest(port, {
+      path: '/api/restart',
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+      headers: {
+        Host: `localhost.:${port}`,
+        Origin: `http://localhost.:${port}`,
       },
     });
     const body = parseJson<DashboardRestartApiResponse>(response.text);

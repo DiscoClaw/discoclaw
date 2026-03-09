@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import http from 'node:http';
+import { isIP } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -159,15 +160,28 @@ function normalizeDashboardHost(host: string | undefined): string {
   throw new Error(`Dashboard server must bind to ${DASHBOARD_HOST}; received ${host ?? value}.`);
 }
 
+function normalizeHostname(hostname: string): string {
+  let value = hostname.trim().toLowerCase();
+  if (value.startsWith('[') && value.endsWith(']')) {
+    value = value.slice(1, -1);
+  }
+  if (value.endsWith('.')) {
+    value = value.slice(0, -1);
+  }
+  return value;
+}
+
 function normalizeOriginHost(hostname: string): string {
-  const value = hostname.trim().toLowerCase();
-  if (value === 'localhost' || value === '::1' || value === '[::1]') return DASHBOARD_HOST;
+  const value = normalizeHostname(hostname);
+  if (value === 'localhost' || value === '::1') return DASHBOARD_HOST;
   return value;
 }
 
 function isLoopbackHostname(hostname: string): boolean {
-  const value = hostname.trim().toLowerCase();
-  return value === DASHBOARD_HOST || value === 'localhost' || value === '::1' || value === '[::1]';
+  const value = normalizeHostname(hostname);
+  if (value === 'localhost' || value === '::1') return true;
+  if (isIP(value) !== 4) return value === DASHBOARD_HOST;
+  return value.split('.').every((segment) => segment !== '') && value.startsWith('127.');
 }
 
 function parseHostHeaderHostname(hostHeader: string | undefined): string | null {
