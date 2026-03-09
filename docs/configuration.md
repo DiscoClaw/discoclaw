@@ -347,8 +347,8 @@ Master switch and per-category flags for Discord actions. See [docs/discord-acti
 | `DISCOCLAW_MULTI_TURN_HANG_TIMEOUT_MS` | `60000` | Timeout for hung multi-turn sessions |
 | `DISCOCLAW_MULTI_TURN_IDLE_TIMEOUT_MS` | `300000` | Idle timeout for multi-turn sessions |
 | `DISCOCLAW_MULTI_TURN_MAX_PROCESSES` | `5` | Max concurrent multi-turn processes |
-| `DISCOCLAW_STREAM_STALL_TIMEOUT_MS` | `600000` | Timeout for stalled streams |
-| `DISCOCLAW_PROGRESS_STALL_TIMEOUT_MS` | `300000` | Timeout for stalled progress |
+| `DISCOCLAW_STREAM_STALL_TIMEOUT_MS` | `1800000` | Timeout for stalled streams |
+| `DISCOCLAW_PROGRESS_STALL_TIMEOUT_MS` | `1800000` | Timeout for stalled progress |
 | `DISCOCLAW_STREAM_STALL_WARNING_MS` | `300000` | Warning threshold for stalled streams |
 | `DISCOCLAW_MAX_CONCURRENT_INVOCATIONS` | `0` (unlimited) | Max concurrent AI invocations |
 | `DISCOCLAW_DEBUG_RUNTIME` | `false` | Enable runtime debug logging |
