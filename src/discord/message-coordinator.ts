@@ -696,7 +696,7 @@ function isQueueLevelCommand(m: CoordinatorMessage, params: Omit<BotParams, 'tok
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
   const longRunWatchdog = params.longRunWatchdog;
   const resolvePlanRunModelForRuntime = (): string =>
-    params.planRunModel ?? params.planCtx?.model ?? params.runtimeModel;
+    params.planCtx?.model ?? params.planRunModel ?? '';
   if (longRunWatchdog) {
     void longRunWatchdog.startupSweep().then((result) => {
       if (result.interruptedRuns > 0 || result.finalRetried > 0 || result.finalFailed > 0) {
