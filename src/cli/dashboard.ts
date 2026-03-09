@@ -7,6 +7,7 @@ import { config as loadDotenv } from 'dotenv';
 import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
 import { isModelTier } from '../runtime/model-tiers.js';
 import { getGitHash } from '../version.js';
+import type { DashboardServer, DashboardServerOptions } from '../dashboard/server.js';
 import type { DoctorContext, DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
@@ -142,6 +143,11 @@ function createDefaultDeps(): DashboardDeps {
   };
 }
 
+export async function startDashboardServer(options: DashboardServerOptions = {}): Promise<DashboardServer> {
+  const serverModule = await import('../dashboard/server.js');
+  return serverModule.startDashboardServer(options);
+}
+
 export function updateModelConfig(
   currentConfig: ModelConfig,
   role: ModelRole,
@@ -170,7 +176,7 @@ export function buildModelRows(ctx: DoctorContext): DashboardModelRow[] {
   });
 }
 
-function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 'info', number> {
+export function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 'info', number> {
   return report.findings.reduce<Record<'error' | 'warn' | 'info', number>>(
     (counts, finding) => {
       counts[finding.severity] += 1;
@@ -180,7 +186,7 @@ function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 
   );
 }
 
-function formatDoctorSummary(report: DoctorReport): string {
+export function formatDoctorSummary(report: DoctorReport): string {
   const counts = countDoctorSeverities(report);
   return `${report.findings.length} findings (errors=${counts.error}, warnings=${counts.warn}, info=${counts.info})`;
 }

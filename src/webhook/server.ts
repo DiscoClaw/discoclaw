@@ -1,36 +1,22 @@
 /**
- * Webhook server — Phase 1
+ * Local webhook ingress surface.
  *
- * Listens on POST /webhook/:source. Each source maps to an HMAC secret
- * and a target Discord channel. Verified requests are dispatched through
- * the existing cron execution pipeline (executeCronJob), giving webhooks
- * runtime invocation, channel routing, model selection, and logging for free.
- *
- * Config file format (JSON):
- *   {
- *     "<source>": {
- *       "secret": "<hmac-sha256-secret>",
- *       "channel": "<discord-channel-name-or-id>",
- *       "prompt": "<optional instruction override>"
- *     }
- *   }
- *
- * HMAC verification: callers must send an `X-Hub-Signature-256` header
- * with value `sha256=<hex-digest>` computed over the raw request body
- * using the per-source secret (same convention as GitHub webhooks).
+ * - `/webhook/:source` provides HMAC-verified webhook ingress.
  */
 
-import http from 'node:http';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import fs from 'node:fs/promises';
-import type { LoggerLike } from '../logging/logger-like.js';
-import type { CronJob } from '../cron/types.js';
 import { executeCronJob, type CronExecutorContext } from '../cron/executor.js';
+import type { CronJob } from '../cron/types.js';
+import type { LoggerLike } from '../logging/logger-like.js';
 import { sanitizeExternalContent } from '../sanitize-external.js';
 
 // ---------------------------------------------------------------------------
-// Config types
+// Shared constants + config types
 // ---------------------------------------------------------------------------
+
+const WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 
 export type WebhookSourceConfig = {
   /** HMAC-SHA256 secret used to verify the X-Hub-Signature-256 header. */
@@ -50,27 +36,30 @@ export type WebhookSourceConfig = {
 export type WebhookConfig = Record<string, WebhookSourceConfig>;
 
 export type WebhookServerOptions = {
-  /** Absolute path to the JSON config file. */
-  configPath: string;
+  /** Optional absolute path to the webhook JSON config file. */
+  configPath?: string;
   /** Port to listen on. Default: 8080. */
   port?: number;
   /** Host to bind to. Default: '127.0.0.1' (loopback only). */
   host?: string;
-  /** Guild ID used when constructing the synthetic CronJob. */
-  guildId: string;
-  /** Executor context passed directly to executeCronJob. */
-  executorCtx: CronExecutorContext;
+  /** Guild ID used when constructing synthetic webhook CronJobs. */
+  guildId?: string;
+  /** Executor context passed directly to executeCronJob for webhooks. */
+  executorCtx?: CronExecutorContext;
   log?: LoggerLike;
 };
 
+export type WebhookServer = {
+  /** The underlying Node.js HTTP server. */
+  server: http.Server;
+  /** Gracefully close the server. */
+  close(): Promise<void>;
+};
+
 // ---------------------------------------------------------------------------
-// HMAC helpers
+// Webhook helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Constant-time comparison of two HMAC digests.
- * Returns true when the signature header matches the expected value.
- */
 function verifySignature(body: Buffer, secret: string, signatureHeader: string): boolean {
   if (!signatureHeader.startsWith('sha256=')) return false;
   const supplied = signatureHeader.slice('sha256='.length);
@@ -78,14 +67,9 @@ function verifySignature(body: Buffer, secret: string, signatureHeader: string):
   try {
     return crypto.timingSafeEqual(Buffer.from(supplied, 'hex'), Buffer.from(expected, 'hex'));
   } catch {
-    // timingSafeEqual throws when buffers differ in length.
     return false;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Config loader
-// ---------------------------------------------------------------------------
 
 export async function loadWebhookConfig(configPath: string): Promise<WebhookConfig> {
   const raw = await fs.readFile(configPath, 'utf8');
@@ -95,10 +79,6 @@ export async function loadWebhookConfig(configPath: string): Promise<WebhookConf
   }
   return parsed as WebhookConfig;
 }
-
-// ---------------------------------------------------------------------------
-// Synthetic CronJob factory
-// ---------------------------------------------------------------------------
 
 let webhookJobCounter = 0;
 
@@ -126,19 +106,18 @@ function buildWebhookJob(source: string, src: WebhookSourceConfig, bodyText: str
   };
 }
 
-// ---------------------------------------------------------------------------
-// Request body reader
-// ---------------------------------------------------------------------------
+function respondWebhook(res: http.ServerResponse, status: number, body: string): void {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ ok: status < 400, message: body }));
+}
 
-const MAX_BODY_BYTES = 256 * 1024; // 256 KB
-
-function readBody(req: http.IncomingMessage): Promise<Buffer> {
+function readBody(req: http.IncomingMessage, maxBytes: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
     req.on('data', (chunk: Buffer) => {
       total += chunk.length;
-      if (total > MAX_BODY_BYTES) {
+      if (total > maxBytes) {
         req.destroy();
         reject(new Error('Request body too large'));
         return;
@@ -151,31 +130,10 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP response helpers
-// ---------------------------------------------------------------------------
-
-function respond(res: http.ServerResponse, status: number, body: string): void {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ ok: status < 400, message: body }));
-}
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-export type WebhookServer = {
-  /** The underlying Node.js HTTP server. */
-  server: http.Server;
-  /** Gracefully close the server. */
-  close(): Promise<void>;
-};
-
-/**
- * Start the webhook HTTP server.
- *
- * Returns a handle with the underlying `http.Server` and a `close()` method.
- */
-export async function startWebhookServer(opts: WebhookServerOptions): Promise<WebhookServer> {
+export async function startWebhookServer(opts: WebhookServerOptions = {}): Promise<WebhookServer> {
   const {
     configPath,
     port = 8080,
@@ -185,20 +143,28 @@ export async function startWebhookServer(opts: WebhookServerOptions): Promise<We
     log,
   } = opts;
 
-  // Load config eagerly so startup fails fast on bad JSON.
-  let config = await loadWebhookConfig(configPath);
-  log?.info({ configPath, sources: Object.keys(config) }, 'webhook:config loaded');
+  if (configPath && (!guildId || !executorCtx)) {
+    throw new Error('Webhook server requires guildId and executorCtx when configPath is set.');
+  }
+
+  let config: WebhookConfig = {};
+  if (configPath) {
+    config = await loadWebhookConfig(configPath);
+    log?.info({ configPath, sources: Object.keys(config) }, 'webhook:config loaded');
+  }
 
   const server = http.createServer(async (req, res) => {
-    // Only handle POST /webhook/:source
-    const url = req.url ?? '';
-    const match = url.match(/^\/webhook\/([^/?#]+)$/);
+    const rawUrl = req.url ?? '/';
+    const pathname = rawUrl.replace(/[?#].*$/, '') || '/';
+
+    const match = pathname.match(/^\/webhook\/([^/?#]+)$/);
     if (!match) {
-      respond(res, 404, 'Not found');
+      respondWebhook(res, 404, 'Not found');
       return;
     }
-    if (req.method !== 'POST') {
-      respond(res, 405, 'Method Not Allowed');
+
+    if ((req.method ?? 'GET') !== 'POST') {
+      respondWebhook(res, 405, 'Method Not Allowed');
       return;
     }
 
@@ -206,51 +172,47 @@ export async function startWebhookServer(opts: WebhookServerOptions): Promise<We
     try {
       source = decodeURIComponent(match[1]);
     } catch {
-      respond(res, 400, 'Bad request');
+      respondWebhook(res, 400, 'Bad request');
       return;
     }
+
     const src = config[source];
     if (!src) {
       log?.warn({ source }, 'webhook:unknown source');
-      // Return 404 to avoid leaking which sources exist.
-      respond(res, 404, 'Not found');
+      respondWebhook(res, 404, 'Not found');
       return;
     }
 
-    // Read body before verifying signature.
     let body: Buffer;
     try {
-      body = await readBody(req);
+      body = await readBody(req, WEBHOOK_MAX_BODY_BYTES);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg === 'Request body too large') {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === 'Request body too large') {
         log?.warn({ source }, 'webhook:body too large');
-        respond(res, 413, 'Payload Too Large');
+        respondWebhook(res, 413, 'Payload Too Large');
         return;
       }
       log?.warn({ source, err }, 'webhook:body read error');
-      respond(res, 400, 'Bad request');
+      respondWebhook(res, 400, 'Bad request');
       return;
     }
 
-    // Verify HMAC signature.
     const sigHeader = String(req.headers['x-hub-signature-256'] ?? '');
     if (!verifySignature(body, src.secret, sigHeader)) {
       log?.warn({ source }, 'webhook:signature verification failed');
-      respond(res, 401, 'Unauthorized');
+      respondWebhook(res, 401, 'Unauthorized');
       return;
     }
 
-    // Signature OK — ack immediately, then dispatch in the background.
-    respond(res, 202, 'Accepted');
+    respondWebhook(res, 202, 'Accepted');
 
     const bodyText = body.toString('utf8');
-    const job = buildWebhookJob(source, src, bodyText, guildId);
+    const job = buildWebhookJob(source, src, bodyText, guildId!);
 
     log?.info({ source, jobId: job.id, channel: src.channel }, 'webhook:dispatching');
 
-    // Fire-and-forget — errors are handled inside executeCronJob.
-    void executeCronJob(job, executorCtx).catch((err) => {
+    void executeCronJob(job, executorCtx!).catch((err) => {
       log?.error({ source, jobId: job.id, err }, 'webhook:executor error');
     });
   });
@@ -260,7 +222,14 @@ export async function startWebhookServer(opts: WebhookServerOptions): Promise<We
     server.listen(port, host, () => resolve());
   });
 
-  log?.info({ port, host }, 'webhook:server listening');
+  log?.info(
+    {
+      host,
+      port: (server.address() as { port: number } | null)?.port ?? port,
+      webhookSources: Object.keys(config),
+    },
+    'webhook:server listening',
+  );
 
   return {
     server,

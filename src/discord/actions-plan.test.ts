@@ -392,6 +392,23 @@ describe('executePlanAction', () => {
       }
     });
 
+    it('resolves plan-run model tiers before phase execution', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: { id: 'codex' } as any, model: 'capable' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(runNextPhase).toHaveBeenCalled();
+      const phaseOpts = (runNextPhase as any).mock.calls[0][2];
+      expect(phaseOpts.model).toBe('gpt-5.4');
+      expect(phaseOpts.reasoningEffort).toBe('high');
+    });
+
     it('surfaces archived-thread (50083) as a stopped run reason', async () => {
       const statusMsg = {
         edit: vi.fn(async () => {

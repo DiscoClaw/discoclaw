@@ -24,12 +24,36 @@ switch (command) {
     break;
   case 'dashboard': {
     const cwd = process.cwd();
-    const { config } = await import('dotenv');
-    const { runDashboard } = await import('./dashboard.js');
+    const useLegacyDashboard = process.argv.includes('--legacy');
+    const { runDashboard, startDashboardServer } = await import('./dashboard.js');
+    const { DASHBOARD_HOST, parseDashboardPort } = await import('../dashboard/options.js');
 
+    if (useLegacyDashboard) {
+      await runDashboard({ cwd });
+      break;
+    }
+
+    const { config } = await import('dotenv');
     config({ path: path.join(cwd, '.env') });
 
-    await runDashboard();
+    try {
+      const port = parseDashboardPort(process.env);
+      const handle = await startDashboardServer({
+        cwd,
+        env: process.env,
+        host: DASHBOARD_HOST,
+        port,
+      });
+      const address = handle.server.address() as { port: number } | null;
+      const boundPort = address?.port ?? port;
+      console.log(`Discoclaw dashboard listening at http://${DASHBOARD_HOST}:${boundPort}/`);
+      console.log('Press Ctrl+C to stop.');
+      await waitForDashboardSignal();
+      await handle.close();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
     break;
   }
   case 'doctor': {
@@ -112,7 +136,7 @@ function printHelp(ver: string): void {
       `\nUsage: discoclaw <command>\n` +
       `\nCommands:\n` +
       `  init                                  Interactive setup wizard — creates .env and workspace/\n` +
-      `  dashboard                             Interactive terminal dashboard for common admin tasks\n` +
+      `  dashboard                             Local web dashboard for common admin tasks (HTTP on 127.0.0.1)\n` +
       `  doctor [--fix]                        Inspect config drift, deprecated env vars, conflicting/stale overrides, and missing secrets; use --fix for auto-fixes\n` +
       `  install-daemon [--service-name <name>]  Register discoclaw as a persistent background service\n` +
       `                                          Use --service-name to run multiple instances side-by-side.\n` +
@@ -193,4 +217,24 @@ function countDoctorSeverities(findings: DoctorFinding[]): Record<'error' | 'war
     },
     { error: 0, warn: 0, info: 0 },
   );
+}
+
+function waitForDashboardSignal(): Promise<NodeJS.Signals> {
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+    };
+    const onSigint = () => {
+      cleanup();
+      resolve('SIGINT');
+    };
+    const onSigterm = () => {
+      cleanup();
+      resolve('SIGTERM');
+    };
+
+    process.once('SIGINT', onSigint);
+    process.once('SIGTERM', onSigterm);
+  });
 }

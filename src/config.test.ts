@@ -1019,6 +1019,42 @@ describe('parseConfig', () => {
     expect(config.webhookConfigPath).toBe('/etc/discoclaw/webhooks.json');
   });
 
+  // --- Dashboard ---
+  it('defaults dashboardEnabled to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.dashboardEnabled).toBe(false);
+  });
+
+  it('parses DISCOCLAW_DASHBOARD_ENABLED=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_DASHBOARD_ENABLED: '1' }));
+    expect(config.dashboardEnabled).toBe(true);
+  });
+
+  it('defaults dashboardPort to 9401', () => {
+    const { config } = parseConfig(env());
+    expect(config.dashboardPort).toBe(9401);
+  });
+
+  it('parses DISCOCLAW_DASHBOARD_PORT when set', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_DASHBOARD_PORT: '8766' }));
+    expect(config.dashboardPort).toBe(8766);
+  });
+
+  it('throws on DISCOCLAW_DASHBOARD_PORT=0 (non-positive)', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_DASHBOARD_PORT: '0' })))
+      .toThrow(/DISCOCLAW_DASHBOARD_PORT must be a positive number/);
+  });
+
+  it('throws on DISCOCLAW_DASHBOARD_PORT=-1 (negative)', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_DASHBOARD_PORT: '-1' })))
+      .toThrow(/DISCOCLAW_DASHBOARD_PORT must be a positive number/);
+  });
+
+  it('throws on DISCOCLAW_DASHBOARD_PORT=3000.5 (non-integer)', () => {
+    expect(() => parseConfig(env({ DISCOCLAW_DASHBOARD_PORT: '3000.5' })))
+      .toThrow(/DISCOCLAW_DASHBOARD_PORT must be an integer/);
+  });
+
   // --- serviceName ---
   it('defaults serviceName to "discoclaw"', () => {
     const { config } = parseConfig(env());

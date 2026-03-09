@@ -175,6 +175,12 @@ describe('startWebhookServer HTTP routing', () => {
     expect(res.status).toBe(404);
   });
 
+  it('returns 404 for dashboard paths', async () => {
+    const res = await makeRequest(port, { path: '/dashboard/api/doctor/fix', method: 'POST', body: '{}' });
+    expect(res.status).toBe(404);
+    expect(res.body.ok).toBe(false);
+  });
+
   it('returns 404 for /webhook/ with no source segment', async () => {
     const res = await makeRequest(port, { path: '/webhook/' });
     expect(res.status).toBe(404);
