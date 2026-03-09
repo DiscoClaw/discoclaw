@@ -5,6 +5,8 @@ import type { DoctorContext, DoctorReport, FixResult } from '../health/config-do
 import {
   startDashboardServer,
   type DashboardDoctorApiResponse,
+  type DashboardModelApiResponse,
+  type DashboardRestartApiResponse,
   type DashboardServer,
   type DashboardServiceApiResponse,
   type DashboardSnapshotApiResponse,
@@ -306,6 +308,45 @@ describe('startDashboardServer', () => {
     expect(runCommandMock).not.toHaveBeenCalled();
   });
 
+  it('restarts the service and returns a refreshed snapshot from /api/restart', async () => {
+    const runCommand = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args[1] === 'restart') {
+        return {
+          stdout: 'restart queued\n',
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      return {
+        stdout: '   Active: active (running) since today\n',
+        stderr: '',
+        exitCode: 0,
+      };
+    });
+    const { port } = await startServer({ runCommand });
+
+    const response = await makeRequest(port, {
+      path: '/api/restart',
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    });
+    const body = parseJson<DashboardRestartApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toBe('Restart/start requested for discoclaw-beta.');
+    expect(body.serviceName).toBe('discoclaw-beta');
+    expect(body.result).toEqual({
+      stdout: 'restart queued\n',
+      stderr: '',
+      exitCode: 0,
+    });
+    expect(body.snapshot.serviceName).toBe('discoclaw-beta');
+    expect(body.snapshot.serviceSummary).toBe('active (running) since today');
+    expect(runCommand).toHaveBeenCalledWith('systemctl', ['--user', 'restart', 'discoclaw-beta']);
+    expect(runCommand.mock.calls.filter(([, args]) => args[1] === 'status')).toHaveLength(2);
+  });
+
   it('returns doctor report JSON from /api/doctor', async () => {
     const report = makeDoctorReport({
       findings: [
@@ -351,6 +392,52 @@ describe('startDashboardServer', () => {
     expect(body.ok).toBe(false);
     expect(body.message).toBe('Unknown model role: not-a-role');
     expect(saveModelConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('saves model changes and returns the updated snapshot from /api/model', async () => {
+    const ctx = makeDoctorContext();
+    const loadDoctorContext = vi.fn(async () => ctx);
+    const saveModelConfig = vi.fn(async (_filePath: string, config: DoctorContext['models']) => {
+      ctx.models = { ...config };
+    });
+    const { port } = await startServer({
+      loadDoctorContext,
+      saveModelConfig,
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/model',
+      method: 'POST',
+      body: JSON.stringify({ role: 'chat', model: 'sonnet-max' }),
+    });
+    const body = parseJson<DashboardModelApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toBe('Saved chat override: sonnet-max. Changes take effect on next service restart.');
+    expect(body.snapshot.modelRows).toContainEqual({
+      role: 'chat',
+      effectiveModel: 'sonnet-max',
+      source: 'override',
+      overrideValue: 'sonnet-max',
+    });
+    expect(saveModelConfig).toHaveBeenCalledWith('/repo/data/models.json', {
+      chat: 'sonnet-max',
+    });
+    expect(loadDoctorContext).toHaveBeenCalled();
+  });
+
+  it('rejects GET requests on /api/model', async () => {
+    const { port } = await startServer();
+
+    const response = await makeRequest(port, {
+      path: '/api/model',
+      method: 'GET',
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(405);
+    expect(body).toEqual({ ok: false, message: 'Method Not Allowed' });
   });
 
   it('returns 404 for unknown routes', async () => {

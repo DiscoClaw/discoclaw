@@ -83,6 +83,20 @@ export type DashboardDoctorApiResponse = {
   report: DoctorReport;
 };
 
+export type DashboardRestartApiResponse = {
+  ok: true;
+  message: string;
+  serviceName: string;
+  result: CommandResult;
+  snapshot: DashboardSnapshot;
+};
+
+export type DashboardModelApiResponse = {
+  ok: true;
+  message: string;
+  snapshot: DashboardSnapshot;
+};
+
 function createDefaultDeps(): DashboardDeps {
   return {
     inspect,
@@ -212,6 +226,21 @@ async function buildDoctorResponse(
   };
 }
 
+async function buildRestartResponse(
+  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
+  deps: DashboardDeps,
+): Promise<DashboardRestartApiResponse> {
+  const serviceName = await loadServiceName(inspectOpts, deps);
+  const result = await restartService(serviceName, deps as ServiceControlDeps);
+  return {
+    ok: true,
+    message: `Restart/start requested for ${serviceName}.`,
+    serviceName,
+    result,
+    snapshot: await collectDashboardSnapshot(inspectOpts, deps),
+  };
+}
+
 async function applyModelChange(
   input: ModelChangeInput,
   inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
@@ -283,6 +312,33 @@ async function applyModelChange(
     message: `Saved ${roleInput} override: ${normalizedModelInput}. Changes take effect on next service restart.`,
     snapshot: await collectDashboardSnapshot(inspectOpts, deps),
   };
+}
+
+async function buildModelResponse(
+  input: ModelChangeInput,
+  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
+  deps: DashboardDeps,
+  knownRuntimes: KnownRuntimesType,
+): Promise<DashboardModelApiResponse> {
+  return {
+    ok: true,
+    ...await applyModelChange(input, inspectOpts, deps, knownRuntimes),
+  };
+}
+
+function isDashboardBadRequest(message: string): boolean {
+  return (
+    message === 'Request body too large'
+    || message === 'JSON body must be an object'
+    || message.startsWith('Unknown model role:')
+    || message === 'Model role is required.'
+    || message === 'Model value is required.'
+    || message === 'Model names cannot contain whitespace.'
+    || message.startsWith('Chat runtime swaps are live-only')
+    || message.startsWith('Runtime names cannot be stored')
+    || message.startsWith('No default model is configured')
+    || message.includes('accepts only model tiers')
+  );
 }
 
 function buildDashboardHtml(): string {
@@ -594,8 +650,8 @@ function buildDashboardHtml(): string {
           body: JSON.stringify({ confirm: true }),
         });
         serviceOutput.textContent = result.result.stdout || result.result.stderr || '(no output)';
+        renderSnapshot(result.snapshot);
         setStatus(serviceStatus, result.message, true);
-        await refreshSnapshot();
       } catch (err) {
         setStatus(serviceStatus, String(err));
       }
@@ -696,9 +752,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 400, { ok: false, message: 'Restart requires {"confirm": true}.' });
           return;
         }
-        const serviceName = await loadServiceName(inspectOpts, deps);
-        const result = await restartService(serviceName, deps as ServiceControlDeps);
-        respondJson(res, 200, { ok: true, message: `Restart/start requested for ${serviceName}.`, result });
+        respondJson(res, 200, await buildRestartResponse(inspectOpts, deps));
         return;
       }
 
@@ -725,26 +779,14 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const body = await readJsonBody(req);
-        const result = await applyModelChange(body, inspectOpts, deps, KNOWN_RUNTIMES);
-        respondJson(res, 200, { ok: true, ...result });
+        respondJson(res, 200, await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES));
         return;
       }
 
       respondJson(res, 404, { ok: false, message: 'Not found' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const status = (
-        message === 'Request body too large'
-        || message === 'JSON body must be an object'
-        || message.startsWith('Unknown model role:')
-        || message === 'Model role is required.'
-        || message === 'Model value is required.'
-        || message === 'Model names cannot contain whitespace.'
-        || message.startsWith('Chat runtime swaps are live-only')
-        || message.startsWith('Runtime names cannot be stored')
-        || message.startsWith('No default model is configured')
-        || message.includes('accepts only model tiers')
-      ) ? 400 : 500;
+      const status = isDashboardBadRequest(message) ? 400 : 500;
 
       if (status === 500) {
         log?.error({ err, method, pathname }, 'dashboard:http request failed');
