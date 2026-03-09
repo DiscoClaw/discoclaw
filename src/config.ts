@@ -25,7 +25,7 @@ export type DiscoclawConfig = {
   fastRuntime?: string;
 
   runtimeModel: string;
-  planRunModel: string;
+  planRunModel?: string;
   runtimeTools: string[];
   runtimeTimeoutMs: number;
 

@@ -92,6 +92,18 @@ describe('modelShow', () => {
     expect(result.summary).toContain('cron');
   });
 
+  it('shows plan-run as unset instead of falling back to chat', () => {
+    const ctx = makeCtx({ planRunModel: undefined, planCtx: { runtime: stubRuntime } });
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const lines = result.summary.split('\n');
+    const planRunLine = lines.find(l => l.includes('**plan-run**'));
+    expect(planRunLine).toContain('(unset)');
+    expect(planRunLine).not.toContain('RUNTIME_MODEL');
+    expect(planRunLine).not.toContain('follows chat');
+  });
+
   it('shows forge models falling back to runtimeModel', () => {
     const ctx = makeCtx();
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
@@ -584,13 +596,16 @@ describe('modelReset', () => {
     expect(clearedRole).toBe('cron-exec');
   });
 
-  it('plan-run modelReset restores the dedicated default', () => {
+  it('plan-run modelReset restores the startup default for plan execution', () => {
     const ctx = makeCtx({ planRunModel: 'deep', planCtx: { model: 'deep', runtime: stubRuntime } });
     ctx.envDefaults = { 'plan-run': 'capable' };
     const result = executeConfigAction({ type: 'modelReset', role: 'plan-run' }, ctx);
     expect(result.ok).toBe(true);
     expect(ctx.botParams.planRunModel).toBe('capable');
     expect(ctx.botParams.planCtx!.model).toBe('capable');
+    if (!result.ok) return;
+    expect(result.summary).toContain('plan-run → capable');
+    expect(result.summary).not.toContain('RUNTIME_MODEL');
   });
 
   it('forge-auditor modelReset sets the configured default instead of following chat', () => {

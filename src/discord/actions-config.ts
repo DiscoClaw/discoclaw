@@ -58,7 +58,7 @@ export type ConfigContext = {
 /** The subset of BotParams fields that modelSet/modelShow reads and mutates. */
 export type ConfigMutableParams = {
   runtimeModel: string;
-  planRunModel: string;
+  planRunModel?: string;
   summaryModel: string;
   runtime?: RuntimeAdapter;
   fastRuntime?: RuntimeAdapter;
@@ -145,7 +145,9 @@ export function executeConfigAction(
                 bp.cronCtx.executorCtx.model = runtimeModel;
               }
             }
-            if (bp.planCtx) bp.planCtx.runtime = newRuntime;
+            if (bp.planCtx) {
+              bp.planCtx.runtime = newRuntime;
+            }
             if (bp.deferOpts) bp.deferOpts.runtime = newRuntime;
             changes.push(`runtime → ${normalized}`);
             if (runtimeModel) changes.push(`chat → ${runtimeModel} (adapter default)`);
@@ -336,10 +338,9 @@ export function executeConfigAction(
             resetChanges.push(`chat → ${defaultModel}`);
             break;
           case 'plan-run':
-            if (defaultModel === undefined) break;
             bp.planRunModel = defaultModel;
             if (bp.planCtx) bp.planCtx.model = defaultModel;
-            resetChanges.push(`plan-run → ${defaultModel}`);
+            resetChanges.push(`plan-run → ${defaultModel ?? '(unset)'}`);
             break;
           case 'fast':
             if (defaultModel === undefined) break;
@@ -429,10 +430,13 @@ export function executeConfigAction(
       const ovr = (role: ModelRole) => (overrides[role] ? ' *(override)*' : '');
 
       const runtimeName = configCtx.runtimeName ?? rid;
+      const planRunDisplay = bp.planRunModel
+        || bp.planCtx?.model
+        || '(unset)';
       const rows: [string, string, string, string][] = [
         ['runtime', runtimeName, `Active runtime adapter (${rid})`, ovr('chat')],
         ['chat', bp.runtimeModel, ROLE_DESCRIPTIONS.chat, ovr('chat')],
-        ['plan-run', bp.planRunModel || bp.planCtx?.model || configCtx.envDefaults?.['plan-run'] || '', ROLE_DESCRIPTIONS['plan-run'], ovr('plan-run')],
+        ['plan-run', planRunDisplay, ROLE_DESCRIPTIONS['plan-run'], ovr('plan-run')],
         ['summary', bp.summaryModel, ROLE_DESCRIPTIONS.summary, ovr('summary') || ovr('fast')],
         ['forge-drafter', bp.forgeDrafterModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-drafter'], ovr('forge-drafter')],
         ['forge-auditor', bp.forgeAuditorModel ?? `${bp.runtimeModel} (follows chat)`, ROLE_DESCRIPTIONS['forge-auditor'], ovr('forge-auditor')],

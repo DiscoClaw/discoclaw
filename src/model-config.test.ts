@@ -347,8 +347,9 @@ describe('loadLegacyOverrideModels', () => {
 // ---------------------------------------------------------------------------
 
 describe('DEFAULTS', () => {
-  it('has expected default tiers for all 8 roles', () => {
+  it('has expected default tiers for all 9 roles', () => {
     expect(DEFAULTS.chat).toBe('capable');
+    expect(DEFAULTS['plan-run']).toBe('capable');
     expect(DEFAULTS.fast).toBe('fast');
     expect(DEFAULTS.summary).toBe('fast');
     expect(DEFAULTS['forge-drafter']).toBe('capable');

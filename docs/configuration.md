@@ -21,9 +21,9 @@ Boolean values accept `0`/`1` or `true`/`false`.
 
 Model assignments are configured in `models.json` under the data dir (`$DISCOCLAW_DATA_DIR/models.json`; default `./data/models.json` in a source checkout). Each role (`chat`, `fast`, `plan-run`, `voice`, forge roles, cron roles, etc.) stores a model string only. Runtime-only overlays such as `voiceRuntime` and `fastRuntime` persist separately in `runtime-overrides.json`. See `src/model-config.ts` and `src/runtime-overrides.ts` for the loading logic.
 
-On first run, `models.json` is scaffolded from the instance startup defaults. `!models set ...` updates it at runtime. `!models reset` writes the startup-default model strings back into `models.json` and clears matching fast/voice runtime overlays from `runtime-overrides.json`. The `plan-run` role is independent from `chat`; when `plan-run` is unset, plan execution falls back to `RUNTIME_MODEL`.
+On first run, `models.json` is scaffolded from the instance startup defaults. `!models set ...` updates it at runtime. `!models reset` writes the startup-default model strings back into `models.json` and clears matching fast/voice runtime overlays from `runtime-overrides.json`. The `plan-run` role is independent from `chat` and starts from `DISCOCLAW_PLAN_RUN_MODEL` (default `capable`) rather than the live chat model.
 
-Legacy env vars `RUNTIME_MODEL` and `DISCOCLAW_FAST_MODEL` are still read as startup fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
+Legacy env vars `RUNTIME_MODEL`, `DISCOCLAW_PLAN_RUN_MODEL`, and `DISCOCLAW_FAST_MODEL` are still read as startup fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
 
 For the operator workflow that explains startup defaults vs. overrides, install-mode detection, `!models reset` semantics, live main-runtime swaps, and safe adapter/model switching, see [docs/runtime-switching.md](runtime-switching.md). If you want OpenRouter to participate in tier-based switching, define the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you need there as well.
 
@@ -32,7 +32,8 @@ For the operator workflow that explains startup defaults vs. overrides, install-
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PRIMARY_RUNTIME` | `claude` | Runtime adapter: `claude`, `openai`, `openrouter`, `gemini`, `codex` |
-| `RUNTIME_MODEL` | `capable` | **Deprecated** — use `models.json`. Fallback model tier for chat invocations, and for `plan-run` when that role is unset |
+| `RUNTIME_MODEL` | `capable` | **Deprecated** — use `models.json`. Startup-default model tier for chat invocations |
+| `DISCOCLAW_PLAN_RUN_MODEL` | `capable` | **Deprecated** — use `models.json`. Startup-default model tier for the dedicated `plan-run` role |
 | `DISCOCLAW_FAST_RUNTIME` | — | **Deprecated** — use `!models set fast <model>` instead, which auto-detects and switches the fast-tier runtime. Legacy startup-only runtime override for fast-tier workloads (summary, cron auto-tag/model classify, task auto-tag); ignored by `!models reset` |
 | `RUNTIME_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch` | Comma-separated tools available to the runtime |
 | `RUNTIME_TIMEOUT_MS` | `1800000` (30 min) | Per-invocation timeout |

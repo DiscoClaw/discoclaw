@@ -409,6 +409,21 @@ describe('executePlanAction', () => {
       expect(phaseOpts.reasoningEffort).toBe('high');
     });
 
+    it('requires an explicit plan-run model when plan-run is unset', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: { id: 'codex' } as any }),
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toContain('plan-run model');
+      expect(runNextPhase).not.toHaveBeenCalled();
+    });
+
     it('surfaces archived-thread (50083) as a stopped run reason', async () => {
       const statusMsg = {
         edit: vi.fn(async () => {

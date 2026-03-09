@@ -161,7 +161,7 @@ const overridesPath = resolveOverridesPath(dataDir, projectRoot);
 const envModelDefaults: ModelConfig = {
   ...MODEL_DEFAULTS,
   chat: cfg.runtimeModel,
-  'plan-run': cfg.planRunModel,
+  'plan-run': cfg.planRunModel ?? MODEL_DEFAULTS['plan-run'],
   fast: fastModelDefault,
   summary: cfg.summaryModel,
   cron: cfg.cronAutoTagModel,

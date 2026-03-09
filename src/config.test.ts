@@ -809,15 +809,16 @@ describe('parseConfig', () => {
     expect(config.cronExecModel).toBe('fast');
   });
 
-  it('defaults planRunModel independently from RUNTIME_MODEL', () => {
+  it('defaults planRunModel independently from chat startup model', () => {
     const { config } = parseConfig(env({ RUNTIME_MODEL: 'deep' }));
     expect(config.runtimeModel).toBe('deep');
     expect(config.planRunModel).toBe('capable');
   });
 
-  it('DISCOCLAW_PLAN_RUN_MODEL overrides the planRunModel default', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_PLAN_RUN_MODEL: 'deep' }));
-    expect(config.planRunModel).toBe('deep');
+  it('parses DISCOCLAW_PLAN_RUN_MODEL as the startup default for plan execution', () => {
+    const { config } = parseConfig(env({ RUNTIME_MODEL: 'deep', DISCOCLAW_PLAN_RUN_MODEL: 'fast' }));
+    expect(config.runtimeModel).toBe('deep');
+    expect(config.planRunModel).toBe('fast');
   });
 
   it('allows missing tasksForum when tasksEnabled (bootstrap will auto-create)', () => {

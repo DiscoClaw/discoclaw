@@ -103,7 +103,7 @@ On first run, `models.json` is scaffolded from the startup defaults that instanc
 Role defaults shipped in code:
 - `chat`: `capable`
 - `fast`: `fast`
-- `plan-run`: unset by default; falls back to `RUNTIME_MODEL` (`capable` if `RUNTIME_MODEL` is also unset)
+- `plan-run`: `capable`
 - `summary`: `fast`
 - `forge-drafter`: `capable`
 - `forge-auditor`: `deep`
@@ -163,7 +163,7 @@ Legacy note: `DISCOCLAW_FAST_RUNTIME` is deprecated. Prefer `!models set fast <m
 | --- | --- | --- |
 | `chat` | Tier/model values persist to `models.json` | `!models set chat <runtime>` swaps the main runtime live, resets chat to that adapter default, keeps plan/deferred-run/cron-exec on the main runtime adapter, and does not write the runtime name to disk |
 | `fast` | Persists the model value to `models.json` | Concrete model strings can auto-switch the fast runtime and write `fastRuntime` |
-| `plan-run` | Persists the model value to `models.json` | Used by `!plan run`, `!plan run-one`, `!plan run-phase`, and `planRun`. It has its own model-role lifecycle and, when unset, falls back to `RUNTIME_MODEL` instead of inheriting the `chat` role's current model string |
+| `plan-run` | Persists the model value to `models.json` | Used by `!plan run`, `!plan run-one`, `!plan run-phase`, and `planRun`. It has its own startup default (`DISCOCLAW_PLAN_RUN_MODEL`, default `capable`) and does not inherit the `chat` role's current model string |
 | `summary` | Persists to `models.json` | Uses the fast runtime; model strings do not auto-switch runtimes |
 | `cron` | Persists to `models.json` | Uses the fast runtime; model strings do not auto-switch runtimes |
 | `cron-exec` | Persists to `models.json` unless you use `default` | Follows chat runtime unless overridden by cron-specific config; model strings do not auto-switch runtimes |
@@ -230,7 +230,7 @@ Use this for a temporary experiment:
 !models set chat gemini
 ```
 
-Expected result in `!models`: the `runtime` row changes to the new adapter, the `chat` row usually becomes that adapter's default model, and plan/deferred-run/cron-exec follow that runtime adapter immediately. Plan execution no longer inherits the `chat` model string, though: it uses the dedicated `plan-run` role and falls back to `RUNTIME_MODEL` only when `plan-run` is unset. Fast and voice can still remain separate if they already have their own runtime overrides. This change is live-only and is lost on restart. To end the experiment, restart or switch chat to another runtime explicitly. Do not assume `!models reset chat` will switch the runtime row back immediately.
+Expected result in `!models`: the `runtime` row changes to the new adapter, the `chat` row usually becomes that adapter's default model, and plan/deferred-run/cron-exec follow that runtime adapter immediately. Plan execution no longer inherits the `chat` model string, though: it uses the dedicated `plan-run` role and stays on its own startup default or override. Fast and voice can still remain separate if they already have their own runtime overrides. This change is live-only and is lost on restart. To end the experiment, restart or switch chat to another runtime explicitly. Do not assume `!models reset chat` will switch the runtime row back immediately.
 
 ### 3. Change chat to another model on the current adapter
 
@@ -348,7 +348,7 @@ After changing credentials, `PRIMARY_RUNTIME`, `OPENROUTER_MODEL`, or any `DISCO
 
 ### `!models reset` did not return the model I expected
 
-Check the startup-default env vars first: `RUNTIME_MODEL` (also the fallback for `plan-run` when unset), `DISCOCLAW_FAST_MODEL`, `DISCOCLAW_SUMMARY_MODEL`, `DISCOCLAW_TASKS_AUTO_TAG_MODEL`, `DISCOCLAW_CRON_MODEL`, `DISCOCLAW_CRON_AUTO_TAG_MODEL`, `DISCOCLAW_CRON_EXEC_MODEL`, `DISCOCLAW_VOICE_MODEL`, `FORGE_DRAFTER_MODEL`, `FORGE_AUDITOR_MODEL`, and any `DISCOCLAW_TIER_*` overrides.
+Check the startup-default env vars first: `RUNTIME_MODEL`, `DISCOCLAW_PLAN_RUN_MODEL`, `DISCOCLAW_FAST_MODEL`, `DISCOCLAW_SUMMARY_MODEL`, `DISCOCLAW_TASKS_AUTO_TAG_MODEL`, `DISCOCLAW_CRON_MODEL`, `DISCOCLAW_CRON_AUTO_TAG_MODEL`, `DISCOCLAW_CRON_EXEC_MODEL`, `DISCOCLAW_VOICE_MODEL`, `FORGE_DRAFTER_MODEL`, `FORGE_AUDITOR_MODEL`, and any `DISCOCLAW_TIER_*` overrides.
 
 `DISCOCLAW_FAST_MODEL` is the legacy startup fallback for the `fast` role. If `DISCOCLAW_SUMMARY_MODEL`, `DISCOCLAW_CRON_MODEL`, `DISCOCLAW_CRON_AUTO_TAG_MODEL`, or `DISCOCLAW_TASKS_AUTO_TAG_MODEL` are unset, they inherit from that same fast-model fallback. Also inspect `DISCOCLAW_FAST_RUNTIME` in `.env` and `voiceRuntime` or `fastRuntime` in `runtime-overrides.json`.
 
