@@ -276,8 +276,8 @@ const shutdown = async () => {
 
   if (loopSchedulerRef) {
     const cancelled = loopSchedulerRef.cancelAll();
+    log.info({ cancelled }, 'shutdown:loop timers cancelled');
     if (cancelled > 0) {
-      log.info({ cancelled }, 'shutdown:loop timers cancelled');
       try {
         await patchShutdownContext(pidLockDir, { cancelledLoops: cancelled });
       } catch (err) {
