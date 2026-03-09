@@ -31,6 +31,8 @@ import type { MemoryActionRequest, MemoryContext } from './actions-memory.js';
 import { DEFER_ACTION_TYPES, executeDeferAction, executeDeferListAction } from './actions-defer.js';
 import type { DeferActionRequest, DeferListActionRequest, DeferActionRequestUnion } from './actions-defer.js';
 import type { DeferScheduler } from './defer-scheduler.js';
+import { LOOP_ACTION_TYPES, executeLoopAction, loopActionsPromptSection } from './actions-loop.js';
+import type { LoopActionRequest } from './actions-loop.js';
 import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } from './actions-config.js';
 import type { ConfigActionRequest, ConfigContext } from './actions-config.js';
 import { executeReactionPromptAction as executeReactionPrompt, REACTION_PROMPT_ACTION_TYPES, reactionPromptSection } from './reaction-prompts.js';
@@ -88,27 +90,6 @@ export type ActionCategoryFlags = {
   voice?: boolean;
   spawn?: boolean;
 };
-
-export type LoopActionRequest =
-  | { type: 'loopCreate'; [key: string]: unknown }
-  | { type: 'loopList'; [key: string]: unknown }
-  | { type: 'loopCancel'; [key: string]: unknown };
-
-const LOOP_ACTION_TYPES = new Set<string>(['loopCreate', 'loopList', 'loopCancel']);
-
-async function executeLoopAction(
-  _action: LoopActionRequest,
-  _ctx: ActionContext,
-): Promise<DiscordActionResult> {
-  return { ok: false, error: 'Loop actions are not configured for this bot' };
-}
-
-function loopActionsPromptSection(): string {
-  return `### Repeating loops
-Use <discord-action>{"type":"loopCreate","channel":"general","intervalSeconds":900,"prompt":"Check the forge status for forge-123 and report changes","label":"forge-watch"}</discord-action> to schedule a repeating self-invocation. Loops are inspectable repeating jobs with metadata such as interval, next run time, origin channel/thread, and an optional purpose label.
-
-Use <discord-action>{"type":"loopList"}</discord-action> to inspect active loops and <discord-action>{"type":"loopCancel","id":123}</discord-action> to stop one. As with defer, the prompt must be fully self-contained because each loop tick runs without conversation history.`;
-}
 
 export type DiscordActionRequest =
   | ChannelActionRequest

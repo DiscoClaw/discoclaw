@@ -34,6 +34,8 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'voiceStatus',
   // Defer
   'deferList',
+  // Loop
+  'loopList',
   // Spawn
   'spawnAgent',
 ]);
