@@ -40,6 +40,7 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-plan.ts`
 - `src/discord/actions-memory.ts`
 - `src/discord/actions-defer.ts`
+- `src/discord/actions-loop.ts`
 - `src/discord/defer-scheduler.ts` (defer scheduler implementation)
 - `src/discord/actions-config.ts`
 - `src/discord/actions-imagegen.ts`
@@ -78,6 +79,9 @@ Task action types (in `src/tasks/task-action-contract.ts`):
 
 Defer action types (in `src/discord/actions-defer.ts`):
 - `defer`, `deferList`
+
+Loop action types (in `src/discord/actions-loop.ts`):
+- `loopCreate`, `loopList`, `loopCancel`
 
 Config action types (in `src/discord/actions-config.ts`):
 - `modelSet`, `modelShow`
@@ -128,6 +132,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1; also requires plan commands enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
+  - `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` default 1, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` default 5)
   - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
   - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 8)
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
@@ -353,6 +358,42 @@ Env: `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1).
 - `cancel(id)` — cancel a single pending job by its numeric ID. Clears the timer and removes the job from the active set. Returns `true` if the job existed and was cancelled, `false` otherwise.
 - `cancelAll()` — cancel all pending jobs and clear their timers. Returns the count of jobs cancelled. This is the clean-shutdown primitive — callers can drain all pending timers before the process exits.
 Execution flow: when the timer fires, `deferred-runner.ts` resolves the channel, builds a prompt (PA preamble + deferred header + user prompt text), invokes the runtime directly, then parses any action blocks from the response and posts the result to the target channel. This is a direct runtime invocation, not a replay through the Discord message handler.
+
+For recurring work, prefer `loopCreate` over chaining defers together. Loops make the repeat semantics explicit and expose inspectable metadata plus cancellation.
+
+### Loop Actions (`actions-loop.ts`)
+
+Allow the model to schedule a repeating self-invocation in a target channel at a fixed interval. This is the first-class replacement for ad-hoc nested `defer` chains when the intent is "run this again every N seconds until canceled."
+
+| Action | Description | Mutating? | Async? |
+|--------|-------------|-----------|--------|
+| `loopCreate` | Create a repeating scheduled self-invocation in a named channel | Yes | Yes (in-process timer; repeats every `intervalSeconds`) |
+| `loopList` | Inspect active loops and their metadata | No (query) | No |
+| `loopCancel` | Cancel one active loop by ID | Yes | No |
+
+Fields (`loopCreate`):
+- `channel` — target channel name or ID for each loop tick
+- `prompt` — fully self-contained user message sent on every tick
+- `intervalSeconds` — repeat interval in seconds
+- `label` — optional human-readable purpose label shown in `loopList`
+
+Fields (`loopList`): none — returns all active loops with `id`, `label`, target `channel`, interval, next run time, remaining time, origin channel/thread, consecutive failure count, and prompt text.
+
+Fields (`loopCancel`):
+- `id` — positive numeric loop ID returned by `loopCreate` and shown by `loopList`
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1).
+`LoopScheduler` constraints: intervals must stay within `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` (default 1 s) and `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` (default 1800 s); at most `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` (default 5) loops may be active simultaneously. Like defer timers, loops are in-process only and do not survive a restart.
+Origin metadata: every loop stores where it came from so `loopList` can show the origin channel or thread that created it, alongside the label and next run time.
+Failure behavior: terminal errors such as missing guild/channel cancel the loop immediately. Non-terminal tick failures increment a consecutive-failure counter; after 3 consecutive failures the scheduler auto-cancels the loop. If a tick is still running when the next interval arrives, the overlapping tick is skipped rather than run concurrently.
+
+Execution flow:
+1. `loopCreate` validates the target channel, prompt, interval bounds, and global concurrent-loop cap, then registers the loop with origin metadata from the current channel/thread.
+2. Each tick resolves the target channel, applies the standard Discord allowlist/channel checks, and builds a fresh scheduled-self-invocation prompt using PA context, channel context, open-task context, and the tier-selected action schema for the loop prompt text.
+3. The runtime is invoked directly with no conversation history; each tick is isolated, so the stored `prompt` must contain the full recurring instruction.
+4. Returned action blocks are parsed and executed with the loop tick's synthetic action context. Tick action capability is intentionally narrowed to read/inspection-oriented actions plus loop inspection, not the full action surface.
+5. The final text and any action result summaries are posted to the target channel.
+6. `loopList` exposes the active loop set for inspection, and `loopCancel` stops a specific loop by `id`.
 
 ### Config Actions (`actions-config.ts`)
 
