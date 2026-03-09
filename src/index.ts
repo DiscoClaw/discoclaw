@@ -74,7 +74,7 @@ import { startWebhookServer } from './webhook/server.js';
 import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
 import type { DashboardServer as LocalDashboardServer } from './dashboard/server.js';
-import { resolveDashboardBindHost } from './dashboard/options.js';
+import { formatDashboardUrl, resolveDashboardBindHost } from './dashboard/options.js';
 import { resolveModel, initTierOverrides } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
@@ -2426,17 +2426,19 @@ if (cfg.webhookEnabled && savedCronExecCtx) {
 }
 
 if (cfg.dashboardEnabled) {
+  const dashboardHost = resolveDashboardBindHost(cfg.dashboardTrustedHosts);
+  const dashboardUrl = formatDashboardUrl(dashboardHost, cfg.dashboardPort);
   try {
     dashboardServer = await startDashboardServer({
       port: cfg.dashboardPort,
-      host: resolveDashboardBindHost(cfg.dashboardTrustedHosts),
+      host: dashboardHost,
       trustedHosts: cfg.dashboardTrustedHosts,
       cwd: process.cwd(),
       env: process.env,
       log,
     });
   } catch (err) {
-    log.error({ err, port: cfg.dashboardPort }, 'dashboard:server failed to start');
+    log.error({ err, port: cfg.dashboardPort, url: dashboardUrl }, 'dashboard:server failed to start');
   }
 }
 
