@@ -172,6 +172,23 @@ function sanitizePhaseOutput(text: string): string {
   return text.replace(NON_TERMINAL_PROGRESS_LINE_RE, '');
 }
 
+function getPhaseSectionStarts(content: string): number[] {
+  return [...content.matchAll(/^## phase-\d+:\s.+$/gm)].map((match) => match.index!);
+}
+
+function splitPhaseSections(content: string): string[] {
+  const starts = getPhaseSectionStarts(content);
+  const sections: string[] = [];
+
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i]!;
+    const end = starts[i + 1] ?? content.length;
+    sections.push(content.slice(start, end).trim());
+  }
+
+  return sections;
+}
+
 
 // ---------------------------------------------------------------------------
 // Pure functions (no I/O)
@@ -650,29 +667,34 @@ export function deserializePhases(content: string): PlanPhases {
   const updatedAt = updatedMatch?.[1]?.trim() ?? '';
   const planContentHash = hashMatch[1]!;
 
-  // Split into phase sections
-  const phaseSections = content.split(/^## /m).slice(1); // first split is the header
+  // Split only on real phase headers. Saved runtime output can contain arbitrary
+  // markdown headings, so plain /^## / splitting corrupts persisted transcripts.
+  const phaseSections = splitPhaseSections(content);
   const phases: PlanPhase[] = [];
 
   for (const section of phaseSections) {
-    const idTitleMatch = section.match(/^(phase-\d+):\s*(.+)$/m);
+    const idTitleMatch = section.match(/^## (phase-\d+):\s*(.+)$/m);
     if (!idTitleMatch) continue;
 
     const id = idTitleMatch[1]!;
     const title = idTitleMatch[2]!.trim();
 
-    const kindMatch = section.match(/^\*\*Kind:\*\*\s*(\S+)/m);
-    const statusMatch = section.match(/^\*\*Status:\*\*\s*(\S+)/m);
-    const contextMatch = section.match(/^\*\*Context:\*\*\s*(.+)$/m);
-    const dependsMatch = section.match(/^\*\*Depends on:\*\*\s*(.+)$/m);
-    const commitMatch = section.match(/^\*\*Git commit:\*\*\s*(\S+)/m);
-    const modifiedMatch = section.match(/^\*\*Modified files:\*\*\s*(.+)$/m);
-    const failureHashesMatch = section.match(/^\*\*Failure hashes:\*\*\s*(.+)$/m);
-    const auditConvergenceMatch = section.match(/^\*\*Audit convergence:\*\*\s*(.+)$/m);
-    const evidenceMatch = section.match(/^\*\*Evidence:\*\*\s*(.+)$/m);
-    const outputMatch = section.match(/^\*\*Output:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Error|Change spec):\*\*|\n---|\n$)/m);
-    const errorMatch = section.match(/^\*\*Error:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Output|Change spec):\*\*|\n---|\n$)/m);
-    const changeSpecMatch = section.match(/^\*\*Change spec:\*\*\n([\s\S]*?)(?=\n\*\*(?:Output|Error):\*\*|\n---|\n$)/m);
+    const metadataEnd = section.indexOf('\n\n');
+    const metadataBlock = metadataEnd === -1 ? section : section.slice(0, metadataEnd);
+    const body = metadataEnd === -1 ? '' : section.slice(metadataEnd + 2);
+
+    const kindMatch = metadataBlock.match(/^\*\*Kind:\*\*\s*(\S+)/m);
+    const statusMatch = metadataBlock.match(/^\*\*Status:\*\*\s*(\S+)/m);
+    const contextMatch = metadataBlock.match(/^\*\*Context:\*\*\s*(.+)$/m);
+    const dependsMatch = metadataBlock.match(/^\*\*Depends on:\*\*\s*(.+)$/m);
+    const commitMatch = metadataBlock.match(/^\*\*Git commit:\*\*\s*(\S+)/m);
+    const modifiedMatch = metadataBlock.match(/^\*\*Modified files:\*\*\s*(.+)$/m);
+    const failureHashesMatch = metadataBlock.match(/^\*\*Failure hashes:\*\*\s*(.+)$/m);
+    const auditConvergenceMatch = metadataBlock.match(/^\*\*Audit convergence:\*\*\s*(.+)$/m);
+    const evidenceMatch = metadataBlock.match(/^\*\*Evidence:\*\*\s*(.+)$/m);
+    const outputMatch = body.match(/(?:^|\n)\*\*Output:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Error|Change spec):\*\*|\n---\s*$|$)/);
+    const errorMatch = body.match(/(?:^|\n)\*\*Error:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Output|Change spec):\*\*|\n---\s*$|$)/);
+    const changeSpecMatch = body.match(/(?:^|\n)\*\*Change spec:\*\*\n([\s\S]*?)(?=\n\*\*(?:Output|Error):\*\*|\n---\s*$|$)/);
 
     const kindValue = kindMatch?.[1]?.trim() ?? 'implement';
     const statusValue = statusMatch?.[1]?.trim() ?? 'pending';
@@ -695,15 +717,13 @@ export function deserializePhases(content: string): PlanPhases {
       : dependsRaw.split(',').map((s) => s.trim()).filter(Boolean);
 
     // Extract description: text between metadata lines and first **field or ---
-    const metadataEnd = section.indexOf('\n\n');
     let description = '';
-    if (metadataEnd !== -1) {
-      const afterMetadata = section.slice(metadataEnd + 2);
+    if (body.length > 0) {
       // Description is everything until the first **field or ---
-      const descEnd = afterMetadata.search(/^\*\*(Change spec|Output|Error|Modified files|Failure hashes|Audit convergence|Evidence):\*\*/m);
-      const dashEnd = afterMetadata.indexOf('\n---');
-      const cutoff = descEnd >= 0 ? descEnd : (dashEnd >= 0 ? dashEnd : afterMetadata.length);
-      description = afterMetadata.slice(0, cutoff).trim();
+      const descEnd = body.search(/^\*\*(Change spec|Output|Error):\*\*/m);
+      const dashEnd = body.indexOf('\n---');
+      const cutoff = descEnd >= 0 ? descEnd : (dashEnd >= 0 ? dashEnd : body.length);
+      description = body.slice(0, cutoff).trim();
     }
 
     const phase: PlanPhase = {
@@ -1142,7 +1162,8 @@ export function buildPhasePrompt(
 
     lines.push('## Instructions');
     lines.push('');
-    lines.push('Implement the specified changes using the Write, Edit, and Read tools.');
+    lines.push('Implement the specified changes using the Read, Write, Edit, Glob, Grep, and Bash tools as needed.');
+    lines.push('Use Bash for build/test verification when appropriate, and if you report verification results include the exact commands you ran.');
     lines.push('After making changes, output a brief summary of what was changed.');
     lines.push("As you work, briefly narrate each step (e.g. 'Reading X...', 'Applying change to Y...') so progress is visible.");
   } else if (phase.kind === 'read') {

@@ -635,6 +635,42 @@ describe('serialization', () => {
     expect(deserialized.phases[0]!.evidence).toEqual(sampleEvidence);
   });
 
+  it('markdown round-trip preserves output headings without splitting phases', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    phases.phases[0]!.output = [
+      'Implemented feature.',
+      '',
+      '## Verification Evidence',
+      '- build: pass',
+      '- test: pass',
+    ].join('\n');
+
+    const serialized = serializePhases(phases);
+    const deserialized = deserializePhases(serialized);
+
+    expect(deserialized.phases).toHaveLength(phases.phases.length);
+    expect(deserialized.phases[0]!.output).toBe(phases.phases[0]!.output);
+  });
+
+  it('markdown round-trip ignores Evidence markers inside description and output text', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
+    phases.phases[0]!.description = [
+      'Implementation notes:',
+      '**Evidence:** this line is prose, not metadata.',
+    ].join('\n');
+    phases.phases[0]!.output = [
+      'Transcript follows.',
+      '**Evidence:** reported inline for humans only.',
+    ].join('\n');
+
+    const serialized = serializePhases(phases);
+    const deserialized = deserializePhases(serialized);
+
+    expect(deserialized.phases[0]!.description).toBe(phases.phases[0]!.description);
+    expect(deserialized.phases[0]!.output).toBe(phases.phases[0]!.output);
+    expect(deserialized.phases[0]!.evidence).toBeUndefined();
+  });
+
   it('evidence round-trips via json serialization', () => {
     const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
     phases.phases[0]!.evidence = sampleEvidence;
@@ -1189,10 +1225,10 @@ describe('buildPhasePrompt', () => {
     expect(prompt).toContain('src/foo.test.ts');
   });
 
-  it('implement phase includes write tools instruction', () => {
+  it('implement phase includes actual tool access and verification guidance', () => {
     const prompt = buildPhasePrompt(phase, SAMPLE_PLAN);
-    expect(prompt).toContain('Write');
-    expect(prompt).toContain('Edit');
+    expect(prompt).toContain('Read, Write, Edit, Glob, Grep, and Bash');
+    expect(prompt).toContain('include the exact commands you ran');
   });
 
   it('read phase uses read-only instruction', () => {

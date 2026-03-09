@@ -318,6 +318,8 @@ Rules:
 
 Phases are persisted in both `workspace/plans/plan-NNN-phases.md` and the adjacent JSON state file `workspace/plans/plan-NNN-phases.json`. The markdown view is serialized by `serializePhases()` / `deserializePhases()`, and the JSON state is serialized by `serializePhasesStateJson()` / `deserializePhasesStateJson()` in `plan-manager.ts`.
 
+In markdown, only headings of the form `## phase-N:` start a new phase section. Structured metadata such as `**Evidence:**` is read from the phase preamble only, so human-readable descriptions and runtime transcripts can contain ordinary markdown headings and prose without being reinterpreted as control data.
+
 ### Structure
 
 ```markdown
@@ -419,4 +421,4 @@ Evidence differs from phase output:
 - `output` and `error` remain the full human-readable transcript for operators.
 - `evidence` is the compact structured contract for machines and summaries.
 - Evidence should capture verification intent and verdict, while `output` preserves raw logs, stack traces, and contextual detail.
-- Evidence is persisted in both the JSON state file and the markdown phases file so downstream readers can recover the same machine-readable contract from either storage format.
+- Evidence is persisted in both the JSON state file and the markdown phases file so downstream readers can recover the same machine-readable contract from either storage format. In markdown, the evidence JSON lives in the phase metadata preamble; free-text transcript content is not scanned for evidence markers.
