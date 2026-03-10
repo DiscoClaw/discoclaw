@@ -5,6 +5,7 @@ export type McpServerEntry = {
   name: string;
   command: string;
   args?: string[];
+  env?: Record<string, string>;
 };
 
 export type McpDetectResult =
@@ -19,6 +20,15 @@ export type McpDetectResult =
  */
 export const MCP_SERVER_NAME_MAX_LENGTH = 64;
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 /**
  * Returns warning strings for any server whose name exceeds MCP_SERVER_NAME_MAX_LENGTH.
  * Pure function — no logging side-effects.
@@ -29,6 +39,19 @@ export function validateMcpServerNames(servers: McpServerEntry[]): string[] {
     .map(
       (s) =>
         `MCP server name "${s.name}" is ${s.name.length} chars, exceeding the ${MCP_SERVER_NAME_MAX_LENGTH}-char limit — tool_use.name may exceed the 200-char API limit`,
+    );
+}
+
+/**
+ * Returns warning strings for any server whose env block is present but empty.
+ * Pure function — no logging side-effects.
+ */
+export function validateMcpServerEnv(servers: McpServerEntry[]): string[] {
+  return servers
+    .filter((s) => s.env !== undefined && Object.keys(s.env).length === 0)
+    .map(
+      (s) =>
+        `MCP server "${s.name}" has an empty env object — likely misconfigured or missing required values`,
     );
 }
 
@@ -72,16 +95,33 @@ export async function detectMcpServers(workspaceCwd: string): Promise<McpDetectR
   const servers: McpServerEntry[] = [];
 
   for (const [name, value] of entries) {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    if (!isPlainObject(value)) {
       return { status: 'invalid', reason: `server "${name}" must be an object` };
     }
-    const entry = value as Record<string, unknown>;
+    const entry = value;
     if (typeof entry.command !== 'string' || !entry.command) {
       return { status: 'invalid', reason: `server "${name}" missing "command"` };
     }
     const server: McpServerEntry = { name, command: entry.command };
     if (Array.isArray(entry.args)) {
       server.args = entry.args.filter((a): a is string => typeof a === 'string');
+    }
+    if (entry.env !== undefined) {
+      if (!isPlainObject(entry.env)) {
+        return { status: 'invalid', reason: `server "${name}" field "env" must be an object` };
+      }
+
+      const env: Record<string, string> = {};
+      for (const [envKey, envValue] of Object.entries(entry.env)) {
+        if (typeof envValue !== 'string') {
+          return {
+            status: 'invalid',
+            reason: `server "${name}" field "env.${envKey}" must be a string`,
+          };
+        }
+        env[envKey] = envValue;
+      }
+      server.env = env;
     }
     servers.push(server);
   }
@@ -94,6 +134,7 @@ export async function detectMcpServers(workspaceCwd: string): Promise<McpDetectR
  */
 export function logMcpDetection(
   result: McpDetectResult,
+  context: { claudeInUse: boolean; strictMcpConfig: boolean },
   log: { info(obj: Record<string, unknown>, msg: string): void; warn(obj: Record<string, unknown>, msg: string): void },
 ): void {
   switch (result.status) {
@@ -105,13 +146,21 @@ export function logMcpDetection(
       break;
     case 'found': {
       const names = result.servers.map((s) => s.name);
+      const warnings = [...validateMcpServerNames(result.servers), ...validateMcpServerEnv(result.servers)];
       if (names.length === 0) {
         log.info({}, 'mcp: .mcp.json found but no servers configured');
       } else {
+        let msg = `mcp: ${names.length} server${names.length === 1 ? '' : 's'} configured: ${names.join(', ')}`;
+        if (!context.claudeInUse) {
+          msg += ' (MCP servers only active with Claude runtime)';
+        }
         log.info(
-          { count: names.length, servers: names },
-          `mcp: ${names.length} server${names.length === 1 ? '' : 's'} configured: ${names.join(', ')}`,
+          { count: names.length, servers: names, strictMcpConfig: context.strictMcpConfig },
+          msg,
         );
+      }
+      for (const warning of warnings) {
+        log.warn({}, warning);
       }
       break;
     }

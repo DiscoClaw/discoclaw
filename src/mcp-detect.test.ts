@@ -3,11 +3,19 @@ import path from 'node:path';
 import os from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { detectMcpServers, logMcpDetection, MCP_SERVER_NAME_MAX_LENGTH, validateMcpServerNames } from './mcp-detect.js';
+import {
+  detectMcpServers,
+  logMcpDetection,
+  MCP_SERVER_NAME_MAX_LENGTH,
+  validateMcpServerEnv,
+  validateMcpServerNames,
+} from './mcp-detect.js';
 
 function mockLog() {
   return { info: vi.fn(), warn: vi.fn() };
 }
+
+const mcpLogContext = { claudeInUse: true, strictMcpConfig: true };
 
 describe('detectMcpServers', () => {
   const dirs: string[] = [];
@@ -101,7 +109,44 @@ describe('detectMcpServers', () => {
       status: 'found',
       servers: [
         { name: 'filesystem', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/home/user/docs'] },
-        { name: 'brave-search', command: 'npx', args: ['-y', '@anthropic/mcp-server-brave-search'] },
+        {
+          name: 'brave-search',
+          command: 'npx',
+          args: ['-y', '@anthropic/mcp-server-brave-search'],
+          env: { BRAVE_API_KEY: 'key-here' },
+        },
+      ],
+    });
+  });
+
+  it('preserves env values when they are all strings', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-detect-'));
+    dirs.push(workspace);
+    const config = {
+      mcpServers: {
+        sequential: {
+          command: 'uvx',
+          env: {
+            API_KEY: 'secret',
+            MODE: 'readonly',
+          },
+        },
+      },
+    };
+    await fs.writeFile(path.join(workspace, '.mcp.json'), JSON.stringify(config), 'utf-8');
+
+    const result = await detectMcpServers(workspace);
+    expect(result).toEqual({
+      status: 'found',
+      servers: [
+        {
+          name: 'sequential',
+          command: 'uvx',
+          env: {
+            API_KEY: 'secret',
+            MODE: 'readonly',
+          },
+        },
       ],
     });
   });
@@ -128,6 +173,42 @@ describe('detectMcpServers', () => {
 
     const result = await detectMcpServers(workspace);
     expect(result).toEqual({ status: 'invalid', reason: 'server "bad" must be an object' });
+  });
+
+  it('returns invalid when env is not an object', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-detect-'));
+    dirs.push(workspace);
+    const config = {
+      mcpServers: {
+        brave: {
+          command: 'npx',
+          env: 'BRAVE_API_KEY=secret',
+        },
+      },
+    };
+    await fs.writeFile(path.join(workspace, '.mcp.json'), JSON.stringify(config), 'utf-8');
+
+    const result = await detectMcpServers(workspace);
+    expect(result).toEqual({ status: 'invalid', reason: 'server "brave" field "env" must be an object' });
+  });
+
+  it('returns invalid when env contains non-string values', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-detect-'));
+    dirs.push(workspace);
+    const config = {
+      mcpServers: {
+        brave: {
+          command: 'npx',
+          env: {
+            BRAVE_API_KEY: 1234,
+          },
+        },
+      },
+    };
+    await fs.writeFile(path.join(workspace, '.mcp.json'), JSON.stringify(config), 'utf-8');
+
+    const result = await detectMcpServers(workspace);
+    expect(result).toEqual({ status: 'invalid', reason: 'server "brave" field "env.BRAVE_API_KEY" must be a string' });
   });
 
   it('handles server with command only (no args)', async () => {
@@ -168,10 +249,27 @@ describe('validateMcpServerNames', () => {
   });
 });
 
+describe('validateMcpServerEnv', () => {
+  it('returns no warnings when env is absent or populated', () => {
+    const servers = [
+      { name: 'filesystem', command: 'npx' },
+      { name: 'brave-search', command: 'npx', env: { BRAVE_API_KEY: 'key-here' } },
+    ];
+    expect(validateMcpServerEnv(servers)).toEqual([]);
+  });
+
+  it('returns a warning for empty env objects', () => {
+    const warnings = validateMcpServerEnv([{ name: 'brave-search', command: 'npx', env: {} }]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('brave-search');
+    expect(warnings[0]).toContain('empty env object');
+  });
+});
+
 describe('logMcpDetection', () => {
   it('logs info for missing .mcp.json', () => {
     const log = mockLog();
-    logMcpDetection({ status: 'missing' }, log);
+    logMcpDetection({ status: 'missing' }, mcpLogContext, log);
 
     expect(log.info).toHaveBeenCalledWith({}, expect.stringContaining('no .mcp.json found'));
     expect(log.warn).not.toHaveBeenCalled();
@@ -179,7 +277,7 @@ describe('logMcpDetection', () => {
 
   it('logs warn for invalid .mcp.json', () => {
     const log = mockLog();
-    logMcpDetection({ status: 'invalid', reason: 'invalid JSON' }, log);
+    logMcpDetection({ status: 'invalid', reason: 'invalid JSON' }, mcpLogContext, log);
 
     expect(log.warn).toHaveBeenCalledWith(
       { reason: 'invalid JSON' },
@@ -190,39 +288,42 @@ describe('logMcpDetection', () => {
 
   it('logs info for empty servers', () => {
     const log = mockLog();
-    logMcpDetection({ status: 'found', servers: [] }, log);
+    logMcpDetection({ status: 'found', servers: [] }, mcpLogContext, log);
 
     expect(log.info).toHaveBeenCalledWith({}, expect.stringContaining('no servers configured'));
   });
 
-  it('logs info with server names for configured servers', () => {
+  it('logs info with server names and warnings for configured servers', () => {
     const log = mockLog();
     logMcpDetection(
       {
         status: 'found',
         servers: [
           { name: 'filesystem', command: 'npx' },
-          { name: 'brave-search', command: 'npx' },
+          { name: 'brave-search', command: 'npx', env: {} },
         ],
       },
+      { claudeInUse: false, strictMcpConfig: false },
       log,
     );
 
     expect(log.info).toHaveBeenCalledWith(
-      { count: 2, servers: ['filesystem', 'brave-search'] },
-      expect.stringContaining('2 servers configured: filesystem, brave-search'),
+      { count: 2, servers: ['filesystem', 'brave-search'], strictMcpConfig: false },
+      expect.stringContaining('2 servers configured: filesystem, brave-search (MCP servers only active with Claude runtime)'),
     );
+    expect(log.warn).toHaveBeenCalledWith({}, expect.stringContaining('empty env object'));
   });
 
   it('uses singular "server" for single server', () => {
     const log = mockLog();
     logMcpDetection(
       { status: 'found', servers: [{ name: 'filesystem', command: 'npx' }] },
+      mcpLogContext,
       log,
     );
 
     expect(log.info).toHaveBeenCalledWith(
-      { count: 1, servers: ['filesystem'] },
+      { count: 1, servers: ['filesystem'], strictMcpConfig: true },
       expect.stringContaining('1 server configured'),
     );
   });
