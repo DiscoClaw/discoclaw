@@ -44,7 +44,7 @@ vi.mock('./plan-manager.js', () => ({
   runNextPhase: vi.fn(async () => ({ result: 'nothing_to_run' })),
   resolveProjectCwd: vi.fn((_content: string, workspaceCwd: string) => workspaceCwd),
   readPhasesFile: vi.fn(() => ({ phases: [] })),
-  buildPostRunSummary: vi.fn(() => ''),
+  buildPostRunSummary: vi.fn(() => ({ text: '', evidence: [] })),
 }));
 
 vi.mock('./forge-plan-registry.js', () => ({
@@ -359,6 +359,59 @@ describe('message coordinator plan run phase-start posts', () => {
         return content.includes('plan-042') && content.includes('phase');
       });
       expect(finalEdit).toBeDefined();
+    });
+  });
+
+  it('logs aggregated completion evidence for manual !plan run summaries', async () => {
+    const { runNextPhase, buildPostRunSummary } = await import('./plan-manager.js');
+    (runNextPhase as any)
+      .mockImplementationOnce(async () => ({
+        result: 'done',
+        phase: { id: 'phase-1', title: 'First phase', kind: 'implement', status: 'done', dependsOn: [], contextFiles: [] },
+        output: 'done',
+        nextPhase: undefined,
+      }))
+      .mockImplementationOnce(async () => ({ result: 'nothing_to_run' }));
+    (buildPostRunSummary as any).mockReturnValue({
+      text: '[x] **phase-1:** First phase — build: pass (dist built cleanly)',
+      evidence: [
+        {
+          phaseId: 'phase-1',
+          phaseTitle: 'First phase',
+          phaseKind: 'implement',
+          phaseStatus: 'done',
+          kind: 'build',
+          status: 'pass',
+          summary: 'dist built cleanly',
+        },
+      ],
+    });
+
+    const params = makeParams();
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue as any);
+    const msg = makeMessage('!plan run plan-042');
+
+    await handler(msg as any);
+    await vi.waitFor(() => {
+      expect(params.log.info).toHaveBeenCalledWith(
+        {
+          planId: 'plan-042',
+          phasesRun: 1,
+          evidence: [
+            {
+              phaseId: 'phase-1',
+              phaseTitle: 'First phase',
+              phaseKind: 'implement',
+              phaseStatus: 'done',
+              kind: 'build',
+              status: 'pass',
+              summary: 'dist built cleanly',
+            },
+          ],
+        },
+        'plan-run: completion evidence',
+      );
     });
   });
 

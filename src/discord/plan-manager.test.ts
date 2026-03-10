@@ -1292,6 +1292,7 @@ describe('buildPhasePrompt', () => {
     const auditPhase: PlanPhase = { ...phase, kind: 'audit' };
     const prompt = buildPhasePrompt(auditPhase, SAMPLE_PLAN);
     expect(prompt).toContain('blocking | medium | minor | suggestion');
+    expect(prompt).toContain('**Severity: none**');
     expect(prompt).not.toContain('Severity: high | medium | low');
   });
 
@@ -2673,7 +2674,48 @@ describe('executePhase audit verdict', () => {
     expect(result.status).toBe('done');
   });
 
-  it('audit phase with no severity markers returns failed', async () => {
+  it('audit phase with Severity: none returns done with no concerns', async () => {
+    const auditOutput = '**Severity: none**\nNo concerns found.\n\n**Verdict:** Ready to approve.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.evidence).toEqual([
+        { kind: 'audit', status: 'pass', summary: 'Audit passed with no concerns' },
+      ]);
+    }
+  });
+
+  it('audit phase with verdict-only ready-to-approve falls back without failing', async () => {
+    const auditOutput = 'Everything looks great.\n\n**Verdict:** Ready to approve.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.evidence).toEqual([
+        {
+          kind: 'audit',
+          status: 'pass',
+          summary: 'Audit passed via legacy verdict-only output; severity markers missing',
+        },
+      ]);
+    }
+  });
+
+  it('audit phase with verdict-only needs-revision falls back to audit_failed', async () => {
+    const auditOutput = 'This needs more work.\n\n**Verdict:** Needs revision.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('audit_failed');
+    if (result.status === 'audit_failed') {
+      expect(result.evidence).toEqual([
+        {
+          kind: 'audit',
+          status: 'fail',
+          reason: 'Audit requested revision via verdict-only output; severity markers missing',
+        },
+      ]);
+    }
+  });
+
+  it('audit phase with no severity markers or verdict returns failed', async () => {
     const auditOutput = 'Everything looks great. No concerns.';
     const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
     expect(result.status).toBe('failed');
@@ -3533,9 +3575,9 @@ function makePhasesForSummary(overrides: Partial<PlanPhases> = {}): PlanPhases {
 }
 
 describe('buildPostRunSummary', () => {
-  it('returns empty string when there are no phases', () => {
+  it('returns empty text and evidence when there are no phases', () => {
     const phases = makePhasesForSummary({ phases: [] });
-    expect(buildPostRunSummary(phases)).toBe('');
+    expect(buildPostRunSummary(phases)).toEqual({ text: '', evidence: [] });
   });
 
   it('shows [x] indicator for done phase', () => {
@@ -3547,7 +3589,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('[x]');
     expect(summary).toContain('phase-1');
     expect(summary).toContain('Implement foo');
@@ -3562,7 +3604,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    expect(buildPostRunSummary(phases)).toContain('[!]');
+    expect(buildPostRunSummary(phases).text).toContain('[!]');
   });
 
   it('shows [-] indicator for skipped phase', () => {
@@ -3574,7 +3616,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    expect(buildPostRunSummary(phases)).toContain('[-]');
+    expect(buildPostRunSummary(phases).text).toContain('[-]');
   });
 
   it('shows [~] indicator for in-progress phase', () => {
@@ -3586,7 +3628,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    expect(buildPostRunSummary(phases)).toContain('[~]');
+    expect(buildPostRunSummary(phases).text).toContain('[~]');
   });
 
   it('shows [ ] indicator for pending phase', () => {
@@ -3598,7 +3640,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    expect(buildPostRunSummary(phases)).toContain('[ ]');
+    expect(buildPostRunSummary(phases).text).toContain('[ ]');
   });
 
   it('includes git commit hash when present', () => {
@@ -3611,7 +3653,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('a1b2c3d');
   });
 
@@ -3625,7 +3667,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('2 files');
   });
 
@@ -3639,7 +3681,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('1 file');
     expect(summary).not.toContain('1 files');
   });
@@ -3654,7 +3696,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('Ready to approve.');
   });
 
@@ -3668,7 +3710,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).not.toContain(' — ');
   });
 
@@ -3687,7 +3729,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('Files changed (3)');
     expect(summary).toContain('`src/foo.ts`');
     expect(summary).toContain('`src/bar.ts`');
@@ -3705,7 +3747,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).not.toContain('Files changed');
   });
 
@@ -3720,7 +3762,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases, 200);
+    const summary = buildPostRunSummary(phases, 200).text;
     expect(summary).toContain('more)');
   });
 
@@ -3742,7 +3784,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('[x]');
     expect(summary).toContain('[!]');
     expect(summary).toContain('[-]');
@@ -3769,9 +3811,37 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('build: pass');
     expect(summary).toContain('test: pass (14 passed)');
     expect(summary).toContain('audit: fail (Blocking findings remain)');
+  });
+
+  it('returns aggregated run evidence alongside the text summary', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          evidence: [{ kind: 'build', status: 'pass', summary: 'dist built cleanly' }],
+        },
+        {
+          id: 'phase-2', title: 'Post-implementation audit', kind: 'audit', status: 'done',
+          description: '', dependsOn: ['phase-1'], contextFiles: [],
+        },
+      ],
+    });
+
+    expect(buildPostRunSummary(phases).evidence).toEqual([
+      {
+        phaseId: 'phase-1',
+        phaseTitle: 'Implement foo',
+        phaseKind: 'implement',
+        phaseStatus: 'done',
+        kind: 'build',
+        status: 'pass',
+        summary: 'dist built cleanly',
+      },
+    ]);
   });
 });

@@ -53,7 +53,7 @@ vi.mock('./plan-manager.js', () => ({
   runNextPhase: vi.fn(async () => ({ result: 'nothing_to_run' })),
   resolveProjectCwd: vi.fn((_content: string, workspaceCwd: string) => workspaceCwd),
   readPhasesFile: vi.fn(() => ({ phases: [] })),
-  buildPostRunSummary: vi.fn(() => ''),
+  buildPostRunSummary: vi.fn(() => ({ text: '', evidence: [] })),
 }));
 
 vi.mock('./forge-plan-registry.js', () => ({
@@ -643,6 +643,53 @@ describe('executePlanAction', () => {
       expect(lastEdit.allowedMentions).toEqual({ parse: [] });
     });
 
+    it('logs aggregated run evidence after building the post-run summary', async () => {
+      const { buildPostRunSummary } = await import('./plan-manager.js');
+      const planCtx = makePlanCtx({ runtime: {} as any, model: 'opus' });
+
+      (buildPostRunSummary as any).mockReturnValueOnce({
+        text: '[x] **phase-1:** First phase — build: pass (dist built cleanly)',
+        evidence: [
+          {
+            phaseId: 'phase-1',
+            phaseTitle: 'First phase',
+            phaseKind: 'implement',
+            phaseStatus: 'done',
+            kind: 'build',
+            status: 'pass',
+            summary: 'dist built cleanly',
+          },
+        ],
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        planCtx,
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(planCtx.log?.info).toHaveBeenCalledWith(
+        {
+          planId: 'plan-042',
+          phasesRun: 0,
+          evidence: [
+            {
+              phaseId: 'phase-1',
+              phaseTitle: 'First phase',
+              phaseKind: 'implement',
+              phaseStatus: 'done',
+              kind: 'build',
+              status: 'pass',
+              summary: 'dist built cleanly',
+            },
+          ],
+        },
+        'plan:action:run complete evidence',
+      );
+    });
+
     it('posts a new message when a phase starts', async () => {
       const { runNextPhase } = await import('./plan-manager.js');
       (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
@@ -764,7 +811,7 @@ describe('executePlanAction', () => {
     });
 
     it('calls onRunComplete with final content after run completes', async () => {
-      const onRunComplete = vi.fn(async (_content: string) => {});
+      const onRunComplete = vi.fn(async (_result: { content: string; evidence: unknown[] }) => {});
 
       await executePlanAction(
         { type: 'planRun', planId: 'plan-042' },
@@ -775,14 +822,57 @@ describe('executePlanAction', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(onRunComplete).toHaveBeenCalledOnce();
-      const content: string = onRunComplete.mock.calls[0]![0]!;
+      const completion = onRunComplete.mock.calls[0]![0]!;
+      const content: string = completion.content;
       expect(content).toContain('Plan run complete');
       expect(content).toContain('plan-042');
       expect(content).toContain('Phases run:');
+      expect(completion.evidence).toEqual([]);
+    });
+
+    it('passes aggregated run evidence into onRunComplete', async () => {
+      const { buildPostRunSummary } = await import('./plan-manager.js');
+      const onRunComplete = vi.fn(async (_result: { content: string; evidence: unknown[] }) => {});
+
+      (buildPostRunSummary as any).mockReturnValueOnce({
+        text: '[x] **phase-1:** First phase — build: pass (dist built cleanly)',
+        evidence: [
+          {
+            phaseId: 'phase-1',
+            phaseTitle: 'First phase',
+            phaseKind: 'implement',
+            phaseStatus: 'done',
+            kind: 'build',
+            status: 'pass',
+            summary: 'dist built cleanly',
+          },
+        ],
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus', onRunComplete }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(onRunComplete).toHaveBeenCalledOnce();
+      expect(onRunComplete.mock.calls[0]![0]!.evidence).toEqual([
+        {
+          phaseId: 'phase-1',
+          phaseTitle: 'First phase',
+          phaseKind: 'implement',
+          phaseStatus: 'done',
+          kind: 'build',
+          status: 'pass',
+          summary: 'dist built cleanly',
+        },
+      ]);
     });
 
     it('calls onRunComplete even when skipCompletionNotify is true', async () => {
-      const onRunComplete = vi.fn(async (_content: string) => {});
+      const onRunComplete = vi.fn(async (_result: { content: string; evidence: unknown[] }) => {});
       const setup = makeSendFn();
       const ctx = makeCtx(setup);
 
@@ -799,9 +889,11 @@ describe('executePlanAction', () => {
       expect(setup.msg.edit).not.toHaveBeenCalled();
       // But onRunComplete is still called
       expect(onRunComplete).toHaveBeenCalledOnce();
-      const content: string = onRunComplete.mock.calls[0]![0]!;
+      const completion = onRunComplete.mock.calls[0]![0]!;
+      const content: string = completion.content;
       expect(content).toContain('Plan run complete');
       expect(content).toContain('plan-042');
+      expect(completion.evidence).toEqual([]);
     });
 
     it('includes auto-close note in completion notification when plan is closed', async () => {

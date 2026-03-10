@@ -13,14 +13,16 @@ import { hasAuditSeveritySignal } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { extractFirstJsonValue } from './json-extract.js';
 import {
+  collectRunEvidence,
   coerceEvidenceArray,
   createEvidence,
   formatEvidenceSummary,
 } from './verification-evidence.js';
 import type {
+  RunVerificationEvidence,
   VerificationEvidence,
 } from './verification-evidence.js';
-export type { VerificationEvidence } from './verification-evidence.js';
+export type { RunVerificationEvidence, VerificationEvidence } from './verification-evidence.js';
 
 const PLAN_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
   profile: 'plan_phase',
@@ -1339,7 +1341,11 @@ export function buildPhasePrompt(
     lines.push('- **minor** — Small issues: naming, style, minor clarity gaps. Worth noting, not worth looping over.');
     lines.push('- **suggestion** — Ideas for future improvement. Not problems with the current plan.');
     lines.push('');
-    lines.push('IMPORTANT: Each concern MUST have its own **Severity: X** line. Do NOT use tables, summary grids, or any other format for severity ratings — the automated fix loop parses these markers to decide whether to trigger revisions.');
+    lines.push('If there are no concerns, do not invent a Concern block. Instead emit:');
+    lines.push('**Severity: none**');
+    lines.push('No concerns found.');
+    lines.push('');
+    lines.push('IMPORTANT: Each concern MUST have its own **Severity: X** line. If there are zero concerns, you MUST still emit **Severity: none** before the verdict. Do NOT use tables, summary grids, or any other format for severity ratings — the automated fix loop parses these markers to decide whether to trigger revisions.');
     lines.push('');
     lines.push('End with a **Verdict:** line — either "Needs revision." (if any blocking concerns) or "Ready to approve." (if no blocking concerns).');
     lines.push('');
@@ -1356,12 +1362,16 @@ export function buildPhasePrompt(
 
 /**
  * Build a concise human-readable rollup of all phases after a plan run completes.
- * Returns an empty string when there are no phases.
+ * Returns empty text when there are no phases.
  * The `budgetChars` parameter (default 800) caps total output length — if the
  * files list exceeds budget, it is truncated with an overflow count.
  */
-export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): string {
-  if (phases.phases.length === 0) return '';
+export function buildPostRunSummary(
+  phases: PlanPhases,
+  budgetChars = 800,
+): { text: string; evidence: RunVerificationEvidence[] } {
+  const evidence = collectRunEvidence(phases.phases);
+  if (phases.phases.length === 0) return { text: '', evidence };
 
   const statusIndicator: Record<string, string> = {
     'done': '[x]',
@@ -1412,7 +1422,7 @@ export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): stri
   const phaseSection = lines.join('\n');
 
   if (allFiles.length === 0) {
-    return phaseSection;
+    return { text: phaseSection, evidence };
   }
 
   // Build files section with budget enforcement
@@ -1438,7 +1448,7 @@ export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): stri
     filesSection += ` (+${overflow} more)`;
   }
 
-  return phaseSection + filesSection;
+  return { text: phaseSection + filesSection, evidence };
 }
 
 export function buildAuditFixPrompt(
@@ -1926,26 +1936,32 @@ export async function executePhase(
     }
 
     if (phase.kind === 'audit') {
-      if (!hasAuditSeveritySignal(sanitizedOutput)) {
+      const verdict = parseAuditVerdict(sanitizedOutput);
+      const hasSeveritySignal = hasAuditSeveritySignal(sanitizedOutput);
+      if (!hasSeveritySignal && verdict.maxSeverity === 'none') {
         return {
           status: 'failed',
           output: sanitizedOutput,
           error: 'Audit output missing severity markers; refusing to synthesize audit evidence from verdict-only text',
         };
       }
-      const verdict = parseAuditVerdict(sanitizedOutput);
+      const legacyVerdictOnly = !hasSeveritySignal;
       const evidence = [
         verdict.shouldLoop
           ? createEvidence({
             kind: 'audit',
             status: 'fail',
-            reason: extractAuditFailureReason(sanitizedOutput),
+            reason: legacyVerdictOnly
+              ? 'Audit requested revision via verdict-only output; severity markers missing'
+              : extractAuditFailureReason(sanitizedOutput),
           })
           : createEvidence({
             kind: 'audit',
             status: 'pass',
-            summary: verdict.maxSeverity === 'none'
-              ? 'Audit passed with no concerns'
+            summary: legacyVerdictOnly
+              ? 'Audit passed via legacy verdict-only output; severity markers missing'
+              : verdict.maxSeverity === 'none'
+                ? 'Audit passed with no concerns'
               : `Audit passed with ${verdict.maxSeverity} non-blocking concerns`,
           }),
       ];
