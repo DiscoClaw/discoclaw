@@ -110,6 +110,14 @@ describe('coerceEvidenceArray', () => {
       { kind: 'test', status: 'pass', reason: 'should not be here' },
     ], 'evidence')).toThrow('Passed verification evidence cannot include a reason');
   });
+
+  it('can restrict allowed kinds for worker-supplied evidence', () => {
+    expect(() => coerceEvidenceArray([
+      { kind: 'audit', status: 'fail', reason: 'Blocking findings remain' },
+    ], 'phase output evidence', { allowedKinds: ['build', 'test'] })).toThrow(
+      "kind 'audit' is not allowed here",
+    );
+  });
 });
 
 describe('formatEvidenceSummary', () => {

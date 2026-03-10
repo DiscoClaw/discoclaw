@@ -9,6 +9,7 @@ import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy } from '../ru
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { parseAuditVerdict } from './forge-audit-verdict.js';
+import { hasAuditSeveritySignal } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { extractFirstJsonValue } from './json-extract.js';
 import {
@@ -154,6 +155,8 @@ const PHASES_STATE_VERSION = 2;
 const AUDIT_CONVERGENCE_REPEAT_LIMIT = 2;
 const NON_TERMINAL_PROGRESS_LINE_RE = /^[ \t]*\[progress\].*(?:\r?\n|$)/gim;
 const PHASE_EVIDENCE_TRAILER_RE = /(?:^|\n)\*\*Phase Evidence:\*\*\s*([^\n]*)\s*$/;
+const AUDIT_CONCERN_LINE_RE = /^\s*\**Concern\s+(\d+)\s*:\s*(.+?)\**\s*$/i;
+const AUDIT_SEVERITY_LINE_RE = /^\s*\**Severity:\s*(blocking|high|medium|minor|low|suggestion|none)\**\s*$/i;
 
 /** Known workspace filenames that should be normalized to workspace/ prefix. */
 const KNOWN_WORKSPACE_FILES = new Set([
@@ -169,28 +172,119 @@ function sanitizePhaseOutput(text: string): string {
   return text.replace(NON_TERMINAL_PROGRESS_LINE_RE, '');
 }
 
+function splitPhaseEvidenceTrailer(output: string): {
+  output: string;
+  trailer: string | undefined;
+} {
+  const match = output.match(PHASE_EVIDENCE_TRAILER_RE);
+  if (!match) {
+    return { output: output.trim(), trailer: undefined };
+  }
+
+  const trailerStart = match.index ?? 0;
+  return {
+    output: output.slice(0, trailerStart).trim(),
+    trailer: match[1],
+  };
+}
+
 function extractPhaseEvidenceTrailer(output: string): {
   output: string;
   evidence: VerificationEvidence[] | undefined;
 } {
-  const match = output.match(PHASE_EVIDENCE_TRAILER_RE);
-  if (!match) {
-    return { output: output.trim(), evidence: undefined };
+  const extracted = splitPhaseEvidenceTrailer(output);
+  if (extracted.trailer === undefined) {
+    return { output: extracted.output, evidence: undefined };
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(match[1]!);
+    parsed = JSON.parse(extracted.trailer);
   } catch {
     throw new Error('Phase evidence trailer must contain valid JSON');
   }
 
-  const evidence = coerceEvidenceArray(parsed, 'phase output evidence');
-  const trailerStart = match.index ?? 0;
+  const implementEvidence = coerceEvidenceArray(parsed, 'phase output evidence', {
+    allowedKinds: ['build', 'test'],
+  });
   return {
-    output: output.slice(0, trailerStart).trim(),
-    evidence,
+    output: extracted.output,
+    evidence: implementEvidence,
   };
+}
+
+function normalizeAuditSeverityLabel(raw: string | undefined): AuditVerdict['maxSeverity'] | null {
+  if (!raw) return null;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'high') return 'blocking';
+  if (normalized === 'low') return 'minor';
+  if (
+    normalized === 'blocking' ||
+    normalized === 'medium' ||
+    normalized === 'minor' ||
+    normalized === 'suggestion' ||
+    normalized === 'none'
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function summarizeAuditFailureTitles(titles: string[]): string | undefined {
+  const uniqueTitles = [...new Set(titles.map((title) => title.trim()).filter(Boolean))];
+  if (uniqueTitles.length === 0) return undefined;
+  if (uniqueTitles.length === 1) return uniqueTitles[0];
+  if (uniqueTitles.length === 2) return `${uniqueTitles[0]}; ${uniqueTitles[1]}`;
+  return `${uniqueTitles[0]}; ${uniqueTitles[1]}; +${uniqueTitles.length - 2} more`;
+}
+
+function extractAuditFailureReason(auditOutput: string): string {
+  const jsonCandidate = extractFirstJsonValue(auditOutput, { objectOnly: true });
+  if (jsonCandidate) {
+    try {
+      const parsed = JSON.parse(jsonCandidate) as {
+        summary?: unknown;
+        concerns?: Array<{ title?: unknown; severity?: unknown }>;
+        verdict?: { summary?: unknown; concerns?: Array<{ title?: unknown; severity?: unknown }> };
+      };
+      const verdictPayload = parsed.verdict && typeof parsed.verdict === 'object'
+        ? parsed.verdict
+        : parsed;
+      const blockingTitles = (verdictPayload.concerns ?? [])
+        .filter((concern) => normalizeAuditSeverityLabel(
+          typeof concern?.severity === 'string' ? concern.severity : undefined,
+        ) === 'blocking')
+        .map((concern) => (typeof concern?.title === 'string' ? concern.title.trim() : ''))
+        .filter(Boolean);
+      const summarizedTitles = summarizeAuditFailureTitles(blockingTitles);
+      if (summarizedTitles) return summarizedTitles;
+      if (typeof verdictPayload.summary === 'string' && verdictPayload.summary.trim()) {
+        return verdictPayload.summary.trim();
+      }
+    } catch {
+      // Fall through to legacy text parsing.
+    }
+  }
+
+  const blockingTitles: string[] = [];
+  let currentConcernTitle: string | undefined;
+  for (const line of auditOutput.split('\n')) {
+    const concernMatch = line.match(AUDIT_CONCERN_LINE_RE);
+    if (concernMatch) {
+      currentConcernTitle = concernMatch[2]?.trim().replace(/\**$/u, '') || undefined;
+      continue;
+    }
+
+    const severityMatch = line.match(AUDIT_SEVERITY_LINE_RE);
+    if (!severityMatch) continue;
+
+    if (normalizeAuditSeverityLabel(severityMatch[1]) === 'blocking' && currentConcernTitle) {
+      blockingTitles.push(currentConcernTitle);
+    }
+    currentConcernTitle = undefined;
+  }
+
+  return summarizeAuditFailureTitles(blockingTitles) ?? 'Audit found blocking severity deviations';
 }
 
 function getPhaseSectionStarts(content: string): number[] {
@@ -1818,23 +1912,33 @@ export async function executePhase(
     const sanitizedOutput = sanitizePhaseOutput(output);
 
     if (phase.kind === 'implement') {
+      const extracted = splitPhaseEvidenceTrailer(sanitizedOutput);
       try {
-        const extracted = extractPhaseEvidenceTrailer(sanitizedOutput);
-        return { status: 'done', output: extracted.output, evidence: extracted.evidence };
+        const evidence = extracted.trailer === undefined
+          ? undefined
+          : extractPhaseEvidenceTrailer(sanitizedOutput).evidence;
+        return { status: 'done', output: extracted.output, evidence };
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        return { status: 'failed', output: sanitizedOutput, error: `Invalid phase evidence trailer: ${errorMsg}` };
+        return { status: 'failed', output: extracted.output, error: `Invalid phase evidence trailer: ${errorMsg}` };
       }
     }
 
     if (phase.kind === 'audit') {
+      if (!hasAuditSeveritySignal(sanitizedOutput)) {
+        return {
+          status: 'failed',
+          output: sanitizedOutput,
+          error: 'Audit output missing severity markers; refusing to synthesize audit evidence from verdict-only text',
+        };
+      }
       const verdict = parseAuditVerdict(sanitizedOutput);
       const evidence = [
         verdict.shouldLoop
           ? createEvidence({
             kind: 'audit',
             status: 'fail',
-            reason: `Audit found ${verdict.maxSeverity} severity deviations`,
+            reason: extractAuditFailureReason(sanitizedOutput),
           })
           : createEvidence({
             kind: 'audit',
@@ -2243,7 +2347,7 @@ export async function runNextPhase(
               createEvidence({
                 kind: 'audit',
                 status: 'fail',
-                reason: `Audit found ${lastSeverity} severity deviations`,
+                reason: extractAuditFailureReason(lastAuditOutput),
               }),
             ],
           };
@@ -2309,7 +2413,7 @@ export async function runNextPhase(
   const sanitizedPhaseOutput = sanitizePhaseOutput(result.output);
   const diskStatus = result.status === 'audit_failed' ? 'failed' : result.status;
   const diskError = result.status === 'done' ? undefined : result.error;
-  const diskEvidence = 'evidence' in result ? (result.evidence ?? []) : null;
+  const diskEvidence = 'evidence' in result ? result.evidence : null;
   allPhases = updatePhaseStatus(allPhases, phase.id, diskStatus, sanitizedPhaseOutput, diskError, diskEvidence);
   // Attach modifiedFiles and failureHashes to the phase
   allPhases = {

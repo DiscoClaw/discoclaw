@@ -77,6 +77,8 @@ function withPhaseEvidence(
   return `${text}\n**Phase Evidence:** ${JSON.stringify(evidence)}`;
 }
 
+const PASSING_AUDIT_TEXT = '**Concern 1: Optional follow-up**\n**Severity: suggestion**\n\n**Verdict:** Ready to approve.';
+
 function makeErrorRuntime(msg: string): RuntimeAdapter {
   return makeRuntime([
     { type: 'error', message: msg },
@@ -567,6 +569,9 @@ describe('serialization', () => {
   const sampleEvidence: VerificationEvidence[] = [
     { kind: 'build', status: 'pass', command: 'pnpm build' },
     { kind: 'test', status: 'pass', command: 'pnpm test', summary: '14 passed' },
+  ];
+
+  const sampleAuditEvidence: VerificationEvidence[] = [
     { kind: 'audit', status: 'fail', reason: 'Blocking findings remain' },
   ];
 
@@ -636,10 +641,15 @@ describe('serialization', () => {
   it('evidence round-trips via markdown serialization', () => {
     const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
     phases.phases[0]!.evidence = sampleEvidence;
+    const auditPhase = phases.phases.find((phase) => phase.kind === 'audit');
+    expect(auditPhase).toBeTruthy();
+    if (!auditPhase) return;
+    auditPhase.evidence = sampleAuditEvidence;
 
     const serialized = serializePhases(phases);
     const deserialized = deserializePhases(serialized);
     expect(deserialized.phases[0]!.evidence).toEqual(sampleEvidence);
+    expect(deserialized.phases.find((phase) => phase.kind === 'audit')!.evidence).toEqual(sampleAuditEvidence);
   });
 
   it('markdown round-trip preserves output headings without splitting phases', () => {
@@ -681,10 +691,15 @@ describe('serialization', () => {
   it('evidence round-trips via json serialization', () => {
     const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011.md');
     phases.phases[0]!.evidence = sampleEvidence;
+    const auditPhase = phases.phases.find((phase) => phase.kind === 'audit');
+    expect(auditPhase).toBeTruthy();
+    if (!auditPhase) return;
+    auditPhase.evidence = sampleAuditEvidence;
 
     const serialized = serializePhasesStateJson(phases);
     const deserialized = deserializePhasesStateJson(serialized);
     expect(deserialized.phases[0]!.evidence).toEqual(sampleEvidence);
+    expect(deserialized.phases.find((phase) => phase.kind === 'audit')!.evidence).toEqual(sampleAuditEvidence);
   });
 
   it('migrates v1 phases json to v2 with evidence defaulting to undefined', () => {
@@ -1636,6 +1651,20 @@ describe('executePhase', () => {
     }
   });
 
+  it('leaves evidence undefined when the worker omits the evidence trailer', async () => {
+    const result = await executePhase(
+      phase,
+      SAMPLE_PLAN,
+      basePhases,
+      makeOpts(makeSuccessRuntime('Done without evidence trailer.')),
+    );
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toBe('Done without evidence trailer.');
+      expect(result.evidence).toBeUndefined();
+    }
+  });
+
   it('returns failed on runtime error', async () => {
     const result = await executePhase(phase, SAMPLE_PLAN, basePhases, makeOpts(makeErrorRuntime('Runtime broke')));
     expect(result.status).toBe('failed');
@@ -1891,6 +1920,7 @@ describe('executePhase', () => {
     );
     expect(result.status).toBe('failed');
     if (result.status === 'failed') {
+      expect(result.output).toBe('Implemented foo.');
       expect(result.error).toContain('Invalid phase evidence trailer');
     }
   });
@@ -1964,6 +1994,47 @@ describe('runNextPhase', () => {
     const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
     expect(updated.phases[0]!.status).toBe('done');
     expect(updated.phases[0]!.evidence).toEqual([]);
+  });
+
+  it('preserves omitted implement evidence as undefined on disk', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(
+      phasesPath,
+      planPath,
+      makeOpts(makeSuccessRuntime('Phase done without trailer.')),
+      onProgress,
+    );
+    expect(result.result).toBe('done');
+
+    const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
+    expect(updated.phases[0]!.evidence).toBeUndefined();
+  });
+
+  it('strips malformed evidence trailers before persisting failed output', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(
+      phasesPath,
+      planPath,
+      makeOpts(makeSuccessRuntime('Phase done.\n**Phase Evidence:** not-json')),
+      onProgress,
+    );
+    expect(result.result).toBe('failed');
+
+    const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
+    expect(updated.phases[0]!.output).toBe('Phase done.');
+    expect(updated.phases[0]!.output).not.toContain('**Phase Evidence:**');
   });
 
   it('reruns replace stale evidence with the latest execution evidence', async () => {
@@ -2429,7 +2500,7 @@ describe('phase progress messages and nextPhase', () => {
     const phasesPath = path.join(plansDir, 'plan-011-phases.md');
     writePhasesFile(phasesPath, phases);
 
-    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(withPhaseEvidence('Final phase done!'))), onProgress);
+    const result = await runNextPhase(phasesPath, planPath, makeOpts(makeSuccessRuntime(PASSING_AUDIT_TEXT)), onProgress);
     expect(result.result).toBe('done');
     if (result.result === 'done') {
       expect(result.nextPhase).toBeUndefined();
@@ -2571,7 +2642,7 @@ describe('executePhase audit verdict', () => {
       expect(result.verdict.maxSeverity).toBe('blocking');
       expect(result.verdict.shouldLoop).toBe(true);
       expect(result.evidence).toEqual([
-        { kind: 'audit', status: 'fail', reason: 'Audit found blocking severity deviations' },
+        { kind: 'audit', status: 'fail', reason: 'Missing error handling' },
       ]);
     }
   });
@@ -2593,16 +2664,30 @@ describe('executePhase audit verdict', () => {
     expect(result.status).toBe('done');
   });
 
-  it('audit phase with no severity markers returns done', async () => {
+  it('audit phase with no severity markers returns failed', async () => {
     const auditOutput = 'Everything looks great. No concerns.';
     const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
-    expect(result.status).toBe('done');
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error).toContain('missing severity markers');
+    }
   });
 
   it('implement phase ignores severity markers in output', async () => {
     const implOutput = withPhaseEvidence('**Severity: HIGH**\nDone implementing.');
     const result = await executePhase(implPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(implOutput)));
     expect(result.status).toBe('done');
+  });
+
+  it('implement phase rejects worker-supplied audit evidence', async () => {
+    const implOutput = withPhaseEvidence('Done implementing.', [
+      { kind: 'audit', status: 'fail', reason: 'Blocking findings remain' },
+    ]);
+    const result = await executePhase(implPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(implOutput)));
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error).toContain("kind 'audit' is not allowed here");
+    }
   });
 
   it('audit phase with runtime error returns failed not audit_failed', async () => {
@@ -2716,6 +2801,9 @@ describe('runNextPhase audit verdict', () => {
     const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
     const auditPhase = updated.phases.find(p => p.id === 'phase-2')!;
     expect(auditPhase.status).toBe('failed');
+    expect(auditPhase.evidence).toEqual([
+      { kind: 'audit', status: 'fail', reason: 'Missing error handling' },
+    ]);
   });
 
   it('audit phase with medium-only severity returns done (auto-approves)', async () => {
@@ -2918,7 +3006,7 @@ describe('runNextPhase audit fix loop', () => {
           yield { type: 'done' };
         } else {
           // Re-audit: passes
-          const text = 'No concerns. **Verdict:** Ready to approve.';
+          const text = PASSING_AUDIT_TEXT;
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -3121,7 +3209,7 @@ describe('runNextPhase audit fix loop', () => {
           yield { type: 'done' };
         } else {
           // Second re-audit: passes
-          const text = 'No concerns. **Verdict:** Ready to approve.';
+          const text = PASSING_AUDIT_TEXT;
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -3176,7 +3264,7 @@ describe('runNextPhase audit fix loop', () => {
           yield { type: 'done' };
         } else {
           // Re-audit: passes
-          const text = 'No concerns. **Verdict:** Ready to approve.';
+          const text = PASSING_AUDIT_TEXT;
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -3232,7 +3320,7 @@ describe('runNextPhase audit fix loop', () => {
           yield { type: 'text_final', text };
           yield { type: 'done' };
         } else {
-          const text = 'No concerns. **Verdict:** Ready to approve.';
+          const text = PASSING_AUDIT_TEXT;
           yield { type: 'text_delta', text };
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -3661,6 +3749,12 @@ describe('buildPostRunSummary', () => {
           evidence: [
             { kind: 'build', status: 'pass', command: 'pnpm build' },
             { kind: 'test', status: 'pass', command: 'pnpm test', summary: '14 passed' },
+          ],
+        },
+        {
+          id: 'phase-2', title: 'Post-implementation audit', kind: 'audit', status: 'done',
+          description: '', dependsOn: ['phase-1'], contextFiles: [],
+          evidence: [
             { kind: 'audit', status: 'fail', reason: 'Blocking findings remain' },
           ],
         },

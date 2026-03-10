@@ -20,6 +20,10 @@ export type VerificationEvidenceInput = {
   reason?: string | null;
 };
 
+export type CoerceEvidenceArrayOptions = {
+  allowedKinds?: readonly VerificationEvidenceKind[];
+};
+
 const VALID_EVIDENCE_KINDS = new Set<string>(VERIFICATION_EVIDENCE_KINDS);
 const VALID_EVIDENCE_STATUSES = new Set<string>(VERIFICATION_EVIDENCE_STATUSES);
 
@@ -74,10 +78,16 @@ export function createEvidence(input: VerificationEvidenceInput): VerificationEv
   return evidence;
 }
 
-export function coerceEvidenceArray(value: unknown, field: string): VerificationEvidence[] {
+export function coerceEvidenceArray(
+  value: unknown,
+  field: string,
+  opts: CoerceEvidenceArrayOptions = {},
+): VerificationEvidence[] {
   if (!Array.isArray(value)) {
     throw new Error(`Malformed phases json: ${field} must be VerificationEvidence[]`);
   }
+
+  const allowedKinds = opts.allowedKinds ? new Set<string>(opts.allowedKinds) : null;
 
   return value.map((entry, idx) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -95,13 +105,17 @@ export function coerceEvidenceArray(value: unknown, field: string): Verification
     };
 
     try {
-      return createEvidence({
+      const evidence = createEvidence({
         kind: typeof obj.kind === 'string' ? obj.kind : String(obj.kind),
         status: typeof obj.status === 'string' ? obj.status : String(obj.status),
         command: asOptionalString('command'),
         summary: asOptionalString('summary'),
         reason: asOptionalString('reason'),
       });
+      if (allowedKinds && !allowedKinds.has(evidence.kind)) {
+        throw new Error(`kind '${evidence.kind}' is not allowed here`);
+      }
+      return evidence;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Malformed phases json: ${field}[${idx}] ${msg}`);

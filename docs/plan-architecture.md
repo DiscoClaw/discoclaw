@@ -405,11 +405,11 @@ Field semantics:
 | `status` | Yes | Machine-readable verdict for that verification record. `pass` means the verification completed successfully. `fail` means the verification completed and produced a negative result. |
 | `command` | No | The exact verification command or invocation that produced the evidence, when applicable (for example `pnpm build` or `pnpm test -- --runInBand`). |
 | `summary` | No | Short success-oriented human summary. Use for compact positive outcomes such as "dist built cleanly" or "all targeted tests passed". |
-| `reason` | No, but required for `fail` | Failure-oriented explanation for why verification failed. This is the primary machine-readable explanation downstream consumers should surface. |
+| `reason` | No, but required for `fail` | Failure-oriented explanation for why verification failed. This is the primary machine-readable explanation downstream consumers should surface. For audit failures, prefer the concrete blocking concern text over a generic severity summary. |
 
 Production path:
 
-- Implement phases may append a dedicated trailer line to their worker response: `**Phase Evidence:** [JSON array]`. The phase runner extracts that trailer before persisting `output`, validates it through the canonical evidence parser, and stores the resulting records in `phase.evidence`.
+- Implement phases may append a dedicated trailer line to their worker response: `**Phase Evidence:** [JSON array]`. Those worker-supplied records are limited to `build` and `test` kinds; implement workers cannot emit `audit` evidence. The phase runner extracts that trailer before persisting `output`, validates it through the canonical evidence parser, and stores the resulting records in `phase.evidence`. An explicit `[]` means the worker reported that no verification commands ran; if the trailer is omitted entirely, `phase.evidence` remains unset so downstream consumers can detect the protocol omission.
 - Audit phases do not rely on worker-supplied JSON. The runner synthesizes an `audit` evidence record directly from the parsed audit verdict, so audit evidence is always available on successful audit execution.
 - Phase retries clear previously stored evidence before rerunning, so `phase.evidence` always reflects the latest execution attempt rather than stale prior results.
 
@@ -422,9 +422,11 @@ Outcome semantics:
 | `skip` | No evidence record for that verification, usually paired with phase `status: skipped` | Skips are phase-level execution outcomes, not evidence statuses. If a command was intentionally not run, downstream code should infer "skipped" from the phase state and the absence of corresponding evidence. |
 | `error` | Phase `status: failed` plus phase-level `error` / `output` | Errors represent runner/tool failures that prevented trustworthy verification from being recorded. They are operational failures, not verification verdicts, so they are not encoded as `VerificationEvidence.status`. |
 
+Malformed audit output is treated as a phase-level `error`, not as passing evidence. In particular, verdict-only audit text without any severity markers is not considered trustworthy enough to synthesize `audit` evidence.
+
 Evidence differs from phase output:
 
-- `output` and `error` remain the full human-readable transcript for operators. The optional `**Phase Evidence:**` trailer is stripped before `output` is persisted.
+- `output` and `error` remain the full human-readable transcript for operators. The optional `**Phase Evidence:**` trailer is stripped before `output` is persisted, including malformed trailers that fail evidence validation.
 - `evidence` is the compact structured contract for machines and summaries.
 - Evidence should capture verification intent and verdict, while `output` preserves raw logs, stack traces, and contextual detail.
 - Evidence is persisted in both the JSON state file and the markdown phases file so downstream readers can recover the same machine-readable contract from either storage format. In markdown, the persisted evidence JSON lives in the phase metadata preamble; arbitrary free-text transcript content is not scanned for evidence markers.
