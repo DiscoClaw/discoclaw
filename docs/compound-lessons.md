@@ -72,4 +72,9 @@ Format notes:
 
 ## Lessons
 
-No compound lessons recorded yet.
+### 2026-03-10 - Keep interactive Discord trigger context in sync
+Tags: #workflow #task #discord
+Lesson: Interactive Discord trigger paths, including the message handler and reaction handler, must hydrate equivalent conversational context, including nearby channel history. When adding or changing an interactive trigger path, audit it against the main message handler's context-gathering steps so the AI does not ask for information that is already present in-channel; cron and webhook paths are non-interactive and exempt from this invariant.
+Source: task thread/chat context - reaction handler missed recent channel history that the main message handler already includes
+Applied: docs/compound-lessons.md
+Status: active
