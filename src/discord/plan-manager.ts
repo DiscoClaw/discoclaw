@@ -1288,7 +1288,7 @@ export function buildPhasePrompt(
     lines.push('After making changes, output a brief summary of what was changed.');
     lines.push('If you ran verification commands, end your response with a single final line in exactly this format:');
     lines.push('**Phase Evidence:** [{"kind":"build","status":"pass","command":"pnpm build","summary":"dist built cleanly"}]');
-    lines.push('Use `[]` when no verification commands were run. Keep the JSON array on one line. Do not wrap it in code fences. Do not add any text after the evidence line.');
+    lines.push('Use `[]` when no verification commands were run. Keep the JSON array on one line. Do not wrap it in code fences. Do not add any text after the evidence line. Only use `kind` values `build` or `test`; unsupported evidence is ignored.');
     lines.push("As you work, briefly narrate each step (e.g. 'Reading X...', 'Applying change to Y...') so progress is visible.");
   } else if (phase.kind === 'read') {
     lines.push('## Task');
@@ -1931,7 +1931,12 @@ export async function executePhase(
         return { status: 'done', output: extracted.output, evidence };
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        return { status: 'failed', output: extracted.output, error: `Invalid phase evidence trailer: ${errorMsg}` };
+        opts.log?.warn({
+          phaseId: phase.id,
+          phaseTitle: phase.title,
+          error: errorMsg,
+        }, 'Ignoring invalid phase evidence trailer');
+        return { status: 'done', output: extracted.output, evidence: undefined };
       }
     }
 
