@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMessageCreateHandler } from './message-coordinator.js';
 import { globalTraceStore } from '../observability/trace-store.js';
+import type { RunTrace } from '../observability/trace-store.js';
 
 vi.mock('../workspace-bootstrap.js', () => ({
   isOnboardingComplete: vi.fn(async () => true),
@@ -126,7 +127,7 @@ describe('message coordinator !trace command', () => {
   });
 
   it('replies with an empty list when traces only exist in a different channel', async () => {
-    const otherChannelTraces = [
+    const otherChannelTraces: RunTrace[] = [
       {
         traceId: 'message_other-channel',
         sessionKey: 'discord:dm:user-1',
@@ -174,7 +175,7 @@ describe('message coordinator !trace command', () => {
   });
 
   it('replies with not found when the trace belongs to a different channel', async () => {
-    const otherChannelTrace = {
+    const otherChannelTrace: RunTrace = {
       traceId: 'message_other-channel',
       sessionKey: 'discord:dm:user-1',
       channelId: 'dm-2',
