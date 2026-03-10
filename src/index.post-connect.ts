@@ -129,6 +129,7 @@ export function buildActionCategoriesEnabled(opts: {
 export function publishBootReport(opts: {
   botStatus: StatusPoster | null;
   startupCtx: StartupContext;
+  dashboardUrl?: string;
   tasksEnabled: boolean;
   forumResolved: boolean;
   cronsEnabled: boolean;
@@ -177,6 +178,7 @@ export function publishBootReport(opts: {
       status: r.status === 'ok' ? 'pass' : r.status,
       detail: r.message,
     })),
+    dashboardUrl: opts.dashboardUrl,
     runtimeModel: opts.runtimeModel,
     bootDurationMs: opts.bootDurationMs,
     buildVersion: opts.buildVersion,

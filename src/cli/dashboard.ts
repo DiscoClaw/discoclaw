@@ -5,7 +5,7 @@ import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { config as loadDotenv } from 'dotenv';
 import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
-import { isModelTier } from '../runtime/model-tiers.js';
+import { isModelTier, listKnownModelValues } from '../runtime/model-tiers.js';
 import { getGitHash } from '../version.js';
 import type { DashboardServer, DashboardServerOptions } from '../dashboard/server.js';
 import type { DoctorContext, DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
@@ -60,6 +60,8 @@ export type DashboardSnapshot = {
   serviceName: string;
   serviceSummary: string;
   doctorSummary: string;
+  roles: string[];
+  modelOptions: Record<string, string[]>;
   modelRows: DashboardModelRow[];
   configPaths: DoctorReport['configPaths'];
   runtimeOverrides: {
@@ -177,6 +179,31 @@ export function buildModelRows(ctx: DoctorContext): DashboardModelRow[] {
   });
 }
 
+export function buildModelOptions(ctx: DoctorContext): Record<string, string[]> {
+  const modelOptions: Record<string, string[]> = {};
+  const tierOptions = ['fast', 'capable', 'deep'];
+  const knownConcreteModels = listKnownModelValues();
+
+  for (const role of DASHBOARD_MODEL_ROLES) {
+    if (role === 'fast' || role === 'voice') {
+      modelOptions[role] = ['default', ...tierOptions];
+      continue;
+    }
+
+    const options: string[] = ['default', ...tierOptions];
+    const envDefault = ctx.envDefaults[role] ?? MODEL_DEFAULTS[role];
+    const overrideValue = ctx.models[role];
+
+    if (envDefault) options.push(envDefault);
+    if (overrideValue && overrideValue !== envDefault) options.push(overrideValue);
+    options.push(...knownConcreteModels);
+
+    modelOptions[role] = [...new Set(options)];
+  }
+
+  return modelOptions;
+}
+
 export function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 'info', number> {
   return report.findings.reduce<Record<'error' | 'warn' | 'info', number>>(
     (counts, finding) => {
@@ -250,7 +277,7 @@ async function promptForModelChange(
     if (!fallback) {
       return `No default model is configured for ${roleInput}.`;
     }
-    const nextConfig = updateModelConfig(ctx.models, roleInput, fallback);
+    const nextConfig = updateModelConfig(ctx.models, roleInput, null);
     await deps.saveModelConfig(ctx.configPaths.models, nextConfig);
     let clearedRuntimeOverride: 'fastRuntime' | 'voiceRuntime' | null = null;
     if (roleInput === 'fast' && ctx.runtimeOverrides.fastRuntime) {
@@ -315,6 +342,8 @@ export async function collectDashboardSnapshot(
     serviceName,
     serviceSummary,
     doctorSummary: formatDoctorSummary(report),
+    roles: [...DASHBOARD_MODEL_ROLES],
+    modelOptions: buildModelOptions(ctx),
     modelRows: buildModelRows(ctx),
     configPaths: report.configPaths,
     runtimeOverrides: {

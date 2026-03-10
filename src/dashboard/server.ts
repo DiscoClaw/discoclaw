@@ -8,6 +8,7 @@ import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
 import { getGitHash } from '../version.js';
 import type { DashboardDeps, DashboardSnapshot } from '../cli/dashboard.js';
 import {
+  buildModelOptions,
   collectDashboardSnapshot,
   countDoctorSeverities,
   formatDoctorSummary,
@@ -377,7 +378,7 @@ async function applyModelChange(
   if (clearOverride) {
     const fallback = ctx.envDefaults[roleInput] ?? MODEL_DEFAULTS[roleInput];
     if (!fallback) throw new Error(`No default model is configured for ${roleInput}.`);
-    const nextConfig = updateModelConfig(ctx.models, roleInput, fallback);
+    const nextConfig = updateModelConfig(ctx.models, roleInput, null);
     await deps.saveModelConfig(ctx.configPaths.models, nextConfig);
 
     let clearedRuntimeOverride: 'fastRuntime' | 'voiceRuntime' | null = null;
@@ -418,6 +419,11 @@ async function applyModelChange(
     throw new Error(`${roleInput} accepts only model tiers (fast, capable, deep) or "default".`);
   }
 
+  const allowedModels = buildModelOptions(ctx)[roleInput] ?? [];
+  if (!allowedModels.includes(normalizedModelInput)) {
+    throw new Error(`Model value must be one of the known saved options for ${roleInput}.`);
+  }
+
   const nextConfig: ModelConfig = updateModelConfig(ctx.models, roleInput, normalizedModelInput);
   await deps.saveModelConfig(ctx.configPaths.models, nextConfig);
 
@@ -451,6 +457,7 @@ function isDashboardBadRequest(message: string): boolean {
     || message.startsWith('Runtime names cannot be stored')
     || message.startsWith('No default model is configured')
     || message.includes('accepts only model tiers')
+    || message.startsWith('Model value must be one of the known saved options')
   );
 }
 

@@ -1,8 +1,41 @@
 export const DASHBOARD_HOST = '127.0.0.1';
 export const DEFAULT_DASHBOARD_PORT = 9401;
 
+export type DashboardListenAddress = {
+  address?: string;
+  port?: number;
+} | null | undefined;
+
 export function formatDashboardUrl(host: string, port: number): string {
   return `http://${host}:${port}/`;
+}
+
+export function formatDashboardListenUrl(
+  address: DashboardListenAddress,
+  fallbackHost: string,
+  fallbackPort: number,
+): string {
+  return formatDashboardUrl(address?.address ?? fallbackHost, address?.port ?? fallbackPort);
+}
+
+function isLoopbackDashboardHost(host: string): boolean {
+  const value = host.trim().toLowerCase().replace(/\.+$/, '');
+  return value === 'localhost' || value === DASHBOARD_HOST || value.startsWith('127.');
+}
+
+export function resolveDashboardOperatorHost(trustedHosts?: ReadonlySet<string>): string {
+  if (!trustedHosts || trustedHosts.size === 0) return DASHBOARD_HOST;
+
+  const configuredHosts = [...trustedHosts];
+  return configuredHosts.find((host) => !isLoopbackDashboardHost(host)) ?? configuredHosts[0] ?? DASHBOARD_HOST;
+}
+
+export function formatDashboardOperatorUrl(
+  address: DashboardListenAddress,
+  fallbackPort: number,
+  trustedHosts?: ReadonlySet<string>,
+): string {
+  return formatDashboardUrl(resolveDashboardOperatorHost(trustedHosts), address?.port ?? fallbackPort);
 }
 
 export function parseDashboardPort(env: NodeJS.ProcessEnv): number {

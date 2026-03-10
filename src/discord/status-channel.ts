@@ -93,6 +93,7 @@ export type BootReportData = {
   runtimeModel?: string;
   bootDurationMs?: number;
   buildVersion?: string;
+  dashboardUrl?: string;
   // npm version check (informational)
   npmVersion?: string;
   npmLatestVersion?: string | null;
@@ -209,6 +210,9 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       const lines: string[] = ['**Boot Report**'];
       lines.push(`Startup · ${typeLabel[data.startupType]}`);
       if (data.bootDurationMs !== undefined) lines.push(`Boot Time · ${data.bootDurationMs}ms`);
+      if (data.dashboardUrl) {
+        lines.push(`Dashboard · ${data.dashboardUrl}`);
+      }
       lines.push(`Model · ${data.runtimeModel || '(default)'}`);
       if (data.permissionsStatus) {
         const permLabel = data.permissionsStatus === 'ok'

@@ -115,6 +115,22 @@ describe('buildSnapshotResponse', () => {
         serviceName: 'discoclaw-beta',
         serviceSummary: 'active (running) since today',
         doctorSummary: '0 findings (errors=0, warnings=0, info=0)',
+        roles: [
+          'chat',
+          'plan-run',
+          'fast',
+          'summary',
+          'cron',
+          'cron-exec',
+          'voice',
+          'forge-drafter',
+          'forge-auditor',
+        ],
+        modelOptions: expect.objectContaining({
+          chat: expect.arrayContaining(['default', 'capable', 'opus']),
+          fast: ['default', 'fast', 'capable', 'deep'],
+          voice: ['default', 'fast', 'capable', 'deep'],
+        }),
         modelRows: expect.arrayContaining([
           expect.objectContaining({
             role: 'chat',

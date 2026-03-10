@@ -3,7 +3,8 @@ import type { RuntimeId } from './types.js';
 /** Provider-agnostic model tier. */
 export type ModelTier = 'fast' | 'capable' | 'deep';
 
-const tiers = new Set<string>(['fast', 'capable', 'deep']);
+const MODEL_TIERS: readonly ModelTier[] = ['fast', 'capable', 'deep'];
+const tiers = new Set<string>(MODEL_TIERS);
 
 /** Type guard for ModelTier. */
 export function isModelTier(s: string): s is ModelTier {
@@ -141,6 +142,22 @@ export function resolveModel(tierOrModel: string, runtimeId: RuntimeId): string 
   const runtimeTiers = tierMap[runtimeId];
   if (!runtimeTiers) return '';
   return runtimeTiers[tierOrModel];
+}
+
+export function listKnownModelValues(): string[] {
+  const values: string[] = [];
+  const seen = new Set<string>();
+
+  for (const runtimeTiers of Object.values(tierMap)) {
+    for (const tier of MODEL_TIERS) {
+      const model = runtimeTiers[tier];
+      if (!model || seen.has(model)) continue;
+      seen.add(model);
+      values.push(model);
+    }
+  }
+
+  return values;
 }
 
 /**
