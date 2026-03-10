@@ -169,7 +169,7 @@ export function shouldSuppressFollowUp(
 const DISABLED_TYPE_HELP: Record<string, string> = {
   // Image generation — requires DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN + an API key.
   generateImage:
-    'Setup walkthrough: 1. Set `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` in `.env`. 2. Add one provider key: `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`. 3. Restart DiscoClaw so it reloads the updated environment. 4. Retry the image request.',
+    'Setup walkthrough: 1. Set `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` in the instance `.env` file. 2. Set at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`. 3. Optionally set `IMAGEGEN_DEFAULT_MODEL` to choose a provider/model. 4. Run `!restart` in Discord so the service reloads the updated environment.',
   // Moderation — requires DISCOCLAW_DISCORD_ACTIONS_MODERATION.
   ban: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',
   kick: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',

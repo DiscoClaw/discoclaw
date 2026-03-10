@@ -198,8 +198,11 @@ describe('buildUnavailableActionTypesNotice', () => {
     const out = buildUnavailableActionTypesNotice(['generateImage']);
     expect(out).toContain('Setup walkthrough');
     expect(out).toContain('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1');
-    expect(out).toContain('Restart DiscoClaw');
-    expect(out).toContain('Retry the image request');
+    expect(out).toContain('instance `.env` file');
+    expect(out).toContain('OPENAI_API_KEY');
+    expect(out).toContain('IMAGEGEN_GEMINI_API_KEY');
+    expect(out).toContain('IMAGEGEN_DEFAULT_MODEL');
+    expect(out).toContain('`!restart`');
     expect(out).toContain('`generateImage`');
     expect(out).not.toContain('unknown type or category disabled');
   });
