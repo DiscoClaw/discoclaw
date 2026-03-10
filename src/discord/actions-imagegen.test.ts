@@ -8,7 +8,7 @@ import {
 } from './actions-imagegen.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import type { ActionContext, ActionCategoryFlags } from './actions.js';
-import { parseDiscordActions } from './actions.js';
+import { buildTieredDiscordActionsPromptSection, parseDiscordActions } from './actions.js';
 import { buildUnavailableActionTypesNotice } from './output-common.js';
 
 // ---------------------------------------------------------------------------
@@ -1310,6 +1310,23 @@ const IMAGEGEN_OFF_FLAGS: ActionCategoryFlags = {
   imagegen: false,
 };
 
+const IMAGEGEN_KEYWORD_FLAGS: ActionCategoryFlags = {
+  channels: true,
+  messaging: true,
+  guild: false,
+  moderation: false,
+  polls: false,
+  tasks: false,
+  crons: false,
+  botProfile: false,
+  forge: false,
+  plan: false,
+  memory: false,
+  defer: false,
+  config: false,
+  imagegen: true,
+};
+
 describe('generateImage — actionable-guidance when imagegen is disabled', () => {
   it('parseDiscordActions strips generateImage into strippedUnrecognizedTypes when imagegen: false', () => {
     const input = '<discord-action>{"type":"generateImage","prompt":"A cat"}</discord-action>';
@@ -1343,14 +1360,20 @@ describe('generateImage — actionable-guidance when imagegen is disabled', () =
 
   it('buildUnavailableActionTypesNotice returns actionable enable-guidance for generateImage', () => {
     const notice = buildUnavailableActionTypesNotice(['generateImage']);
+    expect(notice).toContain('Setup walkthrough');
     expect(notice).toContain('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1');
+    expect(notice).toContain('OPENAI_API_KEY');
+    expect(notice).toContain('IMAGEGEN_GEMINI_API_KEY');
+    expect(notice).toContain('`!restart`');
     expect(notice).toContain('`generateImage`');
     expect(notice).not.toContain('unknown type or category disabled');
   });
 
   it('notice references required API key env vars', () => {
     const notice = buildUnavailableActionTypesNotice(['generateImage']);
-    expect(notice).toMatch(/OPENAI_API_KEY|IMAGEGEN_GEMINI_API_KEY/);
+    expect(notice).toContain('OPENAI_API_KEY');
+    expect(notice).toContain('IMAGEGEN_GEMINI_API_KEY');
+    expect(notice).toContain('`!restart`');
   });
 
   it('full path: disabled imagegen → stripped type → notice contains enable env var', () => {
@@ -1358,5 +1381,22 @@ describe('generateImage — actionable-guidance when imagegen is disabled', () =
     const { strippedUnrecognizedTypes } = parseDiscordActions(input, IMAGEGEN_OFF_FLAGS);
     const notice = buildUnavailableActionTypesNotice(strippedUnrecognizedTypes);
     expect(notice).toContain('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1');
+    expect(notice).toContain('OPENAI_API_KEY');
+    expect(notice).toContain('IMAGEGEN_GEMINI_API_KEY');
+    expect(notice).toContain('`!restart`');
+  });
+
+  it('routes "generate a mockup" through keyword detection to the imagegen category', () => {
+    const selection = buildTieredDiscordActionsPromptSection(IMAGEGEN_KEYWORD_FLAGS, 'ClawBot', {
+      channelName: 'general',
+      channelContextPath: null,
+      isThread: false,
+      userText: 'generate a mockup',
+    });
+
+    expect(selection.keywordHits).toContain('imagegen');
+    expect(selection.tierBuckets.keywordTriggered).toContain('imagegen');
+    expect(selection.includedCategories).toContain('imagegen');
+    expect(selection.prompt).toContain('### Image Generation');
   });
 });
