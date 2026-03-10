@@ -179,7 +179,7 @@ export function buildModelRows(ctx: DoctorContext): DashboardModelRow[] {
   });
 }
 
-function buildModelOptions(ctx: DoctorContext): Record<string, string[]> {
+export function buildModelOptions(ctx: DoctorContext): Record<string, string[]> {
   const modelOptions: Record<string, string[]> = {};
   const tierOptions = ['fast', 'capable', 'deep'];
   const knownConcreteModels = listKnownModelValues();
@@ -277,7 +277,7 @@ async function promptForModelChange(
     if (!fallback) {
       return `No default model is configured for ${roleInput}.`;
     }
-    const nextConfig = updateModelConfig(ctx.models, roleInput, fallback);
+    const nextConfig = updateModelConfig(ctx.models, roleInput, null);
     await deps.saveModelConfig(ctx.configPaths.models, nextConfig);
     let clearedRuntimeOverride: 'fastRuntime' | 'voiceRuntime' | null = null;
     if (roleInput === 'fast' && ctx.runtimeOverrides.fastRuntime) {

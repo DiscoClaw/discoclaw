@@ -713,23 +713,70 @@ describe('startDashboardServer', () => {
     const response = await makeRequest(port, {
       path: '/api/model',
       method: 'POST',
-      body: JSON.stringify({ role: 'chat', model: 'sonnet-max' }),
+      body: JSON.stringify({ role: 'chat', model: 'claude-opus-4-6' }),
     });
     const body = parseJson<DashboardModelApiResponse>(response.text);
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.message).toBe('Saved chat override: sonnet-max. Changes take effect on next service restart.');
+    expect(body.message).toBe('Saved chat override: claude-opus-4-6. Changes take effect on next service restart.');
     expect(body.snapshot.modelRows).toContainEqual({
       role: 'chat',
-      effectiveModel: 'sonnet-max',
+      effectiveModel: 'claude-opus-4-6',
       source: 'override',
-      overrideValue: 'sonnet-max',
+      overrideValue: 'claude-opus-4-6',
     });
     expect(saveModelConfig).toHaveBeenCalledWith('/repo/data/models.json', {
-      chat: 'sonnet-max',
+      chat: 'claude-opus-4-6',
     });
     expect(loadDoctorContext).toHaveBeenCalled();
+  });
+
+  it('removes the saved override when /api/model resets a role to default', async () => {
+    const ctx = makeDoctorContext();
+    const saveModelConfig = vi.fn(async (_filePath: string, config: DoctorContext['models']) => {
+      ctx.models = { ...config };
+    });
+    const { port } = await startServer({
+      loadDoctorContext: vi.fn(async () => ctx),
+      saveModelConfig,
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/model',
+      method: 'POST',
+      body: JSON.stringify({ role: 'chat', model: 'default' }),
+    });
+    const body = parseJson<DashboardModelApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toBe('Reset chat to default: capable. Changes take effect on next service restart.');
+    expect(body.snapshot.modelRows).toContainEqual({
+      role: 'chat',
+      effectiveModel: 'capable',
+      source: 'default',
+    });
+    expect(saveModelConfig).toHaveBeenCalledWith('/repo/data/models.json', {});
+  });
+
+  it('rejects model values outside the known options on /api/model', async () => {
+    const saveModelConfigMock = vi.fn(async () => undefined);
+    const { port } = await startServer({
+      saveModelConfig: saveModelConfigMock,
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/model',
+      method: 'POST',
+      body: JSON.stringify({ role: 'chat', model: 'sonnet-max' }),
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(400);
+    expect(body.ok).toBe(false);
+    expect(body.message).toBe('Model value must be one of the known saved options for chat.');
+    expect(saveModelConfigMock).not.toHaveBeenCalled();
   });
 
   it('rejects GET requests on /api/model', async () => {

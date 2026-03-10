@@ -397,7 +397,7 @@ describe('runDashboard', () => {
       },
     });
 
-    expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', { chat: 'capable' });
+    expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', {});
     expect(saveOverridesMock).not.toHaveBeenCalled();
     expect(frames.some((frame) => frame.includes('Reset chat to default: capable. Changes take effect on next service restart.'))).toBe(true);
   });
@@ -444,7 +444,7 @@ describe('runDashboard', () => {
       },
     });
 
-    expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', { fast: 'capable' });
+    expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', {});
     expect(saveOverridesMock).toHaveBeenCalledWith('/repo/data/runtime-overrides.json', {
       voiceRuntime: 'anthropic',
       ttsVoice: 'alloy',
@@ -494,7 +494,7 @@ describe('runDashboard', () => {
       },
     });
 
-    expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', { voice: 'capable' });
+    expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', {});
     expect(saveOverridesMock).toHaveBeenCalledWith('/repo/data/runtime-overrides.json', {
       fastRuntime: 'openrouter',
       ttsVoice: 'alloy',
