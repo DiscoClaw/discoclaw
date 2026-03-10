@@ -21,11 +21,12 @@ Core instructions live in `CLAUDE.md` at the repo root.
 | **Voice system (STT/TTS, audio pipeline, actions)** | `voice.md` |
 | **Forge/plan standing constraints** | `project.md` *(auto-loaded by forge)* |
 | **Plan & Forge commands** | `plan-and-forge.md` *(in docs/, not .context/)* |
+| **Engineering lessons / compound learnings** | `docs/compound-lessons.md` *(single checked-in durable artifact; lives in `docs/`, not `.context/`; human/developer reference, not auto-loaded into agent context)* |
 
 ## Context Hygiene (Strict)
 - Read the minimum necessary modules for the task.
 - Do not load modules "just in case."
-- Some reference docs live in `docs/` rather than `.context/` — these are human/developer references and are **not** auto-loaded into agent context. The `.context/project.md` file remains the only `.context` module for plan/forge constraints.
+- Some reference docs live in `docs/` rather than `.context/` — these are human/developer references and are **not** auto-loaded into agent context. The `.context/project.md` file remains the only `.context` module for plan/forge constraints, and `docs/compound-lessons.md` remains the single checked-in artifact for distilled engineering lessons.
 
 ## Quick Reference
 - **pa.md** — PA behavioral rules, Discord formatting, memory, group chat etiquette, autonomy tiers
@@ -42,3 +43,4 @@ Core instructions live in `CLAUDE.md` at the repo root.
 - **voice.md** — Voice subsystem: module map, audio data flow, key patterns (barge-in, allowlist gating), wiring sequence, dependencies, config reference
 - **project.md** — Standing constraints auto-loaded by forge drafter and auditor
 - **docs/plan-and-forge.md** — Canonical reference for `!plan` and `!forge` commands (lives in `docs/`, not `.context/` — human/developer reference, not auto-loaded into agent context)
+- **docs/compound-lessons.md** — Single checked-in durable artifact for distilled engineering lessons from audits, forge runs, and repeated workflow failures

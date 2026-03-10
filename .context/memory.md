@@ -161,8 +161,8 @@ Bot:   Sure — is this related to the auth middleware test you were debugging
 `workspace/MEMORY.md` + `workspace/memory/YYYY-MM-DD.md`
 
 Curated long-term notes and daily scratch logs. Loaded in DMs only. These hold
-things too nuanced for structured durable items — decisions, lessons, project
-context, relationship dynamics.
+things too nuanced for structured durable items — decisions, project context,
+relationship dynamics. Engineering lessons belong in `docs/compound-lessons.md`.
 
 **What the user sees:**
 - In DMs, the bot has deep context about ongoing projects and past decisions.

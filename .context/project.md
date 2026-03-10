@@ -20,6 +20,9 @@ Standing constraints for planning and auditing. These apply to all forge/plan op
 - Keep changes minimal — don't over-engineer for hypothetical multi-user scenarios.
 - Prefer wiring existing systems together over building new abstractions.
 - Tests are required for new functionality.
+- `docs/compound-lessons.md` is the single checked-in durable artifact for reusable engineering lessons. Raw findings can stay in plans, audits, or task context, but distilled standing guidance belongs there.
+- Forge drafter/auditor/reviser agents should consult `docs/compound-lessons.md` for known patterns and pitfalls before drafting, and propose new entries when a plan reveals a reusable engineering lesson.
+- If a change closes a recurring workflow, review, or quality gap, the implementing engineer should usually update `docs/compound-lessons.md` in the same change or explain why no durable lesson was needed.
 
 ## Plan Scope & Size Constraints
 
