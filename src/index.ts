@@ -74,7 +74,7 @@ import { startWebhookServer } from './webhook/server.js';
 import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
 import type { DashboardServer as LocalDashboardServer } from './dashboard/server.js';
-import { formatDashboardListenUrl, resolveDashboardBindHost } from './dashboard/options.js';
+import { formatDashboardOperatorUrl, resolveDashboardBindHost } from './dashboard/options.js';
 import { resolveModel, initTierOverrides } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
@@ -2438,9 +2438,8 @@ if (cfg.dashboardEnabled) {
       log,
     });
     const address = dashboardServer.server.address();
-    dashboardUrl = formatDashboardListenUrl(
+    dashboardUrl = formatDashboardOperatorUrl(
       typeof address === 'object' ? address : undefined,
-      dashboardHost,
       cfg.dashboardPort,
     );
   } catch (err) {

@@ -258,7 +258,7 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       lines.push(`Actions · ${data.actionCategoriesEnabled.length > 0 ? data.actionCategoriesEnabled.join(', ') : '(none)'}`);
       lines.push(`Version · DiscoClaw ${formatVersionLine(data)}`);
       if (data.dashboardUrl) {
-        lines.push(`Dashboard · ${data.dashboardUrl}`);
+        lines.push(`Dashboard URL · ${data.dashboardUrl}`);
       }
 
       if (data.configWarnings && data.configWarnings > 0) {

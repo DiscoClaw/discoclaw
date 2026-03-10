@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DASHBOARD_HOST,
   formatDashboardListenUrl,
+  formatDashboardOperatorUrl,
   formatDashboardUrl,
   parseDashboardPort,
   parseDashboardTrustedHosts,
@@ -40,6 +41,13 @@ describe('dashboard options', () => {
     expect(formatDashboardListenUrl({ address: '0.0.0.0', port: 9500 }, DASHBOARD_HOST, 9401))
       .toBe('http://0.0.0.0:9500/');
     expect(formatDashboardListenUrl(undefined, DASHBOARD_HOST, 9401))
+      .toBe('http://127.0.0.1:9401/');
+  });
+
+  it('formats the operator-facing dashboard URL on loopback even when the server binds wildcard', () => {
+    expect(formatDashboardOperatorUrl({ address: '0.0.0.0', port: 9500 }, 9401))
+      .toBe('http://127.0.0.1:9500/');
+    expect(formatDashboardOperatorUrl(undefined, 9401))
       .toBe('http://127.0.0.1:9401/');
   });
 });

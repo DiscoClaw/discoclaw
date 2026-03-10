@@ -281,9 +281,9 @@ describe('bootReport', () => {
   it('includes Dashboard line when dashboardUrl is provided', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);
-    await poster.bootReport!({ ...baseData, dashboardUrl: 'http://0.0.0.0:9401/' });
+    await poster.bootReport!({ ...baseData, dashboardUrl: 'http://127.0.0.1:9401/' });
     const msg = sentContent(ch);
-    expect(msg).toContain('Dashboard · http://0.0.0.0:9401/');
+    expect(msg).toContain('Dashboard URL · http://127.0.0.1:9401/');
   });
 
   it('omits Dashboard line when dashboardUrl is absent', async () => {
@@ -291,7 +291,7 @@ describe('bootReport', () => {
     const poster = createStatusPoster(ch);
     await poster.bootReport!({ ...baseData });
     const msg = sentContent(ch);
-    expect(msg).not.toContain('Dashboard ·');
+    expect(msg).not.toContain('Dashboard URL ·');
   });
 
   it('includes cold in Memory line when memoryColdOn is true with chunk count', async () => {

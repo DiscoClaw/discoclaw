@@ -340,6 +340,18 @@ export function renderDashboardPage(): string {
       line-height: 1.45;
     }
 
+    .role-name {
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .role-copy,
+    .field-note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     .finding-header {
       display: flex;
       align-items: flex-start;
@@ -455,7 +467,7 @@ export function renderDashboardPage(): string {
         </div>
         <button id="refresh-btn" type="button">Refresh</button>
       </div>
-      <p class="hero-copy">Check service health, review settings, and make common changes from one place. This dashboard stays local by default.</p>
+      <p class="hero-copy">Check service health, review current settings, and make common changes from one local dashboard. This dashboard stays local by default.</p>
       <div class="hero-status">
         <div id="hero-service-pill" class="pill">Service: loading</div>
         <div id="hero-runtime-pill" class="pill">Runtime overrides: loading</div>
@@ -467,8 +479,8 @@ export function renderDashboardPage(): string {
       <section class="card span-5">
         <div class="card-header">
           <div>
-            <h2>Status</h2>
-            <p class="card-copy">At-a-glance service, install, and workspace details.</p>
+            <h2>Overview</h2>
+            <p class="card-copy">Version, service state, install mode, and config check summary.</p>
           </div>
         </div>
         <div id="overview-metrics" class="metrics"></div>
@@ -477,12 +489,12 @@ export function renderDashboardPage(): string {
       <section class="card span-7">
         <div class="card-header">
           <div>
-            <h2>Service</h2>
-            <p class="card-copy">Check status, review recent logs, or request a restart.</p>
+            <h2>Service Controls</h2>
+            <p class="card-copy">View status, inspect recent logs, or restart the service.</p>
           </div>
           <div class="actions">
-            <button id="status-btn" type="button">Status</button>
-            <button id="logs-btn" type="button">Logs</button>
+            <button id="status-btn" type="button">View Status</button>
+            <button id="logs-btn" type="button">View Logs</button>
             <button id="restart-btn" type="button">Restart</button>
           </div>
         </div>
@@ -493,8 +505,8 @@ export function renderDashboardPage(): string {
       <section class="card span-6">
         <div class="card-header">
           <div>
-            <h2>Model Roles</h2>
-            <p class="card-copy">Current model choice for each operator-facing role.</p>
+            <h2>Current Model Settings</h2>
+            <p class="card-copy">What each role is using right now.</p>
           </div>
         </div>
         <div class="table-wrap">
@@ -502,9 +514,9 @@ export function renderDashboardPage(): string {
             <thead>
               <tr>
                 <th>Role</th>
-                <th>Current</th>
-                <th>Source</th>
-                <th>Saved Override</th>
+                <th>Using Now</th>
+                <th>Comes From</th>
+                <th>Saved Setting</th>
                 <th></th>
               </tr>
             </thead>
@@ -516,23 +528,24 @@ export function renderDashboardPage(): string {
       <section class="card span-6">
         <div class="card-header">
           <div>
-            <h2>Update Model Role</h2>
-            <p class="card-copy">Pick from known valid values. Changes apply on the next service restart.</p>
+            <h2>Change a Saved Setting</h2>
+            <p class="card-copy">Choose a role, then pick from the valid saved options for that role. Changes apply on the next service restart.</p>
           </div>
         </div>
         <form id="model-form">
           <div class="field-grid">
             <label class="field" for="role-select">
-              <span class="field-label">Model Role</span>
+              <span class="field-label">Role</span>
               <select id="role-select" name="role" required></select>
             </label>
             <label class="field" for="model-select">
-              <span class="field-label">Model Value</span>
-              <select id="model-select" name="model-select" required></select>
+              <span class="field-label">Saved Model</span>
+              <select id="model-select" name="model" required></select>
             </label>
           </div>
+          <div id="model-form-help" class="field-note">Choose a role to see its saved options.</div>
           <div class="actions">
-            <button id="model-submit-btn" type="submit">Save Model Choice</button>
+            <button id="model-submit-btn" type="submit">Save Setting</button>
           </div>
         </form>
         <div id="model-status" class="status"></div>
@@ -541,11 +554,11 @@ export function renderDashboardPage(): string {
       <section class="card span-7">
         <div class="card-header">
           <div>
-            <h2>Config Doctor</h2>
-            <p class="card-copy">Scan for config problems and cleanup suggestions. Safe fixes can be applied automatically; review-only items stay listed for manual cleanup.</p>
+            <h2>Config Check</h2>
+            <p class="card-copy">Scan for config problems and cleanup suggestions. Safe fixes can be applied automatically; review-only items stay listed below.</p>
           </div>
           <div class="actions">
-            <button id="doctor-btn" type="button">Scan Now</button>
+            <button id="doctor-btn" type="button">Run Check</button>
             <button id="doctor-fix-btn" type="button" disabled>Apply Safe Fixes</button>
           </div>
         </div>
@@ -557,8 +570,8 @@ export function renderDashboardPage(): string {
       <section class="card span-5">
         <div class="card-header">
           <div>
-            <h2>Config Paths</h2>
-            <p class="card-copy">Resolved file locations and runtime override state.</p>
+            <h2>Advanced Details</h2>
+            <p class="card-copy">File locations and runtime adapter overrides.</p>
           </div>
         </div>
         <div id="runtime-overrides" class="runtime-grid"></div>
@@ -582,18 +595,30 @@ export function renderDashboardPage(): string {
     const doctorFindings = document.getElementById('doctor-findings');
     const doctorFixButton = document.getElementById('doctor-fix-btn');
     const modelStatus = document.getElementById('model-status');
+    const modelFormHelp = document.getElementById('model-form-help');
     const roleSelect = document.getElementById('role-select');
     const modelSelect = document.getElementById('model-select');
     const ROLE_LABELS = {
       chat: 'Chat',
       'plan-run': 'Plan Run',
-      fast: 'Fast Tasks',
+      fast: 'Quick Tasks',
       summary: 'Summaries',
-      cron: 'Cron Planning',
-      'cron-exec': 'Cron Execution',
-      voice: 'Voice',
-      'forge-drafter': 'Forge Drafter',
-      'forge-auditor': 'Forge Auditor',
+      cron: 'Automation Planning',
+      'cron-exec': 'Automation Runs',
+      voice: 'Voice Replies',
+      'forge-drafter': 'Forge Drafting',
+      'forge-auditor': 'Forge Review',
+    };
+    const ROLE_HELP = {
+      chat: 'Main Discord replies.',
+      'plan-run': 'Plan execution phases.',
+      fast: 'Quick helper work like tagging and lightweight jobs.',
+      summary: 'Conversation summaries and memory rollups.',
+      cron: 'Turning automation thread text into schedules.',
+      'cron-exec': 'Scheduled automation runs.',
+      voice: 'Voice conversations and spoken replies.',
+      'forge-drafter': 'Forge drafting passes.',
+      'forge-auditor': 'Forge review passes.',
     };
 
     let lastSnapshot = null;
@@ -695,6 +720,10 @@ export function renderDashboardPage(): string {
       return ROLE_LABELS[role] || role;
     }
 
+    function getRoleHelp(role) {
+      return ROLE_HELP[role] || 'Saved model setting for this role.';
+    }
+
     function formatModelOptionLabel(role, model) {
       if (model === 'default') return 'Use startup default';
       if (model === 'fast' || model === 'capable' || model === 'deep') {
@@ -704,7 +733,12 @@ export function renderDashboardPage(): string {
     }
 
     function formatSourceLabel(source) {
-      return source === 'override' ? 'saved override' : 'startup default';
+      return source === 'override' ? 'saved setting' : 'startup default';
+    }
+
+    function updateModelFormHelp(role) {
+      if (!modelFormHelp) return;
+      modelFormHelp.textContent = getRoleHelp(role) + ' Only valid saved values are listed here.';
     }
 
     function syncRoleOptions(selectedRole) {
@@ -716,6 +750,7 @@ export function renderDashboardPage(): string {
 
       const nextRole = roles.includes(selectedRole) ? selectedRole : (roles[0] || '');
       roleSelect.value = nextRole;
+      updateModelFormHelp(nextRole);
       return nextRole;
     }
 
@@ -760,21 +795,26 @@ export function renderDashboardPage(): string {
       lastSnapshot = snapshot;
 
       clearNode(overviewMetrics);
-      appendMetric(overviewMetrics, 'workspace', snapshot.cwd);
       appendMetric(overviewMetrics, 'version', snapshot.version);
       appendMetric(overviewMetrics, 'build', snapshot.gitHash || '(not available)');
       appendMetric(overviewMetrics, 'install mode', snapshot.installMode);
       appendMetric(overviewMetrics, 'service', snapshot.serviceName);
       appendMetric(overviewMetrics, 'service state', snapshot.serviceSummary);
-      appendMetric(overviewMetrics, 'config doctor', snapshot.doctorSummary);
+      appendMetric(overviewMetrics, 'config check', snapshot.doctorSummary);
 
       clearNode(modelsBody);
       snapshot.modelRows.forEach((row) => {
         const tr = document.createElement('tr');
 
         const roleCell = document.createElement('td');
-        roleCell.textContent = formatRoleLabel(row.role);
         roleCell.title = row.role;
+        const roleName = document.createElement('div');
+        roleName.className = 'role-name';
+        roleName.textContent = formatRoleLabel(row.role);
+        const roleCopy = document.createElement('div');
+        roleCopy.className = 'role-copy';
+        roleCopy.textContent = getRoleHelp(row.role);
+        roleCell.append(roleName, roleCopy);
 
         const effectiveCell = document.createElement('td');
         effectiveCell.textContent = row.effectiveModel;
@@ -789,7 +829,7 @@ export function renderDashboardPage(): string {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'secondary';
-        button.textContent = 'Edit';
+        button.textContent = 'Change';
         button.addEventListener('click', () => populateModelForm(row.role, row.overrideValue || row.effectiveModel));
         actionCell.append(button);
 

@@ -18,6 +18,13 @@ export function formatDashboardListenUrl(
   return formatDashboardUrl(address?.address ?? fallbackHost, address?.port ?? fallbackPort);
 }
 
+export function formatDashboardOperatorUrl(
+  address: DashboardListenAddress,
+  fallbackPort: number,
+): string {
+  return formatDashboardUrl(DASHBOARD_HOST, address?.port ?? fallbackPort);
+}
+
 export function parseDashboardPort(env: NodeJS.ProcessEnv): number {
   const raw = env.DISCOCLAW_DASHBOARD_PORT?.trim();
   if (!raw) return DEFAULT_DASHBOARD_PORT;
