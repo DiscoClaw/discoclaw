@@ -2940,7 +2940,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 channelName: channelCtx.channelName ?? undefined,
                 channelContextPath: channelCtx.contextPath,
                 isThread,
-                userText: String(msg.content ?? ''),
+                userText: batch.map((m) => String(m.content ?? '')).join(' '),
               },
             );
             actionsReferenceSection = actionSelection.prompt;
@@ -3773,6 +3773,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
                 followUpLines.join('\n') +
                 `\n\n${followUpSuffix}`;
+              const followUpActionSection = buildTieredDiscordActionsPromptSection(
+                actionFlags,
+                params.botDisplayName,
+              );
+              currentPrompt += '\n\n---\n' + followUpActionSection.prompt;
               followUpDepth++;
           }
           } catch (traceErr) {
