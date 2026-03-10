@@ -38,6 +38,7 @@ Completeness pass for this index was cross-checked against:
 | discord.js API docs | `discord.js` production dependency | <https://discord.js.org/docs/packages/discord.js/main> |
 | `@discordjs/voice` | Voice gateway, connection, player, and receiver APIs used by `src/voice/connection-manager.ts`, `src/voice/audio-pipeline.ts`, `src/voice/audio-receiver.ts`, and `src/voice/voice-responder.ts` | Package docs: <https://discord.js.org/docs/packages/voice/stable><br>Maintainer source: <https://github.com/discordjs/discord.js/tree/main/packages/voice><br>npm package: <https://www.npmjs.com/package/@discordjs/voice> |
 | `@discordjs/opus` | Native Opus encoder/decoder addon used by `src/voice/opus.ts` and required by the Discord voice stack | Maintainer repo + README: <https://github.com/discordjs/opus><br>Releases: <https://github.com/discordjs/opus/releases><br>npm package: <https://www.npmjs.com/package/@discordjs/opus> |
+| Discord Voice E2EE (DAVE protocol) | End-to-end voice encryption surface underlying DiscoClaw's Discord voice receive path and `@snazzah/davey` dependency | Discord voice docs: <https://discord.com/developers/docs/topics/voice-connections#endtoend-encryption-dave-protocol><br>Protocol site: <https://daveprotocol.com/><br>Discord maintainer repo (`libdave`): <https://github.com/discord/libdave> |
 
 ## MCP (Model Context Protocol)
 
@@ -98,7 +99,7 @@ Production dependencies from `package.json` are split across sections:
 | `sodium-native` | Native libsodium binding used by Discord voice encryption stack | <https://github.com/holepunchto/sodium-native> |
 | `prism-media` | Audio demuxing/transcoding helpers for the voice pipeline | <https://github.com/hydrabolt/prism-media> |
 | `youtube-transcript-plus` | Transcript retrieval for YouTube URL ingestion | <https://github.com/ericmmartin/youtube-transcript-plus> |
-| `@snazzah/davey` | DAVE protocol implementation used by the Discord voice stack | <https://github.com/Snazzah/davey> |
+| `@snazzah/davey` | Node DAVE protocol implementation used by the Discord voice stack | npm package: <https://www.npmjs.com/package/@snazzah/davey><br>Maintainer repo + README: <https://github.com/Snazzah/davey><br>Node usage README: <https://github.com/Snazzah/davey/blob/master/davey-node/README.md><br>Usage docs: <https://github.com/Snazzah/davey/blob/master/docs/USAGE.md><br>Type definitions: <https://github.com/Snazzah/davey/blob/master/index.d.ts> |
 
 ## Dev Toolchain
 
