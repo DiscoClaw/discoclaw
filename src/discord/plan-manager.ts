@@ -165,6 +165,43 @@ const KNOWN_WORKSPACE_FILES = new Set([
   'TOOLS.md', 'DISCOCLAW.md', 'AGENTS.md', 'MEMORY.md', 'SOUL.md', 'IDENTITY.md', 'USER.md',
 ]);
 
+const COMMON_BARE_FILE_EXTENSIONS = new Set([
+  'cjs',
+  'conf',
+  'config',
+  'css',
+  'cts',
+  'env',
+  'example',
+  'gif',
+  'html',
+  'ini',
+  'jpeg',
+  'jpg',
+  'js',
+  'json',
+  'jsonc',
+  'jsx',
+  'lock',
+  'log',
+  'md',
+  'mdx',
+  'mjs',
+  'mts',
+  'png',
+  'scss',
+  'sh',
+  'sql',
+  'svg',
+  'toml',
+  'ts',
+  'tsx',
+  'txt',
+  'yaml',
+  'yml',
+  'zsh',
+]);
+
 /** Hardcoded project directory map. */
 const PROJECT_DIRS: Record<string, string> = {
   discoclaw: path.join(os.homedir(), 'code/discoclaw'),
@@ -419,6 +456,14 @@ function isLikelyFilePath(s: string): boolean {
 
   // Reject quoted strings ('pending', 'done')
   if (s.startsWith("'") || s.startsWith('"')) return false;
+
+  if (!s.includes('/')) {
+    const dottedIdentifier = /^(?:[A-Za-z_$][\w$]*)(?:\.[A-Za-z_$][\w$]*)+$/.test(s);
+    if (dottedIdentifier) {
+      const ext = s.split('.').pop()?.toLowerCase() ?? '';
+      if (!COMMON_BARE_FILE_EXTENSIONS.has(ext)) return false;
+    }
+  }
 
   // Reject single words without path separators or extensions
   if (!s.includes('/') && !/\.\w+$/.test(s)) return false;
