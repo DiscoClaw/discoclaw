@@ -682,6 +682,14 @@ const ACTION_SCHEMA_CORE_CATEGORIES: ActionSchemaCategory[] = ['messaging', 'cha
 
 const ACTION_SCHEMA_TASK_CONTEXT_RE = /\b(task|tasks|todo|ticket|issue|backlog|sprint)\b/i;
 const ACTION_SCHEMA_CRON_CONTEXT_RE = /\b(cron|schedule|scheduled|reminder|remind|timer)\b/i;
+const ACTION_SCHEMA_IMAGEGEN_STANDALONE_PATTERN =
+  String.raw`\b(?:illustration|artwork|sketch|painting|drawing|photo|image|draw)\b`;
+const ACTION_SCHEMA_IMAGEGEN_GENERATIVE_PATTERN =
+  String.raw`\b(?:generate|create|make|render|design|paint|draw)\b(?:\W+\w+){0,3}\W+\b(?:image|photo|picture|mockup|icon|logo|banner|wallpaper|thumbnail|graphic|illustration|artwork|sketch|painting|drawing|portrait|scene)\b`;
+const ACTION_SCHEMA_IMAGEGEN_RE = new RegExp(
+  `${ACTION_SCHEMA_IMAGEGEN_STANDALONE_PATTERN}|${ACTION_SCHEMA_IMAGEGEN_GENERATIVE_PATTERN}`,
+  'i',
+);
 
 type ActionSchemaKeywordRule = {
   hit: string;
@@ -697,7 +705,7 @@ const ACTION_SCHEMA_KEYWORD_RULES: ActionSchemaKeywordRule[] = [
   { hit: 'cron', pattern: /\b(cron|schedule|scheduled|reminder|remind|later)\b/i, categories: ['crons', 'defer'] },
   { hit: 'loop', pattern: /\b(loop|repeat|repeating|interval)\b/i, categories: ['loop'] },
   { hit: 'config', pattern: /\b(model|config|configure|setting)\b/i, categories: ['config'] },
-  { hit: 'imagegen', pattern: /\b(image|generate image|draw|illustration|photo)\b/i, categories: ['imagegen'] },
+  { hit: 'imagegen', pattern: ACTION_SCHEMA_IMAGEGEN_RE, categories: ['imagegen'] },
   { hit: 'voice', pattern: /\b(voice|speak|mute|unmute)\b/i, categories: ['voice'] },
   { hit: 'moderation', pattern: /\b(moderat|ban|kick|timeout)\b/i, categories: ['moderation'] },
   { hit: 'poll', pattern: /\b(poll|vote)\b/i, categories: ['polls'] },

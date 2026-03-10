@@ -196,7 +196,10 @@ describe('buildUnavailableActionTypesNotice', () => {
 
   it('renders specific enable-guidance for a known-disabled type (generateImage)', () => {
     const out = buildUnavailableActionTypesNotice(['generateImage']);
+    expect(out).toContain('Setup walkthrough');
     expect(out).toContain('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1');
+    expect(out).toContain('Restart DiscoClaw');
+    expect(out).toContain('Retry the image request');
     expect(out).toContain('`generateImage`');
     expect(out).not.toContain('unknown type or category disabled');
   });

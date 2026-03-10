@@ -1050,6 +1050,51 @@ describe('buildTieredDiscordActionsPromptSection', () => {
     expect(selection.prompt).toContain('### Deferred self-invocation');
   });
 
+  it('routes natural-language image requests into the imagegen category', () => {
+    const phrases = [
+      'generate a mockup',
+      'create a picture',
+      'make me an icon',
+      'render a scene',
+    ];
+
+    for (const userText of phrases) {
+      const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+        channelName: 'general',
+        channelContextPath: null,
+        isThread: false,
+        userText,
+      });
+
+      expect(selection.keywordHits).toContain('imagegen');
+      expect(selection.tierBuckets.keywordTriggered).toContain('imagegen');
+      expect(selection.includedCategories).toContain('imagegen');
+      expect(selection.prompt).toContain('### Image Generation');
+    }
+  });
+
+  it('does not route ambiguous non-image creation requests into imagegen', () => {
+    const phrases = [
+      'make a plan',
+      'design the architecture',
+      'create a task',
+    ];
+
+    for (const userText of phrases) {
+      const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+        channelName: 'general',
+        channelContextPath: null,
+        isThread: false,
+        userText,
+      });
+
+      expect(selection.keywordHits).not.toContain('imagegen');
+      expect(selection.tierBuckets.keywordTriggered).not.toContain('imagegen');
+      expect(selection.includedCategories).not.toContain('imagegen');
+      expect(selection.prompt).not.toContain('### Image Generation');
+    }
+  });
+
   it('hard-blocks disabled categories even when keywords/context hit', () => {
     const selection = buildTieredDiscordActionsPromptSection(
       { ...TIER_FLAGS, memory: false, plan: false, forge: false, crons: false, defer: false },
