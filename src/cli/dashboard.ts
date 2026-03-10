@@ -60,6 +60,8 @@ export type DashboardSnapshot = {
   serviceName: string;
   serviceSummary: string;
   doctorSummary: string;
+  roles: string[];
+  modelOptions: Record<string, string[]>;
   modelRows: DashboardModelRow[];
   configPaths: DoctorReport['configPaths'];
   runtimeOverrides: {
@@ -175,6 +177,29 @@ export function buildModelRows(ctx: DoctorContext): DashboardModelRow[] {
       overrideValue: isOverride ? overrideValue : undefined,
     };
   });
+}
+
+function buildModelOptions(ctx: DoctorContext): Record<string, string[]> {
+  const modelOptions: Record<string, string[]> = {};
+
+  for (const role of DASHBOARD_MODEL_ROLES) {
+    if (role === 'fast' || role === 'voice') {
+      modelOptions[role] = ['fast', 'capable', 'deep', 'default'];
+      continue;
+    }
+
+    const options: string[] = [];
+    const envDefault = ctx.envDefaults[role] ?? MODEL_DEFAULTS[role];
+    const overrideValue = ctx.models[role];
+
+    if (envDefault) options.push(envDefault);
+    if (overrideValue && overrideValue !== envDefault) options.push(overrideValue);
+    options.push('default');
+
+    modelOptions[role] = [...new Set(options)];
+  }
+
+  return modelOptions;
 }
 
 export function countDoctorSeverities(report: DoctorReport): Record<'error' | 'warn' | 'info', number> {
@@ -315,6 +340,8 @@ export async function collectDashboardSnapshot(
     serviceName,
     serviceSummary,
     doctorSummary: formatDoctorSummary(report),
+    roles: [...DASHBOARD_MODEL_ROLES],
+    modelOptions: buildModelOptions(ctx),
     modelRows: buildModelRows(ctx),
     configPaths: report.configPaths,
     runtimeOverrides: {

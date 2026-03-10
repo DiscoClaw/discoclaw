@@ -198,7 +198,12 @@ describe('updateModelConfig', () => {
 
 describe('collectDashboardSnapshot', () => {
   it('collects doctor, model, and service summary state', async () => {
-    const ctx = makeDoctorContext();
+    const ctx = makeDoctorContext({
+      envDefaults: {
+        ...makeDoctorContext().envDefaults,
+        chat: 'env-chat-model',
+      },
+    });
     const report = makeDoctorReport({
       findings: [
         {
@@ -238,6 +243,24 @@ describe('collectDashboardSnapshot', () => {
     expect(snapshot.doctorSummary).toBe('1 findings (errors=1, warnings=0, info=0)');
     expect(snapshot.version).toBe('1.2.3');
     expect(snapshot.gitHash).toBe('abc1234');
+    expect(snapshot.roles).toEqual([
+      'chat',
+      'plan-run',
+      'fast',
+      'summary',
+      'cron',
+      'cron-exec',
+      'voice',
+      'forge-drafter',
+      'forge-auditor',
+    ]);
+    expect(snapshot.modelOptions.fast).toEqual(['fast', 'capable', 'deep', 'default']);
+    expect(snapshot.modelOptions.voice).toEqual(['fast', 'capable', 'deep', 'default']);
+    expect(snapshot.modelOptions.chat).toEqual(['env-chat-model', 'opus', 'default']);
+    expect(snapshot.modelOptions['plan-run']).toEqual(['capable', 'default']);
+    expect(
+      snapshot.roles.every((role) => snapshot.modelOptions[role]?.includes('default')),
+    ).toBe(true);
 
     const rendered = renderDashboard(snapshot, 'Ready.');
     expect(rendered).toContain('Discoclaw Dashboard');
