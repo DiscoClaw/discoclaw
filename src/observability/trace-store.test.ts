@@ -12,7 +12,7 @@ describe('TraceStore', () => {
     const store = new TraceStore();
 
     vi.setSystemTime(new Date('2026-03-08T10:00:00.000Z'));
-    store.startTrace('trace-1', 'session-1', 'message');
+    store.startTrace('trace-1', 'session-1', 'message', 'channel-1');
     store.addEvent('trace-1', {
       type: 'invoke_start',
       at: Date.now(),
@@ -56,11 +56,12 @@ describe('TraceStore', () => {
     const ended = store.endTrace('trace-1', 'error');
 
     vi.setSystemTime(new Date('2026-03-08T10:00:02.000Z'));
-    store.startTrace('trace-2', 'session-2', 'reaction');
+    store.startTrace('trace-2', 'session-2', 'reaction', 'channel-2');
 
     expect(ended).toMatchObject({
       traceId: 'trace-1',
       sessionKey: 'session-1',
+      channelId: 'channel-1',
       flow: 'message',
       outcome: 'error',
       durationMs: 1500,
@@ -71,6 +72,7 @@ describe('TraceStore', () => {
     expect(trace).toMatchObject({
       traceId: 'trace-1',
       sessionKey: 'session-1',
+      channelId: 'channel-1',
       flow: 'message',
       outcome: 'error',
       durationMs: 1500,
@@ -122,7 +124,7 @@ describe('TraceStore', () => {
   it('caps retained events per trace', () => {
     const store = new TraceStore({ maxEventsPerTrace: 2 });
 
-    store.startTrace('trace-1', 'session-1', 'message');
+    store.startTrace('trace-1', 'session-1', 'message', 'channel-1');
     store.addEvent('trace-1', { type: 'invoke_start', at: 1, summary: 'start' });
     store.addEvent('trace-1', { type: 'tool_start', at: 2, toolName: 'shell' });
     store.addEvent('trace-1', { type: 'tool_end', at: 3, toolName: 'shell', ok: true });
@@ -139,15 +141,15 @@ describe('TraceStore', () => {
     const store = new TraceStore({ maxEntries: 2 });
 
     vi.setSystemTime(new Date('2026-03-08T10:00:00.000Z'));
-    store.startTrace('trace-1', 'session-1', 'message');
+    store.startTrace('trace-1', 'session-1', 'message', 'channel-1');
     store.endTrace('trace-1', 'success');
 
     vi.setSystemTime(new Date('2026-03-08T10:00:01.000Z'));
-    store.startTrace('trace-2', 'session-2', 'message');
+    store.startTrace('trace-2', 'session-2', 'message', 'channel-2');
     store.endTrace('trace-2', 'error');
 
     vi.setSystemTime(new Date('2026-03-08T10:00:02.000Z'));
-    store.startTrace('trace-3', 'session-3', 'message');
+    store.startTrace('trace-3', 'session-3', 'message', 'channel-3');
 
     expect(store.getTrace('trace-1')).toBeUndefined();
     expect(store.listRecent(5).map((run) => run.traceId)).toEqual(['trace-3', 'trace-2']);
@@ -159,13 +161,13 @@ describe('TraceStore', () => {
     const store = new TraceStore({ maxEntries: 2 });
 
     vi.setSystemTime(new Date('2026-03-08T10:00:00.000Z'));
-    store.startTrace('trace-1', 'session-1', 'message');
+    store.startTrace('trace-1', 'session-1', 'message', 'channel-1');
 
     vi.setSystemTime(new Date('2026-03-08T10:00:01.000Z'));
-    store.startTrace('trace-2', 'session-2', 'message');
+    store.startTrace('trace-2', 'session-2', 'message', 'channel-2');
 
     vi.setSystemTime(new Date('2026-03-08T10:00:02.000Z'));
-    store.startTrace('trace-3', 'session-3', 'message');
+    store.startTrace('trace-3', 'session-3', 'message', 'channel-3');
 
     expect(store.getTrace('trace-1')).toBeUndefined();
     expect(store.listRecent(5).map((run) => run.traceId)).toEqual(['trace-3', 'trace-2']);
@@ -177,17 +179,17 @@ describe('TraceStore', () => {
     const store = new TraceStore({ maxEntries: 2 });
 
     vi.setSystemTime(new Date('2026-03-08T10:00:00.000Z'));
-    store.startTrace('trace-1', 'session-1', 'message');
+    store.startTrace('trace-1', 'session-1', 'message', 'channel-1');
     store.endTrace('trace-1', 'success');
 
     vi.setSystemTime(new Date('2026-03-08T10:00:01.000Z'));
-    store.startTrace('trace-2', 'session-2', 'message');
+    store.startTrace('trace-2', 'session-2', 'message', 'channel-2');
     store.endTrace('trace-2', 'success');
 
     expect(store.listRecent(5).map((run) => run.traceId)).toEqual(['trace-2', 'trace-1']);
 
     vi.setSystemTime(new Date('2026-03-08T10:00:02.000Z'));
-    store.startTrace('trace-3', 'session-3', 'message');
+    store.startTrace('trace-3', 'session-3', 'message', 'channel-3');
 
     expect(store.listRecent(5).map((run) => run.traceId)).toEqual(['trace-3', 'trace-2']);
   });
@@ -195,7 +197,7 @@ describe('TraceStore', () => {
   it('returns defensive copies from getters', () => {
     const store = new TraceStore();
 
-    store.startTrace('trace-1', 'session-1', 'message');
+    store.startTrace('trace-1', 'session-1', 'message', 'channel-1');
     store.addEvent('trace-1', { type: 'invoke_start', at: 1, summary: 'start' });
 
     const trace = store.getTrace('trace-1');
@@ -212,10 +214,10 @@ describe('TraceStore', () => {
     const store = new TraceStore();
 
     vi.setSystemTime(new Date('2026-03-08T10:00:00.000Z'));
-    store.startTrace('trace-1', 'session-shared', 'message');
+    store.startTrace('trace-1', 'session-shared', 'message', 'channel-1');
 
     vi.setSystemTime(new Date('2026-03-08T10:00:01.000Z'));
-    store.startTrace('trace-2', 'session-shared', 'message');
+    store.startTrace('trace-2', 'session-shared', 'message', 'channel-1');
     store.addEvent('trace-1', { type: 'invoke_start', at: 1, summary: 'first' });
     store.addEvent('trace-2', { type: 'invoke_start', at: 2, summary: 'second' });
 
@@ -230,5 +232,59 @@ describe('TraceStore', () => {
       outcome: 'in_progress',
     });
     expect(store.listRecent(5).map((run) => run.traceId)).toEqual(['trace-2', 'trace-1']);
+  });
+
+  it('lists only traces from the requested channel', () => {
+    vi.useFakeTimers();
+
+    const store = new TraceStore();
+
+    vi.setSystemTime(new Date('2026-03-08T10:00:00.000Z'));
+    store.startTrace('trace-1', 'session-1', 'message', 'channel-1');
+
+    vi.setSystemTime(new Date('2026-03-08T10:00:01.000Z'));
+    store.startTrace('trace-2', 'session-2', 'message', 'channel-2');
+
+    vi.setSystemTime(new Date('2026-03-08T10:00:02.000Z'));
+    store.startTrace('trace-3', 'session-3', 'message', 'channel-1');
+
+    expect(store.listRecentForChannel(5, 'channel-1').map((run) => run.traceId)).toEqual([
+      'trace-3',
+      'trace-1',
+    ]);
+    expect(store.listRecentForChannel(5, 'channel-2').map((run) => run.traceId)).toEqual([
+      'trace-2',
+    ]);
+  });
+
+  it('returns undefined from scoped lookup when the channel does not match', () => {
+    const store = new TraceStore();
+
+    store.startTrace('trace-1', 'session-1', 'message', 'channel-1');
+
+    expect(store.getTraceForChannel('trace-1', 'channel-1')).toMatchObject({
+      traceId: 'trace-1',
+      channelId: 'channel-1',
+    });
+    expect(store.getTraceForChannel('trace-1', 'channel-2')).toBeUndefined();
+  });
+
+  it('keeps legacy traces invisible to scoped queries when channelId is undefined', () => {
+    vi.useFakeTimers();
+
+    const store = new TraceStore();
+
+    vi.setSystemTime(new Date('2026-03-08T10:00:00.000Z'));
+    store.startTrace('legacy-trace', 'session-legacy', 'message');
+
+    vi.setSystemTime(new Date('2026-03-08T10:00:01.000Z'));
+    store.startTrace('scoped-trace', 'session-scoped', 'message', 'channel-1');
+
+    expect(store.listRecentForChannel(5, undefined)).toEqual([]);
+    expect(store.listRecentForChannel(5, 'channel-1').map((run) => run.traceId)).toEqual([
+      'scoped-trace',
+    ]);
+    expect(store.getTraceForChannel('legacy-trace', undefined)).toBeUndefined();
+    expect(store.getTraceForChannel('legacy-trace', 'channel-1')).toBeUndefined();
   });
 });
