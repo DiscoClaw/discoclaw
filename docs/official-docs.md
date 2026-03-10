@@ -36,8 +36,8 @@ Completeness pass for this index was cross-checked against:
 | Discord API docs | Platform behavior beyond SDK wrappers | <https://docs.discord.com/developers/intro> |
 | discord.js guide | Discord bot patterns and library usage | <https://discordjs.guide> |
 | discord.js API docs | `discord.js` production dependency | <https://discord.js.org/docs/packages/discord.js/main> |
-| `@discordjs/voice` docs | Voice connection and audio pipeline helpers | <https://discord.js.org/docs/packages/voice/main> |
-| `@discordjs/opus` repo | Native Opus binding used by the voice stack | <https://github.com/discordjs/opus> |
+| `@discordjs/voice` | Voice gateway, connection, player, and receiver APIs used by `src/voice/connection-manager.ts`, `src/voice/audio-pipeline.ts`, `src/voice/audio-receiver.ts`, and `src/voice/voice-responder.ts` | Package docs: <https://discord.js.org/docs/packages/voice/stable><br>Maintainer source: <https://github.com/discordjs/discord.js/tree/main/packages/voice><br>npm package: <https://www.npmjs.com/package/@discordjs/voice> |
+| `@discordjs/opus` | Native Opus encoder/decoder addon used by `src/voice/opus.ts` and required by the Discord voice stack | Maintainer repo + README: <https://github.com/discordjs/opus><br>Releases: <https://github.com/discordjs/opus/releases><br>npm package: <https://www.npmjs.com/package/@discordjs/opus> |
 
 ## MCP (Model Context Protocol)
 
