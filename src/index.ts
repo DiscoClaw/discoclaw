@@ -74,7 +74,7 @@ import { startWebhookServer } from './webhook/server.js';
 import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
 import type { DashboardServer as LocalDashboardServer } from './dashboard/server.js';
-import { formatDashboardUrl, resolveDashboardBindHost } from './dashboard/options.js';
+import { DASHBOARD_HOST, formatDashboardUrl, resolveDashboardBindHost } from './dashboard/options.js';
 import { resolveModel, initTierOverrides } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
@@ -2425,9 +2425,9 @@ if (cfg.webhookEnabled && savedCronExecCtx) {
   log.warn('DISCOCLAW_WEBHOOK_ENABLED=1 but cron executor context is not available; webhook server disabled');
 }
 
+let dashboardUrl: string | undefined;
 if (cfg.dashboardEnabled) {
   const dashboardHost = resolveDashboardBindHost(cfg.dashboardTrustedHosts);
-  const dashboardUrl = formatDashboardUrl(dashboardHost, cfg.dashboardPort);
   try {
     dashboardServer = await startDashboardServer({
       port: cfg.dashboardPort,
@@ -2437,10 +2437,13 @@ if (cfg.dashboardEnabled) {
       env: process.env,
       log,
     });
+    const address = dashboardServer.server.address();
+    const boundPort = typeof address === 'object' && address ? address.port : cfg.dashboardPort;
+    dashboardUrl = formatDashboardUrl(DASHBOARD_HOST, boundPort);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     log.error(
-      { err, host: dashboardHost, port: cfg.dashboardPort, url: dashboardUrl },
+      { err, host: dashboardHost, port: cfg.dashboardPort },
       `dashboard:server failed to start: ${detail}`,
     );
   }
@@ -2476,6 +2479,7 @@ const npmLatestVersion = await npmLatestVersionPromise;
 publishBootReport({
   botStatus,
   startupCtx,
+  dashboardUrl,
   tasksEnabled,
   forumResolved: Boolean(taskCtx?.forumId),
   cronsEnabled: Boolean(cronEnabled && botParams.cronCtx),
