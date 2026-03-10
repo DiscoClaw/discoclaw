@@ -411,7 +411,7 @@ Field semantics:
 
 Production path:
 
-- Implement phases may append a dedicated trailer line to their worker response: `**Phase Evidence:** [JSON array]`. Those worker-supplied records are limited to `build` and `test` kinds; implement workers cannot emit `audit` evidence. The phase runner extracts that trailer before persisting `output`, validates it through the canonical evidence parser, and stores the resulting records in `phase.evidence`. An explicit `[]` means the worker reported that no verification commands ran; if the trailer is omitted entirely, `phase.evidence` remains unset so downstream consumers can detect the protocol omission.
+- Implement phases may append a dedicated trailer line to their worker response: `**Phase Evidence:** [JSON array]`. Those worker-supplied records are limited to `build` and `test` kinds; implement workers cannot emit `audit` evidence. The phase runner extracts that trailer before persisting `output`, validates it through the canonical evidence parser, and stores the resulting records in `phase.evidence`. If the trailer is missing or invalid, the phase still completes and `phase.evidence` remains unset so downstream consumers can treat it as "no trustworthy structured evidence persisted" rather than a failed implementation.
 - Audit phases do not rely on worker-supplied JSON. The runner synthesizes an `audit` evidence record directly from the parsed audit verdict, so audit evidence is always available on successful audit execution.
 - Phase retries clear previously stored evidence before rerunning, so `phase.evidence` always reflects the latest execution attempt rather than stale prior results.
 
@@ -428,7 +428,7 @@ Malformed audit output is treated as a phase-level `error`, not as passing evide
 
 Evidence differs from phase output:
 
-- `output` and `error` remain the full human-readable transcript for operators. The optional `**Phase Evidence:**` trailer is stripped before `output` is persisted, including malformed trailers that fail evidence validation.
+- `output` and `error` remain the full human-readable transcript for operators. The optional `**Phase Evidence:**` trailer is stripped before `output` is persisted, including malformed trailers that fail evidence validation and are discarded.
 - `evidence` is the compact structured contract for machines and summaries.
 - Evidence should capture verification intent and verdict, while `output` preserves raw logs, stack traces, and contextual detail.
 - Evidence is persisted in both the JSON state file and the markdown phases file so downstream readers can recover the same machine-readable contract from either storage format. In markdown, the persisted evidence JSON lives in the phase metadata preamble; arbitrary free-text transcript content is not scanned for evidence markers.

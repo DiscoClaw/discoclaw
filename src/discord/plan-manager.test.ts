@@ -1912,17 +1912,33 @@ describe('executePhase', () => {
     }
   });
 
-  it('fails implement phases when the evidence trailer is malformed', async () => {
+  it('ignores malformed implement evidence trailers', async () => {
     const result = await executePhase(
       phase,
       SAMPLE_PLAN,
       basePhases,
       makeOpts(makeSuccessRuntime('Implemented foo.\n**Phase Evidence:** not-json')),
     );
-    expect(result.status).toBe('failed');
-    if (result.status === 'failed') {
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
       expect(result.output).toBe('Implemented foo.');
-      expect(result.error).toContain('Invalid phase evidence trailer');
+      expect(result.evidence).toBeUndefined();
+    }
+  });
+
+  it('ignores implement evidence entries with unsupported kinds', async () => {
+    const result = await executePhase(
+      phase,
+      SAMPLE_PLAN,
+      basePhases,
+      makeOpts(makeSuccessRuntime(withPhaseEvidence('Implemented foo.', [
+        { kind: 'verify', status: 'pass', summary: 'looks good' },
+      ]))),
+    );
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toBe('Implemented foo.');
+      expect(result.evidence).toBeUndefined();
     }
   });
 });
@@ -2017,7 +2033,7 @@ describe('runNextPhase', () => {
     expect(updated.phases[0]!.evidence).toBeUndefined();
   });
 
-  it('strips malformed evidence trailers before persisting failed output', async () => {
+  it('strips malformed evidence trailers without failing the phase', async () => {
     const planPath = path.join(plansDir, 'plan-011-test.md');
     await fs.writeFile(planPath, SAMPLE_PLAN);
 
@@ -2031,11 +2047,37 @@ describe('runNextPhase', () => {
       makeOpts(makeSuccessRuntime('Phase done.\n**Phase Evidence:** not-json')),
       onProgress,
     );
-    expect(result.result).toBe('failed');
+    expect(result.result).toBe('done');
 
     const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
+    expect(updated.phases[0]!.status).toBe('done');
     expect(updated.phases[0]!.output).toBe('Phase done.');
     expect(updated.phases[0]!.output).not.toContain('**Phase Evidence:**');
+    expect(updated.phases[0]!.evidence).toBeUndefined();
+  });
+
+  it('drops unsupported implement evidence kinds before persisting phase state', async () => {
+    const planPath = path.join(plansDir, 'plan-011-test.md');
+    await fs.writeFile(planPath, SAMPLE_PLAN);
+
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'workspace/plans/plan-011-test.md');
+    const phasesPath = path.join(plansDir, 'plan-011-phases.md');
+    writePhasesFile(phasesPath, phases);
+
+    const result = await runNextPhase(
+      phasesPath,
+      planPath,
+      makeOpts(makeSuccessRuntime(withPhaseEvidence('Phase done.', [
+        { kind: 'verify', status: 'pass', summary: 'looks good' },
+      ]))),
+      onProgress,
+    );
+    expect(result.result).toBe('done');
+
+    const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
+    expect(updated.phases[0]!.status).toBe('done');
+    expect(updated.phases[0]!.output).toBe('Phase done.');
+    expect(updated.phases[0]!.evidence).toBeUndefined();
   });
 
   it('reruns replace stale evidence with the latest execution evidence', async () => {
@@ -2730,14 +2772,15 @@ describe('executePhase audit verdict', () => {
     expect(result.status).toBe('done');
   });
 
-  it('implement phase rejects worker-supplied audit evidence', async () => {
+  it('implement phase ignores worker-supplied audit evidence', async () => {
     const implOutput = withPhaseEvidence('Done implementing.', [
       { kind: 'audit', status: 'fail', reason: 'Blocking findings remain' },
     ]);
     const result = await executePhase(implPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(implOutput)));
-    expect(result.status).toBe('failed');
-    if (result.status === 'failed') {
-      expect(result.error).toContain("kind 'audit' is not allowed here");
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toBe('Done implementing.');
+      expect(result.evidence).toBeUndefined();
     }
   });
 
