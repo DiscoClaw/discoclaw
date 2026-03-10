@@ -2061,6 +2061,7 @@ describe('runNextPhase', () => {
     expect(result.result).toBe('done');
 
     const updated = deserializePhases(fsSync.readFileSync(phasesPath, 'utf-8'));
+    expect(updated.phases[0]!.error).toBeUndefined();
     expect(updated.phases[0]!.evidence).toEqual([
       { kind: 'build', status: 'pass', command: 'pnpm build', summary: 'fresh result' },
     ]);
@@ -2570,6 +2571,14 @@ describe('updatePhaseStatus', () => {
 
     const updated = updatePhaseStatus(phases, phases.phases[0]!.id, 'in-progress', undefined, undefined, null);
     expect(updated.phases[0]!.evidence).toBeUndefined();
+  });
+
+  it('clears stale error when explicitly requested', () => {
+    const phases = decomposePlan(SAMPLE_PLAN, 'plan-011', 'test.md');
+    phases.phases[0]!.error = 'old failure';
+
+    const updated = updatePhaseStatus(phases, phases.phases[0]!.id, 'done', 'ok', null);
+    expect(updated.phases[0]!.error).toBeUndefined();
   });
 });
 

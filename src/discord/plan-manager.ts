@@ -1183,7 +1183,7 @@ export function updatePhaseStatus(
   phaseId: string,
   status: PhaseStatus,
   output?: string,
-  error?: string,
+  error?: string | null,
   evidence?: VerificationEvidence[] | null,
 ): PlanPhases {
   const now = new Date().toISOString().split('T')[0]!;
@@ -1196,7 +1196,8 @@ export function updatePhaseStatus(
         ...p,
         status,
         ...(output !== undefined ? { output } : {}),
-        ...(error !== undefined ? { error } : {}),
+        ...(error === null ? { error: undefined } : {}),
+        ...(error !== undefined && error !== null ? { error } : {}),
         ...(evidence === null ? { evidence: undefined } : {}),
         ...(evidence !== undefined && evidence !== null ? { evidence } : {}),
       };
@@ -2104,7 +2105,7 @@ export async function runNextPhase(
 
   // 5. Write in-progress status to disk
   await onProgress(`**${phase.id}**: Running ${phase.title}...`);
-  allPhases = updatePhaseStatus(allPhases, phase.id, 'in-progress', undefined, undefined, null);
+  allPhases = updatePhaseStatus(allPhases, phase.id, 'in-progress', undefined, null, null);
   writePhasesFile(phasesFilePath, allPhases);
 
   // 6. Git snapshot (null = git command failed, skip modified-files tracking)
@@ -2412,7 +2413,7 @@ export async function runNextPhase(
   // 11. Write done/failed status to disk
   const sanitizedPhaseOutput = sanitizePhaseOutput(result.output);
   const diskStatus = result.status === 'audit_failed' ? 'failed' : result.status;
-  const diskError = result.status === 'done' ? undefined : result.error;
+  const diskError = result.status === 'failed' ? (result.error ?? null) : null;
   const diskEvidence = 'evidence' in result ? result.evidence : null;
   allPhases = updatePhaseStatus(allPhases, phase.id, diskStatus, sanitizedPhaseOutput, diskError, diskEvidence);
   // Attach modifiedFiles and failureHashes to the phase
