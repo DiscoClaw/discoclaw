@@ -60,10 +60,13 @@ Completeness pass for this index was cross-checked against:
 
 ## Image Generation
 
-| Provider | Used in DiscoClaw | Official docs |
-|----------|-------------------|---------------|
-| OpenAI Images API | `src/discord/actions-imagegen.ts` for `dall-e-*` and `gpt-image-*` models | Images API reference: <https://platform.openai.com/docs/api-reference/images/create> |
-| Google Gemini image generation | `src/discord/actions-imagegen.ts` for `gemini-*` image output and `imagen-*` models | Gemini image generation: <https://ai.google.dev/gemini-api/docs/image-generation><br>Imagen docs: <https://ai.google.dev/gemini-api/docs/imagen> |
+| Surface / model family | Used in DiscoClaw | Official docs |
+|------------------------|-------------------|---------------|
+| OpenAI Images API | `src/discord/actions-imagegen.ts` posts to `/images/generations` for OpenAI-backed image generation | API reference: <https://platform.openai.com/docs/api-reference/images/create> |
+| OpenAI GPT Image family | `src/discord/actions-imagegen.ts` accepts `gpt-image-*` model IDs (currently `gpt-image-1`) | Image generation guide: <https://platform.openai.com/docs/guides/image-generation><br>Models overview: <https://platform.openai.com/docs/models> |
+| OpenAI DALL-E family | `src/discord/actions-imagegen.ts` accepts `dall-e-*` model IDs (currently defaulting to `dall-e-3`) | Image generation guide: <https://platform.openai.com/docs/guides/image-generation><br>Images API reference: <https://platform.openai.com/docs/api-reference/images/create> |
+| Google Gemini native image generation | `src/discord/actions-imagegen.ts` calls `:generateContent` for `gemini-*` image-output models such as `gemini-3.1-flash-image-preview` | Gemini image generation guide: <https://ai.google.dev/gemini-api/docs/image-generation><br>Gemini model docs: <https://ai.google.dev/gemini-api/docs/models> |
+| Google Imagen family | `src/discord/actions-imagegen.ts` calls `:predict` for `imagen-*` models such as `imagen-4.0-generate-001` | Imagen docs: <https://ai.google.dev/gemini-api/docs/imagen><br>Gemini image generation guide: <https://ai.google.dev/gemini-api/docs/image-generation> |
 
 ## Embedding Providers
 

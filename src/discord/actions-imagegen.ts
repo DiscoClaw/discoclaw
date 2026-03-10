@@ -3,6 +3,11 @@ import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 
+/**
+ * Maintainers: start with `docs/official-docs.md` before changing model IDs,
+ * provider routing, endpoint paths, or request/response handling here.
+ */
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -350,7 +355,7 @@ export function imagegenActionsPromptSection(): string {
 \`\`\`
 - \`prompt\` (required): Text description of the image to generate.
 - \`channel\` (optional): Channel name (with or without #) or channel ID to post the image to. Defaults to the current channel/thread if omitted.
-- \`model\` (optional): Model to use. Default depends on configuration (auto-detected from available API keys). Available models:
+- \`model\` (optional): Model to use. Default depends on configuration (auto-detected from available API keys). Common supported families/examples:
   - OpenAI: \`dall-e-3\`, \`gpt-image-1\`
   - Gemini (Imagen): \`imagen-4.0-generate-001\`, \`imagen-4.0-fast-generate-001\`, \`imagen-4.0-ultra-generate-001\`
   - Gemini (native): \`gemini-3.1-flash-image-preview\`, \`gemini-3-pro-image-preview\`
