@@ -288,7 +288,7 @@ See [docs/dashboard-tailscale.md](dashboard-tailscale.md) for access and trusted
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DISCOCLAW_DASHBOARD_ENABLED` | `false` | Enable the local operator dashboard |
+| `DISCOCLAW_DASHBOARD_ENABLED` | `true` | Enable the local operator dashboard (`0` disables it) |
 | `DISCOCLAW_DASHBOARD_PORT` | `9401` | Port for the dashboard HTTP server. Each DiscoClaw instance on the same machine needs its own dashboard port. |
 | `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` | — | Comma-separated exact hosts accepted in the dashboard `Host` header. When non-empty, DiscoClaw binds the dashboard to `0.0.0.0` so trusted Tailscale hosts can reach it. |
 

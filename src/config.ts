@@ -557,7 +557,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const webhookEnabled = parseBoolean(env, 'DISCOCLAW_WEBHOOK_ENABLED', false);
   const webhookPort = parsePositiveInt(env, 'DISCOCLAW_WEBHOOK_PORT', 9400);
   const webhookConfigPath = parseTrimmedString(env, 'DISCOCLAW_WEBHOOK_CONFIG');
-  const dashboardEnabled = parseBoolean(env, 'DISCOCLAW_DASHBOARD_ENABLED', false);
+  const dashboardEnabled = parseBoolean(env, 'DISCOCLAW_DASHBOARD_ENABLED', true);
   const dashboardPort = parsePositiveInt(env, 'DISCOCLAW_DASHBOARD_PORT', 9401);
   const dashboardTrustedHosts = parseDashboardTrustedHosts(env);
 
