@@ -196,9 +196,23 @@ describe('buildUnavailableActionTypesNotice', () => {
 
   it('renders specific enable-guidance for a known-disabled type (generateImage)', () => {
     const out = buildUnavailableActionTypesNotice(['generateImage']);
+    expect(out).toContain('Setup walkthrough');
     expect(out).toContain('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1');
+    expect(out).toContain('instance `.env` file');
+    expect(out).toContain('OPENAI_API_KEY');
+    expect(out).toContain('IMAGEGEN_GEMINI_API_KEY');
+    expect(out).toContain('IMAGEGEN_DEFAULT_MODEL');
+    expect(out).toContain('`!restart`');
     expect(out).toContain('`generateImage`');
     expect(out).not.toContain('unknown type or category disabled');
+  });
+
+  it('renders imagegen guidance as a concrete setup checklist', () => {
+    const out = buildUnavailableActionTypesNotice(['generateImage']);
+    expect(out).toContain('1. Open the instance `.env` file used by this bot.');
+    expect(out).toContain('2. Set `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1`.');
+    expect(out).toContain('3. Configure one provider: set `OPENAI_API_KEY`');
+    expect(out).toContain('5. Reload the bot with `!restart`, then retry the image request.');
   });
 
   it('groups multiple types sharing the same help text onto one line', () => {
