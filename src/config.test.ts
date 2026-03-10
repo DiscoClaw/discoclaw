@@ -1072,14 +1072,19 @@ describe('parseConfig', () => {
   });
 
   // --- Dashboard ---
-  it('defaults dashboardEnabled to false', () => {
+  it('defaults dashboardEnabled to true', () => {
     const { config } = parseConfig(env());
-    expect(config.dashboardEnabled).toBe(false);
+    expect(config.dashboardEnabled).toBe(true);
   });
 
   it('parses DISCOCLAW_DASHBOARD_ENABLED=1 as true', () => {
     const { config } = parseConfig(env({ DISCOCLAW_DASHBOARD_ENABLED: '1' }));
     expect(config.dashboardEnabled).toBe(true);
+  });
+
+  it('parses DISCOCLAW_DASHBOARD_ENABLED=0 as false', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_DASHBOARD_ENABLED: '0' }));
+    expect(config.dashboardEnabled).toBe(false);
   });
 
   it('defaults dashboardPort to 9401', () => {

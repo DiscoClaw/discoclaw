@@ -8,7 +8,7 @@ Maintainers: before changing dashboard exposure behavior, trusted-host validatio
 
 ## Background
 
-By default, the dashboard is loopback-only:
+By default, the dashboard is enabled and loopback-only:
 
 - it binds to `127.0.0.1`
 - it rejects any `Host` header that is not a loopback address
@@ -22,14 +22,13 @@ If you want to open the dashboard from a phone over Tailscale, configure an expl
 Add the dashboard settings you need:
 
 ```dotenv
-DISCOCLAW_DASHBOARD_ENABLED=1
 DISCOCLAW_DASHBOARD_PORT=9401
 DISCOCLAW_DASHBOARD_TRUSTED_HOSTS=100.64.0.12,macbook.tailnet.ts.net
 ```
 
 Notes:
 
-- `DISCOCLAW_DASHBOARD_ENABLED=1` starts the dashboard server.
+- `DISCOCLAW_DASHBOARD_ENABLED` is optional; the dashboard starts by default. Set `DISCOCLAW_DASHBOARD_ENABLED=0` if you want it off.
 - `DISCOCLAW_DASHBOARD_PORT` is optional; `9401` is the default.
 - `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` is a comma-separated allowlist of exact hosts the dashboard will accept in the `Host` header.
 - Hostnames are normalized to lowercase and trailing dots are ignored, so `Phone.Tailnet.ts.net.` and `phone.tailnet.ts.net` are treated the same.
