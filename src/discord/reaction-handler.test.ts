@@ -352,6 +352,16 @@ describe('createReactionAddHandler', () => {
       },
     };
     const fetchHistory = vi.fn(async () => new Map([
+      ['later-3', {
+        id: 'later-3',
+        content: 'And prioritize the apples first.',
+        author: { username: 'Bob', displayName: 'Bob', bot: false },
+      }],
+      ['msg-2', {
+        id: 'msg-2',
+        content: 'Can you summarize that?',
+        author: { username: 'Alice', displayName: 'Alice', bot: false },
+      }],
       ['prior-1', {
         id: 'prior-1',
         content: 'Shopping list:\n- apples\n- oat milk\n- coffee',
@@ -382,9 +392,12 @@ describe('createReactionAddHandler', () => {
 
     await handler(reaction as any, mockUser() as any);
 
-    expect(fetchHistory).toHaveBeenCalledWith({ before: 'msg-2', limit: 10 });
+    expect(fetchHistory).toHaveBeenCalledWith({ limit: 11 });
     expect(invokeSpy).toHaveBeenCalledOnce();
-    expect(invokeSpy.mock.calls[0]?.[0].prompt).toContain('Shopping list:\n- apples\n- oat milk\n- coffee');
+    const prompt: string = invokeSpy.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain('Shopping list:\n- apples\n- oat milk\n- coffee');
+    expect(prompt).toContain('And prioritize the apples first.');
+    expect(prompt.match(/Can you summarize that\?/g)).toHaveLength(1);
   });
 
   it('injects tiered Discord action schema using reaction content and channel metadata', async () => {

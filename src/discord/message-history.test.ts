@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { fetchMessageHistory } from './message-history.js';
 
@@ -105,5 +105,25 @@ describe('fetchMessageHistory', () => {
     ]);
     const result = await fetchMessageHistory(ch, '2', { budgetChars: 0 });
     expect(result).toBe('');
+  });
+
+  it('can fetch the latest messages and exclude specific message ids', async () => {
+    const fetch = vi.fn(async () => new Map([
+      ['3', fakeMsg('3', 'latest follow-up', 'User')],
+      ['2', fakeMsg('2', 'skip this message', 'User')],
+      ['1', fakeMsg('1', 'earlier context', 'User')],
+    ]));
+
+    const ch = {
+      messages: { fetch },
+    } as any;
+
+    const result = await fetchMessageHistory(ch, undefined, {
+      budgetChars: 5000,
+      excludeMessageIds: ['2'],
+    });
+
+    expect(fetch).toHaveBeenCalledWith({ limit: 11 });
+    expect(result).toBe('[User]: earlier context\n[User]: latest follow-up');
   });
 });

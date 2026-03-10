@@ -311,8 +311,12 @@ function createReactionHandler(
             try {
               historySection = await fetchMessageHistory(
                 msg.channel as TextBasedChannel,
-                msg.id,
-                { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
+                undefined,
+                {
+                  budgetChars: params.messageHistoryBudget,
+                  botDisplayName: params.botDisplayName,
+                  excludeMessageIds: [msg.id],
+                },
               );
             } catch (err) {
               params.log?.warn({ err }, `${logPrefix}:history fetch failed`);
