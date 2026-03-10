@@ -6,7 +6,7 @@ so keep it focused and pruned.
 ## What Goes Here
 
 - Decisions and their rationale
-- Lessons learned (what worked, what didn't)
+- Personal/project context and decisions only; put reusable engineering lessons in `docs/compound-lessons.md`
 - Project context that matters long-term
 - Nuanced preferences that don't fit a one-liner `!memory add`
 - Relationship context and recurring themes
