@@ -70,9 +70,9 @@ List all plans with their status.
 
 **Output:**
 ```
-- `plan-015` [APPROVED] — Implement phase manager (task: `abc111`)
-- `plan-016` [DONE] — Add forge orchestrator (task: `abc222`)
-- `plan-017` [DRAFT] — Add webhook support (task: `abc333`)
+- `plan-015` [APPROVED] [pending] — Implement phase manager (task: `abc111`)
+- `plan-016` [DONE] [verified] — Add forge orchestrator (task: `abc222`)
+- `plan-017` [DRAFT] [skipped] — Add webhook support (task: `abc333`)
 ```
 
 ### `!plan show <plan-id|task-id>`
@@ -92,6 +92,7 @@ Project: discoclaw
 Created: 2026-02-12
 
 **Objective:** Add webhook endpoints for external notification delivery...
+**Verification:** pending
 
 **Latest audit:** (no audit yet)
 ```
