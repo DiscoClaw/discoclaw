@@ -211,7 +211,7 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       lines.push(`Startup · ${typeLabel[data.startupType]}`);
       if (data.bootDurationMs !== undefined) lines.push(`Boot Time · ${data.bootDurationMs}ms`);
       if (data.dashboardUrl) {
-        lines.push(`Dashboard URL · ${data.dashboardUrl}`);
+        lines.push(`Dashboard · ${data.dashboardUrl}`);
       }
       lines.push(`Model · ${data.runtimeModel || '(default)'}`);
       if (data.permissionsStatus) {

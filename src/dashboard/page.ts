@@ -4,7 +4,7 @@ export function renderDashboardPage(): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Discoclaw Dashboard</title>
+  <title>Dashboard</title>
   <style>
     :root {
       color-scheme: dark;
@@ -463,15 +463,15 @@ export function renderDashboardPage(): string {
     <section class="hero">
       <div class="hero-bar">
         <div>
-          <div class="eyebrow">Discoclaw Control Panel</div>
+          <div class="eyebrow">Discoclaw Operator Dashboard</div>
         </div>
         <button id="refresh-btn" type="button">Refresh</button>
       </div>
-      <p class="hero-copy">Check service health, review current settings, and make common changes from one local dashboard. This dashboard stays local by default.</p>
+      <p class="hero-copy">One local place to check service health, review model settings, and fix common config issues. The dashboard stays local by default.</p>
       <div class="hero-status">
         <div id="hero-service-pill" class="pill">Service: loading</div>
-        <div id="hero-runtime-pill" class="pill">Runtime overrides: loading</div>
-        <div id="hero-url-pill" class="pill">Dashboard URL: loading</div>
+        <div id="hero-runtime-pill" class="pill">Overrides: loading</div>
+        <div id="hero-url-pill" class="pill">Dashboard: loading</div>
       </div>
       <div id="hero-status" class="status"></div>
     </section>
@@ -480,8 +480,8 @@ export function renderDashboardPage(): string {
       <section class="card span-5">
         <div class="card-header">
           <div>
-            <h2>Overview</h2>
-            <p class="card-copy">Version, service state, install mode, and config check summary.</p>
+            <h2>At a Glance</h2>
+            <p class="card-copy">Core service state, build info, and config health.</p>
           </div>
         </div>
         <div id="overview-metrics" class="metrics"></div>
@@ -490,8 +490,8 @@ export function renderDashboardPage(): string {
       <section class="card span-7">
         <div class="card-header">
           <div>
-            <h2>Service</h2>
-            <p class="card-copy">View status, inspect recent logs, or restart the service.</p>
+            <h2>Service Controls</h2>
+            <p class="card-copy">Check status, inspect logs, or restart the service.</p>
           </div>
           <div class="actions">
             <button id="status-btn" type="button">Status</button>
@@ -506,8 +506,8 @@ export function renderDashboardPage(): string {
       <section class="card span-6">
         <div class="card-header">
           <div>
-            <h2>Model Assignments</h2>
-            <p class="card-copy">What each role is using right now.</p>
+            <h2>Current Models</h2>
+            <p class="card-copy">What each system role is using now, plus the saved setting for the next restart.</p>
           </div>
         </div>
         <div class="table-wrap">
@@ -515,9 +515,8 @@ export function renderDashboardPage(): string {
             <thead>
               <tr>
                 <th>Role</th>
-                <th>Current Model</th>
-                <th>Source</th>
-                <th>Next Restart</th>
+                <th>Using Now</th>
+                <th>Saved Setting</th>
                 <th></th>
               </tr>
             </thead>
@@ -529,24 +528,24 @@ export function renderDashboardPage(): string {
       <section class="card span-6">
         <div class="card-header">
           <div>
-            <h2>Change Model</h2>
-            <p class="card-copy">Choose a role, then pick one of the valid saved options for that role. Changes apply on the next service restart.</p>
+            <h2>Update Saved Model</h2>
+            <p class="card-copy">Pick a role, then choose one of its valid saved options. Changes apply on the next service restart.</p>
           </div>
         </div>
         <form id="model-form">
           <div class="field-grid">
             <label class="field" for="role-select">
-              <span class="field-label">System Role</span>
+              <span class="field-label">Role</span>
               <select id="role-select" name="role" required></select>
             </label>
             <label class="field" for="model-select">
-              <span class="field-label">Model</span>
+              <span class="field-label">Saved Option</span>
               <select id="model-select" name="model" required></select>
             </label>
           </div>
-          <div id="model-form-help" class="field-note">Choose a role to see its valid saved options.</div>
+          <div id="model-form-help" class="field-note">Choose a role to load its valid saved options.</div>
           <div class="actions">
-            <button id="model-submit-btn" type="submit">Save Model</button>
+            <button id="model-submit-btn" type="submit">Save Change</button>
           </div>
         </form>
         <div id="model-status" class="status"></div>
@@ -555,7 +554,7 @@ export function renderDashboardPage(): string {
       <section class="card span-7">
         <div class="card-header">
           <div>
-            <h2>Health Check</h2>
+            <h2>Config Doctor</h2>
             <p class="card-copy">Scan for config problems and cleanup suggestions. Safe fixes can be applied automatically; review-only items stay listed below.</p>
           </div>
           <div class="actions">
@@ -571,8 +570,8 @@ export function renderDashboardPage(): string {
       <section class="card span-5">
         <div class="card-header">
           <div>
-            <h2>Files and Overrides</h2>
-            <p class="card-copy">File locations and runtime adapter overrides.</p>
+            <h2>Advanced Details</h2>
+            <p class="card-copy">Runtime adapter overrides and the files backing this install.</p>
           </div>
         </div>
         <div id="runtime-overrides" class="runtime-grid"></div>
@@ -624,7 +623,7 @@ export function renderDashboardPage(): string {
     };
 
     let lastSnapshot = null;
-    heroUrlPill.textContent = 'Dashboard URL: ' + window.location.href;
+    updateDashboardLocation();
 
     async function fetchJson(url, options) {
       const response = await fetch(url, options);
@@ -689,6 +688,12 @@ export function renderDashboardPage(): string {
       appendMetric(parent, label, value);
     }
 
+    function updateDashboardLocation() {
+      const dashboardUrl = window.location.href;
+      document.title = 'Dashboard · ' + dashboardUrl;
+      heroUrlPill.textContent = 'Dashboard: ' + dashboardUrl;
+    }
+
     function setOutput(message) {
       serviceOutput.textContent = message || '(no output)';
     }
@@ -735,15 +740,11 @@ export function renderDashboardPage(): string {
       return model;
     }
 
-    function formatSourceLabel(source) {
-      return source === 'override' ? 'saved setting' : 'startup default';
-    }
-
     function updateModelFormHelp(role) {
       if (!modelFormHelp) return;
       modelFormHelp.textContent = role
-        ? getRoleHelp(role) + ' Pick one of the valid saved options for this role.'
-        : 'Choose a role to see its valid saved options.';
+        ? getRoleHelp(role) + ' Choose one of the valid saved options below.'
+        : 'Choose a role to load its valid saved options.';
     }
 
     function syncRoleOptions(selectedRole) {
@@ -824,11 +825,8 @@ export function renderDashboardPage(): string {
         const effectiveCell = document.createElement('td');
         effectiveCell.textContent = row.effectiveModel;
 
-        const sourceCell = document.createElement('td');
-        sourceCell.textContent = formatSourceLabel(row.source);
-
         const overrideCell = document.createElement('td');
-        overrideCell.textContent = row.overrideValue || '(default)';
+        overrideCell.textContent = row.overrideValue || 'Startup default';
 
         const actionCell = document.createElement('td');
         const button = document.createElement('button');
@@ -838,7 +836,7 @@ export function renderDashboardPage(): string {
         button.addEventListener('click', () => populateModelForm(row.role, row.overrideValue || row.effectiveModel));
         actionCell.append(button);
 
-        tr.append(roleCell, effectiveCell, sourceCell, overrideCell, actionCell);
+        tr.append(roleCell, effectiveCell, overrideCell, actionCell);
         modelsBody.append(tr);
       });
 
@@ -853,8 +851,8 @@ export function renderDashboardPage(): string {
 
       populateModelForm(selectedRole, selectedModel, false);
       heroServicePill.textContent = 'Service: ' + formatServicePill(snapshot.serviceSummary);
-      heroRuntimePill.textContent = 'Runtime overrides: ' + formatRuntimePill(snapshot.runtimeOverrides);
-      heroUrlPill.textContent = 'Dashboard URL: ' + window.location.href;
+      heroRuntimePill.textContent = 'Overrides: ' + formatRuntimePill(snapshot.runtimeOverrides);
+      updateDashboardLocation();
       setStatus(serviceStatus, snapshot.serviceSummary, 'ok');
     }
 

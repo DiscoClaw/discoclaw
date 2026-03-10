@@ -255,7 +255,7 @@ describe('startDashboardServer', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers['content-type']).toContain('text/html');
-    expect(response.text).toContain('Discoclaw Dashboard');
+    expect(response.text).toContain('<title>Dashboard</title>');
   });
 
   it('returns dashboard snapshot JSON from /api/snapshot', async () => {

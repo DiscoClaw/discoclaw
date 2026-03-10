@@ -283,8 +283,8 @@ describe('bootReport', () => {
     const poster = createStatusPoster(ch);
     await poster.bootReport!({ ...baseData, dashboardUrl: 'http://127.0.0.1:9401/' });
     const msg = sentContent(ch);
-    expect(msg).toContain('Dashboard URL · http://127.0.0.1:9401/');
-    expect(msg.indexOf('Dashboard URL · http://127.0.0.1:9401/')).toBeLessThan(msg.indexOf('Model · (default)'));
+    expect(msg).toContain('Dashboard · http://127.0.0.1:9401/');
+    expect(msg.indexOf('Dashboard · http://127.0.0.1:9401/')).toBeLessThan(msg.indexOf('Model · (default)'));
   });
 
   it('omits Dashboard line when dashboardUrl is absent', async () => {
@@ -292,7 +292,7 @@ describe('bootReport', () => {
     const poster = createStatusPoster(ch);
     await poster.bootReport!({ ...baseData });
     const msg = sentContent(ch);
-    expect(msg).not.toContain('Dashboard URL ·');
+    expect(msg).not.toContain('Dashboard ·');
   });
 
   it('includes cold in Memory line when memoryColdOn is true with chunk count', async () => {

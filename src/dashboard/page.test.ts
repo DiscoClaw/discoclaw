@@ -5,14 +5,17 @@ describe('renderDashboardPage', () => {
   it('renders user-friendly doctor controls and guidance', () => {
     const html = renderDashboardPage();
 
-    expect(html).toContain('Discoclaw Control Panel');
+    expect(html).toContain('<title>Dashboard</title>');
+    expect(html).toContain('Discoclaw Operator Dashboard');
     expect(html).toContain('>Refresh<');
-    expect(html).toContain('Check service health, review current settings, and make common changes from one local dashboard.');
-    expect(html).toContain('This dashboard stays local by default.');
-    expect(html).toContain('Runtime overrides: loading');
-    expect(html).toContain('Dashboard URL: loading');
+    expect(html).toContain('One local place to check service health, review model settings, and fix common config issues.');
+    expect(html).toContain('The dashboard stays local by default.');
+    expect(html).toContain('Overrides: loading');
+    expect(html).toContain('Dashboard: loading');
     expect(html).toContain('function formatServicePill');
     expect(html).toContain('function formatRuntimePill');
+    expect(html).toContain('function updateDashboardLocation()');
+    expect(html).toContain("document.title = 'Dashboard · ' + dashboardUrl;");
     expect(html).toContain('const ROLE_LABELS = {');
     expect(html).toContain("chat: 'Chat'");
     expect(html).toContain("fast: 'Quick Tasks'");
@@ -22,10 +25,16 @@ describe('renderDashboardPage', () => {
     expect(html).toContain('<select id="model-select"');
     expect(html).not.toContain('custom-model-input');
     expect(html).not.toContain('CUSTOM_MODEL_OPTION');
-    expect(html).toContain('Choose a role, then pick one of the valid saved options for that role.');
+    expect(html).toContain('>At a Glance<');
+    expect(html).toContain('>Service Controls<');
+    expect(html).toContain('>Current Models<');
+    expect(html).toContain('>Update Saved Model<');
+    expect(html).toContain('>Config Doctor<');
+    expect(html).toContain('>Advanced Details<');
+    expect(html).toContain('Pick a role, then choose one of its valid saved options.');
     expect(html).toContain('id="model-form-help"');
-    expect(html).toContain('Pick one of the valid saved options for this role.');
-    expect(html).toContain('>Save Model<');
+    expect(html).toContain('Choose one of the valid saved options below.');
+    expect(html).toContain('>Save Change<');
     expect(html).toContain("button.textContent = 'Change';");
     expect(html).toContain('Scan for config problems and cleanup suggestions.');
     expect(html).toContain('Safe fixes can be applied automatically; review-only items stay listed below.');
