@@ -156,7 +156,7 @@ Requires an embedding API (OpenAI or any OpenAI-compatible endpoint). Enable wit
 
 ### 7. Workspace Files — human-curated memory
 
-Curated long-term notes (`workspace/MEMORY.md`) and daily scratch logs (`workspace/memory/YYYY-MM-DD.md`). Loaded in DMs only. These hold things too nuanced for structured durable items — decisions, lessons, project context.
+Curated long-term notes (`workspace/MEMORY.md`) and daily scratch logs (`workspace/memory/YYYY-MM-DD.md`). Loaded in DMs only. These hold things too nuanced for structured durable items — decisions and personal project context. Reusable engineering lessons belong in `docs/compound-lessons.md`.
 
 ## Summary Archive
 
