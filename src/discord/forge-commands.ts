@@ -230,6 +230,13 @@ function stripAuditLogForPrompt(planContent: string): string {
   return (idx === -1 ? planContent : planContent.slice(0, idx)).trimEnd();
 }
 
+function extractCompoundLessonsForPrompt(content: string): string | undefined {
+  const lessonsHeading = content.match(/^## Lessons\b[\t ]*$/m);
+  if (lessonsHeading?.index === undefined) return undefined;
+  const lessons = content.slice(lessonsHeading.index).trim();
+  return lessons || undefined;
+}
+
 function summarizePriorAuditHistory(planContent: string): string | undefined {
   const auditLogHeading = '\n## Audit Log';
   const implNotesHeading = '\n## Implementation Notes';
@@ -305,6 +312,7 @@ export function buildDrafterPrompt(
     '- Identify real risks and dependencies based on the actual codebase.',
     '- Write concrete, verifiable test cases.',
     '- Include documentation updates in the Changes section when adding new features, config options, or public APIs. Consider: docs/*.md, .env.example files, README.md, INVENTORY.md, and inline code comments.',
+    `- Check the existing \`${COMPOUND_LESSONS_PATH}\` entries before proposing a new lesson. When the task reveals a reusable pattern, add a new \`${COMPOUND_LESSONS_PATH}\` entry to the plan's \`## Changes\` section instead of rediscovering or duplicating an existing lesson.`,
     `- When the task codifies a reusable engineering lesson from audits, forge runs, incidents, or repeated workflow failures, treat \`${COMPOUND_LESSONS_PATH}\` as the single checked-in durable artifact. Add it to \`## Changes\` and spell out the artifact contract being introduced or updated: entry format, ownership, update/promotion rules, and review expectations. Do not treat plan-local \`## Audit Log\` or \`## Implementation Notes\` as the durable lesson store.`,
     '- Set the status to DRAFT.',
     '- DO NOT echo the template verbatim — every section must contain substantive analysis of the actual codebase.',
@@ -1380,6 +1388,17 @@ export class ForgeOrchestrator {
 
     if (opts?.pinnedThreadSummary) {
       sections.push(`--- pinned-thread summary ---\n${opts.pinnedThreadSummary.trim()}`);
+    }
+
+    const compoundLessonsPath = path.join(this.opts.cwd, COMPOUND_LESSONS_PATH);
+    try {
+      const compoundLessons = await fs.readFile(compoundLessonsPath, 'utf-8');
+      const lessonsSection = extractCompoundLessonsForPrompt(compoundLessons);
+      if (lessonsSection) {
+        sections.push(`--- compound-lessons.md (repo) ---\n${lessonsSection}`);
+      }
+    } catch {
+      // skip missing or unreadable files
     }
 
     return buildPromptPreamble(sections.join('\n\n'));
