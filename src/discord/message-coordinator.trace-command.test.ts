@@ -99,10 +99,11 @@ describe('message coordinator !trace command', () => {
   });
 
   it('replies with recent traces without queueing and includes full trace IDs', async () => {
-    vi.spyOn(globalTraceStore, 'listRecent').mockReturnValue([
+    const listRecentForChannel = vi.spyOn(globalTraceStore, 'listRecentForChannel').mockReturnValue([
       {
         traceId: 'message_12345678-1234-1234-1234-123456789abc',
         sessionKey: 'discord:dm:user-1',
+        channelId: 'dm-1',
         flow: 'message',
         startedAt: new Date('2026-03-08T10:00:00.000Z').getTime(),
         outcome: 'success',
@@ -118,13 +119,16 @@ describe('message coordinator !trace command', () => {
     await handler(msg as any);
 
     expect(queue.run).not.toHaveBeenCalled();
+    expect(listRecentForChannel).toHaveBeenCalledWith(10, 'dm-1');
     expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
       content: expect.stringContaining('message_12345678-1234-1234-1234-123456789abc'),
     }));
   });
 
   it('replies with not found for unknown trace IDs without queueing', async () => {
-    vi.spyOn(globalTraceStore, 'getTrace').mockReturnValue(undefined);
+    const getTraceForChannel = vi
+      .spyOn(globalTraceStore, 'getTraceForChannel')
+      .mockReturnValue(undefined);
 
     const queue = { run: vi.fn(async () => undefined) };
     const handler = createMessageCreateHandler(makeParams(), queue as any);
@@ -133,6 +137,7 @@ describe('message coordinator !trace command', () => {
     await handler(msg as any);
 
     expect(queue.run).not.toHaveBeenCalled();
+    expect(getTraceForChannel).toHaveBeenCalledWith('message:123:456', 'dm-1');
     expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
       content: '```text\nTrace message:123:456 not found.\n```',
     }));

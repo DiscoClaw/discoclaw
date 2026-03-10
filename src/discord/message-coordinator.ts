@@ -1047,7 +1047,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       const traceCmd = parseTraceCommand(String(msg.content ?? ''));
       if (!isBotMessage && traceCmd) {
         if (traceCmd.mode === 'detail') {
-          const trace = globalTraceStore.getTrace(traceCmd.traceId);
+          const trace = globalTraceStore.getTraceForChannel(traceCmd.traceId, msg.channelId);
           const report = trace
             ? renderTraceDetail(trace)
             : `\`\`\`text\nTrace ${traceCmd.traceId} not found.\n\`\`\``;
@@ -1056,7 +1056,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         }
 
         await msg.reply({
-          content: renderTraceList(globalTraceStore.listRecent(10)),
+          content: renderTraceList(globalTraceStore.listRecentForChannel(10, msg.channelId)),
           allowedMentions: NO_MENTIONS,
         });
         return;
@@ -3106,7 +3106,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           effectiveContinuationCapsule = existingContinuationCapsule;
           const traceId = `message_${randomUUID()}`;
           let traceOutcome = 'success';
-          globalTraceStore.startTrace(traceId, sessionKey, 'message');
+          globalTraceStore.startTrace(traceId, sessionKey, 'message', msg.channelId);
 
           try {
             // -- auto-follow-up loop --

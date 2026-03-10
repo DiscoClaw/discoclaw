@@ -59,6 +59,7 @@ export type TraceEvent =
 export type RunTrace = {
   traceId: string;
   sessionKey: string;
+  channelId?: string;
   flow: InvokeFlow;
   startedAt: number;
   events: TraceEvent[];
@@ -92,12 +93,18 @@ export class TraceStore {
     this.maxEventsPerTrace = Math.max(1, Math.floor(options.maxEventsPerTrace ?? 500));
   }
 
-  startTrace(traceId: string, sessionKey: string, flow: InvokeFlow): RunTrace {
+  startTrace(
+    traceId: string,
+    sessionKey: string,
+    flow: InvokeFlow,
+    channelId?: string,
+  ): RunTrace {
     this.makeRoomForNewTrace();
 
     const trace: RunTrace = {
       traceId,
       sessionKey,
+      channelId,
       flow,
       startedAt: Date.now(),
       events: [],
@@ -138,6 +145,19 @@ export class TraceStore {
     return trace ? cloneTrace(trace) : undefined;
   }
 
+  getTraceForChannel(traceId: string, channelId: string | undefined): RunTrace | undefined {
+    if (!channelId) {
+      return undefined;
+    }
+
+    const trace = this.traces.get(traceId);
+    if (!trace || trace.channelId !== channelId) {
+      return undefined;
+    }
+
+    return cloneTrace(trace);
+  }
+
   listRecent(n: number): RunTrace[] {
     const limit = Math.max(0, Math.floor(n));
     if (limit === 0) {
@@ -145,6 +165,23 @@ export class TraceStore {
     }
 
     return [...this.traces.values()]
+      .sort((a, b) => b.startedAt - a.startedAt)
+      .slice(0, limit)
+      .map(cloneTrace);
+  }
+
+  listRecentForChannel(n: number, channelId: string | undefined): RunTrace[] {
+    if (!channelId) {
+      return [];
+    }
+
+    const limit = Math.max(0, Math.floor(n));
+    if (limit === 0) {
+      return [];
+    }
+
+    return [...this.traces.values()]
+      .filter((trace) => trace.channelId === channelId)
       .sort((a, b) => b.startedAt - a.startedAt)
       .slice(0, limit)
       .map(cloneTrace);
