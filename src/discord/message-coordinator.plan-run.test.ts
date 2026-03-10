@@ -362,6 +362,59 @@ describe('message coordinator plan run phase-start posts', () => {
     });
   });
 
+  it('logs aggregated completion evidence for manual !plan run summaries', async () => {
+    const { runNextPhase, buildPostRunSummary } = await import('./plan-manager.js');
+    (runNextPhase as any)
+      .mockImplementationOnce(async () => ({
+        result: 'done',
+        phase: { id: 'phase-1', title: 'First phase', kind: 'implement', status: 'done', dependsOn: [], contextFiles: [] },
+        output: 'done',
+        nextPhase: undefined,
+      }))
+      .mockImplementationOnce(async () => ({ result: 'nothing_to_run' }));
+    (buildPostRunSummary as any).mockReturnValue({
+      text: '[x] **phase-1:** First phase — build: pass (dist built cleanly)',
+      evidence: [
+        {
+          phaseId: 'phase-1',
+          phaseTitle: 'First phase',
+          phaseKind: 'implement',
+          phaseStatus: 'done',
+          kind: 'build',
+          status: 'pass',
+          summary: 'dist built cleanly',
+        },
+      ],
+    });
+
+    const params = makeParams();
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue as any);
+    const msg = makeMessage('!plan run plan-042');
+
+    await handler(msg as any);
+    await vi.waitFor(() => {
+      expect(params.log.info).toHaveBeenCalledWith(
+        {
+          planId: 'plan-042',
+          phasesRun: 1,
+          evidence: [
+            {
+              phaseId: 'phase-1',
+              phaseTitle: 'First phase',
+              phaseKind: 'implement',
+              phaseStatus: 'done',
+              kind: 'build',
+              status: 'pass',
+              summary: 'dist built cleanly',
+            },
+          ],
+        },
+        'plan-run: completion evidence',
+      );
+    });
+  });
+
   it('passes env-configured heartbeat policy into !plan run controller wiring', async () => {
     const heartbeat = await import('./phase-status-heartbeat.js');
     const createHeartbeatSpy = vi.spyOn(heartbeat, 'createPhaseStatusHeartbeatController');

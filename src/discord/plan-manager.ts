@@ -19,10 +19,10 @@ import {
   formatEvidenceSummary,
 } from './verification-evidence.js';
 import type {
-  PhaseEvidenceSummary,
+  RunVerificationEvidence,
   VerificationEvidence,
 } from './verification-evidence.js';
-export type { VerificationEvidence } from './verification-evidence.js';
+export type { RunVerificationEvidence, VerificationEvidence } from './verification-evidence.js';
 
 const PLAN_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
   profile: 'plan_phase',
@@ -1365,7 +1365,7 @@ export function buildPhasePrompt(
 export function buildPostRunSummary(
   phases: PlanPhases,
   budgetChars = 800,
-): { text: string; evidence: PhaseEvidenceSummary[] } {
+): { text: string; evidence: RunVerificationEvidence[] } {
   const evidence = collectRunEvidence(phases.phases);
   if (phases.phases.length === 0) return { text: '', evidence };
 

@@ -1387,7 +1387,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               'plan:auto-implement:progress',
             );
           },
-          onRunComplete: async (finalContent: string) => {
+          onRunComplete: async ({ content: finalContent, evidence }) => {
+            params.log?.info(
+              { planId, evidence },
+              'plan:auto-implement:completion evidence',
+            );
             const sentMsg = await outcomeMsgPromise;
             if (sentMsg) {
               try {
@@ -1957,7 +1961,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       try {
                         const phases = readPhasesFile(phasesFilePath, { log: params.log });
                         const budget = 2000 - summaryMsg.length - 50;
-                        const { text } = buildPostRunSummary(phases, budget);
+                        const { text, evidence } = buildPostRunSummary(phases, budget);
+                        params.log?.info({ planId, phasesRun, evidence }, 'plan-run: completion evidence');
                         if (text) {
                           summaryMsg += `\n${text}`;
                         }

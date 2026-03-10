@@ -13,7 +13,7 @@ import {
 } from './plan-commands.js';
 import type { HandlePlanCommandOpts, PlanFileHeader } from './plan-commands.js';
 import { runNextPhase, resolveProjectCwd, readPhasesFile, buildPostRunSummary } from './plan-manager.js';
-import type { PlanRunEvent } from './plan-manager.js';
+import type { PlanRunEvent, RunVerificationEvidence } from './plan-manager.js';
 import type { TaskStore } from '../tasks/store.js';
 import type { LongRunWatchdog } from './long-run-watchdog.js';
 import {
@@ -75,8 +75,8 @@ export type PlanContext = {
   toolAwareStreaming?: boolean;
   /** When true, suppresses the post-run completion message to the originating channel. Used by forge auto-implement. */
   skipCompletionNotify?: boolean;
-  /** Called with the final completion content after the run finishes. Allows callers (e.g. forge auto-implement) to consume the outcome without a race against Discord status messages. */
-  onRunComplete?: (content: string) => Promise<void>;
+  /** Called with the final completion payload after the run finishes. Allows callers (e.g. forge auto-implement) to consume the outcome without a race against Discord status messages. */
+  onRunComplete?: (result: { content: string; evidence: RunVerificationEvidence[] }) => Promise<void>;
   /** Called after a backing task is closed, so callers can sync Discord thread tags. */
   onTaskClosed?: (taskId: string) => void;
   /** Optional lifecycle watchdog for long-running plan runs. */
@@ -602,10 +602,12 @@ export async function executePlanAction(
           if (autoClosed) {
             lines.push('Plan auto-closed — all phases terminal.');
           }
+          let finalEvidence: RunVerificationEvidence[] = [];
           try {
             const phases = readPhasesFile(prepResult.phasesFilePath, { log: planCtx.log });
             const budget = Math.max(0, 2000 - lines.join('\n').length - 50);
             const { text, evidence } = buildPostRunSummary(phases, budget);
+            finalEvidence = evidence;
             planCtx.log?.info({ planId: runPlanId, phasesRun, evidence }, 'plan:action:run complete evidence');
             if (text) {
               lines.push(text);
@@ -657,9 +659,9 @@ export async function executePlanAction(
             }
           }
 
-          // Notify caller (e.g. forge auto-implement) with the final content — best-effort.
+          // Notify caller (e.g. forge auto-implement) with the final completion payload — best-effort.
           try {
-            await planCtx.onRunComplete?.(finalContent);
+            await planCtx.onRunComplete?.({ content: finalContent, evidence: finalEvidence });
           } catch {
             // best-effort
           }

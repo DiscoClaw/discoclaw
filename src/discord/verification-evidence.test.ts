@@ -132,7 +132,7 @@ describe('formatEvidenceSummary', () => {
 });
 
 describe('collectRunEvidence', () => {
-  it('collects mixed evidence states across run phases', () => {
+  it('flattens mixed evidence states across run phases', () => {
     const buildEvidence = createEvidence({
       kind: 'build',
       status: 'pass',
@@ -173,28 +173,10 @@ describe('collectRunEvidence', () => {
         phaseTitle: 'Implement command parsing',
         phaseKind: 'implement',
         phaseStatus: 'done',
-        evidence: [buildEvidence],
-      },
-      {
-        phaseId: 'phase-2',
-        phaseTitle: 'Read final diff',
-        phaseKind: 'read',
-        phaseStatus: 'done',
-        evidence: undefined,
-      },
-      {
-        phaseId: 'phase-3',
-        phaseTitle: 'Implement cleanup',
-        phaseKind: 'implement',
-        phaseStatus: 'pending',
-        evidence: undefined,
-      },
-      {
-        phaseId: 'phase-4',
-        phaseTitle: 'Implement tests',
-        phaseKind: 'implement',
-        phaseStatus: 'done',
-        evidence: [],
+        kind: 'build',
+        status: 'pass',
+        command: 'pnpm build',
+        summary: 'dist built cleanly',
       },
     ]);
   });
@@ -205,27 +187,65 @@ describe('collectRunEvidence', () => {
 
   it('preserves phase ordering', () => {
     const summaries = collectRunEvidence([
-      { id: 'phase-2', title: 'Second', kind: 'audit', status: 'failed' },
+      {
+        id: 'phase-2',
+        title: 'Second',
+        kind: 'audit',
+        status: 'failed',
+        evidence: [{ kind: 'audit', status: 'fail', reason: 'Blocking findings remain' }],
+      },
       { id: 'phase-1', title: 'First', kind: 'read', status: 'done' },
-      { id: 'phase-3', title: 'Third', kind: 'implement', status: 'skipped' },
+      {
+        id: 'phase-3',
+        title: 'Third',
+        kind: 'implement',
+        status: 'skipped',
+        evidence: [{ kind: 'build', status: 'pass', summary: 'already built' }],
+      },
     ]);
 
     expect(summaries.map((summary) => summary.phaseId)).toEqual([
       'phase-2',
-      'phase-1',
       'phase-3',
     ]);
   });
 
-  it('copies phase kind and status through unchanged', () => {
+  it('copies phase metadata through unchanged', () => {
     expect(collectRunEvidence([
-      { id: 'phase-1', title: 'Audit', kind: 'audit', status: 'failed' },
+      {
+        id: 'phase-1',
+        title: 'Audit',
+        kind: 'audit',
+        status: 'failed',
+        evidence: [{ kind: 'audit', status: 'fail', reason: 'Needs revision' }],
+      },
       { id: 'phase-2', title: 'Read', kind: 'read', status: 'done' },
-      { id: 'phase-3', title: 'Implement', kind: 'implement', status: 'in-progress' },
+      {
+        id: 'phase-3',
+        title: 'Implement',
+        kind: 'implement',
+        status: 'in-progress',
+        evidence: [{ kind: 'test', status: 'pass', summary: 'targeted suite passed' }],
+      },
     ])).toEqual([
-      { phaseId: 'phase-1', phaseTitle: 'Audit', phaseKind: 'audit', phaseStatus: 'failed', evidence: undefined },
-      { phaseId: 'phase-2', phaseTitle: 'Read', phaseKind: 'read', phaseStatus: 'done', evidence: undefined },
-      { phaseId: 'phase-3', phaseTitle: 'Implement', phaseKind: 'implement', phaseStatus: 'in-progress', evidence: undefined },
+      {
+        phaseId: 'phase-1',
+        phaseTitle: 'Audit',
+        phaseKind: 'audit',
+        phaseStatus: 'failed',
+        kind: 'audit',
+        status: 'fail',
+        reason: 'Needs revision',
+      },
+      {
+        phaseId: 'phase-3',
+        phaseTitle: 'Implement',
+        phaseKind: 'implement',
+        phaseStatus: 'in-progress',
+        kind: 'test',
+        status: 'pass',
+        summary: 'targeted suite passed',
+      },
     ]);
   });
 });

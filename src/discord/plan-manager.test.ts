@@ -3796,14 +3796,9 @@ describe('buildPostRunSummary', () => {
         phaseTitle: 'Implement foo',
         phaseKind: 'implement',
         phaseStatus: 'done',
-        evidence: [{ kind: 'build', status: 'pass', summary: 'dist built cleanly' }],
-      },
-      {
-        phaseId: 'phase-2',
-        phaseTitle: 'Post-implementation audit',
-        phaseKind: 'audit',
-        phaseStatus: 'done',
-        evidence: undefined,
+        kind: 'build',
+        status: 'pass',
+        summary: 'dist built cleanly',
       },
     ]);
   });

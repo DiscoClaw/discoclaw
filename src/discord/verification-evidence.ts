@@ -35,12 +35,11 @@ export type RunEvidencePhase = {
   evidence?: VerificationEvidence[];
 };
 
-export type PhaseEvidenceSummary = {
+export type RunVerificationEvidence = VerificationEvidence & {
   phaseId: string;
   phaseTitle: string;
   phaseKind: PhaseEvidenceKind;
   phaseStatus: PhaseEvidenceStatus;
-  evidence: VerificationEvidence[] | undefined;
 };
 
 const VALID_EVIDENCE_KINDS = new Set<string>(VERIFICATION_EVIDENCE_KINDS);
@@ -172,12 +171,20 @@ export function formatEvidenceSummary(evidence: VerificationEvidence): string {
   return `${evidence.kind}: ${evidence.status}`;
 }
 
-export function collectRunEvidence(phases: RunEvidencePhase[]): PhaseEvidenceSummary[] {
-  return phases.map((phase) => ({
-    phaseId: phase.id,
-    phaseTitle: phase.title,
-    phaseKind: phase.kind,
-    phaseStatus: phase.status,
-    evidence: phase.evidence ? [...phase.evidence] : phase.evidence,
-  }));
+export function collectRunEvidence(phases: RunEvidencePhase[]): RunVerificationEvidence[] {
+  const evidence: RunVerificationEvidence[] = [];
+
+  for (const phase of phases) {
+    for (const record of phase.evidence ?? []) {
+      evidence.push({
+        phaseId: phase.id,
+        phaseTitle: phase.title,
+        phaseKind: phase.kind,
+        phaseStatus: phase.status,
+        ...record,
+      });
+    }
+  }
+
+  return evidence;
 }
