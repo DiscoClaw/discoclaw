@@ -31,7 +31,7 @@ export const AUDIT_CRITERIA_LINES: string[] = [
   '5. Risk gaps (unidentified failure modes, missing rollback plans)',
   '6. Test coverage gaps (missing edge cases, untested error paths)',
   '7. Dependency issues (circular deps, version conflicts, missing imports)',
-  `8. Documentation gaps (does the plan update relevant docs, README, .env.example, INVENTORY.md, inline comments, or \`${COMPOUND_LESSONS_PATH}\` when the work codifies a durable engineering lesson? If the plan closes a recurring workflow/process/quality gap or promotes lessons from audits/forge runs, it should update \`${COMPOUND_LESSONS_PATH}\` or explicitly explain why no durable lesson is produced. Missing doc updates are medium severity.)`,
+  `8. Documentation gaps (does the plan update relevant docs, README, .env.example, INVENTORY.md, inline comments, or \`${COMPOUND_LESSONS_PATH}\` when the work codifies a durable engineering lesson? Trigger sources include audits, forge runs, postmortems, incidents, task/chat context, and repeated workflow failures. Trigger-driven changes must record a lesson-promotion decision: update an existing \`${COMPOUND_LESSONS_PATH}\` entry, add a materially distinct new entry, or explicitly explain why no promotion is needed. Review steps must include a dedup check before merge. Missing doc updates are medium severity.)`,
 ];
 
 // ---------------------------------------------------------------------------
@@ -312,8 +312,8 @@ export function buildDrafterPrompt(
     '- Identify real risks and dependencies based on the actual codebase.',
     '- Write concrete, verifiable test cases.',
     '- Include documentation updates in the Changes section when adding new features, config options, or public APIs. Consider: docs/*.md, .env.example files, README.md, INVENTORY.md, and inline code comments.',
-    `- Check the existing \`${COMPOUND_LESSONS_PATH}\` entries before proposing a new lesson. When the task reveals a reusable pattern, add a new \`${COMPOUND_LESSONS_PATH}\` entry to the plan's \`## Changes\` section instead of rediscovering or duplicating an existing lesson.`,
-    `- When the task codifies a reusable engineering lesson from audits, forge runs, incidents, or repeated workflow failures, treat \`${COMPOUND_LESSONS_PATH}\` as the single checked-in durable artifact. Add it to \`## Changes\` and spell out the artifact contract being introduced or updated: entry format, ownership, update/promotion rules, and review expectations. Do not treat plan-local \`## Audit Log\` or \`## Implementation Notes\` as the durable lesson store.`,
+    `- Check the existing \`${COMPOUND_LESSONS_PATH}\` entries before proposing a lesson. When the task reveals a reusable pattern, update the existing entry if it already covers the pattern. Add a new \`${COMPOUND_LESSONS_PATH}\` entry to the plan's \`## Changes\` section only when the lesson is materially distinct.`,
+    `- When the task codifies a reusable engineering lesson from audits, forge runs, postmortems, incidents, task threads, implementation chat, or repeated workflow failures, treat \`${COMPOUND_LESSONS_PATH}\` as the single checked-in durable artifact. Add it to \`## Changes\` and spell out the artifact contract being introduced or updated: entry format, ownership, update/promotion rules, and review expectations, including the mandatory before-merge promotion decision and dedup check. Do not treat plan-local \`## Audit Log\` or \`## Implementation Notes\` as the durable lesson store.`,
     '- Set the status to DRAFT.',
     '- DO NOT echo the template verbatim — every section must contain substantive analysis of the actual codebase.',
     '- The plan header (ID, Task, Created, Status, Project) is managed by the system — do not include it. Start your output with `# Plan:` followed by the plan title.',
@@ -415,7 +415,7 @@ export function buildAuditorPrompt(
     '- Prefer the smallest correct unblocker. If narrowing the contract, docs, or tests resolves the issue, recommend that instead of expanding implementation scope.',
     '- A blocking concern must cite the contradictory plan text or a verified code fact.',
     '- If the plan claims a restricted subset of a broader capability, verify the exact gating primitive that enforces it (for example: category flags, explicit allowlist, permission check, dedicated parser path). If the plan only describes the restriction in prose, that is a blocking concern.',
-    `- If the plan claims to close a recurring workflow/process/quality gap by promoting lessons into durable guidance, verify that it uses \`${COMPOUND_LESSONS_PATH}\` as the checked-in artifact and specifies the intended format, ownership, update rules, and review expectations, or explicitly scopes that work out.`,
+    `- If the plan claims to close a recurring workflow/process/quality gap or promote lessons from audits, forge runs, postmortems, incidents, task threads, or implementation chat into durable guidance, verify that it uses \`${COMPOUND_LESSONS_PATH}\` as the checked-in artifact, specifies the intended format, ownership, update rules, and review expectations, and makes the review gate operational: an explicit promotion decision (update existing lesson, add materially distinct new lesson, or no promotion needed) plus a dedup check before merge.`,
     '- Report at most 3 blocking concerns in a single round; merge related issues.',
     '',
   );
@@ -536,7 +536,7 @@ export function buildRevisionPrompt(
     '- Keep the same plan structure and format.',
     '- In `## Changes`, every file entry must use a concrete backtick-wrapped repo-relative path (for example, `src/discord/forge-commands.ts`). Replace placeholder paths like `path/to/file.ts`.',
     '- If you keep or add a restriction claim ("read-only", "post-only", "only these actions"), rewrite it to name the exact enforcement mechanism. If no such mechanism exists, narrow the claim or add the necessary implementation work.',
-    `- If the task is about codifying reusable engineering lessons, route that work through \`${COMPOUND_LESSONS_PATH}\` as the single checked-in durable artifact. The revised plan should describe the format, ownership, update rules, and review expectations there instead of treating \`## Audit Log\` or \`## Implementation Notes\` as the durable lesson sink.`,
+    `- If the task is about codifying reusable engineering lessons, route that work through \`${COMPOUND_LESSONS_PATH}\` as the single checked-in durable artifact. The revised plan should describe the format, ownership, update rules, and mandatory review gate there, including search/dedup expectations and the explicit promotion decision (update an existing lesson, add a materially distinct new one, or record that no promotion is needed), instead of treating \`## Audit Log\` or \`## Implementation Notes\` as the durable lesson sink.`,
     '- Preserve resolutions from prior audit rounds that were accepted — do not weaken, revert, or remove them unless the current audit explicitly challenges them.',
     '- Prefer the smallest change that resolves the blocker. Narrow the contract, docs, or tests before adding new runtime machinery.',
     '- When an audit exposes a guarantee the runtime cannot actually provide, rewrite the plan to match the real guarantee unless the task explicitly requires the stronger one.',

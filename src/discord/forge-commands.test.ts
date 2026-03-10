@@ -701,15 +701,29 @@ describe('buildDrafterPrompt', () => {
     expect(prompt).toContain(`### Review 1 — ${today}`);
   });
 
-  it('tells the drafter to check existing lessons before proposing new ones', () => {
+  it('tells the drafter to update existing lessons before adding materially distinct new ones', () => {
     const prompt = buildDrafterPrompt(
       'Codify a reusable pattern',
       '# Plan: {{TITLE}}\n\n---\n\n## Objective',
       'ctx',
     );
 
-    expect(prompt).toContain('Check the existing `docs/compound-lessons.md` entries before proposing a new lesson.');
-    expect(prompt).toContain('add a new `docs/compound-lessons.md` entry to the plan\'s `## Changes` section');
+    expect(prompt).toContain('Check the existing `docs/compound-lessons.md` entries before proposing a lesson.');
+    expect(prompt).toContain('update the existing entry if it already covers the pattern');
+    expect(prompt).toContain('only when the lesson is materially distinct');
+  });
+
+  it('tells the drafter that postmortems and task or chat context are first-class lesson sources with a mandatory review gate', () => {
+    const prompt = buildDrafterPrompt(
+      'Codify a reusable pattern',
+      '# Plan: {{TITLE}}\n\n---\n\n## Objective',
+      'ctx',
+    );
+
+    expect(prompt).toContain('postmortems');
+    expect(prompt).toContain('task threads');
+    expect(prompt).toContain('implementation chat');
+    expect(prompt).toContain('mandatory before-merge promotion decision and dedup check');
   });
 });
 
@@ -783,6 +797,10 @@ describe('buildAuditorPrompt', () => {
     expect(prompt).toContain('docs/compound-lessons.md');
     expect(prompt).toContain('recurring workflow/process/quality gap');
     expect(prompt).toContain('format, ownership, update rules, and review expectations');
+    expect(prompt).toContain('explicit promotion decision');
+    expect(prompt).toContain('dedup check before merge');
+    expect(prompt).toContain('postmortems');
+    expect(prompt).toContain('task threads');
   });
 
   it('includes criteria near the start of the prompt before ## Plan to Audit', () => {
@@ -945,7 +963,9 @@ describe('buildRevisionPrompt', () => {
     const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
     expect(prompt).toContain('docs/compound-lessons.md');
     expect(prompt).toContain('single checked-in durable artifact');
-    expect(prompt).toContain('format, ownership, update rules, and review expectations');
+    expect(prompt).toContain('format, ownership, update rules, and mandatory review gate');
+    expect(prompt).toContain('search/dedup expectations');
+    expect(prompt).toContain('explicit promotion decision');
   });
 
   it('requires concrete repo-relative file paths in Changes during revision', () => {
