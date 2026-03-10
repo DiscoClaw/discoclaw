@@ -5,6 +5,10 @@ const OPENAI_TRANSCRIPTIONS_URL = 'https://api.openai.com/v1/audio/transcription
 const DEFAULT_SILENCE_THRESHOLD_MS = 1500;
 const WHISPER_MODEL = 'whisper-1';
 
+/**
+ * Maintainers: consult `docs/official-docs.md` before changing the OpenAI
+ * transcriptions endpoint, multipart field names, or model default here.
+ */
 export type OpenaiSttOpts = {
   apiKey: string;
   sampleRate: number;
@@ -23,6 +27,8 @@ export type OpenaiSttOpts = {
  * detected (no new audio for `silenceThresholdMs`). On transcribe, it
  * constructs a minimal WAV header, POSTs to the OpenAI transcriptions
  * endpoint, and fires the `onTranscription` callback with `isFinal: true`.
+ * Keep the multipart request shape aligned with the official OpenAI audio
+ * transcription docs.
  */
 export class OpenaiSttProvider implements SttProvider {
   private readonly apiKey: string;

@@ -7,6 +7,9 @@ import { OpenaiTtsProvider } from './tts-openai.js';
 /**
  * Create a TTS provider based on the voice config.
  *
+ * Maintainers: start with `docs/official-docs.md` before changing provider
+ * wiring, model defaults, endpoint assumptions, or request parameters here.
+ *
  * Currently supported: `cartesia` (Sonic-3 streaming via WebSocket, 24 kHz PCM),
  * `deepgram` (Aura streaming via REST, 24 kHz PCM),
  * `openai` (TTS API via REST, 24 kHz PCM).
