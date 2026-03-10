@@ -206,6 +206,14 @@ export function renderDashboardPage(): string {
       transform: translateY(-1px);
     }
 
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+      transform: none;
+      border-color: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
     button.secondary {
       background: rgba(255, 255, 255, 0.03);
     }
@@ -274,6 +282,18 @@ export function renderDashboardPage(): string {
       gap: 10px;
     }
 
+    .finding-section {
+      display: grid;
+      gap: 10px;
+    }
+
+    .finding-section-title {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
     .path-item,
     .finding {
       padding: 12px 14px;
@@ -287,8 +307,6 @@ export function renderDashboardPage(): string {
     .finding-meta {
       font-size: 12px;
       color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
       margin-bottom: 8px;
     }
 
@@ -297,14 +315,73 @@ export function renderDashboardPage(): string {
       line-height: 1.45;
     }
 
-    .finding-severity {
+    .finding-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .finding-id {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      word-break: break-word;
+    }
+
+    .finding-badges {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .finding-badge {
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .finding-badge.warn {
       color: var(--amber);
+      border-color: rgba(255, 201, 120, 0.22);
+    }
+
+    .finding-badge.error {
+      color: var(--red);
+      border-color: rgba(255, 138, 138, 0.26);
+    }
+
+    .finding-badge.info {
+      color: var(--cyan);
+      border-color: rgba(90, 233, 255, 0.24);
+    }
+
+    .finding-badge.fixable {
+      color: var(--green);
+      border-color: rgba(125, 255, 176, 0.24);
+    }
+
+    .finding-body {
+      line-height: 1.5;
     }
 
     .finding-recommendation {
       color: var(--muted);
       margin-top: 8px;
       line-height: 1.45;
+    }
+
+    .doctor-helper {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
     }
 
     .runtime-grid {
@@ -349,15 +426,15 @@ export function renderDashboardPage(): string {
     <section class="hero">
       <div class="hero-bar">
         <div>
-          <div class="eyebrow">Discoclaw Local Dashboard</div>
-          <h1>Operator surface over HTTP</h1>
+          <div class="eyebrow">Discoclaw Control Panel</div>
+          <h1>Local Control Panel</h1>
         </div>
-        <button id="refresh-btn" type="button">Refresh snapshot</button>
+        <button id="refresh-btn" type="button">Refresh</button>
       </div>
-      <p class="hero-copy">Control plane for the local Discoclaw service. By default it is loopback-only; optional trusted hosts can expose it on a private network without disabling Host-header checks.</p>
+      <p class="hero-copy">Check service health, review settings, and make common changes from one place. This dashboard stays local by default.</p>
       <div class="hero-status">
         <div id="hero-service-pill" class="pill">Service: loading</div>
-        <div id="hero-runtime-pill" class="pill">Runtime overrides: loading</div>
+        <div id="hero-runtime-pill" class="pill">Special settings: loading</div>
       </div>
       <div id="hero-status" class="status"></div>
     </section>
@@ -433,14 +510,15 @@ export function renderDashboardPage(): string {
         <div class="card-header">
           <div>
             <h2>Config Doctor</h2>
-            <p class="card-copy">Review doctor findings, then apply automated fixes when appropriate.</p>
+            <p class="card-copy">Scan for config problems and cleanup suggestions. Safe fixes can be applied automatically; review-only items stay listed for manual cleanup.</p>
           </div>
           <div class="actions">
-            <button id="doctor-btn" type="button">Doctor</button>
-            <button id="doctor-fix-btn" type="button">Fix</button>
+            <button id="doctor-btn" type="button">Scan Now</button>
+            <button id="doctor-fix-btn" type="button" disabled>Apply Safe Fixes</button>
           </div>
         </div>
         <div id="doctor-summary" class="status"></div>
+        <div id="doctor-helper" class="doctor-helper"></div>
         <div id="doctor-findings" class="finding-list"></div>
       </section>
 
@@ -468,7 +546,9 @@ export function renderDashboardPage(): string {
     const heroRuntimePill = document.getElementById('hero-runtime-pill');
     const serviceStatus = document.getElementById('service-status');
     const doctorSummary = document.getElementById('doctor-summary');
+    const doctorHelper = document.getElementById('doctor-helper');
     const doctorFindings = document.getElementById('doctor-findings');
+    const doctorFixButton = document.getElementById('doctor-fix-btn');
     const modelStatus = document.getElementById('model-status');
     const roleInput = document.getElementById('role-input');
     const modelInput = document.getElementById('model-input');
@@ -549,6 +629,22 @@ export function renderDashboardPage(): string {
       modelInput.select();
     }
 
+    function formatServicePill(summary) {
+      const normalized = String(summary || '').toLowerCase();
+      if (normalized.includes('active (running)')) return 'running';
+      if (normalized.includes('activating')) return 'starting';
+      if (normalized.includes('failed')) return 'failed';
+      if (normalized.includes('inactive') || normalized.includes('dead')) return 'stopped';
+      return String(summary || 'unknown');
+    }
+
+    function formatRuntimePill(overrides) {
+      const parts = [];
+      if (overrides.fastRuntime) parts.push('fast=' + overrides.fastRuntime);
+      if (overrides.voiceRuntime) parts.push('voice=' + overrides.voiceRuntime);
+      return parts.length > 0 ? parts.join(' | ') : 'defaults';
+    }
+
     function renderSnapshot(snapshot) {
       lastSnapshot = snapshot;
 
@@ -598,49 +694,111 @@ export function renderDashboardPage(): string {
       appendRuntimeOverride(runtimeOverrides, 'fast runtime', snapshot.runtimeOverrides.fastRuntime || 'default');
       appendRuntimeOverride(runtimeOverrides, 'voice runtime', snapshot.runtimeOverrides.voiceRuntime || 'default');
 
-      heroServicePill.textContent = 'Service: ' + snapshot.serviceSummary;
-      heroRuntimePill.textContent = 'Runtime overrides: fast=' + (snapshot.runtimeOverrides.fastRuntime || 'default')
-        + ' voice=' + (snapshot.runtimeOverrides.voiceRuntime || 'default');
+      heroServicePill.textContent = 'Service: ' + formatServicePill(snapshot.serviceSummary);
+      heroRuntimePill.textContent = 'Special settings: ' + formatRuntimePill(snapshot.runtimeOverrides);
       setStatus(serviceStatus, snapshot.serviceSummary, 'ok');
     }
 
     function renderDoctor(report, summary) {
+      const findings = Array.isArray(report.findings) ? report.findings : [];
+      const autoFixableCount = findings.filter((finding) => finding.autoFixable).length;
+      const attentionFindings = findings.filter((finding) => finding.severity !== 'info');
+      const cleanupFindings = findings.filter((finding) => finding.severity === 'info');
+
+      doctorFixButton.disabled = autoFixableCount === 0;
+      doctorFixButton.dataset.autoFixableCount = String(autoFixableCount);
+
+      if (findings.length === 0) {
+        doctorHelper.textContent = 'Nothing needs attention. Config looks clean.';
+      } else if (autoFixableCount > 0) {
+        doctorHelper.textContent = autoFixableCount + ' safe auto-fix'
+          + (autoFixableCount === 1 ? ' is' : 'es are')
+          + ' available. Review-only items will stay listed below.';
+      } else if (attentionFindings.length === 0) {
+        doctorHelper.textContent = 'These are cleanup suggestions only. Nothing here can be changed automatically.';
+      } else {
+        doctorHelper.textContent = 'Review the items below. None of them can be changed automatically.';
+      }
+
       clearNode(doctorFindings);
-      if (!report.findings || report.findings.length === 0) {
+      if (findings.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = 'No doctor findings.';
         doctorFindings.append(empty);
       } else {
-        report.findings.forEach((finding) => {
+        const renderSection = (title, sectionFindings) => {
+          if (!sectionFindings.length) return;
+
+          const section = document.createElement('div');
+          section.className = 'finding-section';
+
+          const heading = document.createElement('div');
+          heading.className = 'finding-section-title';
+          heading.textContent = title;
+          section.append(heading);
+
+          sectionFindings.forEach((finding) => {
           const wrapper = document.createElement('div');
           wrapper.className = 'finding';
 
+          const header = document.createElement('div');
+          header.className = 'finding-header';
+
           const meta = document.createElement('div');
           meta.className = 'finding-meta';
-          meta.textContent = finding.id + ' ';
+
+          const id = document.createElement('div');
+          id.className = 'finding-id';
+          id.textContent = finding.id;
+          meta.append(id);
+
+          const badges = document.createElement('div');
+          badges.className = 'finding-badges';
 
           const severity = document.createElement('span');
-          severity.className = 'finding-severity';
-          severity.textContent = '[' + finding.severity + ']';
-          meta.append(severity);
+          severity.className = 'finding-badge ' + finding.severity;
+          severity.textContent = finding.severity === 'info'
+            ? 'cleanup'
+            : finding.severity === 'warn'
+              ? 'review'
+              : 'problem';
+          badges.append(severity);
+
+          const action = document.createElement('span');
+          action.className = 'finding-badge ' + (finding.autoFixable ? 'fixable' : 'manual');
+          action.textContent = finding.autoFixable
+            ? 'safe auto-fix'
+            : finding.severity === 'info'
+              ? 'manual cleanup'
+              : 'manual review';
+          badges.append(action);
+
+          header.append(meta, badges);
 
           const message = document.createElement('div');
+          message.className = 'finding-body';
           message.textContent = finding.message;
 
           const recommendation = document.createElement('div');
           recommendation.className = 'finding-recommendation';
           recommendation.textContent = finding.recommendation || '';
 
-          wrapper.append(meta, message);
+          wrapper.append(header, message);
           if (finding.recommendation) wrapper.append(recommendation);
-          doctorFindings.append(wrapper);
-        });
+          section.append(wrapper);
+          });
+
+          doctorFindings.append(section);
+        };
+
+        renderSection('Needs attention', attentionFindings);
+        renderSection('Cleanup suggestions', cleanupFindings);
       }
 
-      const tone = report.findings && report.findings.some((finding) => finding.severity === 'error')
+      const tone = findings.some((finding) => finding.severity === 'error')
         ? 'error'
-        : report.findings && report.findings.some((finding) => finding.severity === 'warn')
+        : findings.some((finding) => finding.severity === 'warn')
           ? 'warn'
           : 'ok';
       setStatus(doctorSummary, summary, tone);
@@ -711,14 +869,16 @@ export function renderDashboardPage(): string {
     document.getElementById('doctor-btn').addEventListener('click', async () => {
       try {
         await refreshDoctor(false);
-        setStatus(heroStatus, 'Doctor completed.', 'ok');
+        setStatus(heroStatus, 'Doctor scan completed.', 'ok');
       } catch (error) {
         setStatus(doctorSummary, String(error), 'error');
       }
     });
 
-    document.getElementById('doctor-fix-btn').addEventListener('click', async () => {
-      if (!window.confirm('Apply automated config doctor fixes?')) return;
+    doctorFixButton.addEventListener('click', async () => {
+      const autoFixableCount = Number(doctorFixButton.dataset.autoFixableCount || '0');
+      if (autoFixableCount <= 0) return;
+      if (!window.confirm('Apply ' + autoFixableCount + ' safe config fix' + (autoFixableCount === 1 ? '' : 'es') + '?')) return;
       try {
         const response = await fetchJson('/api/doctor/fix', {
           method: 'POST',
@@ -729,7 +889,7 @@ export function renderDashboardPage(): string {
         renderDoctor(response.report, response.summary);
         setStatus(
           doctorSummary,
-          'Applied=' + response.result.applied.length + ' Skipped=' + response.result.skipped.length + ' Errors=' + response.result.errors.length,
+          'Applied safe fixes=' + response.result.applied.length + ' Remaining review-only=' + response.report.findings.length + ' Errors=' + response.result.errors.length,
           response.result.errors.length > 0 ? 'error' : 'ok',
         );
         setStatus(heroStatus, response.message, 'ok');

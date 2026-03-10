@@ -9,8 +9,18 @@ import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy } from '../ru
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { parseAuditVerdict } from './forge-audit-verdict.js';
+import { hasAuditSeveritySignal } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { extractFirstJsonValue } from './json-extract.js';
+import {
+  coerceEvidenceArray,
+  createEvidence,
+  formatEvidenceSummary,
+} from './verification-evidence.js';
+import type {
+  VerificationEvidence,
+} from './verification-evidence.js';
+export type { VerificationEvidence } from './verification-evidence.js';
 
 const PLAN_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
   profile: 'plan_phase',
@@ -52,6 +62,7 @@ export type PlanPhase = {
   modifiedFiles?: string[];
   failureHashes?: Record<string, string>;
   auditConvergence?: AuditConvergenceState;
+  evidence?: VerificationEvidence[];
 };
 
 export type PlanPhases = {
@@ -63,8 +74,15 @@ export type PlanPhases = {
   updatedAt: string;
 };
 
-export type PlanPhasesStateV1 = PlanPhases & {
+type PlanPhaseStateV1 = Omit<PlanPhase, 'evidence'>;
+
+export type PlanPhasesStateV1 = Omit<PlanPhases, 'phases'> & {
   version: 1;
+  phases: PlanPhaseStateV1[];
+};
+
+export type PlanPhasesStateV2 = PlanPhases & {
+  version: 2;
 };
 
 export type PlanRunEvent =
@@ -133,9 +151,12 @@ function isRolloutPathMissingError(error?: string): boolean {
 
 const VALID_STATUSES: Set<string> = new Set(['pending', 'in-progress', 'done', 'failed', 'skipped']);
 const VALID_KINDS: Set<string> = new Set(['implement', 'read', 'audit']);
-const PHASES_STATE_VERSION = 1;
+const PHASES_STATE_VERSION = 2;
 const AUDIT_CONVERGENCE_REPEAT_LIMIT = 2;
 const NON_TERMINAL_PROGRESS_LINE_RE = /^[ \t]*\[progress\].*(?:\r?\n|$)/gim;
+const PHASE_EVIDENCE_TRAILER_RE = /(?:^|\n)\*\*Phase Evidence:\*\*\s*([^\n]*)\s*$/;
+const AUDIT_CONCERN_LINE_RE = /^\s*\**Concern\s+(\d+)\s*:\s*(.+?)\**\s*$/i;
+const AUDIT_SEVERITY_LINE_RE = /^\s*\**Severity:\s*(blocking|high|medium|minor|low|suggestion|none)\**\s*$/i;
 
 /** Known workspace filenames that should be normalized to workspace/ prefix. */
 const KNOWN_WORKSPACE_FILES = new Set([
@@ -149,6 +170,138 @@ const PROJECT_DIRS: Record<string, string> = {
 
 function sanitizePhaseOutput(text: string): string {
   return text.replace(NON_TERMINAL_PROGRESS_LINE_RE, '');
+}
+
+function splitPhaseEvidenceTrailer(output: string): {
+  output: string;
+  trailer: string | undefined;
+} {
+  const match = output.match(PHASE_EVIDENCE_TRAILER_RE);
+  if (!match) {
+    return { output: output.trim(), trailer: undefined };
+  }
+
+  const trailerStart = match.index ?? 0;
+  return {
+    output: output.slice(0, trailerStart).trim(),
+    trailer: match[1],
+  };
+}
+
+function extractPhaseEvidenceTrailer(output: string): {
+  output: string;
+  evidence: VerificationEvidence[] | undefined;
+} {
+  const extracted = splitPhaseEvidenceTrailer(output);
+  if (extracted.trailer === undefined) {
+    return { output: extracted.output, evidence: undefined };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extracted.trailer);
+  } catch {
+    throw new Error('Phase evidence trailer must contain valid JSON');
+  }
+
+  const implementEvidence = coerceEvidenceArray(parsed, 'phase output evidence', {
+    allowedKinds: ['build', 'test'],
+  });
+  return {
+    output: extracted.output,
+    evidence: implementEvidence,
+  };
+}
+
+function normalizeAuditSeverityLabel(raw: string | undefined): AuditVerdict['maxSeverity'] | null {
+  if (!raw) return null;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'high') return 'blocking';
+  if (normalized === 'low') return 'minor';
+  if (
+    normalized === 'blocking' ||
+    normalized === 'medium' ||
+    normalized === 'minor' ||
+    normalized === 'suggestion' ||
+    normalized === 'none'
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function summarizeAuditFailureTitles(titles: string[]): string | undefined {
+  const uniqueTitles = [...new Set(titles.map((title) => title.trim()).filter(Boolean))];
+  if (uniqueTitles.length === 0) return undefined;
+  if (uniqueTitles.length === 1) return uniqueTitles[0];
+  if (uniqueTitles.length === 2) return `${uniqueTitles[0]}; ${uniqueTitles[1]}`;
+  return `${uniqueTitles[0]}; ${uniqueTitles[1]}; +${uniqueTitles.length - 2} more`;
+}
+
+function extractAuditFailureReason(auditOutput: string): string {
+  const jsonCandidate = extractFirstJsonValue(auditOutput, { objectOnly: true });
+  if (jsonCandidate) {
+    try {
+      const parsed = JSON.parse(jsonCandidate) as {
+        summary?: unknown;
+        concerns?: Array<{ title?: unknown; severity?: unknown }>;
+        verdict?: { summary?: unknown; concerns?: Array<{ title?: unknown; severity?: unknown }> };
+      };
+      const verdictPayload = parsed.verdict && typeof parsed.verdict === 'object'
+        ? parsed.verdict
+        : parsed;
+      const blockingTitles = (verdictPayload.concerns ?? [])
+        .filter((concern) => normalizeAuditSeverityLabel(
+          typeof concern?.severity === 'string' ? concern.severity : undefined,
+        ) === 'blocking')
+        .map((concern) => (typeof concern?.title === 'string' ? concern.title.trim() : ''))
+        .filter(Boolean);
+      const summarizedTitles = summarizeAuditFailureTitles(blockingTitles);
+      if (summarizedTitles) return summarizedTitles;
+      if (typeof verdictPayload.summary === 'string' && verdictPayload.summary.trim()) {
+        return verdictPayload.summary.trim();
+      }
+    } catch {
+      // Fall through to legacy text parsing.
+    }
+  }
+
+  const blockingTitles: string[] = [];
+  let currentConcernTitle: string | undefined;
+  for (const line of auditOutput.split('\n')) {
+    const concernMatch = line.match(AUDIT_CONCERN_LINE_RE);
+    if (concernMatch) {
+      currentConcernTitle = concernMatch[2]?.trim().replace(/\**$/u, '') || undefined;
+      continue;
+    }
+
+    const severityMatch = line.match(AUDIT_SEVERITY_LINE_RE);
+    if (!severityMatch) continue;
+
+    if (normalizeAuditSeverityLabel(severityMatch[1]) === 'blocking' && currentConcernTitle) {
+      blockingTitles.push(currentConcernTitle);
+    }
+    currentConcernTitle = undefined;
+  }
+
+  return summarizeAuditFailureTitles(blockingTitles) ?? 'Audit found blocking severity deviations';
+}
+
+function getPhaseSectionStarts(content: string): number[] {
+  return [...content.matchAll(/^## phase-\d+:\s.+$/gm)].map((match) => match.index!);
+}
+
+function splitPhaseSections(content: string): string[] {
+  const starts = getPhaseSectionStarts(content);
+  const sections: string[] = [];
+
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i]!;
+    const end = starts[i + 1] ?? content.length;
+    sections.push(content.slice(start, end).trim());
+  }
+
+  return sections;
 }
 
 
@@ -583,6 +736,9 @@ export function serializePhases(phases: PlanPhases): string {
     if (phase.auditConvergence) {
       lines.push(`**Audit convergence:** ${JSON.stringify(phase.auditConvergence)}`);
     }
+    if (phase.evidence) {
+      lines.push(`**Evidence:** ${JSON.stringify(phase.evidence)}`);
+    }
     lines.push('');
     lines.push(phase.description);
 
@@ -626,28 +782,34 @@ export function deserializePhases(content: string): PlanPhases {
   const updatedAt = updatedMatch?.[1]?.trim() ?? '';
   const planContentHash = hashMatch[1]!;
 
-  // Split into phase sections
-  const phaseSections = content.split(/^## /m).slice(1); // first split is the header
+  // Split only on real phase headers. Saved runtime output can contain arbitrary
+  // markdown headings, so plain /^## / splitting corrupts persisted transcripts.
+  const phaseSections = splitPhaseSections(content);
   const phases: PlanPhase[] = [];
 
   for (const section of phaseSections) {
-    const idTitleMatch = section.match(/^(phase-\d+):\s*(.+)$/m);
+    const idTitleMatch = section.match(/^## (phase-\d+):\s*(.+)$/m);
     if (!idTitleMatch) continue;
 
     const id = idTitleMatch[1]!;
     const title = idTitleMatch[2]!.trim();
 
-    const kindMatch = section.match(/^\*\*Kind:\*\*\s*(\S+)/m);
-    const statusMatch = section.match(/^\*\*Status:\*\*\s*(\S+)/m);
-    const contextMatch = section.match(/^\*\*Context:\*\*\s*(.+)$/m);
-    const dependsMatch = section.match(/^\*\*Depends on:\*\*\s*(.+)$/m);
-    const commitMatch = section.match(/^\*\*Git commit:\*\*\s*(\S+)/m);
-    const modifiedMatch = section.match(/^\*\*Modified files:\*\*\s*(.+)$/m);
-    const failureHashesMatch = section.match(/^\*\*Failure hashes:\*\*\s*(.+)$/m);
-    const auditConvergenceMatch = section.match(/^\*\*Audit convergence:\*\*\s*(.+)$/m);
-    const outputMatch = section.match(/^\*\*Output:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Error|Change spec):\*\*|\n---|\n$)/m);
-    const errorMatch = section.match(/^\*\*Error:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Output|Change spec):\*\*|\n---|\n$)/m);
-    const changeSpecMatch = section.match(/^\*\*Change spec:\*\*\n([\s\S]*?)(?=\n\*\*(?:Output|Error):\*\*|\n---|\n$)/m);
+    const metadataEnd = section.indexOf('\n\n');
+    const metadataBlock = metadataEnd === -1 ? section : section.slice(0, metadataEnd);
+    const body = metadataEnd === -1 ? '' : section.slice(metadataEnd + 2);
+
+    const kindMatch = metadataBlock.match(/^\*\*Kind:\*\*\s*(\S+)/m);
+    const statusMatch = metadataBlock.match(/^\*\*Status:\*\*\s*(\S+)/m);
+    const contextMatch = metadataBlock.match(/^\*\*Context:\*\*\s*(.+)$/m);
+    const dependsMatch = metadataBlock.match(/^\*\*Depends on:\*\*\s*(.+)$/m);
+    const commitMatch = metadataBlock.match(/^\*\*Git commit:\*\*\s*(\S+)/m);
+    const modifiedMatch = metadataBlock.match(/^\*\*Modified files:\*\*\s*(.+)$/m);
+    const failureHashesMatch = metadataBlock.match(/^\*\*Failure hashes:\*\*\s*(.+)$/m);
+    const auditConvergenceMatch = metadataBlock.match(/^\*\*Audit convergence:\*\*\s*(.+)$/m);
+    const evidenceMatch = metadataBlock.match(/^\*\*Evidence:\*\*\s*(.+)$/m);
+    const outputMatch = body.match(/(?:^|\n)\*\*Output:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Error|Change spec):\*\*|\n---\s*$|$)/);
+    const errorMatch = body.match(/(?:^|\n)\*\*Error:\*\*\s*([\s\S]*?)(?=\n\*\*(?:Output|Change spec):\*\*|\n---\s*$|$)/);
+    const changeSpecMatch = body.match(/(?:^|\n)\*\*Change spec:\*\*\n([\s\S]*?)(?=\n\*\*(?:Output|Error):\*\*|\n---\s*$|$)/);
 
     const kindValue = kindMatch?.[1]?.trim() ?? 'implement';
     const statusValue = statusMatch?.[1]?.trim() ?? 'pending';
@@ -670,15 +832,13 @@ export function deserializePhases(content: string): PlanPhases {
       : dependsRaw.split(',').map((s) => s.trim()).filter(Boolean);
 
     // Extract description: text between metadata lines and first **field or ---
-    const metadataEnd = section.indexOf('\n\n');
     let description = '';
-    if (metadataEnd !== -1) {
-      const afterMetadata = section.slice(metadataEnd + 2);
+    if (body.length > 0) {
       // Description is everything until the first **field or ---
-      const descEnd = afterMetadata.search(/^\*\*(Change spec|Output|Error|Modified files|Failure hashes|Audit convergence):\*\*/m);
-      const dashEnd = afterMetadata.indexOf('\n---');
-      const cutoff = descEnd >= 0 ? descEnd : (dashEnd >= 0 ? dashEnd : afterMetadata.length);
-      description = afterMetadata.slice(0, cutoff).trim();
+      const descEnd = body.search(/^\*\*(Change spec|Output|Error):\*\*/m);
+      const dashEnd = body.indexOf('\n---');
+      const cutoff = descEnd >= 0 ? descEnd : (dashEnd >= 0 ? dashEnd : body.length);
+      description = body.slice(0, cutoff).trim();
     }
 
     const phase: PlanPhase = {
@@ -714,6 +874,17 @@ export function deserializePhases(content: string): PlanPhases {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(`Malformed auditConvergence in ${id}: ${msg}`);
+      }
+    }
+    if (evidenceMatch) {
+      try {
+        phase.evidence = asEvidenceArray(
+          JSON.parse(evidenceMatch[1]!),
+          `evidence in ${id}`,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Malformed evidence in ${id}: ${msg}`);
       }
     }
 
@@ -879,6 +1050,7 @@ function clonePlanPhase(phase: PlanPhase): PlanPhase {
     contextFiles: [...phase.contextFiles],
     modifiedFiles: phase.modifiedFiles ? [...phase.modifiedFiles] : undefined,
     failureHashes: phase.failureHashes ? { ...phase.failureHashes } : undefined,
+    evidence: phase.evidence ? phase.evidence.map((entry) => ({ ...entry })) : undefined,
     auditConvergence: phase.auditConvergence
       ? {
           ...phase.auditConvergence,
@@ -929,6 +1101,7 @@ export function resequenceKeepingDone(
     phase.gitCommit = matched.gitCommit;
     phase.modifiedFiles = matched.modifiedFiles ? [...matched.modifiedFiles] : undefined;
     phase.failureHashes = matched.failureHashes ? { ...matched.failureHashes } : undefined;
+    phase.evidence = matched.evidence ? matched.evidence.map((entry) => ({ ...entry })) : undefined;
     phase.auditConvergence = matched.auditConvergence
       ? {
           ...matched.auditConvergence,
@@ -964,6 +1137,7 @@ export function resequenceKeepingDone(
         phase.gitCommit = undefined;
         phase.modifiedFiles = undefined;
         phase.failureHashes = undefined;
+        phase.evidence = undefined;
         phase.auditConvergence = undefined;
         break;
       }
@@ -980,6 +1154,7 @@ export function resequenceKeepingDone(
         phase.gitCommit = undefined;
         phase.modifiedFiles = undefined;
         phase.failureHashes = undefined;
+        phase.evidence = undefined;
         phase.auditConvergence = undefined;
         break;
       }
@@ -1008,7 +1183,8 @@ export function updatePhaseStatus(
   phaseId: string,
   status: PhaseStatus,
   output?: string,
-  error?: string,
+  error?: string | null,
+  evidence?: VerificationEvidence[] | null,
 ): PlanPhases {
   const now = new Date().toISOString().split('T')[0]!;
   return {
@@ -1020,7 +1196,10 @@ export function updatePhaseStatus(
         ...p,
         status,
         ...(output !== undefined ? { output } : {}),
-        ...(error !== undefined ? { error } : {}),
+        ...(error === null ? { error: undefined } : {}),
+        ...(error !== undefined && error !== null ? { error } : {}),
+        ...(evidence === null ? { evidence: undefined } : {}),
+        ...(evidence !== undefined && evidence !== null ? { evidence } : {}),
       };
     }),
   };
@@ -1102,8 +1281,12 @@ export function buildPhasePrompt(
 
     lines.push('## Instructions');
     lines.push('');
-    lines.push('Implement the specified changes using the Write, Edit, and Read tools.');
+    lines.push('Implement the specified changes using the Read, Write, Edit, Glob, Grep, and Bash tools as needed.');
+    lines.push('Use Bash for build/test verification when appropriate, and if you report verification results include the exact commands you ran.');
     lines.push('After making changes, output a brief summary of what was changed.');
+    lines.push('If you ran verification commands, end your response with a single final line in exactly this format:');
+    lines.push('**Phase Evidence:** [{"kind":"build","status":"pass","command":"pnpm build","summary":"dist built cleanly"}]');
+    lines.push('Use `[]` when no verification commands were run. Keep the JSON array on one line. Do not wrap it in code fences. Do not add any text after the evidence line.');
     lines.push("As you work, briefly narrate each step (e.g. 'Reading X...', 'Applying change to Y...') so progress is visible.");
   } else if (phase.kind === 'read') {
     lines.push('## Task');
@@ -1200,8 +1383,10 @@ export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): stri
 
     let line = `${indicator} **${phase.id}:** ${phase.title}${commit}${fileCount}`;
 
-    // For audit phases, append a one-line verdict extracted from output
-    if (phase.kind === 'audit' && phase.output) {
+    if (phase.evidence && phase.evidence.length > 0) {
+      line += ` — ${phase.evidence.map(formatEvidenceSummary).join(' · ')}`;
+    } else if (phase.kind === 'audit' && phase.output) {
+      // For audit phases, append a one-line verdict extracted from output
       const verdictMatch = phase.output.match(/\*\*Verdict:\*\*\s*(.+)/);
       if (verdictMatch) {
         line += ` — ${verdictMatch[1]!.trim()}`;
@@ -1507,8 +1692,8 @@ function writeTextAtomically(filePath: string, content: string): void {
   }
 }
 
-function serializePhasesStateJson(phases: PlanPhases): string {
-  const state: PlanPhasesStateV1 = {
+export function serializePhasesStateJson(phases: PlanPhases): string {
+  const state: PlanPhasesStateV2 = {
     version: PHASES_STATE_VERSION,
     ...phases,
   };
@@ -1572,7 +1757,39 @@ function asAuditConvergence(value: unknown, field: string): AuditConvergenceStat
   return parsed;
 }
 
-function deserializePhasesStateJson(raw: string): PlanPhases {
+function asEvidenceArray(value: unknown, field: string): VerificationEvidence[] {
+  return coerceEvidenceArray(value, field);
+}
+
+function migratePhasesStateJson(parsed: Record<string, unknown>): Record<string, unknown> {
+  if (parsed.version === PHASES_STATE_VERSION) {
+    return parsed;
+  }
+
+  if (parsed.version === 1) {
+    const phases = Array.isArray(parsed.phases)
+      ? parsed.phases.map((phase) => {
+        if (!phase || typeof phase !== 'object' || Array.isArray(phase)) {
+          return phase;
+        }
+        return {
+          ...(phase as Record<string, unknown>),
+          evidence: undefined,
+        };
+      })
+      : parsed.phases;
+
+    return {
+      ...parsed,
+      version: PHASES_STATE_VERSION,
+      phases,
+    };
+  }
+
+  throw new Error(`Malformed phases json: unsupported version '${String(parsed.version)}'`);
+}
+
+export function deserializePhasesStateJson(raw: string): PlanPhases {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -1583,10 +1800,7 @@ function deserializePhasesStateJson(raw: string): PlanPhases {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Malformed phases json: expected object');
   }
-  const obj = parsed as Record<string, unknown>;
-  if (obj.version !== PHASES_STATE_VERSION) {
-    throw new Error(`Malformed phases json: unsupported version '${String(obj.version)}'`);
-  }
+  const obj = migratePhasesStateJson(parsed as Record<string, unknown>);
 
   const phasesRaw = obj.phases;
   if (!Array.isArray(phasesRaw)) {
@@ -1626,6 +1840,9 @@ function deserializePhasesStateJson(raw: string): PlanPhases {
     if (p.auditConvergence !== undefined) {
       phase.auditConvergence = asAuditConvergence(p.auditConvergence, `phases[${idx}].auditConvergence`);
     }
+    if (p.evidence !== undefined) {
+      phase.evidence = asEvidenceArray(p.evidence, `phases[${idx}].evidence`);
+    }
     return phase;
   });
 
@@ -1646,9 +1863,9 @@ export async function executePhase(
   opts: PhaseExecutionOpts,
   injectedContext?: string,
 ): Promise<
-  | { status: 'done'; output: string }
+  | { status: 'done'; output: string; evidence?: VerificationEvidence[] }
   | { status: 'failed'; output: string; error: string }
-  | { status: 'audit_failed'; output: string; error: string; verdict: AuditVerdict }
+  | { status: 'audit_failed'; output: string; error: string; verdict: AuditVerdict; evidence: VerificationEvidence[] }
 > {
   // Derive tools from phase kind
   const tools = phase.kind === 'implement'
@@ -1695,16 +1912,53 @@ export async function executePhase(
     );
     const sanitizedOutput = sanitizePhaseOutput(output);
 
+    if (phase.kind === 'implement') {
+      const extracted = splitPhaseEvidenceTrailer(sanitizedOutput);
+      try {
+        const evidence = extracted.trailer === undefined
+          ? undefined
+          : extractPhaseEvidenceTrailer(sanitizedOutput).evidence;
+        return { status: 'done', output: extracted.output, evidence };
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        return { status: 'failed', output: extracted.output, error: `Invalid phase evidence trailer: ${errorMsg}` };
+      }
+    }
+
     if (phase.kind === 'audit') {
+      if (!hasAuditSeveritySignal(sanitizedOutput)) {
+        return {
+          status: 'failed',
+          output: sanitizedOutput,
+          error: 'Audit output missing severity markers; refusing to synthesize audit evidence from verdict-only text',
+        };
+      }
       const verdict = parseAuditVerdict(sanitizedOutput);
+      const evidence = [
+        verdict.shouldLoop
+          ? createEvidence({
+            kind: 'audit',
+            status: 'fail',
+            reason: extractAuditFailureReason(sanitizedOutput),
+          })
+          : createEvidence({
+            kind: 'audit',
+            status: 'pass',
+            summary: verdict.maxSeverity === 'none'
+              ? 'Audit passed with no concerns'
+              : `Audit passed with ${verdict.maxSeverity} non-blocking concerns`,
+          }),
+      ];
       if (verdict.shouldLoop) {
         return {
           status: 'audit_failed',
           output: sanitizedOutput,
           error: `Audit found ${verdict.maxSeverity} severity deviations`,
           verdict,
+          evidence,
         };
       }
+      return { status: 'done', output: sanitizedOutput, evidence };
     }
 
     return { status: 'done', output: sanitizedOutput };
@@ -1851,7 +2105,7 @@ export async function runNextPhase(
 
   // 5. Write in-progress status to disk
   await onProgress(`**${phase.id}**: Running ${phase.title}...`);
-  allPhases = updatePhaseStatus(allPhases, phase.id, 'in-progress');
+  allPhases = updatePhaseStatus(allPhases, phase.id, 'in-progress', undefined, null, null);
   writePhasesFile(phasesFilePath, allPhases);
 
   // 6. Git snapshot (null = git command failed, skip modified-files tracking)
@@ -2090,6 +2344,13 @@ export async function runNextPhase(
             output: lastAuditOutput,
             error: 'Fix loop exhausted after runtime error on re-audit',
             verdict: { maxSeverity: lastSeverity, shouldLoop: true },
+            evidence: [
+              createEvidence({
+                kind: 'audit',
+                status: 'fail',
+                reason: extractAuditFailureReason(lastAuditOutput),
+              }),
+            ],
           };
         }
       }
@@ -2152,8 +2413,9 @@ export async function runNextPhase(
   // 11. Write done/failed status to disk
   const sanitizedPhaseOutput = sanitizePhaseOutput(result.output);
   const diskStatus = result.status === 'audit_failed' ? 'failed' : result.status;
-  const diskError = result.status === 'done' ? undefined : result.error;
-  allPhases = updatePhaseStatus(allPhases, phase.id, diskStatus, sanitizedPhaseOutput, diskError);
+  const diskError = result.status === 'failed' ? (result.error ?? null) : null;
+  const diskEvidence = 'evidence' in result ? result.evidence : null;
+  allPhases = updatePhaseStatus(allPhases, phase.id, diskStatus, sanitizedPhaseOutput, diskError, diskEvidence);
   // Attach modifiedFiles and failureHashes to the phase
   allPhases = {
     ...allPhases,

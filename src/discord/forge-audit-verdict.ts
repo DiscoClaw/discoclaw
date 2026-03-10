@@ -40,6 +40,12 @@ function normalizeSeverity(raw: string | undefined): AuditSeverity | null {
   return null;
 }
 
+const LEGACY_SEVERITY_MARKER_PATTERNS = [
+  /\bseverity\b[:\s]*\**\s*(blocking|high|medium|minor|low|suggestion)\b/gi,
+  /\|\s*\**\s*(blocking|high|medium|minor|low|suggestion)\s*\**\s*\|/gi,
+  /\((blocking|high|medium|minor|low|suggestion)\)/gi,
+] as const;
+
 function maxSeverityFromList(severities: AuditSeverity[]): AuditSeverity {
   let max: AuditSeverity = 'none';
   for (const sev of severities) {
@@ -91,6 +97,36 @@ function tryParseJsonVerdict(auditText: string): AuditVerdict | null {
   return { maxSeverity, shouldLoop };
 }
 
+function hasJsonSeveritySignal(auditText: string): boolean {
+  const jsonCandidate = extractFirstJsonValue(auditText, { objectOnly: true });
+  if (!jsonCandidate) return false;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonCandidate);
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+
+  const payload = parsed as AuditVerdictPayload;
+  const verdictPayload = payload.verdict && typeof payload.verdict === 'object'
+    ? payload.verdict
+    : payload;
+
+  if (normalizeSeverity(verdictPayload.maxSeverity) !== null) return true;
+  return (verdictPayload.concerns ?? []).some((concern) => normalizeSeverity(concern?.severity) !== null);
+}
+
+export function hasAuditSeveritySignal(auditText: string): boolean {
+  if (!auditText || !auditText.trim()) return false;
+  if (hasJsonSeveritySignal(auditText)) return true;
+  return LEGACY_SEVERITY_MARKER_PATTERNS.some((re) => {
+    re.lastIndex = 0;
+    return re.test(auditText);
+  });
+}
+
 function parseAuditVerdictLegacy(auditText: string): AuditVerdict {
   const lower = auditText.toLowerCase();
 
@@ -100,13 +136,10 @@ function parseAuditVerdictLegacy(auditText: string): AuditVerdict {
   // Tertiary: parenthesized severity like "Concern 1 (high)" or "(medium)".
   // We intentionally avoid matching free-form bold words in prose to prevent
   // false positives like "the impact is **high**" in a description paragraph.
-  const severityLabel = /\bseverity\b[:\s]*\**\s*(blocking|high|medium|minor|low|suggestion)\b/gi;
-  const tableCellSeverity = /\|\s*\**\s*(blocking|high|medium|minor|low|suggestion)\s*\**\s*\|/gi;
-  const bareSeverity = /\((blocking|high|medium|minor|low|suggestion)\)/gi;
-
   // Collect all severity mentions from all patterns
   const found = new Set<string>();
-  for (const re of [severityLabel, tableCellSeverity, bareSeverity]) {
+  for (const re of LEGACY_SEVERITY_MARKER_PATTERNS) {
+    re.lastIndex = 0;
     let m;
     while ((m = re.exec(auditText)) !== null) {
       found.add(m[1]!.toLowerCase());
