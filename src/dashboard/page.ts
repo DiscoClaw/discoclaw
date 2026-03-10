@@ -543,6 +543,10 @@ export function renderDashboardPage(): string {
               <select id="model-select" name="model" required></select>
             </label>
           </div>
+          <label id="custom-model-field" class="field" for="custom-model-input" hidden>
+            <span class="field-label">Custom Model</span>
+            <input id="custom-model-input" name="custom-model" type="text" autocomplete="off" spellcheck="false" placeholder="Enter a concrete model name" />
+          </label>
           <div id="model-form-help" class="field-note">Choose a role to see its saved options.</div>
           <div class="actions">
             <button id="model-submit-btn" type="submit">Save Setting</button>
@@ -598,6 +602,9 @@ export function renderDashboardPage(): string {
     const modelFormHelp = document.getElementById('model-form-help');
     const roleSelect = document.getElementById('role-select');
     const modelSelect = document.getElementById('model-select');
+    const customModelField = document.getElementById('custom-model-field');
+    const customModelInput = document.getElementById('custom-model-input');
+    const CUSTOM_MODEL_OPTION = '__custom__';
     const ROLE_LABELS = {
       chat: 'Chat',
       'plan-run': 'Plan Run',
@@ -713,6 +720,9 @@ export function renderDashboardPage(): string {
     }
 
     function getSelectedModelValue() {
+      if (modelSelect.value === CUSTOM_MODEL_OPTION) {
+        return customModelInput.value.trim();
+      }
       return modelSelect.value;
     }
 
@@ -736,9 +746,27 @@ export function renderDashboardPage(): string {
       return source === 'override' ? 'saved setting' : 'startup default';
     }
 
+    function roleAllowsCustomModel(role) {
+      return role !== 'fast' && role !== 'voice';
+    }
+
     function updateModelFormHelp(role) {
       if (!modelFormHelp) return;
-      modelFormHelp.textContent = getRoleHelp(role) + ' Only valid saved values are listed here.';
+      modelFormHelp.textContent = roleAllowsCustomModel(role)
+        ? getRoleHelp(role) + ' Pick a saved option or choose (custom) to type another valid model name.'
+        : getRoleHelp(role) + ' Only valid saved values are listed here.';
+    }
+
+    function syncCustomModelField(role, selectedModel) {
+      const allowCustom = roleAllowsCustomModel(role);
+      const useCustom = allowCustom && modelSelect.value === CUSTOM_MODEL_OPTION;
+      customModelField.hidden = !useCustom;
+      customModelInput.required = useCustom;
+      if (useCustom) {
+        customModelInput.value = selectedModel;
+      } else {
+        customModelInput.value = '';
+      }
     }
 
     function syncRoleOptions(selectedRole) {
@@ -758,11 +786,24 @@ export function renderDashboardPage(): string {
       const options = getModelOptionsForRole(role);
       clearNode(modelSelect);
       options.forEach((model) => appendSelectOption(modelSelect, model, formatModelOptionLabel(role, model)));
+      if (roleAllowsCustomModel(role)) {
+        appendSelectOption(modelSelect, CUSTOM_MODEL_OPTION, '(custom)');
+      }
 
       if (selectedModel && options.includes(selectedModel)) {
         modelSelect.value = selectedModel;
+        syncCustomModelField(role, '');
+      } else if (selectedModel && roleAllowsCustomModel(role)) {
+        modelSelect.value = CUSTOM_MODEL_OPTION;
+        syncCustomModelField(role, selectedModel);
       } else if (options.length > 0) {
         modelSelect.value = options[0];
+        syncCustomModelField(role, '');
+      } else if (roleAllowsCustomModel(role)) {
+        modelSelect.value = CUSTOM_MODEL_OPTION;
+        syncCustomModelField(role, selectedModel || '');
+      } else {
+        syncCustomModelField(role, '');
       }
     }
 
@@ -770,6 +811,10 @@ export function renderDashboardPage(): string {
       const nextRole = syncRoleOptions(role || roleSelect.value);
       syncModelOptions(nextRole, model || '');
       if (!focusInput) return;
+      if (modelSelect.value === CUSTOM_MODEL_OPTION) {
+        customModelInput.focus();
+        return;
+      }
       modelSelect.focus();
     }
 
@@ -1054,12 +1099,13 @@ export function renderDashboardPage(): string {
     document.getElementById('model-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       try {
+        const selectedModel = getSelectedModelValue();
         const response = await fetchJson('/api/model', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             role: roleSelect.value,
-            model: modelSelect.value,
+            model: selectedModel,
           }),
         });
         renderSnapshot(response.snapshot);
@@ -1083,6 +1129,10 @@ export function renderDashboardPage(): string {
 
     roleSelect.addEventListener('change', () => {
       syncModelOptions(roleSelect.value, '');
+    });
+
+    modelSelect.addEventListener('change', () => {
+      syncCustomModelField(roleSelect.value, '');
     });
   </script>
 </body>

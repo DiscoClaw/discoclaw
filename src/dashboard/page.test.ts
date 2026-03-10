@@ -19,10 +19,15 @@ describe('renderDashboardPage', () => {
     expect(html).toContain("function formatModelOptionLabel(role, model)");
     expect(html).toContain('<select id="role-select"');
     expect(html).toContain('<select id="model-select"');
-    expect(html).not.toContain('id="custom-model-field"');
+    expect(html).toContain('id="custom-model-field"');
+    expect(html).toContain('id="custom-model-input"');
+    expect(html).toContain('const CUSTOM_MODEL_OPTION = \'__custom__\';');
+    expect(html).toContain("appendSelectOption(modelSelect, CUSTOM_MODEL_OPTION, '(custom)');");
+    expect(html).toContain('function roleAllowsCustomModel(role)');
+    expect(html).toContain('function syncCustomModelField(role, selectedModel)');
     expect(html).toContain('Choose a role, then pick from the valid saved options for that role.');
     expect(html).toContain('id="model-form-help"');
-    expect(html).toContain('Only valid saved values are listed here.');
+    expect(html).toContain('choose (custom) to type another valid model name.');
     expect(html).toContain('>Save Setting<');
     expect(html).toContain("button.textContent = 'Change';");
     expect(html).toContain('Scan for config problems and cleanup suggestions.');
