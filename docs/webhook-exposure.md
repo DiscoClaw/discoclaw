@@ -2,11 +2,13 @@
 
 How to expose DiscoClaw's webhook server to external services (GitHub, Stripe, etc.) and keep it secure.
 
+Maintainers: before changing webhook integration code, exposure assumptions, or provider-specific payload/signature behavior, consult [official-docs.md](official-docs.md).
+
 ---
 
 ## Background
 
-The webhook server (`src/webhook/server.ts`) binds to `127.0.0.1:8080` by default — loopback only. External services like GitHub can't reach it unless you expose the port through a tunnel or reverse proxy.
+The DiscoClaw app binds the webhook server to `127.0.0.1:9400` by default — loopback only. External services like GitHub can't reach it unless you expose the port through a tunnel or reverse proxy.
 
 ## Exposure options
 
@@ -15,8 +17,8 @@ The webhook server (`src/webhook/server.ts`) binds to `127.0.0.1:8080` by defaul
 Zero-config HTTPS with a stable hostname. Best if you already use Tailscale.
 
 ```bash
-# Expose port 8080 on your Tailscale hostname
-tailscale funnel 8080
+# Expose the default DiscoClaw webhook port on your Tailscale hostname
+tailscale funnel 9400
 ```
 
 Your webhook URL becomes `https://<machine>.<tailnet>.ts.net/webhook/<source>`.
@@ -26,7 +28,7 @@ Your webhook URL becomes `https://<machine>.<tailnet>.ts.net/webhook/<source>`.
 Quick tunnel for development or testing.
 
 ```bash
-ngrok http 8080
+ngrok http 9400
 ```
 
 Copy the `https://` URL ngrok prints and append `/webhook/<source>`.
@@ -38,7 +40,7 @@ For a VPS or always-on server with a real domain. Caddy handles TLS automaticall
 ```
 # Caddyfile
 webhooks.example.com {
-    reverse_proxy 127.0.0.1:8080
+    reverse_proxy 127.0.0.1:9400
 }
 ```
 
@@ -47,7 +49,7 @@ webhooks.example.com {
 Forward from a public server to your local machine.
 
 ```bash
-ssh -R 8080:127.0.0.1:8080 user@public-server
+ssh -R 9400:127.0.0.1:9400 user@public-server
 ```
 
 Pair with a reverse proxy on the public server for TLS.
@@ -95,7 +97,7 @@ Set these env vars to enable the webhook server:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISCOCLAW_WEBHOOK_ENABLED` | `false` | Set to `1` or `true` to start the server |
-| `DISCOCLAW_WEBHOOK_PORT` | `8080` | Port to listen on |
+| `DISCOCLAW_WEBHOOK_PORT` | `9400` | Port to listen on |
 | `DISCOCLAW_WEBHOOK_CONFIG` | — | Absolute path to the JSON config file |
 
 ### Config file format
