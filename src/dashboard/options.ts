@@ -18,11 +18,24 @@ export function formatDashboardListenUrl(
   return formatDashboardUrl(address?.address ?? fallbackHost, address?.port ?? fallbackPort);
 }
 
+function isLoopbackDashboardHost(host: string): boolean {
+  const value = host.trim().toLowerCase().replace(/\.+$/, '');
+  return value === 'localhost' || value === DASHBOARD_HOST || value.startsWith('127.');
+}
+
+export function resolveDashboardOperatorHost(trustedHosts?: ReadonlySet<string>): string {
+  if (!trustedHosts || trustedHosts.size === 0) return DASHBOARD_HOST;
+
+  const configuredHosts = [...trustedHosts];
+  return configuredHosts.find((host) => !isLoopbackDashboardHost(host)) ?? configuredHosts[0] ?? DASHBOARD_HOST;
+}
+
 export function formatDashboardOperatorUrl(
   address: DashboardListenAddress,
   fallbackPort: number,
+  trustedHosts?: ReadonlySet<string>,
 ): string {
-  return formatDashboardUrl(DASHBOARD_HOST, address?.port ?? fallbackPort);
+  return formatDashboardUrl(resolveDashboardOperatorHost(trustedHosts), address?.port ?? fallbackPort);
 }
 
 export function parseDashboardPort(env: NodeJS.ProcessEnv): number {

@@ -2441,6 +2441,7 @@ if (cfg.dashboardEnabled) {
     dashboardUrl = formatDashboardOperatorUrl(
       typeof address === 'object' ? address : undefined,
       cfg.dashboardPort,
+      cfg.dashboardTrustedHosts,
     );
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

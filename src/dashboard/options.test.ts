@@ -6,6 +6,7 @@ import {
   formatDashboardUrl,
   parseDashboardPort,
   parseDashboardTrustedHosts,
+  resolveDashboardOperatorHost,
   resolveDashboardBindHost,
 } from './options.js';
 
@@ -33,6 +34,12 @@ describe('dashboard options', () => {
     expect(resolveDashboardBindHost(new Set(['phone.tailnet.ts.net']))).toBe('0.0.0.0');
   });
 
+  it('prefers a non-loopback trusted host for operator-facing links', () => {
+    expect(resolveDashboardOperatorHost(new Set(['localhost', 'phone.tailnet.ts.net']))).toBe('phone.tailnet.ts.net');
+    expect(resolveDashboardOperatorHost(new Set(['localhost']))).toBe('localhost');
+    expect(resolveDashboardOperatorHost()).toBe(DASHBOARD_HOST);
+  });
+
   it('formats a dashboard URL from host and port', () => {
     expect(formatDashboardUrl('127.0.0.1', 9401)).toBe('http://127.0.0.1:9401/');
   });
@@ -49,5 +56,13 @@ describe('dashboard options', () => {
       .toBe('http://127.0.0.1:9500/');
     expect(formatDashboardOperatorUrl(undefined, 9401))
       .toBe('http://127.0.0.1:9401/');
+  });
+
+  it('formats the operator-facing dashboard URL with the first non-loopback trusted host when available', () => {
+    expect(formatDashboardOperatorUrl(
+      { address: '0.0.0.0', port: 9500 },
+      9401,
+      new Set(['localhost', 'phone.tailnet.ts.net']),
+    )).toBe('http://phone.tailnet.ts.net:9500/');
   });
 });
