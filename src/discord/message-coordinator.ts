@@ -1957,9 +1957,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       try {
                         const phases = readPhasesFile(phasesFilePath, { log: params.log });
                         const budget = 2000 - summaryMsg.length - 50;
-                        const postRunSummary = buildPostRunSummary(phases, budget);
-                        if (postRunSummary) {
-                          summaryMsg += `\n${postRunSummary}`;
+                        const { text } = buildPostRunSummary(phases, budget);
+                        if (text) {
+                          summaryMsg += `\n${text}`;
                         }
                       } catch (summaryErr) {
                         params.log?.error({ err: summaryErr }, 'plan-run: failed to build post-run summary');

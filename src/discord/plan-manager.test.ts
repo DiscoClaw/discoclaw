@@ -3533,9 +3533,9 @@ function makePhasesForSummary(overrides: Partial<PlanPhases> = {}): PlanPhases {
 }
 
 describe('buildPostRunSummary', () => {
-  it('returns empty string when there are no phases', () => {
+  it('returns empty text and evidence when there are no phases', () => {
     const phases = makePhasesForSummary({ phases: [] });
-    expect(buildPostRunSummary(phases)).toBe('');
+    expect(buildPostRunSummary(phases)).toEqual({ text: '', evidence: [] });
   });
 
   it('shows [x] indicator for done phase', () => {
@@ -3547,7 +3547,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('[x]');
     expect(summary).toContain('phase-1');
     expect(summary).toContain('Implement foo');
@@ -3562,7 +3562,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    expect(buildPostRunSummary(phases)).toContain('[!]');
+    expect(buildPostRunSummary(phases).text).toContain('[!]');
   });
 
   it('shows [-] indicator for skipped phase', () => {
@@ -3574,7 +3574,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    expect(buildPostRunSummary(phases)).toContain('[-]');
+    expect(buildPostRunSummary(phases).text).toContain('[-]');
   });
 
   it('shows [~] indicator for in-progress phase', () => {
@@ -3586,7 +3586,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    expect(buildPostRunSummary(phases)).toContain('[~]');
+    expect(buildPostRunSummary(phases).text).toContain('[~]');
   });
 
   it('shows [ ] indicator for pending phase', () => {
@@ -3598,7 +3598,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    expect(buildPostRunSummary(phases)).toContain('[ ]');
+    expect(buildPostRunSummary(phases).text).toContain('[ ]');
   });
 
   it('includes git commit hash when present', () => {
@@ -3611,7 +3611,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('a1b2c3d');
   });
 
@@ -3625,7 +3625,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('2 files');
   });
 
@@ -3639,7 +3639,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('1 file');
     expect(summary).not.toContain('1 files');
   });
@@ -3654,7 +3654,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('Ready to approve.');
   });
 
@@ -3668,7 +3668,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).not.toContain(' — ');
   });
 
@@ -3687,7 +3687,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('Files changed (3)');
     expect(summary).toContain('`src/foo.ts`');
     expect(summary).toContain('`src/bar.ts`');
@@ -3705,7 +3705,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).not.toContain('Files changed');
   });
 
@@ -3720,7 +3720,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases, 200);
+    const summary = buildPostRunSummary(phases, 200).text;
     expect(summary).toContain('more)');
   });
 
@@ -3742,7 +3742,7 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('[x]');
     expect(summary).toContain('[!]');
     expect(summary).toContain('[-]');
@@ -3769,9 +3769,42 @@ describe('buildPostRunSummary', () => {
         },
       ],
     });
-    const summary = buildPostRunSummary(phases);
+    const summary = buildPostRunSummary(phases).text;
     expect(summary).toContain('build: pass');
     expect(summary).toContain('test: pass (14 passed)');
     expect(summary).toContain('audit: fail (Blocking findings remain)');
+  });
+
+  it('returns aggregated run evidence alongside the text summary', () => {
+    const phases = makePhasesForSummary({
+      phases: [
+        {
+          id: 'phase-1', title: 'Implement foo', kind: 'implement', status: 'done',
+          description: '', dependsOn: [], contextFiles: [],
+          evidence: [{ kind: 'build', status: 'pass', summary: 'dist built cleanly' }],
+        },
+        {
+          id: 'phase-2', title: 'Post-implementation audit', kind: 'audit', status: 'done',
+          description: '', dependsOn: ['phase-1'], contextFiles: [],
+        },
+      ],
+    });
+
+    expect(buildPostRunSummary(phases).evidence).toEqual([
+      {
+        phaseId: 'phase-1',
+        phaseTitle: 'Implement foo',
+        phaseKind: 'implement',
+        phaseStatus: 'done',
+        evidence: [{ kind: 'build', status: 'pass', summary: 'dist built cleanly' }],
+      },
+      {
+        phaseId: 'phase-2',
+        phaseTitle: 'Post-implementation audit',
+        phaseKind: 'audit',
+        phaseStatus: 'done',
+        evidence: undefined,
+      },
+    ]);
   });
 });

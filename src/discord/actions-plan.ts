@@ -605,9 +605,10 @@ export async function executePlanAction(
           try {
             const phases = readPhasesFile(prepResult.phasesFilePath, { log: planCtx.log });
             const budget = Math.max(0, 2000 - lines.join('\n').length - 50);
-            const summary = buildPostRunSummary(phases, budget);
-            if (summary) {
-              lines.push(summary);
+            const { text, evidence } = buildPostRunSummary(phases, budget);
+            planCtx.log?.info({ planId: runPlanId, phasesRun, evidence }, 'plan:action:run complete evidence');
+            if (text) {
+              lines.push(text);
             }
           } catch (summaryErr) {
             planCtx.log?.error({ err: summaryErr, planId: runPlanId }, 'plan:action:run summary failed');

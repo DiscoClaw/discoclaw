@@ -44,7 +44,7 @@ vi.mock('./plan-manager.js', () => ({
   runNextPhase: vi.fn(async () => ({ result: 'nothing_to_run' })),
   resolveProjectCwd: vi.fn((_content: string, workspaceCwd: string) => workspaceCwd),
   readPhasesFile: vi.fn(() => ({ phases: [] })),
-  buildPostRunSummary: vi.fn(() => ''),
+  buildPostRunSummary: vi.fn(() => ({ text: '', evidence: [] })),
 }));
 
 vi.mock('./forge-plan-registry.js', () => ({

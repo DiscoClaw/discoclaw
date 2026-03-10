@@ -53,7 +53,7 @@ vi.mock('./plan-manager.js', () => ({
   runNextPhase: vi.fn(async () => ({ result: 'nothing_to_run' })),
   resolveProjectCwd: vi.fn((_content: string, workspaceCwd: string) => workspaceCwd),
   readPhasesFile: vi.fn(() => ({ phases: [] })),
-  buildPostRunSummary: vi.fn(() => ''),
+  buildPostRunSummary: vi.fn(() => ({ text: '', evidence: [] })),
 }));
 
 vi.mock('./forge-plan-registry.js', () => ({
@@ -641,6 +641,49 @@ describe('executePlanAction', () => {
       expect(lastEdit.content).toContain('plan-042');
       expect(lastEdit.content).toContain('Phases run:');
       expect(lastEdit.allowedMentions).toEqual({ parse: [] });
+    });
+
+    it('logs aggregated run evidence after building the post-run summary', async () => {
+      const { buildPostRunSummary } = await import('./plan-manager.js');
+      const planCtx = makePlanCtx({ runtime: {} as any, model: 'opus' });
+
+      (buildPostRunSummary as any).mockReturnValueOnce({
+        text: '[x] **phase-1:** First phase — build: pass (dist built cleanly)',
+        evidence: [
+          {
+            phaseId: 'phase-1',
+            phaseTitle: 'First phase',
+            phaseKind: 'implement',
+            phaseStatus: 'done',
+            evidence: [{ kind: 'build', status: 'pass', summary: 'dist built cleanly' }],
+          },
+        ],
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        planCtx,
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(planCtx.log?.info).toHaveBeenCalledWith(
+        {
+          planId: 'plan-042',
+          phasesRun: 0,
+          evidence: [
+            {
+              phaseId: 'phase-1',
+              phaseTitle: 'First phase',
+              phaseKind: 'implement',
+              phaseStatus: 'done',
+              evidence: [{ kind: 'build', status: 'pass', summary: 'dist built cleanly' }],
+            },
+          ],
+        },
+        'plan:action:run complete evidence',
+      );
     });
 
     it('posts a new message when a phase starts', async () => {

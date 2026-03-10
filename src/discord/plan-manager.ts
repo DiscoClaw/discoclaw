@@ -13,11 +13,13 @@ import { hasAuditSeveritySignal } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { extractFirstJsonValue } from './json-extract.js';
 import {
+  collectRunEvidence,
   coerceEvidenceArray,
   createEvidence,
   formatEvidenceSummary,
 } from './verification-evidence.js';
 import type {
+  PhaseEvidenceSummary,
   VerificationEvidence,
 } from './verification-evidence.js';
 export type { VerificationEvidence } from './verification-evidence.js';
@@ -1356,12 +1358,16 @@ export function buildPhasePrompt(
 
 /**
  * Build a concise human-readable rollup of all phases after a plan run completes.
- * Returns an empty string when there are no phases.
+ * Returns empty text when there are no phases.
  * The `budgetChars` parameter (default 800) caps total output length — if the
  * files list exceeds budget, it is truncated with an overflow count.
  */
-export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): string {
-  if (phases.phases.length === 0) return '';
+export function buildPostRunSummary(
+  phases: PlanPhases,
+  budgetChars = 800,
+): { text: string; evidence: PhaseEvidenceSummary[] } {
+  const evidence = collectRunEvidence(phases.phases);
+  if (phases.phases.length === 0) return { text: '', evidence };
 
   const statusIndicator: Record<string, string> = {
     'done': '[x]',
@@ -1412,7 +1418,7 @@ export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): stri
   const phaseSection = lines.join('\n');
 
   if (allFiles.length === 0) {
-    return phaseSection;
+    return { text: phaseSection, evidence };
   }
 
   // Build files section with budget enforcement
@@ -1438,7 +1444,7 @@ export function buildPostRunSummary(phases: PlanPhases, budgetChars = 800): stri
     filesSection += ` (+${overflow} more)`;
   }
 
-  return phaseSection + filesSection;
+  return { text: phaseSection + filesSection, evidence };
 }
 
 export function buildAuditFixPrompt(
