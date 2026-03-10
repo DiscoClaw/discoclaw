@@ -2,6 +2,10 @@
 
 MCP lets you connect external tool servers to your DiscoClaw instance. When the Claude runtime starts, it reads your `.mcp.json` file and connects to any configured servers, making their tools available during conversations.
 
+Reference docs:
+- [Model Context Protocol specification, revision 2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18/basic)
+- [Claude Code MCP guide](https://docs.claude.com/en/docs/claude-code/mcp)
+
 ## How it works
 
 DiscoClaw passes `--strict-mcp-config` to Claude by default (controlled by `CLAUDE_STRICT_MCP_CONFIG=1` in `.env`). This tells Claude to only use MCP servers defined in your config file and skip auto-discovery, which avoids slow startup in headless/systemd contexts.
@@ -32,7 +36,7 @@ Place a `.mcp.json` file in your workspace directory (the directory pointed to b
 
 - `command` (required): Path to the MCP server binary or script.
 - `args` (optional): Array of command-line arguments.
-- `env` (optional): Environment variables passed to the server process.
+- `env` (optional): Environment variables passed to the server process. Every value must be a string.
 
 ### Example
 
@@ -65,6 +69,32 @@ A Brave Search MCP server:
 }
 ```
 
+## What DiscoClaw validates
+
+DiscoClaw does a lightweight startup validation pass on `.mcp.json` so bad config is visible in logs before Claude tries to use it.
+
+Current validation covers:
+
+- malformed JSON
+- missing or non-object `mcpServers`
+- non-object server entries
+- missing `command`
+- `env` present but not an object
+- non-string `env` values
+- empty `env` objects, which log a warning because they usually mean incomplete config
+- server names longer than 64 characters, which log a warning because Anthropic tool names have a hard length limit
+
+## Trust boundary
+
+DiscoClaw owns the startup diagnostics above. Claude Code owns the actual MCP runtime behavior after startup:
+
+- transport handling and server launch
+- authentication and authorization
+- tool discovery and execution
+- broader MCP features described in the Claude Code docs
+
+If you need behavior beyond the simple `command` / `args` / `env` project config shown here, treat the Claude Code docs as the source of truth.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -88,6 +118,8 @@ If the API error still occurs at runtime, the error message will direct you here
 ## Troubleshooting
 
 - **MCP servers not loading:** Verify `.mcp.json` is in your workspace directory and is valid JSON. Check startup logs for MCP-related errors.
+- **`env` validation error:** Every `env` value must be a string.
+- **Empty `env` warning:** Remove the empty object if it is unused, or fill in the expected values.
 - **Slow startup:** An MCP server that takes too long to initialize can delay the first response. Check server health independently before adding it to your config.
 - **Server crashes:** MCP server failures don't crash DiscoClaw — the runtime continues without the failed server's tools. Check logs for connection errors.
 - **`tool_use.name` API 400 error:** An MCP server name exceeds 64 chars. Rename it in `workspace/.mcp.json`. See [Server name length limit](#server-name-length-limit) above.
