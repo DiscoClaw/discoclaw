@@ -471,6 +471,7 @@ export function renderDashboardPage(): string {
       <div class="hero-status">
         <div id="hero-service-pill" class="pill">Service: loading</div>
         <div id="hero-runtime-pill" class="pill">Runtime overrides: loading</div>
+        <div id="hero-url-pill" class="pill">Dashboard URL: loading</div>
       </div>
       <div id="hero-status" class="status"></div>
     </section>
@@ -489,12 +490,12 @@ export function renderDashboardPage(): string {
       <section class="card span-7">
         <div class="card-header">
           <div>
-            <h2>Service Controls</h2>
+            <h2>Service</h2>
             <p class="card-copy">View status, inspect recent logs, or restart the service.</p>
           </div>
           <div class="actions">
-            <button id="status-btn" type="button">View Status</button>
-            <button id="logs-btn" type="button">View Logs</button>
+            <button id="status-btn" type="button">Status</button>
+            <button id="logs-btn" type="button">Logs</button>
             <button id="restart-btn" type="button">Restart</button>
           </div>
         </div>
@@ -505,7 +506,7 @@ export function renderDashboardPage(): string {
       <section class="card span-6">
         <div class="card-header">
           <div>
-            <h2>Current Model Settings</h2>
+            <h2>Model Assignments</h2>
             <p class="card-copy">What each role is using right now.</p>
           </div>
         </div>
@@ -514,9 +515,9 @@ export function renderDashboardPage(): string {
             <thead>
               <tr>
                 <th>Role</th>
-                <th>Using Now</th>
-                <th>Comes From</th>
-                <th>Saved Setting</th>
+                <th>Current Model</th>
+                <th>Source</th>
+                <th>Next Restart</th>
                 <th></th>
               </tr>
             </thead>
@@ -528,28 +529,24 @@ export function renderDashboardPage(): string {
       <section class="card span-6">
         <div class="card-header">
           <div>
-            <h2>Change a Saved Setting</h2>
-            <p class="card-copy">Choose a role, then pick from the valid saved options for that role. Changes apply on the next service restart.</p>
+            <h2>Change Model</h2>
+            <p class="card-copy">Choose a role, then pick one of the valid saved options for that role. Changes apply on the next service restart.</p>
           </div>
         </div>
         <form id="model-form">
           <div class="field-grid">
             <label class="field" for="role-select">
-              <span class="field-label">Role</span>
+              <span class="field-label">System Role</span>
               <select id="role-select" name="role" required></select>
             </label>
             <label class="field" for="model-select">
-              <span class="field-label">Saved Model</span>
+              <span class="field-label">Model</span>
               <select id="model-select" name="model" required></select>
             </label>
           </div>
-          <label id="custom-model-field" class="field" for="custom-model-input" hidden>
-            <span class="field-label">Custom Model</span>
-            <input id="custom-model-input" name="custom-model" type="text" autocomplete="off" spellcheck="false" placeholder="Enter a concrete model name" />
-          </label>
-          <div id="model-form-help" class="field-note">Choose a role to see its saved options.</div>
+          <div id="model-form-help" class="field-note">Choose a role to see its valid saved options.</div>
           <div class="actions">
-            <button id="model-submit-btn" type="submit">Save Setting</button>
+            <button id="model-submit-btn" type="submit">Save Model</button>
           </div>
         </form>
         <div id="model-status" class="status"></div>
@@ -558,11 +555,11 @@ export function renderDashboardPage(): string {
       <section class="card span-7">
         <div class="card-header">
           <div>
-            <h2>Config Check</h2>
+            <h2>Health Check</h2>
             <p class="card-copy">Scan for config problems and cleanup suggestions. Safe fixes can be applied automatically; review-only items stay listed below.</p>
           </div>
           <div class="actions">
-            <button id="doctor-btn" type="button">Run Check</button>
+            <button id="doctor-btn" type="button">Scan</button>
             <button id="doctor-fix-btn" type="button" disabled>Apply Safe Fixes</button>
           </div>
         </div>
@@ -574,7 +571,7 @@ export function renderDashboardPage(): string {
       <section class="card span-5">
         <div class="card-header">
           <div>
-            <h2>Advanced Details</h2>
+            <h2>Files and Overrides</h2>
             <p class="card-copy">File locations and runtime adapter overrides.</p>
           </div>
         </div>
@@ -593,6 +590,7 @@ export function renderDashboardPage(): string {
     const heroStatus = document.getElementById('hero-status');
     const heroServicePill = document.getElementById('hero-service-pill');
     const heroRuntimePill = document.getElementById('hero-runtime-pill');
+    const heroUrlPill = document.getElementById('hero-url-pill');
     const serviceStatus = document.getElementById('service-status');
     const doctorSummary = document.getElementById('doctor-summary');
     const doctorHelper = document.getElementById('doctor-helper');
@@ -602,9 +600,6 @@ export function renderDashboardPage(): string {
     const modelFormHelp = document.getElementById('model-form-help');
     const roleSelect = document.getElementById('role-select');
     const modelSelect = document.getElementById('model-select');
-    const customModelField = document.getElementById('custom-model-field');
-    const customModelInput = document.getElementById('custom-model-input');
-    const CUSTOM_MODEL_OPTION = '__custom__';
     const ROLE_LABELS = {
       chat: 'Chat',
       'plan-run': 'Plan Run',
@@ -629,6 +624,7 @@ export function renderDashboardPage(): string {
     };
 
     let lastSnapshot = null;
+    heroUrlPill.textContent = 'Dashboard URL: ' + window.location.href;
 
     async function fetchJson(url, options) {
       const response = await fetch(url, options);
@@ -720,9 +716,6 @@ export function renderDashboardPage(): string {
     }
 
     function getSelectedModelValue() {
-      if (modelSelect.value === CUSTOM_MODEL_OPTION) {
-        return customModelInput.value.trim();
-      }
       return modelSelect.value;
     }
 
@@ -746,27 +739,11 @@ export function renderDashboardPage(): string {
       return source === 'override' ? 'saved setting' : 'startup default';
     }
 
-    function roleAllowsCustomModel(role) {
-      return role !== 'fast' && role !== 'voice';
-    }
-
     function updateModelFormHelp(role) {
       if (!modelFormHelp) return;
-      modelFormHelp.textContent = roleAllowsCustomModel(role)
-        ? getRoleHelp(role) + ' Pick a saved option or choose (custom) to type another valid model name.'
-        : getRoleHelp(role) + ' Only valid saved values are listed here.';
-    }
-
-    function syncCustomModelField(role, selectedModel) {
-      const allowCustom = roleAllowsCustomModel(role);
-      const useCustom = allowCustom && modelSelect.value === CUSTOM_MODEL_OPTION;
-      customModelField.hidden = !useCustom;
-      customModelInput.required = useCustom;
-      if (useCustom) {
-        customModelInput.value = selectedModel;
-      } else {
-        customModelInput.value = '';
-      }
+      modelFormHelp.textContent = role
+        ? getRoleHelp(role) + ' Pick one of the valid saved options for this role.'
+        : 'Choose a role to see its valid saved options.';
     }
 
     function syncRoleOptions(selectedRole) {
@@ -786,24 +763,11 @@ export function renderDashboardPage(): string {
       const options = getModelOptionsForRole(role);
       clearNode(modelSelect);
       options.forEach((model) => appendSelectOption(modelSelect, model, formatModelOptionLabel(role, model)));
-      if (roleAllowsCustomModel(role)) {
-        appendSelectOption(modelSelect, CUSTOM_MODEL_OPTION, '(custom)');
-      }
 
       if (selectedModel && options.includes(selectedModel)) {
         modelSelect.value = selectedModel;
-        syncCustomModelField(role, '');
-      } else if (selectedModel && roleAllowsCustomModel(role)) {
-        modelSelect.value = CUSTOM_MODEL_OPTION;
-        syncCustomModelField(role, selectedModel);
       } else if (options.length > 0) {
         modelSelect.value = options[0];
-        syncCustomModelField(role, '');
-      } else if (roleAllowsCustomModel(role)) {
-        modelSelect.value = CUSTOM_MODEL_OPTION;
-        syncCustomModelField(role, selectedModel || '');
-      } else {
-        syncCustomModelField(role, '');
       }
     }
 
@@ -811,10 +775,6 @@ export function renderDashboardPage(): string {
       const nextRole = syncRoleOptions(role || roleSelect.value);
       syncModelOptions(nextRole, model || '');
       if (!focusInput) return;
-      if (modelSelect.value === CUSTOM_MODEL_OPTION) {
-        customModelInput.focus();
-        return;
-      }
       modelSelect.focus();
     }
 
@@ -894,6 +854,7 @@ export function renderDashboardPage(): string {
       populateModelForm(selectedRole, selectedModel, false);
       heroServicePill.textContent = 'Service: ' + formatServicePill(snapshot.serviceSummary);
       heroRuntimePill.textContent = 'Runtime overrides: ' + formatRuntimePill(snapshot.runtimeOverrides);
+      heroUrlPill.textContent = 'Dashboard URL: ' + window.location.href;
       setStatus(serviceStatus, snapshot.serviceSummary, 'ok');
     }
 
@@ -1129,10 +1090,6 @@ export function renderDashboardPage(): string {
 
     roleSelect.addEventListener('change', () => {
       syncModelOptions(roleSelect.value, '');
-    });
-
-    modelSelect.addEventListener('change', () => {
-      syncCustomModelField(roleSelect.value, '');
     });
   </script>
 </body>

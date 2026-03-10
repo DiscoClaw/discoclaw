@@ -210,6 +210,9 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       const lines: string[] = ['**Boot Report**'];
       lines.push(`Startup · ${typeLabel[data.startupType]}`);
       if (data.bootDurationMs !== undefined) lines.push(`Boot Time · ${data.bootDurationMs}ms`);
+      if (data.dashboardUrl) {
+        lines.push(`Dashboard URL · ${data.dashboardUrl}`);
+      }
       lines.push(`Model · ${data.runtimeModel || '(default)'}`);
       if (data.permissionsStatus) {
         const permLabel = data.permissionsStatus === 'ok'
@@ -257,9 +260,6 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
 
       lines.push(`Actions · ${data.actionCategoriesEnabled.length > 0 ? data.actionCategoriesEnabled.join(', ') : '(none)'}`);
       lines.push(`Version · DiscoClaw ${formatVersionLine(data)}`);
-      if (data.dashboardUrl) {
-        lines.push(`Dashboard URL · ${data.dashboardUrl}`);
-      }
 
       if (data.configWarnings && data.configWarnings > 0) {
         lines.push(`Config Warnings · ${data.configWarnings}`);
