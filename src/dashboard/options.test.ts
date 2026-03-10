@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DASHBOARD_HOST,
+  formatDashboardListenUrl,
   formatDashboardUrl,
   parseDashboardPort,
   parseDashboardTrustedHosts,
@@ -33,5 +34,12 @@ describe('dashboard options', () => {
 
   it('formats a dashboard URL from host and port', () => {
     expect(formatDashboardUrl('127.0.0.1', 9401)).toBe('http://127.0.0.1:9401/');
+  });
+
+  it('formats the published dashboard URL from the bound listen address', () => {
+    expect(formatDashboardListenUrl({ address: '0.0.0.0', port: 9500 }, DASHBOARD_HOST, 9401))
+      .toBe('http://0.0.0.0:9500/');
+    expect(formatDashboardListenUrl(undefined, DASHBOARD_HOST, 9401))
+      .toBe('http://127.0.0.1:9401/');
   });
 });

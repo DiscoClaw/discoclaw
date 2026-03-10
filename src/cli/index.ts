@@ -27,7 +27,7 @@ switch (command) {
     const useLegacyDashboard = process.argv.includes('--legacy');
     const { runDashboard, startDashboardServer } = await import('./dashboard.js');
     const {
-      DASHBOARD_HOST,
+      formatDashboardListenUrl,
       formatDashboardUrl,
       parseDashboardPort,
       parseDashboardTrustedHosts,
@@ -53,9 +53,9 @@ switch (command) {
         port,
         trustedHosts,
       });
-      const address = handle.server.address() as { port: number } | null;
+      const address = handle.server.address() as { address: string; port: number } | null;
       const boundPort = address?.port ?? port;
-      console.log(`Discoclaw dashboard listening at ${formatDashboardUrl(DASHBOARD_HOST, boundPort)}`);
+      console.log(`Discoclaw dashboard listening at ${formatDashboardListenUrl(address, host, port)}`);
       if (trustedHosts.size > 0) {
         const [firstTrustedHost] = trustedHosts;
         console.log(`Trusted host URL: ${formatDashboardUrl(firstTrustedHost, boundPort)}`);

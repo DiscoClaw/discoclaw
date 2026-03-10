@@ -467,8 +467,8 @@ export function renderDashboardPage(): string {
       <section class="card span-5">
         <div class="card-header">
           <div>
-            <h2>Overview</h2>
-            <p class="card-copy">Current install, repo, and operator snapshot.</p>
+            <h2>Status</h2>
+            <p class="card-copy">At-a-glance service, install, and workspace details.</p>
           </div>
         </div>
         <div id="overview-metrics" class="metrics"></div>
@@ -477,8 +477,8 @@ export function renderDashboardPage(): string {
       <section class="card span-7">
         <div class="card-header">
           <div>
-            <h2>Service Control</h2>
-            <p class="card-copy">Inspect the local service, tail logs, or request a restart.</p>
+            <h2>Service</h2>
+            <p class="card-copy">Check status, review recent logs, or request a restart.</p>
           </div>
           <div class="actions">
             <button id="status-btn" type="button">Status</button>
@@ -493,8 +493,8 @@ export function renderDashboardPage(): string {
       <section class="card span-6">
         <div class="card-header">
           <div>
-            <h2>Model Assignments</h2>
-            <p class="card-copy">Effective model resolution for each dashboard role.</p>
+            <h2>Model Roles</h2>
+            <p class="card-copy">Current model choice for each operator-facing role.</p>
           </div>
         </div>
         <div class="table-wrap">
@@ -502,10 +502,10 @@ export function renderDashboardPage(): string {
             <thead>
               <tr>
                 <th>Role</th>
-                <th>Effective Model</th>
+                <th>Current</th>
                 <th>Source</th>
-                <th>Override</th>
-                <th>Action</th>
+                <th>Saved Override</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="models-body"></tbody>
@@ -516,27 +516,23 @@ export function renderDashboardPage(): string {
       <section class="card span-6">
         <div class="card-header">
           <div>
-            <h2>Change Model</h2>
-            <p class="card-copy">Persist a model override or reset a role back to its default.</p>
+            <h2>Update Model Role</h2>
+            <p class="card-copy">Pick from known valid values. Changes apply on the next service restart.</p>
           </div>
         </div>
         <form id="model-form">
           <div class="field-grid">
             <label class="field" for="role-select">
-              <span class="field-label">Role</span>
+              <span class="field-label">Model Role</span>
               <select id="role-select" name="role" required></select>
             </label>
             <label class="field" for="model-select">
-              <span class="field-label">Model</span>
+              <span class="field-label">Model Value</span>
               <select id="model-select" name="model-select" required></select>
-            </label>
-            <label id="custom-model-field" class="field" for="model-input" hidden>
-              <span class="field-label">Custom model</span>
-              <input id="model-input" name="custom-model" placeholder='model id or "default"' />
             </label>
           </div>
           <div class="actions">
-            <button id="model-submit-btn" type="submit">Change model</button>
+            <button id="model-submit-btn" type="submit">Save Model Choice</button>
           </div>
         </form>
         <div id="model-status" class="status"></div>
@@ -588,9 +584,17 @@ export function renderDashboardPage(): string {
     const modelStatus = document.getElementById('model-status');
     const roleSelect = document.getElementById('role-select');
     const modelSelect = document.getElementById('model-select');
-    const customModelField = document.getElementById('custom-model-field');
-    const modelInput = document.getElementById('model-input');
-    const CUSTOM_MODEL_VALUE = '__custom__';
+    const ROLE_LABELS = {
+      chat: 'Chat',
+      'plan-run': 'Plan Run',
+      fast: 'Fast Tasks',
+      summary: 'Summaries',
+      cron: 'Cron Planning',
+      'cron-exec': 'Cron Execution',
+      voice: 'Voice',
+      'forge-drafter': 'Forge Drafter',
+      'forge-auditor': 'Forge Auditor',
+    };
 
     let lastSnapshot = null;
 
@@ -684,23 +688,23 @@ export function renderDashboardPage(): string {
     }
 
     function getSelectedModelValue() {
-      return modelSelect.value === CUSTOM_MODEL_VALUE
-        ? modelInput.value
-        : modelSelect.value;
+      return modelSelect.value;
     }
 
-    function syncCustomModelField(focusInput) {
-      const isCustom = modelSelect.value === CUSTOM_MODEL_VALUE;
-      customModelField.hidden = !isCustom;
-      modelInput.required = isCustom;
-      if (!isCustom) {
-        modelInput.value = '';
-        return;
+    function formatRoleLabel(role) {
+      return ROLE_LABELS[role] || role;
+    }
+
+    function formatModelOptionLabel(role, model) {
+      if (model === 'default') return 'Use startup default';
+      if (model === 'fast' || model === 'capable' || model === 'deep') {
+        return model + ' tier';
       }
-      if (focusInput) {
-        modelInput.focus();
-        modelInput.select();
-      }
+      return model;
+    }
+
+    function formatSourceLabel(source) {
+      return source === 'override' ? 'saved override' : 'startup default';
     }
 
     function syncRoleOptions(selectedRole) {
@@ -708,40 +712,29 @@ export function renderDashboardPage(): string {
 
       const roles = getSnapshotRoles(lastSnapshot);
       clearNode(roleSelect);
-      roles.forEach((role) => appendSelectOption(roleSelect, role, role));
+      roles.forEach((role) => appendSelectOption(roleSelect, role, formatRoleLabel(role)));
 
       const nextRole = roles.includes(selectedRole) ? selectedRole : (roles[0] || '');
       roleSelect.value = nextRole;
       return nextRole;
     }
 
-    function syncModelOptions(role, selectedModel, focusCustomInput) {
+    function syncModelOptions(role, selectedModel) {
       const options = getModelOptionsForRole(role);
       clearNode(modelSelect);
-      options.forEach((model) => appendSelectOption(modelSelect, model, model));
-      appendSelectOption(modelSelect, CUSTOM_MODEL_VALUE, '(custom)');
+      options.forEach((model) => appendSelectOption(modelSelect, model, formatModelOptionLabel(role, model)));
 
       if (selectedModel && options.includes(selectedModel)) {
         modelSelect.value = selectedModel;
-        modelInput.value = '';
-      } else if (selectedModel) {
-        modelSelect.value = CUSTOM_MODEL_VALUE;
-        modelInput.value = selectedModel;
       } else if (options.length > 0) {
         modelSelect.value = options[0];
-        modelInput.value = '';
-      } else {
-        modelSelect.value = CUSTOM_MODEL_VALUE;
-        modelInput.value = '';
       }
-
-      syncCustomModelField(focusCustomInput);
     }
 
     function populateModelForm(role, model, focusInput) {
       const nextRole = syncRoleOptions(role || roleSelect.value);
-      syncModelOptions(nextRole, model || '', Boolean(focusInput));
-      if (!focusInput || modelSelect.value === CUSTOM_MODEL_VALUE) return;
+      syncModelOptions(nextRole, model || '');
+      if (!focusInput) return;
       modelSelect.focus();
     }
 
@@ -767,26 +760,27 @@ export function renderDashboardPage(): string {
       lastSnapshot = snapshot;
 
       clearNode(overviewMetrics);
-      appendMetric(overviewMetrics, 'cwd', snapshot.cwd);
+      appendMetric(overviewMetrics, 'workspace', snapshot.cwd);
       appendMetric(overviewMetrics, 'version', snapshot.version);
-      appendMetric(overviewMetrics, 'git', snapshot.gitHash || '(not available)');
+      appendMetric(overviewMetrics, 'build', snapshot.gitHash || '(not available)');
       appendMetric(overviewMetrics, 'install mode', snapshot.installMode);
-      appendMetric(overviewMetrics, 'service name', snapshot.serviceName);
+      appendMetric(overviewMetrics, 'service', snapshot.serviceName);
       appendMetric(overviewMetrics, 'service state', snapshot.serviceSummary);
-      appendMetric(overviewMetrics, 'doctor summary', snapshot.doctorSummary);
+      appendMetric(overviewMetrics, 'config doctor', snapshot.doctorSummary);
 
       clearNode(modelsBody);
       snapshot.modelRows.forEach((row) => {
         const tr = document.createElement('tr');
 
         const roleCell = document.createElement('td');
-        roleCell.textContent = row.role;
+        roleCell.textContent = formatRoleLabel(row.role);
+        roleCell.title = row.role;
 
         const effectiveCell = document.createElement('td');
         effectiveCell.textContent = row.effectiveModel;
 
         const sourceCell = document.createElement('td');
-        sourceCell.textContent = row.source;
+        sourceCell.textContent = formatSourceLabel(row.source);
 
         const overrideCell = document.createElement('td');
         overrideCell.textContent = row.overrideValue || '(default)';
@@ -795,7 +789,7 @@ export function renderDashboardPage(): string {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'secondary';
-        button.textContent = 'Change';
+        button.textContent = 'Edit';
         button.addEventListener('click', () => populateModelForm(row.role, row.overrideValue || row.effectiveModel));
         actionCell.append(button);
 
@@ -1020,15 +1014,12 @@ export function renderDashboardPage(): string {
     document.getElementById('model-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       try {
-        const selectedModel = modelSelect.value === CUSTOM_MODEL_VALUE
-          ? modelInput.value
-          : modelSelect.value;
         const response = await fetchJson('/api/model', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             role: roleSelect.value,
-            model: selectedModel,
+            model: modelSelect.value,
           }),
         });
         renderSnapshot(response.snapshot);
@@ -1051,11 +1042,7 @@ export function renderDashboardPage(): string {
     });
 
     roleSelect.addEventListener('change', () => {
-      syncModelOptions(roleSelect.value, '', false);
-    });
-
-    modelSelect.addEventListener('change', () => {
-      syncCustomModelField(true);
+      syncModelOptions(roleSelect.value, '');
     });
   </script>
 </body>

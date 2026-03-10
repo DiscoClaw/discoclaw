@@ -254,10 +254,16 @@ describe('collectDashboardSnapshot', () => {
       'forge-drafter',
       'forge-auditor',
     ]);
-    expect(snapshot.modelOptions.fast).toEqual(['fast', 'capable', 'deep', 'default']);
-    expect(snapshot.modelOptions.voice).toEqual(['fast', 'capable', 'deep', 'default']);
-    expect(snapshot.modelOptions.chat).toEqual(['env-chat-model', 'opus', 'default']);
-    expect(snapshot.modelOptions['plan-run']).toEqual(['capable', 'default']);
+    expect(snapshot.modelOptions.fast).toEqual(['default', 'fast', 'capable', 'deep']);
+    expect(snapshot.modelOptions.voice).toEqual(['default', 'fast', 'capable', 'deep']);
+    expect(snapshot.modelOptions.chat).toContain('default');
+    expect(snapshot.modelOptions.chat).toContain('env-chat-model');
+    expect(snapshot.modelOptions.chat).toContain('opus');
+    expect(snapshot.modelOptions.chat).toContain('claude-opus-4-6');
+    expect(snapshot.modelOptions.chat).toContain('gpt-5.4');
+    expect(snapshot.modelOptions['plan-run']).toContain('default');
+    expect(snapshot.modelOptions['plan-run']).toContain('capable');
+    expect(snapshot.modelOptions['plan-run']).toContain('gemini-2.5-pro');
     expect(
       snapshot.roles.every((role) => snapshot.modelOptions[role]?.includes('default')),
     ).toBe(true);

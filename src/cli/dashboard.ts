@@ -5,7 +5,7 @@ import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { config as loadDotenv } from 'dotenv';
 import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
-import { isModelTier } from '../runtime/model-tiers.js';
+import { isModelTier, listKnownModelValues } from '../runtime/model-tiers.js';
 import { getGitHash } from '../version.js';
 import type { DashboardServer, DashboardServerOptions } from '../dashboard/server.js';
 import type { DoctorContext, DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
@@ -181,20 +181,22 @@ export function buildModelRows(ctx: DoctorContext): DashboardModelRow[] {
 
 function buildModelOptions(ctx: DoctorContext): Record<string, string[]> {
   const modelOptions: Record<string, string[]> = {};
+  const tierOptions = ['fast', 'capable', 'deep'];
+  const knownConcreteModels = listKnownModelValues();
 
   for (const role of DASHBOARD_MODEL_ROLES) {
     if (role === 'fast' || role === 'voice') {
-      modelOptions[role] = ['fast', 'capable', 'deep', 'default'];
+      modelOptions[role] = ['default', ...tierOptions];
       continue;
     }
 
-    const options: string[] = [];
+    const options: string[] = ['default', ...tierOptions];
     const envDefault = ctx.envDefaults[role] ?? MODEL_DEFAULTS[role];
     const overrideValue = ctx.models[role];
 
     if (envDefault) options.push(envDefault);
     if (overrideValue && overrideValue !== envDefault) options.push(overrideValue);
-    options.push('default');
+    options.push(...knownConcreteModels);
 
     modelOptions[role] = [...new Set(options)];
   }
