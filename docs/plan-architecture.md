@@ -430,3 +430,45 @@ Evidence differs from phase output:
 - `evidence` is the compact structured contract for machines and summaries.
 - Evidence should capture verification intent and verdict, while `output` preserves raw logs, stack traces, and contextual detail.
 - Evidence is persisted in both the JSON state file and the markdown phases file so downstream readers can recover the same machine-readable contract from either storage format. In markdown, the persisted evidence JSON lives in the phase metadata preamble; arbitrary free-text transcript content is not scanned for evidence markers.
+
+### Run-Level Evidence
+
+Per-phase evidence is flattened into a run-scoped summary by `collectRunEvidence()` in `verification-evidence.ts`. `buildPostRunSummary()` calls it first, then returns both the human-readable summary text and the structured evidence array so run-completion pathways do not need to re-read or manually iterate `phase.evidence`.
+
+The flattened row shape can be thought of as a `PhaseEvidenceSummary`:
+
+```ts
+type PhaseEvidenceSummary = VerificationEvidence & {
+  phaseId: string;
+  phaseTitle: string;
+  phaseKind: 'implement' | 'read' | 'audit';
+  phaseStatus: 'pending' | 'in-progress' | 'done' | 'failed' | 'skipped';
+};
+```
+
+In code, this is currently exported as `RunVerificationEvidence`; the semantics are the same. Each row keeps the original verification `kind`/`status` plus the phase metadata needed to interpret where that record came from and what state the owning phase ended in.
+
+Aggregation rules:
+
+- `collectRunEvidence(phases)` preserves phase order and emits one run-level row for each persisted `phase.evidence` entry.
+- The function does not synthesize records for phases with no evidence. Missing rows therefore mean "no trustworthy structured verification was persisted for this phase", not necessarily "verification passed" or "verification failed".
+- `buildPostRunSummary()` returns `{ text, evidence }`, where `evidence` is the direct output of `collectRunEvidence()`. This is what the `!plan run` completion message path and the action-run completion callback both use.
+
+Interpretation rules:
+
+| Phase kind | Typical evidence kinds | Interpretation |
+|------------|------------------------|----------------|
+| `implement` | `build`, `test` | Successful implement phases may contribute zero or more build/test records. They never emit `audit` evidence. A done implement phase with no row means either the worker explicitly reported `[]` (nothing ran) or no structured trailer was persisted. |
+| `read` | none | Read phases normally contribute no evidence. Their purpose is context gathering, so absence of rows is expected. |
+| `audit` | `audit` | Audit phases contribute exactly the synthesized audit verdict when execution reaches verdict parsing. `phaseStatus: failed` with `status: fail` means the audit completed and found blocking deviations, not that the runner crashed. |
+
+Phase status and evidence status answer different questions:
+
+| Phase status | Evidence interpretation |
+|--------------|-------------------------|
+| `done` | Any included rows are trustworthy completed verification results. Their `status` field carries the actual verification verdict (`pass` or `fail`). |
+| `failed` | Use the evidence rows if present, but read them together with `phaseKind`. The common case is an audit phase with `kind: 'audit'` and `status: 'fail'`; implement/runtime failures usually have no evidence row and rely on phase-level `error`. |
+| `skipped` | No synthetic `skip` evidence is created. If a skipped phase somehow still carries persisted rows (for example after resequencing or manual state edits), those rows describe historical verification that existed before the skip, not a new skip verdict. |
+| `pending` / `in-progress` | Evidence may be absent because the phase has not reached verification yet. If rows do exist, `collectRunEvidence()` preserves them unchanged so downstream consumers can surface partial progress without inventing a new evidence state. |
+
+The key rule is that `VerificationEvidence.status` always represents a completed verification verdict (`pass` or `fail`), while `phaseStatus` represents the execution lifecycle of the owning phase. Consumers that need to distinguish "not run", "skipped", "runner error", and "verification failed" must read both layers together.
