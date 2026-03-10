@@ -1,8 +1,13 @@
 {
   "mcpServers": {
-    "filesystem": {
+    "discoclaw-files": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/path/to/discoclaw/docs",
+        "/path/to/discoclaw/workspace"
+      ]
     }
   }
 }
