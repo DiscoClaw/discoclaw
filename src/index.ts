@@ -863,6 +863,8 @@ const codexRuntimeRaw = createCodexCliRuntime({
   itemTypeDebug: cfg.codexItemTypeDebug,
   appendSystemPrompt,
   log,
+  streamStallTimeoutMs,
+  progressStallTimeoutMs,
 });
 registerRuntime('codex', codexRuntimeRaw);
 log.info(

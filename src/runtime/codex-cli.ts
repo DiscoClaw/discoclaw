@@ -19,6 +19,8 @@ export type CodexCliRuntimeOpts = {
   itemTypeDebug?: boolean;
   appendSystemPrompt?: string;
   log?: { debug(...args: unknown[]): void; info?(...args: unknown[]): void };
+  streamStallTimeoutMs?: number;
+  progressStallTimeoutMs?: number;
 };
 
 export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter {
@@ -31,5 +33,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     disableSessions: opts.disableSessions,
     appendSystemPrompt: opts.appendSystemPrompt,
     log: opts.log,
+    streamStallTimeoutMs: opts.streamStallTimeoutMs,
+    progressStallTimeoutMs: opts.progressStallTimeoutMs,
   });
 }

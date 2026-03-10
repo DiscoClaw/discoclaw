@@ -123,6 +123,77 @@ function createMockSubprocess(opts: {
   return subprocess;
 }
 
+function createControlledSubprocess() {
+  const stdoutListeners: Record<string, ((...args: any[]) => void)[]> = {};
+  const stderrListeners: Record<string, ((...args: any[]) => void)[]> = {};
+  const mockStdout = {
+    on(event: string, cb: (...args: any[]) => void) {
+      if (!stdoutListeners[event]) stdoutListeners[event] = [];
+      stdoutListeners[event].push(cb);
+      return mockStdout;
+    },
+  };
+  const mockStderr = {
+    on(event: string, cb: (...args: any[]) => void) {
+      if (!stderrListeners[event]) stderrListeners[event] = [];
+      stderrListeners[event].push(cb);
+      return mockStderr;
+    },
+  };
+  const mockStdin = {
+    write: vi.fn(),
+    end: vi.fn(),
+  };
+
+  let stdoutText = '';
+  let stderrText = '';
+  let resolveProc!: (result: any) => void;
+  const completion = new Promise<any>((resolve) => {
+    resolveProc = resolve;
+  });
+
+  let stdoutClosed = false;
+  let stderrClosed = false;
+  const endStreams = () => {
+    if (!stdoutClosed) {
+      stdoutClosed = true;
+      for (const cb of (stdoutListeners.end || [])) cb();
+    }
+    if (!stderrClosed) {
+      stderrClosed = true;
+      for (const cb of (stderrListeners.end || [])) cb();
+    }
+  };
+
+  const subprocess: any = Object.assign(completion, {
+    stdout: mockStdout,
+    stderr: mockStderr,
+    stdin: mockStdin,
+    pid: 12345,
+    kill: vi.fn(() => {
+      endStreams();
+      resolveProc({ exitCode: null, stdout: stdoutText, stderr: stderrText, failed: true, killed: true });
+    }),
+  });
+
+  return {
+    subprocess,
+    emitStdout(chunk: string) {
+      stdoutText += chunk;
+      for (const cb of (stdoutListeners.data || [])) cb(Buffer.from(chunk));
+    },
+    emitStderr(chunk: string) {
+      stderrText += chunk;
+      for (const cb of (stderrListeners.data || [])) cb(Buffer.from(chunk));
+    },
+    resolve(opts?: { exitCode?: number | null; failed?: boolean }) {
+      endStreams();
+      const exitCode = opts?.exitCode ?? 0;
+      resolveProc({ exitCode, stdout: stdoutText, stderr: stderrText, failed: opts?.failed ?? exitCode !== 0, timedOut: false });
+    },
+  };
+}
+
 describe('Codex CLI runtime adapter', () => {
   const originalHardening = process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
   const originalStableHome = process.env.DISCOCLAW_CODEX_STABLE_HOME;
@@ -220,6 +291,36 @@ describe('Codex CLI runtime adapter', () => {
     expect(errorEvt).toBeDefined();
     expect((errorEvt as { message: string }).message).toContain('timed out');
     expect(events[events.length - 1]!.type).toBe('done');
+  });
+
+  it('honors configured stream stall timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const controlled = createControlledSubprocess();
+      mockExeca.mockReturnValue(controlled.subprocess);
+
+      const rt = createCodexCliRuntime({
+        codexBin: 'codex',
+        defaultModel: 'gpt-5.3-codex',
+        streamStallTimeoutMs: 5000,
+      });
+
+      const events: EngineEvent[] = [];
+      const drainPromise = (async () => {
+        for await (const evt of rt.invoke({ prompt: 'Say hello', model: '', cwd: '/tmp' })) {
+          events.push(evt);
+        }
+      })();
+
+      await vi.advanceTimersByTimeAsync(6000);
+      await drainPromise;
+
+      expect(events.some((e) => e.type === 'error' && (e as { message: string }).message.includes('stream stall'))).toBe(true);
+      expect(events.some((e) => e.type === 'done')).toBe(true);
+      expect(controlled.subprocess.kill).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('model override: params.model takes precedence over defaultModel', async () => {
