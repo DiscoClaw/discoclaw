@@ -13,6 +13,10 @@ const DEFAULT_MODEL = 'text-embedding-3-small';
 const DEFAULT_DIMENSIONS = 1536;
 const MAX_BATCH_SIZE = 100;
 
+/**
+ * Maintainers: consult `docs/official-docs.md` before changing the OpenAI
+ * embeddings endpoint, default model, request body, or dimensions handling.
+ */
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   readonly dimensions: number;
   private readonly apiKey: string;
