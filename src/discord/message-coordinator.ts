@@ -50,6 +50,7 @@ import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } 
 import type { ForgeOrchestratorOpts, ForgeResult } from './forge-commands.js';
 import { runNextPhase, resolveProjectCwd, readPhasesFile, buildPostRunSummary } from './plan-manager.js';
 import type { PlanRunEvent } from './plan-manager.js';
+import type { RunVerificationEvidence } from './verification-evidence.js';
 import {
   acquireWriterLock as registryAcquireWriterLock,
   setActiveOrchestrator,
@@ -1855,6 +1856,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   // eslint-disable-next-line @typescript-eslint/no-floating-promises
                   (async () => {
                     const phaseResults: Array<{ id: string; title: string; elapsedMs: number }> = [];
+                    let finalEvidence: RunVerificationEvidence[] = [];
                     let phasesRun = 0;
                     let stopReason: 'error' | 'limit' | 'shutdown' | null = null;
                     let stopMessage = '';
@@ -1957,11 +1959,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       if (phaseList) summaryMsg += `\n${phaseList}`;
                     }
 
-                    if (!isRunOne && (phasesRun > 0 || stopReason === null)) {
+                    // Include persisted evidence even when the first attempted phase fails before any phase completes.
+                    if (!isRunOne && (phasesRun > 0 || stopReason === null || stopReason === 'error')) {
                       try {
                         const phases = readPhasesFile(phasesFilePath, { log: params.log });
                         const budget = 2000 - summaryMsg.length - 50;
                         const { text, evidence } = buildPostRunSummary(phases, budget);
+                        finalEvidence = evidence;
                         params.log?.info({ planId, phasesRun, evidence }, 'plan-run: completion evidence');
                         if (text) {
                           summaryMsg += `\n${text}`;
@@ -1994,6 +1998,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         : stopMessage || undefined,
                     );
                     await editSummary(summaryMsg);
+                    try {
+                      await params.planCtx?.onRunComplete?.({ content: summaryMsg, evidence: finalEvidence });
+                    } catch {
+                      // best-effort
+                    }
                     planRunWatchdogOutcome = stopReason === null ? 'succeeded' : 'failed';
                   })().then(
                     () => { /* success — cleanup handled by outer finally */ },
