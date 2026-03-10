@@ -278,6 +278,22 @@ describe('bootReport', () => {
     expect(msg).toContain('Version · DiscoClaw (unknown)');
   });
 
+  it('includes Dashboard line when dashboardUrl is provided', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, dashboardUrl: 'http://127.0.0.1:9401/' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Dashboard · http://127.0.0.1:9401/');
+  });
+
+  it('omits Dashboard line when dashboardUrl is absent', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData });
+    const msg = sentContent(ch);
+    expect(msg).not.toContain('Dashboard ·');
+  });
+
   it('includes cold in Memory line when memoryColdOn is true with chunk count', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);

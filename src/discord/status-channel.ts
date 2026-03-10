@@ -93,6 +93,7 @@ export type BootReportData = {
   runtimeModel?: string;
   bootDurationMs?: number;
   buildVersion?: string;
+  dashboardUrl?: string;
   // npm version check (informational)
   npmVersion?: string;
   npmLatestVersion?: string | null;
@@ -256,6 +257,9 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
 
       lines.push(`Actions · ${data.actionCategoriesEnabled.length > 0 ? data.actionCategoriesEnabled.join(', ') : '(none)'}`);
       lines.push(`Version · DiscoClaw ${formatVersionLine(data)}`);
+      if (data.dashboardUrl) {
+        lines.push(`Dashboard · ${data.dashboardUrl}`);
+      }
 
       if (data.configWarnings && data.configWarnings > 0) {
         lines.push(`Config Warnings · ${data.configWarnings}`);
