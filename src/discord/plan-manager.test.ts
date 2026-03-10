@@ -1292,6 +1292,7 @@ describe('buildPhasePrompt', () => {
     const auditPhase: PlanPhase = { ...phase, kind: 'audit' };
     const prompt = buildPhasePrompt(auditPhase, SAMPLE_PLAN);
     expect(prompt).toContain('blocking | medium | minor | suggestion');
+    expect(prompt).toContain('**Severity: none**');
     expect(prompt).not.toContain('Severity: high | medium | low');
   });
 
@@ -2673,7 +2674,48 @@ describe('executePhase audit verdict', () => {
     expect(result.status).toBe('done');
   });
 
-  it('audit phase with no severity markers returns failed', async () => {
+  it('audit phase with Severity: none returns done with no concerns', async () => {
+    const auditOutput = '**Severity: none**\nNo concerns found.\n\n**Verdict:** Ready to approve.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.evidence).toEqual([
+        { kind: 'audit', status: 'pass', summary: 'Audit passed with no concerns' },
+      ]);
+    }
+  });
+
+  it('audit phase with verdict-only ready-to-approve falls back without failing', async () => {
+    const auditOutput = 'Everything looks great.\n\n**Verdict:** Ready to approve.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.evidence).toEqual([
+        {
+          kind: 'audit',
+          status: 'pass',
+          summary: 'Audit passed via legacy verdict-only output; severity markers missing',
+        },
+      ]);
+    }
+  });
+
+  it('audit phase with verdict-only needs-revision falls back to audit_failed', async () => {
+    const auditOutput = 'This needs more work.\n\n**Verdict:** Needs revision.';
+    const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
+    expect(result.status).toBe('audit_failed');
+    if (result.status === 'audit_failed') {
+      expect(result.evidence).toEqual([
+        {
+          kind: 'audit',
+          status: 'fail',
+          reason: 'Audit requested revision via verdict-only output; severity markers missing',
+        },
+      ]);
+    }
+  });
+
+  it('audit phase with no severity markers or verdict returns failed', async () => {
     const auditOutput = 'Everything looks great. No concerns.';
     const result = await executePhase(auditPhase, SAMPLE_PLAN, basePhases, makeOpts(makeSuccessRuntime(auditOutput)));
     expect(result.status).toBe('failed');

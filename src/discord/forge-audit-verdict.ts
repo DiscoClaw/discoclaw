@@ -41,9 +41,9 @@ function normalizeSeverity(raw: string | undefined): AuditSeverity | null {
 }
 
 const LEGACY_SEVERITY_MARKER_PATTERNS = [
-  /\bseverity\b[:\s]*\**\s*(blocking|high|medium|minor|low|suggestion)\b/gi,
-  /\|\s*\**\s*(blocking|high|medium|minor|low|suggestion)\s*\**\s*\|/gi,
-  /\((blocking|high|medium|minor|low|suggestion)\)/gi,
+  /\bseverity\b[:\s]*\**\s*(blocking|high|medium|minor|low|suggestion|none)\b/gi,
+  /\|\s*\**\s*(blocking|high|medium|minor|low|suggestion|none)\s*\**\s*\|/gi,
+  /\((blocking|high|medium|minor|low|suggestion|none)\)/gi,
 ] as const;
 
 function maxSeverityFromList(severities: AuditSeverity[]): AuditSeverity {
@@ -165,7 +165,9 @@ function parseAuditVerdictLegacy(auditText: string): AuditVerdict {
         ? 'minor'
         : found.has('suggestion')
           ? 'suggestion'
-          : 'none';
+          : found.has('none')
+            ? 'none'
+            : 'none';
 
   // Determine verdict from text
   const needsRevision = lower.includes('needs revision');
@@ -174,7 +176,7 @@ function parseAuditVerdictLegacy(auditText: string): AuditVerdict {
   // Severity markers win over verdict text when they disagree.
   // A "Ready to approve" verdict with blocking-severity findings is contradictory —
   // trust the severity markers.
-  if (markerSeverity !== 'none') {
+  if (markerSeverity !== 'none' || found.has('none')) {
     const shouldLoop = markerSeverity === 'blocking';
     return { maxSeverity: markerSeverity, shouldLoop };
   }

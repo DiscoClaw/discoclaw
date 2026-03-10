@@ -35,7 +35,7 @@ The forge runs a draft → audit → revise cycle:
 
 ### Severity Model
 
-The audit system uses a four-tier severity model:
+The audit system uses a four-tier concern severity model plus a clean-pass marker:
 
 | Level | Triggers loop? | Description |
 |-------|---------------|-------------|
@@ -43,6 +43,7 @@ The audit system uses a four-tier severity model:
 | `medium` | No | Substantive improvements that would make the plan better but aren't showstoppers. Missing edge case handling, incomplete error paths. |
 | `minor` | No | Small issues: naming, style, minor clarity gaps. Worth noting, not worth looping over. |
 | `suggestion` | No | Ideas for future improvement. Not problems with the current plan. |
+| `none` | No | No concerns were found. This is emitted as a standalone clean-pass marker, not as a concern severity. |
 
 Only `blocking` findings trigger the revision loop. All other severities are noted in the audit log but auto-approved.
 
@@ -60,9 +61,10 @@ Only `blocking` findings trigger the revision loop. All other severities are not
 | `severity: minor` | `minor` | `false` — stop, ready for review |
 | `severity: low` (backward compat) | `minor` | `false` — stop, ready for review |
 | `severity: suggestion` | `suggestion` | `false` — stop, ready for review |
-| "ready to approve" text | `minor` | `false` — stop |
-| "needs revision" text (no markers) | `blocking` | `true` — stop |
-| No severity markers | `none` | `false` — stop (malformed → human review) |
+| `severity: none` | `none` | `false` — stop, clean audit |
+| "ready to approve" text (no markers, legacy fallback) | `minor` | `false` — stop |
+| "needs revision" text (no markers, legacy fallback) | `blocking` | `true` — stop |
+| No severity markers and no verdict | `none` | `false` — stop (malformed → human review) |
 
 ### Status transitions during forge
 
@@ -422,7 +424,7 @@ Outcome semantics:
 | `skip` | No evidence record for that verification, usually paired with phase `status: skipped` | Skips are phase-level execution outcomes, not evidence statuses. If a command was intentionally not run, downstream code should infer "skipped" from the phase state and the absence of corresponding evidence. |
 | `error` | Phase `status: failed` plus phase-level `error` / `output` | Errors represent runner/tool failures that prevented trustworthy verification from being recorded. They are operational failures, not verification verdicts, so they are not encoded as `VerificationEvidence.status`. |
 
-Malformed audit output is treated as a phase-level `error`, not as passing evidence. In particular, verdict-only audit text without any severity markers is not considered trustworthy enough to synthesize `audit` evidence.
+Malformed audit output is treated as a phase-level `error`, not as passing evidence. Clean modern audit output should include `**Severity: none**` when no concerns exist. For backward compatibility, verdict-only audit text still falls back to the parsed verdict and records evidence with a legacy-fallback summary/reason. Text with neither severity markers nor a verdict remains a phase-level error.
 
 Evidence differs from phase output:
 

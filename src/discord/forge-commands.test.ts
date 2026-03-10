@@ -262,6 +262,11 @@ describe('parseAuditVerdict', () => {
     expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'suggestion', shouldLoop: false });
   });
 
+  it('text containing "Severity: none" -> none, no loop', () => {
+    const text = '**Severity: none**\nNo concerns found.\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'none', shouldLoop: false });
+  });
+
   it('backward compat: "Severity: high" -> blocking, shouldLoop', () => {
     const text = '**Concern 1: Missing error handling**\n**Severity: high**\n\n**Verdict:** Needs revision.';
     expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'blocking', shouldLoop: true });
