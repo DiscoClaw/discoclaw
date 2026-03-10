@@ -220,6 +220,7 @@ export function collectRunEvidence(phases: RunEvidencePhase[]): RunVerificationE
   const evidence: RunVerificationEvidence[] = [];
 
   for (const phase of phases) {
+    if (phase.status === 'skipped') continue;
     for (const record of phase.evidence ?? []) {
       evidence.push({
         phaseId: phase.id,

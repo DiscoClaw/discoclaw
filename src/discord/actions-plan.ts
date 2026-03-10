@@ -118,6 +118,28 @@ function extractPhaseStopMessage(phaseResult: { result: string } & Record<string
   return phaseResult.result;
 }
 
+function isMissingPhasesStateError(err: unknown): boolean {
+  return typeof err === 'object'
+    && err !== null
+    && 'code' in err
+    && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function readVerificationBadgeFromPhasesFile(
+  phasesFilePath: string,
+  planCtx: Pick<PlanContext, 'log'>,
+): string | undefined {
+  try {
+    const phases = readPhasesFile(phasesFilePath, { log: planCtx.log });
+    return formatVerificationBadge(deriveVerificationState(phases.phases));
+  } catch (err) {
+    if (isMissingPhasesStateError(err)) {
+      return formatVerificationBadge('pending');
+    }
+    return undefined;
+  }
+}
+
 function buildPlanRunWatchdogId(planId: string, ctx: ActionContext): string {
   return `plan-action:${ctx.channelId}:${ctx.messageId}:${planId}`;
 }
@@ -166,17 +188,10 @@ export async function executePlanAction(
 
       const lines = filtered.map((p) => {
         const taskId = resolvePlanHeaderTaskId(p.header);
-        let verificationBadge = '';
+        const phasesFilePath = path.join(planCtx.plansDir, `${p.header.planId}-phases.md`);
+        const verificationBadge = readVerificationBadgeFromPhasesFile(phasesFilePath, planCtx);
 
-        try {
-          const phasesFilePath = path.join(planCtx.plansDir, `${p.header.planId}-phases.md`);
-          const phases = readPhasesFile(phasesFilePath, { log: planCtx.log });
-          verificationBadge = ` ${formatVerificationBadge(deriveVerificationState(phases.phases))}`;
-        } catch {
-          // best-effort — omit verification badge when phases state is unavailable
-        }
-
-        return `\`${p.header.planId}\` [${p.header.status}]${verificationBadge} — ${p.header.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
+        return `\`${p.header.planId}\` [${p.header.status}]${verificationBadge ? ` ${verificationBadge}` : ''} — ${p.header.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
       });
       return { ok: true, summary: lines.join('\n') };
     }
@@ -200,12 +215,10 @@ export async function executePlanAction(
         `Created: ${found.header.created}`,
       ];
 
-      try {
-        const phasesFilePath = path.join(planCtx.plansDir, `${found.header.planId}-phases.md`);
-        const phases = readPhasesFile(phasesFilePath, { log: planCtx.log });
-        lines.push(`Verification: ${formatVerificationBadge(deriveVerificationState(phases.phases))}`);
-      } catch {
-        // best-effort — omit verification when phases state is unavailable
+      const phasesFilePath = path.join(planCtx.plansDir, `${found.header.planId}-phases.md`);
+      const verificationBadge = readVerificationBadgeFromPhasesFile(phasesFilePath, planCtx);
+      if (verificationBadge) {
+        lines.push(`Verification: ${verificationBadge}`);
       }
 
       return { ok: true, summary: lines.join('\n') };

@@ -360,6 +360,25 @@ export type CreatePlanResult = {
   displayMessage: string;
 };
 
+function isMissingPhasesStateError(err: unknown): boolean {
+  return typeof err === 'object'
+    && err !== null
+    && 'code' in err
+    && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function readVerificationBadgeFromPhasesFile(phasesFilePath: string): string | undefined {
+  try {
+    const phases = readPhasesFile(phasesFilePath);
+    return formatVerificationBadge(deriveVerificationState(phases.phases));
+  } catch (err) {
+    if (isMissingPhasesStateError(err)) {
+      return formatVerificationBadge('pending');
+    }
+    return undefined;
+  }
+}
+
 function resolvePlansDir(opts: HandlePlanCommandOpts): string {
   return opts.plansDir ?? path.join(opts.workspaceCwd, 'plans');
 }
@@ -513,14 +532,8 @@ export async function handlePlanCommand(
           const header = parsePlanFileHeader(content);
           if (!header) continue;
 
-          let verificationBadge: string | undefined;
-          try {
-            const phasesFilePath = path.join(plansDir, `${header.planId}-phases.md`);
-            const phases = readPhasesFile(phasesFilePath);
-            verificationBadge = formatVerificationBadge(deriveVerificationState(phases.phases));
-          } catch {
-            // best-effort — omit verification badge when phases state is unavailable
-          }
+          const phasesFilePath = path.join(plansDir, `${header.planId}-phases.md`);
+          const verificationBadge = readVerificationBadgeFromPhasesFile(phasesFilePath);
 
           plans.push({ header, verificationBadge });
         } catch {
@@ -556,15 +569,11 @@ export async function handlePlanCommand(
 
       const auditSection = getSection(parsedPlan, 'Audit Log');
       const latestVerdict = getLatestAuditVerdictFromSection(auditSection) ?? '(no audit yet)';
-      let verificationLine: string | undefined;
-
-      try {
-        const phasesFilePath = path.join(plansDir, `${found.header.planId}-phases.md`);
-        const phases = readPhasesFile(phasesFilePath);
-        verificationLine = `**Verification:** ${formatVerificationBadge(deriveVerificationState(phases.phases))}`;
-      } catch {
-        // best-effort — omit verification when phases state is unavailable
-      }
+      const phasesFilePath = path.join(plansDir, `${found.header.planId}-phases.md`);
+      const verificationBadge = readVerificationBadgeFromPhasesFile(phasesFilePath);
+      const verificationLine = verificationBadge
+        ? `**Verification:** ${verificationBadge}`
+        : undefined;
 
       return [
         `**${found.header.planId}** — ${found.header.title}`,
@@ -729,13 +738,14 @@ const STATUS_EMOJI: Record<string, string> = {
 
 function formatPhasesChecklist(phases: PlanPhases): string {
   const lines: string[] = [];
-  lines.push(`**Phases for ${phases.planId}** (hash: \`${phases.planContentHash}\`)`);
+  const verificationBadge = formatVerificationBadge(deriveVerificationState(phases.phases));
+  lines.push(`**Phases for ${phases.planId}** ${verificationBadge} (hash: \`${phases.planContentHash}\`)`);
   lines.push('');
 
   for (const phase of phases.phases) {
     const emoji = STATUS_EMOJI[phase.status] ?? '[ ]';
     const deps = phase.dependsOn.length > 0 ? ` (depends: ${phase.dependsOn.join(', ')})` : '';
-    const evidenceSummary = phase.evidence && phase.evidence.length > 0
+    const evidenceSummary = phase.status !== 'skipped' && phase.evidence && phase.evidence.length > 0
       ? ` — ${phase.evidence.map(formatEvidenceSummary).join(' · ')}`
       : '';
     lines.push(`${emoji} **${phase.id}:** ${phase.title} [${phase.kind}]${deps}${evidenceSummary}`);

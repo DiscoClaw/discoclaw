@@ -725,6 +725,7 @@ describe('handlePlanCommand', () => {
     expect(result).toContain('plan-002');
     expect(result).toContain('APPROVED');
     expect(result).toContain('Beta');
+    expect(result).toContain('[pending]');
   });
 
   it('list — returns message when no plans', async () => {
@@ -792,6 +793,7 @@ describe('handlePlanCommand', () => {
     expect(result).toContain('DRAFT');
     expect(result).toContain('Build the test feature');
     expect(result).toContain('Ready with minor revisions');
+    expect(result).toContain('**Verification:** [pending]');
   });
 
   it('show — extracts **Verdict:** inline bold format from audit log', async () => {
@@ -1269,6 +1271,7 @@ describe('handlePlanCommand', () => {
     );
 
     expect(result).toContain('Phases for plan-001');
+    expect(result).toContain('**Phases for plan-001** [pending]');
     expect(result).toContain('phase-');
     // Phases file should have been created
     const phasesFile = path.join(plansDir, 'plan-001-phases.md');

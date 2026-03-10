@@ -71,7 +71,7 @@ List all plans with their status.
 **Output:**
 ```
 - `plan-015` [APPROVED] [pending] — Implement phase manager (task: `abc111`)
-- `plan-016` [DONE] [verified] — Add forge orchestrator (task: `abc222`)
+- `plan-016` [CLOSED] [verified] — Add forge orchestrator (task: `abc222`)
 - `plan-017` [DRAFT] [skipped] — Add webhook support (task: `abc333`)
 ```
 
@@ -92,9 +92,9 @@ Project: discoclaw
 Created: 2026-02-12
 
 **Objective:** Add webhook endpoints for external notification delivery...
-**Verification:** pending
-
 **Latest audit:** (no audit yet)
+
+**Verification:** [pending]
 ```
 
 ### `!plan approve <plan-id|task-id>`
@@ -133,7 +133,7 @@ Show or generate the phase decomposition for a plan. If no phases file exists, g
 
 **Output:**
 ```
-**Phases for plan-017** (hash: `a1b2c3d4e5f6g7h8`)
+**Phases for plan-017** [pending] (hash: `a1b2c3d4e5f6g7h8`)
 
 [ ] **phase-1:** Implement src/webhook.ts [implement]
 [ ] **phase-2:** Implement src/webhook.test.ts [implement] (depends: phase-1)

@@ -3,8 +3,10 @@ import {
   collectRunEvidence,
   coerceEvidenceArray,
   createEvidence,
+  deriveVerificationState,
   formatEvidenceLine,
   formatEvidenceSummary,
+  formatVerificationBadge,
 } from './verification-evidence.js';
 
 describe('createEvidence', () => {
@@ -131,6 +133,90 @@ describe('formatEvidenceSummary', () => {
   });
 });
 
+describe('deriveVerificationState', () => {
+  it('returns pending for readable terminal runs with read phases and no audit pass', () => {
+    expect(deriveVerificationState([
+      {
+        id: 'phase-1',
+        title: 'Implement command parsing',
+        kind: 'implement',
+        status: 'done',
+        evidence: [createEvidence({
+          kind: 'build',
+          status: 'pass',
+          summary: 'dist built cleanly',
+        })],
+      },
+      {
+        id: 'phase-2',
+        title: 'Read final diff',
+        kind: 'read',
+        status: 'done',
+      },
+    ])).toBe('pending');
+  });
+
+  it('returns verified when build/test and audit both pass', () => {
+    expect(deriveVerificationState([
+      {
+        id: 'phase-1',
+        title: 'Implement feature',
+        kind: 'implement',
+        status: 'done',
+        evidence: [createEvidence({
+          kind: 'test',
+          status: 'pass',
+          summary: 'targeted suite passed',
+        })],
+      },
+      {
+        id: 'phase-2',
+        title: 'Audit result',
+        kind: 'audit',
+        status: 'done',
+        evidence: [createEvidence({
+          kind: 'audit',
+          status: 'pass',
+          summary: 'blocking review clean',
+        })],
+      },
+    ])).toBe('verified');
+  });
+
+  it('ignores failed evidence on skipped phases when deriving the rollup', () => {
+    expect(deriveVerificationState([
+      {
+        id: 'phase-1',
+        title: 'Implement feature',
+        kind: 'implement',
+        status: 'done',
+        evidence: [createEvidence({
+          kind: 'build',
+          status: 'pass',
+          summary: 'dist built cleanly',
+        })],
+      },
+      {
+        id: 'phase-2',
+        title: 'Skipped audit',
+        kind: 'audit',
+        status: 'skipped',
+        evidence: [createEvidence({
+          kind: 'audit',
+          status: 'fail',
+          reason: 'Old blocking finding',
+        })],
+      },
+    ])).toBe('skipped');
+  });
+});
+
+describe('formatVerificationBadge', () => {
+  it('wraps the state in brackets', () => {
+    expect(formatVerificationBadge('pending')).toBe('[pending]');
+  });
+});
+
 describe('collectRunEvidence', () => {
   it('flattens mixed evidence states across run phases', () => {
     const buildEvidence = createEvidence({
@@ -206,8 +292,19 @@ describe('collectRunEvidence', () => {
 
     expect(summaries.map((summary) => summary.phaseId)).toEqual([
       'phase-2',
-      'phase-3',
     ]);
+  });
+
+  it('ignores skipped-phase evidence entirely', () => {
+    expect(collectRunEvidence([
+      {
+        id: 'phase-1',
+        title: 'Skipped audit',
+        kind: 'audit',
+        status: 'skipped',
+        evidence: [{ kind: 'audit', status: 'fail', reason: 'Old blocking finding' }],
+      },
+    ])).toEqual([]);
   });
 
   it('copies phase metadata through unchanged', () => {
