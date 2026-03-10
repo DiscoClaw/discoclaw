@@ -24,6 +24,25 @@ export type CoerceEvidenceArrayOptions = {
   allowedKinds?: readonly VerificationEvidenceKind[];
 };
 
+export type PhaseEvidenceKind = 'implement' | 'read' | 'audit';
+export type PhaseEvidenceStatus = 'pending' | 'in-progress' | 'done' | 'failed' | 'skipped';
+
+export type RunEvidencePhase = {
+  id: string;
+  title: string;
+  kind: PhaseEvidenceKind;
+  status: PhaseEvidenceStatus;
+  evidence?: VerificationEvidence[];
+};
+
+export type PhaseEvidenceSummary = {
+  phaseId: string;
+  phaseTitle: string;
+  phaseKind: PhaseEvidenceKind;
+  phaseStatus: PhaseEvidenceStatus;
+  evidence: VerificationEvidence[] | undefined;
+};
+
 const VALID_EVIDENCE_KINDS = new Set<string>(VERIFICATION_EVIDENCE_KINDS);
 const VALID_EVIDENCE_STATUSES = new Set<string>(VERIFICATION_EVIDENCE_STATUSES);
 
@@ -151,4 +170,14 @@ export function formatEvidenceSummary(evidence: VerificationEvidence): string {
   }
 
   return `${evidence.kind}: ${evidence.status}`;
+}
+
+export function collectRunEvidence(phases: RunEvidencePhase[]): PhaseEvidenceSummary[] {
+  return phases.map((phase) => ({
+    phaseId: phase.id,
+    phaseTitle: phase.title,
+    phaseKind: phase.kind,
+    phaseStatus: phase.status,
+    evidence: phase.evidence ? [...phase.evidence] : phase.evidence,
+  }));
 }

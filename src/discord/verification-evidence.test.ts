@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  collectRunEvidence,
   coerceEvidenceArray,
   createEvidence,
   formatEvidenceLine,
@@ -127,5 +128,104 @@ describe('formatEvidenceSummary', () => {
       status: 'pass',
       summary: '14 passed',
     }))).toBe('test: pass (14 passed)');
+  });
+});
+
+describe('collectRunEvidence', () => {
+  it('collects mixed evidence states across run phases', () => {
+    const buildEvidence = createEvidence({
+      kind: 'build',
+      status: 'pass',
+      command: 'pnpm build',
+      summary: 'dist built cleanly',
+    });
+
+    expect(collectRunEvidence([
+      {
+        id: 'phase-1',
+        title: 'Implement command parsing',
+        kind: 'implement',
+        status: 'done',
+        evidence: [buildEvidence],
+      },
+      {
+        id: 'phase-2',
+        title: 'Read final diff',
+        kind: 'read',
+        status: 'done',
+      },
+      {
+        id: 'phase-3',
+        title: 'Implement cleanup',
+        kind: 'implement',
+        status: 'pending',
+      },
+      {
+        id: 'phase-4',
+        title: 'Implement tests',
+        kind: 'implement',
+        status: 'done',
+        evidence: [],
+      },
+    ])).toEqual([
+      {
+        phaseId: 'phase-1',
+        phaseTitle: 'Implement command parsing',
+        phaseKind: 'implement',
+        phaseStatus: 'done',
+        evidence: [buildEvidence],
+      },
+      {
+        phaseId: 'phase-2',
+        phaseTitle: 'Read final diff',
+        phaseKind: 'read',
+        phaseStatus: 'done',
+        evidence: undefined,
+      },
+      {
+        phaseId: 'phase-3',
+        phaseTitle: 'Implement cleanup',
+        phaseKind: 'implement',
+        phaseStatus: 'pending',
+        evidence: undefined,
+      },
+      {
+        phaseId: 'phase-4',
+        phaseTitle: 'Implement tests',
+        phaseKind: 'implement',
+        phaseStatus: 'done',
+        evidence: [],
+      },
+    ]);
+  });
+
+  it('returns an empty array for empty input', () => {
+    expect(collectRunEvidence([])).toEqual([]);
+  });
+
+  it('preserves phase ordering', () => {
+    const summaries = collectRunEvidence([
+      { id: 'phase-2', title: 'Second', kind: 'audit', status: 'failed' },
+      { id: 'phase-1', title: 'First', kind: 'read', status: 'done' },
+      { id: 'phase-3', title: 'Third', kind: 'implement', status: 'skipped' },
+    ]);
+
+    expect(summaries.map((summary) => summary.phaseId)).toEqual([
+      'phase-2',
+      'phase-1',
+      'phase-3',
+    ]);
+  });
+
+  it('copies phase kind and status through unchanged', () => {
+    expect(collectRunEvidence([
+      { id: 'phase-1', title: 'Audit', kind: 'audit', status: 'failed' },
+      { id: 'phase-2', title: 'Read', kind: 'read', status: 'done' },
+      { id: 'phase-3', title: 'Implement', kind: 'implement', status: 'in-progress' },
+    ])).toEqual([
+      { phaseId: 'phase-1', phaseTitle: 'Audit', phaseKind: 'audit', phaseStatus: 'failed', evidence: undefined },
+      { phaseId: 'phase-2', phaseTitle: 'Read', phaseKind: 'read', phaseStatus: 'done', evidence: undefined },
+      { phaseId: 'phase-3', phaseTitle: 'Implement', phaseKind: 'implement', phaseStatus: 'in-progress', evidence: undefined },
+    ]);
   });
 });
