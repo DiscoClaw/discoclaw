@@ -684,8 +684,11 @@ const ACTION_SCHEMA_TASK_CONTEXT_RE = /\b(task|tasks|todo|ticket|issue|backlog|s
 const ACTION_SCHEMA_CRON_CONTEXT_RE = /\b(cron|schedule|scheduled|reminder|remind|timer)\b/i;
 const ACTION_SCHEMA_IMAGEGEN_STANDALONE_PATTERN =
   String.raw`\b(?:illustration|artwork|sketch|painting|drawing|photo|image|draw)\b`;
+const ACTION_SCHEMA_IMAGEGEN_SUBJECT_PATTERN =
+  String.raw`\b(?:image|photo|picture|pic|mockup|icon|logo|banner|poster|wallpaper|thumbnail|graphic|illustration|artwork|sketch|painting|drawing|portrait|scene|avatar|sticker|cover(?:\s+image)?|visual)\b`;
 const ACTION_SCHEMA_IMAGEGEN_GENERATIVE_PATTERN =
-  String.raw`\b(?:generate|create|make|render|design|paint|draw)\b(?:\W+\w+){0,3}\W+\b(?:image|photo|picture|mockup|icon|logo|banner|wallpaper|thumbnail|graphic|illustration|artwork|sketch|painting|drawing|portrait|scene)\b`;
+  // Allow short filler phrases like "make me a tiny app icon" before the image noun.
+  String.raw`\b(?:generate|create|make|render|design|paint|draw|illustrate|craft)\b(?:\W+\w+){0,6}\W+${ACTION_SCHEMA_IMAGEGEN_SUBJECT_PATTERN}`;
 const ACTION_SCHEMA_IMAGEGEN_RE = new RegExp(
   `${ACTION_SCHEMA_IMAGEGEN_STANDALONE_PATTERN}|${ACTION_SCHEMA_IMAGEGEN_GENERATIVE_PATTERN}`,
   'i',

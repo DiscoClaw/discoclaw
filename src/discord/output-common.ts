@@ -32,6 +32,17 @@ const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
 type SendOpts = { content: string; allowedMentions: unknown; files?: AttachmentBuilder[] };
 
+function imagegenSetupWalkthrough(): string {
+  return [
+    'Setup walkthrough:',
+    '1. Open the instance `.env` file used by this bot.',
+    '2. Set `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1`.',
+    '3. Configure one provider: set `OPENAI_API_KEY` for OpenAI image models, or set `IMAGEGEN_GEMINI_API_KEY` for Gemini/Imagen image models.',
+    '4. Optional: set `IMAGEGEN_DEFAULT_MODEL` if you want a specific default such as `dall-e-3`, `gpt-image-1`, or `imagen-4.0-generate-001`.',
+    '5. Reload the bot with `!restart`, then retry the image request.',
+  ].join(' ');
+}
+
 export async function editThenSendChunks(
   reply: { edit: (opts: SendOpts) => Promise<unknown> },
   channel: { send: (opts: SendOpts) => Promise<unknown> },
@@ -168,8 +179,7 @@ export function shouldSuppressFollowUp(
  */
 const DISABLED_TYPE_HELP: Record<string, string> = {
   // Image generation — requires DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN + an API key.
-  generateImage:
-    'Setup walkthrough: 1. Set `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` in the instance `.env` file. 2. Set at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`. 3. Optionally set `IMAGEGEN_DEFAULT_MODEL` to choose a provider/model. 4. Run `!restart` in Discord so the service reloads the updated environment.',
+  generateImage: imagegenSetupWalkthrough(),
   // Moderation — requires DISCOCLAW_DISCORD_ACTIONS_MODERATION.
   ban: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',
   kick: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MODERATION=1` in .env.',

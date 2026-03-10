@@ -207,6 +207,14 @@ describe('buildUnavailableActionTypesNotice', () => {
     expect(out).not.toContain('unknown type or category disabled');
   });
 
+  it('renders imagegen guidance as a concrete setup checklist', () => {
+    const out = buildUnavailableActionTypesNotice(['generateImage']);
+    expect(out).toContain('1. Open the instance `.env` file used by this bot.');
+    expect(out).toContain('2. Set `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1`.');
+    expect(out).toContain('3. Configure one provider: set `OPENAI_API_KEY`');
+    expect(out).toContain('5. Reload the bot with `!restart`, then retry the image request.');
+  });
+
   it('groups multiple types sharing the same help text onto one line', () => {
     const out = buildUnavailableActionTypesNotice(['ban', 'kick']);
     expect(out).toContain('`ban`');

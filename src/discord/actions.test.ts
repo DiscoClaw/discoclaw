@@ -1056,6 +1056,8 @@ describe('buildTieredDiscordActionsPromptSection', () => {
       'create a picture',
       'make me an icon',
       'render a scene',
+      'make me a tiny app icon',
+      'craft a profile picture',
     ];
 
     for (const userText of phrases) {
