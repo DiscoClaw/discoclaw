@@ -1393,7 +1393,7 @@ export function buildPostRunSummary(
 
     let line = `${indicator} **${phase.id}:** ${phase.title}${commit}${fileCount}`;
 
-    if (phase.evidence && phase.evidence.length > 0) {
+    if (phase.status !== 'skipped' && phase.evidence && phase.evidence.length > 0) {
       line += ` — ${phase.evidence.map(formatEvidenceSummary).join(' · ')}`;
     } else if (phase.kind === 'audit' && phase.output) {
       // For audit phases, append a one-line verdict extracted from output

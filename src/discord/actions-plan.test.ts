@@ -143,6 +143,33 @@ describe('executePlanAction', () => {
         expect(result.summary).toContain('plan-002');
         expect(result.summary).toContain('First Plan');
         expect(result.summary).toContain('Second Plan');
+        expect(result.summary).toContain('[pending]');
+      }
+    });
+
+    it('shows pending verification when phases state is missing', async () => {
+      const { readPhasesFile } = await import('./plan-manager.js');
+      (readPhasesFile as any)
+        .mockImplementationOnce(() => {
+          const err = new Error('missing phases');
+          (err as NodeJS.ErrnoException).code = 'ENOENT';
+          throw err;
+        })
+        .mockImplementationOnce(() => {
+          const err = new Error('missing phases');
+          (err as NodeJS.ErrnoException).code = 'ENOENT';
+          throw err;
+        });
+
+      const result = await executePlanAction(
+        { type: 'planList' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('[pending]');
       }
     });
 
@@ -199,6 +226,27 @@ describe('executePlanAction', () => {
         expect(result.summary).toContain('plan-042');
         expect(result.summary).toContain('Test Plan');
         expect(result.summary).toContain('REVIEW');
+        expect(result.summary).toContain('Verification: [pending]');
+      }
+    });
+
+    it('shows pending verification when phases state is missing', async () => {
+      const { readPhasesFile } = await import('./plan-manager.js');
+      (readPhasesFile as any).mockImplementationOnce(() => {
+        const err = new Error('missing phases');
+        (err as NodeJS.ErrnoException).code = 'ENOENT';
+        throw err;
+      });
+
+      const result = await executePlanAction(
+        { type: 'planShow', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('Verification: [pending]');
       }
     });
 

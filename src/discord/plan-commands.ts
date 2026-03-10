@@ -15,6 +15,11 @@ import {
 import type { PlanPhase, PlanPhases } from './plan-manager.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { getLatestAuditVerdictFromSection, getSection, parsePlan } from './plan-parser.js';
+import {
+  deriveVerificationState,
+  formatEvidenceSummary,
+  formatVerificationBadge,
+} from './verification-evidence.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -355,6 +360,25 @@ export type CreatePlanResult = {
   displayMessage: string;
 };
 
+function isMissingPhasesStateError(err: unknown): boolean {
+  return typeof err === 'object'
+    && err !== null
+    && 'code' in err
+    && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function readVerificationBadgeFromPhasesFile(phasesFilePath: string): string | undefined {
+  try {
+    const phases = readPhasesFile(phasesFilePath);
+    return formatVerificationBadge(deriveVerificationState(phases.phases));
+  } catch (err) {
+    if (isMissingPhasesStateError(err)) {
+      return formatVerificationBadge('pending');
+    }
+    return undefined;
+  }
+}
+
 function resolvePlansDir(opts: HandlePlanCommandOpts): string {
   return opts.plansDir ?? path.join(opts.workspaceCwd, 'plans');
 }
@@ -500,13 +524,18 @@ export async function handlePlanCommand(
         return 'No plans directory found.';
       }
 
-      const plans: PlanFileHeader[] = [];
+      const plans: Array<{ header: PlanFileHeader; verificationBadge?: string }> = [];
       for (const entry of entries) {
         if (!entry.endsWith('.md') || entry.startsWith('.')) continue;
         try {
           const content = await fs.readFile(path.join(plansDir, entry), 'utf-8');
           const header = parsePlanFileHeader(content);
-          if (header) plans.push(header);
+          if (!header) continue;
+
+          const phasesFilePath = path.join(plansDir, `${header.planId}-phases.md`);
+          const verificationBadge = readVerificationBadgeFromPhasesFile(phasesFilePath);
+
+          plans.push({ header, verificationBadge });
         } catch {
           // skip unreadable files
         }
@@ -515,12 +544,13 @@ export async function handlePlanCommand(
       if (plans.length === 0) return 'No plans found.';
 
       // Sort by planId
-      plans.sort((a, b) => a.planId.localeCompare(b.planId));
+      plans.sort((a, b) => a.header.planId.localeCompare(b.header.planId));
 
       const lines = plans.map(
-        (p) => {
-          const taskId = resolvePlanHeaderTaskId(p);
-          return `- \`${p.planId}\` [${p.status}] — ${p.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
+        ({ header, verificationBadge }) => {
+          const taskId = resolvePlanHeaderTaskId(header);
+          const badgeSuffix = verificationBadge ? ` ${verificationBadge}` : '';
+          return `- \`${header.planId}\` [${header.status}]${badgeSuffix} — ${header.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
         },
       );
       return lines.join('\n');
@@ -539,6 +569,11 @@ export async function handlePlanCommand(
 
       const auditSection = getSection(parsedPlan, 'Audit Log');
       const latestVerdict = getLatestAuditVerdictFromSection(auditSection) ?? '(no audit yet)';
+      const phasesFilePath = path.join(plansDir, `${found.header.planId}-phases.md`);
+      const verificationBadge = readVerificationBadgeFromPhasesFile(phasesFilePath);
+      const verificationLine = verificationBadge
+        ? `**Verification:** ${verificationBadge}`
+        : undefined;
 
       return [
         `**${found.header.planId}** — ${found.header.title}`,
@@ -550,6 +585,7 @@ export async function handlePlanCommand(
         `**Objective:** ${objective}`,
         '',
         `**Latest audit:** ${latestVerdict}`,
+        ...(verificationLine ? ['', verificationLine] : []),
       ].join('\n');
     }
 
@@ -702,13 +738,17 @@ const STATUS_EMOJI: Record<string, string> = {
 
 function formatPhasesChecklist(phases: PlanPhases): string {
   const lines: string[] = [];
-  lines.push(`**Phases for ${phases.planId}** (hash: \`${phases.planContentHash}\`)`);
+  const verificationBadge = formatVerificationBadge(deriveVerificationState(phases.phases));
+  lines.push(`**Phases for ${phases.planId}** ${verificationBadge} (hash: \`${phases.planContentHash}\`)`);
   lines.push('');
 
   for (const phase of phases.phases) {
     const emoji = STATUS_EMOJI[phase.status] ?? '[ ]';
     const deps = phase.dependsOn.length > 0 ? ` (depends: ${phase.dependsOn.join(', ')})` : '';
-    lines.push(`${emoji} **${phase.id}:** ${phase.title} [${phase.kind}]${deps}`);
+    const evidenceSummary = phase.status !== 'skipped' && phase.evidence && phase.evidence.length > 0
+      ? ` — ${phase.evidence.map(formatEvidenceSummary).join(' · ')}`
+      : '';
+    lines.push(`${emoji} **${phase.id}:** ${phase.title} [${phase.kind}]${deps}${evidenceSummary}`);
     if (phase.error) lines.push(`  Error: ${phase.error}`);
     if (phase.gitCommit) lines.push(`  Commit: \`${phase.gitCommit}\``);
   }
