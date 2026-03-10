@@ -39,7 +39,7 @@ export function renderDashboardPage(): string {
       padding: 24px;
     }
 
-    button, input, pre, code, table {
+    button, input, select, pre, code, table {
       font: inherit;
     }
 
@@ -186,7 +186,8 @@ export function renderDashboardPage(): string {
     }
 
     button,
-    input {
+    input,
+    select {
       border-radius: 12px;
       border: 1px solid rgba(90, 233, 255, 0.22);
       color: var(--text);
@@ -218,9 +219,33 @@ export function renderDashboardPage(): string {
       background: rgba(255, 255, 255, 0.03);
     }
 
-    input {
+    input,
+    select {
       flex: 1 1 180px;
       min-width: 0;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .field-label {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .field[hidden] {
+      display: none;
     }
 
     .status {
@@ -427,14 +452,13 @@ export function renderDashboardPage(): string {
       <div class="hero-bar">
         <div>
           <div class="eyebrow">Discoclaw Control Panel</div>
-          <h1>Local Control Panel</h1>
         </div>
         <button id="refresh-btn" type="button">Refresh</button>
       </div>
       <p class="hero-copy">Check service health, review settings, and make common changes from one place. This dashboard stays local by default.</p>
       <div class="hero-status">
         <div id="hero-service-pill" class="pill">Service: loading</div>
-        <div id="hero-runtime-pill" class="pill">Special settings: loading</div>
+        <div id="hero-runtime-pill" class="pill">Runtime overrides: loading</div>
       </div>
       <div id="hero-status" class="status"></div>
     </section>
@@ -497,9 +521,21 @@ export function renderDashboardPage(): string {
           </div>
         </div>
         <form id="model-form">
-          <div class="form-row">
-            <input id="role-input" name="role" placeholder="role: chat, fast, voice" required />
-            <input id="model-input" name="model" placeholder='model or "default"' required />
+          <div class="field-grid">
+            <label class="field" for="role-select">
+              <span class="field-label">Role</span>
+              <select id="role-select" name="role" required></select>
+            </label>
+            <label class="field" for="model-select">
+              <span class="field-label">Model</span>
+              <select id="model-select" name="model-select" required></select>
+            </label>
+            <label id="custom-model-field" class="field" for="model-input" hidden>
+              <span class="field-label">Custom model</span>
+              <input id="model-input" name="custom-model" placeholder='model id or "default"' />
+            </label>
+          </div>
+          <div class="actions">
             <button id="model-submit-btn" type="submit">Change model</button>
           </div>
         </form>
@@ -550,8 +586,11 @@ export function renderDashboardPage(): string {
     const doctorFindings = document.getElementById('doctor-findings');
     const doctorFixButton = document.getElementById('doctor-fix-btn');
     const modelStatus = document.getElementById('model-status');
-    const roleInput = document.getElementById('role-input');
+    const roleSelect = document.getElementById('role-select');
+    const modelSelect = document.getElementById('model-select');
+    const customModelField = document.getElementById('custom-model-field');
     const modelInput = document.getElementById('model-input');
+    const CUSTOM_MODEL_VALUE = '__custom__';
 
     let lastSnapshot = null;
 
@@ -622,11 +661,88 @@ export function renderDashboardPage(): string {
       serviceOutput.textContent = message || '(no output)';
     }
 
-    function populateModelForm(role, model) {
-      roleInput.value = role || '';
-      modelInput.value = model || '';
-      modelInput.focus();
-      modelInput.select();
+    function appendSelectOption(select, value, label) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      select.append(option);
+    }
+
+    function getSnapshotRoles(snapshot) {
+      if (Array.isArray(snapshot.roles) && snapshot.roles.length > 0) {
+        return snapshot.roles;
+      }
+      return Array.isArray(snapshot.modelRows)
+        ? snapshot.modelRows.map((row) => row.role)
+        : [];
+    }
+
+    function getModelOptionsForRole(role) {
+      if (!lastSnapshot || !lastSnapshot.modelOptions) return [];
+      const options = lastSnapshot.modelOptions[role];
+      return Array.isArray(options) ? options : [];
+    }
+
+    function getSelectedModelValue() {
+      return modelSelect.value === CUSTOM_MODEL_VALUE
+        ? modelInput.value
+        : modelSelect.value;
+    }
+
+    function syncCustomModelField(focusInput) {
+      const isCustom = modelSelect.value === CUSTOM_MODEL_VALUE;
+      customModelField.hidden = !isCustom;
+      modelInput.required = isCustom;
+      if (!isCustom) {
+        modelInput.value = '';
+        return;
+      }
+      if (focusInput) {
+        modelInput.focus();
+        modelInput.select();
+      }
+    }
+
+    function syncRoleOptions(selectedRole) {
+      if (!lastSnapshot) return '';
+
+      const roles = getSnapshotRoles(lastSnapshot);
+      clearNode(roleSelect);
+      roles.forEach((role) => appendSelectOption(roleSelect, role, role));
+
+      const nextRole = roles.includes(selectedRole) ? selectedRole : (roles[0] || '');
+      roleSelect.value = nextRole;
+      return nextRole;
+    }
+
+    function syncModelOptions(role, selectedModel, focusCustomInput) {
+      const options = getModelOptionsForRole(role);
+      clearNode(modelSelect);
+      options.forEach((model) => appendSelectOption(modelSelect, model, model));
+      appendSelectOption(modelSelect, CUSTOM_MODEL_VALUE, '(custom)');
+
+      if (selectedModel && options.includes(selectedModel)) {
+        modelSelect.value = selectedModel;
+        modelInput.value = '';
+      } else if (selectedModel) {
+        modelSelect.value = CUSTOM_MODEL_VALUE;
+        modelInput.value = selectedModel;
+      } else if (options.length > 0) {
+        modelSelect.value = options[0];
+        modelInput.value = '';
+      } else {
+        modelSelect.value = CUSTOM_MODEL_VALUE;
+        modelInput.value = '';
+      }
+
+      syncCustomModelField(focusCustomInput);
+    }
+
+    function populateModelForm(role, model, focusInput) {
+      const nextRole = syncRoleOptions(role || roleSelect.value);
+      syncModelOptions(nextRole, model || '', Boolean(focusInput));
+      if (!focusInput || modelSelect.value === CUSTOM_MODEL_VALUE) return;
+      modelSelect.focus();
     }
 
     function formatServicePill(summary) {
@@ -646,6 +762,8 @@ export function renderDashboardPage(): string {
     }
 
     function renderSnapshot(snapshot) {
+      const selectedRole = roleSelect.value || snapshot.modelRows[0] && snapshot.modelRows[0].role;
+      const selectedModel = getSelectedModelValue();
       lastSnapshot = snapshot;
 
       clearNode(overviewMetrics);
@@ -694,8 +812,9 @@ export function renderDashboardPage(): string {
       appendRuntimeOverride(runtimeOverrides, 'fast runtime', snapshot.runtimeOverrides.fastRuntime || 'default');
       appendRuntimeOverride(runtimeOverrides, 'voice runtime', snapshot.runtimeOverrides.voiceRuntime || 'default');
 
+      populateModelForm(selectedRole, selectedModel, false);
       heroServicePill.textContent = 'Service: ' + formatServicePill(snapshot.serviceSummary);
-      heroRuntimePill.textContent = 'Special settings: ' + formatRuntimePill(snapshot.runtimeOverrides);
+      heroRuntimePill.textContent = 'Runtime overrides: ' + formatRuntimePill(snapshot.runtimeOverrides);
       setStatus(serviceStatus, snapshot.serviceSummary, 'ok');
     }
 
@@ -901,12 +1020,15 @@ export function renderDashboardPage(): string {
     document.getElementById('model-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       try {
+        const selectedModel = modelSelect.value === CUSTOM_MODEL_VALUE
+          ? modelInput.value
+          : modelSelect.value;
         const response = await fetchJson('/api/model', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            role: roleInput.value,
-            model: modelInput.value,
+            role: roleSelect.value,
+            model: selectedModel,
           }),
         });
         renderSnapshot(response.snapshot);
@@ -920,12 +1042,20 @@ export function renderDashboardPage(): string {
     Promise.all([refreshSnapshot(false), refreshDoctor(false)]).then(() => {
       setStatus(heroStatus, 'Dashboard ready.', 'ok');
       if (lastSnapshot) {
-        populateModelForm(lastSnapshot.modelRows[0] && lastSnapshot.modelRows[0].role, '');
+        populateModelForm(lastSnapshot.modelRows[0] && lastSnapshot.modelRows[0].role, '', false);
       }
     }).catch((error) => {
       setStatus(heroStatus, String(error), 'error');
       setStatus(serviceStatus, String(error), 'error');
       setStatus(doctorSummary, String(error), 'error');
+    });
+
+    roleSelect.addEventListener('change', () => {
+      syncModelOptions(roleSelect.value, '', false);
+    });
+
+    modelSelect.addEventListener('change', () => {
+      syncCustomModelField(true);
     });
   </script>
 </body>

@@ -6,13 +6,15 @@ describe('renderDashboardPage', () => {
     const html = renderDashboardPage();
 
     expect(html).toContain('Discoclaw Control Panel');
-    expect(html).toContain('Local Control Panel');
     expect(html).toContain('>Refresh<');
     expect(html).toContain('Check service health, review settings, and make common changes from one place.');
     expect(html).toContain('This dashboard stays local by default.');
-    expect(html).toContain('Special settings: loading');
+    expect(html).toContain('Runtime overrides: loading');
     expect(html).toContain('function formatServicePill');
     expect(html).toContain('function formatRuntimePill');
+    expect(html).toContain('<select id="role-select"');
+    expect(html).toContain('<select id="model-select"');
+    expect(html).toContain("appendSelectOption(modelSelect, CUSTOM_MODEL_VALUE, '(custom)');");
     expect(html).toContain('Scan for config problems and cleanup suggestions.');
     expect(html).toContain('Safe fixes can be applied automatically; review-only items stay listed for manual cleanup.');
     expect(html).toContain('>Scan Now<');
