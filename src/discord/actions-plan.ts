@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
@@ -27,6 +28,10 @@ import { createStreamingProgress } from './streaming-progress.js';
 import { adaptPlanRunEventText } from './runtime-event-text-adapter.js';
 import { runtimeSupportsNativeThinkingStream } from './runtime-signal-budget.js';
 import { resolveModel, resolveReasoningEffort } from '../runtime/model-tiers.js';
+import {
+  deriveVerificationState,
+  formatVerificationBadge,
+} from './verification-evidence.js';
 
 const DEFAULT_PLAN_PHASE_TIMEOUT_MS = 1_800_000;
 
@@ -159,12 +164,20 @@ export async function executePlanAction(
       // Sort by planId.
       filtered.sort((a, b) => a.header.planId.localeCompare(b.header.planId));
 
-      const lines = filtered.map(
-        (p) => {
-          const taskId = resolvePlanHeaderTaskId(p.header);
-          return `\`${p.header.planId}\` [${p.header.status}] — ${p.header.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
-        },
-      );
+      const lines = filtered.map((p) => {
+        const taskId = resolvePlanHeaderTaskId(p.header);
+        let verificationBadge = '';
+
+        try {
+          const phasesFilePath = path.join(planCtx.plansDir, `${p.header.planId}-phases.md`);
+          const phases = readPhasesFile(phasesFilePath, { log: planCtx.log });
+          verificationBadge = ` ${formatVerificationBadge(deriveVerificationState(phases.phases))}`;
+        } catch {
+          // best-effort — omit verification badge when phases state is unavailable
+        }
+
+        return `\`${p.header.planId}\` [${p.header.status}]${verificationBadge} — ${p.header.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
+      });
       return { ok: true, summary: lines.join('\n') };
     }
 
@@ -186,6 +199,15 @@ export async function executePlanAction(
         `Project: ${found.header.project}`,
         `Created: ${found.header.created}`,
       ];
+
+      try {
+        const phasesFilePath = path.join(planCtx.plansDir, `${found.header.planId}-phases.md`);
+        const phases = readPhasesFile(phasesFilePath, { log: planCtx.log });
+        lines.push(`Verification: ${formatVerificationBadge(deriveVerificationState(phases.phases))}`);
+      } catch {
+        // best-effort — omit verification when phases state is unavailable
+      }
+
       return { ok: true, summary: lines.join('\n') };
     }
 

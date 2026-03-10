@@ -15,6 +15,11 @@ import {
 import type { PlanPhase, PlanPhases } from './plan-manager.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { getLatestAuditVerdictFromSection, getSection, parsePlan } from './plan-parser.js';
+import {
+  deriveVerificationState,
+  formatEvidenceSummary,
+  formatVerificationBadge,
+} from './verification-evidence.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -500,13 +505,24 @@ export async function handlePlanCommand(
         return 'No plans directory found.';
       }
 
-      const plans: PlanFileHeader[] = [];
+      const plans: Array<{ header: PlanFileHeader; verificationBadge?: string }> = [];
       for (const entry of entries) {
         if (!entry.endsWith('.md') || entry.startsWith('.')) continue;
         try {
           const content = await fs.readFile(path.join(plansDir, entry), 'utf-8');
           const header = parsePlanFileHeader(content);
-          if (header) plans.push(header);
+          if (!header) continue;
+
+          let verificationBadge: string | undefined;
+          try {
+            const phasesFilePath = path.join(plansDir, `${header.planId}-phases.md`);
+            const phases = readPhasesFile(phasesFilePath);
+            verificationBadge = formatVerificationBadge(deriveVerificationState(phases.phases));
+          } catch {
+            // best-effort — omit verification badge when phases state is unavailable
+          }
+
+          plans.push({ header, verificationBadge });
         } catch {
           // skip unreadable files
         }
@@ -515,12 +531,13 @@ export async function handlePlanCommand(
       if (plans.length === 0) return 'No plans found.';
 
       // Sort by planId
-      plans.sort((a, b) => a.planId.localeCompare(b.planId));
+      plans.sort((a, b) => a.header.planId.localeCompare(b.header.planId));
 
       const lines = plans.map(
-        (p) => {
-          const taskId = resolvePlanHeaderTaskId(p);
-          return `- \`${p.planId}\` [${p.status}] — ${p.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
+        ({ header, verificationBadge }) => {
+          const taskId = resolvePlanHeaderTaskId(header);
+          const badgeSuffix = verificationBadge ? ` ${verificationBadge}` : '';
+          return `- \`${header.planId}\` [${header.status}]${badgeSuffix} — ${header.title}${taskId ? ` (task: \`${taskId}\`)` : ''}`;
         },
       );
       return lines.join('\n');
@@ -539,6 +556,15 @@ export async function handlePlanCommand(
 
       const auditSection = getSection(parsedPlan, 'Audit Log');
       const latestVerdict = getLatestAuditVerdictFromSection(auditSection) ?? '(no audit yet)';
+      let verificationLine: string | undefined;
+
+      try {
+        const phasesFilePath = path.join(plansDir, `${found.header.planId}-phases.md`);
+        const phases = readPhasesFile(phasesFilePath);
+        verificationLine = `**Verification:** ${formatVerificationBadge(deriveVerificationState(phases.phases))}`;
+      } catch {
+        // best-effort — omit verification when phases state is unavailable
+      }
 
       return [
         `**${found.header.planId}** — ${found.header.title}`,
@@ -550,6 +576,7 @@ export async function handlePlanCommand(
         `**Objective:** ${objective}`,
         '',
         `**Latest audit:** ${latestVerdict}`,
+        ...(verificationLine ? ['', verificationLine] : []),
       ].join('\n');
     }
 
@@ -708,7 +735,10 @@ function formatPhasesChecklist(phases: PlanPhases): string {
   for (const phase of phases.phases) {
     const emoji = STATUS_EMOJI[phase.status] ?? '[ ]';
     const deps = phase.dependsOn.length > 0 ? ` (depends: ${phase.dependsOn.join(', ')})` : '';
-    lines.push(`${emoji} **${phase.id}:** ${phase.title} [${phase.kind}]${deps}`);
+    const evidenceSummary = phase.evidence && phase.evidence.length > 0
+      ? ` — ${phase.evidence.map(formatEvidenceSummary).join(' · ')}`
+      : '';
+    lines.push(`${emoji} **${phase.id}:** ${phase.title} [${phase.kind}]${deps}${evidenceSummary}`);
     if (phase.error) lines.push(`  Error: ${phase.error}`);
     if (phase.gitCommit) lines.push(`  Commit: \`${phase.gitCommit}\``);
   }

@@ -42,6 +42,8 @@ export type RunVerificationEvidence = VerificationEvidence & {
   phaseStatus: PhaseEvidenceStatus;
 };
 
+export type VerificationState = 'failed' | 'pending' | 'skipped' | 'verified' | 'audited';
+
 const VALID_EVIDENCE_KINDS = new Set<string>(VERIFICATION_EVIDENCE_KINDS);
 const VALID_EVIDENCE_STATUSES = new Set<string>(VERIFICATION_EVIDENCE_STATUSES);
 
@@ -169,6 +171,49 @@ export function formatEvidenceSummary(evidence: VerificationEvidence): string {
   }
 
   return `${evidence.kind}: ${evidence.status}`;
+}
+
+export function deriveVerificationState(phases: RunEvidencePhase[]): VerificationState {
+  if (phases.length === 0) return 'pending';
+
+  const allEvidence = collectRunEvidence(phases);
+
+  if (allEvidence.some((record) => record.status === 'fail')) {
+    return 'failed';
+  }
+
+  if (!phases.every((phase) => phase.status === 'done' || phase.status === 'skipped')) {
+    return 'pending';
+  }
+
+  if (phases.every((phase) => phase.status === 'skipped')) {
+    return 'skipped';
+  }
+
+  const hasBuildOrTestPass = allEvidence.some(
+    (record) => record.status === 'pass' && (record.kind === 'build' || record.kind === 'test'),
+  );
+  const hasAuditPass = allEvidence.some(
+    (record) => record.status === 'pass' && record.kind === 'audit',
+  );
+
+  if (hasBuildOrTestPass && hasAuditPass) {
+    return 'verified';
+  }
+
+  if (hasAuditPass) {
+    return 'audited';
+  }
+
+  if (phases.some((phase) => phase.status === 'skipped')) {
+    return 'skipped';
+  }
+
+  return 'pending';
+}
+
+export function formatVerificationBadge(state: VerificationState): string {
+  return `[${state}]`;
 }
 
 export function collectRunEvidence(phases: RunEvidencePhase[]): RunVerificationEvidence[] {
