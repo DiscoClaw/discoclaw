@@ -666,6 +666,9 @@ describe('buildDrafterPrompt', () => {
     expect(prompt).toContain('concrete repo-relative file paths');
     expect(prompt).toContain('Do not use placeholder paths like `path/to/file.ts`');
     expect(prompt).toContain('name the exact enforcement mechanism');
+    expect(prompt).toContain('docs/compound-lessons.md');
+    expect(prompt).toContain('single checked-in durable artifact');
+    expect(prompt).toContain('entry format, ownership, update/promotion rules, and review expectations');
     // Instructions come before template
     expect(prompt.indexOf('## Instructions')).toBeLessThan(prompt.indexOf('## Expected Output Structure'));
     // Anti-echo instruction
@@ -762,6 +765,13 @@ describe('buildAuditorPrompt', () => {
     expect(prompt).toContain('restricted subset of a broader capability');
     expect(prompt).toContain('exact gating primitive');
     expect(prompt).toContain('only describes the restriction in prose, that is a blocking concern');
+  });
+
+  it('requires auditors to verify durable lesson plans against the compound lessons artifact', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test', 1);
+    expect(prompt).toContain('docs/compound-lessons.md');
+    expect(prompt).toContain('recurring workflow/process/quality gap');
+    expect(prompt).toContain('format, ownership, update rules, and review expectations');
   });
 
   it('includes criteria near the start of the prompt before ## Plan to Audit', () => {
@@ -918,6 +928,13 @@ describe('buildRevisionPrompt', () => {
     const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
     expect(prompt).toContain('If you keep or add a restriction claim');
     expect(prompt).toContain('rewrite it to name the exact enforcement mechanism');
+  });
+
+  it('routes durable lesson work through the compound lessons artifact during revision', () => {
+    const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
+    expect(prompt).toContain('docs/compound-lessons.md');
+    expect(prompt).toContain('single checked-in durable artifact');
+    expect(prompt).toContain('format, ownership, update rules, and review expectations');
   });
 
   it('requires concrete repo-relative file paths in Changes during revision', () => {
