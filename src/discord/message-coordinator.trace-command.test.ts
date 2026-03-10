@@ -63,9 +63,9 @@ function makeParams() {
   } as any;
 }
 
-function makeMessage(content: string) {
+function makeMessage(content: string, channelId = 'dm-1') {
   const channel = {
-    id: 'dm-1',
+    id: channelId,
     name: 'dm',
     send: vi.fn(async () => ({})),
     isThread: () => false,
@@ -78,7 +78,7 @@ function makeMessage(content: string) {
     author: { id: 'user-1', bot: false },
     guildId: null,
     guild: null,
-    channelId: 'dm-1',
+    channelId,
     channel,
     client: { channels: { cache: new Map() }, user: { id: 'bot-1' } },
     attachments: new Map(),
@@ -125,6 +125,36 @@ describe('message coordinator !trace command', () => {
     }));
   });
 
+  it('replies with an empty list when traces only exist in a different channel', async () => {
+    const otherChannelTraces = [
+      {
+        traceId: 'message_other-channel',
+        sessionKey: 'discord:dm:user-1',
+        channelId: 'dm-2',
+        flow: 'message',
+        startedAt: new Date('2026-03-08T10:00:00.000Z').getTime(),
+        outcome: 'success',
+        durationMs: 1200,
+        events: [{ type: 'invoke_start', at: new Date('2026-03-08T10:00:00.000Z').getTime(), summary: 'started' }],
+      },
+    ];
+    const listRecentForChannel = vi
+      .spyOn(globalTraceStore, 'listRecentForChannel')
+      .mockImplementation((_limit, channelId) => (channelId === 'dm-2' ? otherChannelTraces : []));
+
+    const queue = { run: vi.fn(async () => undefined) };
+    const handler = createMessageCreateHandler(makeParams(), queue as any);
+    const msg = makeMessage('!trace', 'dm-1');
+
+    await handler(msg as any);
+
+    expect(queue.run).not.toHaveBeenCalled();
+    expect(listRecentForChannel).toHaveBeenCalledWith(10, 'dm-1');
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: '```text\nRecent traces\n(none)\n```',
+    }));
+  });
+
   it('replies with not found for unknown trace IDs without queueing', async () => {
     const getTraceForChannel = vi
       .spyOn(globalTraceStore, 'getTraceForChannel')
@@ -140,6 +170,38 @@ describe('message coordinator !trace command', () => {
     expect(getTraceForChannel).toHaveBeenCalledWith('message:123:456', 'dm-1');
     expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
       content: '```text\nTrace message:123:456 not found.\n```',
+    }));
+  });
+
+  it('replies with not found when the trace belongs to a different channel', async () => {
+    const otherChannelTrace = {
+      traceId: 'message_other-channel',
+      sessionKey: 'discord:dm:user-1',
+      channelId: 'dm-2',
+      flow: 'message',
+      startedAt: new Date('2026-03-08T10:00:00.000Z').getTime(),
+      outcome: 'success',
+      durationMs: 1200,
+      events: [{ type: 'invoke_start', at: new Date('2026-03-08T10:00:00.000Z').getTime(), summary: 'started' }],
+    };
+    const getTraceForChannel = vi
+      .spyOn(globalTraceStore, 'getTraceForChannel')
+      .mockImplementation((traceId, channelId) => (
+        traceId === otherChannelTrace.traceId && channelId === 'dm-2'
+          ? otherChannelTrace
+          : undefined
+      ));
+
+    const queue = { run: vi.fn(async () => undefined) };
+    const handler = createMessageCreateHandler(makeParams(), queue as any);
+    const msg = makeMessage(`!trace ${otherChannelTrace.traceId}`, 'dm-1');
+
+    await handler(msg as any);
+
+    expect(queue.run).not.toHaveBeenCalled();
+    expect(getTraceForChannel).toHaveBeenCalledWith(otherChannelTrace.traceId, 'dm-1');
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: `\`\`\`text\nTrace ${otherChannelTrace.traceId} not found.\n\`\`\``,
     }));
   });
 });
