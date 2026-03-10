@@ -216,7 +216,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Configuration reference (all env vars) | `docs/configuration.md` | **done** |
 | Canonical runtime/model switching operator guide (startup defaults, live overrides, OpenRouter tier override workflow) | `docs/runtime-switching.md` | **done** |
 | Dashboard Tailscale access guide | `docs/dashboard-tailscale.md` | **done** |
-| Compound lessons artifact | `docs/compound-lessons.md` | **done** |
+| Compound lessons artifact (ownership, promotion rules, promotion workflow) | `docs/compound-lessons.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | **done** |
 

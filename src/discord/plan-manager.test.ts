@@ -302,6 +302,16 @@ describe('extractFilePaths', () => {
     ].join('\n');
     expect(extractFilePaths(section)).toEqual(['src/foo/bar.ts', 'src/config/settings.ts']);
   });
+
+  it('rejects dotted runtime member expressions while keeping real bare filenames', () => {
+    const section = [
+      '- `this.opts.cwd` — runtime placeholder leak',
+      '- `package.json` — real file',
+      '- `vite.config.ts` — real config file',
+    ].join('\n');
+
+    expect(extractFilePaths(section)).toEqual(['package.json', 'vite.config.ts']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -558,6 +568,40 @@ describe('decomposePlan', () => {
     const phases = decomposePlan(plan, 'plan-011', 'workspace/plans/plan-011.md');
     const allContextFiles = phases.phases.flatMap((p) => p.contextFiles);
     expect(allContextFiles.some((f) => f.includes('fence-safe.ts'))).toBe(true);
+  });
+
+  it('falls back to manual phases when Changes only contains pseudo-path placeholders', () => {
+    const planPath = 'workspace/plans/plan-099.md';
+    const plan = [
+      '# Plan: Placeholder path leak',
+      '',
+      '**ID:** plan-099',
+      '**Task:** ws-placeholder',
+      '**Created:** 2026-03-10',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '',
+      '## Objective',
+      '',
+      'Codify the lessons workflow in docs/compound-lessons.md.',
+      '',
+      '## Changes',
+      '',
+      '- `this.opts.cwd` — placeholder leaked from runtime code instead of a repo file path',
+      '',
+      '## Risks',
+      '',
+      '- planner ambiguity',
+    ].join('\n');
+
+    const phases = decomposePlan(plan, 'plan-099', planPath);
+
+    expect(phases.phases).toHaveLength(3);
+    expect(phases.phases[0]!.kind).toBe('read');
+    expect(phases.phases[1]!.kind).toBe('implement');
+    expect(phases.phases[2]!.kind).toBe('audit');
+    expect(phases.phases[1]!.description).toBe('Implement the plan manually based on the analysis output.');
+    expect(phases.phases[1]!.contextFiles).toEqual([planPath]);
   });
 });
 

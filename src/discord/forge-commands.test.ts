@@ -700,6 +700,31 @@ describe('buildDrafterPrompt', () => {
     const today = new Date().toISOString().split('T')[0]!;
     expect(prompt).toContain(`### Review 1 — ${today}`);
   });
+
+  it('tells the drafter to update existing lessons before adding materially distinct new ones', () => {
+    const prompt = buildDrafterPrompt(
+      'Codify a reusable pattern',
+      '# Plan: {{TITLE}}\n\n---\n\n## Objective',
+      'ctx',
+    );
+
+    expect(prompt).toContain('Check the existing `docs/compound-lessons.md` entries before proposing a lesson.');
+    expect(prompt).toContain('update the existing entry if it already covers the pattern');
+    expect(prompt).toContain('only when the lesson is materially distinct');
+  });
+
+  it('tells the drafter that postmortems and task or chat context are first-class lesson sources with a mandatory review gate', () => {
+    const prompt = buildDrafterPrompt(
+      'Codify a reusable pattern',
+      '# Plan: {{TITLE}}\n\n---\n\n## Objective',
+      'ctx',
+    );
+
+    expect(prompt).toContain('postmortems');
+    expect(prompt).toContain('task threads');
+    expect(prompt).toContain('implementation chat');
+    expect(prompt).toContain('mandatory before-merge promotion decision and dedup check');
+  });
 });
 
 describe('buildAuditorPrompt', () => {
@@ -772,6 +797,10 @@ describe('buildAuditorPrompt', () => {
     expect(prompt).toContain('docs/compound-lessons.md');
     expect(prompt).toContain('recurring workflow/process/quality gap');
     expect(prompt).toContain('format, ownership, update rules, and review expectations');
+    expect(prompt).toContain('explicit promotion decision');
+    expect(prompt).toContain('dedup check before merge');
+    expect(prompt).toContain('postmortems');
+    expect(prompt).toContain('task threads');
   });
 
   it('includes criteria near the start of the prompt before ## Plan to Audit', () => {
@@ -934,7 +963,9 @@ describe('buildRevisionPrompt', () => {
     const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad', 'Add feature');
     expect(prompt).toContain('docs/compound-lessons.md');
     expect(prompt).toContain('single checked-in durable artifact');
-    expect(prompt).toContain('format, ownership, update rules, and review expectations');
+    expect(prompt).toContain('format, ownership, update rules, and mandatory review gate');
+    expect(prompt).toContain('search/dedup expectations');
+    expect(prompt).toContain('explicit promotion decision');
   });
 
   it('requires concrete repo-relative file paths in Changes during revision', () => {
@@ -1116,6 +1147,56 @@ describe('buildPlanSummary', () => {
 
     const summary = buildPlanSummary(plan);
     expect(summary).toContain('(no objective)');
+  });
+});
+
+describe('ForgeOrchestrator.buildContextSummary', () => {
+  it('includes the repo compound lessons content from the Lessons section onward when the file exists', async () => {
+    const tmpDir = await makeTmpDir();
+    const workspaceDir = path.join(tmpDir, 'workspace');
+    await fs.mkdir(path.join(tmpDir, 'docs'), { recursive: true });
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, 'docs', 'compound-lessons.md'),
+      [
+        '# Compound Lessons',
+        '',
+        'Preamble that should not be injected.',
+        '',
+        '## Promotion Rules',
+        '',
+        'Rules that should also be skipped.',
+        '',
+        '## Lessons',
+        '',
+        '### Keep prompt context grounded',
+        '- Reuse prior lessons before inventing new ones.',
+      ].join('\n'),
+    );
+
+    const opts = await baseOpts(tmpDir, makeMockRuntime([]), { workspaceCwd: workspaceDir });
+    const orchestrator = new ForgeOrchestrator(opts);
+    const summary = await (orchestrator as unknown as {
+      buildContextSummary: (projectContext?: string) => Promise<string>;
+    }).buildContextSummary();
+
+    expect(summary).toContain('--- compound-lessons.md (repo) ---');
+    expect(summary).toContain('## Lessons');
+    expect(summary).toContain('### Keep prompt context grounded');
+    expect(summary).not.toContain('Preamble that should not be injected.');
+    expect(summary).not.toContain('## Promotion Rules');
+  });
+
+  it('skips compound lessons cleanly when the file is missing', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = await baseOpts(tmpDir, makeMockRuntime([]));
+    const orchestrator = new ForgeOrchestrator(opts);
+    const summary = await (orchestrator as unknown as {
+      buildContextSummary: (projectContext?: string) => Promise<string>;
+    }).buildContextSummary();
+
+    expect(summary).not.toContain('--- compound-lessons.md (repo) ---');
+    expect(summary).not.toContain('## Lessons');
   });
 });
 
