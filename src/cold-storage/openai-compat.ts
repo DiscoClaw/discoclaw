@@ -2,6 +2,9 @@
  * OpenAI-compatible embedding provider for third-party endpoints
  * (Ollama, vLLM, LM Studio, Together, etc.).
  *
+ * Maintainers: consult `docs/official-docs.md` before changing provider
+ * compatibility assumptions, request shape, or model normalization here.
+ *
  * Key differences from OpenAIEmbeddingProvider:
  * - Does not send `dimensions` in the request body (many compat providers reject it)
  * - Strips provider namespace prefixes from model names (e.g., "openai/model" → "model")

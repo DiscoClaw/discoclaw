@@ -3,6 +3,7 @@
 ## Model Names & IDs
 
 **Always research official documentation** when referencing model names, IDs, or parameters — never guess or rely on training data alone. Model names change frequently across providers.
+For the complete maintainer docs index covering providers, SDKs, Discord, MCP, and dependency references, see `docs/official-docs.md`.
 
 Sources to check:
 - **Anthropic:** https://platform.claude.com/docs/en/about-claude/models/overview

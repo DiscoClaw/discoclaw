@@ -2,6 +2,8 @@
 
 How to reach the DiscoClaw dashboard from another device on your Tailscale tailnet, such as a phone browser, without an SSH tunnel.
 
+Maintainers: before changing dashboard exposure behavior, trusted-host validation, or Tailscale-related assumptions, consult [official-docs.md](official-docs.md).
+
 ---
 
 ## Background

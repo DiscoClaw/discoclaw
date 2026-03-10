@@ -14,6 +14,7 @@
     "dist/",
     "dashboard/",
     "templates/",
+    "docs/official-docs.md",
     "systemd/",
     ".context/",
     ".env.example",

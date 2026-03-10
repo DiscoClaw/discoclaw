@@ -69,6 +69,7 @@ Prompt assembly is deterministic:
 - Keep the git tree clean. After every task, follow the dev workflow below.
 - **Never push directly to `main`.** Branch protection is enforced — all changes go through PRs.
 - **Always research official docs** for model names, IDs, and API parameters — never guess from training data. See `.context/runtime.md` for sources.
+- Start with `docs/official-docs.md` when changing integration code, model references, or dependency behavior so authoritative URLs are one hop away.
 
 ## Dev Workflow
 

@@ -6,6 +6,10 @@ const DEFAULT_MODEL = 'tts-1';
 const DEFAULT_VOICE = 'alloy';
 const DEFAULT_SAMPLE_RATE = 24000;
 
+/**
+ * Maintainers: consult `docs/official-docs.md` before changing the OpenAI
+ * speech endpoint, model default, voice default, or `response_format`.
+ */
 export type OpenaiTtsOpts = {
   apiKey: string;
   model?: string;
@@ -21,6 +25,7 @@ export type OpenaiTtsOpts = {
  *
  * POSTs to `/v1/audio/speech` requesting `pcm` format (raw 24 kHz 16-bit mono).
  * Streams the response body and yields `AudioFrame` chunks.
+ * Keep the request body aligned with the official OpenAI audio speech docs.
  */
 export class OpenaiTtsProvider implements TtsProvider {
   private readonly apiKey: string;
