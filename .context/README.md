@@ -21,6 +21,7 @@ Core instructions live in `CLAUDE.md` at the repo root.
 | **Voice system (STT/TTS, audio pipeline, actions)** | `voice.md` |
 | **Forge/plan standing constraints** | `project.md` *(auto-loaded by forge)* |
 | **Plan & Forge commands** | `plan-and-forge.md` *(in docs/, not .context/)* |
+| **Engineering lessons / compound learnings** | `docs/compound-lessons.md` *(in `docs/`, not `.context/`; human/developer reference, not auto-loaded into agent context)* |
 
 ## Context Hygiene (Strict)
 - Read the minimum necessary modules for the task.

@@ -20,6 +20,7 @@ Standing constraints for planning and auditing. These apply to all forge/plan op
 - Keep changes minimal — don't over-engineer for hypothetical multi-user scenarios.
 - Prefer wiring existing systems together over building new abstractions.
 - Tests are required for new functionality.
+- Forge drafter/auditor/reviser agents should consult `docs/compound-lessons.md` for known patterns and pitfalls before drafting, and propose new entries when a plan reveals a reusable engineering lesson.
 
 ## Plan Scope & Size Constraints
 
