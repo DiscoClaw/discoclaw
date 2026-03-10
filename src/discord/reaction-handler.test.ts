@@ -340,6 +340,53 @@ describe('createReactionAddHandler', () => {
     expect(boundaryIdx).toBeLessThan(reactionIdx);
   });
 
+  it('includes recent channel history in the reaction prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const fetchHistory = vi.fn(async () => new Map([
+      ['prior-1', {
+        id: 'prior-1',
+        content: 'Shopping list:\n- apples\n- oat milk\n- coffee',
+        author: { username: 'Alice', displayName: 'Alice', bot: false },
+      }],
+    ]));
+    const params = makeParams({ runtime, messageHistoryBudget: 500 });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({
+        id: 'msg-2',
+        content: 'Can you summarize that?',
+        channel: {
+          id: 'ch-1',
+          name: 'dev-chat',
+          type: ChannelType.GuildText,
+          permissionsFor: vi.fn(() => ({
+            has: vi.fn(() => true),
+          })),
+          isThread: () => false,
+          send: vi.fn().mockResolvedValue(undefined),
+          messages: { fetch: fetchHistory },
+        },
+      }),
+    });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(fetchHistory).toHaveBeenCalledWith({ before: 'msg-2', limit: 10 });
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    expect(invokeSpy.mock.calls[0]?.[0].prompt).toContain('Shopping list:\n- apples\n- oat milk\n- coffee');
+  });
+
   it('injects tiered Discord action schema using reaction content and channel metadata', async () => {
     const invokeSpy = vi.fn();
     const runtime: RuntimeAdapter = {

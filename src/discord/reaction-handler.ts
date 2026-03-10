@@ -1,4 +1,4 @@
-import type { MessageReaction, PartialMessageReaction, User, PartialUser } from 'discord.js';
+import type { MessageReaction, PartialMessageReaction, User, PartialUser, TextBasedChannel } from 'discord.js';
 import type { ImageData, EngineEvent } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
 import { ensureGroupDir } from '../discord.js';
@@ -6,6 +6,7 @@ import type { KeyedQueue } from '../group-queue.js';
 import { isAllowlisted } from './allowlist.js';
 import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
+import { fetchMessageHistory } from './message-history.js';
 import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines, appendActionResults } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
 import { shouldTriggerFollowUp } from './action-categories.js';
@@ -305,6 +306,18 @@ function createReactionHandler(
               log: params.log,
             }),
           ]);
+          let historySection = '';
+          if (params.messageHistoryBudget > 0) {
+            try {
+              historySection = await fetchMessageHistory(
+                msg.channel as TextBasedChannel,
+                msg.id,
+                { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
+              );
+            } catch (err) {
+              params.log?.warn({ err }, `${logPrefix}:history fetch failed`);
+            }
+          }
 
           // Build prompt.
           const emoji = reaction.emoji.name ?? '(unknown)';
@@ -348,7 +361,7 @@ function createReactionHandler(
           // Section order exploits primacy bias (front) and recency bias (near end).
           // Primacy zone: preamble, task context, durable memory.
           // Middle zone: open tasks.
-          // Recency zone: actions reference, permission notes (before user content).
+          // Recency zone: recent conversation, actions reference, permission notes.
           // User content (reaction event) lands at the absolute end.
           let prompt =
             buildPromptPreamble(inlinedContext.text) + '\n\n' +
@@ -360,6 +373,9 @@ function createReactionHandler(
               : '') +
             (openTasksSection
               ? `---\n${openTasksSection}\n\n`
+              : '') +
+            (historySection
+              ? `---\nRecent conversation:\n${historySection}\n\n`
               : '');
 
           // User content block — assembled separately, appended after actions/notes.
