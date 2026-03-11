@@ -130,7 +130,8 @@ export type RuntimeCapability =
   | 'tools_fs'
   | 'tools_web'
   | 'mcp'
-  | 'multi_turn';
+  | 'multi_turn'
+  | 'mid_turn_steering';
 
 export type RuntimeId = 'claude_code' | 'openai' | 'openrouter' | 'codex' | 'gemini' | 'other';
 
@@ -201,4 +202,6 @@ export interface RuntimeAdapter {
   /** The model used when params.model is empty (adapter-default sentinel). */
   defaultModel?: string;
   invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent>;
+  steer?(sessionKey: string, message: string): Promise<boolean>;
+  interrupt?(sessionKey: string): Promise<boolean>;
 }
