@@ -62,7 +62,13 @@ import { initTasksForumGuard } from './tasks/forum-guard.js';
 import { reloadTagMapInPlace } from './tasks/tag-map.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { probeWorkspacePermissions } from './workspace-permissions.js';
-import { detectMcpServers, logMcpDetection } from './mcp-detect.js';
+import {
+  detectMcpServers,
+  logMcpDetection,
+  validateMcpEnvInterpolation,
+  validateMcpServerEnv,
+  validateMcpServerNames,
+} from './mcp-detect.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
 import { loadCronTagMapStrict } from './cron/tag-map.js';
@@ -564,6 +570,13 @@ const claudeInUse = primaryRuntimeName === 'claude'
   || cfg.forgeAuditorRuntime === 'claude';
 const mcpResult = await detectMcpServers(workspaceCwd);
 logMcpDetection(mcpResult, { claudeInUse, strictMcpConfig: cfg.strictMcpConfig }, log);
+const mcpWarnings = mcpResult.status === 'found'
+  ? [
+      ...validateMcpServerNames(mcpResult.servers),
+      ...validateMcpServerEnv(mcpResult.servers),
+      ...validateMcpEnvInterpolation(mcpResult.servers),
+    ].length
+  : 0;
 
 // --- Resolve bot display name ---
 const botDisplayName = await resolveDisplayName({
@@ -2476,6 +2489,8 @@ publishBootReport({
   permProbe,
   credentialReport,
   credentialCheckReport,
+  mcpStatus: mcpResult,
+  mcpWarnings,
   runtimeModel,
   bootDurationMs: Date.now() - bootStartMs,
   buildVersion: gitHash ?? undefined,

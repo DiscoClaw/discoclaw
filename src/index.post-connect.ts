@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { LoggerLike } from './logging/logger-like.js';
 import type { TaskStore } from './tasks/store.js';
 import { cleanupOrphanedReplies } from './discord/inflight-replies.js';
-import type { StatusPoster } from './discord/status-channel.js';
+import type { BootReportMcpStatus, StatusPoster } from './discord/status-channel.js';
 import type { StartupContext } from './discord/shutdown-context.js';
 import { runCredentialChecks, formatCredentialReport, type CredentialCheckReport } from './health/credential-check.js';
 import { healStaleTaskThreadRefs } from './health/startup-healing.js';
@@ -144,6 +144,8 @@ export function publishBootReport(opts: {
   permProbe: PermissionProbeResult;
   credentialReport: string;
   credentialCheckReport: CredentialCheckReport;
+  mcpStatus?: BootReportMcpStatus;
+  mcpWarnings?: number;
   runtimeModel: string;
   bootDurationMs: number;
   buildVersion?: string;
@@ -178,6 +180,8 @@ export function publishBootReport(opts: {
       status: r.status === 'ok' ? 'pass' : r.status,
       detail: r.message,
     })),
+    mcpStatus: opts.mcpStatus,
+    mcpWarnings: opts.mcpWarnings,
     dashboardUrl: opts.dashboardUrl,
     runtimeModel: opts.runtimeModel,
     bootDurationMs: opts.bootDurationMs,
