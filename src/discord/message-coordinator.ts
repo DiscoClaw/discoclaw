@@ -60,7 +60,7 @@ import {
   isPlanRunning,
 } from './forge-plan-registry.js';
 import { applyUserTurnToDurable } from './user-turn-to-durable.js';
-import type { StatusPoster } from './status-channel.js';
+import type { StatusPoster, BootReportMcpStatus } from './status-channel.js';
 import { sanitizeErrorMessage, sanitizePhaseError } from './status-channel.js';
 import { ToolAwareQueue } from './tool-aware-queue.js';
 import { createStreamingProgress } from './streaming-progress.js';
@@ -96,6 +96,7 @@ import {
 } from './health-command.js';
 import { parseStatusCommand, collectStatusSnapshot, renderStatusReport } from './status-command.js';
 import { parseTraceCommand, renderTraceDetail, renderTraceList } from './trace-command.js';
+import { parseMcpCommand, isMcpCommandPrefix, handleMcpCommand } from './mcp-command.js';
 import type { StatusCommandContext } from './status-command.js';
 import { parseRestartCommand, handleRestartCommand } from './restart-command.js';
 import { parseModelsCommand, handleModelsCommand } from './models-command.js';
@@ -296,6 +297,10 @@ export type BotParams = {
   healthConfigSnapshot?: HealthConfigSnapshot;
   /** Runtime context for the !status command. Omit to disable the command. */
   statusCommandContext?: StatusCommandContext;
+  /** Boot-time MCP snapshot exposed via the !mcp command. */
+  mcpStatus?: BootReportMcpStatus;
+  /** Boot-time MCP validation warning count exposed via the !mcp command. */
+  mcpWarnings?: number;
   metrics?: MetricsRegistry;
   botStatus?: 'online' | 'idle' | 'dnd' | 'invisible';
   botActivity?: string;
@@ -1039,6 +1044,24 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           botDisplayName: params.botDisplayName,
           deferScheduler: params.deferScheduler,
           loopScheduler: params.loopScheduler,
+        });
+        await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
+        return;
+      }
+
+      if (!isBotMessage && isMcpCommandPrefix(String(msg.content ?? ''))) {
+        const mcpCmd = parseMcpCommand(String(msg.content ?? ''));
+        if (!mcpCmd) {
+          await msg.reply({
+            content: 'Unknown `!mcp` subcommand. Valid usage: `!mcp`, `!mcp list`, `!mcp help`.',
+            allowedMentions: NO_MENTIONS,
+          });
+          return;
+        }
+
+        const report = handleMcpCommand(mcpCmd, {
+          mcpStatus: params.mcpStatus,
+          mcpWarnings: params.mcpWarnings ?? 0,
         });
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
         return;
